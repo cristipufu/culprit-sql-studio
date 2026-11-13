@@ -107,7 +107,7 @@
     }
   ],
   "fix": {
-    "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143, a read, waits for writes on the same table while READ_COMMITTED_SNAPSHOT is off: with row versioning on (config:read-committed-snapshot has the change), it reads the last committed version of the rows instead.",
+    "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation.",
     "sql": null,
     "cost": null
   },

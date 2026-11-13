@@ -1325,7 +1325,7 @@
         "This statement ran once in the 5 hours since statistics were reset. One run shows what it cost, not that it will run again: an export, a backfill or a query someone ran by hand looks like this. It needs work only if it keeps running."
       ],
       "check": "heavy-query",
-      "confidence": "medium",
+      "confidence": "high",
       "facts": {
         "advice": {
           "application": "unspecified",
@@ -1350,7 +1350,7 @@
       "fix": {
         "cost": null,
         "sql": null,
-        "summary": "It ran once in the 5 hours since statistics were reset, so there is no wait to catch now; if it runs again, have its lock waits logged (log_lock_waits) to see what holds them. Keep those transactions short: commit sooner, and don't wait for a user or another service inside a transaction. An index or a rewrite of this statement won't shorten the wait."
+        "summary": "Find this statement in the application and check that it finds the rows it changes through an index, and changes no more rows per run than it needs (split large updates into batches)."
       },
       "id": "heavy-query:4911431806993420100",
       "impact": {
@@ -1401,12 +1401,12 @@
         "kind": "query",
         "name": "4911431806993420100"
       },
-      "summary": "19.0 s of database time over the 5 hours since statistics were reset (12%). It ran once at 19.0 s, sometime between 08:41 and 09:28 UTC on Oct 11: 12% of all database time in the 5 hours since statistics were reset. It read 15 pages per run, which takes milliseconds, yet ran 19.0 s: almost all of that time it was waiting, most likely for a row lock another transaction held (pg_stat_statements doesn't record what a statement waited for).",
-      "title": "An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%), most likely waiting for locks",
+      "summary": "19.0 s of database time over the 5 hours since statistics were reset (12%). It ran once at 19.0 s, sometime between 08:41 and 09:28 UTC on Oct 11: 12% of all database time in the 5 hours since statistics were reset.",
+      "title": "An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%)",
       "verification_basis": "rescan",
       "verify": [
         "Re-scan later: if it hasn't run again, there is nothing to do.",
-        "pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop toward what its reads take. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."
+        "pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."
       ]
     },
     {

@@ -1,6 +1,7 @@
 //! Declarative requirements for a negative check result. Partial evidence can still produce findings;
 //! it cannot establish that an unobserved problem is absent. Requirements live beside each check.
 
+use culprit_core::telemetry::WaitClass;
 use culprit_core::{CheckEvidence, Snapshot, SourceState, source_id, t};
 
 /// Facts a source can contribute, independent of any check's identifier.
@@ -33,7 +34,7 @@ pub enum QueryMeasure {
     Histograms,
     TempWrites,
     Grants,
-    Waits(&'static str),
+    Waits(WaitClass),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -352,10 +353,7 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
                         .iter()
                         .any(|g| q.query_hash.as_deref() == Some(g.query_hash.as_str()) && g.executions >= 5.0)
                 }),
-                QueryMeasure::Waits(category) => q
-                    .waits
-                    .iter()
-                    .any(|w| w.category.eq_ignore_ascii_case(category) && w.wait_ms.is_finite() && w.wait_ms >= 0.0),
+                QueryMeasure::Waits(class) => q.measured_wait_ms(class).is_some(),
                 QueryMeasure::Plans => q.plan.is_some(),
                 _ => true,
             }

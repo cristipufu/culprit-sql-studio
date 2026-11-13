@@ -808,7 +808,7 @@ fn a_statement_that_waited_is_not_rewritten() {
     assert!(section.contains("waiting for an application lock another session holds"), "{section}");
     assert!(!section.contains("Find where the application sends the statements above"), "{section}");
 
-    // MySQL counts the lock time: an update that spent most of its time waiting for row locks.
+    // A recorded wait vector plus absent CPU does not establish exclusive elapsed time or a lock cause.
     let mut mysql = report("mysql-demo.json");
     let workload = mysql.snapshot.workload.as_mut().expect("workload");
     let mut update = workload.queries[0].clone();
@@ -817,7 +817,17 @@ fn a_statement_that_waited_is_not_rewritten() {
     (update.executions, update.total_time_ms, update.mean_time_ms) = (10.0, 5000.0, 500.0);
     update.waits =
         vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 4500.0, tasks: None }];
+    update.cpu_time_ms = None;
+    update.waits_coverage = None;
     workload.queries.push(update);
+    let section = codebase(&agent_brief(&mysql, &about_query(&mysql, "update")));
+    assert!(section.contains("Find where the application sends the statements above"), "{section}");
+    assert!(!section.contains("so no rewrite or index of it shortens it"), "{section}");
+
+    // The source's explicit scalar lock timer can establish that most of the statement's elapsed time was waiting.
+    let update = mysql.snapshot.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == "update").unwrap();
+    update.waits.clear();
+    update.spread = Some(culprit_core::Spread { lock_ms: Some(4500.0), ..Default::default() });
     let section = codebase(&agent_brief(&mysql, &about_query(&mysql, "update")));
     assert!(section.contains("waiting for locks other transactions hold"), "{section}");
     assert!(section.contains("so no rewrite or index of it shortens it"), "{section}");

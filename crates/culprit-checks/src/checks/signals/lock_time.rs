@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
+use culprit_core::telemetry::WaitClass;
 
 pub fn lock_time_info() -> CheckInfo {
     CheckInfo {
@@ -19,7 +20,7 @@ check!(
     decide = lock_waits,
     render = lock_time_finding,
     case<'s> = LockWait<'s>,
-    evidence = &[Evidence::Query(QueryMeasure::Waits("Lock"))],
+    evidence = &[Evidence::Query(QueryMeasure::Waits(WaitClass::Lock))],
 );
 
 /// Lock waits a day that make a statement's waiting High, or Medium: half an hour and five minutes.
@@ -67,8 +68,8 @@ pub struct LockWait<'s> {
     no_rate: bool,
     /// MySQL before 8.0.28 counted only table locks in a statement's lock time.
     table_locks_only_before_8_0_28: bool,
-    /// A read that waits for writers because READ_COMMITTED_SNAPSHOT is off: row versioning removes the wait.
-    versioning: bool,
+    /// A read whose setting and SQL shape make row versioning a candidate, without identifying its lock resource.
+    versioning_candidate: bool,
 }
 
 /// How the wait of a statement's runs is said: what happened to one or two runs, never an average of 5.2 s for runs
@@ -124,10 +125,8 @@ fn lock_waits(snapshot: &Snapshot) -> Vec<LockWait<'_>> {
                 db_share,
                 no_rate: rate.is_none(),
                 table_locks_only_before_8_0_28: snapshot.server.engine == Engine::Mysql && !is_mariadb(snapshot),
-                // A read that waits for writers' locks because reads don't use row versions here: that setting is the
-                // change that removes the wait, as config:read-committed-snapshot says.
-                versioning: crate::config::read_committed_snapshot_off(snapshot)
-                    && crate::config::versioning_spares_read(q),
+                versioning_candidate: crate::config::read_committed_snapshot_off(snapshot)
+                    && crate::config::row_versioning_candidate(q),
             };
             (case, score_for_share(db_share).max(base_score(severity)))
         })
@@ -200,13 +199,13 @@ fn lock_time_finding(snapshot: &Snapshot, wait: LockWait<'_>) -> Finding {
         },
     ];
     f.facts.lock_wait =
-        Some(culprit_core::FindingLockWait { ms: lock, share, versioning_spares_read: wait.versioning });
+        Some(culprit_core::FindingLockWait { ms: lock, share, versioning_candidate: wait.versioning_candidate });
     // How to find the holder, as every check that names a lock wait says it: Live only for waits that come often
     // enough to catch one.
     let LockHolder { lead, sql } = find_lock_holder(snapshot, q, None);
     f.fix = Some(Fix {
         // Caught live, the holder is found "without it" in the same sentence; otherwise the advice follows whole.
-        summary: match (wait.versioning, catches_live(snapshot, q, None)) {
+        summary: match (wait.versioning_candidate, catches_live(snapshot, q, None)) {
             (true, true) => t!("check.lock_time.fix.versioning_live"),
             (true, false) => t!("check.lock_time.fix.versioning", lead = &lead),
             (false, _) => t!("check.lock_time.fix.holders", lead = &lead),

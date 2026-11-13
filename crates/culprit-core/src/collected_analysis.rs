@@ -64,6 +64,12 @@ pub enum CollectedAnalysisLimit {
     RuntimeDenominatorUnavailable,
     DurationUnavailable,
     MetricNotProjected,
+    WaitSemanticsUnavailable,
+    WaitCaptureDisabled,
+    WaitCaptureUnavailable,
+    WaitIntervalCoverageUnverified,
+    WaitFamilyIncomplete,
+    UnknownWaitCategory,
     WaitWithoutRuntime,
     ExecutableFixPrerequisitesUnknown,
 }

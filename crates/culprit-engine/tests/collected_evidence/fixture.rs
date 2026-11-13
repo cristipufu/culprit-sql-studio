@@ -61,7 +61,7 @@ impl RowProjection for Schema {
 struct Store {
     catalog: Arc<PhysicalCatalog<Schema>>,
     rows: Mutex<BTreeMap<String, Vec<Vec<Value>>>>,
-    publication: Vec<Value>,
+    publication: Mutex<Option<Vec<Value>>>,
 }
 #[async_trait]
 impl AnalyticalReadStore for Store {
@@ -89,7 +89,7 @@ impl AnalyticalReadStore for Store {
         Ok(AnalyticalReadPage { response_bytes: serde_json::to_vec(&rows).unwrap().len(), rows })
     }
     async fn publication_rows(&self, _: &CommittedRange, _: usize) -> Result<AnalyticalReadPage> {
-        let rows = vec![self.publication.clone()];
+        let rows = self.publication.lock().unwrap().clone().into_iter().collect::<Vec<_>>();
         Ok(AnalyticalReadPage { response_bytes: serde_json::to_vec(&rows).unwrap().len(), rows })
     }
 }
@@ -130,7 +130,7 @@ impl Fixture {
         let schema = catalog.publication();
         let publication = schema.project(&publication::input(catalog.as_ref(), &range).unwrap()).unwrap();
         let publication = physical_row(schema, &schema.encode(&publication).unwrap());
-        let store = Arc::new(Store { catalog, rows: Mutex::new(rows), publication });
+        let store = Arc::new(Store { catalog, rows: Mutex::new(rows), publication: Mutex::new(Some(publication)) });
         let reader = EvidenceReader::new(store.clone(), indexes);
         *recovery.fault.lock().unwrap() = Fault::Stall;
         Self { range, store, reader, _scratch: scratch }
@@ -140,24 +140,26 @@ impl Fixture {
         self.store.rows.lock().unwrap().get_mut(&batch.batch_id).unwrap().clear();
     }
     pub fn remove_first_runtime(&self) {
-        let batch =
-            self.range.manifest().batches.iter().find(|batch| batch.stream == TelemetryStream::QueryRuntime).unwrap();
+        self.remove_first_row(TelemetryStream::QueryRuntime);
+    }
+    pub fn remove_first_row(&self, stream: TelemetryStream) {
+        let batch = self.range.manifest().batches.iter().find(|batch| batch.stream == stream).unwrap();
         self.store.rows.lock().unwrap().get_mut(&batch.batch_id).unwrap().remove(0);
     }
+    pub fn unpublish(&self) {
+        self.store.publication.lock().unwrap().take();
+    }
     pub async fn read(&self) -> EvidenceCapture {
-        self.reader
-            .read_capture(
-                &self.range,
-                &[
-                    EvidenceFamily::QueryDefinitions,
-                    EvidenceFamily::PlanDefinitions,
-                    EvidenceFamily::QueryRuntime,
-                    EvidenceFamily::QueryWaits,
-                ],
-                EvidenceReadBudget::default(),
-            )
-            .await
-            .unwrap()
+        self.read_families(&[
+            EvidenceFamily::QueryDefinitions,
+            EvidenceFamily::PlanDefinitions,
+            EvidenceFamily::QueryRuntime,
+            EvidenceFamily::QueryWaits,
+        ])
+        .await
+    }
+    pub async fn read_families(&self, families: &[EvidenceFamily]) -> EvidenceCapture {
+        self.reader.read_capture(&self.range, families, EvidenceReadBudget::default()).await.unwrap()
     }
 }
 

@@ -4,6 +4,7 @@ use culprit_core::{
 use culprit_engine::collected_evidence;
 
 mod fixture;
+mod waits;
 use fixture::Fixture;
 
 fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
@@ -261,7 +262,7 @@ async fn opaque_native_wait_codes_remain_exact_without_becoming_semantic_other_w
     assert!(
         analysis.context.records.iter().any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
     );
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MetricNotProjected));
+    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitSemanticsUnavailable));
     assert!(analysis.assessments.iter().find(|assessment| assessment.check == "heavy-query").unwrap().reason.is_some());
 }
 

@@ -131,7 +131,7 @@ fn a_burst_in_two_hours_of_counters_is_graded_on_its_total() {
     }
 }
 
-// MS-3: "reads waited 1 min … but only about 11.6 s a day" for three runs one afternoon, by a read that stopped.
+// A stopped read's observed wait belongs to its recorded afternoon, not to an inferred daily incident.
 #[test]
 fn reads_that_waited_one_afternoon_and_stopped_are_said_by_when() {
     // Query 7, a read of customers, ran three times on Oct 11 13:56–14:19 (buckets 2 and 3) and waited 72 s on locks.
@@ -148,9 +148,20 @@ fn reads_that_waited_one_afternoon_and_stopped_are_said_by_when() {
     let f = report.findings.iter().find(|f| f.id == "config:read-committed-snapshot").expect("RCSI");
     assert_eq!(f.severity, Severity::Low, "{}", f.summary);
     assert!(
-        f.summary.contains("all of it on Oct 11, 13:56–14:19 UTC, and that read hasn't run since"),
+        f.summary.contains("during activity on Oct 11, 13:56–14:19 UTC, and that read has not run since"),
         "{}",
         f.summary
     );
+    assert!(f.summary.contains("recorded at least 1 min of lock waits"), "{}", f.summary);
+    assert!(f.summary.contains("do not establish that row versioning would remove"), "{}", f.summary);
+    assert_eq!(
+        f.metrics
+            .iter()
+            .find(|metric| metric.is("check.config.read_committed_snapshot.metric.reads_waiting"))
+            .unwrap()
+            .value,
+        71_600.0
+    );
+    assert!(f.fix.as_ref().unwrap().sql.is_none());
     assert!(!f.summary.contains(" a day"), "{}", f.summary);
 }

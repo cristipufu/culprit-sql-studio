@@ -1264,7 +1264,7 @@ caveat: The statistics don't cover enough time (an hour or more from a known sta
 }
 
 #[test]
-fn lock_time_of_reads_that_row_versioning_would_spare() {
+fn lock_time_of_reads_treats_row_versioning_as_a_candidate() {
     let read = |runs: f64, total: f64, lock: f64, max: Option<f64>| {
         let mut s = locked("mssql-demo", "SELECT id FROM dbo.orders WHERE customer_id = @P1", runs, total, lock, max);
         set(&mut s, "is_read_committed_snapshot_on", "0");
@@ -1273,6 +1273,9 @@ fn lock_time_of_reads_that_row_versioning_would_spare() {
     let mut findings = run("lock-time", &read(1.0, 10_500.0, 10_400.0, None));
     findings.extend(run("lock-time", &read(2.0, 21_000.0, 15_000.0, Some(20_000.0))));
     findings.extend(run("lock-time", &read(2_000.0, 100_000.0, 60_000.0, None)));
+    assert!(findings.iter().all(|finding| {
+        finding.fix.as_ref().unwrap().sql.as_deref().is_none_or(|sql| !sql.contains("READ_COMMITTED_SNAPSHOT"))
+    }));
     says(
         &findings,
         r#"id: lock-time:7
@@ -1282,7 +1285,7 @@ impact: 10.4 s waiting on locks
 metric: Lock wait
 metric: Share of its time
 metric: Per run
-fix: This is a read, and READ_COMMITTED_SNAPSHOT is off for this database, so under read committed it waits for any write holding a lock on the rows it reads. With row versioning on (config:read-committed-snapshot has the change), it would read the last committed version of the rows instead of waiting. Without it, it waits for the writers. It ran once in the last 5 hours, so there is no wait to catch now; if it runs again, have its lock waits logged (SQL Server's blocked process report names the holder) to see what holds them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+fix: It ran once in the last 5 hours, so there is no wait to catch now; if it runs again, have its lock waits logged (SQL Server's blocked process report names the holder) to see what holds them. Row versioning is a candidate because this read recorded lock waits while READ_COMMITTED_SNAPSHOT is off. It can avoid read-committed data-lock waits, but not schema locks or explicit locking. Confirm the lock resource and the application's isolation requirements before changing this setting.
 verify: Re-scan: lock waits should be a small part of its time.
 
 id: lock-time:7
@@ -1292,7 +1295,7 @@ impact: 15.0 s waiting on locks
 metric: Lock wait
 metric: Share of its time
 metric: Longest run
-fix: This is a read, and READ_COMMITTED_SNAPSHOT is off for this database, so under read committed it waits for any write holding a lock on the rows it reads. With row versioning on (config:read-committed-snapshot has the change), it would read the last committed version of the rows instead of waiting. Without it, it waits for the writers. It ran 2 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+fix: It ran 2 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Row versioning is a candidate because this read recorded lock waits while READ_COMMITTED_SNAPSHOT is off. It can avoid read-committed data-lock waits, but not schema locks or explicit locking. Confirm the lock resource and the application's isolation requirements before changing this setting.
 verify: Re-scan: lock waits should be a small part of its time.
 
 id: lock-time:7
@@ -1302,7 +1305,7 @@ impact: 1 min waiting on locks
 metric: Lock wait
 metric: Share of its time
 metric: Per run
-fix: This is a read, and READ_COMMITTED_SNAPSHOT is off for this database, so under read committed it waits for any write holding a lock on the rows it reads. With row versioning on (config:read-committed-snapshot has the change), it would read the last committed version of the rows instead of waiting. Without it, find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+fix: This read recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Use Live to identify the blocker and lock resource. Row versioning can avoid read-committed data-lock waits, but not schema locks or explicit locking. Confirm the application's isolation requirements before changing this setting.
 verify: Re-scan: lock waits should be a small part of its time."#,
     );
 }

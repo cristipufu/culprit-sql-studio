@@ -20,6 +20,7 @@ mod parameter_sensitive;
 mod plan_insights;
 mod plan_regression;
 mod plan_warnings;
+mod recorded_waits;
 mod regression;
 mod repeated_request;
 mod temp_spill;

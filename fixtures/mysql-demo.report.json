@@ -197,14 +197,8 @@
       "title": "Queries that fail or time out"
     },
     {
-      "assessed_queries": [
-        "4167fe7f2c20deb7",
-        "4515abd524a46f37",
-        "7f47c8550af0c644",
-        "fc709554a9248878"
-      ],
       "check": "lock-time",
-      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
+      "reason": "This scan did not record the measurements this check needs.",
       "status": "findings",
       "title": "Queries that spend their time waiting for locks"
     },
@@ -369,7 +363,7 @@
         "lock_wait": {
           "ms": 115298.819,
           "share": 0.9999855691410966,
-          "versioning_spares_read": false
+          "versioning_candidate": false
         },
         "log_write": null,
         "network_wait_share": null,

@@ -136,7 +136,7 @@ metrics:
   - Historical lock waits: 5
   - Historical time waiting: 3 min
   - Historical average wait: 37.3 s
-fix: It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143, a read, waits for writes on the same table while READ_COMMITTED_SNAPSHOT is off: with row versioning on (config:read-committed-snapshot has the change), it reads the last committed version of the rows instead.
+fix: It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation.
 verify:
   1. Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
 caveats:
@@ -184,7 +184,7 @@ brief:
 
     ## Suggested fix
 
-    It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143, a read, waits for writes on the same table while READ_COMMITTED_SNAPSHOT is off: with row versioning on (config:read-committed-snapshot has the change), it reads the last committed version of the rows instead.
+    It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation.
 
     ## How to verify
 
@@ -504,53 +504,44 @@ brief:
 
 === finding config:read-committed-snapshot
 Needs attention · medium severity · medium confidence · configuration
-title: Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours, reads waited 1 min on locks held by writes (21% of database time). 1 deadlock in this database had a read in it. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 1 min of lock waits (21% of captured workload time), nearly all for a read from orders. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
 metrics:
-  - Reads waiting on locks: 1 min
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-  sql:
-      ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-  cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
+  - Observed lock waits for captured reads: 1 min
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
 verify:
-  1. Re-scan once the change has taken effect: this finding is gone.
+  1. Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
 caveats:
-  - Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+  - RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 brief:
-    # Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)
+    # Captured reads have lock waits; investigate the blocking resource
 
     Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `config:read-committed-snapshot`: Needs attention, medium impact, medium confidence. Scanned 2026-10-11T12:13:47Z.
 
     ## What's happening
 
-    With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours, reads waited 1 min on locks held by writes (21% of database time). 1 deadlock in this database had a read in it. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+    READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 1 min of lock waits (21% of captured workload time), nearly all for a read from orders. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 
     ## Evidence
 
-    - Reads waiting on locks: 1 min
+    - Observed lock waits for captured reads: 1 min
 
     ## Suggested fix
 
-    Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-
-    ```sql
-    ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-    ```
-
-    Cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
+    Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
 
     ## How to verify
 
-    - Re-scan once the change has taken effect: this finding is gone.
+    - Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
 
     ## Caveats
 
-    - Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+    - RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
     ## What to do in the codebase
 
-    The fix is a setting kept in this database alone: run its SQL once against the database as its owner, by hand or shipped as a migration. It isn't a change to the application's code, nor to the server's configuration (infrastructure as code, the platform's parameter group, a configuration file), which is for settings of the whole server. After any change is live, run `culprit scan mssql-demo` and check `config:read-committed-snapshot` the way *How to verify* says.
+    The fix is a setting of the database server, not a change to the application's code: apply it where this project manages the server's configuration (infrastructure as code, the platform's parameter group, the server's configuration file). Where nothing manages it, make the change by hand the way the fix says. After any change is live, run `culprit scan mssql-demo` and check `config:read-committed-snapshot` the way *How to verify* says.
 
 === finding regression:8
 Optional improvement · low severity · high confidence · queries

@@ -1,5 +1,6 @@
 //! The `chatty-query` check: Tiny queries executed so often that the round trips cost more than the work, typically a loop in application code.
 
+use super::recorded_waits::{LockTotal, RecordedLocks, WaitSource};
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use culprit_core::{ScanSpan, key, t};
@@ -46,6 +47,7 @@ pub struct ChattyQuery<'s> {
     scans: Option<ScanSpan>,
     /// The rows a run handles are kept only in the source's totals, which span more than its scans.
     rows_counted_over: bool,
+    locks: Option<RecordedLocks>,
     severity: Severity,
     score: f64,
 }
@@ -115,6 +117,7 @@ fn chatty_queries(snapshot: &Snapshot) -> Vec<ChattyQuery<'_>> {
                 shape,
                 scans,
                 rows_counted_over: scans.is_some() && crate::support::totals_basis(snapshot, q).is_some(),
+                locks: RecordedLocks::read(snapshot, q),
                 severity: if medium { Severity::Medium } else { Severity::Low },
                 score: (score_for_share(impact.share) + exec_share * 40.0).min(60.0),
                 impact,
@@ -222,10 +225,17 @@ fn chatty_query_finding(snapshot: &Snapshot, chatty: ChattyQuery<'_>) -> Finding
                     [
                         runs_share(Verb::Runs, None),
                         t!("check.chatty_query.summary.counter", column = column, table = table),
-                        match lock_waits(snapshot, q) {
-                            Some(locks) => {
-                                t!("check.chatty_query.summary.counter_locks", share = &share, locks = locks)
-                            }
+                        match chatty.locks {
+                            Some(locks @ RecordedLocks { total: LockTotal::Observed(_), .. }) => [
+                                t!("check.chatty_query.summary.counter_total", share = &share),
+                                render_locks(snapshot, locks, q.total_time_ms),
+                            ]
+                            .join(" "),
+                            Some(locks) => t!(
+                                "check.chatty_query.summary.counter_locks",
+                                share = &share,
+                                locks = render_locks(snapshot, locks, q.total_time_ms)
+                            ),
                             None => t!("check.chatty_query.summary.counter_total", share = &share),
                         },
                     ]
@@ -452,28 +462,17 @@ fn counter_column(text: &str) -> Option<String> {
     })
 }
 
-/// How long a statement waited for locks, where the engine measured it for that statement: Query Store's waits (a
-/// statement with waits recorded and none of them on locks waited for none) and MySQL's lock time. PostgreSQL keeps
-/// no waits per statement: nothing is said there.
-fn lock_waits(snapshot: &Snapshot, q: &QueryStat) -> Option<String> {
-    let total = format::duration(q.total_time_ms);
-    let locks = || q.waits.iter().filter(|w| w.category == "Lock").map(|w| w.wait_ms).reduce(|a, b| a + b);
-    match snapshot.server.engine {
-        Engine::Mssql if !q.waits.is_empty() => Some(t!(
-            "check.chatty_query.locks.query_store",
-            waits = format::duration(locks().unwrap_or(0.0)),
-            total = total
-        )),
-        Engine::Mysql => {
-            let lock = q.spread.as_ref().and_then(|s| s.lock_ms).or_else(locks)?;
-            Some(t!(
-                "check.chatty_query.locks.counted",
-                server = snapshot.server.name(),
-                waits = format::duration(lock),
-                total = total
-            ))
+fn render_locks(snapshot: &Snapshot, locks: RecordedLocks, total_ms: f64) -> String {
+    let total = format::duration(total_ms);
+    let waits = format::duration(locks.total.milliseconds());
+    match (locks.total, locks.source) {
+        (LockTotal::Observed(_), _) => t!("check.chatty_query.locks.observed", waits = waits),
+        (LockTotal::Measured(_), WaitSource::QueryStore) => {
+            t!("check.chatty_query.locks.query_store", waits = waits, total = total)
         }
-        Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Sqlite => None,
+        (LockTotal::Measured(_), WaitSource::Engine) => {
+            t!("check.chatty_query.locks.counted", server = locks.source.label(snapshot), waits = waits, total = total)
+        }
     }
 }
 
@@ -499,3 +498,6 @@ fn counter_fix(snapshot: &Snapshot, isolated: bool) -> String {
     };
     t!("check.chatty_query.fix.counter", sequence = sequence)
 }
+
+#[cfg(test)]
+mod tests;

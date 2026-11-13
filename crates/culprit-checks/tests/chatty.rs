@@ -230,6 +230,24 @@ fn a_counter_says_its_share_apart_from_the_lock_waits_measured() {
             tasks: None,
         },
     ];
+    // This synthetic source explicitly qualifies the entire lock class. A native positive by itself is a subtotal.
+    q.waits_coverage = Some(culprit_core::QueryWaitCoverage {
+        classes: vec![culprit_core::telemetry::WaitClass::Lock],
+        complete: true,
+    });
+    let mut partial = s.clone();
+    partial
+        .workload
+        .as_mut()
+        .unwrap()
+        .queries
+        .iter_mut()
+        .find(|q| q.id == "7")
+        .unwrap()
+        .waits_coverage
+        .as_mut()
+        .unwrap()
+        .complete = false;
     let f = chatty_write(s, "7", counter, None);
     assert!(
         f.summary
@@ -243,15 +261,42 @@ fn a_counter_says_its_share_apart_from_the_lock_waits_measured() {
         f.summary
     );
     assert!(!f.summary.contains("in all)"), "{}", f.summary);
-    // Waits recorded, none on locks: none measured.
+    let f = chatty_write(partial, "7", counter, None);
+    assert!(
+        f.summary.ends_with("At least 1 ms of lock waits were observed; wait coverage is incomplete."),
+        "{}",
+        f.summary
+    );
+    assert!(!f.summary.contains("lock waits out of its"), "{}", f.summary);
+    // An I/O row cannot qualify an absent lock class, even when I/O coverage is complete.
     let mut s = mssql();
     let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == "7").expect("query");
     q.waits = vec![culprit_core::WaitStat { category: "IO".into(), wait_type: None, wait_ms: 179.0, tasks: None }];
+    q.waits_coverage =
+        Some(culprit_core::QueryWaitCoverage { classes: vec![culprit_core::telemetry::WaitClass::Io], complete: true });
+    let unqualified = chatty_write(s.clone(), "7", counter, None);
+    assert!(!unqualified.summary.contains("lock waits"), "{}", unqualified.summary);
+    // Only declared lock-class completeness establishes the missing lock row as measured zero.
+    s.workload
+        .as_mut()
+        .unwrap()
+        .queries
+        .iter_mut()
+        .find(|q| q.id == "7")
+        .unwrap()
+        .waits_coverage
+        .as_mut()
+        .unwrap()
+        .classes
+        .push(culprit_core::telemetry::WaitClass::Lock);
     let f = chatty_write(s, "7", counter, None);
     assert!(f.summary.ends_with("Query Store recorded 0 ms of lock waits out of its 3.9 s."), "{}", f.summary);
     // No waits kept for the statement: only its share.
     let mut s = mssql();
-    s.workload.as_mut().unwrap().queries.iter_mut().for_each(|q| q.waits.clear());
+    s.workload.as_mut().unwrap().queries.iter_mut().for_each(|q| {
+        q.waits.clear();
+        q.waits_coverage = None;
+    });
     let f = chatty_write(s, "7", counter, None);
     assert!(f.summary.ends_with(" of database time.") && !f.summary.contains("lock waits"), "{}", f.summary);
 }
@@ -381,7 +426,7 @@ fn chatty_statements_say_what_their_round_trips_do_in_english() {
                 verify: It ran 30K times in 2 hours. performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there it should run fewer times and take less time in all while the useful work stays the same. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.\n\
                 caveat: Some frequent single-row writes are legitimate (each event recorded as it happens). Check the calling code before batching.",
             "An update of shop runs 30K times in 2 hours, one row each time · Medium · Medium\n\
-                Its runs are 44% of all statement runs. Each run adds to n in one row of counters and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes 9% of database time, and MySQL counted 12 ms of lock waits out of its 3.9 s.\n\
+                Its runs are 44% of all statement runs. Each run adds to n in one row of counters and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes 9% of database time. At least 12 ms of lock waits were observed; wait coverage is incomplete.\n\
                 impact: 44% of executions\n\
                 metric: Share of executions\n\
                 metric: Average duration\n\
@@ -442,7 +487,7 @@ fn chatty_statements_say_what_their_round_trips_do_in_english() {
         ],
         [
             "A query runs 30K times in 5 hours, one row each time · Medium · Medium\n\
-                Its runs are 30% of all statement runs. Each run adds to last_seq in one row of conversations and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes 10% of database time, and Query Store recorded 0 ms of lock waits out of its 3.9 s.\n\
+                Its runs are 30% of all statement runs. Each run adds to last_seq in one row of conversations and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes 10% of database time.\n\
                 impact: 30% of executions\n\
                 metric: Share of executions\n\
                 metric: Average duration\n\
@@ -450,7 +495,7 @@ fn chatty_statements_say_what_their_round_trips_do_in_english() {
                 verify: It ran 30K times in 5 hours; after the change compare total time and any avoidable calls, while checking that numbering, metadata updates and returned values remain correct.\n\
                 caveat: A sequence can have gaps, allocates outside transaction commit order and does not provide per-parent numbering. Check the application's numbering and atomicity requirements before considering one.",
             "A query runs 30K times in 5 hours, one row each time · Medium · Medium\n\
-                Its runs are 30% of all statement runs. Each run adds to last_seq in one row of conversations and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes 10% of database time, and Query Store recorded 40 ms of lock waits out of its 3.9 s.\n\
+                Its runs are 30% of all statement runs. Each run adds to last_seq in one row of conversations and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes 10% of database time. At least 40 ms of lock waits were observed; wait coverage is incomplete.\n\
                 impact: 30% of executions\n\
                 metric: Share of executions\n\
                 metric: Average duration\n\

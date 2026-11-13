@@ -133,7 +133,8 @@ impl FindingFacts {
 pub struct FindingLockWait {
     pub ms: f64,
     pub share: f64,
-    pub versioning_spares_read: bool,
+    /// SQL shape and the current setting make row versioning worth investigating; lock resources are unproven.
+    pub versioning_candidate: bool,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]

@@ -147,10 +147,7 @@ fn lock_time_that_counts_the_run(snapshot: &mut Snapshot) {
     }
     if let Some(workload) = snapshot.workload.as_mut() {
         for q in workload.queries.iter_mut().filter(|q| inflated.contains(&q.id)) {
-            if let Some(spread) = q.spread.as_mut() {
-                spread.lock_ms = None;
-            }
-            q.waits.retain(|w| !is_lock_time(w));
+            q.invalidate_wait_class(culprit_core::telemetry::WaitClass::Lock);
         }
     }
     snapshot.waits.retain(|w| w.wait_type.as_deref() != Some("lock time (slow query log)"));

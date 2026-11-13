@@ -735,12 +735,11 @@ fn a_short_lock_incident_in_a_quiet_database_is_not_high() {
     assert_eq!(of(&r, "lock-time")[0].severity, Severity::Low, "two minutes of statistics make no daily figure");
 }
 
-// A read on SQL Server with READ_COMMITTED_SNAPSHOT off waits for writers' locks because reads take shared locks
-// there: the change that removes the wait is row versioning, as config:read-committed-snapshot says. A read that locks
-// what it reads (UPDLOCK) waits with row versioning on too, and a write isn't spared by it.
+// Aggregate lock waits do not identify a data lock, a blocker or the reader's isolation level. RCSI is a candidate
+// for ordinary reads, while explicit locking and writes need their own investigation.
 #[test]
-fn a_read_blocked_by_writers_is_told_of_row_versioning() {
-    let fix = |text: &str, rcsi: &str| {
+fn aggregate_read_lock_waits_require_resource_proof_before_row_versioning() {
+    let fix = |text: &str, rcsi: &str, wait_type: Option<&str>| {
         let mut s = fixture("mssql-demo");
         s.settings.retain(|x| x.name != "is_read_committed_snapshot_on");
         s.settings.push(Setting {
@@ -753,27 +752,38 @@ fn a_read_blocked_by_writers_is_told_of_row_versioning() {
         q.text = text.into();
         q.executions = 40.0;
         q.total_time_ms = 120_000.0;
-        q.waits = vec![WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 110_000.0, tasks: None }];
+        q.waits = vec![WaitStat {
+            category: "Lock".into(),
+            wait_type: wait_type.map(str::to_owned),
+            wait_ms: 110_000.0,
+            tasks: None,
+        }];
         let id = format!("lock-time:{}", q.id);
         let r = analyze(s);
-        let f = r.findings.iter().find(|f| f.id == id);
-        f.and_then(|f| f.fix.as_ref()).map(|x| x.summary.clone()).unwrap_or_default()
+        let f = r.findings.iter().find(|f| f.id == id).expect("the measured lock wait remains a finding");
+        let fix = f.fix.as_ref().expect("investigation guidance");
+        assert!(fix.sql.as_deref().is_none_or(|sql| !sql.contains("READ_COMMITTED_SNAPSHOT")));
+        fix.summary.clone()
     };
     let read = "SELECT id, status FROM dbo.orders WHERE customer_id = @p0";
-    let said = fix(read, "0");
-    assert!(
-        said.starts_with("This is a read, and READ_COMMITTED_SNAPSHOT is off for this database, so under read committed it waits for any write holding a lock on the rows it reads. With row versioning on (config:read-committed-snapshot has the change), it would read the last committed version of the rows instead of waiting. Without it, find what holds the locks while it waits (Live shows the blocking chain)."),
-        "{said}"
-    );
+    for wait_type in [None, Some("LCK_M_SCH_S"), Some("LCK_M_S")] {
+        let said = fix(read, "0", wait_type);
+        assert!(said.starts_with("This read recorded lock waits while READ_COMMITTED_SNAPSHOT is off."), "{said}");
+        assert!(said.contains("identify the blocker and lock resource"), "{said}");
+        assert!(said.contains("not schema locks or explicit locking"), "{said}");
+        assert!(said.contains("isolation requirements before changing"), "{said}");
+        assert!(!said.contains("would read the last committed version"), "{said}");
+    }
     for (text, rcsi) in [
         (read, "1"),
         ("SELECT id, status FROM dbo.orders WITH (UPDLOCK) WHERE customer_id = @p0", "0"),
         ("UPDATE dbo.orders SET status = @p1 WHERE customer_id = @p0", "0"),
     ] {
-        let said = fix(text, rcsi);
+        let said = fix(text, rcsi, None);
         assert!(
             said.starts_with("Find what holds the locks while it waits (Live shows the blocking chain).")
-                && !said.contains("row versioning"),
+                && !said.contains("row versioning")
+                && !said.contains("Row versioning"),
             "{text}: {said}"
         );
     }
@@ -839,12 +849,11 @@ fn one_lock_episode_on_a_table_is_one_finding() {
         "{}",
         episode.summary
     );
-    // The read's own way out (row versioning) stays said.
+    // The read's candidate remains conditional after deduplication; no native lock resource was collected.
     let fix = &episode.fix.as_ref().unwrap().summary;
-    assert!(
-        fix.contains("Query 9, a read, waits for writes on the same table while READ_COMMITTED_SNAPSHOT is off"),
-        "{fix}"
-    );
+    assert!(fix.contains("Query 9 recorded lock waits while READ_COMMITTED_SNAPSHOT is off."), "{fix}");
+    assert!(fix.contains("Row versioning is a candidate; confirm read-committed data-lock waits"), "{fix}");
+    assert!(episode.fix.as_ref().unwrap().sql.as_deref().is_none_or(|sql| !sql.contains("READ_COMMITTED_SNAPSHOT")));
     assert!(locks.iter().all(|f| f.id != "lock-time:9"), "folded in");
     assert!(locks.iter().any(|f| f.id == "lock-time:10"), "another hour, another episode");
 }

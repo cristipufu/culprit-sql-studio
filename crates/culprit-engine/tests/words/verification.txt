@@ -16,7 +16,7 @@
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
 - ⏳ Still present: order\_items is searched by order\_id without a supporting index (20.3 s of database time over the last 5 hours (6%))
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
-- ⏳ Still present: Readers and writers block each other (READ\_COMMITTED\_SNAPSHOT is off) (Setting)
+- ⏳ Still present: Captured reads have lock waits; investigate the blocking resource (Setting)
 - ⏳ Still present: A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed (3.4× slower)
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
 - ⏳ Still present: ticket\_events has no index on ticket\_id, its foreign key to support\_tickets (800K rows unindexed)

@@ -29,14 +29,14 @@ description: Database and server settings that commonly hurt performance or hide
         "config_mssql_demo",
         &config(&fixture("mssql-demo.json")),
         r#"id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours no read waited on locks, so it costs nothing now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: READ_COMMITTED_SNAPSHOT is off; review row versioning for ordinary reads
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. The available query history does not establish how long reads waited for locks. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+fix: Review application isolation requirements before enabling row versioning for ordinary READ COMMITTED reads. Schedule a window with no other database connections; the statement fails if it cannot apply immediately.
+sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
 cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
 verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:cost-threshold-for-parallelism · Low · Medium · score 6.4 · share None
 title: Cost threshold for parallelism is still the 1990s default of 5
@@ -79,14 +79,14 @@ cost: Uses some space in the database (default cap 1 GB) and a little CPU.
 verify: Re-scan once the change has taken effect: this finding is gone.
 
 id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours no read waited on locks, so it costs nothing now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: READ_COMMITTED_SNAPSHOT is off; review row versioning for ordinary reads
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. The available query history does not establish how long reads waited for locks. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+fix: Review application isolation requirements before enabling row versioning for ordinary READ COMMITTED reads. Schedule a window with no other database connections; the statement fails if it cannot apply immediately.
+sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
 cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
 verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:auto_create_statistics · Medium · Medium · score 17.6 · share None
 title: AUTO_CREATE_STATISTICS is off
@@ -154,14 +154,14 @@ verify: Re-scan once the change has taken effect: this finding is gone."#,
         "config_mssql_query_store",
         &config(&s),
         r#"id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours no read waited on locks, so it costs nothing now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: READ_COMMITTED_SNAPSHOT is off; review row versioning for ordinary reads
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. The available query history does not establish how long reads waited for locks. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+fix: Review application isolation requirements before enabling row versioning for ordinary READ COMMITTED reads. Schedule a window with no other database connections; the statement fails if it cannot apply immediately.
+sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
 cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
 verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:cost-threshold-for-parallelism · Low · Medium · score 6.4 · share None
 title: Cost threshold for parallelism is still the 1990s default of 5
@@ -391,6 +391,14 @@ fn rcsi(s: &Snapshot) -> Vec<culprit_core::Finding> {
     only(s, "config:read-committed-snapshot")
 }
 
+fn assert_lock_investigation(finding: &culprit_core::Finding) {
+    assert!(finding.fix.as_ref().expect("investigation guidance").sql.is_none());
+    assert!(finding.summary.contains("do not identify the lock mode or blocker"), "{}", finding.summary);
+    assert!(finding.metrics.iter().any(|metric| {
+        metric.is("check.config.read_committed_snapshot.metric.reads_waiting") && metric.value > 0.0
+    }));
+}
+
 #[test]
 fn read_committed_snapshot_says_what_reads_waited() {
     let mut all = Vec::new();
@@ -435,79 +443,78 @@ fn read_committed_snapshot_says_what_reads_waited() {
     (read.first_seen, read.last_seen, read.trend) = (None, None, None);
     w.total_time_ms = 335_668.0;
     all.extend(rcsi(&s));
+    let optional_change = all[0].fix.as_ref().unwrap().sql.as_deref().expect("optional setting advice");
+    assert!(optional_change.contains("WITH NO_WAIT") && !optional_change.contains("ROLLBACK"));
+    for finding in &all[1..] {
+        assert_lock_investigation(finding);
+    }
     pin(
         "config_rcsi_low",
         &all,
         r#"id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. Whether reads wait on locks here isn't known: the query history records no waits. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: READ_COMMITTED_SNAPSHOT is off; review row versioning for ordinary reads
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. The available query history does not establish how long reads waited for locks. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+fix: Review application isolation requirements before enabling row versioning for ordinary READ COMMITTED reads. Schedule a window with no other database connections; the statement fails if it cannot apply immediately.
+sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
 cost: ALLOW_SNAPSHOT_ISOLATION is already on, so SQL Server already keeps row versions for this database: little extra overhead.
 verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
-caveat: ALLOW_SNAPSHOT_ISOLATION is on: code can already opt into SNAPSHOT isolation per transaction; RCSI makes every read-committed read use versions.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
+caveat: ALLOW_SNAPSHOT_ISOLATION is on: code can already opt into SNAPSHOT isolation per transaction; RCSI changes ordinary READ COMMITTED data reads to use versions.
 
 id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours reads waited 500 ms on locks (1% of database time), so it costs little now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 500 ms of lock waits (1% of captured workload time), nearly all for a read from customers. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+metric: Observed lock waits for captured reads: 500 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours reads waited 500 ms on locks (1% of database time), all of it on Oct 11, 08:00–08:20 UTC, and that read hasn't run since, so it costs little now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 500 ms of lock waits (1% of captured workload time), nearly all for a read from customers, during activity on Oct 11, 08:00–08:20 UTC, and that read has not run since. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+metric: Observed lock waits for captured reads: 500 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours reads waited 500 ms on locks (1% of database time), and those reads haven't run since, so it costs little now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 500 ms of lock waits (1% of captured workload time), including 300 ms for a read from customers, and those reads have not run since. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+metric: Observed lock waits for captured reads: 500 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours reads waited 40.0 s on locks held by writes (most of it a read from customers, 25.0 s): 50% of database time, but little time in all. With row versioning on, those reads would read the last committed version of the rows instead of waiting. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 40.0 s of lock waits (50% of captured workload time), including 25.0 s for a read from customers. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+metric: Observed lock waits for captured reads: 40000 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours reads waited 2.0 s on locks held by writes (nearly all of it a read from customers): 5% of database time, but all of it on Oct 11, 08:00–08:20 UTC. With row versioning on, those reads would read the last committed version of the rows instead of waiting. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 2.0 s of lock waits (5% of captured workload time), nearly all for a read from customers, during activity on Oct 11, 08:00–08:20 UTC. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+metric: Observed lock waits for captured reads: 2000 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 6 days reads waited 1 min on locks held by writes (nearly all of it a read from customers): 21% of database time, but only about 11.7 s a day. With row versioning on, those reads would read the last committed version of the rows instead of waiting. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 6 days, captured reads recorded at least 1 min of lock waits (21% of captured workload time), nearly all for a read from customers, at least 11.7 s a day. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints."#,
+metric: Observed lock waits for captured reads: 71692 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads."#,
     );
 }
 
@@ -524,13 +531,13 @@ fn read_deadlock(at: &str) -> Deadlock {
 }
 
 #[test]
-fn read_committed_snapshot_says_when_reads_and_writes_block() {
+fn read_committed_snapshot_separates_aggregate_wait_candidates_from_advice_links() {
     let mut all = Vec::new();
-    // Five minutes of reads waiting on writes.
+    // Five minutes of recorded read lock waits, without native blocker or resource evidence.
     let mut s = fixture("mssql-demo.json");
     lock_wait(&mut s, "7", 300_000.0);
     all.extend(rcsi(&s));
-    // All of it in one burst; and a deadlock with a read in it.
+    // One burst plus a deadlock's advice link: the link does not identify a lock mode or blocker.
     burst(&mut s, "7", "2026-10-11T08:00:00Z", "2026-10-11T08:20:00Z", None);
     s.deadlocks = Some(DeadlockReport {
         deadlocks: vec![read_deadlock("2026-10-11T09:00:00Z")],
@@ -538,7 +545,7 @@ fn read_committed_snapshot_says_when_reads_and_writes_block() {
         ..Default::default()
     });
     all.extend(rcsi(&s));
-    // Deadlocks alone, with snapshot isolation allowed.
+    // Advice links alone, with snapshot isolation allowed, do not establish an RCSI-removable cause.
     let mut s = fixture("mssql-demo.json");
     set(&mut s, "snapshot_isolation_state_desc", "ON");
     s.deadlocks = Some(DeadlockReport {
@@ -547,41 +554,43 @@ fn read_committed_snapshot_says_when_reads_and_writes_block() {
         ..Default::default()
     });
     all.extend(rcsi(&s));
+    assert_eq!(all.len(), 3);
+    assert_lock_investigation(&all[0]);
+    assert_lock_investigation(&all[1]);
+    assert_eq!(all[2].severity, culprit_core::Severity::Low, "an advice link does not establish the lock cause");
+    assert!(all[2].metrics.is_empty(), "no lock duration is established by the deadlock advice link");
+    assert!(all[2].summary.contains("does not establish how long reads waited for locks"));
     pin(
         "config_rcsi_blocking",
         &all,
         r#"id: config:read-committed-snapshot · Medium · Medium · score 17.6 · share None
-title: Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours, reads waited 5 min on locks held by writes (88% of database time). Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 5 min of lock waits (88% of captured workload time), nearly all for a read from customers. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-metric: Reads waiting on locks: 300000 Ms
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+metric: Observed lock waits for captured reads: 300000 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
 id: config:read-committed-snapshot · Medium · Medium · score 17.6 · share None
-title: Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours, reads waited 5 min on locks held by writes (88% of database time), all of it on Oct 11, 08:00–08:20 UTC. 1 deadlock in this database had a read in it. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: Captured reads have lock waits; investigate the blocking resource
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 5 min of lock waits (88% of captured workload time), nearly all for a read from customers, during activity on Oct 11, 08:00–08:20 UTC. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.
 impact: Setting
-metric: Reads waiting on locks: 300000 Ms
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
-cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
-verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+metric: Observed lock waits for captured reads: 300000 Ms
+fix: Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning.
+verify: Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement.
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
-id: config:read-committed-snapshot · Medium · Medium · score 17.6 · share None
-title: Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. 2 deadlocks in this database had a read in them. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+id: config:read-committed-snapshot · Low · Medium · score 6.4 · share None
+title: READ_COMMITTED_SNAPSHOT is off; review row versioning for ordinary reads
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. The available query history does not establish how long reads waited for locks. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
-sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+fix: Review application isolation requirements before enabling row versioning for ordinary READ COMMITTED reads. Schedule a window with no other database connections; the statement fails if it cannot apply immediately.
+sql: ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
 cost: ALLOW_SNAPSHOT_ISOLATION is already on, so SQL Server already keeps row versions for this database: little extra overhead.
 verify: Re-scan once the change has taken effect: this finding is gone.
-caveat: Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
-caveat: ALLOW_SNAPSHOT_ISOLATION is on: code can already opt into SNAPSHOT isolation per transaction; RCSI makes every read-committed read use versions."#,
+caveat: RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
+caveat: ALLOW_SNAPSHOT_ISOLATION is on: code can already opt into SNAPSHOT isolation per transaction; RCSI changes ordinary READ COMMITTED data reads to use versions."#,
     );
 }
 

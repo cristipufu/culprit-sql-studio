@@ -17,7 +17,7 @@ mod sqlite;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use mssql::{read_committed_snapshot_off, versioning_spares_read};
+pub(crate) use mssql::{read_committed_snapshot_off, row_versioning_candidate};
 
 /// The checks this area registers (`crate::all()` runs every area's), in the order their findings tie.
 pub(crate) const CHECKS: &[&dyn Check] = &[&ConfigCheck];

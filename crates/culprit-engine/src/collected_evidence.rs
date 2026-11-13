@@ -7,6 +7,7 @@ use culprit_core::{
 
 mod groups;
 mod validation;
+mod waits;
 
 /// Analyze one explicitly selected capture. This cannot merge overlapping captures, source epochs or databases.
 pub fn analyze(capture: &EvidenceCapture) -> Result<CollectedQueryAnalysis> {
@@ -119,6 +120,18 @@ fn snapshot(
         source.state = if partial { SourceState::Partial } else { SourceState::Collected };
         source.reason = partial.then(|| culprit_core::t!("engine.collected_analysis.partial_workload"));
         source.reason_message = partial.then(|| culprit_core::message!("engine.collected_analysis.partial_workload"));
+    }
+    if let Some(workload) = &workload
+        && workload.queries.iter().any(|query| query.waits_coverage.is_some())
+        && let Some(source) = sources.iter_mut().find(|source| source.source == source_id::QUERY_WAITS)
+    {
+        let complete = workload.queries.iter().all(|query| {
+            query.waits_coverage.as_ref().is_some_and(|coverage| coverage.complete && coverage.is_valid())
+        });
+        source.state = if complete { SourceState::Collected } else { SourceState::Partial };
+        source.reason = (!complete).then(|| culprit_core::t!("engine.collected_analysis.partial_workload"));
+        source.reason_message =
+            (!complete).then(|| culprit_core::message!("engine.collected_analysis.partial_workload"));
     }
     if have_plans && let Some(source) = sources.iter_mut().find(|source| source.source == source_id::RETAINED_PLANS) {
         source.state = SourceState::Partial;

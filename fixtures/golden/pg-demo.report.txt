@@ -760,31 +760,31 @@ brief:
     Ship the fix's schema change the way this project ships schema changes (a migration), keeping the options the fix's SQL already has. After any change is live, run `culprit scan pg-demo` and check `untrusted-constraint:archive.wide` the way *How to verify* says.
 
 === finding heavy-query:4911431806993420100
-History · low severity · medium confidence · queries
-title: An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%), most likely waiting for locks
-summary: 19.0 s of database time over the 5 hours since statistics were reset (12%). It ran once at 19.0 s, sometime between 08:41 and 09:28 UTC on Oct 11: 12% of all database time in the 5 hours since statistics were reset. It read 15 pages per run, which takes milliseconds, yet ran 19.0 s: almost all of that time it was waiting, most likely for a row lock another transaction held (pg_stat_statements doesn't record what a statement waited for).
+History · low severity · high confidence · queries
+title: An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%)
+summary: 19.0 s of database time over the 5 hours since statistics were reset (12%). It ran once at 19.0 s, sometime between 08:41 and 09:28 UTC on Oct 11: 12% of all database time in the 5 hours since statistics were reset.
 impact: 19.0 s of database time over the 5 hours since statistics were reset (12%) · 11.8% of database time
 metrics:
   - Share of DB time: 12%
   - Average duration: 19.0 s
   - Pages read per run: 15
   - Rows changed per run: 1
-fix: It ran once in the 5 hours since statistics were reset, so there is no wait to catch now; if it runs again, have its lock waits logged (log_lock_waits) to see what holds them. Keep those transactions short: commit sooner, and don't wait for a user or another service inside a transaction. An index or a rewrite of this statement won't shorten the wait.
+fix: Find this statement in the application and check that it finds the rows it changes through an index, and changes no more rows per run than it needs (split large updates into batches).
 verify:
   1. Re-scan later: if it hasn't run again, there is nothing to do.
-  2. pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop toward what its reads take. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
+  2. pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
 caveats:
   - This statement ran once in the 5 hours since statistics were reset. One run shows what it cost, not that it will run again: an export, a backfill or a query someone ran by hand looks like this. It needs work only if it keeps running.
 queries:
   - 4911431806993420100: 12% of database time
 brief:
-    # An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%), most likely waiting for locks
+    # An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%)
 
-    Database: **pg-demo** (PostgreSQL 18.6, database `demo`, local environment). Finding `heavy-query:4911431806993420100`: History, low impact, medium confidence. Scanned 2026-10-11T11:54:21Z.
+    Database: **pg-demo** (PostgreSQL 18.6, database `demo`, local environment). Finding `heavy-query:4911431806993420100`: History, low impact, high confidence. Scanned 2026-10-11T11:54:21Z.
 
     ## What's happening
 
-    19.0 s of database time over the 5 hours since statistics were reset (12%). It ran once at 19.0 s, sometime between 08:41 and 09:28 UTC on Oct 11: 12% of all database time in the 5 hours since statistics were reset. It read 15 pages per run, which takes milliseconds, yet ran 19.0 s: almost all of that time it was waiting, most likely for a row lock another transaction held (pg_stat_statements doesn't record what a statement waited for).
+    19.0 s of database time over the 5 hours since statistics were reset (12%). It ran once at 19.0 s, sometime between 08:41 and 09:28 UTC on Oct 11: 12% of all database time in the 5 hours since statistics were reset.
 
     ## Evidence
 
@@ -803,12 +803,12 @@ brief:
 
     ## Suggested fix
 
-    It ran once in the 5 hours since statistics were reset, so there is no wait to catch now; if it runs again, have its lock waits logged (log_lock_waits) to see what holds them. Keep those transactions short: commit sooner, and don't wait for a user or another service inside a transaction. An index or a rewrite of this statement won't shorten the wait.
+    Find this statement in the application and check that it finds the rows it changes through an index, and changes no more rows per run than it needs (split large updates into batches).
 
     ## How to verify
 
     - Re-scan later: if it hasn't run again, there is nothing to do.
-    - pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes pg-demo --since <ship time>`): there its time per run should drop toward what its reads take. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
+    - pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes pg-demo --since <ship time>`): there its time per run should drop. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
 
     ## Caveats
 

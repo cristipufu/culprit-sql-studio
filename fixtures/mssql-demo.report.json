@@ -217,11 +217,8 @@
       "title": "A long open transaction holds cleanup back"
     },
     {
-      "assessed_queries": [
-        "264"
-      ],
       "check": "network-wait",
-      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
+      "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
       "title": "Results the application reads slowly"
     },
@@ -290,13 +287,8 @@
       "title": "Writes that produce most of the log"
     },
     {
-      "assessed_queries": [
-        "138",
-        "143",
-        "161"
-      ],
       "check": "lock-time",
-      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
+      "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
       "title": "Queries that spend their time waiting for locks"
     },
@@ -556,7 +548,7 @@
       "fix": {
         "cost": null,
         "sql": null,
-        "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143, a read, waits for writes on the same table while READ_COMMITTED_SNAPSHOT is off: with row versioning on (config:read-committed-snapshot has the change), it reads the last committed version of the rows instead."
+        "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation."
       },
       "id": "hot-rows:shop.orders",
       "impact": {
@@ -998,14 +990,14 @@
       "actionability": "needs-attention",
       "category": "configuration",
       "caveats": [
-        "Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints."
+        "RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads."
       ],
       "check": "config",
       "confidence": "medium",
       "fix": {
-        "cost": "Row versions live in tempdb (or the database with ADR), which adds some write overhead.",
-        "sql": "ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;",
-        "summary": "Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it."
+        "cost": null,
+        "sql": null,
+        "summary": "Capture the blocking request, lock resource and modes, then confirm the reader's isolation and locking hints before considering row versioning."
       },
       "id": "config:read-committed-snapshot",
       "impact": {
@@ -1019,7 +1011,7 @@
       "metrics": [
         {
           "key": "check.config.read_committed_snapshot.metric.reads_waiting",
-          "label": "Reads waiting on locks",
+          "label": "Observed lock waits for captured reads",
           "text": null,
           "unit": "ms",
           "value": 71692.0
@@ -1031,11 +1023,11 @@
         "kind": "setting",
         "name": "read-committed-snapshot"
       },
-      "summary": "With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours, reads waited 1 min on locks held by writes (21% of database time). 1 deadlock in this database had a read in it. Most OLTP applications run with it on; Azure SQL Database enables it by default.",
-      "title": "Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)",
+      "summary": "READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. In the last 5 hours, captured reads recorded at least 1 min of lock waits (21% of captured workload time), nearly all for a read from orders. These aggregate waits do not identify the lock mode or blocker, so they do not establish that row versioning would remove the contention.",
+      "title": "Captured reads have lock waits; investigate the blocking resource",
       "verification_basis": "rescan",
       "verify": [
-        "Re-scan once the change has taken effect: this finding is gone."
+        "Confirm whether an ordinary READ COMMITTED read is waiting on a shared data lock rather than a schema lock or an explicit locking requirement."
       ]
     },
     {

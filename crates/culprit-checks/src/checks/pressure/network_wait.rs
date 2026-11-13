@@ -3,6 +3,7 @@
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use culprit_core::t;
+use culprit_core::telemetry::WaitClass;
 
 pub fn network_wait_info() -> CheckInfo {
     CheckInfo {
@@ -20,7 +21,7 @@ check!(
     decide = network_waits,
     render = network_wait_finding,
     case<'s> = NetworkWait<'s>,
-    evidence = &[Evidence::Query(QueryMeasure::Waits("Network"))],
+    evidence = &[Evidence::Query(QueryMeasure::Waits(WaitClass::Network))],
 );
 
 /// The network-wait findings of `snapshot`: its cases, each worded.

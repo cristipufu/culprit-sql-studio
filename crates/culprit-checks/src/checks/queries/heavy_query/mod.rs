@@ -8,7 +8,7 @@ mod tests;
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
-use culprit_core::{key, t};
+use culprit_core::{engines::ReadUnit, key, t};
 use fix::*;
 pub(super) use idle::idle_time;
 use idle::{DominantWait, Idle, NOTHING_READS, WaitOn, dominant_wait};
@@ -242,13 +242,13 @@ fn decide<'a>(snapshot: &'a Snapshot, q: &'a QueryStat) -> HeavyCase<'a> {
     let mut plan_node = hot.map(|(_, n)| n.id);
     let (mut remedy, mut verify) = match &idle {
         Some(idle) => {
-            if idle.kind == IdleKind::Sleep || idle.kind == IdleKind::AppLock {
+            if matches!(idle.kind(), IdleKind::Sleep | IdleKind::AppLock) {
                 // A deliberate pause holds a connection, not the server's resources: listed, ranked low.
                 severity = Severity::Low;
                 ranked_low = true;
             }
             confidence = idle.confidence;
-            (Remedy::Idle(idle.kind), Verify::Scan(idle.verify()))
+            (Remedy::Idle(idle.kind()), Verify::Scan(idle.verify()))
         }
         None => {
             // The next steps tied to one operator: measure a seek's residual filter, or inspect a whole-table read.
@@ -271,11 +271,11 @@ fn decide<'a>(snapshot: &'a Snapshot, q: &'a QueryStat) -> HeavyCase<'a> {
             };
             let expect = match (&lookups, &wait) {
                 (Some(_), _) => Expect::Measure,
-                // A read that waits for storage: what the change shortens is the wait, not the pages a run reads.
+                // A material I/O wait needs equivalent-work I/O and runtime measurements before and after a change.
                 (None, Some(wait))
                     if wait.on == WaitOn::Storage && matches!(kind, StatementKind::Read | StatementKind::Aggregate) =>
                 {
-                    Expect::Storage(wait.share)
+                    Expect::Storage
                 }
                 _ if culprit_core::sql::is_session_statement(&q.text) => Expect::Session,
                 // A fix that cuts runs leaves what one run reads as it was (or more, once the cheap runs are skipped
@@ -350,7 +350,7 @@ pub(crate) fn title_with_cost(snapshot: &Snapshot, q: &QueryStat, share: f64, co
             handle = &handle,
             tense = tense,
             cost = cost,
-            idle = idle.title_tail()
+            idle = idle.title_tail(snapshot.server.engine)
         ),
         _ => t!("check.heavy_query.title.cost", handle = &handle, tense = tense, cost = cost),
     })
@@ -371,8 +371,8 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
     f.confidence = case.confidence;
     f.actionability = case.actionability;
     let share = format::percent(case.impact.share);
-    // MySQL counts the rows a statement examined, the other engines the pages it read.
-    let mysql = snapshot.server.engine == Engine::Mysql;
+    let read_unit = snapshot.server.engine.spec().statement_metrics().reads;
+    let rows_examined = read_unit == ReadUnit::RowsExamined;
     // A statement that stopped running is told in the past: it took its share until it stopped, whatever it spent the
     // time on.
     let tense = if case.stopped { "past" } else { "present" };
@@ -384,13 +384,13 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
                 tense = tense,
                 share = &share,
                 time = &time,
-                idle = idle.title_tail()
+                idle = idle.title_tail(snapshot.server.engine)
             ),
             _ => t!("check.heavy_query.title.share", handle = &handle, tense = tense, share = &share, time = &time),
         },
         TitleForm::ReadsForNothing { reads: n, returns } => {
             let (reads, returns) = (format::count(n), returns.select());
-            if mysql {
+            if rows_examined {
                 t!(
                     "check.heavy_query.title.reads_for_nothing_rows_examined",
                     handle = &handle,
@@ -412,7 +412,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
         }
         TitleForm::ManyReadsPerRow(r) => {
             let reads = format::count(r);
-            if mysql {
+            if rows_examined {
                 t!(
                     "check.heavy_query.title.reads_per_row_rows_examined",
                     handle = &handle,
@@ -485,9 +485,8 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
     match &case.lead {
         Lead::Idle(idle) => summary.push(idle.evidence(snapshot, q)),
         Lead::Step { plan, node, share } => {
-            // MySQL counts the rows a statement examined: what the step reads, measured, when it is the plan's only
-            // table.
-            let examined = q.reads_per_execution().filter(|_| mysql);
+            // Rows-examined measurements describe what the step reads when it is the plan's only table.
+            let examined = q.reads_per_execution().filter(|_| rows_examined);
             let step = describe_node(plan, node, examined);
             summary.push(match share {
                 Some(s) => t!("check.heavy_query.summary.step_share", share = format::percent(*s), step = step),
@@ -502,7 +501,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
         Lead::CheapPlan { storage_reads: Some(reads) } => {
             let n = reads.round().max(1.0);
             let reads = format::count(n);
-            summary.push(if mysql {
+            summary.push(if rows_examined {
                 t!("check.heavy_query.summary.cheap_plan_reads_rows_examined", n = n, reads = reads)
             } else {
                 t!("check.heavy_query.summary.cheap_plan_reads_pages", n = n, reads = reads)
@@ -512,7 +511,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
         Lead::WholeScan { plan, node } => {
             // No share of the cost is put on the scan under the bar, but that every run reads its table is the plan's
             // own.
-            let step = describe_node(plan, node, q.reads_per_execution().filter(|_| mysql));
+            let step = describe_node(plan, node, q.reads_per_execution().filter(|_| rows_examined));
             summary.push(t!("check.heavy_query.summary.whole_scan", step = step));
         }
         Lead::Unexplained => {}
@@ -578,11 +577,9 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
     }
     let basis = crate::support::totals_basis(snapshot, q);
     if let Some(r) = q.reads_per_execution() {
-        // MySQL counts rows examined, the other engines pages.
-        let (label, unit) = if mysql {
-            (t!("common.metric.rows_examined_per_run"), Unit::Rows)
-        } else {
-            (t!("common.metric.pages_read_per_run"), Unit::Pages)
+        let (label, unit) = match read_unit {
+            ReadUnit::RowsExamined => (t!("common.metric.rows_examined_per_run"), Unit::Rows),
+            ReadUnit::Pages => (t!("common.metric.pages_read_per_run"), Unit::Pages),
         };
         let label = match &basis {
             Some(basis) => over(label, basis),
@@ -627,9 +624,10 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
 pub(super) enum Expect {
     /// The cause is not known yet: get operator measurements before prescribing a change.
     Measure,
-    /// Less of its time waiting for storage, which is this share of it now (Query Store sums a parallel plan's waits
-    /// over its threads, which can pass the whole).
-    Storage(f64),
+    /// Compare measured I/O and execution time under equivalent useful work.
+    Storage,
+    /// Compare native wait totals and execution time without assuming exclusive elapsed-time accounting.
+    RecordedWait,
     /// A fix that makes each run cheaper: its reads and time per run drop.
     CheaperRuns,
     /// A fix that cuts runs (a cache, a skipped or batched call, a rarer poll): fewer runs and less time in all, while
@@ -649,23 +647,17 @@ pub(super) enum Expect {
 /// reads and averages move; on a source of running totals two of Culprit's scans show it, in What changed, which
 /// carries runs and time and no reads ([`verify_between_scans`]).
 fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
-    // MySQL counts the rows a statement examined, the other engines the pages it read.
-    let mysql = snapshot.server.engine == Engine::Mysql;
+    let read_unit = snapshot.server.engine.spec().statement_metrics().reads;
     if matches!(expect, Expect::Measure) {
-        return if mysql {
-            t!("check.heavy_query.verify.measure_rows_examined")
-        } else {
-            t!("check.heavy_query.verify.measure_pages")
+        return match read_unit {
+            ReadUnit::RowsExamined => t!("check.heavy_query.verify.measure_rows_examined"),
+            ReadUnit::Pages => t!("check.heavy_query.verify.measure_pages"),
         };
     }
-    // The storage wait's share now: "most" where a parallel plan's waits pass the whole.
-    let storage_now = |share: f64| (if share >= 1.0 { "most" } else { "share" }, format::percent(share));
     let between = match expect {
         Expect::Measure => unreachable!(),
-        Expect::Storage(share) => {
-            let (part, share) = storage_now(share);
-            t!("check.heavy_query.verify.between.storage", part = part, share = share)
-        }
+        Expect::Storage => t!("check.heavy_query.verify.between.storage"),
+        Expect::RecordedWait => t!("check.heavy_query.verify.between.recorded_wait"),
         Expect::CheaperRuns => Shows::CheaperRuns.between(),
         Expect::FewerRuns => Shows::FewerRuns.between(),
         Expect::Counter => t!("check.heavy_query.verify.between.counter"),
@@ -679,11 +671,11 @@ fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
     let time = time_noun(snapshot);
     match expect {
         Expect::Measure => unreachable!(),
-        Expect::Storage(share) => {
-            let (part, share) = storage_now(share);
-            t!("check.heavy_query.verify.storage", part = part, share = share)
+        Expect::Storage => t!("check.heavy_query.verify.storage"),
+        Expect::RecordedWait => t!("check.heavy_query.verify.recorded_wait"),
+        Expect::CheaperRuns if read_unit == ReadUnit::RowsExamined => {
+            t!("check.heavy_query.verify.cheaper_runs_rows_examined", time = time)
         }
-        Expect::CheaperRuns if mysql => t!("check.heavy_query.verify.cheaper_runs_rows_examined", time = time),
         Expect::CheaperRuns => t!("check.heavy_query.verify.cheaper_runs_pages", time = time),
         Expect::FewerRuns => t!("check.heavy_query.verify.fewer_runs", time = time),
         Expect::Counter => t!("check.heavy_query.verify.counter"),

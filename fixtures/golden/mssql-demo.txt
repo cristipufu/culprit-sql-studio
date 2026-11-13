@@ -515,32 +515,32 @@ brief:
 
 === finding config:read-committed-snapshot
 Optional improvement · low severity · medium confidence · configuration
-title: READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
-summary: With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours no read waited on locks, so it costs nothing now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+title: READ_COMMITTED_SNAPSHOT is off; review row versioning for ordinary reads
+summary: READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. The available query history does not establish how long reads waited for locks. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
 impact: Setting
-fix: Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
+fix: Review application isolation requirements before enabling row versioning for ordinary READ COMMITTED reads. Schedule a window with no other database connections; the statement fails if it cannot apply immediately.
   sql:
-      ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+      ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
   cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
 verify:
   1. Re-scan once the change has taken effect: this finding is gone.
 caveats:
-  - Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+  - RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 brief:
-    # READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows
+    # READ_COMMITTED_SNAPSHOT is off; review row versioning for ordinary reads
 
     Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `config:read-committed-snapshot`: Optional improvement, low impact, medium confidence. Scanned 2026-10-11T12:13:47Z.
 
     ## What's happening
 
-    With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa. In the last 5 hours no read waited on locks, so it costs nothing now. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
+    READ_COMMITTED_SNAPSHOT is off, so ordinary READ COMMITTED data reads use shared locks rather than row versions. The available query history does not establish how long reads waited for locks. It matters more as reads and writes meet on the same rows more often. Most OLTP applications run with it on; Azure SQL Database enables it by default.
 
     ## Suggested fix
 
-    Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.
+    Review application isolation requirements before enabling row versioning for ordinary READ COMMITTED reads. Schedule a window with no other database connections; the statement fails if it cannot apply immediately.
 
     ```sql
-    ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+    ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
     ```
 
     Cost: Row versions live in tempdb (or the database with ADR), which adds some write overhead.
@@ -551,7 +551,7 @@ brief:
 
     ## Caveats
 
-    - Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.
+    - RCSI uses row versions for ordinary READ COMMITTED data reads; schema locks and explicit locking requirements can still block reads.
 
     ## What to do in the codebase
 

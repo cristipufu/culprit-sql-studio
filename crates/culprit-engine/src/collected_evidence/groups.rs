@@ -137,6 +137,8 @@ pub(super) fn project(
             None => partial = true,
         }
     }
+    let mut native_waits = BTreeMap::<String, Vec<super::waits::NativeWait<'_>>>::new();
+    let mut wait_joins_complete = true;
     for record in capture.records() {
         let TelemetryRecord::QueryWaits(wait) = &record.row().record else { continue };
         if inclusion(definitions.join(&wait.key.references)?.query) == QueryInclusion::Excluded {
@@ -145,12 +147,15 @@ pub(super) fn project(
         let key = group_key(capture, &wait.key)?;
         if !queries.contains_key(&key) {
             limitations.push(limit(record.row().record_id.clone(), CollectedAnalysisLimit::WaitWithoutRuntime));
+            wait_joins_complete = false;
+            partial = true;
             continue;
         }
-        // WaitMeasurement preserves an opaque native category, not the vocabulary required by WaitStat. Its exact
-        // value and unit remain in the authenticated native inputs until that semantic mapping is established.
-        partial = true;
-        limitations.push(limit(record.row().record_id.clone(), CollectedAnalysisLimit::MetricNotProjected));
+        native_waits.entry(key).or_default().push((record.row(), wait));
+    }
+    let waits = super::waits::Projection::new(capture, wait_joins_complete, limitations);
+    for (id, query) in &mut queries {
+        partial |= waits.apply(query, native_waits.get(id).map(Vec::as_slice).unwrap_or_default(), limitations);
     }
     Ok((queries.into_values().collect(), inputs, partial))
 }
@@ -322,11 +327,11 @@ fn plan(
     Ok(None)
 }
 
-fn exact_count(value: &str) -> Option<u64> {
+pub(super) fn exact_count(value: &str) -> Option<u64> {
     value.parse::<u64>().ok().filter(|value| *value <= MAX_EXACT_COUNT)
 }
 
-fn milliseconds(value: f64, unit: RuntimeMetricUnit) -> Option<f64> {
+pub(super) fn milliseconds(value: f64, unit: RuntimeMetricUnit) -> Option<f64> {
     let scale = match unit {
         RuntimeMetricUnit::Picoseconds => 1e-9,
         RuntimeMetricUnit::Nanoseconds => 1e-6,

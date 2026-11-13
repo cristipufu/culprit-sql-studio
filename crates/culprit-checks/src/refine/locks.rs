@@ -180,12 +180,11 @@ impl Refine for Rule {
                         when = when,
                         waited = &waited
                     ));
-                    if wait.versioning_spares_read
+                    if wait.versioning_candidate
                         && let Some(fix) = target.fix.as_mut()
                     {
-                        let stopped = if query_stopped(s, q).is_some() { "yes" } else { "no" };
                         fix.summary.push(' ');
-                        fix.summary.push_str(&t!("refine.locks.row_versioning", query = &q.id, stopped = stopped));
+                        fix.summary.push_str(&t!("refine.locks.row_versioning", query = &q.id));
                     }
                     note = Some(t!("refine.locks.episode_note", waited = waited, table = table));
                     target.impact.set_label(t!("refine.locks.impact", time = format::duration(d.total_lock_ms)));

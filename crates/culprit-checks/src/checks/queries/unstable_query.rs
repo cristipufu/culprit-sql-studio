@@ -4,6 +4,9 @@ use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use culprit_core::{ScanSpan, t};
 
+mod recorded;
+use recorded::Recorded;
+
 pub fn unstable_query_info() -> CheckInfo {
     CheckInfo {
         id: "unstable-query".into(),
@@ -113,8 +116,8 @@ fn unstable_queries(snapshot: &Snapshot) -> Vec<UnstableQuery<'_>> {
                 stopped: crate::all_stopped(snapshot, &[q]),
                 scans: workload.scans_of(q),
                 waited,
-                // What the engine recorded of its waits says which of the two causes it is, where it recorded any.
-                recorded: Recorded::read(snapshot, q, excess),
+                // Aggregate waits retain observed candidates without assigning them to particular slow calls.
+                recorded: Recorded::read(snapshot, q),
                 fewest: (excess / (max - q.mean_time_ms).max(1.0)).ceil(),
             })
         })
@@ -169,7 +172,7 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
     let why = if let Some(w) = &case.waited {
         w.summary(snapshot)
     } else if snapshot.server.engine.has_server() {
-        case.recorded.sentence(case.excess)
+        case.recorded.sentence(snapshot, case.excess)
     } else {
         // SQLite: no server to record waits; a run that waits is waiting for the file's write lock.
         t!("check.unstable_query.summary.sqlite")
@@ -210,20 +213,10 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
     if let Some(io) = case.waited.as_ref().and_then(|w| w.io_ms) {
         f.metrics.push(Metric::said(culprit_core::key!("check.unstable_query.metric.io"), io, Unit::Ms));
     }
-    // The same ladders as `parameter-sensitive`: the cause is usually the same, only the evidence is coarser.
-    f.fix = Some(match (&case.waited, snapshot.server.engine) {
+    // Parameter comparisons remain an investigation; aggregate waits do not select a cause.
+    let mut fix = match (&case.waited, snapshot.server.engine) {
         (Some(w), Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => {
             w.fix(snapshot)
-        }
-        // Lock waits the engine recorded explain the slow runs: what holds the locks is the fix, not a plan.
-        (None, Engine::Mssql) if case.recorded.locks_explain() => {
-            let LockHolder { lead, sql } = find_lock_holder(snapshot, q, Some(case.fewest));
-            Fix {
-                summary: [lead, t!("check.unstable_query.fix.hold_short"), t!("check.unstable_query.fix.inspect")]
-                    .join(" "),
-                sql,
-                cost: None,
-            }
         }
         (None, Engine::Mssql) => {
             f.facts.advice.application = culprit_core::ApplicationAdvice::Alternative;
@@ -231,11 +224,21 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
         }
         (None, Engine::Postgres) => crate::queries::postgres_fix(),
         (None, Engine::Yugabyte) => Fix { summary: t!("check.unstable_query.fix.yugabyte"), sql: None, cost: None },
-        (None, Engine::Mysql) => crate::queries::mysql_fix(snapshot, q, case.recorded.lock_share(), Some(case.fewest)),
+        (None, Engine::Mysql) => {
+            // There is no proven allocation of the aggregate lock total to the slow calls.
+            crate::queries::mysql_fix(snapshot, q, 0.0, Some(case.fewest))
+        }
         (None, Engine::Sqlite) => {
             Fix { summary: t!("check.unstable_query.fix.sqlite"), sql: Some("ANALYZE;".into()), cost: None }
         }
-    });
+    };
+    if case.waited.is_none() && case.recorded.has_positive_locks() {
+        // Aggregate lock totals do not identify the slow calls. Preserve both investigations rather than forcing
+        // the lock-only or parameter-only ladder, and do not generate a guessed owner's command.
+        fix.summary =
+            [t!("check.unstable_query.fix.watch"), t!("check.unstable_query.fix.inspect"), fix.summary].join(" ");
+    }
+    f.fix = Some(fix);
     f.verify = vec![verify_new_runs(snapshot)];
     if snapshot.server.engine.sql_syntax() == culprit_core::SqlSyntax::Postgres {
         // A plan that reads no table has no values to blame: which ones were slow doesn't matter.
@@ -535,151 +538,6 @@ impl<'a> WriteWaits<'a> {
     }
 }
 
-/// What the engine recorded of a statement's waits, said against its slow runs' extra time: Query Store's waits per
-/// query, MySQL's and MariaDB's lock time. Lock waits that make up half the extra time or more explain the slow runs; a
-/// record with none or few of them rules locks out, and its largest other wait says what the slow runs spent their time
-/// on. PostgreSQL keeps no waits per statement, and a Query Store without wait statistics recorded none: then both
-/// causes stay open, and the sentence says why.
-enum Recorded {
-    /// Nothing recorded tells the causes apart, for this reason.
-    Open(Unrecorded),
-    /// Lock waits that make up half the slow runs' extra time or more, by the source that recorded them.
-    Locks { source: String, lock_ms: f64 },
-    /// Few or no lock waits, and the largest other wait with a plain meaning.
-    NotLocks { source: String, lock_ms: f64, other: Option<OtherWait> },
-}
-
-enum Unrecorded {
-    /// Query Store recorded no waits for it.
-    QueryStore,
-    /// MySQL or MariaDB recorded no lock time for it.
-    NoLockTime(String),
-    /// pg_stat_statements doesn't record what a statement waited for.
-    Postgres,
-    Sqlite,
-}
-
-/// A wait that says what the slow runs spent their time on.
-struct OtherWait {
-    name: String,
-    ms: f64,
-    meaning: Meaning,
-}
-
-#[derive(Clone, Copy)]
-enum Meaning {
-    Network,
-    Io,
-    Memory,
-}
-
-impl Recorded {
-    fn read(snapshot: &Snapshot, q: &QueryStat, excess: f64) -> Self {
-        let engine = snapshot.server.engine;
-        let lock_waits = q.waits.iter().filter(|w| w.category == "Lock").map(|w| w.wait_ms).reduce(|a, b| a + b);
-        let (source, lock) = match engine {
-            Engine::Mssql if !q.waits.is_empty() => ("Query Store".to_string(), lock_waits.unwrap_or(0.0)),
-            Engine::Mssql => return Recorded::Open(Unrecorded::QueryStore),
-            Engine::Mysql => match q.spread.as_ref().and_then(|s| s.lock_ms).or(lock_waits) {
-                Some(lock) => (snapshot.server.name().to_string(), lock),
-                None => return Recorded::Open(Unrecorded::NoLockTime(snapshot.server.name().to_string())),
-            },
-            Engine::Postgres | Engine::Yugabyte => return Recorded::Open(Unrecorded::Postgres),
-            Engine::Sqlite => return Recorded::Open(Unrecorded::Sqlite),
-        };
-        if lock >= excess * 0.5 {
-            return Recorded::Locks { source, lock_ms: lock };
-        }
-        // The largest other wait, where it has a plain meaning: what the slow runs spent their time on.
-        let other = q
-            .waits
-            .iter()
-            .filter(|w| !matches!(w.category.as_str(), "Lock" | "CPU"))
-            .max_by(|a, b| a.wait_ms.total_cmp(&b.wait_ms))
-            .and_then(|w| {
-                let meaning = match culprit_core::waits::category_key(&w.category) {
-                    "network" => Meaning::Network,
-                    "io" => Meaning::Io,
-                    "memory" => Meaning::Memory,
-                    _ => return None,
-                };
-                Some(OtherWait {
-                    name: w.wait_type.clone().unwrap_or_else(|| w.category.clone()),
-                    ms: w.wait_ms,
-                    meaning,
-                })
-            });
-        Recorded::NotLocks { source, lock_ms: lock, other }
-    }
-
-    /// Lock waits recorded for it make up half the slow runs' extra time or more.
-    fn locks_explain(&self) -> bool {
-        matches!(self, Recorded::Locks { .. })
-    }
-
-    /// The lock share `mysql_fix` reads: all of it where locks explain the slow runs, none otherwise.
-    fn lock_share(&self) -> f64 {
-        if self.locks_explain() { 1.0 } else { 0.0 }
-    }
-
-    /// The summary's sentences on what the engine recorded, after the extra time.
-    fn sentence(&self, excess: f64) -> String {
-        let values = t!("check.unstable_query.recorded.compare_values");
-        let extra = format::duration(excess);
-        match self {
-            Recorded::Open(why) => [
-                match why {
-                    Unrecorded::QueryStore => t!("check.unstable_query.recorded.open_query_store"),
-                    Unrecorded::NoLockTime(server) => t!("check.unstable_query.recorded.open_server", server = server),
-                    Unrecorded::Postgres => t!("check.unstable_query.recorded.open_postgres"),
-                    Unrecorded::Sqlite => t!("check.unstable_query.recorded.open"),
-                },
-                values,
-            ]
-            .join(" "),
-            Recorded::Locks { source, lock_ms } => t!(
-                "check.unstable_query.recorded.locks",
-                source = source,
-                lock = format::duration(*lock_ms),
-                extra = extra
-            ),
-            Recorded::NotLocks { source, lock_ms, other } => {
-                let meaning = |m: Meaning| match m {
-                    Meaning::Network => t!("check.unstable_query.meaning.network"),
-                    Meaning::Io => t!("check.unstable_query.meaning.io"),
-                    Meaning::Memory => t!("check.unstable_query.meaning.memory"),
-                };
-                let locks = match (*lock_ms <= 0.0, other) {
-                    (true, None) => t!("check.unstable_query.recorded.no_locks", source = source),
-                    (true, Some(o)) => t!(
-                        "check.unstable_query.recorded.no_locks_other",
-                        source = source,
-                        wait = &o.name,
-                        ms = format::duration(o.ms),
-                        meaning = meaning(o.meaning)
-                    ),
-                    (false, None) => t!(
-                        "check.unstable_query.recorded.few_locks",
-                        source = source,
-                        lock = format::duration(*lock_ms),
-                        extra = extra
-                    ),
-                    (false, Some(o)) => t!(
-                        "check.unstable_query.recorded.few_locks_other",
-                        source = source,
-                        lock = format::duration(*lock_ms),
-                        extra = extra,
-                        wait = &o.name,
-                        ms = format::duration(o.ms),
-                        meaning = meaning(o.meaning)
-                    ),
-                };
-                [locks, t!("check.unstable_query.recorded.most_likely"), values].join(" ")
-            }
-        }
-    }
-}
-
 /// How many rows an INSERT's VALUES list gives: its parenthesized groups, `None` without a VALUES list.
 fn values_rows(text: &str) -> Option<usize> {
     let lower = text.to_ascii_lowercase();
@@ -870,10 +728,7 @@ mod tests {
         assert_eq!(fix.sql, None, "a finding on a statement that stopped runs nothing for it");
     }
 
-    // The SQL Server demo's fresh reading: "or some runs wait on locks. Check the waits for this query" where Query Store
-    // recorded 3.4 s of Network IO, 43 ms of memory, 11 ms of CPU and no lock waits for it.
-    #[test]
-    fn the_summary_reads_the_waits_the_engine_recorded() {
+    fn unstable_read() -> Snapshot {
         let mut s = crate::waits::snapshot_with(Engine::Mssql);
         let w = s.workload.as_mut().unwrap();
         let q = w.queries.iter_mut().find(|q| q.id == "10").expect("the demo's read of support_tickets");
@@ -883,6 +738,27 @@ mod tests {
         (q.executions, q.mean_time_ms, q.total_time_ms) = (runs, mean, mean * runs);
         (q.stddev_time_ms, q.max_time_ms) = (Some(variance.sqrt()), Some(1_100.0));
         q.plans.truncate(1);
+        q.waits.clear();
+        q.waits_coverage = None;
+        q.spread = None;
+        w.total_time_ms = w.queries.iter().map(|q| q.total_time_ms).sum();
+        s
+    }
+
+    #[test]
+    fn qualified_aggregates_describe_waits_without_assigning_them_to_the_slow_calls() {
+        let mut s = unstable_read();
+        let w = s.workload.as_mut().unwrap();
+        let q = w.queries.iter_mut().find(|q| q.id == "10").unwrap();
+        q.waits_coverage = Some(culprit_core::QueryWaitCoverage {
+            classes: vec![
+                culprit_core::telemetry::WaitClass::Lock,
+                culprit_core::telemetry::WaitClass::Network,
+                culprit_core::telemetry::WaitClass::Memory,
+                culprit_core::telemetry::WaitClass::Cpu,
+            ],
+            complete: true,
+        });
         let wait = |category: &str, wait_type: &str, ms: f64| culprit_core::WaitStat {
             category: category.into(),
             wait_type: Some(wait_type.into()),
@@ -897,19 +773,92 @@ mod tests {
             |s: Snapshot| unstable_query(&s).into_iter().find(|f| f.id == "unstable-query:10").expect("unstable");
         let f = found(s.clone());
         assert!(
-            f.summary.contains("Query Store recorded no lock waits for it, so locks weren't what made them slow; its largest wait is Network IO (3.4 s): the application reading the results, which takes longer the more rows a run returns. Most likely some parameter values match far more rows than the plan was built for"),
+            f.summary.contains("Query Store recorded no lock waits in this qualified observation")
+                && f.summary.contains("Network IO (3.4 s)"),
             "{}",
             f.summary
         );
         assert!(!f.summary.contains("Check the waits"), "{}", f.summary);
-        // Lock waits that make up the slow runs' time are the cause: the fix is what holds them, not a plan.
+        assert!(f.summary.contains("These totals do not identify which calls were slow."), "{}", f.summary);
+        // Aggregate waits keep blocking and parameter sensitivity open even when the class is qualified.
         let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == "10").unwrap();
         q.waits = vec![wait("Lock", "Lock", 10_000.0)];
         let f = found(s);
-        assert!(f.summary.contains("Query Store recorded 10.0 s of lock waits for it"), "{}", f.summary);
+        assert!(f.summary.contains("Query Store recorded 10.0 s of lock waits"), "{}", f.summary);
+        assert!(
+            f.summary.contains("do not identify which calls waited or exclude parameter-sensitive plans"),
+            "{}",
+            f.summary
+        );
         let fix = f.fix.unwrap();
-        assert!(!fix.summary.contains("Pick the lightest option"), "{}", fix.summary);
-        assert!(fix.summary.contains("Keep the transactions that hold those rows short"), "{}", fix.summary);
+        assert!(fix.summary.contains("Pick the lightest option"), "{}", fix.summary);
+        assert!(fix.summary.contains("Inspect the blocking transaction"), "{}", fix.summary);
+    }
+
+    #[test]
+    fn incomplete_undeclared_and_malformed_wait_coverage_never_rule_out_locks() {
+        use culprit_core::{QueryWaitCoverage, telemetry::WaitClass};
+        for coverage in [
+            None,
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Io], complete: true }),
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Lock], complete: false }),
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Lock, WaitClass::Lock], complete: true }),
+        ] {
+            let mut snapshot = unstable_read();
+            let query = snapshot.workload.as_mut().unwrap().queries.iter_mut().find(|query| query.id == "10").unwrap();
+            query.waits_coverage = coverage;
+            query.waits = vec![culprit_core::WaitStat {
+                category: "IO".into(),
+                wait_type: Some("native read wait".into()),
+                wait_ms: 1000.0,
+                tasks: None,
+            }];
+            let case = unstable_queries(&snapshot).into_iter().find(|case| case.query.id == "10").unwrap();
+            assert!(matches!(&case.recorded, Recorded::Incomplete));
+            let finding = unstable_query_finding(&snapshot, case);
+            assert!(finding.summary.contains("Wait coverage is incomplete"), "{}", finding.summary);
+            assert!(!finding.summary.contains("recorded no lock waits"), "{}", finding.summary);
+            assert!(!finding.summary.contains("locks weren't"), "{}", finding.summary);
+        }
+    }
+
+    #[test]
+    fn positive_partial_waits_keep_both_investigations_and_source_wording_follows_explicit_kind() {
+        use culprit_core::{QueryWaitCoverage, telemetry::WaitClass};
+        for coverage in [
+            None,
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Lock], complete: false }),
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Io], complete: true }),
+        ] {
+            let mut snapshot = unstable_read();
+            let workload = snapshot.workload.as_mut().unwrap();
+            workload.kind = None;
+            let query = workload.queries.iter_mut().find(|query| query.id == "10").unwrap();
+            query.waits_coverage = coverage;
+            query.waits = vec![culprit_core::WaitStat {
+                category: "Lock".into(),
+                wait_type: None,
+                wait_ms: 10_000.0,
+                tasks: None,
+            }];
+            let case = unstable_queries(&snapshot).into_iter().find(|case| case.query.id == "10").unwrap();
+            assert!(matches!(&case.recorded, Recorded::ObservedLocks { lock_ms, .. } if *lock_ms == 10_000.0));
+            let finding = unstable_query_finding(&snapshot, case);
+            assert!(
+                finding.summary.contains("At least 10.0 s of lock waits were recorded by SQL Server"),
+                "{}",
+                finding.summary
+            );
+            assert!(!finding.summary.contains("recorded by Query Store"), "{}", finding.summary);
+            assert!(
+                finding.summary.contains("do not identify which calls waited or rule out parameter-sensitive plans"),
+                "{}",
+                finding.summary
+            );
+            let fix = finding.fix.unwrap();
+            assert!(fix.summary.contains("Inspect the blocking transaction"), "{}", fix.summary);
+            assert!(fix.summary.contains("Pick the lightest option"), "{}", fix.summary);
+        }
     }
 
     #[test]

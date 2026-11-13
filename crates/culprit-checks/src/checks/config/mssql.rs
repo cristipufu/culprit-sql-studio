@@ -470,41 +470,28 @@ pub(crate) fn read_committed_snapshot_off(snapshot: &Snapshot) -> bool {
         && value(snapshot, &["is_read_committed_snapshot_on"]).is_some_and(|v| !is_on(v))
 }
 
-/// A read whose lock waits row versioning for read committed would remove: under READ_COMMITTED_SNAPSHOT it reads the
-/// last committed version of the rows instead of waiting for a write's locks. Not a read that locks what it reads
-/// (UPDLOCK, HOLDLOCK): it waits with row versioning on too.
-pub(crate) fn versioning_spares_read(q: &culprit_core::QueryStat) -> bool {
+/// SQL shape identifies a candidate only. Aggregate lock waits establish neither the lock resource/mode nor the
+/// session isolation, so they cannot establish that row versioning would remove the wait.
+pub(crate) fn row_versioning_candidate(q: &culprit_core::QueryStat) -> bool {
     matches!(statement_handle_of(&q.text), Handle::Read(_))
         && crate::queries::kind_of(q) != crate::queries::StatementKind::Locking
 }
 
-/// Time reads spent waiting on locks in the workload's window, how many deadlocks in this database had a read in them,
-/// and the read that waited longest (with its wait): what row versioning for read committed would remove.
-fn readers_blocked(snapshot: &Snapshot) -> (f64, usize, Option<(&culprit_core::QueryStat, f64)>) {
+/// Observed lock waiting on candidate read statements; its cause and the effect of changing isolation remain unknown.
+fn observed_read_locks(snapshot: &Snapshot) -> (f64, Option<(&culprit_core::QueryStat, f64)>) {
     let waited: Vec<(&culprit_core::QueryStat, f64)> = app_queries(snapshot)
-        .filter(|q| versioning_spares_read(q))
-        .map(|q| {
-            let ms = q.waits.iter().filter(|w| category_key(&w.category) == "lock").map(|w| w.wait_ms).sum::<f64>();
-            (q, ms)
+        .filter(|q| row_versioning_candidate(q))
+        .filter_map(|q| {
+            let ms = q.observed_wait_ms(culprit_core::telemetry::WaitClass::Lock).filter(|ms| *ms > 0.0)?;
+            Some((q, ms))
         })
-        .filter(|(_, ms)| *ms > 0.0)
         .collect();
     let lock_ms: f64 = waited.iter().map(|(_, ms)| ms).sum();
     let longest = waited.into_iter().max_by(|a, b| a.1.total_cmp(&b.1));
-    let deadlocks = snapshot
-        .deadlocks
-        .as_ref()
-        .map(|r| {
-            r.deadlocks
-                .iter()
-                .filter(|d| d.fixes.iter().any(|x| x.finding.as_deref() == Some("config:read-committed-snapshot")))
-                .count()
-        })
-        .unwrap_or(0);
-    (lock_ms, deadlocks, longest)
+    (lock_ms, longest)
 }
 
-/// The reads that waited on locks (see [`readers_blocked`]), as their runs came: whether any ran steadily enough for a
+/// The reads that waited on locks (see [`observed_read_locks`]), as their runs came: whether any ran steadily enough for a
 /// rate a day, when they ran where they came in bursts ("on Oct 11, 13:56–14:19 UTC", for one read or several in one
 /// stretch, as the workload words it), and whether all of them stopped running (history: their waits are behind them).
 struct WaitingReads<'a> {
@@ -516,8 +503,8 @@ struct WaitingReads<'a> {
 
 fn waiting_reads(snapshot: &Snapshot) -> WaitingReads<'_> {
     let reads: Vec<&culprit_core::QueryStat> = app_queries(snapshot)
-        .filter(|q| versioning_spares_read(q))
-        .filter(|q| q.waits.iter().any(|w| category_key(&w.category) == "lock" && w.wait_ms > 0.0))
+        .filter(|q| row_versioning_candidate(q))
+        .filter(|q| q.observed_wait_ms(culprit_core::telemetry::WaitClass::Lock).is_some_and(|ms| ms > 0.0))
         .collect();
     let w = snapshot.workload.as_ref();
     let steady = reads.iter().any(|q| w.is_some_and(|w| w.runs_per_day_of(q).is_some()));
@@ -548,159 +535,154 @@ fn waiting_reads(snapshot: &Snapshot) -> WaitingReads<'_> {
     WaitingReads { reads, steady, when, stopped }
 }
 
-/// READ_COMMITTED_SNAPSHOT off, and what the reads' lock waits establish.
+const MATERIAL_READ_LOCK_MS: f64 = 60_000.0;
+const MATERIAL_READ_LOCK_SHARE: f64 = 0.03;
+const NEARLY_ALL_READ_LOCK_SHARE: f64 = 0.9;
+const MOST_READ_LOCK_SHARE: f64 = 0.5;
+
+#[derive(Clone, Copy)]
+enum RcsiEvidence {
+    ConfigurationOnly,
+    AggregateReadLocks { severity: Severity },
+}
+
+#[derive(Clone, Copy)]
+enum ReadLockConcentration<'s> {
+    NearlyAll(&'s culprit_core::QueryStat),
+    Most { query: &'s culprit_core::QueryStat, milliseconds: f64 },
+    Distributed,
+}
+
+/// READ_COMMITTED_SNAPSHOT off, with separate configuration advice and observed lock symptoms.
 pub struct Rcsi<'s> {
+    evidence: RcsiEvidence,
     lock_ms: f64,
     share: f64,
-    /// Deadlocks in this database a read was part of.
-    deadlocks: usize,
-    /// The read that waited longest, and how long.
-    longest: Option<(&'s culprit_core::QueryStat, f64)>,
+    concentration: ReadLockConcentration<'s>,
     waiting: WaitingReads<'s>,
-    /// Reads blocked for a real amount of time, or a deadlock a read was part of: what the setting removes.
-    blocking: bool,
-    /// Query Store recorded waits for some statement: without any, nothing says the reads didn't wait.
-    waits_recorded: bool,
-    /// The wait a day, where the reads ran steadily enough to say so.
+    /// Every captured candidate read has qualified lock measurements; no unrelated query can establish absence.
+    read_waits_qualified: bool,
     per_day: Option<f64>,
-    /// ALLOW_SNAPSHOT_ISOLATION is on: SQL Server keeps row versions already.
     snapshot_isolation: bool,
 }
 
 fn read_committed_snapshot(snapshot: &Snapshot) -> Rcsi<'_> {
-    let (lock_ms, deadlocks, longest) = readers_blocked(snapshot);
+    let (lock_ms, longest) = observed_read_locks(snapshot);
     let share = snapshot.workload.as_ref().map(|w| w.share(lock_ms)).unwrap_or(0.0);
     let waiting = waiting_reads(snapshot);
-    // Reads blocked for a real amount of time (a minute in the window, a few percent of it, and the amount rule every
-    // time-based finding uses: about a minute a day, a burst's on its own total), or a deadlock a read was part of:
-    // that's what the setting removes. Waits of reads that all stopped running are history, as any finding on them is.
-    // Without either it is advice for later.
     let real_amount = severity_for_time_of(snapshot, &waiting.reads, lock_ms, share) >= Severity::Medium;
-    let blocking = (lock_ms >= 60_000.0 && share >= 0.03 && real_amount && !waiting.stopped) || deadlocks > 0;
-    // A rate a day only where the reads ran that way; reads that came in bursts are said by when they did.
+    // Severity describes the observed symptom; it never establishes the blocking resource or a setting's cure.
+    let material =
+        lock_ms >= MATERIAL_READ_LOCK_MS && share >= MATERIAL_READ_LOCK_SHARE && real_amount && !waiting.stopped;
+    let evidence = if lock_ms > 0.0 {
+        RcsiEvidence::AggregateReadLocks { severity: if material { Severity::Medium } else { Severity::Low } }
+    } else {
+        RcsiEvidence::ConfigurationOnly
+    };
+    let concentration = match longest {
+        Some((query, ms)) if ms >= lock_ms * NEARLY_ALL_READ_LOCK_SHARE => ReadLockConcentration::NearlyAll(query),
+        Some((query, ms)) if ms >= lock_ms * MOST_READ_LOCK_SHARE => {
+            ReadLockConcentration::Most { query, milliseconds: ms }
+        }
+        _ => ReadLockConcentration::Distributed,
+    };
     let per_day = snapshot.workload.as_ref().filter(|_| waiting.steady).and_then(|w| w.per_day_measured(lock_ms));
+    let mut reads = app_queries(snapshot).filter(|q| row_versioning_candidate(q));
+    let lock_measured =
+        |q: &culprit_core::QueryStat| q.measured_wait_ms(culprit_core::telemetry::WaitClass::Lock).is_some();
+    let read_waits_qualified = reads.next().is_some_and(|first| lock_measured(first) && reads.all(lock_measured));
     Rcsi {
+        evidence,
         lock_ms,
         share,
-        deadlocks,
-        longest,
-        blocking,
-        // Statements' waits come from Query Store's wait capture: a history with none at all recorded can't say reads
-        // didn't wait.
-        waits_recorded: app_queries(snapshot).any(|q| !q.waits.is_empty()),
+        concentration,
+        waiting,
+        read_waits_qualified,
         per_day,
         snapshot_isolation: value(snapshot, &["snapshot_isolation_state_desc"])
             .is_some_and(|v| v.eq_ignore_ascii_case("ON")),
-        waiting,
     }
 }
 
 fn read_committed_snapshot_finding(snapshot: &Snapshot, db: &str, r: Rcsi<'_>) -> Finding {
-    let Rcsi { lock_ms, share, deadlocks, waiting, .. } = &r;
-    // When the waits came, where the reads came in bursts, and that they're over where the reads stopped.
-    let came = match (&waiting.when, waiting.stopped) {
-        (Some(_), true) => "when_stopped",
-        (Some(_), false) => "when",
-        (None, true) => "stopped",
-        (None, false) => "none",
-    };
-    let when = waiting.when.clone().unwrap_or_default();
-    let reads = waiting.reads.len();
     let window = snapshot
         .workload
         .as_ref()
         .map(|w| w.window_phrase())
         .unwrap_or_else(|| t!("check.config.read_committed_snapshot.window.this_scan"));
-    let (duration, share_said) = (format::duration(*lock_ms), format::percent(*share));
     let mut summary = vec![t!("check.config.read_committed_snapshot.summary.lead")];
-    let (severity, title) = if r.blocking {
-        if *lock_ms > 0.0 {
-            summary.push(t!(
-                "check.config.read_committed_snapshot.summary.blocking",
-                window = &window,
-                duration = &duration,
-                share = &share_said,
-                came = came,
-                when = &when,
-                reads = reads
-            ));
-        }
-        if *deadlocks > 0 {
-            summary.push(t!(
-                "check.config.read_committed_snapshot.summary.deadlocks",
-                n = *deadlocks,
-                count = deadlocks.to_string()
-            ));
-        }
-        (Severity::Medium, t!("check.config.read_committed_snapshot.title.blocking"))
-    } else {
-        // Said by its share of database time as well as its amount: a minute that is a fifth of a quiet database's
-        // time is little in time, not little of what the database does.
-        summary.push(if *lock_ms <= 0.0 && !r.waits_recorded {
-            t!("check.config.read_committed_snapshot.summary.waits_unknown")
-        } else if *lock_ms <= 0.0 {
-            t!("check.config.read_committed_snapshot.summary.no_read_waited", window = &window)
-        } else if *share < 0.03 {
-            t!(
-                "check.config.read_committed_snapshot.summary.costs_little",
-                window = &window,
-                duration = &duration,
-                share = &share_said,
-                came = came,
-                when = &when,
-                reads = reads
+    let (severity, title, fix) = match r.evidence {
+        RcsiEvidence::ConfigurationOnly => {
+            summary.push(if r.read_waits_qualified {
+                t!("check.config.read_committed_snapshot.summary.no_read_waited", window = &window)
+            } else {
+                t!("check.config.read_committed_snapshot.summary.waits_unknown")
+            });
+            summary.push(t!("check.config.read_committed_snapshot.summary.matters_more"));
+            summary.push(t!("check.config.read_committed_snapshot.summary.most_apps"));
+            (
+                Severity::Low,
+                t!("check.config.read_committed_snapshot.title.advice"),
+                Fix {
+                    summary: t!("check.config.read_committed_snapshot.fix"),
+                    sql: Some(format!("ALTER DATABASE {db} SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;")),
+                    cost: Some(if r.snapshot_isolation {
+                        t!("check.config.read_committed_snapshot.fix_cost.versions_kept")
+                    } else {
+                        t!("check.config.read_committed_snapshot.fix_cost.tempdb")
+                    }),
+                },
             )
-        } else {
-            let (which, statement, statement_wait) = match &r.longest {
-                Some((q, ms)) if *ms >= lock_ms * 0.9 => ("nearly_all", query_handle(q), String::new()),
-                Some((q, ms)) if *ms >= lock_ms * 0.5 => ("most", query_handle(q), format::duration(*ms)),
-                _ => ("none", String::new(), String::new()),
+        }
+        RcsiEvidence::AggregateReadLocks { severity } => {
+            let (which, statement, statement_wait) = match r.concentration {
+                ReadLockConcentration::NearlyAll(query) => ("nearly_all", query_handle(query), String::new()),
+                ReadLockConcentration::Most { query, milliseconds } => {
+                    ("most", query_handle(query), format::duration(milliseconds))
+                }
+                ReadLockConcentration::Distributed => ("none", String::new(), String::new()),
             };
-            t!(
-                "check.config.read_committed_snapshot.summary.share",
+            let came = match (&r.waiting.when, r.waiting.stopped) {
+                (Some(_), true) => "when_stopped",
+                (Some(_), false) => "when",
+                (None, true) => "stopped",
+                (None, false) => "none",
+            };
+            summary.push(t!(
+                "check.config.read_committed_snapshot.summary.observed",
                 window = &window,
-                duration = &duration,
+                duration = format::duration(r.lock_ms),
+                share = format::percent(r.share),
                 which = which,
                 statement = statement,
                 statement_wait = statement_wait,
-                share = &share_said,
                 amount = if r.per_day.is_some() { "per_day" } else { came },
                 per_day = r.per_day.map(format::duration).unwrap_or_default(),
-                when = &when,
-                reads = reads
+                when = r.waiting.when.clone().unwrap_or_default(),
+                reads = r.waiting.reads.len()
+            ));
+            summary.push(t!("check.config.read_committed_snapshot.summary.cause_unknown"));
+            (
+                severity,
+                t!("check.config.read_committed_snapshot.title.candidate"),
+                Fix { summary: t!("check.config.read_committed_snapshot.fix.investigate"), sql: None, cost: None },
             )
-        });
-        summary.push(t!("check.config.read_committed_snapshot.summary.matters_more"));
-        (Severity::Low, t!("check.config.read_committed_snapshot.title.advice"))
+        }
     };
-    summary.push(t!("check.config.read_committed_snapshot.summary.most_apps"));
-    let mut f = setting_finding(
-        "read-committed-snapshot",
-        severity,
-        title,
-        summary.join(" "),
-        Fix {
-            summary: t!("check.config.read_committed_snapshot.fix"),
-            sql: Some(format!("ALTER DATABASE {db} SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;")),
-            cost: Some(if r.snapshot_isolation {
-                t!("check.config.read_committed_snapshot.fix_cost.versions_kept")
-            } else {
-                t!("check.config.read_committed_snapshot.fix_cost.tempdb")
-            }),
-        },
-    );
-    if r.blocking && *lock_ms > 0.0 {
-        f.metrics.push(Metric::said(
+    let mut finding = setting_finding("read-committed-snapshot", severity, title, summary.join(" "), fix);
+    if let RcsiEvidence::AggregateReadLocks { .. } = r.evidence {
+        finding.metrics.push(Metric::said(
             culprit_core::key!("check.config.read_committed_snapshot.metric.reads_waiting"),
-            *lock_ms,
+            r.lock_ms,
             Unit::Ms,
         ));
+        finding.verify = vec![t!("check.config.read_committed_snapshot.verify.investigate")];
     }
-    f.caveats.push(t!("check.config.read_committed_snapshot.caveat.readers"));
+    finding.caveats.push(t!("check.config.read_committed_snapshot.caveat.readers"));
     if r.snapshot_isolation {
-        f.caveats.push(t!("check.config.read_committed_snapshot.caveat.snapshot_isolation"));
+        finding.caveats.push(t!("check.config.read_committed_snapshot.caveat.snapshot_isolation"));
     }
-    f
+    finding
 }
 
 /// The newest compatibility level the server offers. Azure SQL Database and Managed Instance report a product version

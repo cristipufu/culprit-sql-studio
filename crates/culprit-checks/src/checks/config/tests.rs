@@ -17,33 +17,39 @@ fn fixture(name: &str) -> Snapshot {
     serde_json::from_str(&text).expect("snapshot")
 }
 
-// C5: the demo database has RCSI off and 15 ms of lock waits in 4.6 hours: advice for later, not Medium.
 #[test]
-fn rcsi_is_medium_only_with_reads_blocked() {
-    let s = fixture("mssql-demo.json");
-    let f = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().expect("finding");
-    assert_eq!(f.severity, Severity::Low);
-    assert!(f.title.contains("reads would wait for writes"), "{}", f.title);
-
-    // A read that waited minutes on locks is what RCSI removes.
+fn rcsi_preserves_lock_symptoms_without_claiming_a_proven_isolation_cure() {
     let mut s = fixture("mssql-demo.json");
+    let advice = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
+    assert_eq!(advice.severity, Severity::Low);
+    assert!(advice.title.contains("review row versioning"), "{}", advice.title);
+    let sql = advice.fix.as_ref().unwrap().sql.as_deref().unwrap();
+    assert!(sql.contains("WITH NO_WAIT"));
+    assert!(!sql.contains("ROLLBACK"));
+
     let w = s.workload.as_mut().unwrap();
     let read = w.queries.iter_mut().find(|q| q.text.starts_with("SELECT")).unwrap();
     read.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 300_000.0, tasks: None });
     w.total_time_ms += 300_000.0;
-    let f = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
-    assert_eq!(f.severity, Severity::Medium);
-    assert!(f.summary.contains("reads waited 5 min on locks"), "{}", f.summary);
-    // With snapshot isolation already allowed, versions are kept anyway.
+    let candidate = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
+    assert_eq!(candidate.severity, Severity::Medium);
+    assert!(candidate.summary.contains("at least 5 min of lock waits"), "{}", candidate.summary);
+    assert!(candidate.summary.contains("do not identify the lock mode or blocker"));
+    assert!(candidate.fix.as_ref().unwrap().sql.is_none());
+    assert!(candidate.fix.as_ref().unwrap().summary.contains("locking hints"));
+    assert!(candidate.verify[0].contains("schema lock"));
+    assert_eq!(candidate.metrics[0].value, 300_000.0);
+
     set(&mut s, "snapshot_isolation_state_desc", "ON");
-    let f = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
-    assert!(f.fix.unwrap().cost.unwrap().contains("ALLOW_SNAPSHOT_ISOLATION is already on"));
+    assert!(found(&mssql::check(&s), "config:read-committed-snapshot").unwrap().fix.as_ref().unwrap().sql.is_none());
+    let mut general = fixture("mssql-demo.json");
+    set(&mut general, "snapshot_isolation_state_desc", "ON");
+    let advice = found(&mssql::check(&general), "config:read-committed-snapshot").cloned().unwrap();
+    assert!(advice.fix.unwrap().cost.unwrap().contains("ALLOW_SNAPSHOT_ISOLATION is already on"));
 }
 
-// Demos MS-12: a read blocked a minute in 6 days is little time but 21% of a quiet database's: said by its share
-// as well as its amount, with the read named and what row versioning would do for it, never "costs little".
 #[test]
-fn rcsi_low_is_worded_by_its_share_as_well_as_its_time() {
+fn rcsi_candidate_keeps_share_cadence_and_largest_reader_as_observations() {
     let mut s = fixture("mssql-demo.json");
     let w = s.workload.as_mut().unwrap();
     w.window_hours = 146.66;
@@ -53,22 +59,92 @@ fn rcsi_low_is_worded_by_its_share_as_well_as_its_time() {
     w.total_time_ms = 335_668.0;
     let f = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
     assert_eq!(f.severity, Severity::Low, "about 12 s a day");
-    assert!(
-        f.summary.contains("reads waited 1 min on locks held by writes (nearly all of it a read from"),
-        "{}",
-        f.summary
-    );
-    assert!(f.summary.contains("21% of database time, but only about 11.7 s a day"), "{}", f.summary);
-    assert!(f.summary.contains("those reads would read the last committed version"), "{}", f.summary);
+    assert!(f.summary.contains("at least 1 min of lock waits"), "{}", f.summary);
+    assert!(f.summary.contains("nearly all for a read from"), "{}", f.summary);
+    assert!(f.summary.contains("21% of captured workload time"), "{}", f.summary);
+    assert!(f.summary.contains("at least 11.7 s a day"), "{}", f.summary);
+    assert!(!f.summary.contains("locks held by writes"), "{}", f.summary);
     assert!(!f.summary.contains("costs little"), "{}", f.summary);
-    // No statement recorded any wait: nothing says the reads didn't wait.
+    assert!(f.fix.as_ref().unwrap().sql.is_none());
+
     let mut s = fixture("mssql-demo.json");
     for q in &mut s.workload.as_mut().unwrap().queries {
         q.waits.clear();
+        q.waits_coverage = None;
     }
     let f = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
-    assert!(f.summary.contains("isn't known: the query history records no waits"), "{}", f.summary);
+    assert!(f.summary.contains("does not establish how long reads waited for locks"), "{}", f.summary);
     assert_eq!(f.verify, vec!["Re-scan once the change has taken effect: this finding is gone.".to_string()]);
+}
+
+#[test]
+fn schema_and_unknown_aggregate_lock_waits_require_resource_investigation_before_setting_sql() {
+    for native_type in [Some("LCK_M_SCH_S"), Some("LCK_M_S"), None] {
+        let mut s = fixture("mssql-demo.json");
+        let w = s.workload.as_mut().unwrap();
+        let read = w.queries.iter_mut().find(|query| mssql::row_versioning_candidate(query)).unwrap();
+        read.waits = vec![WaitStat {
+            category: "Lock".into(),
+            wait_type: native_type.map(str::to_owned),
+            wait_ms: 300_000.0,
+            tasks: None,
+        }];
+        read.waits_coverage = Some(culprit_core::QueryWaitCoverage {
+            classes: vec![culprit_core::telemetry::WaitClass::Lock],
+            complete: true,
+        });
+        w.total_time_ms += 300_000.0;
+        let candidate = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
+        assert_eq!(candidate.severity, Severity::Medium);
+        assert!(candidate.title.contains("investigate the blocking resource"));
+        assert!(candidate.summary.contains("do not establish that row versioning would remove"));
+        assert!(!candidate.summary.contains("held by writes"));
+        assert!(candidate.fix.unwrap().sql.is_none());
+        assert!(candidate.verify[0].contains("ordinary READ COMMITTED"));
+        assert_eq!(candidate.metrics[0].value, 300_000.0);
+    }
+}
+
+#[test]
+fn a_heuristic_deadlock_advice_link_does_not_establish_a_read_write_blocking_cause() {
+    let mut s = fixture("mssql-demo.json");
+    let before = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
+    let mut deadlock = culprit_core::Deadlock::new("fixture", None, vec![], vec![]);
+    deadlock.pattern = culprit_core::DeadlockPattern::KeyLookup;
+    deadlock.fixes.push(culprit_core::DeadlockFix {
+        finding: Some("config:read-committed-snapshot".into()),
+        kind: Some(culprit_core::DeadlockFixKind::ReadCommittedSnapshot),
+        ..Default::default()
+    });
+    s.deadlocks = Some(culprit_core::DeadlockReport { deadlocks: vec![deadlock], ..Default::default() });
+    let after = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
+    assert_eq!(after.severity, before.severity);
+    assert_eq!(after.title, before.title);
+    assert_eq!(after.summary, before.summary);
+}
+
+#[test]
+fn rcsi_absence_requires_qualified_lock_measurements_for_every_captured_read() {
+    use culprit_core::{QueryWaitCoverage, telemetry::WaitClass};
+    let mut s = fixture("mssql-demo.json");
+    let workload = s.workload.as_mut().unwrap();
+    let mut read = workload.queries.iter().find(|q| mssql::row_versioning_candidate(q)).unwrap().clone();
+    read.waits = vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: 100.0, tasks: None }];
+    read.waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Lock], complete: true });
+    let mut unqualified = read.clone();
+    unqualified.id.push_str("-unqualified");
+    unqualified.waits_coverage = None;
+    workload.queries = vec![read, unqualified];
+
+    let summary = |s: &Snapshot| found(&mssql::check(s), "config:read-committed-snapshot").unwrap().summary.clone();
+    assert!(summary(&s).contains("does not establish how long reads waited for locks"));
+
+    let queries = &mut s.workload.as_mut().unwrap().queries;
+    queries[1].waits_coverage = queries[0].waits_coverage.clone();
+    assert!(summary(&s).contains("No lock waits were recorded for the captured reads considered here"));
+
+    s.workload.as_mut().unwrap().queries.clear();
+    assert!(summary(&s).contains("does not establish how long reads waited for locks"));
 }
 
 // C6: the threshold is moot where nothing goes parallel; RDS words it as its parameter group.

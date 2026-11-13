@@ -174,14 +174,8 @@
       "title": "Queries that fail or time out"
     },
     {
-      "assessed_queries": [
-        "decf59629e790076",
-        "a92bb0be330ac53a",
-        "46db559fdff712fd",
-        "d1f45c9664edccf9"
-      ],
       "check": "lock-time",
-      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
+      "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
       "title": "Queries that spend their time waiting for locks"
     },

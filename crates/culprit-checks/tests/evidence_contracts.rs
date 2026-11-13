@@ -483,7 +483,9 @@ fn measured_zero_jit_and_wal_verify_but_missing_costs_do_not() {
 
 #[test]
 fn zero_waits_verify_only_the_category_actually_measured() {
-    for (check, category) in [("lock-time", "Lock"), ("network-wait", "Network")] {
+    use culprit_core::{QueryWaitCoverage, telemetry::WaitClass};
+    for (check, class) in [("lock-time", WaitClass::Lock), ("network-wait", WaitClass::Network)] {
+        let category = class.category();
         let mut s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
         s.settings.clear();
         let w = s.workload.as_mut().unwrap();
@@ -492,6 +494,8 @@ fn zero_waits_verify_only_the_category_actually_measured() {
         q.executions = 1000.0;
         q.total_time_ms = 100_000.0;
         q.mean_time_ms = 100.0;
+        q.spread = None;
+        q.waits_coverage = None;
         q.waits =
             vec![culprit_core::WaitStat { category: category.into(), wait_type: None, wait_ms: 80_000.0, tasks: None }];
         w.total_time_ms = q.total_time_ms;
@@ -502,6 +506,13 @@ fn zero_waits_verify_only_the_category_actually_measured() {
             culprit_core::compare_reports(&before, after, std::slice::from_ref(&finding.id)).findings[0].status
         };
         s.workload.as_mut().unwrap().queries[0].waits[0].wait_ms = 0.0;
+        assert_eq!(
+            verify(&culprit_checks::analyze(s.clone())),
+            culprit_core::VerifyStatus::Unknown,
+            "an unqualified zero row does not prove a fix"
+        );
+        s.workload.as_mut().unwrap().queries[0].waits_coverage =
+            Some(QueryWaitCoverage { classes: vec![class], complete: true });
         let after = culprit_checks::analyze(s.clone());
         assert_eq!(verify(&after), culprit_core::VerifyStatus::Fixed, "{check}");
         assert!(
@@ -513,8 +524,12 @@ fn zero_waits_verify_only_the_category_actually_measured() {
                 .any(|f| f.id == finding.id)
         );
         s.workload.as_mut().unwrap().queries[0].waits[0].category = "IO".into();
+        s.workload.as_mut().unwrap().queries[0].waits_coverage =
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Io], complete: true });
         assert_eq!(verify(&culprit_checks::analyze(s.clone())), culprit_core::VerifyStatus::Unknown);
         s.workload.as_mut().unwrap().queries[0].waits[0].category = category.into();
+        s.workload.as_mut().unwrap().queries[0].waits_coverage =
+            Some(QueryWaitCoverage { classes: vec![class], complete: true });
         crate::record(&mut s, "query_waits", SourceState::Partial, Some("Capture was disabled"));
         assert_eq!(verify(&culprit_checks::analyze(s)), culprit_core::VerifyStatus::Unknown);
     }
@@ -638,4 +653,45 @@ fn failed_statement_detail_sources_prevent_clean_assessments() {
             "{measure:?} with failed {source}"
         );
     }
+}
+
+#[test]
+fn negative_wait_assessments_require_the_requested_class_even_when_positive_waits_exist() {
+    use culprit_core::{QueryWaitCoverage, Spread, WaitStat, source_id, telemetry::WaitClass};
+    let mut s = snapshot();
+    crate::record(&mut s, source_id::WORKLOAD, SourceState::Collected, None);
+    crate::record(&mut s, source_id::QUERY_WAITS, SourceState::Collected, None);
+    let queries = &mut s.workload.as_mut().unwrap().queries;
+    queries.truncate(1);
+    queries[0].spread = None;
+    queries[0].waits = vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: 100.0, tasks: None }];
+    queries[0].waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Io], complete: true });
+    let requirement = Requirement::Query(QueryMeasure::Waits(WaitClass::Lock));
+    assert!(matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)));
+
+    let query = &mut s.workload.as_mut().unwrap().queries[0];
+    query.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 5.0, tasks: None });
+    query.waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Lock], complete: false });
+    assert!(
+        matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)),
+        "a lower bound cannot clear a threshold"
+    );
+
+    let query = &mut s.workload.as_mut().unwrap().queries[0];
+    query.waits.clear();
+    query.waits_coverage.as_mut().unwrap().complete = true;
+    assert!(
+        matches!(assess(&[requirement], &s), CheckEvidence::Queries { assessed, reason: None } if assessed.len() == 1)
+    );
+
+    let query = &mut s.workload.as_mut().unwrap().queries[0];
+    query.waits_coverage = None;
+    query.spread = Some(Spread { lock_ms: Some(0.0), ..Default::default() });
+    assert!(
+        matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)),
+        "a native timer can cover a subset of the lock class"
+    );
+
+    crate::record(&mut s, source_id::QUERY_WAITS, SourceState::Partial, Some("Wait source is partial"));
+    assert!(matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)));
 }

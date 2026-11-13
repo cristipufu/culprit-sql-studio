@@ -1,34 +1,30 @@
+use super::super::recorded_waits::WaitSource;
 use super::*;
-use culprit_core::t;
+use culprit_core::{WaitStat, engines::ReadUnit, t, telemetry::WaitClass};
 
-/// Where a statement's time goes when it isn't reading or computing.
+/// A recorded wait class or direct evidence of a deliberate pause.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum IdleKind {
     /// It calls a sleep function: the pause is what it was asked to do.
     Sleep,
     /// It waits for an application lock (GET_LOCK, pg_advisory_lock, sp_getapplock).
     AppLock,
-    /// Locks other transactions hold.
+    /// Recorded lock waiting; its resource and holder still need identifying.
     Locks,
-    /// The application reading its results.
+    /// Recorded network waiting; result consumption is one possible cause.
     Client,
-    /// A memory grant.
+    /// Recorded memory waiting; the native wait determines its cause.
     Memory,
-    /// Pages other sessions are using (latches).
+    /// Recorded latch waiting; its resource still needs identifying.
     Latch,
     /// Something the engine doesn't name.
     Unknown,
 }
 
 pub(in crate::checks::queries) struct Idle {
-    pub(super) kind: IdleKind,
     /// What shows it ([`Idle::evidence`] words it).
     shown: Shown,
     pub(super) confidence: Confidence,
-    /// The engine named the cause (Query Store's waits, MySQL's lock time) rather than Culprit inferring it.
-    pub(super) measured: bool,
-    /// The wait's share of the statement's time, where that is what named it: "most of it" only from half on.
-    pub(super) share: Option<f64>,
 }
 
 /// What shows where a statement's time goes: the facts its evidence states.
@@ -37,47 +33,40 @@ enum Shown {
     Sleep(&'static str),
     /// It calls this application lock.
     AppLock(&'static str),
-    /// MySQL's own lock time, this share of its time.
+    /// The source's explicit scalar lock timer, this share of its execution time.
     LockTime(f64),
-    /// Query Store's waits for it: this much of this wait, beside this share of its time on CPU.
-    QueryStoreWait { cpu: f64, wait_ms: f64, wait: String },
+    /// A recorded native wait and its declared source, beside the measured CPU total.
+    RecordedWait { source: WaitSource, cpu_ms: f64, wait_ms: f64, class: WaitClass, native_name: Option<String> },
     /// This share of its time on CPU, and reads that take far less than a run.
     LittleCpu(f64),
-    /// Few reads, yet a long run, and MySQL counted its lock time without it being most of the run: waiting, for what
-    /// MySQL doesn't say.
-    Unnamed,
-    /// Few reads and no CPU time, yet a long run: most likely waiting for this lock.
-    RowLock(LockFor),
-}
-
-/// The lock a write, or a read that locks the rows it finds, most likely waited for.
-enum LockFor {
-    /// The one its locking clause takes on the rows it finds.
-    Clause(&'static str),
-    /// The one a locking read takes on the rows it finds, by a clause its text doesn't show.
-    LockingRead,
-    /// A row lock another transaction held.
-    Row,
 }
 
 impl Idle {
-    /// What the title says it does instead of working: "most of it waiting for locks".
-    pub(super) fn title_tail(&self) -> String {
-        // "Most of it" from half on; where the engine didn't name the cause, "most likely".
-        let share = self.share.filter(|s| *s < 0.5).map(format::percent);
-        let part = if share.is_some() { "share" } else { "most" };
-        let share = share.unwrap_or_default();
-        match self.kind {
-            IdleKind::Sleep => t!("check.heavy_query.idle.title.sleep"),
-            IdleKind::AppLock => t!("check.heavy_query.idle.title.app_lock"),
-            IdleKind::Locks => {
-                let part = if self.measured { part } else { "likely" };
-                t!("check.heavy_query.idle.title.locks", part = part, share = share)
-            }
-            IdleKind::Client => t!("check.heavy_query.idle.title.client", part = part, share = share),
-            IdleKind::Memory => t!("check.heavy_query.idle.title.memory", part = part, share = share),
-            IdleKind::Latch => t!("check.heavy_query.idle.title.latch", part = part, share = share),
-            IdleKind::Unknown => t!("check.heavy_query.idle.title.unknown"),
+    pub(super) fn kind(&self) -> IdleKind {
+        match self.shown {
+            Shown::Sleep(_) => IdleKind::Sleep,
+            Shown::AppLock(_) => IdleKind::AppLock,
+            Shown::LockTime(_) => IdleKind::Locks,
+            Shown::RecordedWait { class: WaitClass::Lock, .. } => IdleKind::Locks,
+            Shown::RecordedWait { class: WaitClass::Network, .. } => IdleKind::Client,
+            Shown::RecordedWait { class: WaitClass::Memory, .. } => IdleKind::Memory,
+            Shown::RecordedWait { class: WaitClass::Latch, .. } => IdleKind::Latch,
+            Shown::RecordedWait { .. } | Shown::LittleCpu(_) => IdleKind::Unknown,
+        }
+    }
+
+    /// Native wait totals are not exclusive portions of elapsed time, including in a parallel plan.
+    pub(super) fn title_tail(&self, engine: Engine) -> String {
+        match &self.shown {
+            Shown::Sleep(_) => t!("check.heavy_query.idle.title.sleep"),
+            Shown::AppLock(_) => t!("check.heavy_query.idle.title.app_lock"),
+            Shown::LockTime(_) => t!("check.heavy_query.idle.title.locks", part = "most", share = ""),
+            Shown::RecordedWait { wait_ms, class, native_name, .. } => t!(
+                "check.heavy_query.idle.title.recorded_wait",
+                wait_time = format::duration(*wait_ms),
+                wait = wait_name(native_name.as_deref(), *class, engine)
+            ),
+            Shown::LittleCpu(_) => t!("check.heavy_query.idle.title.unknown"),
         }
     }
 
@@ -87,15 +76,16 @@ impl Idle {
     pub(super) fn evidence(&self, snapshot: &Snapshot, q: &QueryStat) -> String {
         let engine = snapshot.server.engine;
         let run = format::duration(q.mean_time_ms);
-        // MySQL counts the rows a statement examined, the other engines the pages it read.
+        let read_unit = engine.spec().statement_metrics().reads;
         let reads = q
             .reads_per_execution()
             .map(|r| {
                 let reads = format::count(r);
-                if engine == Engine::Mysql {
-                    t!("check.heavy_query.idle.reads_per_run_rows_examined", n = r, reads = reads)
-                } else {
-                    t!("check.heavy_query.idle.reads_per_run_pages", n = r, reads = reads)
+                match read_unit {
+                    ReadUnit::RowsExamined => {
+                        t!("check.heavy_query.idle.reads_per_run_rows_examined", n = r, reads = reads)
+                    }
+                    ReadUnit::Pages => t!("check.heavy_query.idle.reads_per_run_pages", n = r, reads = reads),
                 }
             })
             .unwrap_or_default();
@@ -119,19 +109,23 @@ impl Idle {
                     }
                 }
             }
-            Shown::QueryStoreWait { cpu, wait_ms, wait } => {
-                let (cpu, wait_time) = (format::percent(*cpu), format::duration(*wait_ms));
+            Shown::RecordedWait { source, cpu_ms, wait_ms, class, native_name } => {
+                let (cpu_time, wait_time) = (format::duration(*cpu_ms), format::duration(*wait_ms));
+                let wait = wait_name(native_name.as_deref(), *class, engine);
+                let source = source.label(snapshot);
                 match basis {
                     Some(basis) => t!(
-                        "check.heavy_query.idle.evidence.query_store_wait_over",
+                        "check.heavy_query.idle.evidence.recorded_wait_over",
+                        source = source,
                         basis = basis,
-                        cpu = cpu,
+                        cpu_time = cpu_time,
                         wait_time = wait_time,
                         wait = wait
                     ),
                     None => t!(
-                        "check.heavy_query.idle.evidence.query_store_wait",
-                        cpu = cpu,
+                        "check.heavy_query.idle.evidence.recorded_wait",
+                        source = source,
+                        cpu_time = cpu_time,
                         wait_time = wait_time,
                         wait = wait
                     ),
@@ -150,56 +144,13 @@ impl Idle {
                     None => t!("check.heavy_query.idle.evidence.little_cpu", cpu = cpu, reads = reads, run = run),
                 }
             }
-            Shown::Unnamed => {
-                let engine = snapshot.server.name();
-                match basis {
-                    Some(basis) => t!(
-                        "check.heavy_query.idle.evidence.unnamed_over",
-                        basis = basis,
-                        reads = reads,
-                        run = run,
-                        engine = engine
-                    ),
-                    None => t!("check.heavy_query.idle.evidence.unnamed", reads = reads, run = run, engine = engine),
-                }
-            }
-            Shown::RowLock(lock) => {
-                // What says a statement waited, and doesn't say for what.
-                let statistics = match engine {
-                    Engine::Postgres => "pg_stat_statements",
-                    Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => "statistics",
-                };
-                let (lock, clause) = match lock {
-                    LockFor::Clause(clause) => ("clause", *clause),
-                    LockFor::LockingRead => ("locking_read", ""),
-                    LockFor::Row => ("row", ""),
-                };
-                match basis {
-                    Some(basis) => t!(
-                        "check.heavy_query.idle.evidence.row_lock_over",
-                        basis = basis,
-                        reads = reads,
-                        run = run,
-                        lock = lock,
-                        clause = clause,
-                        statistics = statistics
-                    ),
-                    None => t!(
-                        "check.heavy_query.idle.evidence.row_lock",
-                        reads = reads,
-                        run = run,
-                        lock = lock,
-                        clause = clause,
-                        statistics = statistics
-                    ),
-                }
-            }
         }
     }
 
     pub(super) fn verify(&self) -> Expect {
-        match self.kind {
-            IdleKind::Sleep | IdleKind::AppLock => Expect::TimeOrStops,
+        match self.shown {
+            Shown::Sleep(_) | Shown::AppLock(_) => Expect::TimeOrStops,
+            Shown::RecordedWait { .. } => Expect::RecordedWait,
             _ => Expect::Average,
         }
     }
@@ -259,105 +210,108 @@ const CPU_SMALL: f64 = 0.2;
 /// Pages (rows examined, MySQL) a run of a read that returns nothing reads before its title says so: many times what a
 /// lookup that finds nothing reads (an index's few levels).
 pub(super) const NOTHING_READS: f64 = 100.0;
-/// A wait that takes at least this share of a statement's time is what its runs spend most of their time on.
-const WAIT_MOST: f64 = 0.5;
+/// Materiality policy only: summed native waits need not be exclusive portions of elapsed time.
+const MATERIAL_WAIT_RUNTIME_RATIO: f64 = 0.5;
+const IDLE_WAIT_RUNTIME_RATIO: f64 = 0.25;
 
 /// What a statement's dominant wait is on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WaitOn {
-    /// Reading pages from storage: they weren't in memory.
+    /// Recorded I/O; this class alone does not establish a cache miss or physical storage access.
     Storage,
     Locks,
     Latches,
     /// Its changes reaching the transaction log.
     Log,
-    /// The application reading the results.
+    /// Recorded network waiting.
     Client,
     Memory,
     /// Compiling its plan.
     Compilation,
 }
 
-/// The wait that takes most of a statement's time by the engine's own count of its waits ([`dominant_wait`]).
+/// A material native wait total, without assuming exclusive elapsed-time accounting.
 pub(super) struct DominantWait<'a> {
     pub(super) on: WaitOn,
-    /// Its share of the statement's time. Query Store sums a parallel plan's waits over its threads, which can pass the
-    /// statement's time: then it is "most of" it.
-    pub(super) share: f64,
-    /// The engine's name for it: Query Store's wait type, or its category.
-    name: &'a str,
+    wait_ms: f64,
+    /// An actual native name, when supplied. Portable class labels are localized when rendered.
+    native_name: Option<&'a str>,
 }
 
-impl DominantWait<'_> {
-    /// In a sentence: "85% of its time is spent waiting for data to come from storage because it wasn't in memory (Query
-    /// Store: Buffer IO)."
-    pub(super) fn sentence(&self, snapshot: &Snapshot, q: &QueryStat) -> String {
-        // PostgreSQL's time on storage is its time reading and writing data files.
-        let on = match self.on {
-            WaitOn::Storage if snapshot.server.engine == Engine::Postgres => "storage_files",
-            WaitOn::Storage => "storage",
-            WaitOn::Locks => "locks",
-            WaitOn::Latches => "latches",
-            WaitOn::Log => "log",
-            WaitOn::Client => "client",
-            WaitOn::Memory => "memory",
-            WaitOn::Compilation => "compilation",
-        };
-        let part = if self.share >= 1.0 { "most" } else { "share" };
-        let share = format::percent(self.share);
-        let source =
-            snapshot.workload.as_ref().map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source_name());
-        // A part of its time the source keeps only in its totals: said over them where the share is the scans'.
-        match crate::support::totals_basis(snapshot, q) {
-            Some(basis) => t!(
-                "check.heavy_query.wait.sentence_over",
-                basis = basis,
-                part = part,
-                share = share,
-                on = on,
-                source = source,
-                name = self.name
-            ),
-            None => t!(
-                "check.heavy_query.wait.sentence",
-                part = part,
-                share = share,
-                on = on,
-                source = source,
-                name = self.name
-            ),
+impl WaitOn {
+    fn class(self) -> WaitClass {
+        match self {
+            Self::Storage => WaitClass::Io,
+            Self::Locks => WaitClass::Lock,
+            Self::Latches => WaitClass::Latch,
+            Self::Log => WaitClass::Log,
+            Self::Client => WaitClass::Network,
+            Self::Memory => WaitClass::Memory,
+            Self::Compilation => WaitClass::Compilation,
         }
     }
 }
 
-/// The wait that takes most of a statement's time by the engine's own count of its waits (Query Store's per query,
-/// PostgreSQL's time reading and writing data files, MySQL's lock time). Not the statement's own work (CPU, a parallel
-/// plan's threads waiting for each other), nor a category with no plain meaning.
+fn wait_name(native_name: Option<&str>, class: WaitClass, engine: Engine) -> String {
+    native_name.map(str::to_owned).unwrap_or_else(|| culprit_core::waits::category_info(class.key(), engine).0)
+}
+
+fn wait_class(wait: &WaitStat) -> Option<WaitClass> {
+    let key = culprit_core::waits::known_category_key(&wait.category)?;
+    WaitClass::ALL.iter().copied().find(|class| class.key() == key)
+}
+
+impl DominantWait<'_> {
+    /// Preserve the native total and name without deriving its cause or a portion of elapsed time.
+    pub(super) fn sentence(&self, snapshot: &Snapshot, q: &QueryStat) -> String {
+        let source =
+            snapshot.workload.as_ref().map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source_name());
+        let name = wait_name(self.native_name, self.on.class(), snapshot.server.engine);
+        let wait_time = format::duration(self.wait_ms);
+        // The wait total remains over its native population even when the lead describes Culprit's own scans.
+        match crate::support::totals_basis(snapshot, q) {
+            Some(basis) => t!(
+                "check.heavy_query.wait.sentence_over",
+                basis = basis,
+                wait_time = wait_time,
+                source = source,
+                name = name
+            ),
+            None => t!("check.heavy_query.wait.sentence", wait_time = wait_time, source = source, name = name),
+        }
+    }
+}
+
+/// The largest recognized material wait total. Comparing it with runtime chooses what to explain; it does not
+/// establish a portion of elapsed time, a physical resource or a blocking owner.
 pub(super) fn dominant_wait(q: &QueryStat) -> Option<DominantWait<'_>> {
-    if q.total_time_ms <= 0.0 {
+    if !q.total_time_ms.is_finite() || q.total_time_ms <= 0.0 {
         return None;
     }
-    let w = q
-        .waits
+    q.waits
         .iter()
-        .filter(|w| w.wait_ms >= q.total_time_ms * WAIT_MOST)
-        .max_by(|a, b| a.wait_ms.total_cmp(&b.wait_ms))?;
-    let on = match culprit_core::waits::category_key(&w.category) {
-        "io" => WaitOn::Storage,
-        "lock" => WaitOn::Locks,
-        "latch" => WaitOn::Latches,
-        "log" => WaitOn::Log,
-        "network" => WaitOn::Client,
-        "memory" => WaitOn::Memory,
-        "compilation" => WaitOn::Compilation,
-        _ => return None,
-    };
-    Some(DominantWait { on, share: w.wait_ms / q.total_time_ms, name: w.wait_type.as_deref().unwrap_or(&w.category) })
+        .filter(|w| {
+            w.wait_ms.is_finite() && w.wait_ms > 0.0 && w.wait_ms >= q.total_time_ms * MATERIAL_WAIT_RUNTIME_RATIO
+        })
+        .filter_map(|w| {
+            let on = match wait_class(w)? {
+                WaitClass::Io => WaitOn::Storage,
+                WaitClass::Lock => WaitOn::Locks,
+                WaitClass::Latch => WaitOn::Latches,
+                WaitClass::Log => WaitOn::Log,
+                WaitClass::Network => WaitOn::Client,
+                WaitClass::Memory => WaitOn::Memory,
+                WaitClass::Compilation => WaitOn::Compilation,
+                _ => return None,
+            };
+            Some(DominantWait { on, wait_ms: w.wait_ms, native_name: w.wait_type.as_deref() })
+        })
+        .max_by(|a, b| a.wait_ms.total_cmp(&b.wait_ms))
 }
 
 /// Where a statement's time goes when it isn't work (`idle_time`), for the views that word a finding by it (the brief).
 pub(crate) fn idle_kind(snapshot: &Snapshot, q: &QueryStat) -> Option<IdleKind> {
-    idle_time(snapshot, q).map(|i| i.kind)
+    idle_time(snapshot, q).map(|i| i.kind())
 }
 
 /// When a statement's time isn't work: it sleeps, waits for a lock, or does too little reading and computing to fill
@@ -370,130 +324,77 @@ pub(in crate::checks::queries) fn idle_time(snapshot: &Snapshot, q: &QueryStat) 
             .map(|(_, name)| *name)
     };
     if let Some(name) = named(&SLEEPS) {
-        return Some(Idle {
-            kind: IdleKind::Sleep,
-            shown: Shown::Sleep(name),
-            confidence: Confidence::High,
-            measured: true,
-            share: None,
-        });
+        return Some(Idle { shown: Shown::Sleep(name), confidence: Confidence::High });
     }
     if let Some(name) = named(&APP_LOCKS) {
-        return Some(Idle {
-            kind: IdleKind::AppLock,
-            shown: Shown::AppLock(name),
-            confidence: Confidence::High,
-            measured: true,
-            share: None,
-        });
+        return Some(Idle { shown: Shown::AppLock(name), confidence: Confidence::High });
     }
-    if q.mean_time_ms < IDLE_MIN_MS || q.total_time_ms <= 0.0 {
+    if !q.mean_time_ms.is_finite()
+        || q.mean_time_ms < IDLE_MIN_MS
+        || !q.total_time_ms.is_finite()
+        || q.total_time_ms <= 0.0
+    {
         return None;
     }
     let engine = snapshot.server.engine;
-    let read_cost = if engine == Engine::Mysql { ROW_READ_MS } else { PAGE_READ_MS };
+    let read_cost = match engine.spec().statement_metrics().reads {
+        ReadUnit::RowsExamined => ROW_READ_MS,
+        ReadUnit::Pages => PAGE_READ_MS,
+    };
     let reads = q.reads_per_execution();
     let reads_small =
         reads.is_some_and(|r| r * read_cost < q.mean_time_ms * 0.1) && q.temp_writes.is_none_or(|t| t <= 0.0);
-    let cpu_share = q.cpu_time_ms.map(|c| c / q.total_time_ms);
-    let cpu_small = cpu_share.is_some_and(|s| s < CPU_SMALL);
+    let cpu_ms = q.cpu_time_ms.filter(|cpu| cpu.is_finite() && *cpu >= 0.0);
+    let cpu_share = cpu_ms.map(|cpu| cpu / q.total_time_ms);
 
-    // MySQL's own lock time (row locks too from 8.0.28; the slow query log's lock time).
-    let lock_ms = q.spread.as_ref().and_then(|s| s.lock_ms).or_else(|| {
-        (engine == Engine::Mysql).then(|| q.waits.iter().filter(|w| w.category == "Lock").map(|w| w.wait_ms).sum())
-    });
-    if engine == Engine::Mysql
-        && let Some(lock) = lock_ms.filter(|l| *l >= q.total_time_ms * 0.5)
+    // Only the native scalar timer establishes this bound. Wait vectors may accumulate across parallel workers.
+    if let Some(lock) = q
+        .spread
+        .as_ref()
+        .and_then(|spread| spread.lock_ms)
+        .filter(|lock| lock.is_finite() && *lock > 0.0 && *lock >= q.total_time_ms * 0.5)
     {
-        return Some(Idle {
-            kind: IdleKind::Locks,
-            shown: Shown::LockTime((lock / q.total_time_ms).min(1.0)),
-            confidence: Confidence::High,
-            measured: true,
-            share: None,
-        });
+        return Some(Idle { shown: Shown::LockTime((lock / q.total_time_ms).min(1.0)), confidence: Confidence::High });
     }
 
-    // Query Store's waits per query (summed over parallel threads, so a category names the cause, not a share).
-    if engine == Engine::Mssql && cpu_small {
+    // Declared canonical wait classes carry meaning across sources. Current configuration and engine identity do
+    // not assign the source's vocabulary, and absent CPU still cannot establish an idle cause.
+    if let (Some(cpu), Some(cpu_ms)) = (cpu_share.filter(|share| share.is_finite() && *share < CPU_SMALL), cpu_ms) {
         let top = q
             .waits
             .iter()
-            .filter(|w| w.category != "CPU" && w.wait_ms >= q.total_time_ms * 0.25)
+            .filter(|w| {
+                w.wait_ms.is_finite()
+                    && w.wait_ms > 0.0
+                    && wait_class(w) != Some(WaitClass::Cpu)
+                    && w.wait_ms >= q.total_time_ms * IDLE_WAIT_RUNTIME_RATIO
+            })
             .max_by(|a, b| a.wait_ms.total_cmp(&b.wait_ms));
-        // Categories as the SQL Server provider folds Query Store's (`wait_category`).
-        let kind = match top.map(|w| w.category.as_str()) {
-            Some("Lock") => Some(IdleKind::Locks),
-            Some("Network") => Some(IdleKind::Client),
-            Some("Memory") => Some(IdleKind::Memory),
-            Some("Latch") => Some(IdleKind::Latch),
-            // Reading from disk, writing the log, compiling or a parallel plan's threads are the statement's own work.
-            Some("IO" | "Log" | "Parallelism" | "Compilation") => return None,
-            Some(_) | None => None,
+        let class = top.and_then(wait_class);
+        let explains_idle = match class {
+            Some(WaitClass::Lock | WaitClass::Network | WaitClass::Memory | WaitClass::Latch) => true,
+            // These classes need their own diagnosis, not a guessed idle cause.
+            Some(WaitClass::Io | WaitClass::Log | WaitClass::Parallelism | WaitClass::Compilation) => return None,
+            Some(_) | None => false,
         };
-        let cpu = cpu_share.unwrap_or(0.0);
-        if let (Some(kind), Some(w)) = (kind, top) {
+        if let (true, Some(w), Some(class)) = (explains_idle, top, class) {
             return Some(Idle {
-                kind,
-                shown: Shown::QueryStoreWait {
-                    cpu,
+                shown: Shown::RecordedWait {
+                    source: WaitSource::of(snapshot),
+                    cpu_ms,
                     wait_ms: w.wait_ms,
-                    wait: w.wait_type.as_deref().unwrap_or(&w.category).to_string(),
+                    class,
+                    native_name: w.wait_type.clone(),
                 },
                 confidence: Confidence::High,
-                measured: true,
-                // Summed over a parallel plan's threads it can pass the statement's time: then it is most of it.
-                share: Some((w.wait_ms / q.total_time_ms).min(1.0)),
             });
         }
         if reads_small {
-            return Some(Idle {
-                kind: IdleKind::Unknown,
-                shown: Shown::LittleCpu(cpu),
-                confidence: Confidence::Medium,
-                measured: false,
-                share: None,
-            });
+            return Some(Idle { shown: Shown::LittleCpu(cpu), confidence: Confidence::Medium });
         }
         return None;
     }
-    if cpu_small && reads_small {
-        return Some(Idle {
-            kind: IdleKind::Unknown,
-            shown: Shown::LittleCpu(cpu_share.unwrap_or(0.0)),
-            confidence: Confidence::Medium,
-            measured: false,
-            share: None,
-        });
-    }
-    // No CPU time (PostgreSQL, the slow query log): a write, or a read that locks the rows it finds, that reads a
-    // handful of pages can't compute for seconds, so it waited, most likely for a row lock. A plain read could be
-    // computing (functions), so it isn't called waiting.
-    let kind = kind_of(q);
-    if cpu_share.is_none() && reads_small && matches!(kind, StatementKind::Write | StatementKind::Locking) {
-        // MySQL counted its lock time and it wasn't most of the run: waiting, but not for what MySQL calls locks.
-        if engine == Engine::Mysql && lock_ms.is_some() {
-            return Some(Idle {
-                kind: IdleKind::Unknown,
-                shown: Shown::Unnamed,
-                confidence: Confidence::Medium,
-                measured: false,
-                share: None,
-            });
-        }
-        // A locking read asks for the lock on every row it finds: that's the one it most likely waited for.
-        let lock = match locking_clause(&text) {
-            Some(clause) if kind == StatementKind::Locking => LockFor::Clause(clause),
-            _ if kind == StatementKind::Locking => LockFor::LockingRead,
-            _ => LockFor::Row,
-        };
-        return Some(Idle {
-            kind: IdleKind::Locks,
-            shown: Shown::RowLock(lock),
-            confidence: Confidence::Medium,
-            measured: false,
-            share: None,
-        });
-    }
+    // Without a native CPU measurement, read counts and SQL shape cannot establish waiting or its cause.
+
     None
 }
