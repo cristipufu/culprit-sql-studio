@@ -327,6 +327,7 @@ lower history bound permits a native-retention gap. Waiting does not count as a 
 | Native route | Discovery | Capture | Meaning and limits |
 |---|---|---|---|
 | Azure SQL elastic pool, through a writable member database | `--kind pool` | `--resource pool.json --collection resource-history` | Pool demand/storage with explicitly broader instance context; no fabricated replica identity or fixed sampling period |
+| Azure SQL elastic pool or Managed Instance | `--kind pool` or `--kind instance` | `--resource resource.json --collection memory-failures` | Retained native OOM observations with verified shared identity; incomplete history, offset-free event times and no query owner |
 | SQL Server or Managed Instance, through an existing database connection | `--kind instance` | `--resource instance.json --collection operational` | Memory, schedulers, performance/topology, compiler admission and tempdb context tied to the verified native instance |
 | PostgreSQL instance, through a TCP database connection | `--kind instance` | `--resource instance.json --collection operational` | Shared archive, writer, WAL, I/O, checkpointer, available statistics-eviction counters and main shared-memory allocations; database counters stay on database captures |
 
@@ -346,6 +347,15 @@ processor topology, compiler admission and tempdb capacity are not exposed throu
 instance/host/resource-governor scope does not establish elastic-pool ownership. Database operational captures
 exclude instance performance counters, processor topology, compiler
 gateways and shared tempdb capacity. The shared resource is assigned once instead of reread for every database.
+
+`memory-failures` is a separate opt-in point observation; it takes no historical `--from`/`--until` bounds and is not
+part of the general operational profile. Managed Instance supports the instance route; boxed SQL Server does not
+support this native DMV. The pool route requires an eligible writable member and rechecks its physical route and
+pool membership. Native event time has no established UTC offset and is never fabricated from capture time.
+Rows go through the existing `OperationalSamples` schema in both ADX and ClickHouse. Authenticated SDK readback
+(`culprit_engine::collected_resources::memory_failures`) reuses the scan's pure explanations and retains native
+rows once, their source qualification and warehouse read gaps. It creates no database snapshot or query owner.
+See [the SQL Server source limits](providers/mssql.md#retained-out-of-memory-observations) before scheduling it.
 
 Azure pool history uses `sys.dm_elastic_pool_resource_stats`, whose documented retention is approximately
 40 minutes. It is distinct from the 14-day `sys.elastic_pool_resource_stats` history in `master`. The native

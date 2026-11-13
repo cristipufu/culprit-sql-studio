@@ -132,6 +132,7 @@ impl OperationalFact {
             | Self::MssqlMissingIndex(_)
             | Self::MssqlQueryCompilation(_)
             | Self::MssqlCachedRuntime(_)
+            | Self::MssqlOutOfMemory(_)
             | Self::SuspectPages { .. } => None,
         };
         [payload, None]

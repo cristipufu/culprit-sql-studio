@@ -38,6 +38,21 @@ pub struct CollectedAnalysisRecord {
     pub row: ExportedRecord,
 }
 
+/// Proof and native input for one selected capture. Domain views reference these records instead of cloning them.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedEvidenceContext {
+    pub range_id: String,
+    pub manifest_sha256: String,
+    pub source: CollectionDescription,
+    pub capture: CaptureIdentity,
+    pub collected_from: String,
+    pub collected_until: String,
+    pub selected_streams: Vec<TelemetryStream>,
+    pub read_gaps: Vec<EvidenceGap>,
+    pub records: Vec<CollectedAnalysisRecord>,
+}
+
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
 pub struct CollectedQueryInput {
@@ -84,15 +99,8 @@ pub struct CollectedAnalysisLimitation {
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
 pub struct CollectedAnalysisContext {
-    pub range_id: String,
-    pub manifest_sha256: String,
-    pub source: CollectionDescription,
-    pub capture: CaptureIdentity,
-    pub collected_from: String,
-    pub collected_until: String,
-    pub selected_streams: Vec<TelemetryStream>,
-    pub read_gaps: Vec<EvidenceGap>,
-    pub records: Vec<CollectedAnalysisRecord>,
+    #[serde(flatten)]
+    pub evidence: CollectedEvidenceContext,
     pub query_inputs: Vec<CollectedQueryInput>,
 }
 

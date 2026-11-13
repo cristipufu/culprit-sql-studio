@@ -34,6 +34,9 @@ pub struct OperationalStats {
     pub termination_history: Option<TerminationHistory>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub memory_failures: Option<MemoryFailureSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub node_resources: Option<NodeResources>,
 }
 
@@ -101,10 +104,26 @@ impl OperationalStats {
             cluster,
             activity_history: _,
             termination_history: _,
+            memory_failures: _,
             node_resources: _,
         } = self;
         Counters { log_failures, spaces, counters, sequences, multixacts, sqlite, cluster }
     }
+}
+
+/// Rows retained in a native memory-failure buffer when it was read. A complete buffer read is not complete
+/// historical coverage; even an empty observation cannot establish absence of failures.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct MemoryFailureSnapshot {
+    pub source: String,
+    pub observed_from: String,
+    pub observed_until: String,
+    /// Hosting scope, never the database selected to reach the source.
+    pub scope: crate::MeasurementScope,
+    /// None is unowned hosting context. It does not fall back to a database or elastic-pool identity.
+    pub resource: Option<crate::telemetry::SharedResourceIdentity>,
+    pub observations: Vec<crate::telemetry::MssqlOutOfMemoryObservation>,
 }
 
 /// Shared node measurements, separate from the selected database's pressure signals and workload period.

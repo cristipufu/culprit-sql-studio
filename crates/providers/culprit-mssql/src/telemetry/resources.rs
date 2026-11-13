@@ -89,7 +89,7 @@ impl ResourceScope for PoolScope {
         CollectionTarget::Shared(context.identity.clone())
     }
     async fn identity<R: NativeRead>(&self, reader: &mut R) -> Result<Self::Context> {
-        resources::pool::identity(reader).await?.0.ok_or_else(|| CollectionStop::SourceChanged.error())
+        resources::pool::identity(reader).await?.0.pool.ok_or_else(|| CollectionStop::SourceChanged.error())
     }
     async fn inventory<R: NativeRead>(&self, reader: &mut R, window: &Window) -> Result<Inventory> {
         resources::pool::inventory(reader, window).await
@@ -179,22 +179,26 @@ async fn discover_with_io<R: NativeRead>(
     let resources = match request.kind {
         SharedResourceKind::Pool => {
             description::ensure_supported(reader).await?;
-            let (pool, observed_at) = resources::pool::identity(reader).await?;
+            let (membership, observed_at) = resources::pool::identity(reader).await?;
+            let pool = membership.pool;
             pool.into_iter()
                 .map(|pool| CollectionResource {
                     identity: pool.identity,
                     observed_at: observed_at.clone(),
-                    collections: vec![TelemetryCollection::ResourceHistory],
+                    collections: vec![
+                        TelemetryCollection::ResourceHistory,
+                        TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures),
+                    ],
                 })
                 .collect::<Vec<_>>()
         }
         SharedResourceKind::Instance => {
             let (instance, observed_at) = crate::instance::read(reader).await?;
-            vec![CollectionResource {
-                identity: instance.identity,
-                observed_at,
-                collections: vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)],
-            }]
+            let mut collections = vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)];
+            if instance.engine_edition() == crate::probe::ENGINE_EDITION_MANAGED_INSTANCE {
+                collections.push(TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures));
+            }
+            vec![CollectionResource { identity: instance.identity, observed_at, collections }]
         }
         _ => {
             return Err(culprit_core::Error::new(

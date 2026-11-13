@@ -6,4 +6,4 @@ import type { CollectionDescription } from "./CollectionDescription";
 import type { EvidenceGap } from "./EvidenceGap";
 import type { TelemetryStream } from "./TelemetryStream";
 
-export type CollectedAnalysisContext = { range_id: string, manifest_sha256: string, source: CollectionDescription, capture: CaptureIdentity, collected_from: string, collected_until: string, selected_streams: Array<TelemetryStream>, read_gaps: Array<EvidenceGap>, records: Array<CollectedAnalysisRecord>, query_inputs: Array<CollectedQueryInput>, };
+export type CollectedAnalysisContext = { query_inputs: Array<CollectedQueryInput>, range_id: string, manifest_sha256: string, source: CollectionDescription, capture: CaptureIdentity, collected_from: string, collected_until: string, selected_streams: Array<TelemetryStream>, read_gaps: Array<EvidenceGap>, records: Array<CollectedAnalysisRecord>, };

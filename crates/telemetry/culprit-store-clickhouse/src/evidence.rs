@@ -7,3 +7,6 @@ use std::sync::Arc;
 pub fn new(query: Arc<dyn QueryTransport>, indexes: Arc<ProjectionIndexes>) -> Result<EvidenceReader> {
     Ok(EvidenceReader::new(Arc::new(ClickHouseStore::new(query)?), indexes))
 }
+
+#[cfg(test)]
+mod tests;

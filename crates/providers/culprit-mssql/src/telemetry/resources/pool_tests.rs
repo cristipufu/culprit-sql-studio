@@ -155,7 +155,10 @@ async fn discovery_is_bounded_metadata_and_does_not_turn_a_nonpooled_database_in
     let mut reader = FakeRead::new(vec![edition(), Ok(vec![identity_row()])]);
     let resources = discover_with_io(&mut reader, &request).await.unwrap();
     assert_eq!(resources.len(), 1);
-    assert_eq!(resources[0].collections, vec![TelemetryCollection::ResourceHistory]);
+    assert_eq!(
+        resources[0].collections,
+        vec![TelemetryCollection::ResourceHistory, TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures)]
+    );
     assert_eq!(reader.calls.len(), 2);
     assert!(reader.calls.iter().all(|call| call.limit <= 2));
     let mut reader = FakeRead::new(vec![edition(), Ok(vec![replace(&identity_row(), &[("pool_name", Val::Null)])])]);

@@ -29,7 +29,7 @@ pub struct LoggedError<'s> {
     failure: &'s LoggedFailure,
     /// What the code means, which says what to do about it.
     code: ErrorCode,
-    /// A storage or integrity error dated within the scan's window: it needs attention.
+    /// A storage, integrity or allocation failure dated within the scan's window: it needs attention.
     critical: bool,
 }
 
@@ -44,6 +44,8 @@ enum ErrorCode {
     ReadOnly,
     /// SQLITE_IOERR and SQLITE_CORRUPT.
     Storage,
+    /// A required allocation failed, without identifying the consumer responsible for the pressure.
+    Allocation,
     Unrecognized,
 }
 
@@ -57,6 +59,7 @@ impl ErrorCode {
             "SQLITE_FULL" => ErrorCode::Full,
             "SQLITE_READONLY" => ErrorCode::ReadOnly,
             "SQLITE_IOERR" | "SQLITE_CORRUPT" => ErrorCode::Storage,
+            "SQLITE_NOMEM" | "SQLITE_IOERR_NOMEM" => ErrorCode::Allocation,
             _ => ErrorCode::Unrecognized,
         }
     }
@@ -71,6 +74,7 @@ impl ErrorCode {
             ErrorCode::Full => t!("check.logged_errors.why.full"),
             ErrorCode::ReadOnly => t!("check.logged_errors.why.readonly"),
             ErrorCode::Storage => t!("check.logged_errors.why.storage"),
+            ErrorCode::Allocation => t!("check.logged_errors.why.allocation"),
             ErrorCode::Unrecognized => t!("check.logged_errors.why.unrecognized"),
         }
     }
@@ -85,19 +89,20 @@ impl ErrorCode {
             ErrorCode::Full => t!("check.logged_errors.fix.full"),
             ErrorCode::ReadOnly => t!("check.logged_errors.fix.readonly"),
             ErrorCode::Storage => t!("check.logged_errors.fix.storage"),
+            ErrorCode::Allocation => t!("check.logged_errors.fix.allocation"),
             ErrorCode::Unrecognized => t!("check.logged_errors.fix.unrecognized"),
         }
     }
 }
 
-/// Every code the log recorded at least once; storage and integrity errors dated within the window need attention.
+/// Every code the log recorded at least once; dated storage, integrity and allocation failures need attention.
 fn logged_errors(s: &Snapshot) -> Vec<LoggedError<'_>> {
     let now = parse_epoch_seconds(&s.taken_at);
     let window_s = f64::from(s.options.as_ref().map_or(24 * 60, |o| o.window_in_minutes())) * 60.0;
     s.operations
         .log_failures
         .iter()
-        .filter(|e| e.count > 0.0)
+        .filter(|e| e.count.is_finite() && e.count > 0.0)
         .map(|failure| {
             let recent = failure
                 .last_at
@@ -106,7 +111,11 @@ fn logged_errors(s: &Snapshot) -> Vec<LoggedError<'_>> {
                 .zip(now)
                 .is_some_and(|(at, now)| at <= now && at >= now - window_s);
             let code = ErrorCode::of(&failure.code);
-            LoggedError { failure, code, critical: recent && matches!(code, ErrorCode::Full | ErrorCode::Storage) }
+            LoggedError {
+                failure,
+                code,
+                critical: recent && matches!(code, ErrorCode::Full | ErrorCode::Storage | ErrorCode::Allocation),
+            }
         })
         .collect()
 }
@@ -149,3 +158,6 @@ fn logged_error_finding(s: &Snapshot, error: LoggedError<'_>) -> Finding {
     f.verify = vec![t!("check.logged_errors.verify")];
     f
 }
+
+#[cfg(test)]
+mod tests;

@@ -22,6 +22,11 @@ pub(crate) struct Context {
     process_id: u64,
     started_at_ticks: u64,
 }
+impl Context {
+    pub(crate) fn engine_edition(&self) -> i64 {
+        self.edition
+    }
+}
 
 pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<(Context, String)> {
     let row = one(reader, IDENTITY).await?;

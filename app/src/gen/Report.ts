@@ -3,6 +3,7 @@ import type { AnalysisProvenance } from "./AnalysisProvenance";
 import type { CheckAssessment } from "./CheckAssessment";
 import type { Finding } from "./Finding";
 import type { LockedCheck } from "./LockedCheck";
+import type { MemoryFailureReport } from "./MemoryFailureReport";
 import type { RefinementDecision } from "./RefinementDecision";
 import type { ReportEvidence } from "./ReportEvidence";
 import type { Snapshot } from "./Snapshot";
@@ -11,4 +12,8 @@ import type { Summary } from "./Summary";
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+export type Report = { 
+/**
+ * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
+ */
+memory_failures?: MemoryFailureReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

@@ -18,6 +18,7 @@ pub(super) enum Family {
     CompilationGateways,
     MemoryClerks,
     Schedulers,
+    MemoryFailures,
     PlanCacheSummary,
     MissingIndexes,
     Tuning(crate::query_store::tuning::Kind),
@@ -82,10 +83,14 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::CurrentRequestMemory => {
             return Err(crate::read::invalid_data());
         }
+        SnapshotDataset::MemoryFailures => return Err(crate::read::invalid_data()),
     })
 }
 
 pub(super) fn shared_families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
+    if dataset == SnapshotDataset::MemoryFailures {
+        return Ok(vec![Family::MemoryFailures]);
+    }
     if dataset != SnapshotDataset::Operational {
         return Err(crate::read::invalid_data());
     }
@@ -113,6 +118,7 @@ impl Family {
             Self::CompilationGateways => &sources::COMPILATION_GATEWAYS,
             Self::MemoryClerks => &sources::MEMORY_CLERKS,
             Self::Schedulers => &sources::SCHEDULERS,
+            Self::MemoryFailures => &sources::MEMORY_FAILURES,
             Self::PlanCacheSummary => &sources::PLAN_CACHE_USE,
             Self::MissingIndexes => &sources::MISSING_INDEXES,
             Self::Tuning(kind) => kind.source(),
@@ -151,6 +157,21 @@ impl Family {
         tuning_layout: Option<&Result<crate::query_store::tuning::Layout>>,
     ) -> Result<ReadOutcome> {
         let records = match self {
+            Self::MemoryFailures => {
+                let Some(facts) = crate::oom_events::read(reader, limit).await? else {
+                    return Ok(ReadOutcome::NotApplicable);
+                };
+                facts
+                    .into_iter()
+                    .map(|fact| {
+                        Ok(TelemetryRecord::Operational(OperationalObservation {
+                            source: self.source().name.into(),
+                            key: fact.key()?,
+                            fact: OperationalFact::MssqlOutOfMemory(Box::new(fact)),
+                        }))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            }
             Self::MemoryClerks => counter_sets(self.source().name, crate::memory_clerks::read(reader, limit).await?)?,
             Self::Schedulers => counter_sets(self.source().name, crate::schedulers::read(reader, limit).await?)?,
             Self::Tuning(kind) => {

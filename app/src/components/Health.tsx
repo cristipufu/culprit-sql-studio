@@ -14,6 +14,7 @@ import { tx } from "../lib/message-parts";
 import { SIGNAL_SCOPE, signalValue } from "../lib/waits";
 import { Replication, StorageLatency } from "./BeyondTime";
 import { OperationalHealth, hasOperationalHealth } from "./OperationalHealth";
+import { MemoryFailureSourceIssue, RetainedMemoryFailures, memoryFailureReadIssue } from "./RetainedMemoryFailures";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -77,7 +78,10 @@ export function HealthTab({
   engine?: Engine;
 }) {
   const signals = [...(pressure?.signals ?? [])].sort((a, b) => RANK[a.status] - RANK[b.status]);
-  if (!signals.length && !resources.length && !hasOperationalHealth(report)) {
+  const memoryFailures = report.snapshot.operations.memory_failures;
+  const memoryReport = report.memory_failures;
+  const memoryIssue = memoryFailureReadIssue(memoryFailures?.source, report.snapshot.sources ?? []);
+  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue) {
     return (
       <div className="waits-empty">
         <h3>{t("ui.health.empty")}</h3>
@@ -116,6 +120,8 @@ export function HealthTab({
       {engine && <StorageLatency files={pressure?.files ?? []} engine={engine} report={report} />}
       <Replication replicas={pressure?.replicas ?? []} report={report} />
       <OperationalHealth report={report} />
+      {memoryFailures && memoryReport && <RetainedMemoryFailures key={memoryFailures.observed_until} evidence={memoryFailures} report={memoryReport} />}
+      {!(memoryFailures && memoryReport) && memoryIssue && <MemoryFailureSourceIssue source={memoryIssue} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
     </div>
   );

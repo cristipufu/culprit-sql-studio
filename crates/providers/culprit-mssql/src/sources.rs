@@ -116,6 +116,11 @@ pub const MEMORY_CLERKS: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.memory_clerks"),
     delivers: &[],
 };
+pub const MEMORY_FAILURES: Source = Source {
+    name: source_id::MEMORY_FAILURES,
+    reads: culprit_core::key!("provider.mssql.source.memory_failures"),
+    delivers: &[],
+};
 pub const SCHEDULERS: Source = Source {
     name: source_id::SCHEDULERS,
     reads: culprit_core::key!("provider.mssql.source.schedulers"),
@@ -350,6 +355,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    MEMORY_FAILURES,
     CURRENT_REQUEST_MEMORY,
     REPLICATION,
     LOG_CAPACITY,

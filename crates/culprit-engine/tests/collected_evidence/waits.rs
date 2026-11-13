@@ -74,7 +74,7 @@ fn query(analysis: &CollectedQueryAnalysis) -> &QueryStat {
         .unwrap_or_else(|| {
             panic!(
                 "query workload unavailable: limits={:?}; read gaps={:?}",
-                analysis.limitations, analysis.context.read_gaps
+                analysis.limitations, analysis.context.evidence.read_gaps
             )
         })
         .queries;
@@ -110,9 +110,9 @@ async fn authenticated_dictionary_projects_every_class_and_keeps_native_names_an
     }
     assert!(projected.waits.iter().all(|row| row.wait_type.is_none() && row.tasks.is_none()));
     assert_eq!(projected.waits_coverage.as_ref().unwrap().classes.len(), WaitClass::ALL.len());
-    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.context.evidence.source, source);
     for wait in waits {
-        assert!(analysis.context.records.iter().any(|record| record.row.record == wait));
+        assert!(analysis.context.evidence.records.iter().any(|record| record.row.record == wait));
     }
     assert!(!has_limit(&analysis, CollectedAnalysisLimit::MetricNotProjected));
     assert!(!has_limit(&analysis, CollectedAnalysisLimit::UnknownWaitCategory));
@@ -211,9 +211,14 @@ async fn currently_enabled_capture_preserves_positive_waits_without_proving_the_
     assert_eq!(projected.measured_wait_ms(WaitClass::Io), None);
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
     assert!(has_limit(&analysis, CollectedAnalysisLimit::WaitIntervalCoverageUnverified));
-    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.context.evidence.source, source);
     assert!(
-        analysis.context.records.iter().any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
+        analysis
+            .context
+            .evidence
+            .records
+            .iter()
+            .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
     );
     assert_ne!(
         analysis.assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap().status,
@@ -242,6 +247,7 @@ async fn turning_capture_off_or_losing_current_config_does_not_erase_historical_
         assert!(
             analysis
                 .context
+                .evidence
                 .records
                 .iter()
                 .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
@@ -302,6 +308,7 @@ async fn observed_unknown_categories_preserve_positive_locks_but_never_become_ot
         assert_eq!(
             analysis
                 .context
+                .evidence
                 .records
                 .iter()
                 .filter(|record| matches!(record.row.record, TelemetryRecord::QueryWaits(_)))
@@ -342,6 +349,7 @@ async fn exact_qualifier_joins_do_not_attach_another_outcome_replica_or_plan() {
         assert!(
             analysis
                 .context
+                .evidence
                 .records
                 .iter()
                 .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
@@ -452,6 +460,7 @@ async fn integer_precision_and_conversion_overflow_keep_raw_values_and_only_supp
         assert_eq!(
             analysis
                 .context
+                .evidence
                 .records
                 .iter()
                 .filter(|record| matches!(record.row.record, TelemetryRecord::QueryWaits(_)))

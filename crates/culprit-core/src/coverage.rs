@@ -93,6 +93,7 @@ pub mod source_id {
     pub const GLOBAL_STATUS: &str = "global status";
     pub const PROCESSOR_TOPOLOGY: &str = "processor topology";
     pub const MEMORY_CLERKS: &str = "memory clerks";
+    pub const MEMORY_FAILURES: &str = "memory failures";
     pub const SCHEDULERS: &str = "schedulers";
     pub const SHARED_MEMORY_ALLOCATIONS: &str = "shared memory allocations";
     pub const SHARED_RESOURCE_DETAILS: &str = "shared-resource-details";
@@ -193,6 +194,7 @@ pub mod source_id {
         GLOBAL_STATUS,
         PROCESSOR_TOPOLOGY,
         MEMORY_CLERKS,
+        MEMORY_FAILURES,
         SCHEDULERS,
         SHARED_MEMORY_ALLOCATIONS,
         SHARED_RESOURCE_DETAILS,

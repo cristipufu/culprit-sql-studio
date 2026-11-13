@@ -23,7 +23,7 @@ fn database_context() -> subject::Identity {
 pub(super) fn clock(metadata: bool, at: &str) -> Rec {
     Rec::of(&[("observed_at", Val::Text(at.into())), ("metadata_visibility", Val::Int(i64::from(metadata)))])
 }
-fn pressure(high: bool) -> Rec {
+pub(super) fn pressure(high: bool) -> Rec {
     replace(
         &latest_row("2020-01-01T06:01:30Z"),
         &[

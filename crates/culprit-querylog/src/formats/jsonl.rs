@@ -174,7 +174,7 @@ fn entry(line: &str) -> Option<Entry> {
     let error_code = raw_error.map(|value| {
         let code = value
             .as_str()
-            .map(str::to_ascii_uppercase)
+            .map(|code| code.trim().to_ascii_uppercase())
             .or_else(|| value.as_u64().map(|n| n.to_string()))
             .unwrap_or_default();
         match code.as_str() {
@@ -184,6 +184,10 @@ fn entry(line: &str) -> Option<Entry> {
             "SQLITE_CONSTRAINT" | "19" => "SQLITE_CONSTRAINT",
             "SQLITE_FULL" | "13" => "SQLITE_FULL",
             "SQLITE_READONLY" | "8" => "SQLITE_READONLY",
+            // Keep the native allocation failures distinct before reducing extended I/O error families.
+            // https://www.sqlite.org/rescode.html#nomem
+            "SQLITE_NOMEM" | "7" => "SQLITE_NOMEM",
+            "SQLITE_IOERR_NOMEM" | "3082" => "SQLITE_IOERR_NOMEM",
             "SQLITE_IOERR" | "10" => "SQLITE_IOERR",
             "SQLITE_CORRUPT" | "11" => "SQLITE_CORRUPT",
             c if c.contains("SQLITE_CONSTRAINT") => "SQLITE_CONSTRAINT",
@@ -194,9 +198,10 @@ fn entry(line: &str) -> Option<Entry> {
             c if c.contains("SQLITE_LOCKED") => "SQLITE_LOCKED",
             c if c.contains("SQLITE_FULL") => "SQLITE_FULL",
             c if c.contains("SQLITE_CORRUPT") => "SQLITE_CORRUPT",
-            c if c.parse::<u64>().is_ok_and(|n| n > 255) => match c.parse::<u64>().unwrap_or(0) & 255 {
+            c if c.parse::<i32>().is_ok_and(|n| n > 255) => match c.parse::<i32>().unwrap_or(0) & 255 {
                 5 => "SQLITE_BUSY",
                 6 => "SQLITE_LOCKED",
+                7 => "SQLITE_NOMEM",
                 19 => "SQLITE_CONSTRAINT",
                 8 => "SQLITE_READONLY",
                 10 => "SQLITE_IOERR",
@@ -243,6 +248,49 @@ fn entry(line: &str) -> Option<Entry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_allocation_codes_preserve_symbolic_numeric_and_extended_meaning_without_a_fake_duration() {
+        for (code, expected) in [
+            (serde_json::json!("SQLITE_NOMEM"), "SQLITE_NOMEM"),
+            (serde_json::json!(" sqlite_nomem "), "SQLITE_NOMEM"),
+            (serde_json::json!(7), "SQLITE_NOMEM"),
+            (serde_json::json!("7"), "SQLITE_NOMEM"),
+            (serde_json::json!("SQLITE_IOERR_NOMEM"), "SQLITE_IOERR_NOMEM"),
+            (serde_json::json!(3082), "SQLITE_IOERR_NOMEM"),
+            (serde_json::json!("3082"), "SQLITE_IOERR_NOMEM"),
+            // A future extended result retains the documented primary result code.
+            (serde_json::json!(263), "SQLITE_NOMEM"),
+        ] {
+            let line = serde_json::json!({
+                "sql": "SELECT value FROM items WHERE id = ?",
+                "error_code": code,
+                "at": "2026-11-13T08:00:00Z",
+            })
+            .to_string();
+            let entry = entry(&line).expect("a native failed operation");
+            assert_eq!(entry.error_code, Some(expected));
+            assert!(entry.ms.is_nan(), "an untimed allocation failure is not an instant execution");
+            assert!(entry.at.is_some_and(|time| time.zoned));
+        }
+    }
+
+    #[test]
+    fn memory_prose_or_lookalike_codes_do_not_establish_native_allocation_failure() {
+        for code in [
+            "out of memory",
+            "OOM killer",
+            "memory exhausted",
+            "SQLITE_NOMEM_UNKNOWN",
+            "SIGKILL",
+            "2147483655",
+            "18446744073709551367",
+        ] {
+            let line = serde_json::json!({"sql": "SELECT value FROM items", "error_code": code}).to_string();
+            let entry = entry(&line).expect("the unknown failure is retained");
+            assert_eq!(entry.error_code, Some("Logged SQL error"));
+        }
+    }
 
     #[test]
     fn statements_and_their_keys() {

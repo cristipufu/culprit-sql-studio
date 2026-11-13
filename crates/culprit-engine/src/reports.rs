@@ -26,9 +26,21 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         refinement: &'a [culprit_core::RefinementDecision],
         #[serde(skip_serializing_if = "Option::is_none")]
         provenance: &'a Option<culprit_core::AnalysisProvenance>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        memory_failures: &'a Option<culprit_core::MemoryFailureReport>,
     }
-    let Report { snapshot, findings, locked, summary, assessments, refinement, provenance, evidence: _ } = report;
-    View { snapshot, findings, locked, summary, assessments, refinement, provenance }
+    let Report {
+        snapshot,
+        findings,
+        locked,
+        summary,
+        assessments,
+        refinement,
+        provenance,
+        memory_failures,
+        evidence: _,
+    } = report;
+    View { snapshot, findings, locked, summary, assessments, refinement, provenance, memory_failures }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

@@ -4,6 +4,7 @@ use culprit_core::{
 use culprit_engine::collected_evidence;
 
 mod fixture;
+mod memory_failures;
 mod waits;
 use fixture::Fixture;
 
@@ -96,8 +97,8 @@ async fn authenticated_archived_scan_measurements_reach_the_existing_pure_checks
     let workload = analysis.workload.as_ref().unwrap();
     assert_eq!(workload.kind, None);
     assert!(workload.windowed && workload.counter_set.is_none() && workload.history_inputs.is_empty());
-    assert_eq!(analysis.context.source, source);
-    assert_eq!(analysis.context.manifest_sha256, fixture.range.manifest_digest());
+    assert_eq!(analysis.context.evidence.source, source);
+    assert_eq!(analysis.context.evidence.manifest_sha256, fixture.range.manifest_digest());
     assert_eq!(analysis.provenance.as_ref().unwrap().origin, culprit_core::AnalysisOrigin::ArchivedTelemetry);
     let original = scan.workload.as_ref().unwrap();
     for input in &analysis.context.query_inputs {
@@ -120,6 +121,9 @@ async fn authenticated_archived_scan_measurements_reach_the_existing_pure_checks
     );
     let encoded = serde_json::to_value(&analysis).unwrap();
     assert!(encoded.get("snapshot").is_none() && encoded.get("summary").is_none() && encoded.get("server").is_none());
+    assert_eq!(encoded["context"]["range_id"], capture.range_id());
+    assert_eq!(encoded["context"]["source"], serde_json::to_value(&source).unwrap());
+    assert!(encoded["context"].get("evidence").is_none(), "composition serializes the shared capture fields once");
 }
 
 #[tokio::test]
@@ -160,7 +164,12 @@ async fn missing_or_native_restricted_definitions_keep_positive_evidence_partial
             );
         }
         assert!(
-            analysis.context.records.iter().any(|record| matches!(record.row.record, TelemetryRecord::QueryRuntime(_)))
+            analysis
+                .context
+                .evidence
+                .records
+                .iter()
+                .any(|record| matches!(record.row.record, TelemetryRecord::QueryRuntime(_)))
         );
     }
 }
@@ -231,6 +240,7 @@ async fn application_totals_exclude_proven_monitoring_but_keep_unknown_and_missi
     assert_eq!(
         analysis
             .context
+            .evidence
             .records
             .iter()
             .filter(|record| matches!(record.row.record, TelemetryRecord::QueryRuntime(_)))
@@ -260,7 +270,12 @@ async fn opaque_native_wait_codes_remain_exact_without_becoming_semantic_other_w
     let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
     assert!(analysis.workload.as_ref().unwrap().queries[0].waits.is_empty());
     assert!(
-        analysis.context.records.iter().any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
+        analysis
+            .context
+            .evidence
+            .records
+            .iter()
+            .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
     );
     assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitSemanticsUnavailable));
     assert!(analysis.assessments.iter().find(|assessment| assessment.check == "heavy-query").unwrap().reason.is_some());
@@ -325,7 +340,7 @@ async fn interval_shape_and_a_recorded_plan_version_do_not_invent_source_or_curr
     assert!(
         analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MissingCurrentServerMetadata)
     );
-    assert!(analysis.context.records.iter().any(|record| matches!(&record.row.record,
+    assert!(analysis.context.evidence.records.iter().any(|record| matches!(&record.row.record,
         TelemetryRecord::PlanDefinition(plan) if plan.engine_version.as_deref() == Some("18.1"))));
     assert!(analysis.context.query_inputs.iter().any(|input| input.native_rows[0].qualifiers["execution_type"] == "3"));
     assert!(analysis.workload.as_ref().unwrap().queries.iter().all(|query| query.logical_reads.is_none()));
@@ -378,6 +393,7 @@ async fn native_large_counts_and_unknown_units_are_retained_without_rounded_anal
     assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::CounterPrecision));
     let native = analysis
         .context
+        .evidence
         .records
         .iter()
         .find_map(|record| match &record.row.record {

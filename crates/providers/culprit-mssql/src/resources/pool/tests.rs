@@ -16,7 +16,9 @@ async fn member_routes_share_a_native_pool_identity_without_claiming_a_database_
         )]),
     ]);
     let (first, _) = identity(&mut reader).await.unwrap();
+    let first = first.pool;
     let (second, _) = identity(&mut reader).await.unwrap();
+    let second = second.pool;
     let (first, second) = (first.unwrap(), second.unwrap());
     assert_eq!(first.identity.telemetry_id().unwrap(), second.identity.telemetry_id().unwrap());
     assert!(first != second);
@@ -30,7 +32,7 @@ async fn member_routes_share_a_native_pool_identity_without_claiming_a_database_
 #[tokio::test]
 async fn a_nonpooled_database_is_absent_and_invalid_or_secondary_metadata_is_never_guessed() {
     let mut reader = FakeRead::new(vec![Ok(vec![replace(&identity_row(), &[("pool_name", Val::Null)])])]);
-    assert!(identity(&mut reader).await.unwrap().0.is_none());
+    assert!(identity(&mut reader).await.unwrap().0.pool.is_none());
     for rows in [vec![], vec![identity_row(), identity_row()]] {
         let mut reader = FakeRead::new(vec![Ok(rows)]);
         assert!(
@@ -86,7 +88,7 @@ async fn pool_history_reuses_bound_selection_and_validates_the_overflow_witness(
         Ok(vec![identity_row()]),
         Ok(vec![row("2020-01-01T06:00:15Z"), row("2020-01-01T06:00:30Z")]),
     ]);
-    let context = identity(&mut reader).await.unwrap().0.unwrap();
+    let context = identity(&mut reader).await.unwrap().0.pool.unwrap();
     assert_eq!(windowed(&mut reader, &context, &window(), None, 1).await.unwrap().len(), 2);
     let call = &reader.calls[1];
     assert_eq!(call.limit, 2);

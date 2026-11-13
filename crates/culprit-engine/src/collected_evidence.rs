@@ -27,27 +27,7 @@ pub fn analyze(capture: &EvidenceCapture) -> Result<CollectedQueryAnalysis> {
     }
     apply_executable_fix_policy(&mut report.findings, &mut limitations);
     Ok(CollectedQueryAnalysis {
-        context: CollectedAnalysisContext {
-            range_id: capture.range_id().into(),
-            manifest_sha256: capture.manifest_sha256().into(),
-            source: capture.source().clone(),
-            capture: capture.capture().clone(),
-            collected_from: capture.collected_from().into(),
-            collected_until: capture.collected_until().into(),
-            selected_streams: capture.families().iter().map(|family| family.stream()).collect(),
-            read_gaps: capture.gaps().to_vec(),
-            records: capture
-                .records()
-                .iter()
-                .map(|record| CollectedAnalysisRecord {
-                    batch_id: record.batch_id().into(),
-                    row_ordinal: record.row_ordinal(),
-                    native_payload_sha256: record.native_payload_sha256().into(),
-                    row: record.row().clone(),
-                })
-                .collect(),
-            query_inputs,
-        },
+        context: CollectedAnalysisContext { evidence: crate::collected_context::from_capture(capture), query_inputs },
         workload: report.snapshot.workload,
         findings: report.findings,
         assessments: report.assessments,

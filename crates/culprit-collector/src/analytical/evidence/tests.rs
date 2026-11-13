@@ -5,6 +5,8 @@ use crate::{
 };
 use culprit_core::telemetry::*;
 
+mod empty;
+
 #[tokio::test]
 async fn query_reconstruction_keeps_native_closure_outcomes_units_and_redacted_payloads_exact() {
     let catalog = LogicalCatalog::new().unwrap();

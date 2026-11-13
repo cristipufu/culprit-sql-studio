@@ -68,6 +68,16 @@ pub fn redact_identity(identity: &mut crate::DatabaseIdentity) {
     identity.incarnation = identity.incarnation.as_deref().map(opaque);
 }
 
+/// Keep a shared resource's kind and equality relationships without publishing its physical native identity.
+pub fn redact_resource_identity(identity: &mut crate::telemetry::SharedResourceIdentity) {
+    for native in [&mut identity.namespace, &mut identity.native] {
+        native.id = opaque(&native.id);
+        for value in native.qualifiers.values_mut() {
+            *value = opaque(value);
+        }
+    }
+}
+
 pub fn redact_measurement(measurement: &mut crate::MeasurementContext) {
     redact_identity(&mut measurement.database);
     if let crate::MeasurementSource::Named(source) = &mut measurement.source {
@@ -169,6 +179,9 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     }
     for failure in &mut s.operations.log_failures {
         failure.statement = redact_sql(&failure.statement, engine);
+    }
+    if let Some(resource) = s.operations.memory_failures.as_mut().and_then(|evidence| evidence.resource.as_mut()) {
+        redact_resource_identity(resource);
     }
     if let Some(resources) = &mut s.operations.node_resources {
         for message in resources.source_message.iter_mut().chain(resources.note_messages.iter_mut().flatten()) {

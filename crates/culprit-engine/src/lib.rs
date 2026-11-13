@@ -8,7 +8,11 @@ pub mod changes;
 pub mod cloud;
 mod cloud_process;
 #[cfg(feature = "collector")]
+mod collected_context;
+#[cfg(feature = "collector")]
 pub mod collected_evidence;
+#[cfg(feature = "collector")]
+pub mod collected_resources;
 #[cfg(feature = "collector")]
 mod collection;
 #[cfg(any(feature = "store-adx", feature = "store-clickhouse"))]

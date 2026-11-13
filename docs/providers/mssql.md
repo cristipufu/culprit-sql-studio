@@ -92,6 +92,28 @@ The ring buffer keeps only recent events and is cleared when the session restart
 
 This configured Azure source requires its own native and production-cost qualification. Unit fixtures validate configuration admission, graph decoding, identity, limits and collector verification; they do not establish Azure permissions or production overhead. Durable event-file and managed log feeds are separate source capabilities.
 
+### Retained out-of-memory observations
+
+`culprit scan shop --collect-memory-failures` explicitly requests the supported native OOM buffer on Azure SQL
+Database or Managed Instance. Default scans skip it. Boxed SQL Server is excluded: Microsoft documents
+`sys.dm_os_out_of_memory_events` as unsupported there, even when the view is visible.
+
+The same reader serves scans and the collector's `memory-failures` profile. It projects at most 128 native rows
+without a sort, join or server-side JSON parsing, with a three-second statement ceiling and a ten-second overall
+budget. These limits bound admission and waiting; cloud source-load qualification is still required before
+scheduling it. Identity changes, overflow or uncertain connection shutdown withhold the observation.
+
+This is shared hosting evidence, not the selected database's memory pressure. Managed Instance uses its verified
+instance identity; an eligible writable pool member uses verified pool membership and the same physical database
+route before and after the read. Other Azure SQL routes retain unowned hosting context rather than inventing a
+pool identity. Native cause codes suggest investigations, but identify no requesting or owning query.
+
+Native event times have no documented UTC offset. Culprit keeps them separate from UTC read bounds and does not
+assign them to the selected workload window. Signed MB values, SQL NULLs, JSON-null documents, unknown JSON members
+and malformed bounded documents remain distinct. Equal native rows remain separate captured observations: the
+buffer supplies no occurrence identifier, can omit or evict failures, and resets on restart. An empty read cannot
+establish that no failures occurred. See the [native source and permission reference](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-out-of-memory-events?view=azuresqldb-current).
+
 ### Resource history
 
 On Azure SQL Database, scans and background capture share the same native resource reader. Scans reuse their retained samples for the resource timeline and pressure summary. Selected export windows and workload admission request their own bounded projections, with the same units, scope, null handling and timestamps. Instance CPU and memory remain shared context. Background resource capture currently supports primary replicas; native reads preserve the connected replica's role.

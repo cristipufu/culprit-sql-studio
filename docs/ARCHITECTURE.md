@@ -332,6 +332,11 @@ their assessments and withhold executable fix SQL while preserving supported fin
 Native wait categories are interpreted through the bounded, authenticated vocabulary declared by the source.
 Unknown categories remain unknown, and workers, CPU, compilation and memory waits stay distinct.
 Current capture configuration does not qualify historical coverage or invalidate retained positive observations.
+
+`collected_resources::memory_failures` adapts an authenticated shared-resource snapshot to the same pure native
+memory-failure explanations used by scans. It requires the explicit dataset and matching source coverage, keeps
+capture-local positions rather than inventing occurrence IDs, and distinguishes missing warehouse rows from native
+source loss. The result references its original rows without duplicating diagnostic JSON or constructing a database.
 Recorded worker waits are accumulated native durations, not exclusive portions of statement elapsed time. Keep their
 totals when parallel workers overlap, including when the sum exceeds elapsed time. A mean divides that recorded total
 by its matching execution count; it identifies neither a particular slow execution nor the longest execution's wait.
@@ -426,6 +431,13 @@ A request with unresolved generation or database ownership cannot acquire a data
 context rather than proof of the granting statement; native Resource Governor identifiers never imply an Azure
 elastic-pool owner. Default scans skip this reader. Provisional results require final identity checks and confirmed
 shutdown, and snapshot sharing strips client labels without changing retained native counters.
+
+`culprit-mssql::oom_events` is the single bounded native OOM decoder for scans and explicit shared-resource
+collection. Only documented Azure SQL Database/Managed Instance products are admitted; boxed SQL Server and default
+scan profiles never query the view. Both paths require final context verification and confirmed owned shutdown.
+Native signed memory values and opaque bounded JSON are retained without forcing a guessed schema. Event time has
+no established UTC offset, cause codes are heuristic classifications, and the buffer supplies neither complete
+history nor a query/database owner. The pure view words this evidence independently from current pressure findings.
 
 `culprit-mssql::processors` reads host logical processors, visible online user schedulers and their NUMA nodes through one bounded native operation. The app uses online SQL schedulers for its parallelism context. Export retains all three as separate exact server-scoped gauges; these measurements do not establish an Azure database's CPU quota or a cross-database resource identity. Unreadable topology stays unavailable, and zero visible schedulers does not become a usable zero-processor configuration.
 

@@ -987,6 +987,7 @@
       "sqlite": null
     },
     "options": {
+      "collect_memory_failures": false,
       "collect_request_memory": false,
       "collect_shared_resources": false,
       "plans": 25,

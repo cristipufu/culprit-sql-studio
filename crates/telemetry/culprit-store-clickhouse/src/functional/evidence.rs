@@ -143,6 +143,7 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
         test_support::retention_evidence(),
         test_support::retention_coverage_only_evidence(vec![CleanupHorizon::Data, CleanupHorizon::Catalog]),
         test_support::retention_coverage_only_evidence(vec![]),
+        test_support::memory_failure_evidence(),
     ]
     .into_iter()
     .enumerate()

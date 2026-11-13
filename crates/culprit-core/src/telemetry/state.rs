@@ -18,6 +18,7 @@ pub enum SnapshotDataset {
     Tuning,
     StatementGrants,
     CurrentRequestMemory,
+    MemoryFailures,
     IndexOperations,
     Tables,
     ForeignKeys,
@@ -47,6 +48,7 @@ impl SnapshotDataset {
             | Self::PlanCacheSummary
             | Self::StatementGrants
             | Self::CurrentRequestMemory
+            | Self::MemoryFailures
             | Self::IndexOperations
             | Self::Tables
             | Self::Statistics
@@ -294,6 +296,7 @@ pub enum OperationalFact {
     Retention(Box<RetentionObservation>),
     RetentionCoverage(RetentionCoverage),
     ExecutionGrant(Box<ExecutionGrantObservation>),
+    MssqlOutOfMemory(Box<MssqlOutOfMemoryObservation>),
     StatementCounters(Box<StatementCounterSample>),
     Queue(QueueSample),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
@@ -321,6 +324,7 @@ impl OperationalFact {
             Self::Retention(retainer) => retainer.key(),
             Self::RetentionCoverage(coverage) => coverage.key(),
             Self::ExecutionGrant(grant) => grant.key(),
+            Self::MssqlOutOfMemory(observation) => observation.key(),
             Self::StatementCounters(counters) => counters.key(),
             Self::MssqlStatementGrants(grants) => grants.context.identity.key(),
             Self::MssqlIndexOperations(index) => index.identity.key(),
@@ -346,6 +350,9 @@ impl OperationalFact {
             Self::MssqlIndex(index) => index.redact(engine),
             Self::CatalogCounters(counters) => counters.catalog.redact(engine),
             Self::ExecutionGrant(grant) => grant.redact(engine),
+            // Only the explicitly named native memory-metadata columns are retained. They contain no SQL payload
+            // or connection identity; malformed native JSON is qualified without inventing a SQL redaction pass.
+            Self::MssqlOutOfMemory(_) => {}
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
@@ -398,6 +405,7 @@ impl OperationalFact {
             Self::Retention(retainer) => retainer.is_valid(),
             Self::RetentionCoverage(coverage) => coverage.is_valid(),
             Self::ExecutionGrant(grant) => grant.is_valid(),
+            Self::MssqlOutOfMemory(observation) => observation.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),

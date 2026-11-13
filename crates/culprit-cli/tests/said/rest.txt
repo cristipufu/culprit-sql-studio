@@ -123,6 +123,7 @@ last-actual-plans  Actual plans without re-running queries
                   SQL Server · SQL Server 2019+ can keep each query's last actual plan (LAST_QUERY_PLAN_STATS) and report live per-operator progress (LIGHTWEIGHT_QUERY_PROFILING).
 $ culprit --format text sources
 SQL Server
+  memory failures           retained database-engine out-of-memory observations · adds detail
   current request memory    current query memory requests and reservations · adds detail
   replication               availability replicas and geo-replication links · adds detail
   log_capacity              database log space and log reuse reason · adds detail

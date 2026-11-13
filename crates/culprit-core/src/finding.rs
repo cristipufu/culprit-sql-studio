@@ -376,6 +376,10 @@ pub struct SeverityCount {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct Report {
+    /// A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub memory_failures: Option<crate::memory_failure_report::MemoryFailureReport>,
     pub snapshot: Snapshot,
     pub findings: Vec<Finding>,
     pub locked: Vec<LockedCheck>,

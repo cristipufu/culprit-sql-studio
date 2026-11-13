@@ -13312,6 +13312,8 @@ li code,
 .operational-health > details { margin-top: 16px; }
 .operational-health summary { cursor: pointer; }
 .operational-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 12px; }
+.memory-failure-grid { align-items: start; }
+.memory-failure-grid > article:has(> details[open]) { grid-column: 1 / -1; }
 .operational-card { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 14px; overflow-wrap: anywhere; }
 .operational-card h4 { margin: 0 0 8px; font-size: var(--fs-ui); }
 .operational-card p { font-size: var(--fs-ui-sm); line-height: 1.6; margin: 6px 0; }

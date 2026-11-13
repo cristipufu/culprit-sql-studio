@@ -36,6 +36,8 @@ impl StateSource {
 impl<R: NativeRead> StateSource<R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         request.validate()?;
+        let CollectionSelection::Snapshot { dataset } = request.selection else { return Err(invalid_data()) };
+        subject::validate_dataset(&request.subject, dataset)?;
         Ok(Self {
             request: request.clone(),
             host,
@@ -157,7 +159,11 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         let description = CollectionDescription {
             target,
             source: if shared {
-                "shared-operational-state"
+                if dataset == SnapshotDataset::MemoryFailures {
+                    "shared-memory-failure-state"
+                } else {
+                    "shared-operational-state"
+                }
             } else {
                 match dataset {
                     SnapshotDataset::Operational => "operational-state",
@@ -189,6 +195,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::CurrentRequestMemory => {
                         return Err(invalid_data());
                     }
+                    SnapshotDataset::MemoryFailures => return Err(invalid_data()),
                 }
             }
             .into(),
@@ -263,6 +270,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
     }
 }
 
+#[cfg(test)]
+mod memory_failure_tests;
 #[cfg(test)]
 mod native_tests;
 #[cfg(test)]

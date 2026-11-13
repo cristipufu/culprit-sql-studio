@@ -5,6 +5,7 @@ pub mod changes;
 pub mod check;
 pub mod cloud;
 pub mod collected_analysis;
+pub mod collected_resource_analysis;
 pub mod compilation;
 pub mod connection;
 pub mod connection_security;
@@ -28,6 +29,7 @@ pub mod insights;
 mod label_tests;
 pub mod limits;
 pub mod measurement;
+pub mod memory_failure_report;
 pub mod model;
 pub mod operations;
 pub mod plan;
@@ -89,6 +91,7 @@ pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
 pub use measurement::*;
+pub use memory_failure_report::{MemoryFailureExplanation, MemoryFailureReport};
 pub use model::*;
 pub use operations::{
     MemoryLimit, NodeResource, NodeResources, ProcessMemory, QueryTermination, TerminationHistory, TerminationReason,

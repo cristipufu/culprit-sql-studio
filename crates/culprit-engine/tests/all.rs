@@ -28,6 +28,7 @@ mod plugin;
 mod provenance;
 mod services;
 mod share;
+mod sqlite_memory_failures;
 mod table_growth;
 mod timescale;
 

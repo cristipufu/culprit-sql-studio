@@ -1,4 +1,4 @@
-//! Azure SQL collection adapters over bounded native statistics readers and stable parameterized queries.
+//! Native collection adapters over bounded statistics readers and stable parameterized queries.
 mod cached_definitions;
 mod cached_runtime;
 mod check_constraints;
@@ -47,7 +47,12 @@ pub(crate) fn source(
         return resources::pool_source(pool, request);
     }
     if matches!(request.subject, culprit_core::telemetry::CollectionSubject::Shared { .. })
-        && request.collection() == culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Operational)
+        && matches!(
+            request.collection(),
+            culprit_core::telemetry::TelemetryCollection::Snapshot(
+                SnapshotDataset::Operational | SnapshotDataset::MemoryFailures
+            )
+        )
     {
         subject::is_shared(&request.subject)?;
         return Ok(Box::new(state::StateSource::new(pool, request, host, port)?));

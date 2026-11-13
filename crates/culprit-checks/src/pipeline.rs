@@ -250,6 +250,7 @@ impl Pipeline {
         for step in &self.prepare {
             step.prepare(&mut snapshot);
         }
+        let memory_failures = explained_memory_failures(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
         let mut assessments = Vec::new();
@@ -343,7 +344,38 @@ impl Pipeline {
                 assessment.status = culprit_core::CheckStatus::Findings;
             }
         }
-        Report { snapshot, findings, locked, summary, assessments, refinement, provenance, evidence }
+        Report { snapshot, findings, locked, summary, assessments, refinement, provenance, evidence, memory_failures }
+    }
+}
+
+fn explained_memory_failures(snapshot: &mut Snapshot) -> Option<culprit_core::MemoryFailureReport> {
+    let captured = snapshot.operations.memory_failures.as_ref()?;
+    let source = snapshot.sources.iter().find(|source| source.source == captured.source);
+    match crate::memory_failures::explain(captured, source) {
+        Ok(report) => Some(report),
+        Err(_) => {
+            let source_id = captured.source.clone();
+            let message = culprit_core::message!("view.memory_failures.invalid_capture");
+            if let Some(source) = snapshot.sources.iter_mut().find(|source| source.source == source_id) {
+                source.state = culprit_core::SourceState::Unavailable;
+                source.reason = Some(message.render());
+                source.reason_message = Some(message.clone());
+            } else {
+                snapshot.sources.push(culprit_core::SourceOutcome {
+                    source: source_id.clone(),
+                    state: culprit_core::SourceState::Unavailable,
+                    reason: Some(message.render()),
+                    reason_message: Some(message.clone()),
+                });
+            }
+            snapshot.notes.push(CollectorNote {
+                message_source: Some(message.clone()),
+                collector: source_id,
+                message: message.render(),
+                table: None,
+            });
+            None
+        }
     }
 }
 

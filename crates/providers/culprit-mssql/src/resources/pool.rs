@@ -33,12 +33,25 @@ pub(crate) struct Context {
     pricing: Pricing,
 }
 
-pub(crate) async fn identity<R: NativeRead>(io: &mut R) -> Result<(Option<Context>, String)> {
+/// Even an unpooled member needs an exact physical route anchor. It is not substituted for pool identity.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Membership {
+    pub pool: Option<Context>,
+    pub route: NativeIdentity,
+}
+
+pub(crate) async fn identity<R: NativeRead>(io: &mut R) -> Result<(Membership, String)> {
     let row = one(io, IDENTITY).await?;
     crate::read::require_primary(crate::read::database_writable(&row)?)?;
     let observed_at = canonical_time(&text(&row, "observed_at")?)?;
+    let route = NativeIdentity::new(text(&row, "server_name")?)
+        .qualified("logical_database_guid", text(&row, "incarnation")?)
+        .qualified("physical_database_guid", text(&row, "physical_incarnation")?);
+    if !route.is_valid() {
+        return Err(invalid_data());
+    }
     let pool_name = match row.columns().find(|(key, _)| *key == "pool_name").map(|(_, value)| value) {
-        Some(crate::value::Val::Null) => return Ok((None, observed_at)),
+        Some(crate::value::Val::Null) => return Ok((Membership { pool: None, route }, observed_at)),
         Some(crate::value::Val::Text(name)) if !name.trim().is_empty() => name,
         _ => return Err(invalid_data()),
     };
@@ -60,7 +73,7 @@ pub(crate) async fn identity<R: NativeRead>(io: &mut R) -> Result<(Option<Contex
     if !context.identity.is_valid() || context.logical_database.is_empty() || context.physical_database.is_empty() {
         return Err(invalid_data());
     }
-    Ok((Some(context), observed_at))
+    Ok((Membership { pool: Some(context), route }, observed_at))
 }
 
 pub(crate) async fn inventory<R: NativeRead>(io: &mut R, window: &Window) -> Result<Inventory> {

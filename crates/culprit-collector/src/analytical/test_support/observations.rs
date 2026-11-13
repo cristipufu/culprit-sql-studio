@@ -1,5 +1,68 @@
 use super::*;
 
+/// Native retained rows deliberately carry no occurrence, database, session or query identity.
+pub fn memory_failure_observation(position: u32) -> MssqlOutOfMemoryObservation {
+    let row = MssqlOutOfMemoryObservation {
+        position,
+        event_time_without_offset: "2020-01-01T10:30:00.003".into(),
+        oom_cause: 11,
+        oom_cause_desc: "native heuristic cause 11".into(),
+        oom_factor: 255,
+        oom_factor_desc: "native internal diagnostic".into(),
+        available_physical_memory_mb: i32::MIN,
+        process_memory_usage_mb: i32::MAX,
+        non_sos_memory_usage_mb: -7,
+        committed_memory_target_mb: 0,
+        committed_memory_mb: 64,
+        allocation_potential_memory_mb: -1,
+        initial_job_object_memory_limit_mb: None,
+        current_job_object_memory_limit_mb: Some(-1),
+        possible_non_sos_leaked_memory_mb: Some(0),
+        oom_resource_pools: Some(MemoryFailureJsonDocument::from_raw("null").unwrap()),
+        top_memory_clerks: Some(
+            MemoryFailureJsonDocument::from_raw(
+                r#"[{"clerk_type_name":"native-clerk","page_allocated_mb":-1,"future_member":{"counter":"9007199254740993"}}]"#,
+            )
+            .unwrap(),
+        ),
+        top_resource_pools: None,
+        possible_leaked_memory_clerks: Some(MemoryFailureJsonDocument::from_raw("{unfinished").unwrap()),
+    };
+    assert!(row.is_valid());
+    row
+}
+
+/// A complete read of one retained shared pool buffer does not establish a complete native event history.
+pub fn memory_failure_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut manifest, _) = fixture();
+    let source = culprit_core::source_id::MEMORY_FAILURES;
+    manifest.source.target = CollectionTarget::Shared(SharedResourceIdentity {
+        engine: culprit_core::Engine::Mssql,
+        kind: SharedResourceKind::Pool,
+        namespace: NativeIdentity::new("fixture-native-server"),
+        native: NativeIdentity::new("fixture-native-pool"),
+    });
+    manifest.source.source = source.into();
+    manifest.source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
+        dataset: SnapshotDataset::MemoryFailures,
+        observed_from: "2020-01-01T12:00:00Z".into(),
+        observed_until: "2020-01-01T12:00:01Z".into(),
+        records: 2,
+        sources: vec![StateSourceCoverage::collected(source.into(), 2)],
+    });
+    let records = (0..2)
+        .map(|position| {
+            let row = memory_failure_observation(position);
+            TelemetryRecord::Operational(OperationalObservation {
+                source: source.into(),
+                key: row.key().unwrap(),
+                fact: OperationalFact::MssqlOutOfMemory(Box::new(row)),
+            })
+        })
+        .collect();
+    (manifest.source, records)
+}
+
 pub fn request_memory_evidence(
     statement: DefinitionPayload,
     associated: bool,

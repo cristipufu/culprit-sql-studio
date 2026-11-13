@@ -25,6 +25,10 @@ pub struct SnapshotOptions {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_request_memory: bool,
+    /// Explicit opt-in to retained native memory-failure buffers. Absence of rows does not establish healthy history.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub collect_memory_failures: bool,
 }
 
 impl Default for SnapshotOptions {
@@ -35,6 +39,7 @@ impl Default for SnapshotOptions {
             plans: 25,
             collect_shared_resources: false,
             collect_request_memory: false,
+            collect_memory_failures: false,
         }
     }
 }
@@ -272,5 +277,19 @@ mod tests {
         assert!(!options.collect_shared_resources);
         assert!(options.with_window_minutes(90).collect_request_memory);
         assert!(SnapshotOptions::decl(&ts_rs::Config::default()).contains("collect_request_memory?: boolean"));
+    }
+    #[test]
+    fn memory_failures_require_an_independent_explicit_request() {
+        assert!(!SnapshotOptions::default().collect_memory_failures);
+        let mut request = serde_json::json!({
+            "window_minutes":60,"top_queries":20,"plans":0,
+            "collect_request_memory":true,"collect_shared_resources":true
+        });
+        let options: SnapshotOptions = serde_json::from_value(request.clone()).unwrap();
+        assert!(!options.collect_memory_failures, "other opt-ins do not enable another native source");
+        request["collect_memory_failures"] = true.into();
+        let options: SnapshotOptions = serde_json::from_value(request).unwrap();
+        assert!(options.with_window_minutes(90).collect_memory_failures);
+        assert!(SnapshotOptions::decl(&ts_rs::Config::default()).contains("collect_memory_failures?: boolean"));
     }
 }

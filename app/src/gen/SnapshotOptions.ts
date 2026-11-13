@@ -21,4 +21,8 @@ collect_shared_resources?: boolean,
 /**
  * Explicit opt-in to current request-memory participants. Native source cost requires separate qualification.
  */
-collect_request_memory?: boolean, };
+collect_request_memory?: boolean, 
+/**
+ * Explicit opt-in to retained native memory-failure buffers. Absence of rows does not establish healthy history.
+ */
+collect_memory_failures?: boolean, };
