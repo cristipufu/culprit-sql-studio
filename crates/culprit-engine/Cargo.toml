@@ -69,6 +69,7 @@ ts-rs.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]
+culprit-collector = { workspace = true, features = ["test-support"] }
 culprit-checks.workspace = true
 proptest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

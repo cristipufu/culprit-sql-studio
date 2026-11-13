@@ -3,6 +3,8 @@
 //! listed here, or `every_test_file_is_listed` fails.
 
 #[cfg(feature = "collector")]
+mod collected_evidence;
+#[cfg(feature = "collector")]
 mod collection;
 mod connection_security;
 mod dashboard;

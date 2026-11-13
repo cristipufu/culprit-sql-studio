@@ -3314,6 +3314,8 @@
   "engine.cloud_cli.too_large": "The cloud CLI response exceeded its size limit",
   "engine.cloud_cli.too_large_hint": "Narrow the search or choose specific regions",
   "engine.cloud_cli.unreadable": "Could not read cloud CLI output",
+  "engine.collected_analysis.not_captured": "This query capture does not include the evidence needed for this assessment.",
+  "engine.collected_analysis.partial_workload": "Only the query observations with complete, representable native evidence are assessed; other captured observations remain unresolved.",
   "engine.connection.choose_engine_hint": "Choose the engine explicitly: PostgreSQL, SQL Server, MySQL or SQLite (--engine in the CLI)",
   "engine.connection.empty_password": "The password is empty",
   "engine.connection.iam_needs_user": "AWS IAM authentication needs a database user name",
