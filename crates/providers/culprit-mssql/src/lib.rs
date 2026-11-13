@@ -43,6 +43,7 @@ mod read;
 mod read_metrics;
 mod recorded;
 mod replication;
+mod request_memory;
 mod resource_counters;
 mod resources;
 mod retained_definitions;

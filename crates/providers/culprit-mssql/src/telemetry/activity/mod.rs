@@ -1,7 +1,7 @@
 //! Activity export selects and redacts evidence from the provider's shared activity reader.
 use crate::query_store::decode;
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, NativeStatement, ReadOptions},
+    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
     conn::Pool,
 };
 use async_trait::async_trait;
@@ -109,14 +109,7 @@ pub(crate) fn export_observations(
     let mut observations: Vec<_> = records
         .into_iter()
         .filter(|record| keys.contains(&record.facts.key))
-        .map(|record| {
-            let mut observation = record.facts;
-            observation.statement = match record.current_sql {
-                NativeStatement::Available(text) => DefinitionPayload::sql(&text, culprit_core::Engine::Mssql),
-                NativeStatement::Unavailable(reason) => DefinitionPayload::Unavailable { reason },
-            };
-            observation
-        })
+        .map(crate::activity::ActivityRecord::into_redacted_observation)
         .collect();
     observations.sort_by(|a, b| a.key.cmp(&b.key));
     observations

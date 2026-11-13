@@ -48,7 +48,7 @@ fn replace(row: &Rec, values: &[(&str, Val)]) -> Rec {
             .collect::<Vec<_>>(),
     )
 }
-fn metadata(id: i64) -> Rec {
+pub(crate) fn metadata(id: i64) -> Rec {
     Rec::of(&[
         ("edition", Val::Int(5)),
         ("major", Val::Int(16)),
@@ -151,7 +151,7 @@ fn idle(id: i64) -> Rec {
         ],
     )
 }
-fn details(id: i64, sql: &str) -> Rec {
+pub(crate) fn details(id: i64, sql: &str) -> Rec {
     Rec::of(&[
         ("session_id", Val::Int(id)),
         ("session_generation", Val::Text("2020-01-01T07:00:00.1533333".into())),
@@ -227,7 +227,7 @@ async fn idle_previous_batches_remain_visible_without_becoming_current_export_st
     assert_eq!(sleeper.sql.as_deref(), Some(last));
     assert_eq!(sleeper.elapsed_ms, Some(300_000.0));
     assert_eq!(sleeper.cpu_ms, Some(1000.0));
-    assert_eq!(interactive.io.calls[2].sql, sql::PREVIOUS_BATCH);
+    assert_eq!(interactive.io.calls[2].sql, sql::details(true, sql::QueryPolicy::Activity));
     let mut exporting = reader(
         vec![Ok(rows), Ok(vec![details(42, "SELECT 1")])],
         ActivityScope::CurrentDatabase,
@@ -462,7 +462,7 @@ async fn endpoint_projection_works_for_sql_server_without_azure_database_identit
     );
     let live = crate::live::collect_from(&mut reader).await.unwrap();
     assert_eq!(live.sessions.len(), 1);
-    assert_eq!(reader.io.calls[0].sql, sql::METADATA);
+    assert_eq!(reader.io.calls[0].sql, sql::metadata(IdentityDetail::Endpoint));
     assert_eq!(reader.query_count(), 2);
 }
 

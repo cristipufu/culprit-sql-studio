@@ -246,6 +246,8 @@ struct ScanArgs {
     plans: u32,
     #[arg(long, help = t!("cli.scan.shared_resources"))]
     collect_shared_resources: bool,
+    #[arg(long, help = t!("cli.scan.request_memory"))]
+    collect_request_memory: bool,
     /// Exit with code 3 if any finding is at least this severe (for CI).
     #[arg(long, value_enum)]
     fail_on: Option<SeverityArg>,
@@ -265,6 +267,7 @@ impl ScanArgs {
             top_queries: self.top,
             plans: self.plans,
             collect_shared_resources: self.collect_shared_resources,
+            collect_request_memory: self.collect_request_memory,
             ..SnapshotOptions::default()
         }
         .with_window_minutes(window)
@@ -682,6 +685,17 @@ mod tests {
         assert_eq!(options.window_minutes, 360);
         assert_eq!(options.top_queries, 20);
         assert_eq!(options.plans, 3);
+    }
+    #[test]
+    fn scan_request_memory_reads_are_explicit_and_independent_of_shared_resource_reads() {
+        assert!(!scan_args(&[]).unwrap().snapshot_options().collect_request_memory);
+        let options = scan_args(&["--collect-request-memory", "--window", "6h"]).unwrap().snapshot_options();
+        assert!(options.collect_request_memory);
+        assert!(!options.collect_shared_resources);
+        assert_eq!(options.window_minutes, 360);
+        let options =
+            scan_args(&["--collect-request-memory", "--collect-shared-resources"]).unwrap().snapshot_options();
+        assert!(options.collect_request_memory && options.collect_shared_resources);
     }
 
     #[test]

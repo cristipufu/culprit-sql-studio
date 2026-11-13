@@ -25,6 +25,9 @@ async fn observe(
     if options.collect_shared_resources {
         coverage.shared_resource_details_unavailable(culprit_core::Engine::Yugabyte);
     }
+    if options.collect_request_memory {
+        coverage.request_memory_unavailable(culprit_core::Engine::Yugabyte);
+    }
     let tables = coverage.read_rows(&sources::TABLES, catalog::tables(session).await).unwrap_or_default();
     let indexes = coverage.read_rows(&sources::INDEXES, catalog::indexes(session, &probe).await).unwrap_or_default();
     let columns = coverage.read_rows(&sources::COLUMNS, catalog::columns(session, &probe).await).unwrap_or_default();

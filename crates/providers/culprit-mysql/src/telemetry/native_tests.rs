@@ -352,7 +352,12 @@ async fn scans_and_live_share_the_owned_reader_and_native_catalog_queries() {
     let snapshot = provider
         .snapshot(
             "owned-native-fixture",
-            &culprit_core::SnapshotOptions { plans: 2, collect_shared_resources: true, ..Default::default() },
+            &culprit_core::SnapshotOptions {
+                plans: 2,
+                collect_shared_resources: true,
+                collect_request_memory: true,
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -364,6 +369,13 @@ async fn scans_and_live_share_the_owned_reader_and_native_catalog_queries() {
         .sources
         .iter()
         .find(|source| source.source == culprit_core::source_id::SHARED_RESOURCE_DETAILS)
+        .unwrap();
+    assert_eq!(unsupported.state, culprit_core::SourceState::Unavailable);
+    assert!(unsupported.reason_message.is_some());
+    let unsupported = snapshot
+        .sources
+        .iter()
+        .find(|source| source.source == culprit_core::source_id::REQUEST_MEMORY_DETAILS)
         .unwrap();
     assert_eq!(unsupported.state, culprit_core::SourceState::Unavailable);
     assert!(unsupported.reason_message.is_some());

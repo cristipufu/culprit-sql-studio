@@ -9,6 +9,7 @@ mod index_operations;
 mod indexes;
 mod objects;
 mod partitions;
+mod request_memory;
 mod retained_definitions;
 mod streamed;
 mod triggers;
@@ -76,6 +77,9 @@ pub(crate) fn source(
         }
         culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::StatementGrants) => {
             Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, grants::Grants)?))
+        }
+        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestMemory) => {
+            Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?))
         }
         culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::IndexOperations) => {
             Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, index_operations::IndexOperations)?))

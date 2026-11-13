@@ -350,6 +350,17 @@ async fn collect_misc(
     if let Some(counters) = shared_resources {
         part.pressure.get_or_insert_with(Default::default).resource_counters = Some(counters);
     }
+    let (request_memory, request_coverage) = crate::request_memory::collect(
+        provider.pool.clone(),
+        options.collect_request_memory,
+        provider.endpoint_host.clone(),
+        provider.endpoint_port,
+    )
+    .await;
+    part.outcome.merge(request_coverage);
+    if let Some(grants) = request_memory {
+        part.pressure.get_or_insert_with(Default::default).request_memory = Some(grants);
+    }
     if dmv {
         // The index advisor and tuning checks: each adds detail, and a failure is a note.
         let out = &mut part.outcome;

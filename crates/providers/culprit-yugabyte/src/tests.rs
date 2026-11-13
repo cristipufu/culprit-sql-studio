@@ -758,13 +758,23 @@ async fn live_native_catalog_workload_sessions_and_stale_identity_guards() {
     assert_eq!(probe.engine, Engine::Yugabyte);
     assert!(probe.database_size_bytes.is_none());
     let snapshot = provider
-        .snapshot("yugabyte-native-test", &SnapshotOptions { collect_shared_resources: true, ..Default::default() })
+        .snapshot(
+            "yugabyte-native-test",
+            &SnapshotOptions { collect_shared_resources: true, collect_request_memory: true, ..Default::default() },
+        )
         .await
         .unwrap();
     let unsupported = snapshot
         .sources
         .iter()
         .find(|source| source.source == culprit_core::source_id::SHARED_RESOURCE_DETAILS)
+        .unwrap();
+    assert_eq!(unsupported.state, culprit_core::SourceState::Unavailable);
+    assert!(unsupported.reason_message.is_some());
+    let unsupported = snapshot
+        .sources
+        .iter()
+        .find(|source| source.source == culprit_core::source_id::REQUEST_MEMORY_DETAILS)
         .unwrap();
     assert_eq!(unsupported.state, culprit_core::SourceState::Unavailable);
     assert!(unsupported.reason_message.is_some());

@@ -1,11 +1,12 @@
 //! One native activity reader. Consumers choose scope, enrichment and presentation after reading the same facts.
+pub(crate) mod memory;
 mod resources;
 mod rows;
 mod sql;
 
 use crate::{
     conn::Pool,
-    read::{NativeRead, Parameter, ReadError, ReadSession, integer, invalid_data, text},
+    read::{NativeRead, Parameter, ReadError, ReadSession, integer, invalid_data, stops_remaining_reads, text},
     value::Rec,
 };
 use culprit_core::{DatabaseIdentity, Engine, Error, ErrorCode, Result, telemetry::*};
@@ -114,6 +115,16 @@ pub(crate) struct ActivityRecord {
     current_locator: Option<RequestLocator>,
     previous_locator: Option<PreviousBatchLocator>,
 }
+impl ActivityRecord {
+    pub(crate) fn into_redacted_observation(self) -> ActivityObservation {
+        let mut observation = self.facts;
+        observation.statement = match self.current_sql {
+            NativeStatement::Available(text) => DefinitionPayload::sql(&text, Engine::Mssql),
+            NativeStatement::Unavailable(reason) => DefinitionPayload::Unavailable { reason },
+        };
+        observation
+    }
+}
 pub(crate) struct ActivityFrame {
     pub context: ActivityContext,
     pub records: Vec<ActivityRecord>,
@@ -163,17 +174,14 @@ impl<R: NativeRead> ActivityReader<R> {
         }
         self.observed = true;
         let limit = self.options.budget.max_snapshot_rows;
-        let sql = match self.options.identity {
-            IdentityDetail::Endpoint => sql::METADATA,
-            IdentityDetail::AzureDatabase => sql::METADATA_WITH_IDENTITY,
-        };
+        let sql = sql::metadata(self.options.identity);
         let scope = match self.options.scope {
             ActivityScope::Visible => 0,
             ActivityScope::CurrentDatabase => 1,
         };
         let rows = self
             .io
-            .query(sql, vec![Parameter::Integer(i64::from(limit) + 1), Parameter::Integer(scope)], limit as usize + 1)
+            .query(&sql, vec![Parameter::Integer(i64::from(limit) + 1), Parameter::Integer(scope)], limit as usize + 1)
             .await
             .map_err(ReadError::into_error)?;
         let context = ActivityContext::decode(
@@ -206,6 +214,16 @@ impl<R: NativeRead> ActivityReader<R> {
         previous_batches: bool,
         max_sql_bytes: u32,
     ) -> Result<ActivityDetailStatus> {
+        self.enrich_using_policy(frame, selected, previous_batches, max_sql_bytes, sql::QueryPolicy::Activity).await
+    }
+    async fn enrich_using_policy(
+        &mut self,
+        frame: &mut ActivityFrame,
+        selected: &BTreeSet<ActivityKey>,
+        previous_batches: bool,
+        max_sql_bytes: u32,
+        policy: sql::QueryPolicy,
+    ) -> Result<ActivityDetailStatus> {
         let mut status = ActivityDetailStatus::NotNeeded;
         for previous in [false, true] {
             if previous && !previous_batches {
@@ -230,14 +248,15 @@ impl<R: NativeRead> ActivityReader<R> {
             let cap =
                 (self.options.budget.page_bytes / (targets.len() as u32)).saturating_sub(DETAIL_METADATA_ALLOWANCE) / 3;
             let cap = cap.min(max_sql_bytes).min(self.options.budget.max_sql_bytes);
-            let sql = if previous { sql::PREVIOUS_BATCH } else { sql::CURRENT_SQL };
+            let sql = sql::details(previous, policy);
             let result = self
                 .io
-                .query(sql, vec![Parameter::Text(selectors), Parameter::Integer(i64::from(cap))], targets.len())
+                .query(&sql, vec![Parameter::Text(selectors), Parameter::Integer(i64::from(cap))], targets.len())
                 .await;
             let detail_rows = match result {
                 Ok(rows) => rows,
                 Err(ReadError::Stopped(reason)) => return Err(reason.error()),
+                Err(ReadError::Source(error)) if stops_remaining_reads(&error) => return Err(error),
                 Err(ReadError::Source(error)) => {
                     mark_unavailable(frame, &targets, previous);
                     return Ok(ActivityDetailStatus::Unavailable { code: error.code });
@@ -323,7 +342,7 @@ fn selectors(frame: &ActivityFrame, targets: &[usize], previous: bool) -> Result
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod native_tests;

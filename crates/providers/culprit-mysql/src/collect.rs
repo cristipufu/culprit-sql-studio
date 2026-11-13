@@ -49,6 +49,9 @@ pub async fn snapshot(
     if options.collect_shared_resources {
         coverage.shared_resource_details_unavailable(Engine::Mysql);
     }
+    if options.collect_request_memory {
+        coverage.request_memory_unavailable(Engine::Mysql);
+    }
 
     let mut source_waits = Vec::new();
     let workload = match workload {

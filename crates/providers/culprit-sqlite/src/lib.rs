@@ -143,11 +143,14 @@ impl Provider for SqliteProvider {
                 collect::snapshot_with_handle(conn, path, &connection, environment, Instant::now(), handle)
             })
             .await?;
+        let mut coverage = culprit_core::Coverage::default();
         if options.collect_shared_resources {
-            let mut coverage = culprit_core::Coverage::default();
             coverage.shared_resource_details_unavailable(Engine::Sqlite);
-            coverage.append_to(&mut snapshot);
         }
+        if options.collect_request_memory {
+            coverage.request_memory_unavailable(Engine::Sqlite);
+        }
+        coverage.append_to(&mut snapshot);
         Ok(snapshot)
     }
 
@@ -208,12 +211,20 @@ mod tests {
         assert!(
             ordinary.sources.iter().all(|source| source.source != culprit_core::source_id::SHARED_RESOURCE_DETAILS)
         );
-        let options = SnapshotOptions { collect_shared_resources: true, ..Default::default() };
+        let options =
+            SnapshotOptions { collect_shared_resources: true, collect_request_memory: true, ..Default::default() };
         let requested = provider.snapshot("file", &options).await.unwrap();
         let outcome = requested
             .sources
             .iter()
             .find(|source| source.source == culprit_core::source_id::SHARED_RESOURCE_DETAILS)
+            .unwrap();
+        assert_eq!(outcome.state, culprit_core::SourceState::Unavailable);
+        assert!(outcome.reason_message.is_some());
+        let outcome = requested
+            .sources
+            .iter()
+            .find(|source| source.source == culprit_core::source_id::REQUEST_MEMORY_DETAILS)
             .unwrap();
         assert_eq!(outcome.state, culprit_core::SourceState::Unavailable);
         assert!(outcome.reason_message.is_some());

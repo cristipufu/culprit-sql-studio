@@ -198,6 +198,11 @@ pub const PENDING_GRANTS: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.pending_grants"),
     delivers: &[],
 };
+pub const CURRENT_REQUEST_MEMORY: Source = Source {
+    name: source_id::CURRENT_REQUEST_MEMORY,
+    reads: culprit_core::key!("provider.mssql.source.current_request_memory"),
+    delivers: &[],
+};
 pub const WORKER_QUEUE: Source = Source {
     name: source_id::WORKER_QUEUE,
     reads: culprit_core::key!("provider.mssql.source.worker_queue"),
@@ -345,6 +350,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    CURRENT_REQUEST_MEMORY,
     REPLICATION,
     LOG_CAPACITY,
     FILE_CAPACITY,
