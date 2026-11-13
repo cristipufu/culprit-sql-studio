@@ -73,6 +73,18 @@ pub enum ConstraintValidation {
     Unsupported,
 }
 
+/// Which native evidence can establish cleanup retention, independently of SQL grammar or engine identity.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum CleanupEvidence {
+    LoggedAndVersionedTransactions,
+    TransactionHorizons,
+    SharedUndoReadViews,
+    FileLock,
+    Unavailable,
+}
+
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
     fn evidence_presentation(&self) -> EvidencePresentation;
@@ -97,6 +109,7 @@ pub trait EngineSpec: Send + Sync {
     /// Meaning and presentation of statement counters, independently of SQL grammar or storage.
     fn statement_metrics(&self) -> StatementMetrics;
     fn constraint_validation(&self) -> ConstraintValidation;
+    fn cleanup_evidence(&self) -> CleanupEvidence;
     /// How a live wait sample is collected. Required so a new engine cannot inherit another engine's description.
     fn wait_sampling(&self) -> Option<WaitSampling>;
     /// Whether a health counter measures this database or a shared server, independently of its temporal scope.
@@ -450,6 +463,7 @@ pub struct EngineFacts {
     pub sql_syntax: SqlSyntax,
     pub statement_metrics: StatementMetrics,
     pub constraint_validation: ConstraintValidation,
+    pub cleanup_evidence: CleanupEvidence,
     pub wait_sampling: Option<WaitSampling>,
     pub connection_security: Option<crate::ConnectionSecuritySpec>,
 }
@@ -508,6 +522,7 @@ impl Engine {
             products: spec.products().iter().map(|product| product.facts()).collect(),
             statement_metrics: spec.statement_metrics(),
             constraint_validation: spec.constraint_validation(),
+            cleanup_evidence: spec.cleanup_evidence(),
             wait_sampling: spec.wait_sampling(),
             sql_syntax: spec.sql_syntax(),
             label: spec.label().into(),

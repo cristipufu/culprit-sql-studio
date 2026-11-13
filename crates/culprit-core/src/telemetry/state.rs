@@ -17,6 +17,7 @@ pub enum SnapshotDataset {
     PlanCacheSummary,
     Tuning,
     StatementGrants,
+    CurrentRequestMemory,
     IndexOperations,
     Tables,
     ForeignKeys,
@@ -45,6 +46,7 @@ impl SnapshotDataset {
             | Self::Operational
             | Self::PlanCacheSummary
             | Self::StatementGrants
+            | Self::CurrentRequestMemory
             | Self::IndexOperations
             | Self::Tables
             | Self::Statistics
@@ -289,6 +291,9 @@ pub enum OperationalFact {
     Counter(NativeCounterSample),
     CounterSet(Box<NativeCounterSet>),
     CatalogCounters(Box<NativeCatalogCounters>),
+    Retention(Box<RetentionObservation>),
+    RetentionCoverage(RetentionCoverage),
+    ExecutionGrant(Box<ExecutionGrantObservation>),
     StatementCounters(Box<StatementCounterSample>),
     Queue(QueueSample),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
@@ -313,6 +318,9 @@ impl OperationalFact {
         let expected = match self {
             Self::CounterSet(counters) => counters.key(),
             Self::CatalogCounters(counters) => counters.catalog.key(),
+            Self::Retention(retainer) => retainer.key(),
+            Self::RetentionCoverage(coverage) => coverage.key(),
+            Self::ExecutionGrant(grant) => grant.key(),
             Self::StatementCounters(counters) => counters.key(),
             Self::MssqlStatementGrants(grants) => grants.context.identity.key(),
             Self::MssqlIndexOperations(index) => index.identity.key(),
@@ -337,12 +345,15 @@ impl OperationalFact {
         match self {
             Self::MssqlIndex(index) => index.redact(engine),
             Self::CatalogCounters(counters) => counters.catalog.redact(engine),
+            Self::ExecutionGrant(grant) => grant.redact(engine),
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
             | Self::Counter(_)
             | Self::StatementCounters(_)
             | Self::CounterSet(_)
+            | Self::Retention(_)
+            | Self::RetentionCoverage(_)
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)
@@ -384,6 +395,9 @@ impl OperationalFact {
             Self::StatementCounters(counters) => counters.is_valid(),
             Self::CounterSet(counters) => counters.is_valid(),
             Self::CatalogCounters(counters) => counters.is_valid(),
+            Self::Retention(retainer) => retainer.is_valid(),
+            Self::RetentionCoverage(coverage) => coverage.is_valid(),
+            Self::ExecutionGrant(grant) => grant.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),
@@ -418,7 +432,16 @@ impl OperationalObservation {
         SnapshotDataset::Operational.stream()
     }
     pub fn is_valid(&self) -> bool {
-        valid_key(&self.source) && valid_key(&self.key) && self.fact.is_valid() && self.fact.matches_key(&self.key)
+        valid_key(&self.source)
+            && valid_key(&self.key)
+            && self.fact.is_valid()
+            && self.fact.matches_key(&self.key)
+            && match &self.fact {
+                OperationalFact::Retention(retainer) => retainer.source == self.source,
+                OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,
+                OperationalFact::ExecutionGrant(grant) => grant.source == self.source,
+                _ => true,
+            }
     }
 }
 /// A native nonzero counter row. Absence does not establish an observed zero or an unchanged reset epoch.

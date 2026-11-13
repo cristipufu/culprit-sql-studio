@@ -44,16 +44,25 @@ pub struct GeoReplicationSample {
 pub struct NativeReplicationSample {
     pub key: String,
     pub measurements: NativeCounterSet,
+    /// A native sender/consumer link observed with its backend generation. Not the application query causing lag.
+    pub session: Option<NativeActivityIdentity>,
+    pub unresolved_session_id: Option<String>,
+    pub slot_name: Option<String>,
 }
 impl NativeReplicationSample {
     pub fn new(measurements: NativeCounterSet) -> Result<Self> {
         if !measurements.is_valid() {
             return Err(CollectionStop::InvalidPage.error());
         }
-        Ok(Self { key: measurements.key()?, measurements })
+        Ok(Self { key: measurements.key()?, measurements, session: None, unresolved_session_id: None, slot_name: None })
     }
     pub fn is_valid(&self) -> bool {
-        self.measurements.is_valid() && self.measurements.key().is_ok_and(|key| key == self.key)
+        self.measurements.is_valid()
+            && self.measurements.key().is_ok_and(|key| key == self.key)
+            && self.session.as_ref().is_none_or(NativeActivityIdentity::is_valid)
+            && self.unresolved_session_id.as_deref().is_none_or(valid_key)
+            && (self.session.is_none() || self.unresolved_session_id.is_none())
+            && self.slot_name.as_deref().is_none_or(valid_key)
     }
 }
 

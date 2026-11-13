@@ -43,6 +43,9 @@ const USER_SETTINGS: &[&str] = &[
 ];
 
 impl EngineSpec for Postgres {
+    fn cleanup_evidence(&self) -> CleanupEvidence {
+        CleanupEvidence::TransactionHorizons
+    }
     fn evidence_presentation(&self) -> EvidencePresentation {
         EvidencePresentation {
             storage_about: key!("ui.beyond_time.storage.about_postgres").into(),

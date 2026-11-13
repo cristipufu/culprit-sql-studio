@@ -110,12 +110,18 @@ impl OperationalFact {
             Self::MssqlIndex(value) => {
                 value.filter.as_ref().map(|value| reference("/record/data/fact/data/filter/payload", &value.payload))
             }
+            Self::ExecutionGrant(value) => value
+                .request
+                .as_ref()
+                .map(|request| reference("/record/data/fact/data/request/statement", &request.statement)),
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
             | Self::Counter(_)
             | Self::StatementCounters(_)
             | Self::CounterSet(_)
+            | Self::Retention(_)
+            | Self::RetentionCoverage(_)
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)

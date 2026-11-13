@@ -4,6 +4,28 @@
 use super::*;
 
 #[test]
+fn cleanup_evidence_semantics_are_required_for_every_engine_and_shared_with_frontend_facts() {
+    use CleanupEvidence::*;
+    let cases = [
+        (Engine::Mssql, LoggedAndVersionedTransactions),
+        (Engine::Postgres, TransactionHorizons),
+        (Engine::Yugabyte, Unavailable),
+        (Engine::Mysql, SharedUndoReadViews),
+        (Engine::Sqlite, FileLock),
+    ];
+    assert_eq!(cases.map(|case| case.0), Engine::ALL, "new engines must declare their native cleanup evidence");
+    for (engine, expected) in cases {
+        assert_eq!(engine.spec().cleanup_evidence(), expected, "{engine:?}");
+        assert_eq!(engine.facts().cleanup_evidence, expected, "{engine:?}");
+    }
+    assert_ne!(
+        Engine::Postgres.spec().cleanup_evidence(),
+        Engine::Yugabyte.spec().cleanup_evidence(),
+        "shared SQL grammar does not imply shared storage horizons"
+    );
+}
+
+#[test]
 fn constraint_and_io_semantics_are_explicit_for_every_engine() {
     use ConstraintValidation::*;
     let cases = [

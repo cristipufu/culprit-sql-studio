@@ -70,6 +70,7 @@
       "runtime_cache_note": "core.engines.mssql.runtime_cache_note"
     },
     "constraint_validation": "optimizer-trust",
+    "cleanup_evidence": "logged-and-versioned-transactions",
     "wait_sampling": "counters",
     "connection_security": {
       "modes": [
@@ -217,6 +218,7 @@
       "runtime_cache_note": null
     },
     "constraint_validation": "check-exclusion",
+    "cleanup_evidence": "transaction-horizons",
     "wait_sampling": "sessions",
     "connection_security": {
       "modes": [
@@ -380,6 +382,7 @@
       "runtime_cache_note": null
     },
     "constraint_validation": "deferred",
+    "cleanup_evidence": "unavailable",
     "wait_sampling": "sessions",
     "connection_security": {
       "modes": [
@@ -544,6 +547,7 @@
       "runtime_cache_note": null
     },
     "constraint_validation": "unsupported",
+    "cleanup_evidence": "shared-undo-read-views",
     "wait_sampling": "counters",
     "connection_security": {
       "modes": [
@@ -745,6 +749,7 @@
       "runtime_cache_note": null
     },
     "constraint_validation": "unsupported",
+    "cleanup_evidence": "file-lock",
     "wait_sampling": null,
     "connection_security": null
   }

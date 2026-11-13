@@ -7,6 +7,9 @@ use crate::model::Capability;
 pub(super) struct Mssql;
 
 impl EngineSpec for Mssql {
+    fn cleanup_evidence(&self) -> CleanupEvidence {
+        CleanupEvidence::LoggedAndVersionedTransactions
+    }
     fn evidence_presentation(&self) -> EvidencePresentation {
         EvidencePresentation {
             storage_about: key!("ui.beyond_time.storage.about").into(),

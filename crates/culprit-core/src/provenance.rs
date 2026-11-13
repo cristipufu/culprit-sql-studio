@@ -60,6 +60,8 @@ pub enum AnalysisOrigin {
     Collected,
     RetainedInput,
     PreparedReport,
+    /// An explicit authenticated telemetry capture projected offline, without a newly collected server snapshot.
+    ArchivedTelemetry,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]

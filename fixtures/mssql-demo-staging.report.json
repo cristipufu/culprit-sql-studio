@@ -2012,6 +2012,8 @@
       "sqlite": null
     },
     "options": {
+      "collect_request_memory": false,
+      "collect_shared_resources": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080

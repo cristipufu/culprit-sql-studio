@@ -326,6 +326,19 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         if let Some(transaction) = &mut p.oldest_transaction {
             transaction.program = None;
         }
+        if let Some(retention) = &mut p.retention {
+            for holder in &mut retention.holders {
+                holder.redact_context();
+            }
+        }
+        if let Some(grants) = &mut p.request_memory {
+            for grant in grants {
+                grant.redact(engine);
+                if let Some(request) = &mut grant.request {
+                    request.client = None;
+                }
+            }
+        }
         for file in &mut p.files {
             file.name = shareable_name(&file.name);
         }

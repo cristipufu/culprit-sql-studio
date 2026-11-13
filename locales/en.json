@@ -5017,6 +5017,8 @@
   "provider.postgres.wait.data_files": "data file reads and writes",
   "provider.postgres.wait.other": "CPU, locks and untimed waits",
   "provider.postgres.wait.running": "Running",
+  "provider.request_memory.details": "current query memory evidence",
+  "provider.request_memory.unsupported": "{engine} does not provide current query memory observations through this profile.",
   "provider.shared_resources.details": "detailed shared-resource evidence",
   "provider.shared_resources.not_requested": "Detailed shared-resource collection was not requested for this scan.",
   "provider.shared_resources.unsupported": "Detailed shared-resource collection is not implemented by this {engine} provider.",

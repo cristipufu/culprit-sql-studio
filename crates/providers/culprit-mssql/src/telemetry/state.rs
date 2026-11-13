@@ -185,7 +185,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::Triggers
                     | SnapshotDataset::Partitions
                     | SnapshotDataset::CachedDefinitions
-                    | SnapshotDataset::RetainedPlans => {
+                    | SnapshotDataset::RetainedPlans
+                    | SnapshotDataset::CurrentRequestMemory => {
                         return Err(invalid_data());
                     }
                 }

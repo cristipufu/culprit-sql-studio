@@ -161,6 +161,13 @@ pub struct ActivityClient {
     pub user: Option<String>,
     pub host: Option<String>,
 }
+impl ActivityClient {
+    pub fn is_valid(&self) -> bool {
+        [&self.application, &self.user, &self.host]
+            .into_iter()
+            .all(|value| value.as_deref().is_none_or(|value| value.len() <= 512))
+    }
+}
 
 /// Unknown blocking evidence cannot clear an incident previously established for the same request.
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,11 +238,7 @@ impl ActivityObservation {
                     })
             })
             && self.query_hash.as_deref().is_none_or(identifier)
-            && self.client.as_ref().is_none_or(|client| {
-                [&client.application, &client.user, &client.host]
-                    .into_iter()
-                    .all(|value| value.as_deref().is_none_or(|value| value.len() <= 512))
-            })
+            && self.client.as_ref().is_none_or(ActivityClient::is_valid)
             && self.statement.is_valid()
     }
     pub fn redact(&mut self, engine: crate::Engine) {

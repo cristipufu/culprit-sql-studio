@@ -4,6 +4,7 @@ pub mod blocking;
 pub mod changes;
 pub mod check;
 pub mod cloud;
+pub mod collected_analysis;
 pub mod compilation;
 pub mod connection;
 pub mod connection_security;
@@ -80,8 +81,8 @@ pub use digest::{
 };
 pub use drift::{Drift, DriftItem, DriftKind, DriftPresence, DriftSide, server_label};
 pub use engines::{
-    DatabaseProduct, EngineSpec, PlanningStep, ProductFacts, ProductSpec, ReadUnit, SettingChange, SqlSyntax, WriteLog,
-    WriteRows, ysql_session_target,
+    CleanupEvidence, DatabaseProduct, EngineSpec, PlanningStep, ProductFacts, ProductSpec, ReadUnit, SettingChange,
+    SqlSyntax, WriteLog, WriteRows, ysql_session_target,
 };
 pub use error::{Error, ErrorCode, ErrorDetail, Result};
 pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};

@@ -24,6 +24,19 @@ pub struct FindingFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cleanup_holder: Option<String>,
+    /// The native cleanup horizon selected by the diagnosis; data and catalog holds are independent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cleanup_horizon: Option<crate::telemetry::CleanupHorizon>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cleanup_retention_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cleanup_visibility_complete: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cleanup_tied_holders: Option<u32>,
     pub histogram_columns: Vec<String>,
     pub index_keys: Vec<String>,
     pub network_wait_share: Option<f64>,

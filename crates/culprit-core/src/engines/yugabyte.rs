@@ -29,6 +29,9 @@ pub fn session_target(session: &str) -> crate::Result<(String, i32, String)> {
 }
 
 impl EngineSpec for Yugabyte {
+    fn cleanup_evidence(&self) -> CleanupEvidence {
+        CleanupEvidence::Unavailable
+    }
     fn evidence_presentation(&self) -> EvidencePresentation {
         EvidencePresentation {
             storage_about: key!("ui.beyond_time.storage.about").into(),

@@ -21,6 +21,10 @@ pub struct SnapshotOptions {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_shared_resources: bool,
+    /// Explicit opt-in to current request-memory participants. Native source cost requires separate qualification.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub collect_request_memory: bool,
 }
 
 impl Default for SnapshotOptions {
@@ -30,6 +34,7 @@ impl Default for SnapshotOptions {
             top_queries: 60,
             plans: 25,
             collect_shared_resources: false,
+            collect_request_memory: false,
         }
     }
 }
@@ -255,5 +260,17 @@ mod tests {
         let options: SnapshotOptions = serde_json::from_value(request).unwrap();
         assert!(options.with_window_minutes(90).collect_shared_resources);
         assert!(SnapshotOptions::decl(&ts_rs::Config::default()).contains("collect_shared_resources?: boolean"));
+    }
+    #[test]
+    fn request_memory_collection_requires_its_own_explicit_request() {
+        assert!(!SnapshotOptions::default().collect_request_memory);
+        let mut request = serde_json::json!({"window_minutes":60,"top_queries":20,"plans":0});
+        let options: SnapshotOptions = serde_json::from_value(request.clone()).unwrap();
+        assert!(!options.collect_request_memory);
+        request["collect_request_memory"] = true.into();
+        let options: SnapshotOptions = serde_json::from_value(request).unwrap();
+        assert!(!options.collect_shared_resources);
+        assert!(options.with_window_minutes(90).collect_request_memory);
+        assert!(SnapshotOptions::decl(&ts_rs::Config::default()).contains("collect_request_memory?: boolean"));
     }
 }

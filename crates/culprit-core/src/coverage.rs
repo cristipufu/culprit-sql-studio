@@ -96,6 +96,8 @@ pub mod source_id {
     pub const SCHEDULERS: &str = "schedulers";
     pub const SHARED_MEMORY_ALLOCATIONS: &str = "shared memory allocations";
     pub const SHARED_RESOURCE_DETAILS: &str = "shared-resource-details";
+    pub const CURRENT_REQUEST_MEMORY: &str = "current request memory";
+    pub const REQUEST_MEMORY_DETAILS: &str = "request-memory-details";
     pub const PERFORMANCE_COUNTERS: &str = "performance counters";
     pub const DATABASE_STATS: &str = "database statistics";
     pub const RESOURCES: &str = "resources";
@@ -194,6 +196,8 @@ pub mod source_id {
         SCHEDULERS,
         SHARED_MEMORY_ALLOCATIONS,
         SHARED_RESOURCE_DETAILS,
+        CURRENT_REQUEST_MEMORY,
+        REQUEST_MEMORY_DETAILS,
         PERFORMANCE_COUNTERS,
         DATABASE_STATS,
         RESOURCES,
@@ -291,6 +295,11 @@ impl Source {
         reads: crate::key!("provider.shared_resources.details"),
         delivers: &[],
     };
+    pub const REQUEST_MEMORY_DETAILS: Self = Self {
+        name: source_id::REQUEST_MEMORY_DETAILS,
+        reads: crate::key!("provider.request_memory.details"),
+        delivers: &[],
+    };
     pub fn description(&self) -> String {
         crate::i18n::t(self.reads, &[])
     }
@@ -324,6 +333,16 @@ impl Coverage {
             &Error::new(
                 ErrorCode::Unsupported,
                 crate::message!("provider.shared_resources.unsupported", engine = engine.label()),
+            ),
+        );
+    }
+    /// Native per-request memory is a capability; an unsupported explicit request never becomes a measured zero.
+    pub fn request_memory_unavailable(&mut self, engine: crate::Engine) {
+        self.source_failed(
+            &Source::REQUEST_MEMORY_DETAILS,
+            &Error::new(
+                ErrorCode::Unsupported,
+                crate::message!("provider.request_memory.unsupported", engine = engine.label()),
             ),
         );
     }
@@ -632,6 +651,21 @@ mod tests {
             assert!(missing.is_empty());
             assert_eq!(notes.len(), 1);
         }
+    }
+
+    #[test]
+    fn unavailable_request_memory_does_not_withdraw_other_capabilities_or_claim_empty_measurements() {
+        let mut coverage = Coverage::with(vec![Capability::TableStats], vec![]);
+        coverage.request_memory_unavailable(crate::Engine::Postgres);
+        let outcomes = coverage.outcomes();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].source, source_id::REQUEST_MEMORY_DETAILS);
+        assert_eq!(outcomes[0].state, SourceState::Unavailable);
+        assert!(outcomes[0].reason_message.as_ref().is_some_and(crate::i18n::Message::is_translatable));
+        let (have, missing, notes) = coverage.finish();
+        assert_eq!(have, [Capability::TableStats]);
+        assert!(missing.is_empty());
+        assert_eq!(notes.len(), 1);
     }
 
     const INDEXES: Source = Source {

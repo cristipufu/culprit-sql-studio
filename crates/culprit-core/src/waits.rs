@@ -425,6 +425,14 @@ pub struct Pressure {
     pub signals: Vec<Signal>,
     pub grants: Vec<GrantStat>,
     pub oldest_transaction: Option<OpenTransaction>,
+    /// Bounded native cleanup retainers and source visibility. Data and catalog horizons remain independent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub retention: Option<crate::telemetry::RetentionSnapshot>,
+    /// Explicitly requested current execution-memory participants. Missing is never a measured empty source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub request_memory: Option<Vec<crate::telemetry::ExecutionGrantObservation>>,
     /// Read and write latency per database file (or kind of I/O), since startup.
     pub files: Vec<crate::signals::FileIo>,
     /// Replicas and replication slots, and how far behind they are.

@@ -7,6 +7,9 @@ use crate::dialect::{NewIndex, keys, unique};
 pub(super) struct Sqlite;
 
 impl EngineSpec for Sqlite {
+    fn cleanup_evidence(&self) -> CleanupEvidence {
+        CleanupEvidence::FileLock
+    }
     fn evidence_presentation(&self) -> EvidencePresentation {
         EvidencePresentation {
             storage_about: key!("ui.beyond_time.storage.about").into(),

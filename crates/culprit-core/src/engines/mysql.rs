@@ -21,6 +21,9 @@ fn index_hiding(server: &ServerInfo) -> Option<&'static str> {
 }
 
 impl EngineSpec for Mysql {
+    fn cleanup_evidence(&self) -> CleanupEvidence {
+        CleanupEvidence::SharedUndoReadViews
+    }
     fn evidence_presentation(&self) -> EvidencePresentation {
         EvidencePresentation {
             storage_about: key!("ui.beyond_time.storage.about").into(),

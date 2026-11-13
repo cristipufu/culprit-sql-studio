@@ -78,7 +78,8 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::Triggers
         | SnapshotDataset::Partitions
         | SnapshotDataset::CachedDefinitions
-        | SnapshotDataset::RetainedPlans => {
+        | SnapshotDataset::RetainedPlans
+        | SnapshotDataset::CurrentRequestMemory => {
             return Err(crate::read::invalid_data());
         }
     })

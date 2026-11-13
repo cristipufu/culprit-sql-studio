@@ -17,4 +17,8 @@ plans: number,
 /**
  * Explicit opt-in to detailed shared-resource readers that require separate production load qualification.
  */
-collect_shared_resources?: boolean, };
+collect_shared_resources?: boolean, 
+/**
+ * Explicit opt-in to current request-memory participants. Native source cost requires separate qualification.
+ */
+collect_request_memory?: boolean, };
