@@ -25,4 +25,8 @@ collect_request_memory?: boolean,
 /**
  * Explicit opt-in to retained native memory-failure buffers. Absence of rows does not establish healthy history.
  */
-collect_memory_failures?: boolean, };
+collect_memory_failures?: boolean, 
+/**
+ * Explicit opt-in to retained native error metadata; free-form diagnostic messages remain omitted.
+ */
+collect_native_failures?: boolean, };

@@ -9,6 +9,7 @@ pub mod deadlocks;
 pub mod fingerprint;
 mod json_members;
 mod native;
+mod native_failures;
 mod operations;
 pub mod plan_json;
 pub mod plan_maria;
@@ -182,6 +183,13 @@ impl Provider for MysqlProvider {
         request: &culprit_core::telemetry::CollectionRequest,
     ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
         telemetry::source(self.connector.clone(), request)
+    }
+
+    async fn telemetry_resources(
+        &self,
+        request: &culprit_core::telemetry::ResourceDiscoveryRequest,
+    ) -> Result<Vec<culprit_core::telemetry::CollectionResource>> {
+        telemetry::native_failures::discover(self.connector.clone(), request).await
     }
 
     async fn probe(&self) -> Result<ServerInfo> {

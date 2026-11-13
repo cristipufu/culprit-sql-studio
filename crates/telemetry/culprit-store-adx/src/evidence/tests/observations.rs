@@ -1,6 +1,51 @@
 use super::*;
 
 #[tokio::test]
+async fn native_failure_formats_keep_exact_context_partial_coverage_and_proof_membership() {
+    for (source, records) in test_support::native_failure_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let result = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..budget() },
+            )
+            .await
+            .unwrap();
+        assert!(result.is_read_complete(), "{:?}", result.gaps());
+        assert_eq!(result.source(), &source);
+        assert_eq!(result.records().len(), records.len());
+        assert_eq!(result.metrics().pages as usize, records.len());
+        assert_ne!(result.records()[0].row().record_id, result.records()[1].row().record_id);
+        let snapshot = source.observation.snapshot().unwrap();
+        assert_eq!(snapshot.dataset, SnapshotDataset::NativeFailures);
+        assert_ne!(source.source, snapshot.sources[0].source);
+        assert!(source.target.database().is_none());
+        for (index, native) in records.iter().enumerate() {
+            let expected = ExportedRecord::new(&source, result.capture(), native.clone()).unwrap();
+            assert_eq!(result.records()[index].row(), &expected);
+            assert_eq!(result.records()[index].row_ordinal() as usize, index + 1);
+        }
+        assert!(!serde_json::to_string(result.records()).unwrap().contains("private-pg-log-canary"));
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        assert_eq!(schema.table(), "CulpritOperationalV1");
+        let column = schema.columns().iter().position(|column| column.name == "FactKind").unwrap();
+        let mut tampered = fixture.rows[0].clone();
+        tampered[column] = json!("unproven-native-format");
+        fixture.replies(vec![vec![tampered]]);
+        let error = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}
+
+#[tokio::test]
 async fn retained_memory_failures_keep_duplicate_native_rows_signed_values_and_unparsed_documents() {
     let (source, records) = test_support::memory_failure_evidence();
     let fixture = Fixture::new(source.clone(), records.clone()).await;

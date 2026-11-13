@@ -1,6 +1,7 @@
 //! Runtime composition owns credentials and adapters; capture, recovery and delivery retain their own lifecycles.
 pub mod config;
 mod destination;
+pub mod evidence;
 mod recovery;
 mod runtime;
 pub use runtime::CollectorRuntime;

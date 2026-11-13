@@ -19,6 +19,7 @@ mod rows;
 mod sessions;
 mod signals;
 pub mod sources;
+pub mod structured_logs;
 mod tables;
 mod telemetry;
 mod timescale;

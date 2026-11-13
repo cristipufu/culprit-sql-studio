@@ -59,6 +59,33 @@ establish historical session thresholds, other logging filters, or that every st
 zero. See the [MySQL slow-log rules](https://dev.mysql.com/doc/refman/8.0/en/slow-query-log.html) and
 [MariaDB's native statement timers](https://mariadb.com/docs/server/reference/system-tables/performance-schema/performance-schema-tables/performance-schema-events_statements_current-table).
 
+## Retained native diagnostics
+
+`culprit scan shop --collect-native-failures` explicitly requests metadata from MySQL 8.0.22+'s native
+`performance_schema.error_log` buffer. Default scans skip it. Scans and the shared-instance collector profile
+`native-failures` use one reader, decoder and context verification. MariaDB, older MySQL and disabled Performance
+Schema are explicit unsupported routes; enabling logging or changing permissions is a separate operator action.
+
+The projection reads at most 128 records plus one truncation witness, without filters, ordering, joins or server-side
+JSON processing. It never selects the free-form `DATA` column, which can contain application values. UTC timestamps,
+exact decimal connection IDs, native log codes, priorities and subsystems remain available. A native connection ID
+has no recorded generation and is not a Performance Schema thread ID, so it cannot identify a current query owner.
+
+The native server UUID and owned session context are rechecked before publication. They qualify the hosting read,
+not the original emitter of every retained row: the buffer may load older log files. Per-entry reads are not an
+atomic event history; logging filters, eviction and restart affect visibility. Equal records at different capture
+positions remain separate, and an empty buffer never establishes the absence of failures. Exact native OOM/resource
+codes select investigations; arbitrary messages and client numeric error codes do not supply that classification.
+
+Collection has its own statement, overall, row and byte limits. These are admission bounds, not a production-load
+qualification. See the [native error-log reference](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-error-log-table.html)
+and [server log-code vocabulary](https://dev.mysql.com/doc/mysql-errors/8.4/en/server-error-reference.html).
+
+The bounded unfiltered cursor starts with the oldest retained entries. A full buffer can therefore leave newer
+failures outside every capped read until earlier entries expire. Partial reads expose that limitation; this opt-in
+diagnostic sample does not provide continuous or guaranteed recent-error coverage. A recent feed requires its own
+qualified acquisition policy.
+
 ## Schema and indexes
 
 `information_schema`, `performance_schema` and `sys` provide the catalog, table activity, index usage and available column histograms. Missing-index candidates are derived from workload, plans and foreign keys rather than a native missing-index DMV.

@@ -83,7 +83,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::CurrentRequestMemory => {
             return Err(crate::read::invalid_data());
         }
-        SnapshotDataset::MemoryFailures => return Err(crate::read::invalid_data()),
+        SnapshotDataset::MemoryFailures | SnapshotDataset::NativeFailures => return Err(crate::read::invalid_data()),
     })
 }
 

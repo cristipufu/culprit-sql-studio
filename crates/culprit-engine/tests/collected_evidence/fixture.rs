@@ -7,10 +7,9 @@ use culprit_collector::{
         encoding::BatchEncoder,
         evidence::{EvidenceCapture, EvidenceFamily, EvidenceReadBudget, EvidenceReader},
         indexes::ProjectionIndexes,
-        projection, publication,
+        publication,
         read_store::{AnalyticalReadPage, AnalyticalReadStore},
-        schema::{LogicalSchema, OutputColumn},
-        test_support::{Blobs, Fault, Recovery},
+        test_support::{Blobs, Fault, JsonProjection as Schema, Recovery},
     },
     delivery::recovery::{CommittedRange, reopen},
 };
@@ -21,43 +20,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-struct Schema {
-    logical: LogicalSchema,
-    columns: Vec<OutputColumn>,
-}
-impl Schema {
-    fn logical(&self, row: &[Value]) -> Result<Map<String, Value>> {
-        self.columns
-            .iter()
-            .zip(row)
-            .map(|(column, value)| Ok((column.name.clone(), column.kind.returned(value, column.nullable)?)))
-            .collect()
-    }
-}
-impl RowProjection for Schema {
-    fn from_logical(logical: LogicalSchema) -> Result<Self> {
-        Ok(Self { columns: logical.columns(), logical })
-    }
-    fn table(&self) -> &str {
-        self.logical.table()
-    }
-    fn digest(&self) -> &str {
-        self.logical.digest()
-    }
-    fn columns(&self) -> &[OutputColumn] {
-        &self.columns
-    }
-    fn project(&self, source: &Value) -> Result<Vec<Value>> {
-        self.logical.project(source)
-    }
-    fn encode(&self, values: &[Value]) -> Result<Vec<u8>> {
-        self.logical.encode(values)
-    }
-    fn returned_digest(&self, row: &[Value]) -> Result<[u8; 32]> {
-        let values = self.logical(row)?;
-        projection::digest(&self.columns.iter().map(|column| values[&column.name].clone()).collect::<Vec<_>>())
-    }
-}
 struct Store {
     catalog: Arc<PhysicalCatalog<Schema>>,
     rows: Mutex<BTreeMap<String, Vec<Vec<Value>>>>,
@@ -72,7 +34,7 @@ impl AnalyticalReadStore for Store {
         self.catalog.clone()
     }
     fn logical_values(&self, stream: TelemetryStream, row: &[Value]) -> Result<Map<String, Value>> {
-        self.catalog.get(stream)?.logical(row)
+        self.catalog.get(stream)?.logical_values(row)
     }
     async fn audit_membership(&self, _: &CommittedRange, _: usize) -> Result<usize> {
         Ok(3)
@@ -165,5 +127,5 @@ impl Fixture {
 
 fn physical_row(schema: &Schema, bytes: &[u8]) -> Vec<Value> {
     let object: Map<String, Value> = serde_json::from_slice(bytes).unwrap();
-    schema.columns.iter().map(|column| object[&column.name].clone()).collect()
+    schema.columns().iter().map(|column| object[&column.name].clone()).collect()
 }

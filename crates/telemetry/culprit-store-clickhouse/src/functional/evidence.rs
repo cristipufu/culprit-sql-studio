@@ -146,6 +146,7 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
         test_support::memory_failure_evidence(),
     ]
     .into_iter()
+    .chain(test_support::native_failure_evidence_cases())
     .enumerate()
     {
         let scenario = Scenario::new(

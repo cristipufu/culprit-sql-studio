@@ -114,6 +114,7 @@ impl OperationalFact {
                 .request
                 .as_ref()
                 .map(|request| reference("/record/data/fact/data/request/statement", &request.statement)),
+            Self::PostgresLog(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
@@ -133,6 +134,7 @@ impl OperationalFact {
             | Self::MssqlQueryCompilation(_)
             | Self::MssqlCachedRuntime(_)
             | Self::MssqlOutOfMemory(_)
+            | Self::MysqlErrorLog(_)
             | Self::SuspectPages { .. } => None,
         };
         [payload, None]

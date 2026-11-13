@@ -323,6 +323,13 @@ independent recovery proofs. It verifies publication, exact membership, normaliz
 before exposing typed records. Both stores share that reader; source coverage remains distinct from successful
 retrieval. Incomplete SQL/plan previews and precision absent from a store remain explicit recovery requirements.
 
+`CollectorRuntime::evidence` composes a query-only `EvidenceService` from independent warehouse and recovery
+credentials. Its configuration has no source connection, fleet inventory, staging target or writer policy. Reading
+a committed range neither acquires collector ownership nor changes remote history. Cancellation and the read
+deadline bound the caller's wait; native transports retain their own request lifecycle, and a dropped caller does
+not establish remote query cancellation. ClickHouse's query transport has no insertion method; its ingestor owns
+`WritePolicy`, and destination identity depends on the endpoint and database rather than insertion quorum.
+
 The optional engine `collected_evidence` consumer adapts one authenticated query-history capture to the existing
 pure pipeline. It joins exact native references within that capture, weights interval statistics by execution
 counts, and withholds workload shares when runtime membership or totals are incomplete. Its public result retains
@@ -333,10 +340,22 @@ Native wait categories are interpreted through the bounded, authenticated vocabu
 Unknown categories remain unknown, and workers, CPU, compilation and memory waits stay distinct.
 Current capture configuration does not qualify historical coverage or invalidate retained positive observations.
 
-`collected_resources::memory_failures` adapts an authenticated shared-resource snapshot to the same pure native
-memory-failure explanations used by scans. It requires the explicit dataset and matching source coverage, keeps
-capture-local positions rather than inventing occurrence IDs, and distinguishes missing warehouse rows from native
+`collected_resources::{memory_failures,native_failures}` adapt authenticated shared-resource snapshots to the same
+pure retained-failure explanations used by scans. They require the explicit dataset and matching source coverage, keep
+capture-local positions rather than inventing occurrence IDs, and distinguish missing warehouse rows from native
 source loss. The result references its original rows without duplicating diagnostic JSON or constructing a database.
+MySQL scans and background collection share one bounded metadata reader for its retained error-log buffer. They
+omit free-form messages and keep connection IDs distinct from Performance Schema thread IDs. A bounded prefix of
+that buffer can omit newer records; successful retrieval establishes neither a complete incident history nor the
+database or query responsible for a recorded resource failure.
+
+`native_logs` analyzes supplied PostgreSQL JSON or explicitly selected CSV layouts without opening a workspace,
+resolving credentials or querying a server. The provider's parser, safe native observation types and pure
+explanations are shared with other consumers. Byte, record and field limits preserve valid observations while
+reporting parse gaps. A file digest identifies the supplied bytes, never a server or incident. Native clock
+qualifications and process/session identifiers remain distinct from the local read bounds; a database label in a
+record does not bind it to a current database. Raw messages and client labels are omitted, statements are redacted,
+and deadlock graphs require supported native edges forming one closed cycle.
 Recorded worker waits are accumulated native durations, not exclusive portions of statement elapsed time. Keep their
 totals when parallel workers overlap, including when the sum exceeds elapsed time. A mean divides that recorded total
 by its matching execution count; it identifies neither a particular slow execution nor the longest execution's wait.

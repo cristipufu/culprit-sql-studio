@@ -12,6 +12,10 @@ pub use observations::{
     memory_failure_evidence, memory_failure_observation, request_memory_evidence, retention_coverage_only_evidence,
     retention_evidence,
 };
+mod projection;
+pub use projection::JsonProjection;
+mod native_failures;
+pub use native_failures::native_failure_evidence_cases;
 
 pub fn fixture() -> (RangeManifest, ExportedRecord) {
     let source = CollectionDescription {

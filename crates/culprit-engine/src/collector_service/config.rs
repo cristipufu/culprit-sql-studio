@@ -46,7 +46,12 @@ pub enum TargetConfig {
     Adx { query: AdxConfig, credential: String, delivery: AdxDeliveryConfig },
     #[cfg(feature = "store-clickhouse")]
     #[serde(rename = "clickhouse")]
-    ClickHouse { query: ClickHouseConfig, credential: String },
+    ClickHouse {
+        query: ClickHouseConfig,
+        credential: String,
+        #[serde(default)]
+        write: culprit_store_clickhouse::ingestion::WritePolicy,
+    },
 }
 
 #[cfg(feature = "store-adx")]
@@ -118,6 +123,12 @@ impl CollectorConfig {
         Ok(())
     }
 }
+pub(super) fn valid_provider_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::InvalidContract.error()
 }

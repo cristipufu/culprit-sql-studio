@@ -81,7 +81,16 @@ async fn capture(
         selection: CollectionSelection::Snapshot { dataset },
         budget: CollectionBudget { page_rows: 2, ..Default::default() },
     };
-    let mut source = provider.telemetry_source(&request).unwrap();
+    let (description, records, _) = capture_requested(provider, &request).await;
+    (description, records)
+}
+
+async fn capture_requested(
+    provider: &crate::MysqlProvider,
+    request: &CollectionRequest,
+) -> (CollectionDescription, Vec<TelemetryRecord>, u32) {
+    let TelemetryCollection::Snapshot(dataset) = request.collection() else { panic!("native snapshot request") };
+    let mut source = provider.telemetry_source(request).unwrap();
     let initial = source.describe().await.unwrap();
     let mut cursor = None;
     let mut all = vec![];
@@ -100,9 +109,10 @@ async fn capture(
         }
     }
     let completion = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
+    let queries = source.query_count();
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);
-    (completion, all)
+    (completion, all, queries)
 }
 
 #[tokio::test]
@@ -527,4 +537,111 @@ async fn a_populated_replication_channel_and_open_transaction_preserve_scope_wit
     assert!(description.observation.covers_request());
     assert!(!records.is_empty());
     assert!(records.iter().all(|row|matches!(row,TelemetryRecord::Operational(OperationalObservation {fact:OperationalFact::CounterSet(set),..}) if set.scope==MeasurementScope::Server)));
+}
+
+#[tokio::test]
+#[ignore = "requires the owned MySQL/MariaDB fixture"]
+async fn retained_error_log_metadata_is_shared_bounded_and_message_free() {
+    use crate::{native::error_log, read::QueryRead};
+    let provider = fixture();
+    let mut reader = ReadSession::new(provider.connector.clone(), crate::native_failures::budget(), Scope::Server);
+    let context = error_log::context::read(&mut reader).await;
+    let (context, _) = match context {
+        Ok(context) => context,
+        Err(error) => {
+            // MariaDB and older MySQL must stop after the native platform guard, before MySQL-only source SQL.
+            assert_eq!(reader.query_count(), 8, "seven owned setup statements plus one platform guard");
+            assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+            assert_eq!(error.code, ErrorCode::Unsupported);
+            let request = ResourceDiscoveryRequest { kind: SharedResourceKind::Instance, budget: Default::default() };
+            assert_eq!(provider.telemetry_resources(&request).await.err().unwrap().code, ErrorCode::Unsupported);
+            return;
+        }
+    };
+    let identity = native::one(&mut reader, "SELECT @@GLOBAL.server_uuid AS uuid", vec![]).await.unwrap();
+    assert_eq!(context.resource.native.id, native::text(&identity, "uuid").unwrap().to_ascii_lowercase());
+    assert_eq!(context.resource.kind, SharedResourceKind::Instance);
+    assert_eq!(context.resource.namespace.qualifiers.get("server_uuid"), Some(&context.resource.native.id));
+
+    let rows = reader
+        .read(
+            &error_log::query(),
+            vec![mysql_async::Value::UInt((error_log::MAX_ROWS + 1) as u64)],
+            error_log::MAX_ROWS + 1,
+        )
+        .await
+        .unwrap();
+    assert!(rows.len() >= 2, "the owned default MySQL image should retain its startup diagnostics");
+    for row in &rows {
+        assert!(!row.has_column("data"), "the actual SQL result must omit free-form native messages");
+        assert!(!row.has_column("message"));
+        assert!(row.has_column("error_code") && row.has_column("priority") && row.has_column("subsystem"));
+    }
+    let first = error_log::decode(&rows[0], 0).unwrap();
+    let micros = native::integer(&rows[0], "logged_microseconds").unwrap();
+    let expected_clock = native::one(
+        &mut reader,
+        "SELECT DATE_FORMAT(FROM_UNIXTIME(?), '%Y-%m-%dT%H:%i:%s.%fZ') AS native_utc",
+        vec![mysql_async::Value::from(format!("{}.{:06}", micros / 1_000_000, micros % 1_000_000))],
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.logged_at, native::text(&expected_clock, "native_utc").unwrap());
+    assert!(first.message.is_none());
+    assert!(!reader.read_metrics().unwrap().has_unconfirmed_work());
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+
+    let discovered = provider
+        .telemetry_resources(&ResourceDiscoveryRequest {
+            kind: SharedResourceKind::Instance,
+            budget: Default::default(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(discovered.len(), 1);
+    assert_eq!(discovered[0].identity, context.resource);
+    assert_eq!(discovered[0].collections, [TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures)]);
+    let request = CollectionRequest {
+        subject: CollectionSubject::Shared { resource: context.resource },
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::NativeFailures },
+        budget: CollectionBudget { page_rows: error_log::MAX_ROWS as u32, ..Default::default() },
+    };
+    let (description, records, queries) = capture_requested(&provider, &request).await;
+    assert!(queries <= crate::native_failures::budget().max_queries);
+    let SourceObservation::Snapshot(native) = description.observation else { panic!("native snapshot") };
+    assert!(!records.is_empty());
+    assert!(records.len() <= error_log::MAX_ROWS);
+    assert_eq!(
+        native.sources[0].state,
+        if native.sources[0].complete_scope {
+            culprit_core::SourceState::Collected
+        } else {
+            culprit_core::SourceState::Partial
+        }
+    );
+    for record in records {
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::MysqlErrorLog(row), .. }) =
+            record
+        else {
+            panic!("native error-log fact")
+        };
+        assert!(row.is_valid() && row.message.is_none());
+    }
+    let limited_request = CollectionRequest {
+        budget: CollectionBudget { max_snapshot_rows: 1, ..request.budget.clone() },
+        ..request.clone()
+    };
+    let (description, records, _) = capture_requested(&provider, &limited_request).await;
+    let SourceObservation::Snapshot(native) = description.observation else { panic!("bounded snapshot") };
+    assert_eq!(native.sources[0].state, culprit_core::SourceState::Partial);
+    assert_eq!(records.len(), 1);
+
+    let mut limited = provider.spec.clone();
+    limited.user = Some(std::env::var("CULPRIT_SMOKE_LIMITED_USER").expect("owned limited monitoring fixture"));
+    limited.password = Some(std::env::var("CULPRIT_SMOKE_LIMITED_PASSWORD").expect("owned limited monitoring fixture"));
+    let limited = crate::MysqlProvider::new(&limited).unwrap();
+    let mut source = limited.telemetry_source(&request).unwrap();
+    let error = source.describe().await.expect_err("unreadable source cannot become an empty native buffer");
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    assert_eq!(error.code, ErrorCode::PermissionDenied);
 }

@@ -1,6 +1,7 @@
 //! Thin native recipes over the shared snapshot lifecycle. No archive, scheduler or destination ownership.
 mod activity;
 mod events;
+pub(crate) mod native_failures;
 #[cfg(test)]
 mod native_tests;
 use crate::{
@@ -119,6 +120,9 @@ impl Recipe {
 }
 pub(crate) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
+    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures) {
+        return native_failures::source(connector, request);
+    }
     request.subject.require_database()?;
     if request.collection() == TelemetryCollection::Activity {
         return activity::source(connector, request);

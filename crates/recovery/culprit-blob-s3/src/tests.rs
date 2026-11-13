@@ -175,8 +175,9 @@ async fn s3_recovery_clickhouse_delivery_and_restart() {
     };
     use culprit_store_clickhouse::{
         catalog::SchemaCatalog,
-        client::{ClickHouseClient, ClickHouseConfig, Credentials, QueryTransport},
+        client::{ClickHouseConfig, Credentials},
         deployment::DeploymentAssets,
+        ingestion::{ClickHouseIngestor, WritePolicy},
     };
     let s3_port = std::env::var("CULPRIT_TEST_S3_PORT").unwrap().parse::<u16>().unwrap();
     let ch_port = std::env::var("CULPRIT_TEST_CLICKHOUSE_PORT").unwrap().parse::<u16>().unwrap();
@@ -205,13 +206,15 @@ async fn s3_recovery_clickhouse_delivery_and_restart() {
     })
     .await
     .unwrap();
-    let client = Arc::new(
-        ClickHouseClient::new(
-            ClickHouseConfig { endpoint, database: "culprit_fixture".into(), insert_quorum: None },
+    let ingestion = Arc::new(
+        ClickHouseIngestor::new(
+            ClickHouseConfig { endpoint, database: "culprit_fixture".into() },
             Credentials::new("culprit_fixture".into(), Zeroizing::new("owned-fixture-password".into())).unwrap(),
+            WritePolicy::default(),
         )
         .unwrap(),
     );
+    let client = ingestion.query_transport();
     let (mut manifest, row) = test_support::fixture();
     manifest.contract = culprit_collector::delivery::contract::Contract::new(
         "s3-clickhouse".into(),
@@ -237,6 +240,7 @@ async fn s3_recovery_clickhouse_delivery_and_restart() {
         manifest.contract.clone(),
         store.clone(),
         objects.clone(),
+        ingestion.clone(),
         client.clone(),
         scratch.path(),
     )
@@ -251,9 +255,15 @@ async fn s3_recovery_clickhouse_delivery_and_restart() {
     let restored = Arc::new(ObjectRecoveryStore::open(objects.clone(), manifest.contract.clone()).await.unwrap());
     assert_eq!(restored.load(&manifest.range_id).await.unwrap(), manifest);
     let range = reopen(restored.as_ref(), &manifest.range_id).await.unwrap();
-    let resumed =
-        culprit_store_clickhouse::sink::new(manifest.contract.clone(), restored, objects, client, scratch.path())
-            .unwrap();
+    let resumed = culprit_store_clickhouse::sink::new(
+        manifest.contract.clone(),
+        restored,
+        objects,
+        ingestion,
+        client,
+        scratch.path(),
+    )
+    .unwrap();
     verify(&resumed, &range, VerificationBudget::default()).await.unwrap();
     assert!(resumed.publication_visible(&publication, &range).await.unwrap());
 }

@@ -41,8 +41,8 @@ pub(super) fn configure(
             validation,
         )?)),
         #[cfg(feature = "store-clickhouse")]
-        TargetConfig::ClickHouse { query, credential } => {
-            Ok(Box::new(clickhouse::Destination::new(query, credential, credentials, validation)?))
+        TargetConfig::ClickHouse { query, credential, write } => {
+            Ok(Box::new(clickhouse::Destination::new(query, credential, *write, credentials, validation)?))
         }
     }
 }
@@ -123,7 +123,8 @@ mod clickhouse {
     use super::*;
     use culprit_store_clickhouse::{
         catalog::SchemaCatalog,
-        client::{ClickHouseClient, ClickHouseConfig, Credentials},
+        client::{ClickHouseConfig, Credentials},
+        ingestion::{ClickHouseIngestor, WritePolicy},
     };
     pub(super) struct Destination {
         id: String,
@@ -132,15 +133,18 @@ mod clickhouse {
         credentials: Arc<dyn CredentialResolver>,
         validation: Arc<dyn ObjectTransport>,
         catalog: SchemaCatalog,
+        write: WritePolicy,
     }
     impl Destination {
         pub(super) fn new(
             query: &ClickHouseConfig,
             profile: &str,
+            write: WritePolicy,
             credentials: Arc<dyn CredentialResolver>,
             validation: Arc<dyn ObjectTransport>,
         ) -> Result<Self> {
             credentials.validate_password(profile)?;
+            write.validate()?;
             Ok(Self {
                 id: query.destination_id()?,
                 query: query.clone(),
@@ -148,6 +152,7 @@ mod clickhouse {
                 credentials,
                 validation,
                 catalog: SchemaCatalog::new()?,
+                write,
             })
         }
     }
@@ -165,11 +170,13 @@ mod clickhouse {
             scratch: &Path,
         ) -> Result<AnalyticalSink> {
             let credential = self.credentials.password(&self.profile)?;
-            let client = Arc::new(ClickHouseClient::new(
+            let ingestion = Arc::new(ClickHouseIngestor::new(
                 self.query,
                 Credentials::new(credential.username, credential.password)?,
+                self.write,
             )?);
-            culprit_store_clickhouse::sink::new(contract, recovery, self.validation, client, scratch)
+            let query = ingestion.query_transport();
+            culprit_store_clickhouse::sink::new(contract, recovery, self.validation, ingestion, query, scratch)
         }
     }
 }

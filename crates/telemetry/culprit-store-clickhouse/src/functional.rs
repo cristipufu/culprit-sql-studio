@@ -1,8 +1,9 @@
 //! Native correctness against the owned loopback container created by dev/smoke-clickhouse.py.
 use crate::{
     catalog::SchemaCatalog,
-    client::{ClickHouseClient, ClickHouseConfig, Credentials, QueryRequest, QueryTransport},
+    client::{ClickHouseConfig, Credentials, QueryRequest, QueryTransport},
     deployment::DeploymentAssets,
+    ingestion::{ClickHouseIngestor, IngestionTransport, WritePolicy},
     response::Column,
 };
 use culprit_collector::{
@@ -25,7 +26,8 @@ mod evidence;
 mod waits;
 struct Server {
     origin: String,
-    client: Arc<ClickHouseClient>,
+    client: Arc<dyn QueryTransport>,
+    ingestion: Arc<ClickHouseIngestor>,
 }
 impl Server {
     fn new() -> Self {
@@ -35,14 +37,16 @@ impl Server {
             .unwrap();
         assert!(port > 0);
         let origin = format!("http://127.0.0.1:{port}");
-        let client = Arc::new(
-            ClickHouseClient::new(
-                ClickHouseConfig { endpoint: origin.clone(), database: "culprit_fixture".into(), insert_quorum: None },
+        let ingestion = Arc::new(
+            ClickHouseIngestor::new(
+                ClickHouseConfig { endpoint: origin.clone(), database: "culprit_fixture".into() },
                 Credentials::new(USER.into(), Zeroizing::new(PASSWORD.into())).unwrap(),
+                WritePolicy::default(),
             )
             .unwrap(),
         );
-        Self { origin, client }
+        let client = ingestion.query_transport();
+        Self { origin, client, ingestion }
     }
     fn execute(&self, sql: &str) {
         let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -143,6 +147,7 @@ impl Scenario {
             range.manifest().contract.clone(),
             recovery.clone(),
             indexes.clone(),
+            server.ingestion.clone(),
             server.client.clone(),
             scratch.path(),
         )
@@ -319,7 +324,7 @@ async fn native_scalar_roundtrip(server: &Server) {
     for input in &inputs {
         let values = schema.project(input).unwrap();
         let bytes = schema.encode(&values).unwrap();
-        server.client.insert("ScalarFixture", crate::client::InsertData::Control(bytes)).await.unwrap();
+        server.ingestion.insert("ScalarFixture", crate::client::InsertData::Control(bytes)).await.unwrap();
         let parameters = BTreeMap::from([("n".into(), input["count"].as_str().unwrap().into())]);
         let rows = server
             .client
@@ -364,6 +369,7 @@ async fn exact_delivery_and_recovery(server: &Server, catalog: &SchemaCatalog) {
         range.manifest().contract.clone(),
         recovery.clone(),
         indexes,
+        server.ingestion.clone(),
         server.client.clone(),
         scratch.path(),
     )

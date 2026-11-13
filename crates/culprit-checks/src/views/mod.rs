@@ -8,6 +8,7 @@ pub mod dashboard;
 pub(crate) mod digest;
 pub mod drift;
 pub mod memory_failures;
+pub mod native_failures;
 pub(crate) mod plan_advice;
 pub mod plan_view;
 pub mod sql_lint;

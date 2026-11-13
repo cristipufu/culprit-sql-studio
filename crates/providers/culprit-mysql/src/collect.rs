@@ -167,7 +167,22 @@ pub async fn snapshot(
         None,
     ));
     crate::signals::collect(&mut reader, &probe, &mut snapshot).await;
-    reader.close().await;
+    let ordinary_shutdown = reader.close().await;
+    // The optional source has its own observation bounds and ownership. Never start a new native operation
+    // after the ordinary scan left uncertain work on this connector.
+    if ordinary_shutdown == culprit_core::telemetry::SourceShutdown::Quiescent {
+        let (native_failures, coverage) =
+            crate::native_failures::collect(connector.clone(), options.collect_native_failures, &probe).await;
+        snapshot.operations.native_failures = native_failures;
+        coverage.append_to(&mut snapshot);
+    } else if options.collect_native_failures {
+        let mut coverage = Coverage::default();
+        coverage.source_failed(
+            &sources::NATIVE_FAILURES,
+            &culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error(),
+        );
+        coverage.append_to(&mut snapshot);
+    }
     snapshot.duration_ms = started.elapsed().as_secs_f64() * 1000.0;
     Ok(snapshot)
 }

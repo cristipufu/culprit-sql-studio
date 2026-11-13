@@ -8,6 +8,7 @@ mod functional;
 #[cfg(test)]
 #[path = "../../../../tests/support/http.rs"]
 mod http_fixture;
+pub mod ingestion;
 pub mod response;
 pub mod schema;
 pub mod sink;

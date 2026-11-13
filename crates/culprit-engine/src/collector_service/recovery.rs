@@ -14,11 +14,7 @@ impl RecoveryRegistry {
 
     pub fn register(&mut self, provider: Arc<dyn RecoveryProvider>) -> Result<()> {
         let name = provider.name();
-        if name.is_empty()
-            || name.len() > 64
-            || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            || self.0.contains_key(name)
-        {
+        if !super::config::valid_provider_name(name) || self.0.contains_key(name) {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         self.0.insert(name.to_string(), provider);

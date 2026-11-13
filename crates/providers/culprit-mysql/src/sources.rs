@@ -3,6 +3,11 @@
 //! detail some checks use; without it those checks say less, never something wrong.
 
 use culprit_core::{Capability, Source, source_id};
+pub const NATIVE_FAILURES: Source = Source {
+    name: source_id::NATIVE_FAILURES,
+    reads: culprit_core::key!("provider.mysql.source.native_failures"),
+    delivers: &[],
+};
 pub const LIVE_LOCKS: Source = Source {
     name: source_id::LIVE_LOCKS,
     reads: culprit_core::key!("provider.mysql.source.live_locks"),
@@ -128,6 +133,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    NATIVE_FAILURES,
     REDO_PRESSURE,
     CLUSTER_HEALTH,
     SEQUENCE_CAPACITY,

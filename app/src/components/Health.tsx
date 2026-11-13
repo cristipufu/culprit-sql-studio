@@ -15,6 +15,7 @@ import { SIGNAL_SCOPE, signalValue } from "../lib/waits";
 import { Replication, StorageLatency } from "./BeyondTime";
 import { OperationalHealth, hasOperationalHealth } from "./OperationalHealth";
 import { MemoryFailureSourceIssue, RetainedMemoryFailures, memoryFailureReadIssue } from "./RetainedMemoryFailures";
+import { NativeFailureSourceIssue, RetainedNativeFailures, nativeFailureReadIssue } from "./RetainedNativeFailures";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -80,8 +81,11 @@ export function HealthTab({
   const signals = [...(pressure?.signals ?? [])].sort((a, b) => RANK[a.status] - RANK[b.status]);
   const memoryFailures = report.snapshot.operations.memory_failures;
   const memoryReport = report.memory_failures;
-  const memoryIssue = memoryFailureReadIssue(memoryFailures?.source, report.snapshot.sources ?? []);
-  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue) {
+  const memoryIssue = memoryFailureReadIssue(memoryFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_memory_failures === true);
+  const nativeFailures = report.snapshot.operations.native_failures;
+  const nativeReport = report.native_failures;
+  const nativeIssue = nativeFailureReadIssue(nativeFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_native_failures === true);
+  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue) {
     return (
       <div className="waits-empty">
         <h3>{t("ui.health.empty")}</h3>
@@ -122,6 +126,8 @@ export function HealthTab({
       <OperationalHealth report={report} />
       {memoryFailures && memoryReport && <RetainedMemoryFailures key={memoryFailures.observed_until} evidence={memoryFailures} report={memoryReport} />}
       {!(memoryFailures && memoryReport) && memoryIssue && <MemoryFailureSourceIssue source={memoryIssue} />}
+      {nativeFailures && nativeReport && <RetainedNativeFailures key={nativeFailures.observed_until} evidence={nativeFailures} report={nativeReport} />}
+      {!(nativeFailures && nativeReport) && nativeIssue && <NativeFailureSourceIssue source={nativeIssue} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
     </div>
   );

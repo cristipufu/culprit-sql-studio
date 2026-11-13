@@ -1,14 +1,17 @@
 mod activity_cmd;
 mod admission_cmd;
 mod agents;
+mod bounded_output;
 mod collect_cmd;
 mod collection_shutdown;
 mod commands;
 mod conn_cmd;
 mod dashboard_cmd;
+mod evidence_cmd;
 mod fleet_cmd;
 mod lint_cmd;
 mod locks;
+mod logs_cmd;
 mod outbox_cmd;
 mod output;
 mod plan_cmd;
@@ -132,6 +135,8 @@ enum Command {
     Scan(ScanArgs),
     #[command(subcommand, about = culprit_core::t!("collection.cli.about"))]
     Collect(collect_cmd::CollectCommand),
+    #[command(about = culprit_core::t!("native_logs.cli.about"))]
+    Logs(logs_cmd::LogsArgs),
     /// Findings from the latest saved report (no database access).
     Findings(FindingsArgs),
     /// One finding in full, with the agent brief.
@@ -250,6 +255,8 @@ struct ScanArgs {
     collect_request_memory: bool,
     #[arg(long, help = t!("cli.scan.memory_failures"))]
     collect_memory_failures: bool,
+    #[arg(long, help = t!("cli.scan.native_failures"))]
+    collect_native_failures: bool,
     /// Exit with code 3 if any finding is at least this severe (for CI).
     #[arg(long, value_enum)]
     fail_on: Option<SeverityArg>,
@@ -271,6 +278,7 @@ impl ScanArgs {
             collect_shared_resources: self.collect_shared_resources,
             collect_request_memory: self.collect_request_memory,
             collect_memory_failures: self.collect_memory_failures,
+            collect_native_failures: self.collect_native_failures,
             ..SnapshotOptions::default()
         }
         .with_window_minutes(window)
@@ -489,6 +497,9 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
     if let Command::Collect(command) = command {
         return collect_cmd::run(command, out).await;
     }
+    if let Command::Logs(args) = command {
+        return logs_cmd::run(args, out).await;
+    }
     let mut ws = Workspace::open()?;
     // A device-code sign-in needs a person to read the code; scripts and agents get an error with a hint instead.
     if std::io::stderr().is_terminal() && !matches!(&command, Command::Collect(_)) {
@@ -526,6 +537,7 @@ fn dispatch<'a>(command: Command, ws: Workspace, out: &'a Out) -> CommandTask<'a
         Command::Doctor { connection } => Box::pin(async move { commands::doctor(&ws, &connection, out).await }),
         Command::Scan(args) => Box::pin(async move { commands::scan(&ws, args, out).await }),
         Command::Collect(_) => Box::pin(async move { unreachable!("collection dispatch precedes workspace creation") }),
+        Command::Logs(_) => Box::pin(async move { unreachable!("local log dispatch precedes workspace creation") }),
         Command::Findings(args) => Box::pin(async move { commands::findings(&ws, args, out) }),
         Command::Show { connection, finding, report } => {
             Box::pin(async move { commands::show(&ws, connection, finding, report, out) })

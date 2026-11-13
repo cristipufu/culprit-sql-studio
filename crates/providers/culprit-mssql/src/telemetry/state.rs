@@ -195,7 +195,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::CurrentRequestMemory => {
                         return Err(invalid_data());
                     }
-                    SnapshotDataset::MemoryFailures => return Err(invalid_data()),
+                    SnapshotDataset::MemoryFailures | SnapshotDataset::NativeFailures => return Err(invalid_data()),
                 }
             }
             .into(),

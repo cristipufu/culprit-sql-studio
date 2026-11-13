@@ -31,6 +31,14 @@ pub(crate) trait QueryRead: Send {
     async fn explain(&mut self, sql: &str) -> Result<Option<Rec>>;
 }
 
+/// A caller retaining provisional native evidence also owns proof that its session finished.
+#[async_trait::async_trait]
+pub(crate) trait OwnedRead: QueryRead {
+    fn query_count(&self) -> u32;
+    fn read_metrics(&self) -> Option<ReadWorkMetrics>;
+    async fn close(&mut self) -> SourceShutdown;
+}
+
 /// Borrowed reads share layouts/decoders without claiming ownership of an interactive caller's connection.
 #[async_trait::async_trait]
 impl QueryRead for Conn {
@@ -225,6 +233,19 @@ impl QueryRead for ReadSession {
         let result = self.finish_active().await;
         drop(owner);
         result
+    }
+}
+
+#[async_trait::async_trait]
+impl OwnedRead for ReadSession {
+    fn query_count(&self) -> u32 {
+        ReadSession::query_count(self)
+    }
+    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+        ReadSession::read_metrics(self)
+    }
+    async fn close(&mut self) -> SourceShutdown {
+        ReadSession::close(self).await
     }
 }
 impl Drop for ReadSession {

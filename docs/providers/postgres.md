@@ -46,6 +46,44 @@ These sources do not retain a history of every wait. Recorded statement I/O timi
 
 The database keeps a cumulative deadlock count. Import the relevant PostgreSQL log lines to reconstruct the participants and pattern. Cancel and terminate actions are available outside production, subject to the login's permissions.
 
+## Supplied structured diagnostics
+
+Analyze an explicitly supplied local PostgreSQL log without a saved connection, workspace or database credentials:
+
+```sh
+culprit logs ./postgres.jsonl --input-format json --json
+culprit logs ./postgres.csv --input-format csv
+```
+
+`json` selects native PostgreSQL JSON logs; `csv` requires the documented 26-column PostgreSQL 14+ layout. Use
+`csv13` explicitly for the older 24-column native layout. A truncated modern row is never guessed to be an older
+layout. The same provider parser and pure explanations serve supplied bytes, local files and authenticated native
+records; intake never calls `pg_read_file`, changes logging, reads an application's tables or executes its SQL.
+
+SQLSTATE supplies the condition: allocation failure, deadlock, resource/connection/configuration limits, unavailable
+locks, cancellation and supported termination classes. `57014` establishes cancellation without deciding whether
+the client, a timeout or another cause initiated it. `25P04` identifies the separate native transaction-timeout
+condition. Unknown codes remain available as unclassified diagnostics rather than acquiring a cause from message text.
+
+Raw messages, detail/context strings and client labels are omitted from the result; retained SQL has its literals
+redacted. A qualified deadlock graph contains only reported participants and lock edges. Unsupported or malformed
+details withhold the graph while retaining an otherwise valid native `40P01` condition and affected statement.
+
+Native event time keeps its original text and is qualified as UTC only when an explicit supported offset establishes
+it. Local intake dates never replace an unknown native clock. The database name is affected context, not proof of a
+resource owner. Session IDs and second-resolution starts are native quasi-identities; CSV and JSON line counters are
+independent. Neither a recycled PID nor matching session text creates a current-session/query join.
+
+Input bytes, record/field sizes, record counts and JSON output each have a cap. Defaults read at most 1 MiB, decode
+at most 1,024 records, and bound records/fields to 64/32 KiB. Valid conditions survive malformed neighboring records
+with explicit partial qualification and exit code 2. The artifact digest identifies the supplied prefix, not a native
+incident or host, and equal records remain distinct captured positions. Local analysis does not publish an
+unverified host/database association into a warehouse or claim complete log history. Managed feed collection still
+needs independently qualified acquisition, identity and retention handling.
+
+Source format references: [PostgreSQL structured logging](https://www.postgresql.org/docs/18/runtime-config-logging.html#RUNTIME-CONFIG-LOGGING-JSONLOG)
+and [SQLSTATE conditions](https://www.postgresql.org/docs/18/errcodes-appendix.html).
+
 ## Schema and indexes
 
 The catalog supplies tables, columns, constraints, statistics and index definitions. `pg_stat_user_indexes` provides usage; the collector records counter history where it can establish the reset period. PostgreSQL does not emit SQL Server-style missing-index requests: advice comes from captured plans, foreign keys, scans and the current index set.

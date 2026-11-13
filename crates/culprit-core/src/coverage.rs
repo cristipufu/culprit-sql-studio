@@ -94,6 +94,7 @@ pub mod source_id {
     pub const PROCESSOR_TOPOLOGY: &str = "processor topology";
     pub const MEMORY_CLERKS: &str = "memory clerks";
     pub const MEMORY_FAILURES: &str = "memory failures";
+    pub const NATIVE_FAILURES: &str = "native failures";
     pub const SCHEDULERS: &str = "schedulers";
     pub const SHARED_MEMORY_ALLOCATIONS: &str = "shared memory allocations";
     pub const SHARED_RESOURCE_DETAILS: &str = "shared-resource-details";
@@ -195,6 +196,7 @@ pub mod source_id {
         PROCESSOR_TOPOLOGY,
         MEMORY_CLERKS,
         MEMORY_FAILURES,
+        NATIVE_FAILURES,
         SCHEDULERS,
         SHARED_MEMORY_ALLOCATIONS,
         SHARED_RESOURCE_DETAILS,

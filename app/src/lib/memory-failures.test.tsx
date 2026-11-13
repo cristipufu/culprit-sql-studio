@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryFailureSourceIssue, RetainedMemoryFailures, memoryFailureReadIssue } from "../components/RetainedMemoryFailures";
-import type { MemoryFailureReport } from "../gen/MemoryFailureReport";
+import type { RetainedFailureReport } from "../gen/RetainedFailureReport";
 import type { MemoryFailureSnapshot } from "../gen/MemoryFailureSnapshot";
 import type { SourceOutcome } from "../gen/SourceOutcome";
 import { partial } from "../test/fixtures";
@@ -37,7 +37,7 @@ function nativeEvidence(positions = [0]): MemoryFailureSnapshot {
   });
 }
 
-function explanation(positions = [0]): MemoryFailureReport {
+function explanation(positions = [0]): RetainedFailureReport {
   return {
     title: "Retained memory failures",
     summary: `${positions.length} retained observations; no incident count established.`,
@@ -57,6 +57,17 @@ function explanation(positions = [0]): MemoryFailureReport {
 function show(evidence = nativeEvidence(), report = explanation()): string {
   return renderToStaticMarkup(<RetainedMemoryFailures evidence={evidence} report={report} />);
 }
+
+test("memory source issue aliases retain actual partial results and failed regions remain named", () => {
+  const source: SourceOutcome = { source: "MEMORY_FAILURES", state: "partial", reason: "Native positive observations were incomplete." };
+  expect(memoryFailureReadIssue(undefined, [source])).toBe(source);
+  expect(source.state).toBe("partial");
+  expect(memoryFailureReadIssue("memory-failures", [source])).toBeUndefined();
+  const html = renderToStaticMarkup(<MemoryFailureSourceIssue source={source} />);
+  expect(html).toContain('aria-label="Retained memory failures"');
+  expect(html).toContain('class="operational-health retained-failures"');
+  expect(html).toContain("Native positive observations were incomplete.");
+});
 
 test("retained memory observations render backend explanation without becoming a database opportunity or owner", () => {
   const html = show();
@@ -159,4 +170,12 @@ test("default unrequested reads and unrelated source failures do not add memory 
     expect(memoryFailureReadIssue(undefined, [{ source: "memory failures", state, reason: null }])).toBeUndefined();
   }
   expect(memoryFailureReadIssue(undefined, [{ source: "some-other-source", state: "unavailable", reason: null }])).toBeUndefined();
+});
+
+test("an explicit unsupported memory diagnostic request remains visible without creating an empty read", () => {
+  const source: SourceOutcome = { source: "memory failures", state: "not-applicable", reason: "This provider has no native reader for these records." };
+  expect(memoryFailureReadIssue(undefined, [source], true)).toBe(source);
+  const html = renderToStaticMarkup(<MemoryFailureSourceIssue source={source} />);
+  expect(html).toContain(source.reason!);
+  expect(html).not.toContain("0 failures");
 });

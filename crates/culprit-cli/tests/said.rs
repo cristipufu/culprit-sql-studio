@@ -4,25 +4,12 @@
 //! the English to what it printed when its words were in code. To write a pin from the code as it is, run its test
 //! with `CULPRIT_PIN_RECORD=1`. Nothing here connects to a database.
 
+use super::workspace::home;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 #[path = "../../../tests/support/paths.rs"]
 mod paths;
-
-struct Home(PathBuf);
-impl Drop for Home {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn home(tag: &str) -> Home {
-    let dir = std::env::temp_dir().join(format!("culprit-cli-said-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    Home(dir)
-}
 
 fn repo() -> PathBuf {
     std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()

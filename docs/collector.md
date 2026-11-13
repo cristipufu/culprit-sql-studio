@@ -32,8 +32,8 @@ implement their respective interfaces; they do not acquire database connections.
 separate consumer; this service does not add an ADX-backed desktop connection.
 
 Embedders can read a specifically selected committed capture through
-`culprit_collector::analytical::evidence::EvidenceReader`; both store crates expose a read-only constructor under
-`evidence::new`. The reader accepts an authenticated `CommittedRange`, selected evidence families and a read budget.
+`culprit_collector::analytical::evidence::EvidenceReader`; the store crates expose `evidence::AdxReadStore` and
+`evidence::ClickHouseReadStore`. The reader accepts an authenticated `CommittedRange`, selected evidence families and a read budget.
 `EvidenceFamily::ALL` declares the supported families: resource samples, inline typed operational facts, query and
 plan definitions, interval query runtime and query waits. Runtime and waits retain native identities, dimensions,
 outcomes, exact execution counters, units and query/plan references. Definitions retain native context and plan-to-query
@@ -84,6 +84,63 @@ decoded row encodings respect the per-response ceiling, and proof objects have a
 Caller timeout ends the caller's wait; it does not acknowledge that a
 warehouse query has stopped.
 
+### Investigate a committed capture
+
+`collect evidence` opens only the selected warehouse and recovery profiles. It neither opens a source database nor
+initializes a namespace, acquires collection ownership, changes checkpoints or submits ingestion. The configuration
+has no source inventory, workspace, delivery or staging fields. For example, `archive.json` can use ClickHouse query
+access and an independent S3 proof reader:
+
+```json
+{
+  "pipeline": "pilot",
+  "shard": "shard-0",
+  "credentials": {
+    "warehouse-read": {"kind": "password-environment", "username": "culprit_reader", "variable": "CULPRIT_WAREHOUSE_PASSWORD"},
+    "recovery-read": {"kind": "aws", "profile": "culprit-archive-reader"}
+  },
+  "recovery": {
+    "provider": "s3",
+    "options": {"bucket": "culprit-private-recovery", "region": "eu-west-1", "prefix": "pilot/shard-0", "expected_owner": "123456789012"},
+    "credential": "recovery-read"
+  },
+  "warehouse": {
+    "provider": "clickhouse",
+    "options": {"endpoint": "https://warehouse.example:8443", "database": "culprit"},
+    "credential": "warehouse-read"
+  }
+}
+```
+
+The pipeline, shard, destination and recovery prefix must identify the original committed namespace. Set
+`CULPRIT_CAPTURE_RANGE` to its exact range ID, then select the required families or an analysis:
+
+```sh
+culprit collect evidence read --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --family operational-samples --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis queries --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis native-failures
+```
+
+`memory-failures` selects the retained SQL Server OOM analysis; `native-failures` selects native structured
+diagnostics. Both call the scan's existing pure explanation functions, reference original native rows once, and
+retain source qualifications separately from warehouse read gaps. Query analysis requests its four definition,
+runtime and wait families. No mode invents current server metadata or query ownership.
+
+For ADX, select warehouse provider `adx`, its query endpoint/database and an independently named bearer profile.
+Azure recovery uses the existing recovery adapter and profile shape. Neither route needs an ingestion identity.
+The warehouse configuration excludes insert policy, and changing an insert quorum does not change the destination
+identity. Recovery credentials need access to committed manifests and immutable projection indexes; complete inline
+readback does not reread raw archived payloads. Missing large or precision-sensitive details remain explicit gaps.
+
+Rows, requests, response bytes, proof bytes and archive-read caller wait have separate caps. JSON output is staged
+under `--max-output-bytes` before writing, so an exceeded cap emits no truncated JSON document. Text output keeps
+source qualification and a short explanation. An incomplete warehouse read returns exit code 2 with its gaps;
+native partial coverage can remain even when warehouse retrieval succeeds. Native transports retain their own
+bounded lifecycle after caller cancellation. Pure analysis and output follow the archive-read deadline.
+
 ## Configure and validate
 
 The examples are [collector configuration](../deploy/collector/config.example.json),
@@ -120,8 +177,9 @@ For ClickHouse, replace `target` and add a password profile:
 {
   "target": {
     "kind": "clickhouse",
-    "query": {"endpoint": "https://warehouse.example:8443", "database": "culprit", "insert_quorum": null},
-    "credential": "clickhouse"
+    "query": {"endpoint": "https://warehouse.example:8443", "database": "culprit"},
+    "credential": "clickhouse",
+    "write": {"insert_quorum": null}
   },
   "credentials": {
     "clickhouse": {"kind": "password-environment", "username": "culprit", "variable": "CULPRIT_WAREHOUSE_PASSWORD"}
@@ -265,7 +323,7 @@ recovery-only activity checkpoints have no analytical table. Landing tables sort
 bounded readback. A publication-table projection supports resource/time selection without duplicating every payload.
 
 `--store clickhouse --replicated` emits `ReplicatedMergeTree` tables using server-configured replication paths/macros.
-For that layout, configure a positive `insert_quorum` and a read/write endpoint with the required replica consistency.
+For that layout, configure a positive `target.write.insert_quorum` and a read/write endpoint with the required replica consistency.
 Single-node tables use synchronous inserts and local fsync; that does not promise survival of node or disk loss.
 Replica failover, distributed routing and cloud deployments need separate qualification. The owned native fixture
 verifies single-node ClickHouse 26.8.36.3, not those deployment guarantees.

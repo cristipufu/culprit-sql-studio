@@ -29,8 +29,8 @@ pub mod insights;
 mod label_tests;
 pub mod limits;
 pub mod measurement;
-pub mod memory_failure_report;
 pub mod model;
+pub mod native_log_analysis;
 pub mod operations;
 pub mod plan;
 pub mod plan_compare;
@@ -44,6 +44,7 @@ pub mod provenance;
 pub mod provider;
 pub mod redact;
 pub mod refinement;
+pub mod retained_failure_report;
 pub mod signals;
 pub mod sql;
 pub mod telemetry;
@@ -91,8 +92,10 @@ pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
 pub use measurement::*;
-pub use memory_failure_report::{MemoryFailureExplanation, MemoryFailureReport};
 pub use model::*;
+pub use native_log_analysis::{
+    NativeLogAnalysis, NativeLogArtifact, NativeLogFormat, NativeLogIssue, NativeLogLimits, NativeLogProblem,
+};
 pub use operations::{
     MemoryLimit, NodeResource, NodeResources, ProcessMemory, QueryTermination, TerminationHistory, TerminationReason,
 };
@@ -114,6 +117,7 @@ pub use provenance::{
 };
 pub use provider::{ExplainMode, Provider, SnapshotOptions};
 pub use refinement::{FixWithholdingBasis, HistoryBasis, PresentationAspect, RefinementDecision, RefinementOutcome};
+pub use retained_failure_report::{RetainedFailureExplanation, RetainedFailureReport};
 pub use signals::{
     ColumnHistogram, ConstraintIssue, ConstraintKind, ContentionBaseline, CountBaseline, EscalationBaseline, FileIo,
     FileKind, FileScope, FileWriteOperation, IndexContention, IndexLockCounts, QueryCosts, Replica, ReplicaCondition,

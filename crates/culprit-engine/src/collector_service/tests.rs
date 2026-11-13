@@ -290,9 +290,9 @@ fn clickhouse_configuration_uses_its_password_profile_without_acquiring_it_offli
         query: culprit_store_clickhouse::client::ClickHouseConfig {
             endpoint: "https://never-contact.example".into(),
             database: "fixture".into(),
-            insert_quorum: None,
         },
         credential: "warehouse".into(),
+        write: Default::default(),
     };
     let configured = ConfiguredAdapters::new(&config, SourceMode::Collect, &CollectorRuntime::default()).unwrap();
     assert!(configured.contract.destination().starts_with("clickhouse:"));

@@ -3,6 +3,9 @@
 
 use culprit_core::deadlock::classify;
 use culprit_core::format::digits;
+use culprit_core::telemetry::{
+    MAX_POSTGRES_DEADLOCK_EDGES, postgres_deadlock_cycle_is_valid, postgres_log_lock_mode_is_valid,
+};
 use culprit_core::{
     Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result, t,
 };
@@ -100,72 +103,161 @@ pub fn parse_deadlock_log(text: &str) -> Vec<Deadlock> {
         if !line.contains("deadlock detected") {
             continue;
         }
+        let block: Vec<&str> = lines[start + 1..]
+            .iter()
+            .take_while(|line| !line.contains("deadlock detected"))
+            .take(40)
+            .copied()
+            .collect();
+        let detail = block
+            .iter()
+            .take_while(|line| !pasted_section_start(line))
+            .map(|line| line.split_once("DETAIL:").map_or(*line, |(_, detail)| detail))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let Some(mut deadlock) = detail_graph(&detail, log_time(line), "pasted log") else { continue };
+        // Pasted text keeps its existing per-process statement presentation. Structured input instead supplies only
+        // the reporting backend's separate native statement field: application SQL must not forge another process.
+        for line in &block {
+            attach_pasted_statement(&mut deadlock, line);
+        }
         let reporter = bracketed_pid(line);
-        let at = log_time(line);
-        let block: Vec<&str> =
-            lines[start + 1..].iter().take_while(|l| !l.contains("deadlock detected")).take(40).copied().collect();
-        let mut processes: Vec<DeadlockProcess> = Vec::new();
-        let mut resources: Vec<DeadlockResource> = Vec::new();
-        let mut context_relation: Option<String> = None;
-        for raw in &block {
-            let l = raw.split_once("DETAIL:").map(|(_, r)| r).unwrap_or(raw).trim();
-            if let Some(rest) = raw.split_once("CONTEXT:").map(|(_, r)| r) {
-                context_relation =
-                    rest.split("relation \"").nth(1).and_then(|r| r.split('"').next()).map(str::to_string);
-                continue;
-            }
-            // Process 539 waits for ShareLock on transaction 838; blocked by process 545.
-            if let Some(rest) = l.strip_prefix("Process ")
-                && let Some((pid, rest)) = rest.split_once(" waits for ")
-                && let Some((mode, rest)) = rest.split_once(" on ")
-                && let Some((what, blocker)) = rest.split_once("; blocked by process ")
-            {
-                let blocker = blocker.trim_end_matches('.').trim().to_string();
-                let kind = what.split_whitespace().next().unwrap_or("lock").to_string();
-                resources.push(DeadlockResource {
-                    id: what.to_string(),
-                    kind,
-                    object: None,
-                    index: None,
-                    holders: vec![LockHolder { process: blocker, mode: None }],
-                    waiters: vec![LockHolder { process: pid.to_string(), mode: Some(mode.to_string()) }],
-                });
-                if !processes.iter().any(|p| p.id == pid) {
-                    processes.push(DeadlockProcess {
-                        id: pid.into(),
-                        session: Some(pid.into()),
-                        wait_mode: Some(mode.into()),
-                        ..Default::default()
-                    });
-                }
-                continue;
-            }
-            // Process 539: UPDATE …
-            if let Some(rest) = l.strip_prefix("Process ")
-                && let Some((pid, statement)) = rest.split_once(": ")
-                && pid.chars().all(|c| c.is_ascii_digit())
-                && let Some(p) = processes.iter_mut().find(|p| p.id == pid)
-            {
-                p.statement = Some(statement.trim().to_string());
-            }
-        }
-        if processes.is_empty() {
-            continue;
-        }
-        // The process that logged the error is the one Postgres cancelled.
-        for p in &mut processes {
-            p.victim = reporter.as_deref() == Some(p.id.as_str());
-        }
-        if let (Some(relation), Some(victim)) = (context_relation, reporter.as_deref()) {
-            for r in resources.iter_mut().filter(|r| r.waiters.iter().any(|w| w.process == victim)) {
-                r.object = Some(relation.clone());
-            }
-        }
-        let mut d = Deadlock::new("pasted log", at, processes, resources);
-        classify(Engine::Postgres, &mut d);
-        out.push(d);
+        let context = block.iter().find_map(|line| line.split_once("CONTEXT:").map(|(_, context)| context));
+        qualify_deadlock(&mut deadlock, reporter.as_deref(), context);
+        classify(Engine::Postgres, &mut deadlock);
+        out.push(deadlock);
     }
     out
+}
+
+pub(crate) struct DeadlockLogContext<'a> {
+    pub reporter: Option<&'a str>,
+    pub statement: Option<&'a str>,
+    pub context: Option<&'a str>,
+    pub at: Option<String>,
+}
+
+/// SQLSTATE establishes a structured deadlock. The English DETAIL grammar can provide a graph, but a localized or
+/// unsupported graph stays unavailable. No synthetic log header or application SQL is fed to this graph decoder.
+pub(crate) fn parse_deadlock_details(detail: &str, context: DeadlockLogContext<'_>) -> Option<Deadlock> {
+    let mut deadlock = detail_graph(detail, context.at, "postgres-structured-log")?;
+    qualify_deadlock(&mut deadlock, context.reporter, context.context);
+    if let (Some(statement), Some(victim)) =
+        (context.statement, deadlock.processes.iter_mut().find(|process| process.victim))
+    {
+        victim.statement = Some(statement.to_owned());
+    }
+    classify(Engine::Postgres, &mut deadlock);
+    Some(deadlock)
+}
+
+fn native_pid(value: &str) -> bool {
+    value.parse::<i32>().is_ok_and(|pid| pid > 0)
+}
+
+/// PostgreSQL emits all wait edges before the explicit per-process query section. Arbitrary unsupported lines in
+/// the graph cannot qualify a valid prefix; after the query boundary, multiline SQL is never parsed as another edge.
+fn detail_graph(detail: &str, at: Option<String>, source: &str) -> Option<Deadlock> {
+    let mut processes: Vec<DeadlockProcess> = Vec::new();
+    let mut resources = Vec::new();
+    for line in detail.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if let Some(pid) = detail_query_pid(line) {
+            if !processes.iter().any(|process| process.id == pid) {
+                return None;
+            }
+            break;
+        }
+        let (pid, mode, what, blocker) = detail_edge(line)?;
+        if resources.len() == MAX_POSTGRES_DEADLOCK_EDGES {
+            return None;
+        }
+        resources.push(DeadlockResource {
+            id: what.into(),
+            kind: what.split_whitespace().next()?.into(),
+            object: None,
+            index: None,
+            holders: vec![LockHolder { process: blocker.into(), mode: None }],
+            waiters: vec![LockHolder { process: pid.into(), mode: Some(mode.into()) }],
+        });
+        if !processes.iter().any(|process| process.id == pid) {
+            processes.push(DeadlockProcess {
+                id: pid.into(),
+                session: Some(pid.into()),
+                wait_mode: Some(mode.into()),
+                ..Default::default()
+            });
+        }
+    }
+    if !postgres_deadlock_cycle_is_valid(resources.iter().flat_map(|resource| {
+        resource
+            .waiters
+            .iter()
+            .zip(&resource.holders)
+            .map(|(waiter, holder)| (waiter.process.as_str(), holder.process.as_str()))
+    })) {
+        None
+    } else {
+        Some(Deadlock::new(source, at, processes, resources))
+    }
+}
+
+fn detail_query_pid(line: &str) -> Option<&str> {
+    let (pid, _) = line.strip_prefix("Process ")?.split_once(':')?;
+    native_pid(pid).then_some(pid)
+}
+
+/// Pasted stderr records carry their other native sections outside DETAIL. Keep those headers out of the shared
+/// native DETAIL decoder; an unknown line inside structured DETAIL must not be guessed into a section boundary.
+fn pasted_section_start(line: &str) -> bool {
+    let content = line.split_once("] ").map_or(line, |(_, content)| content).trim_start();
+    ["HINT:", "CONTEXT:", "STATEMENT:", "ERROR:", "FATAL:", "PANIC:", "LOG:", "NOTICE:", "WARNING:", "INFO:"]
+        .iter()
+        .any(|prefix| content.starts_with(prefix))
+}
+
+fn detail_edge(line: &str) -> Option<(&str, &str, &str, &str)> {
+    let (pid, rest) = line.strip_prefix("Process ")?.split_once(" waits for ")?;
+    let (mode, rest) = rest.split_once(" on ")?;
+    let (what, blocker) = rest.split_once("; blocked by process ")?;
+    let blocker = blocker.strip_suffix('.')?;
+    (native_pid(pid) && native_pid(blocker) && postgres_log_lock_mode_is_valid(mode) && !what.is_empty())
+        .then_some((pid, mode, what, blocker))
+}
+
+fn attach_pasted_statement(deadlock: &mut Deadlock, line: &str) {
+    let line = line.split_once("DETAIL:").map_or(line, |(_, detail)| detail).trim();
+    if let Some((pid, statement)) = line.strip_prefix("Process ").and_then(|line| line.split_once(": "))
+        && native_pid(pid)
+        && let Some(process) = deadlock.processes.iter_mut().find(|process| process.id == pid)
+    {
+        process.statement = Some(statement.trim().into());
+    }
+}
+
+fn qualify_deadlock(deadlock: &mut Deadlock, reporter: Option<&str>, context: Option<&str>) {
+    for process in &mut deadlock.processes {
+        process.victim = reporter == Some(process.id.as_str());
+    }
+    if let (Some(relation), Some(victim)) = (context.and_then(context_relation), reporter) {
+        for resource in deadlock
+            .resources
+            .iter_mut()
+            .filter(|resource| resource.waiters.iter().any(|waiter| waiter.process == victim))
+        {
+            resource.object = Some(relation.clone());
+        }
+    }
+}
+
+fn context_relation(context: &str) -> Option<String> {
+    let context = context.trim();
+    if !["while updating tuple ", "while deleting tuple ", "while locking tuple "]
+        .iter()
+        .any(|prefix| context.starts_with(prefix))
+    {
+        return None;
+    }
+    context.split_once(" in relation \"")?.1.strip_suffix('"').map(str::to_owned)
 }
 
 fn bracketed_pid(line: &str) -> Option<String> {

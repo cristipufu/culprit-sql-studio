@@ -1,4 +1,5 @@
 mod diff;
+pub(crate) mod retained;
 pub(crate) mod sarif;
 #[cfg(test)]
 mod tests;
@@ -16,6 +17,16 @@ use culprit_engine::{ConnectionInfo, DiscoveryResult, ImportCandidate};
 use serde_json::{Value, json};
 
 use crate::TopBy;
+
+pub(crate) const BRIEF_FINDING_LIMIT: usize = 3;
+pub(crate) const BRIEF_TITLE_CHARS: usize = 160;
+
+pub(crate) fn append_brief_titles<'a>(text: &mut String, titles: impl Iterator<Item = &'a str>) {
+    for title in titles.take(BRIEF_FINDING_LIMIT) {
+        text.push_str("\n• ");
+        text.extend(title.chars().take(BRIEF_TITLE_CHARS));
+    }
+}
 
 /// "just now", "7 min ago", "2 h 5 min ago": how long ago a scan was taken, as the app says it.
 pub(crate) fn age(taken_at: &str) -> Option<String> {

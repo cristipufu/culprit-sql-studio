@@ -1,72 +1,31 @@
-import { useState } from "react";
-import type { MemoryFailureExplanation } from "../gen/MemoryFailureExplanation";
+import type { RetainedFailureExplanation } from "../gen/RetainedFailureExplanation";
 import type { MemoryFailureJsonDocument } from "../gen/MemoryFailureJsonDocument";
-import type { MemoryFailureReport } from "../gen/MemoryFailureReport";
+import type { RetainedFailureReport } from "../gen/RetainedFailureReport";
 import type { MemoryFailureSnapshot } from "../gen/MemoryFailureSnapshot";
 import type { MssqlOutOfMemoryObservation } from "../gen/MssqlOutOfMemoryObservation";
 import type { SourceOutcome } from "../gen/SourceOutcome";
 import { digits } from "../lib/format";
 import { key, t } from "../lib/i18n";
-
-const PAGE_SIZE = 10;
+import { RetainedFailures, RetainedFailureSourceIssue, retainedFailureReadIssue } from "./RetainedFailures";
 
 /** The backend explains the source's classifications. The UI preserves native values and independently read bounds. */
-export function RetainedMemoryFailures({ evidence, report }: { evidence: MemoryFailureSnapshot; report: MemoryFailureReport }) {
-  const [page, setPage] = useState(0);
-  const lastPage = Math.max(0, Math.ceil(report.entries.length / PAGE_SIZE) - 1);
-  const currentPage = Math.min(page, lastPage);
-  const first = currentPage * PAGE_SIZE;
-  const entries = report.entries.slice(first, first + PAGE_SIZE);
+export function RetainedMemoryFailures({ evidence, report }: { evidence: MemoryFailureSnapshot; report: RetainedFailureReport }) {
   const observations = new Map(evidence.observations.map((observation) => [observation.position, observation]));
-  return <section className="operational-health" aria-label={report.title}>
-    <h3>{report.title}</h3>
-    <p>{report.summary}</p>
-    <p className="muted">{evidence.source} · {memoryScope(evidence.scope)}</p>
-    <p className="muted">{t("ui.memory_failures.read_between", { from: evidence.observed_from, until: evidence.observed_until })}</p>
-    {readQualification(report.source_state) && <p className="muted">{readQualification(report.source_state)}</p>}
-    <details>
-      <summary>{t("ui.memory_failures.limitations")}</summary>
-      {report.source_reason && <p className="muted">{report.source_reason}</p>}
-      {report.limitations.map((limitation, index) => <p className="muted" key={index}>{limitation}</p>)}
-    </details>
-    <div className="operational-grid memory-failure-grid">
-      {entries.map((entry) => {
-        const observation = observations.get(entry.position);
-        return observation
-          ? <MemoryFailureRow key={entry.position} explanation={entry} observation={observation} />
-          : <div className="operational-card" key={entry.position}><p>{t("ui.memory_failures.missing_row")}</p></div>;
-      })}
-    </div>
-    {report.entries.length > PAGE_SIZE && <div className="actions">
-      <button type="button" className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t("ui.termination_history.previous")}</button>
-      <span className="muted">{t("ui.memory_failures.page", { first: digits(String(first + 1)), last: digits(String(Math.min(first + PAGE_SIZE, report.entries.length))), total: digits(String(report.entries.length)) })}</span>
-      <button type="button" className="btn" disabled={currentPage === lastPage} onClick={() => setPage(currentPage + 1)}>{t("ui.termination_history.next")}</button>
-    </div>}
-  </section>;
+  return <RetainedFailures evidence={evidence} report={report} scope={memoryScope(evidence.scope)} renderEntry={(entry) => {
+    const observation = observations.get(entry.position);
+    return observation
+      ? <MemoryFailureRow key={entry.position} explanation={entry} observation={observation} />
+      : <div className="operational-card" key={entry.position}><p>{t("ui.memory_failures.missing_row")}</p></div>;
+  }} />;
 }
 
 /** A rejected read must remain visible even when it could not admit a native wrapper or a derived explanation. */
-export function memoryFailureReadIssue(source: string | undefined, sources: SourceOutcome[]): SourceOutcome | undefined {
-  return sources.find((outcome) => outcome.source === (source ?? "memory failures") && (outcome.state === "partial" || outcome.state === "unavailable"));
+export function memoryFailureReadIssue(source: string | undefined, sources: SourceOutcome[], requested = false): SourceOutcome | undefined {
+  return retainedFailureReadIssue(source ?? "memory failures", sources, requested);
 }
 
 export function MemoryFailureSourceIssue({ source }: { source: SourceOutcome }) {
-  return <section className="operational-health">
-    <h3>{t("view.memory_failures.title")}</h3>
-    <p className="muted">{readQualification(source.state)}</p>
-    <details>
-      <summary>{t("ui.memory_failures.limitations")}</summary>
-      <p>{source.reason ?? t("view.memory_failures.limit.source_unknown")}</p>
-    </details>
-  </section>;
-}
-
-function readQualification(state: SourceOutcome["state"] | null): string | null {
-  switch (state) {
-    case "partial": return t("ui.common.read_partial");
-    case "unavailable": return t("ui.dashboard.status.unavailable");
-    default: return null;
-  }
+  return <RetainedFailureSourceIssue source={source} title={t("view.memory_failures.title")} />;
 }
 
 function memoryScope(scope: MemoryFailureSnapshot["scope"]): string {
@@ -77,7 +36,7 @@ function memoryScope(scope: MemoryFailureSnapshot["scope"]): string {
   }
 }
 
-function MemoryFailureRow({ observation, explanation }: { observation: MssqlOutOfMemoryObservation; explanation: MemoryFailureExplanation }) {
+function MemoryFailureRow({ observation, explanation }: { observation: MssqlOutOfMemoryObservation; explanation: RetainedFailureExplanation }) {
   return <article className="operational-card">
     <h4>{explanation.title}</h4>
     <p>{explanation.explanation}</p>

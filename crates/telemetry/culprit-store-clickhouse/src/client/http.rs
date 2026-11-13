@@ -35,6 +35,7 @@ pub(super) fn query(
     config: &ClickHouseConfig,
     credentials: &Credentials,
     id: &str,
+    sequential_reads: bool,
     input: QueryRequest,
 ) -> Result<QueryTable> {
     let mut request = request(origin, config, credentials, id)
@@ -47,7 +48,7 @@ pub(super) fn query(
         .query("max_bytes_to_read", MAX_READ_BYTES.to_string())
         .query("cancel_http_readonly_queries_on_client_close", "1")
         .query("output_format_json_quote_64bit_integers", "0");
-    if config.insert_quorum.is_some() {
+    if sequential_reads {
         request = request.query("select_sequential_consistency", "1");
     }
     for (name, value) in &input.parameters {
@@ -70,6 +71,7 @@ pub(super) fn insert(
     id: &str,
     table: &str,
     data: InsertData,
+    policy: crate::ingestion::WritePolicy,
 ) -> Result<Submission> {
     let bytes = data.bytes();
     let mut request = request(origin, config, credentials, id)
@@ -81,7 +83,7 @@ pub(super) fn insert(
         .query("input_format_allow_errors_num", "0")
         .query("input_format_allow_errors_ratio", "0")
         .query("input_format_null_as_default", "0");
-    if let Some(quorum) = config.insert_quorum {
+    if let Some(quorum) = policy.insert_quorum {
         request = request
             .query("insert_quorum", quorum.to_string())
             .query("insert_quorum_timeout", "30000")

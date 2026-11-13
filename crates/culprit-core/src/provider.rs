@@ -29,6 +29,10 @@ pub struct SnapshotOptions {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_memory_failures: bool,
+    /// Explicit opt-in to retained native error metadata; free-form diagnostic messages remain omitted.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub collect_native_failures: bool,
 }
 
 impl Default for SnapshotOptions {
@@ -40,6 +44,7 @@ impl Default for SnapshotOptions {
             collect_shared_resources: false,
             collect_request_memory: false,
             collect_memory_failures: false,
+            collect_native_failures: false,
         }
     }
 }

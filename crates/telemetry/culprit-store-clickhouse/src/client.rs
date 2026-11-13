@@ -26,21 +26,17 @@ const MAX_REQUEST_BYTES: usize = 256 * 1024;
 pub struct ClickHouseConfig {
     pub endpoint: String,
     pub database: String,
-    /// A replica quorum for deployments using ReplicatedMergeTree; omit for a single-node MergeTree deployment.
-    #[serde(default)]
-    pub insert_quorum: Option<u32>,
 }
 impl ClickHouseConfig {
     pub fn destination_id(&self) -> Result<String> {
         let origin = self.origin()?;
-        let bytes = serde_json::to_vec(&(origin, &self.database, self.insert_quorum)).map_err(|_| invalid())?;
+        let bytes = serde_json::to_vec(&(origin, &self.database)).map_err(|_| invalid())?;
         Ok(format!("clickhouse:{}", culprit_core::telemetry::digest(&bytes)))
     }
     fn origin(&self) -> Result<String> {
         if self.database.is_empty()
             || self.database.len() > 256
             || self.database.chars().any(char::is_control)
-            || self.insert_quorum.is_some_and(|n| n == 0 || n > 128)
             || self.endpoint.contains('#')
             || self.endpoint.chars().any(|character| character.is_control() || character.is_whitespace())
         {
@@ -135,7 +131,6 @@ impl InsertData {
 pub trait QueryTransport: Send + Sync {
     fn destination(&self) -> &str;
     async fn query(&self, request: QueryRequest) -> Result<QueryTable>;
-    async fn insert(&self, table: &str, data: InsertData) -> Result<Submission>;
 }
 pub struct ClickHouseClient {
     destination: String,
@@ -143,6 +138,7 @@ pub struct ClickHouseClient {
     config: ClickHouseConfig,
     credentials: Arc<Credentials>,
     requests: Arc<Semaphore>,
+    sequential_reads: bool,
 }
 impl ClickHouseClient {
     pub fn new(config: ClickHouseConfig, credentials: Credentials) -> Result<Self> {
@@ -152,7 +148,12 @@ impl ClickHouseClient {
             config,
             credentials: Arc::new(credentials),
             requests: Arc::new(Semaphore::new(MAX_PARALLEL_REQUESTS)),
+            sequential_reads: false,
         })
+    }
+    pub(crate) fn with_sequential_reads(mut self, required: bool) -> Self {
+        self.sequential_reads = required;
+        self
     }
 }
 #[async_trait]
@@ -164,15 +165,23 @@ impl QueryTransport for ClickHouseClient {
         request.validate()?;
         let permit = self.requests.clone().acquire_owned().await.map_err(|_| transport())?;
         let (origin, config, credentials) = (self.origin.clone(), self.config.clone(), self.credentials.clone());
+        let sequential_reads = self.sequential_reads;
         let id = request_id()?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            http::query(&origin, &config, &credentials, &id, request)
+            http::query(&origin, &config, &credentials, &id, sequential_reads, request)
         })
         .await
         .map_err(|_| transport())?
     }
-    async fn insert(&self, table: &str, data: InsertData) -> Result<Submission> {
+}
+impl ClickHouseClient {
+    pub(crate) async fn insert(
+        &self,
+        table: &str,
+        data: InsertData,
+        policy: crate::ingestion::WritePolicy,
+    ) -> Result<Submission> {
         if !culprit_collector::analytical::schema::identifier(table) || data.bytes() > MAX_RANGE_BYTES {
             return Err(invalid());
         }
@@ -186,7 +195,7 @@ impl QueryTransport for ClickHouseClient {
         // The worker retains the batch, its temporary file and its spool lease through native HTTP completion.
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            http::insert(&origin, &config, &credentials, &id, &table, data)
+            http::insert(&origin, &config, &credentials, &id, &table, data, policy)
         })
         .await
         .map_err(|_| transport())?

@@ -251,6 +251,7 @@ impl Pipeline {
             step.prepare(&mut snapshot);
         }
         let memory_failures = explained_memory_failures(&mut snapshot);
+        let native_failures = explained_native_failures(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
         let mut assessments = Vec::new();
@@ -344,18 +345,56 @@ impl Pipeline {
                 assessment.status = culprit_core::CheckStatus::Findings;
             }
         }
-        Report { snapshot, findings, locked, summary, assessments, refinement, provenance, evidence, memory_failures }
+        Report {
+            snapshot,
+            findings,
+            locked,
+            summary,
+            assessments,
+            refinement,
+            provenance,
+            evidence,
+            memory_failures,
+            native_failures,
+        }
     }
 }
 
-fn explained_memory_failures(snapshot: &mut Snapshot) -> Option<culprit_core::MemoryFailureReport> {
+fn explained_memory_failures(snapshot: &mut Snapshot) -> Option<culprit_core::RetainedFailureReport> {
     let captured = snapshot.operations.memory_failures.as_ref()?;
     let source = snapshot.sources.iter().find(|source| source.source == captured.source);
-    match crate::memory_failures::explain(captured, source) {
+    let result = crate::memory_failures::explain(captured, source);
+    let source_id = captured.source.clone();
+    admit_retained_explanation(
+        snapshot,
+        source_id,
+        culprit_core::message!("view.memory_failures.invalid_capture"),
+        result,
+    )
+}
+
+fn explained_native_failures(snapshot: &mut Snapshot) -> Option<culprit_core::RetainedFailureReport> {
+    let captured = snapshot.operations.native_failures.as_ref()?;
+    let source = snapshot.sources.iter().find(|source| source.source == captured.source);
+    let result = crate::native_failures::explain(captured, source);
+    let source_id = captured.source.clone();
+    admit_retained_explanation(
+        snapshot,
+        source_id,
+        culprit_core::message!("view.native_failures.invalid_capture"),
+        result,
+    )
+}
+
+fn admit_retained_explanation(
+    snapshot: &mut Snapshot,
+    source_id: String,
+    message: culprit_core::i18n::Message,
+    explained: culprit_core::Result<culprit_core::RetainedFailureReport>,
+) -> Option<culprit_core::RetainedFailureReport> {
+    match explained {
         Ok(report) => Some(report),
         Err(_) => {
-            let source_id = captured.source.clone();
-            let message = culprit_core::message!("view.memory_failures.invalid_capture");
             if let Some(source) = snapshot.sources.iter_mut().find(|source| source.source == source_id) {
                 source.state = culprit_core::SourceState::Unavailable;
                 source.reason = Some(message.render());

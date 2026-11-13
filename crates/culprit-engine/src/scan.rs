@@ -42,6 +42,7 @@ impl<'a> Scan<'a> {
         if snapshot.options.is_none() {
             snapshot.options = Some(options.clone());
         }
+        record_missing_retained_source_outcomes(&mut snapshot, options);
         if let Some(log) = log {
             query_log::attach(provider, &mut snapshot, log.path, options, log.discovered).await?;
         }
@@ -100,6 +101,29 @@ impl<'a> Scan<'a> {
             completed_at: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
         };
         Ok(CollectedScan { dir, checks: self.checks.to_vec(), snapshot, recorded, previous, collection })
+    }
+}
+
+/// A provider may omit an optional reader. An explicit request must still explain the missing qualification,
+/// without guessing support or replacing native evidence and coverage supplied by an embedding provider.
+fn record_missing_retained_source_outcomes(snapshot: &mut Snapshot, options: &SnapshotOptions) {
+    use culprit_core::{SourceOutcome, SourceState, coverage::same_source, source_id};
+    let requested_sources = [
+        (options.collect_memory_failures, snapshot.operations.memory_failures.is_some(), source_id::MEMORY_FAILURES),
+        (options.collect_native_failures, snapshot.operations.native_failures.is_some(), source_id::NATIVE_FAILURES),
+    ];
+    for (requested, has_evidence, source) in requested_sources {
+        if !requested || has_evidence || snapshot.sources.iter().any(|outcome| same_source(&outcome.source, source)) {
+            continue;
+        }
+        let reason = culprit_core::message!("provider.retained_failures.unreported");
+        snapshot.notes.push(CollectorNote::recorded(source, reason.clone()));
+        snapshot.sources.push(SourceOutcome {
+            source: source.into(),
+            state: SourceState::Unavailable,
+            reason: Some(reason.render()),
+            reason_message: Some(reason),
+        });
     }
 }
 
@@ -163,8 +187,66 @@ impl CollectedScan {
 }
 
 #[cfg(test)]
-mod frame_tests {
+mod tests {
     use super::*;
+
+    fn recorded() -> Snapshot {
+        serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap()
+    }
+
+    #[test]
+    fn an_ignored_diagnostic_opt_in_reports_unknown_coverage_without_inventing_an_empty_read() {
+        let mut snapshot = recorded();
+        let original = snapshot.sources.clone();
+        record_missing_retained_source_outcomes(&mut snapshot, &SnapshotOptions::default());
+        assert_eq!(snapshot.sources, original, "default scans acquire no new diagnostic source");
+        let options =
+            SnapshotOptions { collect_memory_failures: true, collect_native_failures: true, ..Default::default() };
+        record_missing_retained_source_outcomes(&mut snapshot, &options);
+        let expected = snapshot.sources.clone();
+        for source in [culprit_core::source_id::MEMORY_FAILURES, culprit_core::source_id::NATIVE_FAILURES] {
+            let outcome = snapshot.sources.iter().find(|outcome| outcome.source == source).unwrap();
+            assert_eq!(outcome.state, culprit_core::SourceState::Unavailable);
+            assert!(outcome.reason_message.as_ref().unwrap().is_translatable());
+            assert!(
+                snapshot.notes.iter().any(|note| note.collector == source && note.message_source.is_some()),
+                "human CLI output must also disclose the unqualified source"
+            );
+        }
+        let note_count = snapshot.notes.len();
+        record_missing_retained_source_outcomes(&mut snapshot, &options);
+        assert_eq!(snapshot.sources, expected, "qualification is recorded only once");
+        assert_eq!(snapshot.notes.len(), note_count, "repeated qualification must not duplicate notes");
+    }
+
+    #[test]
+    fn optional_diagnostic_qualification_preserves_provider_outcomes_and_custom_native_sources() {
+        use culprit_core::{SourceOutcome, SourceState, telemetry::NativeFailureSnapshot};
+        let options = SnapshotOptions { collect_native_failures: true, ..Default::default() };
+        for state in [SourceState::Partial, SourceState::Unavailable, SourceState::NotApplicable, SourceState::Empty] {
+            let mut snapshot = recorded();
+            snapshot.sources.push(SourceOutcome {
+                source: culprit_core::source_id::NATIVE_FAILURES.into(),
+                state,
+                reason: Some("provider-owned qualification".into()),
+                reason_message: None,
+            });
+            let original = snapshot.sources.clone();
+            record_missing_retained_source_outcomes(&mut snapshot, &options);
+            assert_eq!(snapshot.sources, original);
+        }
+        let mut snapshot = recorded();
+        snapshot.operations.native_failures = Some(NativeFailureSnapshot {
+            source: "embedding-native-diagnostics".into(),
+            observed_from: "2026-11-13T08:00:00Z".into(),
+            observed_until: "2026-11-13T08:00:01Z".into(),
+            resource: None,
+            observations: vec![],
+        });
+        let original = snapshot.sources.clone();
+        record_missing_retained_source_outcomes(&mut snapshot, &options);
+        assert_eq!(snapshot.sources, original, "an embedding provider owns its native source qualification");
+    }
 
     #[test]
     fn public_scan_futures_leave_stack_space_for_native_decoding_and_nested_consumers() {

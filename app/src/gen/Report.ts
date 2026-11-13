@@ -3,9 +3,9 @@ import type { AnalysisProvenance } from "./AnalysisProvenance";
 import type { CheckAssessment } from "./CheckAssessment";
 import type { Finding } from "./Finding";
 import type { LockedCheck } from "./LockedCheck";
-import type { MemoryFailureReport } from "./MemoryFailureReport";
 import type { RefinementDecision } from "./RefinementDecision";
 import type { ReportEvidence } from "./ReportEvidence";
+import type { RetainedFailureReport } from "./RetainedFailureReport";
 import type { Snapshot } from "./Snapshot";
 import type { Summary } from "./Summary";
 
@@ -16,4 +16,8 @@ export type Report = {
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */
-memory_failures?: MemoryFailureReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+memory_failures?: RetainedFailureReport, 
+/**
+ * Explanations refer to retained native diagnostic rows in the input snapshot.
+ */
+native_failures?: RetainedFailureReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

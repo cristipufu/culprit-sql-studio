@@ -5,6 +5,7 @@ use culprit_collector::delivery::object_store::provider::RecoveryProvider;
 pub struct CollectorRuntime {
     pub(super) recovery: recovery::RecoveryRegistry,
     pub(super) credentials: Option<Arc<dyn culprit_auth::CredentialResolver>>,
+    pub(super) evidence_stores: evidence::stores::StoreRegistry,
 }
 impl Default for CollectorRuntime {
     fn default() -> Self {
@@ -14,12 +15,20 @@ impl Default for CollectorRuntime {
             #[cfg(feature = "recovery-s3")]
             Arc::new(culprit_blob_s3::S3RecoveryProvider),
         ];
-        Self { recovery: recovery::RecoveryRegistry::builtins(providers), credentials: None }
+        Self {
+            recovery: recovery::RecoveryRegistry::builtins(providers),
+            credentials: None,
+            evidence_stores: evidence::stores::StoreRegistry::builtins(),
+        }
     }
 }
 impl CollectorRuntime {
     pub fn empty() -> Self {
-        Self { recovery: recovery::RecoveryRegistry::default(), credentials: None }
+        Self {
+            recovery: recovery::RecoveryRegistry::default(),
+            credentials: None,
+            evidence_stores: evidence::stores::StoreRegistry::default(),
+        }
     }
     pub fn with_recovery_provider(mut self, provider: Arc<dyn RecoveryProvider>) -> Result<Self> {
         self.recovery.register(provider)?;

@@ -67,20 +67,7 @@ async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, proc
         // https://github.com/mysql/mysql-server/blob/8.4/sql/mysqld.cc (show_starttime)
         // https://github.com/MariaDB/server/blob/11.8/sql/mysqld.cc (show_starttime)
         // This does not establish when any digest, table or global counter was flushed or evicted.
-        let status = match flavor {
-            Flavor::Mysql => "performance_schema.global_status",
-            Flavor::Mariadb => "information_schema.GLOBAL_STATUS",
-        };
-        let clock = one(
-            reader,
-            &format!(
-                "SELECT UNIX_TIMESTAMP() AS observed_second,
-            CAST(VARIABLE_VALUE AS UNSIGNED) AS uptime FROM {status} WHERE VARIABLE_NAME='Uptime'"
-            ),
-            vec![],
-        )
-        .await?;
-        Some(integer(&clock, "observed_second")?.checked_sub(integer(&clock, "uptime")?).ok_or_else(invalid)?)
+        Some(process_started_second(reader, flavor).await?)
     } else {
         None
     };
@@ -110,4 +97,22 @@ async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, proc
         process_wide: flag(&visibility, "process_wide")?,
         started_second,
     })
+}
+
+/// A native server-process marker, independently of any selected database or resettable statement counters.
+pub(crate) async fn process_started_second<R: QueryRead>(reader: &mut R, flavor: Flavor) -> Result<u64> {
+    let status = match flavor {
+        Flavor::Mysql => "performance_schema.global_status",
+        Flavor::Mariadb => "information_schema.GLOBAL_STATUS",
+    };
+    let clock = one(
+        reader,
+        &format!(
+            "SELECT UNIX_TIMESTAMP() AS observed_second,
+            CAST(VARIABLE_VALUE AS UNSIGNED) AS uptime FROM {status} WHERE VARIABLE_NAME='Uptime'"
+        ),
+        vec![],
+    )
+    .await?;
+    integer(&clock, "observed_second")?.checked_sub(integer(&clock, "uptime")?).ok_or_else(invalid)
 }

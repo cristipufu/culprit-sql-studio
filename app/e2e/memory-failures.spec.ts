@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { MemoryFailureReport } from "../src/gen/MemoryFailureReport";
+import type { RetainedFailureReport } from "../src/gen/RetainedFailureReport";
 import type { MemoryFailureSnapshot } from "../src/gen/MemoryFailureSnapshot";
 import type { MssqlOutOfMemoryObservation } from "../src/gen/MssqlOutOfMemoryObservation";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
@@ -48,7 +48,7 @@ function retainedEvidence(): MemoryFailureSnapshot {
   };
 }
 
-function explanations(evidence: MemoryFailureSnapshot): MemoryFailureReport {
+function explanations(evidence: MemoryFailureSnapshot): RetainedFailureReport {
   return {
     title: "Retained memory failures",
     summary: "12 retained observations; no incident count established.",
@@ -65,7 +65,7 @@ function explanations(evidence: MemoryFailureSnapshot): MemoryFailureReport {
   };
 }
 
-async function injectMemory(page: Page, evidence: MemoryFailureSnapshot | null, view: MemoryFailureReport | null, source: SourceOutcome) {
+async function injectMemory(page: Page, evidence: MemoryFailureSnapshot | null, view: RetainedFailureReport | null, source: SourceOutcome) {
   // Opening a connection renders cached data before its refresh. Install the synthetic capture only after that
   // existing request has finished, so the refresh cannot legitimately replace the test's evidence underneath it.
   await expect.poll(async () => page.evaluate(async (path) => {
@@ -97,6 +97,8 @@ test("retained memory evidence stays compact and preserves native rows, clocks a
   const evidence = retainedEvidence();
   await injectMemory(page, evidence, explanations(evidence), { source: SOURCE, state: "partial", reason: "Only a bounded native buffer was read." });
   await page.locator('[data-tile="health"]').click();
+  // Health is loaded on demand; wait for its dialog before asserting the injected evidence.
+  await page.getByRole("dialog", { name: "Database health", exact: true }).waitFor();
   const memory = page.locator(".health-tab > .operational-health").filter({ has: page.getByRole("heading", { name: "Retained memory failures", exact: true }) });
   const cards = memory.locator("article");
   await expect(memory).toBeVisible();
@@ -109,7 +111,7 @@ test("retained memory evidence stays compact and preserves native rows, clocks a
   await expect(cards.first()).toContainText("UTC offset unknown");
   await expect(cards.first().locator("code").first()).toHaveText(NATIVE_TIME);
   expect((await cards.first().boundingBox())!.height).toBeLessThan(300);
-  await info.attach("memory-failures-collapsed-1000", { body: await page.screenshot(), contentType: "image/png" });
+  await info.attach("memory-failures-collapsed-1000", { body: await page.screenshot({ path: info.outputPath("memory-failures-collapsed-1000.png") }), contentType: "image/png" });
 
   await memory.getByRole("button", { name: "Next records", exact: true }).click();
   await expect(cards).toHaveCount(2);
@@ -153,7 +155,7 @@ test("retained memory evidence stays compact and preserves native rows, clocks a
   await expect(first.locator("pre").filter({ hasText: /^null$/ })).toBeVisible();
   await first.getByText("Native possible leaked memory clerks", { exact: true }).click();
   await expect(first.getByText("SQL NULL: no document supplied.", { exact: true })).toBeVisible();
-  await info.attach("memory-failures-native-details-1000", { body: await page.screenshot(), contentType: "image/png" });
+  await info.attach("memory-failures-native-details-1000", { body: await page.screenshot({ path: info.outputPath("memory-failures-native-details-1000.png") }), contentType: "image/png" });
 
   await injectMemory(page, null, null, { source: SOURCE, state: "unavailable", reason: "The native read did not establish permission or bounded completion." });
   await expect(memory).toBeVisible();
@@ -165,5 +167,5 @@ test("retained memory evidence stays compact and preserves native rows, clocks a
   await memory.getByText("What this evidence establishes", { exact: true }).click();
   await expect(reason).toBeVisible();
   await expect(memory).not.toContainText("0 failures");
-  await info.attach("memory-failures-unavailable-1000", { body: await page.screenshot(), contentType: "image/png" });
+  await info.attach("memory-failures-unavailable-1000", { body: await page.screenshot({ path: info.outputPath("memory-failures-unavailable-1000.png") }), contentType: "image/png" });
 });

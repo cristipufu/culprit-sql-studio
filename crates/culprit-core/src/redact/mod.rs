@@ -183,6 +183,12 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     if let Some(resource) = s.operations.memory_failures.as_mut().and_then(|evidence| evidence.resource.as_mut()) {
         redact_resource_identity(resource);
     }
+    if let Some(evidence) = &mut s.operations.native_failures {
+        evidence.redact();
+        if let Some(resource) = &mut evidence.resource {
+            redact_resource_identity(resource);
+        }
+    }
     if let Some(resources) = &mut s.operations.node_resources {
         for message in resources.source_message.iter_mut().chain(resources.note_messages.iter_mut().flatten()) {
             redact_scoped_message(message);

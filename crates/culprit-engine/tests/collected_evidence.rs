@@ -5,6 +5,7 @@ use culprit_engine::collected_evidence;
 
 mod fixture;
 mod memory_failures;
+mod native_failures;
 mod waits;
 use fixture::Fixture;
 

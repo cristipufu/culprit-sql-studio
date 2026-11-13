@@ -32,6 +32,8 @@ pub mod history;
 mod http;
 pub mod import;
 pub mod marks;
+#[cfg(feature = "postgres")]
+pub mod native_logs;
 mod operation;
 pub mod plans;
 mod private_fs;

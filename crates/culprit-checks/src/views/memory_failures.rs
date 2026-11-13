@@ -3,14 +3,16 @@
 
 use culprit_core::operations::MemoryFailureSnapshot;
 use culprit_core::telemetry::MssqlOutOfMemoryObservation;
-use culprit_core::{Error, MemoryFailureExplanation, MemoryFailureReport, SourceOutcome, SourceState, format, key, t};
+use culprit_core::{
+    Error, RetainedFailureExplanation, RetainedFailureReport, SourceOutcome, SourceState, format, key, t,
+};
 
 /// Scan and authenticated resource readback use the same native facts and source qualification. Capture bounds
 /// describe the read; this view never compares the native offset-free event time with those UTC bounds.
 pub fn explain(
     evidence: &MemoryFailureSnapshot,
     source: Option<&SourceOutcome>,
-) -> culprit_core::Result<MemoryFailureReport> {
+) -> culprit_core::Result<RetainedFailureReport> {
     validate_input(evidence, source)?;
     let cases = evidence
         .observations
@@ -32,7 +34,7 @@ pub fn explain(
         }
         Some(SourceState::Collected | SourceState::Empty) => {}
     }
-    Ok(MemoryFailureReport {
+    Ok(RetainedFailureReport {
         source_state: source.map(|source| source.state),
         source_reason: source.and_then(|source| source.reason.clone()),
         title: t!("view.memory_failures.title"),
@@ -182,9 +184,9 @@ impl NativeMemoryCause {
     }
 }
 
-fn render(case: MemoryFailureCase<'_>) -> MemoryFailureExplanation {
+fn render(case: MemoryFailureCase<'_>) -> RetainedFailureExplanation {
     let (title, explanation, investigation) = case.cause.messages();
-    MemoryFailureExplanation {
+    RetainedFailureExplanation {
         position: case.observation.position,
         title: culprit_core::i18n::t(title, &[]),
         explanation: culprit_core::i18n::t(explanation, &[]),

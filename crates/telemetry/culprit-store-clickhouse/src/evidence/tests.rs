@@ -1,10 +1,5 @@
 use super::*;
-use crate::{
-    catalog::SchemaCatalog,
-    client::{InsertData, QueryRequest},
-    response::QueryTable,
-    schema::Schema,
-};
+use crate::{catalog::SchemaCatalog, client::QueryRequest, response::QueryTable, schema::Schema};
 use async_trait::async_trait;
 use culprit_collector::{
     analytical::{
@@ -15,7 +10,7 @@ use culprit_collector::{
         publication,
         test_support::{self, Blobs, Fault, Recovery},
     },
-    delivery::{recovery::reopen, sink::Submission},
+    delivery::recovery::reopen,
 };
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Value, json};
@@ -41,9 +36,6 @@ impl QueryTransport for Queries {
         self.requests.lock().unwrap().push(request);
         Ok(QueryTable { columns, rows, response_bytes })
     }
-    async fn insert(&self, _: &str, _: InsertData) -> Result<Submission> {
-        panic!("evidence reads must not ingest or access a source database")
-    }
 }
 
 fn returned(schema: &Schema, encoded: &Value) -> Vec<Value> {
@@ -65,40 +57,104 @@ fn returned(schema: &Schema, encoded: &Value) -> Vec<Value> {
         .collect()
 }
 
+struct Fixture {
+    catalog: Arc<SchemaCatalog>,
+    recovery: Arc<Recovery>,
+    range: culprit_collector::delivery::recovery::CommittedRange,
+    reader: EvidenceReader,
+    query: Arc<Queries>,
+    rows: Vec<Vec<Value>>,
+    publication: Vec<Value>,
+}
+impl Fixture {
+    async fn new(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+        let catalog = Arc::new(SchemaCatalog::new().unwrap());
+        let schema = catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        assert_eq!(schema.table(), "CulpritOperationalV1");
+        let recovery = Arc::new(Recovery::capture("clickhouse:test", catalog.digest(), source, records, 140_000));
+        let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
+        assert_eq!(range.manifest().batches.len(), 1);
+        assert_eq!(range.manifest().batches[0].stream, TelemetryStream::OperationalSamples);
+        let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
+        let scratch = tempfile::tempdir().unwrap();
+        let encoder = BatchEncoder::new(catalog.clone(), recovery.clone(), scratch.path()).unwrap();
+        let encoded = encoder.encode(&range, &range.manifest().batches[0].batch_id).await.unwrap();
+        indexes.put(&encoded.index_key, &encoded.digests).await.unwrap();
+        let rows: Vec<_> = std::fs::read_to_string(encoded.path())
+            .unwrap()
+            .lines()
+            .map(|line| returned(schema, &serde_json::from_str(line).unwrap()))
+            .collect();
+        let publication_schema = catalog.publication();
+        let values = publication_schema.project(&publication::input(catalog.as_ref(), &range).unwrap()).unwrap();
+        let publication = returned(
+            publication_schema,
+            &serde_json::from_slice(&publication_schema.encode(&values).unwrap()).unwrap(),
+        );
+        let query = Arc::new(Queries::default());
+        *recovery.fault.lock().unwrap() = Fault::Stall;
+        let reader = super::new(query.clone(), indexes).unwrap();
+        Self { catalog, recovery, range, reader, query, rows, publication }
+    }
+    fn replies(&self, pages: Vec<Vec<Vec<Value>>>) {
+        let mut replies = self.query.replies.lock().unwrap();
+        replies.push_back(vec![self.publication.clone()]);
+        replies.push_back(vec![vec![json!(0)]]);
+        replies.extend(pages);
+    }
+}
+
+#[tokio::test]
+async fn native_failure_formats_keep_exact_context_partial_coverage_and_proof_membership() {
+    for (source, records) in test_support::native_failure_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let result = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..Default::default() },
+            )
+            .await
+            .unwrap();
+        assert!(result.is_read_complete(), "{:?}", result.gaps());
+        assert_eq!(result.source(), &source);
+        assert_eq!(result.records().len(), records.len());
+        assert_eq!(result.metrics().pages as usize, records.len());
+        assert_ne!(result.records()[0].row().record_id, result.records()[1].row().record_id);
+        let snapshot = source.observation.snapshot().unwrap();
+        assert_eq!(snapshot.dataset, SnapshotDataset::NativeFailures);
+        assert_ne!(source.source, snapshot.sources[0].source);
+        assert!(source.target.database().is_none());
+        for (index, native) in records.iter().enumerate() {
+            let expected = ExportedRecord::new(&source, result.capture(), native.clone()).unwrap();
+            assert_eq!(result.records()[index].row(), &expected);
+            assert_eq!(result.records()[index].row_ordinal() as usize, index + 1);
+        }
+        assert!(!serde_json::to_string(result.records()).unwrap().contains("private-pg-log-canary"));
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "FactKind").unwrap();
+        let mut tampered = fixture.rows[0].clone();
+        tampered[column] = json!("unproven-native-format");
+        fixture.replies(vec![vec![tampered]]);
+        let error = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}
+
 #[tokio::test]
 async fn retained_memory_failures_use_exact_operational_readback_without_inventing_time_or_ownership() {
     let (source, records) = test_support::memory_failure_evidence();
-    let catalog = Arc::new(SchemaCatalog::new().unwrap());
+    let fixture = Fixture::new(source.clone(), records.clone()).await;
+    fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+    let Fixture { catalog, recovery, range, reader, query, rows, publication } = fixture;
     let schema = catalog.get(TelemetryStream::OperationalSamples).unwrap();
-    assert_eq!(schema.table(), "CulpritOperationalV1");
-    let recovery =
-        Arc::new(Recovery::capture("clickhouse:test", catalog.digest(), source.clone(), records.clone(), 140_000));
-    let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
-    assert_eq!(range.manifest().batches.len(), 1);
-    assert_eq!(range.manifest().batches[0].stream, TelemetryStream::OperationalSamples);
-    let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
-    let scratch = tempfile::tempdir().unwrap();
-    let encoder = BatchEncoder::new(catalog.clone(), recovery.clone(), scratch.path()).unwrap();
-    let encoded = encoder.encode(&range, &range.manifest().batches[0].batch_id).await.unwrap();
-    indexes.put(&encoded.index_key, &encoded.digests).await.unwrap();
-    let rows: Vec<_> = std::fs::read_to_string(encoded.path())
-        .unwrap()
-        .lines()
-        .map(|line| returned(schema, &serde_json::from_str(line).unwrap()))
-        .collect();
-    let publication_schema = catalog.publication();
-    let values = publication_schema.project(&publication::input(catalog.as_ref(), &range).unwrap()).unwrap();
-    let publication =
-        returned(publication_schema, &serde_json::from_slice(&publication_schema.encode(&values).unwrap()).unwrap());
-    let query = Arc::new(Queries::default());
-    query.replies.lock().unwrap().extend([
-        vec![publication.clone()],
-        vec![vec![json!(0)]],
-        vec![rows[0].clone()],
-        vec![rows[1].clone()],
-    ]);
-    *recovery.fault.lock().unwrap() = Fault::Stall;
-    let reader = super::new(query.clone(), indexes).unwrap();
     let budget = EvidenceReadBudget { page_rows: 1, ..Default::default() };
     let result = reader.read_capture(&range, &[EvidenceFamily::OperationalSamples], budget).await.unwrap();
     assert!(result.is_read_complete(), "{:?}", result.gaps());

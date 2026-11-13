@@ -63,7 +63,8 @@ pub(crate) fn source(
             SnapshotDataset::StatementCounters
             | SnapshotDataset::StatementDefinitions
             | SnapshotDataset::Sequences
-            | SnapshotDataset::Cleanup,
+            | SnapshotDataset::Cleanup
+            | SnapshotDataset::NativeFailures,
         ) => Err(culprit_core::Error::new(
             culprit_core::ErrorCode::Unsupported,
             culprit_core::t!("collection.unsupported"),

@@ -228,6 +228,7 @@ YugabyteDB
   settings                  YSQL and DocDB supported configuration · adds detail
   docdb-index-usage         complete cluster-wide index usage and its reset epochs · Index usage statistics
 MySQL
+  native failures           retained native error-log metadata · adds detail
   redo_pressure             shared InnoDB redo buffer wait counter · adds detail
   cluster_health            Galera readiness and flow control (where enabled) · adds detail
   sequence_capacity         auto-increment allocation limits · adds detail

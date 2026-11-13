@@ -1,7 +1,9 @@
 //! Every integration test file in `tests/`, as a module of this one test binary: one link (and one scan of a fresh
 //! binary) for all of them. A new file in `tests/` is listed here, or `every_test_file_is_listed` fails.
 
+mod native_logs;
 mod said;
+mod workspace;
 
 #[test]
 fn every_test_file_is_listed() {

@@ -13309,6 +13309,7 @@ li code,
 .actual-triggers li > span { min-width: 0; overflow-wrap: anywhere; }
 
 .operational-health { margin-top: 24px; min-width: 0; }
+.retained-failures { overflow-wrap: anywhere; }
 .operational-health > details { margin-top: 16px; }
 .operational-health summary { cursor: pointer; }
 .operational-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 12px; }

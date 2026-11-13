@@ -1,8 +1,9 @@
 use super::*;
+use crate::ingestion::{ClickHouseIngestor, IngestionTransport, WritePolicy};
 use serde_json::json;
 use std::{io::Write, net::TcpListener};
 fn config(endpoint: String) -> ClickHouseConfig {
-    ClickHouseConfig { endpoint, database: "fixture".into(), insert_quorum: None }
+    ClickHouseConfig { endpoint, database: "fixture".into() }
 }
 fn credentials() -> Credentials {
     Credentials::new("fixture-user".into(), Zeroizing::new("private-header-canary".into())).unwrap()
@@ -31,6 +32,64 @@ fn configuration_is_canonical_and_cannot_hide_credentials_or_remote_plaintext() 
         config("https://two.example".into()).destination_id().unwrap()
     );
     assert!(Credentials::new("a\r\nx-secret: bad".into(), Zeroizing::new(String::new())).is_err());
+}
+
+#[test]
+fn read_identity_does_not_depend_on_write_quorum_and_read_configuration_rejects_write_fields() {
+    let config = config("https://warehouse.example".into());
+    let destination = config.destination_id().unwrap();
+    for insert_quorum in [None, Some(1), Some(2), Some(128)] {
+        let ingestion = ClickHouseIngestor::new(config.clone(), credentials(), WritePolicy { insert_quorum }).unwrap();
+        assert_eq!(ingestion.query_transport().destination(), destination);
+    }
+    let mut mixed = serde_json::to_value(&config).unwrap();
+    mixed["insert_quorum"] = json!(2);
+    assert!(serde_json::from_value::<ClickHouseConfig>(mixed).is_err());
+    for insert_quorum in [Some(0), Some(129)] {
+        assert!(ClickHouseIngestor::new(config.clone(), credentials(), WritePolicy { insert_quorum }).is_err());
+    }
+}
+
+#[test]
+fn writer_composition_rejects_an_ingestor_bound_to_another_destination_before_io() {
+    let query = Arc::new(ClickHouseClient::new(config("https://reader.example".into()), credentials()).unwrap());
+    let ingestion = Arc::new(
+        ClickHouseIngestor::new(config("https://different.example".into()), credentials(), WritePolicy::default())
+            .unwrap(),
+    );
+    let error = crate::sink::ClickHouseStore::new(query, ingestion).err().unwrap();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::DestinationChanged)));
+}
+
+#[tokio::test]
+async fn quorum_writer_keeps_insert_policy_and_sequential_verification_out_of_reader_configuration() {
+    let body =
+        serde_json::to_vec(&json!({"meta":[{"name":"Value","type":"String"}],"data":[["ok"]],"rows":1})).unwrap();
+    let (endpoint, worker) = server(body, 200);
+    let ingestion =
+        ClickHouseIngestor::new(config(endpoint), credentials(), WritePolicy { insert_quorum: Some(2) }).unwrap();
+    ingestion
+        .query_transport()
+        .query(QueryRequest {
+            text: "SELECT 'ok' AS Value".into(),
+            parameters: BTreeMap::new(),
+            columns: vec![Column { name: "Value".into(), kind: "String".into() }],
+            row_limit: 1,
+            byte_limit: 1024,
+        })
+        .await
+        .unwrap();
+    let request = String::from_utf8(worker.join().unwrap()).unwrap();
+    assert!(request.contains("select_sequential_consistency=1"));
+    assert!(!request.contains("insert_quorum="));
+    let (endpoint, worker) = server(vec![], 200);
+    let ingestion =
+        ClickHouseIngestor::new(config(endpoint), credentials(), WritePolicy { insert_quorum: Some(2) }).unwrap();
+    ingestion.insert("Fixture", InsertData::Control(b"{}\n".to_vec())).await.unwrap();
+    let request = String::from_utf8(worker.join().unwrap()).unwrap();
+    assert!(request.contains("insert_quorum=2"));
+    assert!(request.contains("insert_quorum_timeout=30000"));
+    assert!(request.contains("insert_quorum_parallel=0"));
 }
 fn server(body: Vec<u8>, status: u16) -> (String, std::thread::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -81,8 +140,8 @@ async fn write_acks_are_hints_and_late_errors_are_ambiguous_without_leaking_bodi
         (500, b"private-header-canary".to_vec(), false),
     ] {
         let (endpoint, worker) = server(reply, status);
-        let client = ClickHouseClient::new(config(endpoint), credentials()).unwrap();
-        let submission = client.insert("Fixture", InsertData::Control(b"{}\n".to_vec())).await.unwrap();
+        let ingestion = ClickHouseIngestor::new(config(endpoint), credentials(), WritePolicy::default()).unwrap();
+        let submission = ingestion.insert("Fixture", InsertData::Control(b"{}\n".to_vec())).await.unwrap();
         assert_eq!(matches!(submission, Submission::Accepted), accepted);
         assert!(accepted || matches!(submission, Submission::Unknown));
         let request = String::from_utf8(worker.join().unwrap()).unwrap();
@@ -154,7 +213,8 @@ async fn cancelling_an_insert_keeps_its_batch_and_spool_owner_until_http_complet
         until_finished.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
     });
-    let client = Arc::new(ClickHouseClient::new(config(endpoint), credentials()).unwrap());
+    let ingestion = Arc::new(ClickHouseIngestor::new(config(endpoint), credentials(), WritePolicy::default()).unwrap());
+    let client = ingestion.query_transport();
     let catalog = Arc::new(crate::catalog::SchemaCatalog::new().unwrap());
     let recovery = Arc::new(Recovery::new(client.destination(), catalog.digest()));
     let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
@@ -164,7 +224,8 @@ async fn cancelling_an_insert_keeps_its_batch_and_spool_owner_until_http_complet
     let path = batch.path().to_owned();
     let retained = Arc::downgrade(&batch);
     drop(encoder);
-    let insert = tokio::spawn(async move { client.insert("CulpritResourceSamplesV1", InsertData::Batch(batch)).await });
+    let insert =
+        tokio::spawn(async move { ingestion.insert("CulpritResourceSamplesV1", InsertData::Batch(batch)).await });
     received.await.unwrap();
     insert.abort();
     assert!(insert.await.unwrap_err().is_cancelled());

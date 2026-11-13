@@ -10,6 +10,8 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub(crate) enum CollectCommand {
+    #[command(subcommand,about=culprit_core::t!("evidence.cli.about"))]
+    Evidence(crate::evidence_cmd::EvidenceCommand),
     #[command(about=culprit_core::t!("collection.cli.resources"))]
     Resources(ResourcesArgs),
     #[command(about=culprit_core::t!("delivery.cli.schema"))]
@@ -215,6 +217,7 @@ enum CollectionChoice {
     StatementGrants,
     CurrentRequestMemory,
     MemoryFailures,
+    NativeFailures,
     IndexOperations,
     Tables,
     ForeignKeys,
@@ -249,6 +252,7 @@ impl CollectionChoice {
             Self::StatementGrants => SnapshotDataset::StatementGrants,
             Self::CurrentRequestMemory => SnapshotDataset::CurrentRequestMemory,
             Self::MemoryFailures => SnapshotDataset::MemoryFailures,
+            Self::NativeFailures => SnapshotDataset::NativeFailures,
             Self::IndexOperations => SnapshotDataset::IndexOperations,
             Self::Tables => SnapshotDataset::Tables,
             Self::ForeignKeys => SnapshotDataset::ForeignKeys,
@@ -319,6 +323,7 @@ impl OnceArgs {
 
 pub(crate) fn run(command: CollectCommand, out: &Out) -> crate::CommandTask<'_> {
     match command {
+        CollectCommand::Evidence(command) => crate::command_task(|| crate::evidence_cmd::run(command, out)),
         CollectCommand::Resources(args) => crate::command_task(|| args.run(out)),
         CollectCommand::Schema(args) => crate::command_task(|| async { schema(args, out) }),
         CollectCommand::Service(command) => crate::command_task(|| crate::service_cmd::run(command, out)),
@@ -485,6 +490,7 @@ mod tests {
             ("statement-grants", SnapshotDataset::StatementGrants),
             ("current-request-memory", SnapshotDataset::CurrentRequestMemory),
             ("memory-failures", SnapshotDataset::MemoryFailures),
+            ("native-failures", SnapshotDataset::NativeFailures),
             ("index-operations", SnapshotDataset::IndexOperations),
             ("tables", SnapshotDataset::Tables),
             ("foreign-keys", SnapshotDataset::ForeignKeys),
