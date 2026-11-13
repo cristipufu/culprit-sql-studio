@@ -127,10 +127,18 @@ pub struct RuntimeMeasurement {
     pub key: NativeMeasurementKey,
     pub executions: String,
     pub metrics: Vec<RuntimeMetric>,
+    /// UTC instants, normalized at the shared export boundary without changing their nanosecond precision.
     pub first_execution_at: Option<String>,
     pub last_execution_at: Option<String>,
 }
 impl RuntimeMeasurement {
+    pub(super) fn canonicalize_instants(&mut self) -> Result<()> {
+        for instant in [&mut self.first_execution_at, &mut self.last_execution_at].into_iter().flatten() {
+            *instant = canonical_time(instant)?;
+        }
+        Ok(())
+    }
+
     pub fn metric(&self, key: &RuntimeMetricKey) -> Option<&RuntimeMetric> {
         self.metrics.iter().find(|metric| &metric.key == key)
     }
@@ -143,7 +151,7 @@ impl RuntimeMeasurement {
             && [&self.first_execution_at, &self.last_execution_at]
                 .into_iter()
                 .flatten()
-                .all(|at| at.len() <= 64 && DateTime::parse_from_rfc3339(at).is_ok())
+                .all(|at| super::identity::valid_utc_instant(at))
     }
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]

@@ -6,7 +6,7 @@ use crate::delivery::{
 use culprit_core::telemetry::*;
 
 mod queries;
-pub use queries::query_evidence;
+pub use queries::{query_evidence, query_wait_evidence_cases, wait_semantics};
 mod observations;
 pub use observations::{request_memory_evidence, retention_coverage_only_evidence, retention_evidence};
 

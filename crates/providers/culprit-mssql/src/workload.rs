@@ -3,28 +3,16 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use culprit_core::{Coverage, PlanVariant, QueryStat, SnapshotOptions, WaitStat, Workload};
 
 use crate::plan_xml;
+use crate::query_store::waits;
 use crate::read::NativeRead;
+use culprit_core::telemetry::WaitCaptureState;
+
+#[cfg(test)]
+#[path = "workload/window_tests.rs"]
+mod window_tests;
 
 /// The heaviest queries get a trend line; the rest would only grow the report.
 const TREND_QUERIES: usize = 40;
-
-/// Query Store wait categories that are not the database working: idle sessions, WAITFOR, tracing.
-const IGNORED_WAIT_CATEGORIES: &[&str] = &["Idle", "User Wait", "Tracing", "Service Broker", "Unknown"];
-
-pub(crate) fn wait_category(query_store_category: &str) -> &'static str {
-    match query_store_category {
-        "CPU" | "Worker Thread" => "CPU",
-        "Lock" => "Lock",
-        "Latch" | "Buffer Latch" => "Latch",
-        "Buffer IO" | "Other Disk IO" => "IO",
-        "Tran Log IO" | "Log Rate Governor" => "Log",
-        "Network IO" => "Network",
-        "Parallelism" => "Parallelism",
-        "Memory" => "Memory",
-        "Compilation" => "Compilation",
-        _ => "Other",
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 struct PlanAgg {
@@ -163,13 +151,6 @@ impl QueryAgg {
     }
 }
 
-use crate::query_store::window_sql::window_sql;
-#[cfg(test)]
-use crate::{
-    query_store::window_sql::CAPPED_END,
-    sql_time::{utc_offset_iso, utc_second},
-};
-
 pub(crate) fn id_list(ids: &[String]) -> String {
     let numeric: Vec<&str> =
         ids.iter().map(String::as_str).filter(|id| id.chars().all(|c| c.is_ascii_digit())).collect();
@@ -208,7 +189,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
 ) -> culprit_core::Result<WorkloadResult> {
     let window_minutes = options.window_in_minutes();
     let rows = reader.summary(window_minutes).await?;
-    let window = reader.read_rows(&window_sql(window_minutes)).await?.into_iter().next().unwrap_or_default();
+    let window = reader.window(window_minutes).await?;
     let mut by_query: BTreeMap<String, QueryAgg> = BTreeMap::new();
     for row in rows {
         let query_id = row.query_id.clone();
@@ -255,42 +236,57 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
     let all_plan_ids: Vec<String> =
         selected.iter().flat_map(|query| query.plans.iter().map(|plan| plan.plan_id.clone())).collect();
     let mut coverage = Coverage::default();
+    let wait_result = reader.waits(window_minutes, Some(&all_plan_ids)).await;
+    if let Err(error) = &wait_result
+        && crate::read::stops_remaining_reads(error)
+    {
+        return Err(error.clone());
+    }
     let wait_rows = coverage.read(
         &crate::sources::QUERY_WAITS,
-        reader.waits(window_minutes, Some(&all_plan_ids)).await.map_err(|error| {
+        wait_result.map_err(|error| {
             if error.code == culprit_core::ErrorCode::PermissionDenied { error.with_hint(waits_grant()) } else { error }
         }),
     );
-    // An empty category is zero only when the read succeeded and Query Store is capturing waits.
-    // Older servers, disabled capture and failed reads must not manufacture zeroes.
-    let capture_on = reader
-        .read_rows("SELECT wait_stats_capture_mode FROM sys.database_query_store_options")
-        .await
-        .ok()
-        .and_then(|rows| rows.first().and_then(|r| r.f64("wait_stats_capture_mode")))
-        == Some(1.0);
-    let waits_complete = wait_rows.is_some() && capture_on;
-    if wait_rows.is_some() && !capture_on {
+    let known = waits::fold(wait_rows.as_deref().unwrap_or_default());
+    if wait_rows.is_some() && window.capture != WaitCaptureState::Enabled {
         coverage.partial(&crate::sources::QUERY_WAITS, waits_not_captured());
     }
-    let mut plan_waits: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    if wait_rows.is_some() {
+        // Query Store exposes its current mode, not capture continuity or independent wait cleanup over old intervals.
+        coverage.partial(
+            &crate::sources::QUERY_WAITS,
+            culprit_core::message!("provider.mssql.query_waits.capture_history_unverified"),
+        );
+    }
+    note_unknown_waits(&mut coverage, &known.unknown_categories);
+    let mut plan_waits: HashMap<String, Vec<waits::Summary>> = HashMap::new();
     for row in wait_rows.into_iter().flatten() {
-        if let Some(plan_id) = row.plan_id {
-            plan_waits.entry(plan_id).or_default().push((row.category, row.total_ms as f64));
+        if let Some(plan_id) = &row.plan_id {
+            plan_waits.entry(plan_id.clone()).or_default().push(row);
         }
     }
     let waits = match reader.waits(window_minutes, None).await {
-        Ok(rows) => fold_waits(rows.into_iter().map(|row| (row.category, row.total_ms as f64))),
-        Err(_) => Vec::new(),
+        Ok(rows) => {
+            let folded = waits::fold(&rows);
+            note_unknown_waits(&mut coverage, &folded.unknown_categories);
+            folded.values
+        }
+        Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
+        Err(error) => {
+            coverage.partial(&crate::sources::QUERY_WAITS, error.message_source());
+            Vec::new()
+        }
     };
 
-    let window_hours = window.f64("window_hours").unwrap_or(f64::from(window_minutes) / 60.0);
-    let window_end = window.str("window_end");
+    let window_hours = window.hours;
+    let window_end = window.end.clone();
     let trend_ids: Vec<String> = selected.iter().take(TREND_QUERIES).map(|q| q.query_id.clone()).collect();
     // Trends are a bonus: a failure here must not cost the scan its workload.
-    let (timeline, mut trends) =
+    let (mut timeline, mut trends) =
         match crate::timeline::collect(reader, window_minutes, window_hours, window_end.as_deref(), &trend_ids).await {
             Ok(Some((timeline, trends))) => (Some(timeline), trends),
+            Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
             _ => (None, HashMap::new()),
         };
 
@@ -313,18 +309,25 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
                 }
             });
             let text = texts.get(&q.query_id);
-            let query_waits = measured_query_waits(
-                q.plans.iter().flat_map(|p| plan_waits.get(&p.plan_id).cloned().unwrap_or_default()),
-                waits_complete,
-            );
-            let mut stat = to_query_stat(q, text, plan, query_waits);
+            let query_waits =
+                waits::fold(q.plans.iter().flat_map(|p| plan_waits.get(&p.plan_id).into_iter().flatten()));
+            let mut stat = to_query_stat(q, text, plan, query_waits.values);
+            stat.waits_coverage = Some(waits::coverage(false));
             stat.plan_id = stat.plan.as_ref().and(current).map(|p| p.plan_id.clone());
             stat.trend = trends.remove(&q.query_id);
             stat
         })
         .collect();
     // Compiled values and SQL Server 2022 variants are a bonus as well.
-    crate::spread::attach(reader, window_minutes, &mut queries).await;
+    crate::spread::attach(reader, window_minutes, &mut queries).await?;
+    crate::signals::attach_runtime_costs(reader, window_minutes, &mut queries, &texts, &mut coverage).await?;
+    verify_runtime_window(reader, &mut coverage).await?;
+    let window = reader.window(window_minutes).await?;
+    let window_hours = window.hours;
+    let window_end = window.end.clone();
+    if let Some(timeline) = &mut timeline {
+        timeline.end = window_end.clone().ok_or_else(crate::read::invalid_data)?;
+    }
 
     let workload = Workload {
         source_label: None,
@@ -334,7 +337,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         source: "Query Store".into(),
         kind: Some(culprit_core::WorkloadKind::QueryStore),
         windowed: true,
-        window_start: window.str("window_start"),
+        window_start: window.start,
         window_end,
         window_hours,
         total_time_ms,
@@ -411,6 +414,7 @@ fn to_query_stat(
         plans: variants,
         plan,
         waits,
+        waits_coverage: None,
         trend: None,
         spread: q.min_ms().map(|min_ms| culprit_core::Spread { min_ms: Some(min_ms), ..Default::default() }),
         costs: None,
@@ -484,39 +488,36 @@ fn select_top(all: &[QueryAgg], limit: usize) -> Vec<&QueryAgg> {
     out
 }
 
-fn measured_query_waits(items: impl IntoIterator<Item = (String, f64)>, complete: bool) -> Vec<WaitStat> {
-    let mut waits = fold_waits(items);
-    if complete {
-        for category in ["Lock", "Network"] {
-            if !waits.iter().any(|w| w.category == category) {
-                waits.push(WaitStat { category: category.into(), wait_type: None, wait_ms: 0.0, tasks: None });
-            }
+async fn verify_runtime_window<R: NativeRead>(
+    reader: &mut crate::query_store::Reader<R>,
+    coverage: &mut Coverage,
+) -> culprit_core::Result<()> {
+    use crate::query_store::window_sql::WindowVerification;
+    match reader.verify_window().await? {
+        WindowVerification::Unchanged => Ok(()),
+        WindowVerification::WaitCaptureChanged => {
+            coverage.partial(
+                &crate::sources::QUERY_WAITS,
+                culprit_core::telemetry::CollectionStop::SourceChanged.error().message_source(),
+            );
+            Ok(())
+        }
+        WindowVerification::RuntimePopulationChanged => {
+            Err(culprit_core::telemetry::CollectionStop::SourceChanged.error())
         }
     }
-    waits
 }
 
-pub(crate) fn fold_waits(items: impl IntoIterator<Item = (String, f64)>) -> Vec<WaitStat> {
-    let mut by_category: BTreeMap<&'static str, (f64, BTreeMap<String, f64>)> = BTreeMap::new();
-    for (source, ms) in items {
-        if IGNORED_WAIT_CATEGORIES.contains(&source.as_str()) || ms <= 0.0 {
-            continue;
-        }
-        let entry = by_category.entry(wait_category(&source)).or_default();
-        entry.0 += ms;
-        *entry.1.entry(source).or_default() += ms;
+fn note_unknown_waits(coverage: &mut Coverage, categories: &std::collections::BTreeSet<String>) {
+    if !categories.is_empty() {
+        coverage.partial(
+            &crate::sources::QUERY_WAITS,
+            culprit_core::message!(
+                "provider.mssql.query_waits.unknown_categories",
+                categories = categories.iter().map(String::as_str).collect::<Vec<_>>().join(", ")
+            ),
+        );
     }
-    let mut waits: Vec<WaitStat> = by_category
-        .into_iter()
-        .map(|(category, (ms, sources))| WaitStat {
-            category: category.to_string(),
-            wait_type: sources.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(s, _)| s),
-            wait_ms: ms,
-            tasks: None,
-        })
-        .collect();
-    waits.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
-    waits
 }
 
 /// Workload from the plan cache, for databases without Query Store. Covers only what is still cached.
@@ -644,19 +645,6 @@ pub(crate) async fn from_plan_cache(
 mod tests {
     use super::*;
 
-    #[test]
-    fn zero_waits_require_successful_collection_and_enabled_capture() {
-        let waits = measured_query_waits([], true);
-        assert_eq!(waits.len(), 2);
-        assert!(waits.iter().all(|w| w.wait_ms == 0.0));
-        assert!(measured_query_waits([], false).is_empty());
-        let waits = measured_query_waits([("Lock".into(), 500.0)], true);
-        assert_eq!(waits.iter().find(|w| w.category == "Lock").unwrap().wait_ms, 500.0);
-        assert_eq!(waits.iter().find(|w| w.category == "Network").unwrap().wait_ms, 0.0);
-        let partial = measured_query_waits([("Lock".into(), 500.0)], false);
-        assert_eq!(partial.len(), 1, "an unrelated wait cannot establish a missing category");
-    }
-
     fn agg(id: &str, ms: f64, cpu: f64, reads: f64, executions: f64) -> QueryAgg {
         QueryAgg {
             query_id: id.into(),
@@ -722,20 +710,6 @@ mod tests {
     }
 
     #[test]
-    fn the_open_interval_ends_now() {
-        let sql = window_sql(60);
-        assert!(sql.contains(&utc_offset_iso(CAPPED_END)), "{sql}");
-        // The length is measured between the bounds the scan states, both rounded to the second alike.
-        let length = format!(
-            "DATEDIFF(second, {}, {}) / 3600.0 AS window_hours",
-            utc_second("MIN(start_time)"),
-            utc_second(CAPPED_END)
-        );
-        assert!(sql.contains(&length), "{sql}");
-        assert!(sql.contains(&format!("{} AS window_start", utc_offset_iso("MIN(start_time)"))), "{sql}");
-    }
-
-    #[test]
     fn keeps_chatty_and_io_heavy_queries() {
         let mut all: Vec<QueryAgg> =
             (0..20).map(|i| agg(&format!("t{i}"), 1_000.0 - f64::from(i), 1.0, 1.0, 1.0)).collect();
@@ -778,20 +752,5 @@ mod tests {
             ],
         };
         assert!((q.stddev_ms().unwrap() - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn folds_waits_into_categories() {
-        let waits = fold_waits(vec![
-            ("Buffer IO".to_string(), 10.0),
-            ("Other Disk IO".to_string(), 5.0),
-            ("CPU".to_string(), 20.0),
-            ("Idle".to_string(), 1_000.0),
-        ]);
-        assert_eq!(waits[0].category, "CPU");
-        assert_eq!(waits[1].category, "IO");
-        assert_eq!(waits[1].wait_ms, 15.0);
-        assert_eq!(waits[1].wait_type.as_deref(), Some("Buffer IO"));
-        assert_eq!(waits.len(), 2);
     }
 }

@@ -1056,6 +1056,11 @@ pub struct QueryStat {
     pub plans: Vec<PlanVariant>,
     pub plan: Option<Plan>,
     pub waits: Vec<WaitStat>,
+    /// Classes this source measured for this query and whether their observation is complete. Positive rows alone
+    /// cannot establish that another class was zero. Missing coverage remains unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub waits_coverage: Option<crate::QueryWaitCoverage>,
     /// This query's part of each bucket of the workload's timeline (only the heaviest queries carry one).
     pub trend: Option<QueryTrend>,
     /// How run times spread beyond the average, as far as the engine keeps it.

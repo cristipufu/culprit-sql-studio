@@ -316,6 +316,7 @@ pub(crate) fn sample() -> QueryStat {
         plans: Vec::new(),
         plan: None,
         waits: Vec::new(),
+        waits_coverage: None,
         trend: None,
         spread: None,
         costs: None,

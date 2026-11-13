@@ -158,14 +158,7 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
         } else {
             result
         };
-        let uncertain = result.as_ref().err().is_some_and(|error| {
-            matches!(
-                error.detail,
-                Some(culprit_core::ErrorDetail::CollectionStopped(
-                    culprit_core::telemetry::CollectionStop::CancellationUnconfirmed
-                ))
-            )
-        });
+        let stop_followup = result.as_ref().err().is_some_and(crate::read::stops_remaining_reads);
         if let Some(result) = part.outcome.read(
             &sources::QUERY_STORE,
             result.map_err(|error| {
@@ -188,7 +181,7 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
             part.workload = Some(result.workload);
             return part;
         }
-        if uncertain {
+        if stop_followup {
             return part;
         }
     }

@@ -89,7 +89,7 @@ fn timestamp(row: &Rec, name: &str) -> Result<Option<String>> {
 pub(crate) fn summary_sql(with_tempdb: bool) -> String {
     let relation = relation(with_tempdb);
     format!(
-        r#"{relation}
+        r#"{window_declaration}{relation}
 SELECT /* culprit */ p.query_id, rs.plan_id,SUM(rs.count_executions) AS executions,
  SUM(rs.culprit_duration_us) AS duration_us, SUM(rs.culprit_cpu_us) AS cpu_us,
  MAX(rs.max_duration) AS max_us,MIN(rs.min_duration) AS min_us,
@@ -104,12 +104,15 @@ JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id=rs.
 JOIN sys.query_store_plan p ON p.plan_id=rs.plan_id
 JOIN sys.query_store_query q ON q.query_id=p.query_id
 JOIN sys.query_store_query_text t ON t.query_text_id=q.query_text_id
-WHERE i.end_time>=DATEADD(minute,-@P1,SYSDATETIMEOFFSET()) AND {workload}
+WHERE {window_membership} AND {workload}
 GROUP BY p.query_id,rs.plan_id OPTION(MAXDOP 1)"#,
-        workload = crate::statement_origin::application_candidates_sql("t.query_sql_text")
+        workload = crate::statement_origin::application_candidates_sql("t.query_sql_text"),
+        window_declaration = super::window_sql::DECLARATION,
+        window_membership = super::window_sql::MEMBERSHIP,
     )
 }
 
 pub(crate) const LAYOUT: &str = r#"SELECT /* culprit */
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_tempdb_space_used') THEN 1 ELSE 0 END AS tempdb,
- CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'replica_group_id') THEN 1 ELSE 0 END AS replicas"#;
+ CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'replica_group_id') THEN 1 ELSE 0 END AS replicas,
+ CASE WHEN OBJECT_ID(N'sys.query_store_wait_stats') IS NOT NULL AND EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.database_query_store_options') AND name=N'wait_stats_capture_mode_desc') THEN 1 ELSE 0 END AS waits"#;

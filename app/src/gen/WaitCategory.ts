@@ -6,7 +6,7 @@ import type { WaitQuery } from "./WaitQuery";
  */
 export type WaitCategory = { 
 /**
- * Stable key: cpu, io, rows, lock, latch, log, network, parallelism, memory, compilation, other.
+ * Stable analytical key from [`WaitClass::key`].
  */
 key: string, 
 /**

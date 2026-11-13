@@ -191,8 +191,27 @@ pub fn batch_id(observation_id: &str, stream: TelemetryStream) -> Result<String>
 }
 
 pub fn canonical_time(value: &str) -> Result<String> {
+    parse_utc_instant(value).map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+}
+
+pub(super) fn valid_utc_instant(value: &str) -> bool {
+    parse_utc_instant(value).is_ok()
+}
+
+fn parse_utc_instant(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+    const MAX_INSTANT_BYTES: usize = 64;
+    const NANOSECOND_DIGITS: usize = 9;
+    // Chrono accepts excess fractional digits by truncating them. Never convert a finer native instant to zero,
+    // or let normalization erase the original field's length violation.
+    if value.len() > MAX_INSTANT_BYTES
+        || value.split_once('.').is_some_and(|(_, fraction)| {
+            fraction.bytes().take_while(u8::is_ascii_digit).skip(NANOSECOND_DIGITS).any(|digit| digit != b'0')
+        })
+    {
+        return Err(crate::Error::invalid(crate::t!("collection.invalid_source")));
+    }
     chrono::DateTime::parse_from_rfc3339(value)
-        .map(|time| time.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+        .map(|time| time.with_timezone(&chrono::Utc))
         .map_err(|_| crate::Error::invalid(crate::t!("collection.invalid_source")))
 }
 
@@ -232,6 +251,7 @@ mod tests {
             target: database.into(),
             source: "query_store".into(),
             observation: crate::telemetry::SourceObservation::QueryHistory(crate::telemetry::QueryHistoryDescription {
+                waits: None,
                 interval: TelemetryInterval {
                     native_id: "7".into(),
                     from: "2020-01-01T06:00:00Z".into(),
@@ -293,6 +313,80 @@ mod tests {
             maximum: Some(crate::telemetry::MeasurementValue::Integer("2".into())),
         })
     }
+
+    fn export_runtime(first: Option<&str>, last: Option<&str>) -> crate::Result<ExportedRecord> {
+        let source = source();
+        let TelemetryRecord::QueryWaits(wait) = wait(&source) else { panic!("native identity fixture") };
+        let mut key = wait.key;
+        key.native.qualifiers.insert("native-local-generation".into(), "2020-01-01T05:00:00.1234567".into());
+        ExportedRecord::new(
+            &source,
+            &CaptureIdentity { observation_id: "runtime-capture".into(), revision: None },
+            TelemetryRecord::QueryRuntime(crate::telemetry::RuntimeMeasurement {
+                key,
+                executions: "2".into(),
+                metrics: vec![crate::telemetry::RuntimeMetric::average(
+                    crate::telemetry::RuntimeMetricKey::Duration,
+                    crate::telemetry::RuntimeMetricUnit::Milliseconds,
+                    1.25,
+                )],
+                first_execution_at: first.map(str::to_owned),
+                last_execution_at: last.map(str::to_owned),
+            }),
+        )
+    }
+
+    #[test]
+    fn equivalent_runtime_utc_instants_have_one_export_representation_without_rewriting_native_identity() {
+        let offset =
+            export_runtime(Some("2020-01-01T08:00:00.1234567+02:00"), Some("2020-01-01T08:00:01+02:00")).unwrap();
+        let canonical =
+            export_runtime(Some("2020-01-01T06:00:00.123456700Z"), Some("2020-01-01T06:00:01.000000000Z")).unwrap();
+        assert_eq!(offset, canonical);
+        assert_eq!(serde_json::to_vec(&offset).unwrap(), serde_json::to_vec(&canonical).unwrap());
+        let TelemetryRecord::QueryRuntime(row) = &offset.record else { panic!("runtime") };
+        assert_eq!(row.first_execution_at.as_deref(), Some("2020-01-01T06:00:00.123456700Z"));
+        assert_eq!(row.last_execution_at.as_deref(), Some("2020-01-01T06:00:01.000000000Z"));
+        assert_eq!(row.key.native.qualifiers["native-local-generation"], "2020-01-01T05:00:00.1234567");
+        assert_eq!(
+            row.key.references.query.as_ref().unwrap().native.qualifiers["initial_compile_at"],
+            "2020-01-01T05:00:00Z"
+        );
+    }
+
+    #[test]
+    fn runtime_instant_export_preserves_nanosecond_values_instead_of_truncating_to_store_precision() {
+        let exported =
+            export_runtime(Some("2020-01-01T06:00:00.123456789Z"), Some("2020-01-01T06:00:01.000000001Z")).unwrap();
+        let TelemetryRecord::QueryRuntime(row) = exported.record else { panic!("runtime") };
+        assert_eq!(row.first_execution_at.as_deref(), Some("2020-01-01T06:00:00.123456789Z"));
+        assert_eq!(row.last_execution_at.as_deref(), Some("2020-01-01T06:00:01.000000001Z"));
+    }
+
+    #[test]
+    fn missing_runtime_instants_stay_missing_and_invalid_utc_fields_cannot_enter_an_export() {
+        let exported = export_runtime(None, None).unwrap();
+        let TelemetryRecord::QueryRuntime(row) = exported.record else { panic!("runtime") };
+        assert!(row.first_execution_at.is_none() && row.last_execution_at.is_none());
+        assert!(
+            export_runtime(Some("2020-01-01T06:00:00"), None).is_err(),
+            "a local timestamp is not an established UTC instant"
+        );
+        assert!(export_runtime(None, Some("invalid-native-time")).is_err());
+    }
+
+    #[test]
+    fn runtime_instant_normalization_cannot_erase_excess_length_or_subnanosecond_values() {
+        let too_long = format!("2020-01-01T06:00:00.{}Z", "0".repeat(50));
+        assert!(too_long.len() > 64);
+        for instant in [too_long.as_str(), "2020-01-01T06:00:00.0000000001Z", "2020-01-01T06:00:00.1234567891Z"] {
+            assert!(canonical_time(instant).is_err());
+            assert!(export_runtime(Some(instant), None).is_err());
+            assert!(export_runtime(None, Some(instant)).is_err());
+        }
+        assert_eq!(canonical_time("2020-01-01T06:00:00.1234567890Z").unwrap(), "2020-01-01T06:00:00.123456789Z");
+    }
+
     #[test]
     fn replay_and_an_endpoint_rename_preserve_ids_with_native_database_identity() {
         let source = source();

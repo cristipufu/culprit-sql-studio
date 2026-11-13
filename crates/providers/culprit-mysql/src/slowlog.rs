@@ -261,6 +261,7 @@ pub fn workload(
                     })
                     .into_iter()
                     .collect(),
+                waits_coverage: None,
                 trend,
                 costs: None,
                 rows_affected: None,

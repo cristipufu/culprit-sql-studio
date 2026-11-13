@@ -16,7 +16,7 @@ pub(crate) async fn attach<R: crate::read::NativeRead>(
     reader: &mut crate::query_store::Reader<R>,
     window_minutes: u32,
     queries: &mut [QueryStat],
-) {
+) -> culprit_core::Result<()> {
     for q in queries.iter_mut() {
         let compiled = q.plan.as_ref().and_then(|p| p.facts().compiled_parameters.clone());
         if let (Some(first), Some(compiled)) = (q.plans.first_mut(), compiled) {
@@ -30,11 +30,17 @@ pub(crate) async fn attach<R: crate::read::NativeRead>(
         .flat_map(|q| q.plans.iter().filter(|p| p.compiled.is_none()).map(|p| p.id.clone()))
         .take(MAX_PLANS)
         .collect();
-    if !wanted.is_empty()
-        && let Ok(rows) =
-            reader.definitions(&wanted, crate::query_store::definitions::Kind::Plan, 2 * 1024 * 1024).await
+    let definitions = if wanted.is_empty() {
+        vec![]
+    } else {
+        match reader.definitions(&wanted, crate::query_store::definitions::Kind::Plan, 2 * 1024 * 1024).await {
+            Ok(rows) => rows,
+            Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
+            Err(_) => vec![],
+        }
+    };
     {
-        let compiled: HashMap<String, String> = rows
+        let compiled: HashMap<String, String> = definitions
             .into_iter()
             .filter_map(|row| {
                 let plan = plan_xml::parse(row.payload.text()?).ok()?;
@@ -47,7 +53,7 @@ pub(crate) async fn attach<R: crate::read::NativeRead>(
             }
         }
     }
-    attach_variants(reader, window_minutes, queries).await;
+    attach_variants(reader, window_minutes, queries).await
 }
 
 use crate::query_store::variants_sql::variants_sql;
@@ -58,13 +64,17 @@ async fn attach_variants<R: crate::read::NativeRead>(
     reader: &mut crate::query_store::Reader<R>,
     window_minutes: u32,
     queries: &mut [QueryStat],
-) {
+) -> culprit_core::Result<()> {
     let ids: Vec<String> = queries.iter().map(|q| q.id.clone()).collect();
     let list = id_list(&ids);
     if list == "NULL" {
-        return;
+        return Ok(());
     }
-    let Ok(rows) = reader.read_rows(&variants_sql(window_minutes, &list)).await else { return };
+    let rows = match reader.window_rows(&variants_sql(&list), window_minutes).await {
+        Ok(rows) => rows,
+        Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
+        Err(_) => return Ok(()),
+    };
     for r in rows {
         let Some(parent) = queries.iter_mut().find(|q| q.id == r.string("parent_query_id")) else { continue };
         let executions = r.f64_or_zero("executions");
@@ -86,4 +96,5 @@ async fn attach_variants<R: crate::read::NativeRead>(
             logical_reads: None,
         });
     }
+    Ok(())
 }

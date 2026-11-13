@@ -215,7 +215,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     assert_eq!(costs.len(), 1);
     assert_eq!((costs[0].aborted, costs[0].failed), (0, 0));
     assert!(costs[0].log_bytes.is_some());
-    reader.total_log_bytes(60).await.unwrap();
+    assert!(costs[0].total_log_bytes.is_some());
     let compilations = reader.compilations(std::slice::from_ref(&query_id)).await.unwrap();
     assert_eq!(compilations.len(), 1);
     assert!(compilations[0].count > 0);
@@ -241,7 +241,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     assert!(definitions.iter().all(|row| row.payload.text().is_some_and(|text| text.contains("ShowPlanXML"))));
     reader.waits(60, None).await.unwrap();
     reader.waits(60, Some(&plans)).await.unwrap();
-    let options = SnapshotOptions { top_queries: 10, plans: 1, ..SnapshotOptions::default() };
+    let options = SnapshotOptions { window_minutes: 60, top_queries: 10, plans: 1, ..SnapshotOptions::default() };
     let app = crate::workload::from_query_store(&mut reader, &options).await.unwrap();
     let query = app.workload.queries.iter().find(|row| row.id == query_id).expect("interactive query");
     assert!(query.text.contains("private-query-store-canary"));
@@ -354,7 +354,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     };
     let recent = Period { start: baseline.end.clone(), end: now.to_rfc3339() };
     crate::periods::collect(&mut reader, &baseline, &recent).await.unwrap();
-    reader.read_rows(&variants_sql::variants_sql(60, &query_id)).await.unwrap();
+    reader.window_rows(&variants_sql::variants_sql(&query_id), 60).await.unwrap();
     let shutdown = reader.close().await;
     assert_eq!(shutdown, SourceShutdown::Quiescent);
     let mut tuning_coverage = culprit_core::Coverage::default();

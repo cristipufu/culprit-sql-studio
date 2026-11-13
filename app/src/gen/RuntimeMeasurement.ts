@@ -2,4 +2,8 @@
 import type { NativeMeasurementKey } from "./NativeMeasurementKey";
 import type { RuntimeMetric } from "./RuntimeMetric";
 
-export type RuntimeMeasurement = { key: NativeMeasurementKey, executions: string, metrics: Array<RuntimeMetric>, first_execution_at: string | null, last_execution_at: string | null, };
+export type RuntimeMeasurement = { key: NativeMeasurementKey, executions: string, metrics: Array<RuntimeMetric>, 
+/**
+ * UTC instants, normalized at the shared export boundary without changing their nanosecond precision.
+ */
+first_execution_at: string | null, last_execution_at: string | null, };

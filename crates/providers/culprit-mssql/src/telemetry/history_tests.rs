@@ -92,3 +92,100 @@ async fn retiring_query_description_or_native_page_cannot_authorize_another_read
         assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
     }
 }
+
+#[tokio::test]
+async fn query_history_freezes_native_wait_semantics_without_an_additional_read() {
+    for (native, capture) in [("ON", WaitCaptureState::Enabled), ("OFF", WaitCaptureState::Disabled)] {
+        let mut replies = description_rows();
+        let Ok(rows) = &mut replies[2] else { panic!("native settings") };
+        rows[0] = replace(&rows[0], &[("wait_stats_capture_mode_desc", Val::Text(native.into()))]);
+        if capture == WaitCaptureState::Disabled {
+            replies.extend([
+                Ok(vec![pressure()]),
+                Ok(vec![Rec::of(&[
+                    ("row_id", Val::Int(1)),
+                    ("plan_id", Val::Int(0)),
+                    ("replica_group_id", Val::Int(1)),
+                    ("execution_type", Val::Int(0)),
+                    ("wait_category", Val::Int(3)),
+                    ("total_query_wait_time_ms", Val::Int(20)),
+                    ("avg_query_wait_time_ms", Val::Float(20.0)),
+                    ("min_query_wait_time_ms", Val::Int(20)),
+                    ("max_query_wait_time_ms", Val::Int(20)),
+                ])]),
+            ]);
+        }
+        let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+        let description = source.describe().await.unwrap();
+        let semantics = description.query_history().unwrap().waits.as_ref().unwrap();
+        assert_eq!(semantics, &crate::query_store::waits::semantics(capture));
+        assert_eq!(source.query_count(), 7, "metadata must reuse the existing settings read");
+        if capture == WaitCaptureState::Disabled {
+            let CollectionRead::Page { records, next_cursor: None } =
+                source.read_page(TelemetryStream::QueryWaits, None).await.unwrap()
+            else {
+                panic!("bounded retained native waits")
+            };
+            assert!(
+                matches!(&records[0],TelemetryRecord::QueryWaits(wait) if wait.category=="3" && wait.total.integer()==Some(20))
+            );
+            assert_eq!(source.query_count(), 9, "one pressure read and one bounded retained-history page");
+            assert!(source.finish().await.is_err());
+        }
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn unrecognized_or_timed_out_wait_settings_cannot_become_disabled_or_read_further() {
+    for timeout in [false, true] {
+        let mut replies = description_rows();
+        if timeout {
+            replies[2] = Err(crate::read::ReadError::Stopped(CollectionStop::TimedOut));
+        } else {
+            let Ok(rows) = &mut replies[2] else { panic!("native settings") };
+            rows[0] = replace(&rows[0], &[("wait_stats_capture_mode_desc", Val::Text("UNKNOWN".into()))]);
+        }
+        let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+        let error = source.describe().await.unwrap_err();
+        if timeout {
+            assert_eq!(CollectionStop::from_error(&error), CollectionStop::TimedOut);
+        }
+        assert_eq!(source.query_count(), 3, "no identity/page query after failed settings");
+        assert!(source.describe().await.is_err());
+        assert_eq!(source.query_count(), 3);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn a_wait_capture_change_prevents_empty_native_streams_from_verifying_complete() {
+    let mut replies = description_rows();
+    replies.extend([
+        Ok(vec![pressure()]),
+        Ok(vec![]),
+        Ok(vec![pressure()]),
+        Ok(vec![]),
+        Ok(vec![pressure()]),
+        Ok(vec![pressure()]),
+        Ok(vec![pressure()]),
+    ]);
+    let mut closing = description_rows().into_iter().skip(2).collect::<Vec<_>>();
+    let Ok(settings) = &mut closing[0] else { panic!("native settings") };
+    settings[0] = replace(&settings[0], &[("wait_stats_capture_mode_desc", Val::Text("OFF".into()))]);
+    replies.extend(closing);
+    let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+    source.describe().await.unwrap();
+    for stream in [
+        TelemetryStream::QueryRuntime,
+        TelemetryStream::QueryWaits,
+        TelemetryStream::QueryDefinitions,
+        TelemetryStream::PlanDefinitions,
+    ] {
+        let page = source.read_page(stream, None).await.unwrap();
+        assert!(matches!(page, CollectionRead::Page { records, next_cursor: None } if records.is_empty()));
+    }
+    assert!(!source.finish().await.unwrap().is_verified());
+    assert_eq!(source.query_count(), 19);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}

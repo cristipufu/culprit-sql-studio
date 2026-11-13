@@ -3105,10 +3105,8 @@
   "core.waits.category.compilation.label": "Compiling plans",
   "core.waits.category.compilation.meaning": "Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.",
   "core.waits.category.cpu.gist": "Running on a processor, or queued for one.",
-  "core.waits.category.cpu.gist_threadpool": "Running on a processor, queued for one, or (THREADPOOL) waiting for a worker thread before the request could start at all.",
   "core.waits.category.cpu.label": "CPU",
   "core.waits.category.cpu.meaning": "Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.",
-  "core.waits.category.cpu.meaning_threadpool": "Running on a processor, queued for one, or (THREADPOOL) waiting for a worker thread before the request could start at all. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row. Worker waits instead point at blocking chains or heavy parallelism holding the workers.",
   "core.waits.category.io.gist": "Waiting for data to come from disk because it wasn't in memory.",
   "core.waits.category.io.label": "Disk reads",
   "core.waits.category.io.meaning": "Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.",
@@ -8223,5 +8221,10 @@
   "check.compile_queue.fix": "Inspect delayed statements in live sessions, compare recent compiles and reduce unnecessary recompilation or simplify costly query shapes after identifying the responsible workload.",
   "check.compile_queue.verify": "Confirm compiler waits fall across subsequent observations and compare compile counts, per-compile memory and execution performance after a targeted change.",
   "check.compile_queue.caveat": "The linked queries are recent compilation candidates from one observation; current memory holders are unconfirmed and other databases may consume the shared compiler budget.",
-  "provider.mssql.compiler_gateways.unavailable_version": "This server version does not expose optimizer memory gateways."
+  "provider.mssql.compiler_gateways.unavailable_version": "This server version does not expose optimizer memory gateways.",
+  "core.waits.category.workers.label": "Execution workers",
+  "core.waits.category.workers.gist": "Requests queued for an execution worker.",
+  "core.waits.category.workers.meaning": "Requests queued for an execution worker. Blocking chains, concurrent requests or parallel work can keep workers occupied; these waits do not measure CPU consumption.",
+  "provider.mssql.query_waits.unknown_categories": "Native wait categories {categories} have no established analytical meaning, so this observation cannot establish zero waits in other classes.",
+  "provider.mssql.query_waits.capture_history_unverified": "Query Store does not establish whether wait capture covered the whole selected period; observed waits remain available, while missing categories are unmeasured."
 }

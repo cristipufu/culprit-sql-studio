@@ -9,6 +9,7 @@ use serde_json::json;
 
 mod observations;
 mod queries;
+mod waits;
 
 struct Fixture {
     query: Arc<Queries>,

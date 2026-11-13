@@ -11,6 +11,7 @@ IMAGE = "clickhouse/clickhouse-server@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6
 TESTS = (
     "functional::functional_contract_and_canonical_sets",
     "functional::evidence::typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter_epochs",
+    "functional::waits::authenticated_wait_meanings_preserve_empty_unknown_and_missing_native_evidence",
 )
 
 

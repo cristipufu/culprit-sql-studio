@@ -5,7 +5,7 @@ use crate::{
     value::{Rec, Val},
 };
 use culprit_core::telemetry::*;
-fn summary_row() -> Rec {
+pub(crate) fn summary_row() -> Rec {
     Rec::of(&[
         ("query_id", Val::Int(3)),
         ("plan_id", Val::Int(4)),
@@ -51,8 +51,11 @@ fn runtime_row(duration: i64) -> Rec {
 }
 #[tokio::test]
 async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_counts() {
-    let mut reader =
-        Reader::new(FakeRead::new(vec![Ok(vec![Rec::of(&[("tempdb", Val::Int(0))])]), Ok(vec![summary_row()])]));
+    let mut reader = Reader::new(FakeRead::new(vec![
+        Ok(vec![Rec::of(&[("tempdb", Val::Int(0)), ("waits", Val::Int(1))])]),
+        Ok(vec![super::window_sql::tests::row()]),
+        Ok(vec![summary_row()]),
+    ]));
     let summary = reader.summary(60).await.unwrap().remove(0);
     let records = [runtime_row(1000), runtime_row(3000)]
         .map(|row| decode::record(&row, TelemetryStream::QueryRuntime, StatementReferences::default()).unwrap());
@@ -137,7 +140,7 @@ async fn missing_or_changed_definition_identity_cannot_supply_text_for_a_differe
 #[tokio::test]
 async fn source_budget_and_cancellation_errors_are_not_retried_as_schema_fallbacks() {
     let mut reader = Reader::new(FakeRead::new(vec![
-        Ok(vec![Rec::of(&[("tempdb", Val::Int(1))])]),
+        Ok(vec![Rec::of(&[("tempdb", Val::Int(1)), ("waits", Val::Int(1))])]),
         Err(ReadError::Stopped(CollectionStop::TimedOut)),
     ]));
     let error = reader.summary(60).await.err().unwrap();
@@ -152,7 +155,11 @@ async fn source_budget_and_cancellation_errors_are_not_retried_as_schema_fallbac
 
 #[test]
 fn negative_native_wait_totals_are_rejected_instead_of_wrapping_into_a_large_measurement() {
-    let row = Rec::of(&[("wait_category_desc", Val::Text("Lock".into())), ("wait_ms", Val::Int(-1))]);
+    let row = Rec::of(&[
+        ("wait_category", Val::Int(3)),
+        ("wait_category_desc", Val::Text("Lock".into())),
+        ("wait_ms", Val::Int(-1)),
+    ]);
     assert!(waits::Summary::decode(&row, false).is_err());
 }
 

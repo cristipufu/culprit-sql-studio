@@ -161,6 +161,7 @@ fn description() -> CollectionDescription {
         source: "fixture-statistics".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {
+                waits: None,
                 interval: TelemetryInterval {
                     native_id: "123".into(),
                     from: "2020-01-01T06:00:00Z".into(),

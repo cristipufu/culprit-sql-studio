@@ -56,6 +56,7 @@ mod target;
 mod transactions;
 mod triggers;
 mod tuning;
+mod wait_semantics;
 pub use activity::*;
 pub use admission::*;
 pub use cached_definitions::*;
@@ -105,6 +106,7 @@ pub use target::*;
 pub use transactions::*;
 pub use triggers::*;
 pub use tuning::*;
+pub use wait_semantics::*;
 
 pub const MAX_CURSOR_BYTES: usize = 16 * 1024;
 
@@ -446,7 +448,10 @@ impl TelemetryRecord {
                 row.fact.redact(source.target.engine());
                 source.observation.accepts_snapshot_record(TelemetryStream::TuningObservations, &row.source)
             }
-            Self::QueryRuntime(row) => source.accepts_measurement(&row.key),
+            Self::QueryRuntime(row) => {
+                row.canonicalize_instants()?;
+                source.accepts_measurement(&row.key)
+            }
             Self::QueryWaits(row) => source.accepts_measurement(&row.key),
         };
         if !valid_identity || !record.is_valid() {

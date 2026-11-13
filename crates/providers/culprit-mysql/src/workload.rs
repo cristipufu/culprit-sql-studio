@@ -262,6 +262,7 @@ fn digest(r: &Rec, has_cpu: bool) -> Digest {
                     }]
                 })
                 .unwrap_or_default(),
+            waits_coverage: None,
             trend: None,
             // Percentiles exist from 8.0.31; the histogram, attached later, from 8.0.19.
             spread: Some(Spread {
@@ -681,6 +682,7 @@ mod tests {
                 plans: Vec::new(),
                 plan: None,
                 waits: Vec::new(),
+                waits_coverage: None,
                 trend: None,
                 spread: None,
                 costs: None,

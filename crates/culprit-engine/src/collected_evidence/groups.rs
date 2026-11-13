@@ -257,6 +257,7 @@ fn query(
         plans: vec![],
         plan,
         waits: vec![],
+        waits_coverage: None,
         trend: None,
         spread: has_min.then(|| Spread { min_ms: stats.min_ms, ..Default::default() }),
         costs: None,

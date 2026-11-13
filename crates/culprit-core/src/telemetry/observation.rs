@@ -130,6 +130,8 @@ impl TelemetryRange {
 #[ts(export)]
 pub struct QueryHistoryDescription {
     pub interval: TelemetryInterval,
+    /// Source-owned native wait meaning frozen with this capture. None establishes neither a vocabulary nor zero waits.
+    pub waits: Option<QueryWaitSemantics>,
     /// Dimensions required on every native measurement, with the admissible values observed by the source.
     pub dimensions: std::collections::BTreeMap<String, Vec<String>>,
     /// Audit facts interpreted by the native adapter, never by common collection or delivery policy.
@@ -141,6 +143,7 @@ const MAX_DIMENSION_VALUES: usize = 100;
 impl QueryHistoryDescription {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.interval.native_id)
+            && self.waits.as_ref().is_none_or(QueryWaitSemantics::is_valid)
             && self.dimensions.len() <= MAX_NATIVE_QUALIFIERS
             && super::native_identity::native_properties_valid(&self.native_properties)
             && self.dimensions.iter().all(|(name, values)| {

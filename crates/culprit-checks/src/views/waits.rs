@@ -454,7 +454,10 @@ pub(crate) fn snapshot_with(engine: Engine) -> Snapshot {
     };
     let mut snapshot: Snapshot = serde_json::from_str(text).expect("fixture is a snapshot");
     if let Some(w) = snapshot.workload.as_mut() {
-        w.queries.iter_mut().for_each(|q| q.waits.clear());
+        for query in &mut w.queries {
+            query.waits.clear();
+            query.waits_coverage = None;
+        }
     }
     snapshot
 }
@@ -651,14 +654,18 @@ mod tests {
         );
     }
 
-    // C19: SQL Server's Memory category holds allocations as well as grants, and THREADPOOL is folded into CPU.
+    // C19: SQL Server's Memory category holds allocations as well as grants; worker admission is separate from CPU.
     #[test]
     fn category_labels_say_what_they_hold() {
         let (label, meaning) = category_info("memory", Engine::Mssql);
         assert_eq!(label, "Memory");
         assert!(meaning.contains("RESOURCE_SEMAPHORE") && meaning.contains("CMEMTHREAD"));
-        assert!(category_info("cpu", Engine::Mssql).1.contains("THREADPOOL"));
-        assert!(!category_info("cpu", Engine::Postgres).1.contains("THREADPOOL"));
+        for engine in Engine::ALL {
+            assert!(!category_info("cpu", engine).1.contains("THREADPOOL"));
+            let (label, meaning) = category_info("workers", engine);
+            assert_eq!(label, "Execution workers");
+            assert!(meaning.contains("execution worker") && meaning.contains("CPU"));
+        }
     }
 
     #[test]

@@ -61,6 +61,7 @@ impl FleetBackend for Backend {
         let observation = match &request.selection {
             CollectionSelection::QueryHistory { from, .. } => {
                 SourceObservation::QueryHistory(QueryHistoryDescription {
+                    waits: None,
                     interval: if work::parse_time(from).unwrap().hour() == 10 { interval(10) } else { interval(11) },
                     dimensions: [("replica_group_id".into(), vec!["0".into()])].into(),
                     native_properties: [

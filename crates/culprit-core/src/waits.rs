@@ -7,6 +7,75 @@ use ts_rs::TS;
 
 use crate::model::{Engine, WaitStat};
 use crate::t;
+use crate::telemetry::WaitClass;
+
+/// Qualification of query wait classes, independent of their positive observed totals. A source can measure only
+/// some classes; an enabled, completely read I/O source does not establish zero lock waiting.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct QueryWaitCoverage {
+    pub classes: Vec<WaitClass>,
+    pub complete: bool,
+}
+impl QueryWaitCoverage {
+    pub fn is_valid(&self) -> bool {
+        self.classes.iter().collect::<std::collections::BTreeSet<_>>().len() == self.classes.len()
+    }
+    pub fn measures(&self, class: WaitClass) -> bool {
+        self.complete && self.is_valid() && self.classes.contains(&class)
+    }
+}
+
+impl crate::QueryStat {
+    fn waits_for(&self, class: WaitClass) -> impl Iterator<Item = &WaitStat> {
+        self.waits.iter().filter(move |wait| known_category_key(&wait.category) == Some(class.key()))
+    }
+    fn native_lock_timer(&self, class: WaitClass) -> Option<f64> {
+        (class == WaitClass::Lock).then(|| self.spread.as_ref().and_then(|spread| spread.lock_ms)).flatten()
+    }
+    /// Known positive/zero rows can be inspected even when the source is partial. This is an observed subtotal,
+    /// never proof that an absent class was zero.
+    pub fn observed_wait_ms(&self, class: WaitClass) -> Option<f64> {
+        let mut waits = self.waits_for(class);
+        let Some(first) = waits.next() else {
+            return self.native_lock_timer(class).filter(|ms| ms.is_finite() && *ms >= 0.0);
+        };
+        let first = add_wait_ms(0.0, first)?;
+        waits.try_fold(first, add_wait_ms)
+    }
+    /// A complete, qualified class can establish zero. A native timer may measure only a subset of that class.
+    /// Invalid or partial observations
+    /// cannot be interpreted as a zero, including when their displayed vector contains other wait classes.
+    pub fn measured_wait_ms(&self, class: WaitClass) -> Option<f64> {
+        if !self.waits_coverage.as_ref()?.measures(class) {
+            return None;
+        }
+        if self.waits_for(class).next().is_none() && self.native_lock_timer(class).is_none() {
+            Some(0.0)
+        } else {
+            self.observed_wait_ms(class)
+        }
+    }
+
+    /// Withdrawing invalid measurements must also withdraw their qualification; otherwise an erased value could
+    /// become a fabricated measured zero on the next read.
+    pub fn invalidate_wait_class(&mut self, class: WaitClass) {
+        self.waits.retain(|wait| known_category_key(&wait.category) != Some(class.key()));
+        if let Some(coverage) = &mut self.waits_coverage {
+            coverage.classes.retain(|covered| *covered != class);
+        }
+        if class == WaitClass::Lock
+            && let Some(spread) = &mut self.spread
+        {
+            spread.lock_ms = None;
+        }
+    }
+}
+
+fn add_wait_ms(total: f64, wait: &WaitStat) -> Option<f64> {
+    let next = total + wait.wait_ms;
+    (wait.wait_ms.is_finite() && wait.wait_ms >= 0.0 && next.is_finite()).then_some(next)
+}
 
 /// How far back a set of numbers reaches. The UI states it next to every figure.
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +112,7 @@ pub struct WaitQuery {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct WaitCategory {
-    /// Stable key: cpu, io, rows, lock, latch, log, network, parallelism, memory, compilation, other.
+    /// Stable analytical key from [`WaitClass::key`].
     pub key: String,
     /// What a person calls it, e.g. "Sending results".
     pub label: String,
@@ -460,14 +529,8 @@ pub fn category_info(key: &str, engine: Engine) -> (String, String) {
     match key {
         "rpc" => (t!("core.waits.category.rpc.label"), t!("core.waits.category.rpc.meaning")),
         "storage" => (t!("core.waits.category.storage.label"), t!("core.waits.category.storage.meaning")),
-        "cpu" => (
-            t!("core.waits.category.cpu.label"),
-            match engine {
-                // SQL Server folds THREADPOOL (Query Store's "Worker Thread") in here: a request that hasn't started.
-                Engine::Mssql => t!("core.waits.category.cpu.meaning_threadpool"),
-                _ => t!("core.waits.category.cpu.meaning"),
-            },
-        ),
+        "cpu" => (t!("core.waits.category.cpu.label"), t!("core.waits.category.cpu.meaning")),
+        "workers" => (t!("core.waits.category.workers.label"), t!("core.waits.category.workers.meaning")),
         "io" => (t!("core.waits.category.io.label"), t!("core.waits.category.io.meaning")),
         "rows" => (t!("core.waits.category.rows.label"), t!("core.waits.category.rows.meaning")),
         "lock" => (t!("core.waits.category.lock.label"), t!("core.waits.category.lock.meaning")),
@@ -505,10 +568,8 @@ pub fn category_gist(key: &str, engine: Engine) -> String {
     match key {
         "rpc" => t!("core.waits.category.rpc.gist"),
         "storage" => t!("core.waits.category.storage.gist"),
-        "cpu" => match engine {
-            Engine::Mssql => t!("core.waits.category.cpu.gist_threadpool"),
-            _ => t!("core.waits.category.cpu.gist"),
-        },
+        "cpu" => t!("core.waits.category.cpu.gist"),
+        "workers" => t!("core.waits.category.workers.gist"),
         "io" => t!("core.waits.category.io.gist"),
         "rows" => t!("core.waits.category.rows.gist"),
         "lock" => t!("core.waits.category.lock.gist"),
@@ -531,8 +592,14 @@ pub fn category_gist(key: &str, engine: Engine) -> String {
 
 /// Fold an engine category name into the shared keys.
 pub fn category_key(category: &str) -> &'static str {
-    match category.to_ascii_lowercase().as_str() {
-        "cpu" | "worker thread" | "running" => "cpu",
+    known_category_key(category).unwrap_or("other")
+}
+
+/// Known analytical names, without treating an unrecognized native label as a proven Other measurement.
+pub fn known_category_key(category: &str) -> Option<&'static str> {
+    Some(match category.to_ascii_lowercase().as_str() {
+        "cpu" | "running" => "cpu",
+        "workers" | "worker thread" => "workers",
         "rpc" => "rpc",
         "storage" => "storage",
         "io" | "buffer io" | "other disk io" | "disk" => "io",
@@ -544,13 +611,110 @@ pub fn category_key(category: &str) -> &'static str {
         "parallelism" => "parallelism",
         "memory" => "memory",
         "compilation" => "compilation",
-        _ => "other",
-    }
+        "other" => "other",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn query_with_waits() -> crate::QueryStat {
+        let snapshot: crate::Snapshot =
+            serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+        let mut query = snapshot.queries()[0].clone();
+        query.waits = vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: 40.0, tasks: None }];
+        query.waits_coverage = None;
+        query.spread = None;
+        query
+    }
+
+    #[test]
+    fn positive_waits_do_not_prove_an_unmeasured_lock_class_was_zero() {
+        let mut query = query_with_waits();
+        assert_eq!(query.observed_wait_ms(WaitClass::Io), Some(40.0));
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+        query.waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Io], complete: true });
+        assert_eq!(query.measured_wait_ms(WaitClass::Io), Some(40.0));
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+        query.waits_coverage.as_mut().unwrap().classes.push(WaitClass::Lock);
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), Some(0.0));
+    }
+
+    #[test]
+    fn partial_waits_remain_observed_subtotals_without_absence_or_exact_total_claims() {
+        let mut query = query_with_waits();
+        query.waits_coverage =
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Io, WaitClass::Lock], complete: false });
+        assert_eq!(query.observed_wait_ms(WaitClass::Io), Some(40.0));
+        assert_eq!(query.measured_wait_ms(WaitClass::Io), None);
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+        query.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 15.0, tasks: None });
+        assert_eq!(query.observed_wait_ms(WaitClass::Lock), Some(15.0));
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+    }
+
+    #[test]
+    fn a_native_timer_is_observed_without_assuming_it_covers_every_lock_kind() {
+        let mut query = query_with_waits();
+        query.spread = Some(crate::Spread { lock_ms: Some(0.0), ..Default::default() });
+        assert_eq!(query.observed_wait_ms(WaitClass::Lock), Some(0.0));
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+        assert_eq!(query.measured_wait_ms(WaitClass::Io), None);
+        query.spread.as_mut().unwrap().lock_ms = Some(15.0);
+        assert_eq!(query.observed_wait_ms(WaitClass::Lock), Some(15.0));
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+        query.waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Lock], complete: true });
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), Some(15.0));
+        for invalid in [-1.0, f64::NAN, f64::INFINITY] {
+            query.spread.as_mut().unwrap().lock_ms = Some(invalid);
+            assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+        }
+        query.invalidate_wait_class(WaitClass::Lock);
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+    }
+
+    #[test]
+    fn invalid_wait_values_and_duplicate_qualification_never_become_healthy_zeroes() {
+        let mut query = query_with_waits();
+        query.waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Io], complete: true });
+        for invalid in [-1.0, f64::NAN, f64::INFINITY] {
+            query.waits[0].wait_ms = invalid;
+            assert_eq!(query.observed_wait_ms(WaitClass::Io), None);
+            assert_eq!(query.measured_wait_ms(WaitClass::Io), None);
+        }
+        query.waits[0].wait_ms = f64::MAX;
+        query.waits.push(query.waits[0].clone());
+        assert_eq!(query.measured_wait_ms(WaitClass::Io), None);
+        query.waits.clear();
+        query.waits_coverage.as_mut().unwrap().classes.push(WaitClass::Io);
+        assert_eq!(query.measured_wait_ms(WaitClass::Io), None);
+    }
+
+    #[test]
+    fn native_unknown_labels_are_not_other_measurements_and_workers_are_not_cpu() {
+        let mut query = query_with_waits();
+        query.waits[0].category = "future-native-category".into();
+        assert_eq!(query.observed_wait_ms(WaitClass::Other), None);
+        query.waits[0].category = "Worker Thread".into();
+        assert_eq!(query.observed_wait_ms(WaitClass::Workers), Some(40.0));
+        assert_eq!(query.observed_wait_ms(WaitClass::Cpu), None);
+    }
+
+    #[test]
+    fn withdrawing_invalid_lock_measurements_also_withdraws_their_zero_qualification() {
+        let mut query = query_with_waits();
+        query.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 15.0, tasks: None });
+        query.waits_coverage =
+            Some(QueryWaitCoverage { classes: vec![WaitClass::Io, WaitClass::Lock], complete: true });
+        query.spread = Some(crate::Spread { lock_ms: Some(15.0), ..Default::default() });
+        query.invalidate_wait_class(WaitClass::Lock);
+        assert_eq!(query.observed_wait_ms(WaitClass::Lock), None);
+        assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
+        assert_eq!(query.spread.as_ref().unwrap().lock_ms, None);
+        assert_eq!(query.measured_wait_ms(WaitClass::Io), Some(40.0));
+    }
 
     #[test]
     fn signals_grade_both_directions() {
@@ -577,6 +741,7 @@ mod tests {
                 "rpc",
                 "storage",
                 "cpu",
+                "workers",
                 "io",
                 "rows",
                 "lock",
@@ -600,7 +765,8 @@ mod tests {
             got,
             r#"Mssql rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
 Mssql storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
-Mssql cpu: CPU | Running on a processor, queued for one, or (THREADPOOL) waiting for a worker thread before the request could start at all. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row. Worker waits instead point at blocking chains or heavy parallelism holding the workers.
+Mssql cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Mssql workers: Execution workers | Requests queued for an execution worker. Blocking chains, concurrent requests or parallel work can keep workers occupied; these waits do not measure CPU consumption.
 Mssql io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
 Mssql rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
 Mssql lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
@@ -614,6 +780,7 @@ Mssql other: Everything else | Everything SQL Server doesn't break down further.
 Postgres rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
 Postgres storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
 Postgres cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Postgres workers: Execution workers | Requests queued for an execution worker. Blocking chains, concurrent requests or parallel work can keep workers occupied; these waits do not measure CPU consumption.
 Postgres io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
 Postgres rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
 Postgres lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
@@ -627,6 +794,7 @@ Postgres other: Everything else | Statement time PostgreSQL doesn't break down: 
 Yugabyte rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
 Yugabyte storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
 Yugabyte cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Yugabyte workers: Execution workers | Requests queued for an execution worker. Blocking chains, concurrent requests or parallel work can keep workers occupied; these waits do not measure CPU consumption.
 Yugabyte io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
 Yugabyte rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
 Yugabyte lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
@@ -640,6 +808,7 @@ Yugabyte other: Everything else | Everything YugabyteDB doesn't break down furth
 Mysql rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
 Mysql storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
 Mysql cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Mysql workers: Execution workers | Requests queued for an execution worker. Blocking chains, concurrent requests or parallel work can keep workers occupied; these waits do not measure CPU consumption.
 Mysql io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
 Mysql rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
 Mysql lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
@@ -653,6 +822,7 @@ Mysql other: Everything else | Everything MySQL doesn't break down further.
 Sqlite rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
 Sqlite storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
 Sqlite cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Sqlite workers: Execution workers | Requests queued for an execution worker. Blocking chains, concurrent requests or parallel work can keep workers occupied; these waits do not measure CPU consumption.
 Sqlite io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
 Sqlite rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
 Sqlite lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.

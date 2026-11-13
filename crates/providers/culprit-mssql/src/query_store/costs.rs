@@ -8,52 +8,76 @@ use culprit_core::{Result, telemetry::canonical_time};
 pub(crate) const LAYOUT: &str = r#"SELECT /* culprit */
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_log_bytes_used') THEN 1 ELSE 0 END AS log_bytes"#;
 
-pub(crate) fn runs_sql(with_log: bool, selected: bool) -> String {
-    let selector = if selected { "DECLARE @ids xml=CONVERT(xml,@P2);" } else { "" };
-    let selection = if selected {
-        "AND p.query_id IN(SELECT n.x.value('@id[1]','bigint') FROM @ids.nodes('/ids/id') n(x))"
-    } else {
-        ""
-    };
+pub(crate) fn runs_sql(with_log: bool) -> String {
+    let population = format!(
+        r#"FROM culprit_runtime rs
+ JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id=rs.runtime_stats_interval_id
+ JOIN sys.query_store_plan p ON p.plan_id=rs.plan_id
+ JOIN sys.query_store_query q ON q.query_id=p.query_id
+ LEFT JOIN sys.query_store_query_text t ON t.query_text_id=q.query_text_id
+ WHERE {membership} AND {workload}"#,
+        membership = super::window_sql::MEMBERSHIP,
+        workload = crate::statement_origin::application_candidates_sql("t.query_sql_text")
+    );
+    let window = super::window_sql::DECLARATION;
+    let relation = super::runtime::relation(false);
     let log = if with_log { "SUM(rs.avg_log_bytes_used*rs.count_executions)" } else { "CAST(NULL AS float)" };
-    let grouping = if selected { "p.query_id," } else { "" };
-    let group_by = if selected { "GROUP BY p.query_id" } else { "" };
+    let (denominator, join, total) = if with_log {
+        (
+            format!(",total AS(SELECT {log} AS total_log_bytes {population})"),
+            "CROSS JOIN total",
+            "total.total_log_bytes",
+        )
+    } else {
+        (String::new(), "", "CAST(NULL AS float) AS total_log_bytes")
+    };
+    // Selected groups stay bounded by the requested query IDs. The all-workload denominator is a scalar,
+    // not an all-query grouping/window spool; both aggregates use the exact same frozen interval population.
     format!(
-        r#"{selector}
-{relation}
-SELECT /* culprit */ {grouping}
+        r#"{window}DECLARE /* culprit */ @ids xml=CONVERT(xml,@P2);
+{relation},costs AS (
+ SELECT p.query_id,q.context_settings_id,q.object_id,CONVERT(varchar(16),q.query_hash,2) AS query_hash,
+ CONVERT(varchar(40),q.initial_compile_start_time,127) AS query_initial_compile_at,
+ SUM(rs.count_executions) AS executions,
  SUM(CASE WHEN rs.execution_type=3 THEN rs.count_executions ELSE 0 END) AS aborted,
  SUM(CASE WHEN rs.execution_type=3 THEN rs.culprit_duration_us ELSE 0 END) AS aborted_us,
  SUM(CASE WHEN rs.execution_type=4 THEN rs.count_executions ELSE 0 END) AS failed,
  {log} AS log_bytes
-FROM culprit_runtime rs
-JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id=rs.runtime_stats_interval_id
-JOIN sys.query_store_plan p ON p.plan_id=rs.plan_id
-JOIN sys.query_store_query q ON q.query_id=p.query_id
-LEFT JOIN sys.query_store_query_text t ON t.query_text_id=q.query_text_id
-WHERE i.end_time>=DATEADD(minute,-@P1,SYSDATETIMEOFFSET()) AND {workload} {selection}
-{group_by} OPTION(MAXDOP 1)"#,
-        relation = super::runtime::relation(false),
-        workload = crate::statement_origin::application_candidates_sql("t.query_sql_text")
+ {population} AND p.query_id IN(SELECT n.x.value('@id[1]','bigint') FROM @ids.nodes('/ids/id') n(x))
+ GROUP BY p.query_id,q.context_settings_id,q.object_id,q.query_hash,q.initial_compile_start_time
+){denominator}
+SELECT /* culprit */ costs.*,{total} FROM costs {join} OPTION(MAXDOP 1,LOOP JOIN)"#
     )
 }
 
 pub(crate) struct RunCosts {
     pub query_id: String,
+    pub identity: culprit_core::telemetry::NativeQueryIdentity,
+    pub executions: u64,
     pub aborted: u64,
     pub aborted_us: f64,
     pub failed: u64,
     pub log_bytes: Option<f64>,
+    pub total_log_bytes: Option<f64>,
 }
 impl RunCosts {
     pub fn decode(row: &Rec) -> Result<Self> {
-        Ok(Self {
+        let value = Self {
             query_id: integer(row, "query_id")?.to_string(),
+            identity: super::decode::query_identity(row)?,
+            executions: integer(row, "executions")?.try_into().map_err(|_| invalid_data())?,
             aborted: integer(row, "aborted")?.try_into().map_err(|_| invalid_data())?,
             aborted_us: crate::read::required_nonnegative_number(row, "aborted_us")?,
             failed: integer(row, "failed")?.try_into().map_err(|_| invalid_data())?,
             log_bytes: crate::read::optional_nonnegative_number(row, "log_bytes")?,
-        })
+            total_log_bytes: crate::read::optional_nonnegative_number(row, "total_log_bytes")?,
+        };
+        if value.aborted.checked_add(value.failed).is_none_or(|count| count > value.executions)
+            || matches!((value.log_bytes,value.total_log_bytes),(Some(own),Some(total)) if own>total)
+        {
+            return Err(invalid_data());
+        }
+        Ok(value)
     }
 }
 

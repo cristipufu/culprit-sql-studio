@@ -16,8 +16,15 @@ const SNAPSHOT_TIMEOUT_MS: u32 = 120_000;
 
 pub(crate) struct Reader<R = ReadSession> {
     io: R,
-    tempdb: Option<bool>,
+    layout: Option<RuntimeLayout>,
+    window: Option<super::window_sql::FrozenWindow>,
     log_bytes: Option<bool>,
+    stopped: Option<culprit_core::Error>,
+}
+#[derive(Clone, Copy)]
+struct RuntimeLayout {
+    tempdb: bool,
+    waits: bool,
 }
 impl Reader {
     pub(crate) fn open(pool: Arc<Pool>) -> Self {
@@ -31,33 +38,101 @@ impl Reader {
 }
 impl<R: NativeRead> Reader<R> {
     pub(crate) fn new(io: R) -> Self {
-        Self { io, tempdb: None, log_bytes: None }
+        Self { io, layout: None, window: None, log_bytes: None, stopped: None }
+    }
+    fn admit(&self) -> Result<()> {
+        if let Some(error) = &self.stopped {
+            return Err(error.clone());
+        }
+        if self.window.as_ref().is_some_and(|window| !window.retained) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        Ok(())
+    }
+    fn observe_failure(&mut self, error: &culprit_core::Error) {
+        if crate::read::stops_remaining_reads(error) {
+            self.stopped = Some(error.clone());
+            if let Some(window) = &mut self.window {
+                window.invalidate_endpoint();
+            }
+        }
+    }
+    pub(crate) fn source_changed(&mut self) -> culprit_core::Error {
+        let error = CollectionStop::SourceChanged.error();
+        self.observe_failure(&error);
+        error
     }
     pub(crate) async fn read_rows(&mut self, sql: &str) -> Result<Vec<Rec>> {
         self.read(sql, vec![], MAX_RESULT_ROWS).await
     }
+    pub(crate) async fn window_rows(&mut self, sql: &str, minutes: u32) -> Result<Vec<Rec>> {
+        let parameter = self.window(minutes).await?.parameter();
+        self.read(sql, vec![parameter], MAX_RESULT_ROWS).await
+    }
     pub(crate) async fn read(&mut self, sql: &str, parameters: Vec<Parameter>, limit: usize) -> Result<Vec<Rec>> {
-        let rows = self.io.query(sql, parameters, limit + 1).await.map_err(ReadError::into_error)?;
+        self.admit()?;
+        let result = self.io.query(sql, parameters, limit + 1).await.map_err(ReadError::into_error);
+        if let Err(error) = &result {
+            self.observe_failure(error);
+        }
+        let rows = result?;
         if rows.len() > limit {
             return Err(CollectionStop::RowLimit.error());
         }
         Ok(rows)
     }
-    pub(crate) async fn summary(&mut self, window_minutes: u32) -> Result<Vec<PlanSummary>> {
-        let tempdb = match self.tempdb {
-            Some(value) => value,
-            None => {
-                let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
-                let value = match integer(rows.first().ok_or_else(invalid_data)?, "tempdb")? {
-                    0 => false,
-                    1 => true,
-                    _ => return Err(invalid_data()),
-                };
-                self.tempdb = Some(value);
-                value
+    pub(crate) async fn window(&mut self, window_minutes: u32) -> Result<super::window_sql::FrozenWindow> {
+        self.admit()?;
+        if let Some(window) = &self.window {
+            return if window.matches_request(window_minutes) { Ok(window.clone()) } else { Err(invalid_data()) };
+        }
+        let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
+        let [row] = rows.as_slice() else { return Err(invalid_data()) };
+        let tempdb = match integer(row, "tempdb")? {
+            0 => false,
+            1 => true,
+            _ => return Err(invalid_data()),
+        };
+        let layout = RuntimeLayout { tempdb, waits: super::window_sql::waits_supported(row)? };
+        let rows = self
+            .read(
+                &super::window_sql::metadata_sql(layout.waits, false),
+                vec![Parameter::Integer(i64::from(window_minutes))],
+                1,
+            )
+            .await?;
+        let [row] = rows.as_slice() else { return Err(invalid_data()) };
+        let window = match super::window_sql::FrozenWindow::decode(row, window_minutes, layout.waits) {
+            Ok(window) => window,
+            Err(error) => {
+                self.observe_failure(&error);
+                return Err(error);
             }
         };
-        self.read(&runtime::summary_sql(tempdb), vec![Parameter::Integer(i64::from(window_minutes))], MAX_RESULT_ROWS)
+        if !window.retained {
+            return Err(self.source_changed());
+        }
+        self.layout = Some(layout);
+        self.window = Some(window.clone());
+        Ok(window)
+    }
+    pub(crate) async fn verify_window(&mut self) -> Result<super::window_sql::WindowVerification> {
+        let mut window = self.window.as_ref().ok_or_else(invalid_data)?.clone();
+        let (sql, parameters) = window.verify_query();
+        let result = self.read(&sql, parameters, 1).await.and_then(|rows| {
+            let [row] = rows.as_slice() else { return Err(invalid_data()) };
+            window.verify(row)
+        });
+        if result.is_err() {
+            window.invalidate_endpoint();
+        }
+        self.window = Some(window);
+        result
+    }
+    pub(crate) async fn summary(&mut self, window_minutes: u32) -> Result<Vec<PlanSummary>> {
+        let window = self.window(window_minutes).await?;
+        let layout = self.layout.ok_or_else(invalid_data)?;
+        self.read(&runtime::summary_sql(layout.tempdb), vec![window.parameter()], MAX_RESULT_ROWS)
             .await?
             .iter()
             .map(PlanSummary::decode)
@@ -71,7 +146,14 @@ impl<R: NativeRead> Reader<R> {
         if plan_ids.is_some_and(|ids| ids.is_empty()) {
             return Ok(Vec::new());
         }
-        let mut parameters = vec![Parameter::Integer(i64::from(window_minutes))];
+        let window = self.window(window_minutes).await?;
+        if window.capture == culprit_core::telemetry::WaitCaptureState::Unavailable {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::t!("provider.mssql.query_waits.not_captured"),
+            ));
+        }
+        let mut parameters = vec![window.parameter()];
         if let Some(ids) = plan_ids {
             parameters.push(ids_parameter(ids)?);
         }
@@ -94,24 +176,12 @@ impl<R: NativeRead> Reader<R> {
             return Ok(Vec::new());
         }
         let log = self.has_log_bytes().await?;
-        self.read(
-            &super::costs::runs_sql(log, true),
-            vec![Parameter::Integer(i64::from(window_minutes)), ids_parameter(ids)?],
-            MAX_RESULT_ROWS,
-        )
-        .await?
-        .iter()
-        .map(super::costs::RunCosts::decode)
-        .collect()
-    }
-    pub(crate) async fn total_log_bytes(&mut self, window_minutes: u32) -> Result<Option<f64>> {
-        if !self.has_log_bytes().await? {
-            return Ok(None);
-        }
-        let rows = self
-            .read(&super::costs::runs_sql(true, false), vec![Parameter::Integer(i64::from(window_minutes))], 1)
-            .await?;
-        crate::read::optional_nonnegative_number(rows.first().ok_or_else(invalid_data)?, "log_bytes")
+        let scope = self.window(window_minutes).await?.parameter();
+        self.read(&super::costs::runs_sql(log), vec![scope, ids_parameter(ids)?], MAX_RESULT_ROWS)
+            .await?
+            .iter()
+            .map(super::costs::RunCosts::decode)
+            .collect()
     }
     async fn has_log_bytes(&mut self) -> Result<bool> {
         if let Some(value) = self.log_bytes {
@@ -149,7 +219,14 @@ impl<R: NativeRead> NativeRead for Reader<R> {
         parameters: Vec<Parameter>,
         row_limit: usize,
     ) -> crate::read::ReadResult<Vec<Rec>> {
-        self.io.query(sql, parameters, row_limit).await
+        self.admit().map_err(ReadError::Source)?;
+        let result = self.io.query(sql, parameters, row_limit).await;
+        match &result {
+            Err(ReadError::Source(error)) => self.observe_failure(error),
+            Err(ReadError::Stopped(stop)) => self.observe_failure(&stop.error()),
+            Ok(_) => (),
+        }
+        result
     }
     fn queries(&self) -> u32 {
         self.io.queries()
@@ -171,3 +248,6 @@ pub(crate) fn ids_parameter(ids: &[String]) -> Result<Parameter> {
     xml.push_str("</ids>");
     Ok(Parameter::Text(xml))
 }
+
+#[cfg(test)]
+mod tests;

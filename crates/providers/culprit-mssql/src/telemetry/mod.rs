@@ -204,7 +204,7 @@ impl<R: crate::read::NativeRead> Source<R> {
             return Err(decode::malformed().into());
         }
         let description = self.description.as_ref().ok_or_else(decode::malformed)?;
-        if stream == TelemetryStream::QueryWaits && !description.waits_capture_enabled {
+        if stream == TelemetryStream::QueryWaits && !description.waits_supported() {
             return Ok(CollectionRead::Stopped(CollectionStop::SourceUnavailable));
         }
         let Some(query) = self.prepare_page(stream, token)? else {

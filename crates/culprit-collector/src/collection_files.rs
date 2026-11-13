@@ -550,6 +550,7 @@ mod tests {
                 source: "query-store".into(),
                 observation: culprit_core::telemetry::SourceObservation::QueryHistory(
                     culprit_core::telemetry::QueryHistoryDescription {
+                        waits: None,
                         interval: culprit_core::telemetry::TelemetryInterval {
                             native_id: "1".into(),
                             from: request().bounds().unwrap().0.to_rfc3339(),

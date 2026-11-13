@@ -118,6 +118,7 @@ async fn collect_with_base(
                     }]
                 })
                 .unwrap_or_default(),
+            waits_coverage: None,
             trend: None,
             spread: r.number("min_ms").map(|min_ms| Spread { min_ms: Some(min_ms), ..Default::default() }),
             costs: None,

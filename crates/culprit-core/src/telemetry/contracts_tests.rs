@@ -64,6 +64,7 @@ fn native_identity_is_canonical_but_its_qualifiers_are_not_interpreted() {
 #[test]
 fn source_dimensions_are_explicit_and_do_not_require_replica_groups() {
     let mut history = QueryHistoryDescription {
+        waits: None,
         interval: TelemetryInterval {
             native_id: "interval".into(),
             from: "2020-01-01T00:00:00Z".into(),
@@ -98,6 +99,7 @@ fn query_only_records_get_stable_native_ids_but_unresolved_queries_do_not() {
         source: "fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            waits: None,
             interval: TelemetryInterval {
                 native_id: "1".into(),
                 from: "2020-01-01T00:00:00Z".into(),

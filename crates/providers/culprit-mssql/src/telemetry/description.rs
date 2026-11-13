@@ -1,11 +1,12 @@
 use crate::query_store::{
     catalog_sql as sql,
     decode::{integer, malformed, text},
+    waits,
 };
 use crate::read::{NativeRead, ReadError};
 use culprit_core::{
     DatabaseIdentity, Engine, Error, ErrorCode, Result, t,
-    telemetry::{CollectionDescription, CollectionRequest, SourceContinuity},
+    telemetry::{CollectionDescription, CollectionRequest, SourceContinuity, WaitCaptureState},
 };
 
 pub(super) struct Description {
@@ -13,7 +14,14 @@ pub(super) struct Description {
     pub physical_incarnation: String,
     pub plan_upper_bound: i64,
     pub replica_group_ids: Vec<String>,
-    pub waits_capture_enabled: bool,
+}
+impl Description {
+    pub fn waits_supported(&self) -> bool {
+        self.value
+            .query_history()
+            .and_then(|history| history.waits.as_ref())
+            .is_some_and(|waits| waits.capture != WaitCaptureState::Unavailable)
+    }
 }
 
 pub(super) async fn ensure_supported<R: NativeRead>(session: &mut R) -> Result<()> {
@@ -30,7 +38,7 @@ pub(super) async fn read<R: NativeRead>(
     host: &str,
     port: u16,
 ) -> Result<Description> {
-    let (capture_mode, waits_capture_enabled) = settings(session).await?;
+    let (capture_mode, capture) = settings(session).await?;
     let (database, physical_incarnation) = identity(session, host, port).await?;
     let interval = crate::query_store::intervals::exact(session, request).await?;
     let replica_group_ids = replicas(session).await?;
@@ -43,11 +51,8 @@ pub(super) async fn read<R: NativeRead>(
                 culprit_core::telemetry::QueryHistoryDescription {
                     interval,
                     dimensions: [("replica_group_id".into(), replica_group_ids.clone())].into(),
-                    native_properties: [
-                        ("capture_mode".into(), capture_mode),
-                        ("waits_capture_enabled".into(), waits_capture_enabled.to_string()),
-                    ]
-                    .into(),
+                    native_properties: [("capture_mode".into(), capture_mode)].into(),
+                    waits: Some(waits::semantics(capture)),
                 },
             ),
             continuity: SourceContinuity::Unverified,
@@ -55,17 +60,16 @@ pub(super) async fn read<R: NativeRead>(
         physical_incarnation,
         plan_upper_bound,
         replica_group_ids,
-        waits_capture_enabled,
     })
 }
 
-pub(super) async fn settings<R: NativeRead>(session: &mut R) -> Result<(String, bool)> {
+pub(super) async fn settings<R: NativeRead>(session: &mut R) -> Result<(String, WaitCaptureState)> {
     let rows = session.query(sql::OPTIONS, vec![], 1).await.map_err(ReadError::into_error)?;
     let row = rows.first().ok_or_else(malformed)?;
     if !matches!(text(row, "actual_state_desc")?.as_str(), "READ_WRITE" | "READ_ONLY") {
         return Err(Error::new(ErrorCode::Unsupported, t!("collection.query_store_unavailable")));
     }
-    Ok((text(row, "query_capture_mode_desc")?, text(row, "wait_stats_capture_mode_desc")? == "ON"))
+    Ok((text(row, "query_capture_mode_desc")?, waits::capture_state(row)?))
 }
 
 pub(super) async fn identity<R: NativeRead>(

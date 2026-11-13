@@ -113,6 +113,9 @@ fn categorises_wait_types() {
     assert_eq!(wait_type_category("HTREPARTITION"), "Parallelism");
     assert_eq!(wait_type_category("BMPBUILD"), "Parallelism");
     assert_eq!(wait_type_category("SOS_SCHEDULER_YIELD"), "CPU");
+    assert_eq!(wait_type_category("THREADPOOL"), "Workers");
+    assert_eq!(wait_type_category("RESOURCE_SEMAPHORE_QUERY_COMPILE"), "Compilation");
+    assert_eq!(wait_type_category("RESOURCE_SEMAPHORE"), "Memory");
     assert_eq!(wait_type_category("CXPACKET"), "Parallelism");
     assert_eq!(wait_type_category("ASYNC_NETWORK_IO"), "Network");
 }

@@ -14,6 +14,7 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
         source: culprit_core::source_id::QUERY_STORE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            waits: None,
             interval: TelemetryInterval {
                 native_id: "recorded-interval".into(),
                 from: workload.window_start.clone().unwrap(),

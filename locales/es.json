@@ -3116,10 +3116,8 @@
       "core.waits.category.compilation.label": "e16a20e854c4ef4fff4b7c0cc0de05df18e83b263501d84db458c30fb9576f58",
       "core.waits.category.compilation.meaning": "686b47949af1e6b5a5819bfe86d7964cbc1b6bef3d9bb91b6139d52d353c67a2",
       "core.waits.category.cpu.gist": "6e7dde00bdba77f03c3f1099dad4fce2e91ca8ca0950ec4655e6163a602b4525",
-      "core.waits.category.cpu.gist_threadpool": "abbc4b23394e832d352a819a7138d384c563d3f7320de4a6aec05d208fe4bf6b",
       "core.waits.category.cpu.label": "db9a4c7d4c195ebf80068dd04120accce1cbfbef342bb43a53cbd651eb96e37b",
       "core.waits.category.cpu.meaning": "dbf29373d5a1ce64b4958737d3f8289712b66617a9b4609ac3377370a750fd11",
-      "core.waits.category.cpu.meaning_threadpool": "6438b49045c1246775d234cd9c2302fb094fd332dcf39fcf268727350c588020",
       "core.waits.category.io.gist": "c32377df64ead89210873e41ac560624d948b9f6b8bb244c07da963923747939",
       "core.waits.category.io.label": "ef07117c48def1a6af493b84e6a917b7d18a73cf056c37c751af2d04cda70fd1",
       "core.waits.category.io.meaning": "b880492dca8dcd9979376ec41b111e205e7ec2bfc5dadf074608afb994dee275",
@@ -8223,7 +8221,12 @@
       "provider.postgres.shared_memory_allocations.permission_required": "58f1b72849df59f09bc49ca3c05423d2160a071e6c7a6e568a7f0b922eb110a3",
       "provider.mssql.shared_resources.memory_version": "c7a4b0677834e2f85bb52c3aab6775f5de4679de4914f6f146a132e2bce754e7",
       "provider.shared_resources.details": "098d5b55716855cd5b76393b66ec9cf1e2d84b4b4d1c86951f82b29ccce370a3",
-      "provider.shared_resources.unsupported": "d70b1fa8cfb9c2ec4d0d12d1c82a87e5763fb85f089b3657c15b9d4417e8f104"
+      "provider.shared_resources.unsupported": "d70b1fa8cfb9c2ec4d0d12d1c82a87e5763fb85f089b3657c15b9d4417e8f104",
+      "core.waits.category.workers.label": "59f81b1ce71e6ed87cc9bd6e5576e72f6ff37c061e7fb7298c62059b4ac9fc18",
+      "core.waits.category.workers.gist": "a1a3f0f4123b09ef2285e1064bdded4fc1a10822fe2dabd3bbb4d228e6d5ba18",
+      "core.waits.category.workers.meaning": "77d5b6b601af3eda23d4b85c1c3a57c6f16f5e992cbe3bf500d936e15a9ad7a5",
+      "provider.mssql.query_waits.unknown_categories": "6b962bff18355a32b12ae458b9572f1f863763bea0ef792965f654d15bb6cf9e",
+      "provider.mssql.query_waits.capture_history_unverified": "4687a32759b46cacfc77a305c8a9b207435aa0d52aac70eb5490f2e406989d34"
     }
   },
   "activity.cli.about": "Supervisa bloqueos persistentes y solicitudes de larga duración.",
@@ -11337,10 +11340,8 @@
   "core.waits.category.compilation.label": "Compilación de planes",
   "core.waits.category.compilation.meaning": "Construir planes de consulta. Mucho tiempo aquí significa que la aplicación envía instrucciones de un solo uso en lugar de instrucciones parametrizadas.",
   "core.waits.category.cpu.gist": "Ejecutándose en un procesador o en cola para uno.",
-  "core.waits.category.cpu.gist_threadpool": "Ejecutándose en un procesador, en cola para uno o (THREADPOOL) esperando un subproceso de trabajo antes de que la solicitud pudiera siquiera empezar.",
   "core.waits.category.cpu.label": "CPU",
   "core.waits.category.cpu.meaning": "Ejecutándose en un procesador o en cola para uno. Cuando domina la CPU, las consultas suelen hacer más trabajo del necesario: recorridos, conversiones, funciones evaluadas en cada fila.",
-  "core.waits.category.cpu.meaning_threadpool": "Ejecutándose en un procesador, en cola para uno o (THREADPOOL) esperando un subproceso de trabajo antes de que la solicitud pudiera siquiera empezar. Cuando domina la CPU, las consultas suelen hacer más trabajo del necesario: recorridos, conversiones, funciones evaluadas en cada fila. Las esperas de subprocesos, en cambio, apuntan a cadenas de bloqueo o a mucho paralelismo que acapara los subprocesos.",
   "core.waits.category.io.gist": "Esperando a que los datos lleguen del disco porque no estaban en memoria.",
   "core.waits.category.io.label": "Lecturas de disco",
   "core.waits.category.io.meaning": "Esperando a que los datos lleguen del disco porque no estaban en memoria. Suelen ser recorridos de tablas grandes, o una memoria demasiado pequeña para los datos que la carga de trabajo toca una y otra vez.",
@@ -16442,5 +16443,10 @@
   "view.waits.source.slow_log_last": "Tiempo de bloqueo por instrucción del registro de consultas lentas, {window}",
   "view.waits.source.sqlite": "SQLite no guarda esperas",
   "view.waits.source.unavailable": "no disponible",
-  "view.waits.source.yugabyte": "Métricas nativas de YSQL en su ámbito de nodo/clúster registrado"
+  "view.waits.source.yugabyte": "Métricas nativas de YSQL en su ámbito de nodo/clúster registrado",
+  "core.waits.category.workers.label": "Subprocesos de trabajo",
+  "core.waits.category.workers.gist": "Solicitudes en cola para obtener un subproceso de trabajo.",
+  "core.waits.category.workers.meaning": "Solicitudes en cola para obtener un subproceso de trabajo. Las cadenas de bloqueo, las solicitudes simultáneas o el trabajo paralelo pueden mantener ocupados los subprocesos; estas esperas no miden el consumo de CPU.",
+  "provider.mssql.query_waits.unknown_categories": "Las categorías de espera nativas {categories} no tienen un significado analítico establecido, por lo que esta observación no permite afirmar que otras clases no tuvieron esperas.",
+  "provider.mssql.query_waits.capture_history_unverified": "Query Store no permite establecer si la captura de esperas abarcó todo el periodo seleccionado; se conservan las esperas observadas y las categorías ausentes quedan sin medir."
 }

@@ -121,7 +121,7 @@ pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_repo
 pub use wait_resources::{ObservedWaitResource, WaitResourceKind};
 pub use waits::{
     ActivityCategory, ActivityEvent, ActivityHistory, ActivityPeriod, ActivityQuery, ActivityReport, CleanupHolder,
-    GrantStat, OpenTransaction, Pressure, Signal, SignalScope, SignalStatus, SignalUnit, TransactionActivity,
-    WaitCategory, WaitQuery, WaitSample, WaitScope, WaitsReport, signal_id,
+    GrantStat, OpenTransaction, Pressure, QueryWaitCoverage, Signal, SignalScope, SignalStatus, SignalUnit,
+    TransactionActivity, WaitCategory, WaitQuery, WaitSample, WaitScope, WaitsReport, signal_id,
 };
 pub use window::{MAX_WINDOW_MINUTES, MINUTES_PER_DAY, parse_window, window_label};

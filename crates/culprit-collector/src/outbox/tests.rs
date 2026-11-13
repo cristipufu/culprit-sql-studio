@@ -23,6 +23,7 @@ fn source() -> CollectionDescription {
         source: "query_store".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {
+                waits: None,
                 interval: TelemetryInterval {
                     native_id: "8".into(),
                     from: request().bounds().unwrap().0.to_rfc3339(),

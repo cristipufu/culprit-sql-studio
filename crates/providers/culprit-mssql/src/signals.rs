@@ -12,6 +12,10 @@ use crate::query_store::costs::Compilation;
 use crate::read::NativeRead;
 use crate::sources;
 
+#[cfg(test)]
+#[path = "signals/runtime_tests.rs"]
+mod runtime_tests;
+
 /// Collect every signal into `snapshot`, each source read through `sources::read`: these add detail and lock nothing,
 /// so a failure is a note.
 pub(crate) async fn collect(
@@ -25,7 +29,7 @@ pub(crate) async fn collect(
     if let Some(workload) =
         snapshot.workload.as_mut().filter(|workload| workload.kind() == Some(culprit_core::WorkloadKind::QueryStore))
     {
-        let compiles = collect_query_costs(
+        let compiles = collect_query_compilations(
             Reader::open(pool.clone()),
             options.window_in_minutes(),
             &mut workload.queries,
@@ -115,25 +119,27 @@ pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -
     ]
 }
 
-/// Independent cost sources are projected only after their one native owner confirms shutdown.
-async fn collect_query_costs<R: NativeRead>(
+/// Compilation lifetimes stay independent of runtime sampling and publish only after their own confirmed shutdown.
+async fn collect_query_compilations<R: NativeRead>(
     mut reader: Reader<R>,
     window_minutes: u32,
     queries: &mut [culprit_core::QueryStat],
     coverage: &mut Coverage,
 ) -> Vec<Signal> {
     let ids: Vec<String> = queries.iter().map(|query| query.id.clone()).collect();
-    let runs = read_run_costs(&mut reader, window_minutes, &ids).await;
-    let compilations = reader.compilations(&ids).await;
+    let compilations = match reader.compilations(&ids).await {
+        Err(error) if crate::read::stops_remaining_reads(&error) => {
+            let _ = reader.close().await;
+            coverage.source_failed(&sources::QUERY_COMPILATION, &error);
+            return vec![];
+        }
+        result => result,
+    };
     let database = database_compiles(&mut reader).await;
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
-        coverage.source_failed(&sources::QUERY_COSTS, &error);
         coverage.source_failed(&sources::QUERY_COMPILATION, &error);
         return vec![];
-    }
-    if let Some(runs) = coverage.read(&sources::QUERY_COSTS, runs) {
-        attach_run_costs(queries, runs);
     }
     if let Some(compilations) = coverage.read(&sources::QUERY_COMPILATION, compilations) {
         attach_compilations(queries, compilations, window_minutes);
@@ -141,45 +147,63 @@ async fn collect_query_costs<R: NativeRead>(
     coverage.read(&sources::QUERY_COMPILATION, database).unwrap_or_default()
 }
 
-#[derive(Default)]
-struct RuntimeCosts {
-    rows: Vec<crate::query_store::costs::RunCosts>,
-    total_log_bytes: Option<f64>,
-}
-
-async fn read_run_costs(
-    reader: &mut Reader<impl NativeRead>,
+/// Runtime ratios stay in their original native owner and interval population. A later counter value is not the
+/// earlier query's execution denominator, and a recycled query ID cannot borrow its SQL or costs.
+pub(crate) async fn attach_runtime_costs<R: NativeRead>(
+    reader: &mut Reader<R>,
     window_minutes: u32,
-    ids: &[String],
-) -> culprit_core::Result<RuntimeCosts> {
-    if ids.is_empty() {
-        return Ok(RuntimeCosts::default());
-    }
-    Ok(RuntimeCosts {
-        rows: reader.costs(window_minutes, ids).await?,
-        total_log_bytes: reader.total_log_bytes(window_minutes).await?,
-    })
-}
-
-/// Aborted (3) and exception (4) runs and their log bytes use the selected runtime window.
-fn attach_run_costs(queries: &mut [culprit_core::QueryStat], captured: RuntimeCosts) {
-    let by_id = captured.rows.into_iter().map(|row| (row.query_id.clone(), row)).collect::<HashMap<_, _>>();
-    for q in queries.iter_mut() {
-        let mut costs = q.costs.take().unwrap_or_default();
-        if let Some(r) = by_id.get(&q.id) {
-            let aborted = r.aborted as f64;
-            costs.aborted = Some(aborted);
-            costs.failed = Some(r.failed as f64);
-            costs.aborted_mean_ms =
-                (aborted > 0.0).then(|| crate::query_store::runtime::milliseconds(r.aborted_us) / aborted);
-            costs.log_bytes = r.log_bytes;
-            costs.log_share = match (costs.log_bytes, captured.total_log_bytes) {
-                (Some(own), Some(all)) if all > 0.0 => Some((own / all).min(1.0)),
-                _ => None,
-            };
+    queries: &mut [culprit_core::QueryStat],
+    definitions: &HashMap<String, crate::query_store::definitions::Definition>,
+    coverage: &mut Coverage,
+) -> culprit_core::Result<()> {
+    let ids = queries.iter().map(|query| query.id.clone()).collect::<Vec<_>>();
+    let captured = match reader.costs(window_minutes, &ids).await {
+        Ok(rows) => rows,
+        Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
+        Err(error) => {
+            coverage.source_failed(&sources::QUERY_COSTS, &error);
+            return Ok(());
         }
-        q.costs = (!costs.is_empty()).then_some(costs);
+    };
+    coverage.completed(&sources::QUERY_COSTS, captured.len());
+    let by_id = captured.into_iter().map(|row| (row.query_id.clone(), row)).collect::<HashMap<_, _>>();
+    let mut changed_counts = false;
+    const MAX_EXACT_COUNT: u64 = 1 << 53;
+    for query in queries {
+        let Some(row) = by_id.get(&query.id) else {
+            return Err(reader.source_changed());
+        };
+        let Some(expected) = definitions.get(&query.id).and_then(|definition| definition.query.as_ref()) else {
+            changed_counts = true;
+            continue;
+        };
+        if &row.identity != expected || (row.executions as f64) < query.executions {
+            return Err(reader.source_changed());
+        }
+        if row.executions > MAX_EXACT_COUNT || row.executions as f64 != query.executions {
+            changed_counts = true;
+            continue;
+        }
+        let mut costs = query.costs.take().unwrap_or_default();
+        costs.aborted = Some(row.aborted as f64);
+        costs.failed = Some(row.failed as f64);
+        costs.aborted_mean_ms =
+            (row.aborted > 0).then(|| crate::query_store::runtime::milliseconds(row.aborted_us) / row.aborted as f64);
+        costs.log_bytes = row.log_bytes;
+        // Both aggregates share one native statement and frozen population; selected groups are bounded by IDs.
+        costs.log_share = match (row.log_bytes, row.total_log_bytes) {
+            (Some(own), Some(all)) if all > 0.0 => Some((own / all).min(1.0)),
+            _ => None,
+        };
+        query.costs = (!costs.is_empty()).then_some(costs);
     }
+    if changed_counts {
+        coverage.partial(
+            &sources::QUERY_COSTS,
+            culprit_core::telemetry::CollectionStop::SourceChanged.error().message_source(),
+        );
+    }
+    Ok(())
 }
 
 /// Compilation history keeps its own lifetime even when runtime costs are unavailable.
@@ -363,22 +387,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn query_compilation_survives_unavailable_runtime_costs_but_no_costs_survive_unconfirmed_native_shutdown() {
+    async fn query_compilation_is_independent_and_never_survives_unconfirmed_native_shutdown() {
         for shutdown in
             [culprit_core::telemetry::SourceShutdown::Quiescent, culprit_core::telemetry::SourceShutdown::Unconfirmed]
         {
             let mut io = FakeRead::new(vec![
-                Err(crate::read::ReadError::Source(culprit_core::Error::new(
-                    culprit_core::ErrorCode::PermissionDenied,
-                    "fixture runtime-cost permission",
-                ))),
                 Ok(vec![crate::query_store::tests::compilation_row()]),
                 Ok(vec![database_compilation_row()]),
             ]);
             io.shutdown = shutdown;
             let mut queries = vec![query_without_costs()];
             let mut coverage = Coverage::default();
-            let signals = collect_query_costs(Reader::new(io), 60, &mut queries, &mut coverage).await;
+            let signals = collect_query_compilations(Reader::new(io), 60, &mut queries, &mut coverage).await;
             if shutdown == culprit_core::telemetry::SourceShutdown::Unconfirmed {
                 assert!(queries[0].costs.is_none(), "unsettled native work cannot publish fresh per-query evidence");
                 assert!(signals.is_empty());
@@ -390,15 +410,6 @@ mod tests {
                 assert!(costs.failed.is_none() && costs.aborted.is_none());
                 assert_eq!(costs.compile_history.as_ref().unwrap().memory.unwrap().last_kb, Some(8192.0));
                 assert_eq!(signals.len(), 2);
-                assert_eq!(
-                    coverage
-                        .outcomes()
-                        .iter()
-                        .find(|outcome| outcome.source == sources::QUERY_COSTS.name)
-                        .unwrap()
-                        .state,
-                    culprit_core::SourceState::Unavailable
-                );
             }
         }
     }

@@ -22,6 +22,7 @@ use zeroize::Zeroizing;
 const USER: &str = "culprit_fixture";
 const PASSWORD: &str = "owned-fixture-password";
 mod evidence;
+mod waits;
 struct Server {
     origin: String,
     client: Arc<ClickHouseClient>,

@@ -7,6 +7,7 @@ pub(super) fn source() -> CollectionDescription {
     database.engine = culprit_core::Engine::Postgres;
     manifest.source.source = "native-history-fixture".into();
     manifest.source.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
+        waits: None,
         interval: TelemetryInterval {
             native_id: "native-period".into(),
             from: "2020-01-01T06:00:00Z".into(),
@@ -104,4 +105,73 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
         maximum: None,
     }));
     (source, records)
+}
+
+/// A synthetic source dictionary exercises the shared contract without copying any provider's native taxonomy.
+pub fn wait_semantics(capture: WaitCaptureState) -> QueryWaitSemantics {
+    QueryWaitSemantics {
+        capture,
+        coverage: WaitCaptureCoverage::Qualified,
+        categories: [
+            (
+                "native-page-io".into(),
+                NativeWaitMeaning {
+                    native_name: "Native Page IO".into(),
+                    disposition: WaitDisposition::Analyze(WaitClass::Io),
+                },
+            ),
+            (
+                "native-lock".into(),
+                NativeWaitMeaning {
+                    native_name: "Native Lock".into(),
+                    disposition: WaitDisposition::Analyze(WaitClass::Lock),
+                },
+            ),
+            (
+                "native-idle".into(),
+                NativeWaitMeaning { native_name: "Native Idle".into(), disposition: WaitDisposition::Ignore },
+            ),
+            (
+                "native-unknown".into(),
+                NativeWaitMeaning { native_name: "Native Unknown".into(), disposition: WaitDisposition::Unknown },
+            ),
+        ]
+        .into(),
+    }
+}
+
+pub fn query_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
+    let mut cases = [
+        (Some(WaitCaptureState::Enabled), Some("native-page-io")),
+        (Some(WaitCaptureState::Enabled), None),
+        (None, Some("native-page-io")),
+        (Some(WaitCaptureState::Enabled), Some("future-native-id")),
+        (Some(WaitCaptureState::Enabled), Some("native-unknown")),
+        (Some(WaitCaptureState::Enabled), Some("native-idle")),
+        (Some(WaitCaptureState::Disabled), Some("native-page-io")),
+        (Some(WaitCaptureState::Unavailable), Some("native-page-io")),
+    ]
+    .into_iter()
+    .map(|(capture, category)| {
+        let (mut source, mut records) = query_evidence();
+        let SourceObservation::QueryHistory(history) = &mut source.observation else { panic!() };
+        history.waits = capture.map(wait_semantics);
+        records.retain_mut(|record| match record {
+            TelemetryRecord::QueryWaits(wait) => match category {
+                Some(category) => {
+                    wait.category = category.into();
+                    true
+                }
+                None => false,
+            },
+            _ => true,
+        });
+        (source, records)
+    })
+    .collect::<Vec<_>>();
+    let (mut source, records) = cases[0].clone();
+    let SourceObservation::QueryHistory(history) = &mut source.observation else { panic!() };
+    history.waits.as_mut().unwrap().coverage = WaitCaptureCoverage::Unverified;
+    cases.push((source, records));
+    cases
 }

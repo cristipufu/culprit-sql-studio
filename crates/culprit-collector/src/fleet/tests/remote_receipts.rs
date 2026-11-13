@@ -27,6 +27,7 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
         source: "query_store".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            waits: None,
             interval: interval(10),
             dimensions: [("replica_group_id".into(), vec!["0".into()])].into(),
             native_properties: [

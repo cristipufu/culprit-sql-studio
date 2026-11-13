@@ -222,7 +222,10 @@ pub(crate) fn wait_type_category(wait_type: &str) -> &'static str {
     {
         return "Log";
     }
-    if w == "SOS_SCHEDULER_YIELD" || w == "THREADPOOL" || w.starts_with("RESOURCE_GOVERNOR") {
+    if w == "THREADPOOL" {
+        return "Workers";
+    }
+    if w == "SOS_SCHEDULER_YIELD" || w.starts_with("RESOURCE_GOVERNOR") {
         return "CPU";
     }
     // HT* and BMP* are batch-mode hash and bitmap work shared across a parallel query's threads.
@@ -234,6 +237,9 @@ pub(crate) fn wait_type_category(wait_type: &str) -> &'static str {
         || w.starts_with("BMP")
     {
         return "Parallelism";
+    }
+    if w == "RESOURCE_SEMAPHORE_QUERY_COMPILE" {
+        return "Compilation";
     }
     if w.starts_with("RESOURCE_SEMAPHORE") || w == "CMEMTHREAD" {
         return "Memory";

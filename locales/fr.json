@@ -3116,10 +3116,8 @@
       "core.waits.category.compilation.label": "e16a20e854c4ef4fff4b7c0cc0de05df18e83b263501d84db458c30fb9576f58",
       "core.waits.category.compilation.meaning": "686b47949af1e6b5a5819bfe86d7964cbc1b6bef3d9bb91b6139d52d353c67a2",
       "core.waits.category.cpu.gist": "6e7dde00bdba77f03c3f1099dad4fce2e91ca8ca0950ec4655e6163a602b4525",
-      "core.waits.category.cpu.gist_threadpool": "abbc4b23394e832d352a819a7138d384c563d3f7320de4a6aec05d208fe4bf6b",
       "core.waits.category.cpu.label": "db9a4c7d4c195ebf80068dd04120accce1cbfbef342bb43a53cbd651eb96e37b",
       "core.waits.category.cpu.meaning": "dbf29373d5a1ce64b4958737d3f8289712b66617a9b4609ac3377370a750fd11",
-      "core.waits.category.cpu.meaning_threadpool": "6438b49045c1246775d234cd9c2302fb094fd332dcf39fcf268727350c588020",
       "core.waits.category.io.gist": "c32377df64ead89210873e41ac560624d948b9f6b8bb244c07da963923747939",
       "core.waits.category.io.label": "ef07117c48def1a6af493b84e6a917b7d18a73cf056c37c751af2d04cda70fd1",
       "core.waits.category.io.meaning": "b880492dca8dcd9979376ec41b111e205e7ec2bfc5dadf074608afb994dee275",
@@ -8223,7 +8221,12 @@
       "provider.postgres.shared_memory_allocations.permission_required": "58f1b72849df59f09bc49ca3c05423d2160a071e6c7a6e568a7f0b922eb110a3",
       "provider.mssql.shared_resources.memory_version": "c7a4b0677834e2f85bb52c3aab6775f5de4679de4914f6f146a132e2bce754e7",
       "provider.shared_resources.details": "098d5b55716855cd5b76393b66ec9cf1e2d84b4b4d1c86951f82b29ccce370a3",
-      "provider.shared_resources.unsupported": "d70b1fa8cfb9c2ec4d0d12d1c82a87e5763fb85f089b3657c15b9d4417e8f104"
+      "provider.shared_resources.unsupported": "d70b1fa8cfb9c2ec4d0d12d1c82a87e5763fb85f089b3657c15b9d4417e8f104",
+      "core.waits.category.workers.label": "59f81b1ce71e6ed87cc9bd6e5576e72f6ff37c061e7fb7298c62059b4ac9fc18",
+      "core.waits.category.workers.gist": "a1a3f0f4123b09ef2285e1064bdded4fc1a10822fe2dabd3bbb4d228e6d5ba18",
+      "core.waits.category.workers.meaning": "77d5b6b601af3eda23d4b85c1c3a57c6f16f5e992cbe3bf500d936e15a9ad7a5",
+      "provider.mssql.query_waits.unknown_categories": "6b962bff18355a32b12ae458b9572f1f863763bea0ef792965f654d15bb6cf9e",
+      "provider.mssql.query_waits.capture_history_unverified": "4687a32759b46cacfc77a305c8a9b207435aa0d52aac70eb5490f2e406989d34"
     }
   },
   "activity.cli.about": "Surveiller les blocages persistants et les requêtes de longue durée.",
@@ -11337,10 +11340,8 @@
   "core.waits.category.compilation.label": "Compilation des plans",
   "core.waits.category.compilation.meaning": "Construction des plans de requête. Une part importante signifie que l’application envoie des instructions ponctuelles au lieu d’instructions paramétrées.",
   "core.waits.category.cpu.gist": "Exécution sur un processeur, ou attente d’un processeur.",
-  "core.waits.category.cpu.gist_threadpool": "Exécution sur un processeur, attente d’un processeur, ou (THREADPOOL) attente d’un thread worker avant même que la requête puisse démarrer.",
   "core.waits.category.cpu.label": "CPU",
   "core.waits.category.cpu.meaning": "Exécution sur un processeur, ou attente d’un processeur. Quand le CPU domine, les requêtes font généralement plus de travail que nécessaire : parcours, conversions, fonctions évaluées sur chaque ligne.",
-  "core.waits.category.cpu.meaning_threadpool": "Exécution sur un processeur, attente d’un processeur, ou (THREADPOOL) attente d’un thread worker avant même que la requête puisse démarrer. Quand le CPU domine, les requêtes font généralement plus de travail que nécessaire : parcours, conversions, fonctions évaluées sur chaque ligne. Les attentes de workers pointent plutôt vers des chaînes de blocage ou un parallélisme important qui monopolisent les workers.",
   "core.waits.category.io.gist": "Attente de données venant du disque parce qu’elles n’étaient pas en mémoire.",
   "core.waits.category.io.label": "Lectures disque",
   "core.waits.category.io.meaning": "Attente de données venant du disque parce qu’elles n’étaient pas en mémoire. En général des parcours de grandes tables, ou une mémoire trop petite pour les données que la charge de travail sollicite sans cesse.",
@@ -16442,5 +16443,10 @@
   "view.waits.source.slow_log_last": "Temps de verrouillage par instruction du journal des requêtes lentes, {window}",
   "view.waits.source.sqlite": "SQLite ne conserve aucune attente",
   "view.waits.source.unavailable": "indisponible",
-  "view.waits.source.yugabyte": "Métriques natives YSQL dans leur périmètre nœud/cluster enregistré"
+  "view.waits.source.yugabyte": "Métriques natives YSQL dans leur périmètre nœud/cluster enregistré",
+  "core.waits.category.workers.label": "Workers d’exécution",
+  "core.waits.category.workers.gist": "Requêtes en attente d’un worker.",
+  "core.waits.category.workers.meaning": "Requêtes en attente d’un worker. Les chaînes de blocage, les requêtes simultanées ou le travail parallèle peuvent occuper les workers ; ces attentes ne mesurent pas la consommation du CPU.",
+  "provider.mssql.query_waits.unknown_categories": "Les catégories d’attente natives {categories} n’ont pas de sens analytique établi ; cette observation ne permet donc pas d’affirmer que les autres classes n’ont eu aucune attente.",
+  "provider.mssql.query_waits.capture_history_unverified": "Query Store ne permet pas d’établir si la capture des attentes couvrait toute la période sélectionnée ; les attentes observées restent disponibles et les catégories absentes ne sont pas mesurées."
 }

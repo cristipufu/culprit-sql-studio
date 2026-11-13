@@ -80,7 +80,8 @@ fn worker_limits(snapshot: &Snapshot) -> Vec<WorkerPressure> {
             let per_hour = total.zip(hours).map(|(t, h)| t / h);
             let database_history = snapshot.server.on(culprit_core::Platform::AzureSqlDatabase)
                 || app_queries(snapshot).any(|q| {
-                    q.waits.iter().any(|w| w.category.eq_ignore_ascii_case("worker thread") && w.wait_ms >= MINUTE_MS)
+                    q.observed_wait_ms(culprit_core::telemetry::WaitClass::Workers)
+                        .is_some_and(|wait_ms| wait_ms >= MINUTE_MS)
                 });
             let history = database_history && per_hour.is_some_and(|p| p >= 10_000.0);
             if waiting <= 0.0 && !history {
