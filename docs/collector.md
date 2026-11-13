@@ -34,10 +34,13 @@ separate consumer; this service does not add an ADX-backed desktop connection.
 Embedders can read a specifically selected committed capture through
 `culprit_collector::analytical::evidence::EvidenceReader`; both store crates expose a read-only constructor under
 `evidence::new`. The reader accepts an authenticated `CommittedRange`, selected evidence families and a read budget.
-It supports resource samples and inline typed operational facts, including counter sets, scalar counters and space
-observations, through `EvidenceFamily::ResourceSamples` and `EvidenceFamily::OperationalSamples`. Scope, reset
-evidence, source coverage and observation bounds remain attached to the typed records. It does not select a latest
-head, merge epochs or create a report.
+`EvidenceFamily::ALL` declares the supported families: resource samples, inline typed operational facts, query and
+plan definitions, interval query runtime and query waits. Runtime and waits retain native identities, dimensions,
+outcomes, exact execution counters, units and query/plan references. Definitions retain native context and plan-to-query
+parents; an available SQL or plan payload is reconstructed only when the stored preview is complete and verified.
+Truncated payloads require recovery. A native unavailable payload keeps its original reason.
+Scope, reset evidence, source coverage and observation bounds remain attached to the typed records. The reader does
+not select a latest head, resolve references across captures, merge epochs or create a report.
 `is_read_complete()` confirms retrieval of the selected capture's evidence. Native source coverage remains
 independent: a fully retrieved capture can still contain partial or unavailable native sources.
 
@@ -47,6 +50,21 @@ payload. Keep validation indexes for as long as these warehouse investigations a
 rows or proof indexes remain explicit gaps; conflicting content is rejected. Large recovery-only details and native
 timestamp precision absent from a warehouse projection require native recovery and cannot be reported as complete.
 The initial read API reports those requirements without downloading the raw payload or connecting to the database.
+
+With the engine's `collector` feature, `culprit_engine::collected_evidence::analyze` feeds one verified query-history
+capture through the existing pure checks. It returns `CollectedQueryAnalysis`, with authenticated native inputs,
+findings, unavailable assessments and explicit limitations. It does not open a database or manufacture a current
+server snapshot. Runtime groups join only exact native query/plan references within that capture; missing runtime
+rows withhold the workload denominator. Available statements can still be analyzed when unrelated definitions are
+missing, using the complete captured runtime totals. Unsupported metrics remain in the native context.
+Known monitoring and engine-internal statements are excluded from application totals as well as application
+recommendations. Unresolved definitions keep their known runtime in the conservative denominator. Native wait
+category IDs have no declared portable meaning yet, so waits remain exact context with a projection limitation;
+they are not relabeled as another engine's wait categories or used for semantic wait diagnoses.
+
+This consumer does not combine captures, estimate database health from absent measurements or expose a warehouse
+connection in the desktop app. Missing current metadata, schema and settings prevent executable fix SQL; the
+finding's explanation and verification remain available. Analysis provenance identifies archived telemetry explicitly.
 
 `EvidenceReadBudget` bounds rows, queries, proof bytes and caller wait. Its per-response and total byte limits cover
 complete native query response bodies, including metadata and completion frames; HTTP headers, TLS and
@@ -374,6 +392,28 @@ before production scheduling. Scans can request these observations with
 no SQL and record that shared collection was not requested. These facts do not create pressure warnings solely
 from size or fullness.
 
+### Current execution-memory requests
+
+`culprit scan CONNECTION --collect-request-memory` opts into the SQL Server family's current memory-grant
+observations. The default scan does not run this reader. The collector profile requires an Azure SQL primary replica:
+`culprit collect once CONNECTION --collection current-request-memory`. It writes typed operational facts through
+the same native reader. Other providers report this profile as unsupported rather than returning empty evidence.
+
+Facts distinguish waiting requests from granted reservations, retain exact KiB and worker counters, and associate
+a request only when native generations, request times and handles agree. Missing associations remain unassigned
+facts with partial coverage. Current SQL is request context; it does not prove which statement acquired a grant or
+which holder caused another request's wait. Resource Governor pool/semaphore IDs are native resource identities,
+not Azure elastic-pool identities. Optional columns and native NULLs remain explicit.
+
+The bounded probe has no sort, aggregate or plan retrieval. Its query chain uses loop joins and one execution
+thread to avoid diagnostic hash grants, following Microsoft's
+[memory-grant troubleshooting guidance](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/performance/troubleshoot-memory-grant-issues).
+SQL detail uses the existing guarded activity reader;
+identity checks and confirmed shutdown precede accepting the result. Scan limits are 200 rows, five queries,
+three seconds per statement and ten seconds overall. These limits do not prove low server cost: qualify the
+source under representative load before scheduling it. Native application, login and host labels follow the
+existing activity collection policy; SQL literals are redacted. Snapshot sharing removes those client labels.
+
 ## PostgreSQL source coverage
 
 PostgreSQL uses the same capture, outbox, fleet and delivery path as SQL Server. Configure PostgreSQL connections
@@ -412,6 +452,15 @@ other version-dependent fields are detected explicitly. Native tests run against
 setup can upgrade PostgreSQL's base-image minor version, and the runner logs the actual restarted server version.
 Managed-service permissions, TimescaleDB-specific storage and production
 source cost require their own qualification.
+
+Cleanup observations retain session, prepared-transaction and replication-slot identities, independent data and
+catalog horizons, and source visibility. Qualification covers data and non-shared catalogs in the selected database;
+shared catalogs remain unqualified for database-only captures, including on a primary. A standalone qualification
+record survives empty holder sets. Session generation is distinct from transaction start; current/previous
+query context does not identify the code that opened a transaction. Tied or partially observed horizons remain
+multiple possible retainers, without a PID-only termination action or a guessed prepared-transaction name.
+Standby session statistics do not expose every recovery horizon, so neither data nor catalog boundaries are qualified
+there. The scan and collector consume the same native observations.
 
 PostgreSQL supplies a deadlock counter, not retained SQL-accessible deadlock graphs. The counter is included in
 operational observations. Graphs still require server logs, which the app's existing importer can parse; a scheduled

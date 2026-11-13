@@ -309,6 +309,18 @@ include normalization, preparation and physical representation, so a contract ca
 Canonical revision and complete/current-set policies are shared; each adapter renders its query dialect and executes
 it in an owned native fixture. Push-only metrics/APM endpoints cannot claim this warehouse readback contract.
 
+`culprit-collector::analytical::evidence` owns read-only capture reconstruction over injected warehouse queries and
+independent recovery proofs. It verifies publication, exact membership, normalized projections and native receipts
+before exposing typed records. Both stores share that reader; source coverage remains distinct from successful
+retrieval. Incomplete SQL/plan previews and precision absent from a store remain explicit recovery requirements.
+
+The optional engine `collected_evidence` consumer adapts one authenticated query-history capture to the existing
+pure pipeline. It joins exact native references within that capture, weights interval statistics by execution
+counts, and withholds workload shares when runtime membership or totals are incomplete. Its public result retains
+native inputs, limitations and archived-telemetry provenance rather than exposing the internal snapshot adapter as
+a current server observation. It needs no source provider or credential. Missing schema/settings/server facts lock
+their assessments and withhold executable fix SQL while preserving supported findings and verification.
+
 Capture and outbox code have no ADX or Blob dependencies. Destinations consume immutable validated evidence and keep
 their registration, authentication and delivery state separate from database providers. Adding a destination must not
 add branches to native readers or change logical measurement IDs. RecoveryStore and TelemetrySink contracts separate durable commit from analytical acknowledgement. Dispatch accepts a
@@ -382,6 +394,14 @@ unavailable reads, unknown direction and successful emptiness, including when in
 attribution; a session's default database cannot establish it. Unattributed members of shared queues remain coverage
 metadata and cannot become this database's queue or a healthy zero. Worker-task joins retain native request IDs to
 avoid multiplying MARS rows. App and export share units, selection thresholds, strict decoding and bounded ownership.
+
+`culprit-mssql::activity::memory` extends that same activity reader with explicit current execution grants. Scans
+and the current-memory telemetry profile reuse its context, row decoding, generations and SQL enrichment guards.
+`ExecutionGrantObservation` separates waiting from granted reservations and preserves native optional/null columns.
+A request with unresolved generation or database ownership cannot acquire a database scope. Current SQL remains
+context rather than proof of the granting statement; native Resource Governor identifiers never imply an Azure
+elastic-pool owner. Default scans skip this reader. Provisional results require final identity checks and confirmed
+shutdown, and snapshot sharing strips client labels without changing retained native counters.
 
 `culprit-mssql::processors` reads host logical processors, visible online user schedulers and their NUMA nodes through one bounded native operation. The app uses online SQL schedulers for its parallelism context. Export retains all three as separate exact server-scoped gauges; these measurements do not establish an Azure database's CPU quota or a cross-database resource identity. Unreadable topology stays unavailable, and zero visible schedulers does not become a usable zero-processor configuration.
 
@@ -505,6 +525,15 @@ driver and SSH route through completion or cancellation. CancelRequest is only a
 reach ReadyForQuery to prove completion. An interrupted client is discarded; missing proof fences the connector's
 future operations. Shared `RowOutput`, `ReadBudget`, read accounting and source lifecycle do not duplicate this
 protocol-specific responsibility.
+
+The cleanup reader retains native session, transaction, prepared-transaction and slot lifetimes separately.
+`RetentionObservation` names each native horizon and the cleanup classes it protects; current-database data,
+current-database catalogs and shared catalogs have distinct qualification. `RetentionCoverage` accompanies even
+an empty collector capture, so warehouse reads do not have to infer completeness from the presence of holders.
+Database-filtered observations cannot qualify a global shared-catalog boundary, and recovery has additional
+unobserved horizons. Pure checks preserve ties and partial observations, without treating previous SQL as the
+transaction's origin or generating a PID-only termination command. `EngineSpec::cleanup_evidence` declares the
+native retention semantics; shared SQL grammar does not grant another engine PostgreSQL cleanup behavior.
 
 PostgreSQL's native parser owns generic-plan and normalized-statement annotations in `plan_json.rs`, so every plan it
 parses carries them, whichever path captured it. Shared identifier quoting stays with the SQL protocol helpers

@@ -81,6 +81,12 @@ readers await production load qualification. Leaving it off sends no SQL from th
 shared collection was not requested. The captured facts retain broader scope; size or fullness alone does not
 create a database pressure warning. See [shared resource collection](collector.md#shared-allocation-and-scheduler-facts).
 
+SQL Server family scans can also request current execution-memory observations with
+`culprit scan CONNECTION --collect-request-memory`. This separate opt-in retains waiting and granted requests,
+exact native counters and generation-checked request context. A current statement is context, not proof that it
+acquired the grant. The default sends no SQL from this reader. See
+[current memory collection](collector.md#current-execution-memory-requests) for limits and attribution boundaries.
+
 Or open the desktop app: saved connections are listed in the sidebar, grouped by environment. A connection opens on its **dashboard**: one sentence that says what needs a look first, then fourteen tiles (database time and its trend, findings, top queries, where time goes, sessions right now, health, deadlocks, indexes, plans, storage, connections, replication, failing queries, query statistics), each a plain takeaway, a small picture and a click into the view that explains it. Every engine gets every tile; one it can't fill says why. The ranked findings are one key away (`2`). Pick the engine and paste its connection string, or pick **SQLite** and choose the file (then **Add query log** if its framework's log isn't found beside it), use **Find Azure databases** / **Find AWS databases**, or **Import from other tools** (names, hosts and user names only; passwords are asked for once), and the first scan appears in seconds. Reopening a connection shows its last report instantly while a fresh scan runs. Rename a connection's alias with the pencil on its card or `culprit conn rename`.
 
 Entra ID connections use your `az login`. Without the Azure CLI (or when it's signed out), Culprit signs in with a device code instead: the app shows the code, the CLI prints it when you're at a terminal. Access tokens stay in memory, the refresh token in the OS keychain; `culprit auth logout` forgets it. Scripts and agents never block on a sign-in: they get an error with a hint.
@@ -463,9 +469,13 @@ Run the owned, loopback-only Blob integration fixture with `python3 dev/smoke-de
 
 Applications embedding the Rust libraries can read explicitly selected ADX or ClickHouse captures through the
 [verified evidence API](collector.md#components-and-ownership), using warehouse query credentials and independent
-recovery-proof access. It reconstructs resource samples and inline operational facts after exact verification;
-missing or recovery-only details remain explicit gaps. It does not open the source database, choose the latest
-capture, combine epochs or build a Culprit report yet.
+recovery-proof access. It reconstructs resource samples, inline operational facts, interval query runtime/waits and
+query/plan definitions after exact verification. Native identities, units, outcomes and references stay intact;
+truncated SQL/plans, missing rows and recovery-only details remain explicit gaps. It does not open the source database,
+choose the latest capture or combine epochs. With the engine's `collector` feature, the separate offline consumer
+can analyze one verified query-history capture through the existing checks. Its result retains native evidence and
+limitations; it provides neither a current database-health report nor a desktop warehouse connection. Missing
+runtime rows prevent invented workload shares, and missing current fix prerequisites withhold executable SQL.
 Byte limits cover complete native query response bodies, including metadata/completion frames, and decoded rows
 also respect the per-response ceiling. Recovery proofs have their own ceiling. HTTP/TLS/authentication overhead is outside those byte limits. Caller timeout does
 not acknowledge remote warehouse query shutdown.
