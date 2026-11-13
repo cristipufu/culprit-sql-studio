@@ -172,7 +172,7 @@ fn statement(runs: f64, first: Option<&str>, last: Option<&str>) -> QueryStat {
         "id": "244", "query_hash": null, "text": "SELECT AVG(value) FROM ctx.readings WHERE sensor = @s",
         "parameters": null, "object_name": null, "executions": runs, "total_time_ms": runs * 5.0,
         "mean_time_ms": 5.0, "max_time_ms": null, "stddev_time_ms": null, "cpu_time_ms": null, "rows": null,
-        "logical_reads": null, "physical_reads": null, "temp_writes": null, "first_seen": first,
+        "logical_reads": null, "physical_reads": null, "temporary_work": null, "first_seen": first,
         "last_seen": last, "plans": [], "plan": null, "waits": []
     }))
     .unwrap();

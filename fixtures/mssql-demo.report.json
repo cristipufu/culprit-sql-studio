@@ -157,6 +157,30 @@
       "title": "Queries that are fast for most calls and slow for some"
     },
     {
+      "assessed_queries": [
+        "7",
+        "9",
+        "10",
+        "8",
+        "6",
+        "5",
+        "35",
+        "146",
+        "138",
+        "143",
+        "161",
+        "246",
+        "249",
+        "255",
+        "263",
+        "264"
+      ],
+      "check": "temp-spill",
+      "reason": null,
+      "status": "findings",
+      "title": "Temporary resource work"
+    },
+    {
       "check": "stale-stats",
       "reason": null,
       "status": "assessed",
@@ -1893,6 +1917,64 @@
     },
     {
       "actionability": "information",
+      "category": "queries",
+      "caveats": [
+        "A weighted sum of used-page observations is not current allocation, a peak, temporary-file writes or a spill diagnosis.",
+        "These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run."
+      ],
+      "check": "temp-spill",
+      "confidence": "high",
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits."
+      },
+      "id": "temp-spill:263",
+      "impact": {
+        "db_time_share": null,
+        "label": "",
+        "score": 8.0,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T15:55:55Z",
+      "metrics": [
+        {
+          "key": "view.temporary_work.usage_pages",
+          "label": "Weighted sum of native used-page observations",
+          "text": null,
+          "unit": "pages",
+          "value": 56.0
+        },
+        {
+          "key": "view.temporary_work.page_bytes",
+          "label": "Native bytes per page",
+          "text": null,
+          "unit": "bytes",
+          "value": 8192.0
+        }
+      ],
+      "queries": [
+        {
+          "id": "263",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "low",
+      "subject": {
+        "kind": "query",
+        "name": "263"
+      },
+      "summary": "The source weighted native space-use averages by recorded executions. Simultaneous footprint and write volume remain unknown.",
+      "title": "A read from order_items: Recorded temporary-space use",
+      "verification_basis": "rescan",
+      "verify": [
+        "Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change."
+      ]
+    },
+    {
+      "actionability": "information",
       "category": "indexes",
       "caveats": [
         "These counters cover each index metadata entry’s lifetime, which can end without a server restart."
@@ -2303,7 +2385,6 @@
         "a plan's index request is the finding for its table and key",
         "a rewrite, not an index, fixes a scan behind a function or wildcard",
         "a spill explains the big sort",
-        "a spill carries the result it sorts",
         "an index to add covers the foreign key",
         "an index the engine builds for itself is the foreign key's",
         "an index to add replaces a histogram",
@@ -2545,6 +2626,18 @@
       },
       "queries": [
         "8"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "temp-spill:263",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T15:55:55Z"
+      },
+      "queries": [
+        "263"
       ],
       "rule": "stopped-running",
       "tables": []
@@ -5962,7 +6055,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6091,7 +6183,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.7882754897894857,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT [id], [name], [segment] FROM [shop].[customers] WHERE [email] = @P1",
           "total_time_ms": 22165.192,
           "trend": {
@@ -6403,7 +6500,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6510,7 +6606,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 5.616261453910221,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_items] WHERE [order_id] = @P1",
           "total_time_ms": 6742.594,
           "trend": {
@@ -6852,7 +6953,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6971,7 +7071,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 17.49761392102848,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT [id], [subject], [opened_at], [status] FROM [shop].[support_tickets] WHERE [priority] = @P1",
           "total_time_ms": 5803.878,
           "trend": {
@@ -7311,7 +7416,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -7434,7 +7538,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 4.8133084203694985,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEADD(day, @P1, '2026-01-01') AND [shipped_at] < DATEADD(day, @P2, '2026-01-01')",
           "total_time_ms": 4979.772,
           "trend": {
@@ -7659,7 +7768,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -7738,7 +7846,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.006748578541708695,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT [id], [name], [price] FROM [shop].[products] WHERE [id] = @P1",
           "total_time_ms": 822.237,
           "trend": {
@@ -8112,7 +8225,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -8251,7 +8363,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.06775048598026806,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT TOP (20) [id], [status], [total], [created_at] FROM [shop].[orders] WHERE [customer_id] = @P1 ORDER BY [created_at] DESC",
           "total_time_ms": 232.577,
           "trend": {
@@ -8456,7 +8573,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -8535,7 +8651,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.05069078373388554,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "select table_id, item_guid, oplsn_fseqno, oplsn_bOffset, oplsn_slotid\n from [culprit_demo].[sys].[filetable_updates_2105058535] with (readpast) order by table_id",
           "total_time_ms": 0.337,
           "trend": {
@@ -8647,7 +8768,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 5.2209070520776315,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT @c = COUNT(*) FROM telemetry.events WHERE tenant = @t AND payload <> 'y'",
           "total_time_ms": 2591.053,
           "trend": null,
@@ -9029,7 +9155,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -9188,7 +9313,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 17682.814172870185,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1",
           "total_time_ms": 114972.03,
           "trend": null,
@@ -9350,7 +9480,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -9429,7 +9558,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 17974.577463416757,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT [status] FROM [shop].[orders] WHERE [id]=@1",
           "total_time_ms": 71698.777,
           "trend": null,
@@ -9577,7 +9711,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -9656,7 +9789,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 1040.7493898728394,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "UPDATE [shop].[orders] set [total] = [total]+@1  WHERE [id]=@2",
           "total_time_ms": 2405.253,
           "trend": null,
@@ -9731,7 +9869,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.3909658471443936,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT TOP (1) total / @d AS share FROM shop.orders WHERE id = 42",
           "total_time_ms": 9.112,
           "trend": null,
@@ -10778,7 +10921,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -11165,7 +11307,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 30.44940285063075,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id = o1.customer_id JOIN shop.order_items i1 ON i1.order_id = o1.id JOIN shop.products p1 ON p1.id = i1.product_id JOIN shop.orders o2 ON o2.customer_id = c1.id JOIN shop.order_items i2 ON i2.order_id = o2.id JOIN shop.products p2 ON p2.id = i2.product_id JOIN shop.customers c2 ON c2.id = o2.customer_id WHERE o1.id = @id AND p1.price > 0 AND p2.price > 0 AND c2.segment IS NOT NULL OPTION (RECOMPILE)",
           "total_time_ms": 13589.288,
           "trend": null,
@@ -11440,7 +11587,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -11559,7 +11705,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "UPDATE archive.wide SET pad = REPLICATE('y', 4000)",
           "total_time_ms": 528.407,
           "trend": null,
@@ -12166,7 +12317,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -12401,7 +12551,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 3.4840133242784823,
-          "temp_writes": 56.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 56.0
+          },
           "text": "SELECT COUNT_BIG(*) FROM shop.order_items a JOIN shop.order_items b ON a.id % 1000 = b.id % 999 OPTION (LOOP JOIN, MAXDOP 1)",
           "total_time_ms": 90091.675,
           "trend": null,
@@ -12482,7 +12637,12 @@
             "p99_ms": null
           },
           "stddev_time_ms": 18.253915434229445,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_page": 8192,
+            "kind": "space-usage",
+            "source": "sys.query_store_runtime_stats.avg_tempdb_space_used",
+            "usage_pages_total": 0.0
+          },
           "text": "SELECT id, order_id, product_id, quantity FROM shop.order_items WHERE id <= @n",
           "total_time_ms": 329.068,
           "trend": null,

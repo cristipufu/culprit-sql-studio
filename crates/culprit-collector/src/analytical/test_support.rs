@@ -18,6 +18,8 @@ mod session_memory;
 pub use session_memory::session_memory_evidence_cases;
 mod page_waits;
 pub use page_waits::page_wait_evidence_cases;
+mod statement_work;
+pub use statement_work::statement_work_evidence_cases;
 mod projection;
 pub use projection::JsonProjection;
 mod native_failures;
@@ -47,6 +49,16 @@ pub fn assert_page_wait_capture(
     assert_operational_capture(capture, source, records);
     assert!(source.target.database().is_some());
     assert_eq!(source.observation.snapshot().unwrap().dataset, SnapshotDataset::PageWaitTargets);
+}
+
+pub fn assert_statement_work_capture(
+    capture: &crate::analytical::evidence::EvidenceCapture,
+    source: &CollectionDescription,
+    records: &[TelemetryRecord],
+) {
+    assert_operational_capture(capture, source, records);
+    assert!(source.target.database().is_some());
+    assert_eq!(source.observation.snapshot().unwrap().dataset, SnapshotDataset::StatementCounters);
 }
 
 fn assert_operational_capture(

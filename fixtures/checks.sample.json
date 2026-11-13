@@ -277,14 +277,17 @@
   },
   {
     "category": "queries",
-    "description": "Statements whose sorts, hashes or temporary tables outgrow memory and spill to disk.",
+    "description": "Recorded temporary I/O, internal table creation and space use, without inferring elapsed cost or a memory shortage.",
     "engines": [
+      "mssql",
       "postgres",
-      "mysql"
+      "yugabyte",
+      "mysql",
+      "sqlite"
     ],
     "id": "temp-spill",
     "requires": [],
-    "title": "Queries writing temp files"
+    "title": "Temporary resource work"
   },
   {
     "category": "maintenance",

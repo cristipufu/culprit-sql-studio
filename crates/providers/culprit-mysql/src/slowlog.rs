@@ -269,7 +269,7 @@ pub fn workload(
                 rows: Some(g.rows_sent),
                 logical_reads: Some(g.rows_examined),
                 physical_reads: None,
-                temp_writes: None,
+                temporary_work: None,
                 first_seen: Some(g.first.1),
                 last_seen: Some(g.last.1),
                 plans: Vec::new(),

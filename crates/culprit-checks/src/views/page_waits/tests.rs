@@ -22,9 +22,20 @@ pub(crate) fn observation(session: &str, kind: WaitResourceKind) -> PageWaitObse
         observed_from: "2026-11-13T10:00:00.1Z".into(),
         observed_until: "2026-11-13T10:00:00.9Z".into(),
         request,
+        before_check: Some(PageWaitRecheck {
+            observed_at: "2026-11-13T10:00:00.2Z".into(),
+            request: PageWaitRequestState::SameStatement,
+            wait: PageWaitRelation::OriginalObserved,
+        }),
+        after_check: Some(PageWaitRecheck {
+            observed_at: "2026-11-13T10:00:00.8Z".into(),
+            request: PageWaitRequestState::SameStatement,
+            wait: PageWaitRelation::OriginalObserved,
+        }),
         statement_identity: Some(NativeIdentity::new("native-handle").qualified("statement_start_offset", "0")),
         plan_identity: None,
         resource,
+        observed_address: Some(PageWaitAddress { database_id: 7, file_id: 1, page_id: 4144 }),
         resolution: PageWaitResolution::ObservedAtBothBounds,
         target: Some(Box::new(MappedPageTarget {
             identity_basis: PageTargetIdentityBasis::LocalDatabaseFileEpoch,
@@ -127,8 +138,6 @@ fn unresolved_scope_permissions_and_reuse_preserve_original_waiter_without_a_cur
         PageWaitResolution::Unsupported,
         PageWaitResolution::PermissionDenied,
         PageWaitResolution::Unavailable,
-        PageWaitResolution::MissingRequest,
-        PageWaitResolution::ChangedRequest,
         PageWaitResolution::ChangedMetadata,
         PageWaitResolution::UnverifiedSource,
         PageWaitResolution::UnrecognizedAddress,
@@ -144,6 +153,33 @@ fn unresolved_scope_permissions_and_reuse_preserve_original_waiter_without_a_cur
         assert!(report.entries[0].explanation.contains(&culprit_core::i18n::t(unresolved_message(resolution), &[])));
         assert!(!report.entries[0].explanation.contains("app.orders"));
         assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.unresolved"));
+    }
+}
+
+#[test]
+fn later_wait_completion_or_a_changed_request_never_rewrites_original_participant_or_current_header_evidence() {
+    for (request, wait, key) in [
+        (
+            PageWaitRequestState::SameStatement,
+            PageWaitRelation::NoLongerObserved,
+            "view.page_waits.recheck.no_longer_observed",
+        ),
+        (PageWaitRequestState::SameStatement, PageWaitRelation::Different, "view.page_waits.recheck.different"),
+        (PageWaitRequestState::Missing, PageWaitRelation::Unqualified, "view.page_waits.recheck.missing"),
+        (PageWaitRequestState::Changed, PageWaitRelation::Unqualified, "view.page_waits.recheck.changed"),
+    ] {
+        let mut row = observation("61", WaitResourceKind::MemoryPage);
+        let original = row.request.clone();
+        row.after_check.as_mut().unwrap().request = request;
+        row.after_check.as_mut().unwrap().wait = wait;
+        if request != PageWaitRequestState::SameStatement {
+            row.statement_identity = None;
+        }
+        let report = explain(&[&row], None).unwrap();
+        assert!(report.entries[0].explanation.contains(&culprit_core::i18n::t(key, &[])));
+        assert!(report.entries[0].explanation.contains("app.orders"));
+        assert_eq!(row.request, original);
+        assert_eq!(report.entries[0].resource, row.resource);
     }
 }
 
@@ -192,4 +228,34 @@ fn explanations_localize_without_reinterpreting_the_native_wait_or_catalog_name(
             assert_eq!(report.entries[0].resource, row.resource);
         });
     }
+}
+
+#[test]
+fn another_page_header_or_missing_observed_address_cannot_be_explained_as_this_wait_target() {
+    for field in ["database", "file", "page", "missing-address"] {
+        let mut row = observation("61", WaitResourceKind::MemoryPage);
+        match field {
+            "database" => row.target.as_mut().unwrap().header.database_id = 99,
+            "file" => row.target.as_mut().unwrap().header.file_id = 99,
+            "page" => row.target.as_mut().unwrap().header.page_id = 99,
+            "missing-address" => row.observed_address = None,
+            _ => unreachable!(),
+        }
+        assert!(explain(&[&row], Some(&source(SourceState::Collected))).is_err(), "{field}");
+    }
+}
+
+#[test]
+fn undecoded_native_wait_address_preserves_the_original_participant_without_an_object_mapping() {
+    let mut row = observation("61", WaitResourceKind::MemoryPage);
+    row.resource.native.id = "opaque-unrecognized-page".into();
+    row.request.wait.as_mut().unwrap().identified_resources = vec![row.resource.clone()];
+    row.observed_address = None;
+    row.target = None;
+    row.resolution = PageWaitResolution::UnrecognizedAddress;
+    let report = explain(&[&row], Some(&source(SourceState::Partial))).unwrap();
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].request_key, row.request.key);
+    assert_eq!(report.entries[0].resource, row.resource);
+    assert!(!report.entries[0].explanation.contains("ix_orders"));
 }

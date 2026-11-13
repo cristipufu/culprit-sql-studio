@@ -1,45 +1,35 @@
 reading: PostgreSQL 18.6 · database demo · scanned 2026-10-11T11:54:21Z
 headline: 7 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (69%).
 top share: 69%
-findings: 9
+findings: 10
 
-=== finding temp-spill:9065391607317686058
+=== finding big-result:9065391607317686058
 Needs attention · medium severity · high confidence · queries
-title: A read from orders writes about 19.9 MB of temp files per run
-summary: The associated statements used 1 min of database time over the 5 hours since statistics were reset (45%). A sort or hash in this statement needs more memory than work_mem (4MB in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory. Each run also sends 247K rows (≈ 17.4 MB) to the application, and few screens or jobs need that many at once: returning fewer can keep the sort in memory too.
-impact: 45% of DB time · 45.2% of database time
+title: A read from orders returns 247K rows (≈ 17.4 MB) per run
+summary: The associated statements used 1 min of database time over the 5 hours since statistics were reset (45%). Each run sends 247K rows to the application, about 17.4 MB at the plan's estimated 74 B per row; its 214 runs since its statistics began 5 hours ago moved 52.8M rows. Few screens or jobs need that many at once: the database reads them, the network carries them and the application holds them in memory.
+impact: 247K rows per run · 45.2% of database time
 metrics:
-  - Temp written per run: 19.9 MB
-  - Average duration: 332 ms
   - Rows per run: 247K
+  - Runs: 214
   - Bytes per run (estimated): 17.4 MB
-fix: Give this statement more sort memory (64MB instead of 4MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows. Where the application doesn't use every row it receives, return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
-  sql:
-      -- For the role the application connects as (takes effect on its next connections):
-      ALTER ROLE <app_role> SET work_mem = '64MB';
-
-      -- Or only for this statement, inside its transaction:
-      SET LOCAL work_mem = '64MB';
-  cost: work_mem is per sort or hash, per connection: size it with your connection count in mind.
+fix: Return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
 verify:
-  1. Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).
-  2. If it now returns fewer rows, the rows it returns per run between those two scans should drop to what a page or a job actually uses.
+  1. Between two scans, the rows it returns per run should drop to what a page or a job actually uses: pg_stat_statements keeps running totals, so compare its rows and runs in a scan taken once the change is live and one a day or more later (52.8M rows in 214 runs in this scan).
 queries:
-  - 9065391607317686058: 45% of database time · plan step 1
+  - 9065391607317686058: 45% of database time
 brief:
-    # A read from orders writes about 19.9 MB of temp files per run
+    # A read from orders returns 247K rows (≈ 17.4 MB) per run
 
-    Database: **pg-demo** (PostgreSQL 18.6, database `demo`, local environment). Finding `temp-spill:9065391607317686058`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T11:54:21Z.
+    Database: **pg-demo** (PostgreSQL 18.6, database `demo`, local environment). Finding `big-result:9065391607317686058`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T11:54:21Z.
 
     ## What's happening
 
-    The associated statements used 1 min of database time over the 5 hours since statistics were reset (45%). A sort or hash in this statement needs more memory than work_mem (4MB in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory. Each run also sends 247K rows (≈ 17.4 MB) to the application, and few screens or jobs need that many at once: returning fewer can keep the sort in memory too.
+    The associated statements used 1 min of database time over the 5 hours since statistics were reset (45%). Each run sends 247K rows to the application, about 17.4 MB at the plan's estimated 74 B per row; its 214 runs since its statistics began 5 hours ago moved 52.8M rows. Few screens or jobs need that many at once: the database reads them, the network carries them and the application holds them in memory.
 
     ## Evidence
 
-    - Temp written per run: 19.9 MB
-    - Average duration: 332 ms
     - Rows per run: 247K
+    - Runs: 214
     - Bytes per run (estimated): 17.4 MB
 
     ## Queries involved
@@ -50,30 +40,17 @@ brief:
     SELECT id, note FROM orders WHERE created_at > now() - interval $1 ORDER BY note
     ```
 
-    Plan: the step this finding is about is `Sort`. The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.
-
     ## Suggested fix
 
-    Give this statement more sort memory (64MB instead of 4MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows. Where the application doesn't use every row it receives, return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
-
-    ```sql
-    -- For the role the application connects as (takes effect on its next connections):
-    ALTER ROLE <app_role> SET work_mem = '64MB';
-
-    -- Or only for this statement, inside its transaction:
-    SET LOCAL work_mem = '64MB';
-    ```
-
-    Cost: work_mem is per sort or hash, per connection: size it with your connection count in mind.
+    Return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
 
     ## How to verify
 
-    - Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).
-    - If it now returns fewer rows, the rows it returns per run between those two scans should drop to what a page or a job actually uses.
+    - Between two scans, the rows it returns per run should drop to what a page or a job actually uses: pg_stat_statements keeps running totals, so compare its rows and runs in a scan taken once the change is live and one a day or more later (52.8M rows in 214 runs in this scan).
 
     ## What to do in the codebase
 
-    Find where the application sends the statements above (search for their table and column names) and apply the fix in that calling code. Where it changes SQL, use the way this project ships query changes (an ORM change or a query rewrite). The role setting in the fix's SQL (`ALTER ROLE … SET`) applies to that role's new connections alone: run it once against the database, as that role or one allowed to change it, by hand or shipped as a migration, with the role the application connects as (its connection string names it) in place of `<app_role>`. It isn't a change to the application's code, nor to the server's configuration (infrastructure as code, the platform's parameter group, a configuration file), which is for settings of the whole server. `SET LOCAL` is the exception: it lasts only until the end of the transaction it runs in, so it goes in the application's code, inside the transaction that runs the statement, just before it. After any change is live, run `culprit scan pg-demo` and check `temp-spill:9065391607317686058` the way *How to verify* says.
+    Find where the application sends the statements above (search for their table and column names) and apply the fix in that calling code. Where it changes SQL, use the way this project ships query changes (an ORM change or a query rewrite). After any change is live, run `culprit scan pg-demo` and check `big-result:9065391607317686058` the way *How to verify* says.
 
 === finding filtered-scan:public.orders(customer_id)
 Needs attention · medium severity · high confidence · indexes
@@ -392,6 +369,59 @@ brief:
     ## What to do in the codebase
 
     Ship the fix's index change the way this project ships schema changes (a migration), keeping the options the fix's SQL already has. `CONCURRENTLY` can't run inside a transaction, and most migration tools wrap each migration in one: run this one without it (Rails `disable_ddl_transaction!`, Django `atomic = False`, a non-transactional Flyway migration). After any change is live, run `culprit scan pg-demo` and check `duplicate-index:public.products.products_sku_idx` the way *How to verify* says.
+
+=== finding temp-spill:9065391607317686058
+Information · low severity · high confidence · queries
+title: A read from orders: Recorded temporary I/O
+summary: The source recorded temporary block traffic and any available I/O timings for this statement. Individual executions and operators remain unresolved.
+impact:
+metrics:
+  - Native temporary blocks written: 543988
+fix: Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.
+verify:
+  1. Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change.
+caveats:
+  - Resource totals can include planning and execution work. Parallel I/O times are not an exclusive elapsed-time component, and zero timings do not establish complete historical timing coverage.
+  - These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run.
+queries:
+  - 9065391607317686058: 45% of database time
+brief:
+    # A read from orders: Recorded temporary I/O
+
+    Database: **pg-demo** (PostgreSQL 18.6, database `demo`, local environment). Finding `temp-spill:9065391607317686058`: Information, low impact, high confidence. Scanned 2026-10-11T11:54:21Z.
+
+    ## What's happening
+
+    The source recorded temporary block traffic and any available I/O timings for this statement. Individual executions and operators remain unresolved.
+
+    ## Evidence
+
+    - Native temporary blocks written: 543988
+
+    ## Queries involved
+
+    Query `9065391607317686058` — 45% of DB time, 214 runs over the 5 hours since statistics were reset, 332 ms average:
+
+    ```sql
+    SELECT id, note FROM orders WHERE created_at > now() - interval $1 ORDER BY note
+    ```
+
+    ## Suggested fix
+
+    Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.
+
+    ## How to verify
+
+    - Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change.
+
+    ## Caveats
+
+    - Resource totals can include planning and execution work. Parallel I/O times are not an exclusive elapsed-time component, and zero timings do not establish complete historical timing coverage.
+    - These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run.
+
+    ## What to do in the codebase
+
+    Information: inspect the evidence and follow its verification guidance if the workload warrants it. This observation requests no immediate database change. Use `culprit scan pg-demo` for a later comparison if needed, as *How to verify* describes.
 
 === finding heavy-query:4911431806993420100
 History · low severity · high confidence · queries

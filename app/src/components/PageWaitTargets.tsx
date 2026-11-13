@@ -3,6 +3,9 @@ import type { MappedPageTarget } from "../gen/MappedPageTarget";
 import type { PageWaitExplanation } from "../gen/PageWaitExplanation";
 import type { PageWaitObservation } from "../gen/PageWaitObservation";
 import type { PageWaitReport } from "../gen/PageWaitReport";
+import type { PageWaitRecheck } from "../gen/PageWaitRecheck";
+import type { PageWaitRelation } from "../gen/PageWaitRelation";
+import type { PageWaitRequestState } from "../gen/PageWaitRequestState";
 import type { PageWaitResolution } from "../gen/PageWaitResolution";
 import type { PageWaitSnapshot } from "../gen/PageWaitSnapshot";
 import type { PageWaitTargetKind } from "../gen/PageWaitTargetKind";
@@ -30,7 +33,7 @@ export function PageWaitTargets({ evidence, report }: { evidence: PageWaitSnapsh
 
 function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWaitExplanation }) {
   const target = row.resolution === "observed-at-both-bounds" && row.request.scope === "request-database" ? row.target : null;
-  const linksQualified = row.resolution !== "missing-request" && row.resolution !== "changed-request" && row.resolution !== "unverified-source";
+  const linksQualified = row.before_check?.request === "same-statement" && row.after_check?.request === "same-statement";
   return <article className="operational-card">
     <h4>{entry.title}</h4>
     <p>{entry.explanation}</p>
@@ -38,6 +41,7 @@ function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWai
       <summary>{t("ui.memory_failures.investigation")}</summary>
       <p>{entry.investigation}</p><p>{entry.verify}</p>
       <RequestMetadata row={row} />
+      <RecheckMetadata before={row.before_check} after={row.after_check} />
       <dl>
         <NativeValue label={t("ui.page_waits.resolution")} value={t(RESOLUTION[row.resolution])} />
         {linksQualified && row.statement_identity && <NativeValue label={t("ui.page_waits.statement_identity")} value={<NativeReference identity={row.statement_identity} />} />}
@@ -70,13 +74,43 @@ const RESOLUTION: Record<PageWaitResolution, string> = {
   unsupported: key("view.page_waits.unresolved.unsupported"),
   "permission-denied": key("view.page_waits.unresolved.permission_denied"),
   unavailable: key("view.page_waits.unresolved.unavailable"),
-  "missing-request": key("view.page_waits.unresolved.missing_request"),
-  "changed-request": key("view.page_waits.unresolved.changed_request"),
   "changed-metadata": key("view.page_waits.unresolved.changed_metadata"),
   "unverified-source": key("view.page_waits.unresolved.unverified_source"),
   "unrecognized-address": key("view.page_waits.unresolved.unrecognized_address"),
   limit: key("view.page_waits.unresolved.limit"),
 };
+
+const REQUEST_CHECK: Record<PageWaitRequestState, string> = {
+  "same-statement": key("ui.page_waits.recheck.request.same"),
+  missing: key("ui.page_waits.recheck.request.missing"),
+  changed: key("ui.page_waits.recheck.request.changed"),
+  unverified: key("ui.page_waits.recheck.request.unverified"),
+};
+const WAIT_CHECK: Record<PageWaitRelation, string> = {
+  "original-observed": key("ui.page_waits.recheck.wait.original"),
+  "no-longer-observed": key("ui.page_waits.recheck.wait.no_longer"),
+  different: key("ui.page_waits.recheck.wait.different"),
+  unqualified: key("ui.page_waits.recheck.wait.unqualified"),
+};
+
+function RecheckMetadata({ before, after }: { before: PageWaitRecheck | undefined; after: PageWaitRecheck | undefined }) {
+  return <details>
+    <summary>{t("ui.page_waits.rechecks")}</summary>
+    <Recheck title={t("ui.page_waits.recheck.before")} check={before} />
+    <Recheck title={t("ui.page_waits.recheck.after")} check={after} />
+  </details>;
+}
+
+function Recheck({ title, check }: { title: string; check: PageWaitRecheck | undefined }) {
+  return <div>
+    <h5>{title}</h5>
+    {check ? <dl>
+      <NativeValue label={t("ui.page_waits.recheck.at")} value={<code>{check.observed_at}</code>} />
+      <NativeValue label={t("ui.page_waits.recheck.request")} value={t(REQUEST_CHECK[check.request])} />
+      <NativeValue label={t("ui.page_waits.recheck.wait")} value={t(WAIT_CHECK[check.wait])} />
+    </dl> : <p className="muted">{t("ui.page_waits.recheck.missing")}</p>}
+  </div>;
+}
 
 function RequestMetadata({ row }: { row: PageWaitObservation }) {
   const request = row.request;

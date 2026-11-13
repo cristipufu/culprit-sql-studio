@@ -39,6 +39,10 @@ Query Store must be enabled and readable for interval history, recorded plans an
 
 Planning, compile history, execution time, CPU, waits, rows, reads and log bytes retain their source's own meaning and dates. Compilation entry totals are not silently assigned to a selected runtime window.
 
+Compilation statistics link to SQL only when their native query identity matches the original definition,
+including its initial compilation time, query hash and context. A reused query ID or missing definition withholds
+that link and marks collection partial; independently measured database totals retain their own scope.
+
 Compiler working memory, cached plan bytes and execution memory grants are separate measurements. A waiting request is affected; it is not a compiler-memory owner. Recent high-memory compilations are linked as investigation candidates, with their native timestamps. Historical peaks do not prove simultaneous use, and gateway counts across tiers must not be summed into a unique compiler count. Retained plan variants, including dispatcher and parameter-sensitive variants, are not by themselves evidence of a compilation problem.
 
 Gateway pool IDs identify native Resource Governor pools, not Azure elastic-pool resource IDs. Their shared scope does not establish which database consumed the compiler budget.
@@ -68,8 +72,16 @@ reader through `--collection page-wait-targets`; ordinary scans and Live do not 
 The reader retains up to 64 coordinator request observations and maps at most eight distinct pages through two
 `sys.dm_db_page_info(..., 'LIMITED')` reads. It checks native source, database/file, request generation, statement
 and catalog identity around the reads. Visible rowstore metadata can identify the current table/index and leaf
-or branch page; allocation pages, heap pages and unqualified layouts stay distinct. Changed requests, missing
-permissions, outside-database addresses and unresolved metadata retain the original wait with an explicit reason.
+or branch page; allocation pages, heap pages and unqualified layouts stay distinct. `LIMITED` can leave the header
+version null; known native type/level and visible rowstore catalog facts still qualify the layout. A present
+unrecognized format remains unclassified. Missing permissions, outside-database addresses and unresolved metadata
+retain the original wait with an explicit reason. A mapped header must match the independently decoded original
+database/file/page address; this is enforced by the shared fact contract as well as the native reader.
+
+The original wait remains historical evidence when a later wait ends or changes. Independent before/after rechecks
+record request/statement continuity, later wait state and their own clocks; page metadata can remain checked even
+if its earlier requester is gone. SQL links require the same native statement and trusted source; changing plans
+withholds the plan link. None of these associations proves continuous physical page identity or latch ownership.
 
 `PAGELATCH` is in-memory synchronization; `PAGEIOLATCH` concerns page I/O. Waiting SQL identifies an affected
 participant, not the latch holder, allocation owner or query that caused the I/O. Equal metadata at both bounds
@@ -80,7 +92,13 @@ The scan's native-read budget allows at most 16 query batches, with a one-second
 Azure SQL admission checks native resource pressure before each header phase and stops immediately when pressure
 is high or unavailable. Page headers can still require I/O and latching: these limits do not establish a CPU/I/O
 quota or justify frequent production polling. Local SQL Server 2022 schema and quiet-capture tests pass;
-contended-request, cold-page, managed-service and representative-load qualification remain required.
+owned concurrent INSERT attribution and a controlled write-routing comparison also pass. Cold-page, managed-service
+and representative production-load qualification remain required. A deadline can still encounter the documented
+driver cancellation uncertainty; the reader withholds the capture and fences subsequent work.
+
+Query Store's temporary-space metric retains its documented meaning: average used 8-KiB pages, weighted by recorded
+executions. Its sum is distinct from written pages, a simultaneous footprint or an observed spill. Culprit keeps
+that meaning in the typed statement-resource model rather than treating it as temporary I/O.
 
 ### Current execution-memory participants
 

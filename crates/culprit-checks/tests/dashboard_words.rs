@@ -321,43 +321,43 @@ const FINDINGS: &str = r#"Findings Good Findings: Nothing stands out over the la
   metric High: 0
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
 Findings Good Findings: Nothing stands out.
   metric High: 0
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
 Findings Bad Findings: 1 opportunity; the top ones touch 2 min of database time over the last 5 hours (34%).
   metric High: 1
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
   item An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock): 2 min of database time over the last 5 hours (34%)
 Findings Bad Findings: 1 opportunity; the top ones touch 2 min of database time over the last 5 hours (34%).
   metric High: 1
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
   item An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock): 2 min of database time over the last 5 hours (34%)
 Findings Bad Findings: 2 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).
   metric High: 2
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
   item An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock): 2 min of database time over the last 5 hours (34%)
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
 Findings Bad Findings: 2 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).
   metric High: 2
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
   item An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock): 2 min of database time over the last 5 hours (34%)
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
 Findings Bad Findings: 3 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).
   metric High: 3
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
   item An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock): 2 min of database time over the last 5 hours (34%)
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
@@ -365,7 +365,7 @@ Findings Bad Findings: 3 opportunities; the top ones touch 3 min of database tim
   metric High: 3
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 4
+  metric Information and history: 5
   item An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock): 2 min of database time over the last 5 hours (34%)
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
@@ -374,7 +374,7 @@ Findings Bad Findings: 22 opportunities; the top ones touch 3 min of database ti
   metric High: 2
   metric Medium: 9
   metric Low: 11
-  metric Information and history: 4
+  metric Information and history: 5
   metric Stopped running: 1
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
@@ -384,7 +384,7 @@ Findings Bad Findings: 22 opportunities; the top ones touch 3 min of database ti
   metric High: 2
   metric Medium: 9
   metric Low: 11
-  metric Information and history: 4
+  metric Information and history: 5
   metric Stopped running: 1
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
@@ -394,7 +394,7 @@ Findings Bad Findings: 21 opportunities; the top ones touch 3 min of database ti
   metric High: 1
   metric Medium: 9
   metric Low: 11
-  metric Information and history: 4
+  metric Information and history: 5
   metric Stopped running: 2
   item A read from orders fails 25% of the time: 25% of runs fail
   item An update of orders has at least 2 min of recorded lock waits: Recorded lock waits: 2 min
@@ -404,7 +404,7 @@ Findings Bad Findings: 21 opportunities; the top ones touch 3 min of database ti
   metric High: 1
   metric Medium: 9
   metric Low: 11
-  metric Information and history: 4
+  metric Information and history: 5
   metric Stopped running: 2
   item A read from orders fails 25% of the time: 25% of runs fail
   item An update of orders has at least 2 min of recorded lock waits: Recorded lock waits: 2 min
@@ -414,7 +414,7 @@ Findings Watch Findings: 19 opportunities; the top ones touch 3 min of database 
   metric High: 0
   metric Medium: 8
   metric Low: 11
-  metric Information and history: 4
+  metric Information and history: 5
   metric Stopped running: 4
   item Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs): 27% of DB time
   item This plan runs on one CPU because its statement says OPTION (MAXDOP 1): 27% of DB time
@@ -424,7 +424,7 @@ Findings Watch Findings: 19 opportunities; the top ones touch 3 min of database 
   metric High: 0
   metric Medium: 8
   metric Low: 11
-  metric Information and history: 4
+  metric Information and history: 5
   metric Stopped running: 4
   item Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs): 27% of DB time
   item This plan runs on one CPU because its statement says OPTION (MAXDOP 1): 27% of DB time

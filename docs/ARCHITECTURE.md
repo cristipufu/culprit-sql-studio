@@ -360,6 +360,20 @@ targets require qualified request/database scope, while unresolved observations 
 context. Mapping a current page, table or index never establishes the transient latch holder or the statement
 that allocated the page. SQL Server reuses its activity reader and source-pressure admission; no generic consumer
 decodes SQL Server page addresses or opens a database to explain an archive capture.
+The provider decodes an observed page address; shared validation requires its database, file and page numbers to
+match the mapped header. Native database/file incarnation identities remain separate, opaque qualifications.
+Native header mapping is independent from before/after request and wait rechecks. The originally observed waiter
+survives a later ended wait or changed requester; native statement and plan references require their own matching
+checks and source authority. Checks are bounded by the capture's clocks. Missing header-version data in SQL Server's
+explicit `LIMITED` mode does not manufacture a version or erase independently qualified numeric page/catalog facts.
+
+`StatementTemporaryWork` gives statement I/O, internal-table creation and weighted space-use observations distinct
+types and units. Native readers own their projection once for scans and counter export. Typed runtime metric keys
+carry those meanings through both warehouses; generic analysis never branches on an engine name or native-key
+prefix. Shared `temporary_work` explanations serve the scan and `collected_resources::statement_work` point view.
+Unknown measurements remain distinct from native zeros, and point/reset metadata never becomes an invented interval.
+Temporary totals alone establish no elapsed-time contribution, allocating operator or required memory setting.
+They cannot hide an independently evidenced sort, large result or costly query.
 MySQL scans and background collection share one bounded metadata reader for its retained error-log buffer. They
 omit free-form messages and keep connection IDs distinct from Performance Schema thread IDs. A bounded prefix of
 that buffer can omit newer records; successful retrieval establishes neither a complete incident history nor the

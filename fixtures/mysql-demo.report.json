@@ -128,7 +128,7 @@
       "check": "temp-spill",
       "reason": null,
       "status": "findings",
-      "title": "Queries writing temp files"
+      "title": "Temporary resource work"
     },
     {
       "check": "config",
@@ -753,11 +753,11 @@
       "actionability": "optional-improvement",
       "category": "queries",
       "caveats": [],
-      "check": "temp-spill",
+      "check": "heavy-query",
       "confidence": "high",
       "facts": {
         "advice": {
-          "application": "session-settings",
+          "application": "unspecified",
           "diagnostic_cleanup": false,
           "disappears_after_rescan": false,
           "disposition": "change",
@@ -773,17 +773,18 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
+        "uncosted_plan_explained": true,
         "usual_fast_plan": null
       },
       "fix": {
-        "cost": "The limit is per temporary table per connection; size it with your connection count in mind.",
-        "sql": "SET PERSIST tmp_table_size = 67108864;\nSET PERSIST max_heap_table_size = 67108864;",
-        "summary": "Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 64.0 MB (both variables: with the MEMORY engine the smaller one wins). Set tmp_table_size to 67108864; SET PERSIST keeps it across restarts. Set max_heap_table_size to 67108864; SET PERSIST keeps it across restarts. Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them."
+        "cost": null,
+        "sql": null,
+        "summary": "Find this statement in the application and check whether it aggregates more rows than it needs, or whether the result could be kept up to date instead of recomputed on every run."
       },
-      "id": "temp-spill:04cd7be9c366fadc",
+      "id": "heavy-query:04cd7be9c366fadc",
       "impact": {
         "db_time_share": 0.11989445082158064,
-        "label": "12% of DB time",
+        "label": "34.5 s of database time over the 2 minutes since statistics were reset (12%)",
         "label_key": "support.impact.share",
         "score": 34.62577808823661,
         "time_ms_per_day": null
@@ -792,10 +793,10 @@
       "last_seen": "2026-10-11T12:07:48Z",
       "metrics": [
         {
-          "label": "On-disk temporary tables per run",
+          "label": "Share of DB time",
           "text": null,
-          "unit": "count",
-          "value": 1.0
+          "unit": "ratio",
+          "value": 0.11989445082158064
         },
         {
           "key": "common.metric.average_duration",
@@ -803,13 +804,25 @@
           "text": null,
           "unit": "ms",
           "value": 1724.08040845
+        },
+        {
+          "label": "Rows examined per run",
+          "text": null,
+          "unit": "rows",
+          "value": 500020.0
+        },
+        {
+          "label": "Rows returned per run",
+          "text": null,
+          "unit": "rows",
+          "value": 20.0
         }
       ],
       "queries": [
         {
           "id": "04cd7be9c366fadc",
           "note": null,
-          "plan_node": 2
+          "plan_node": 3
         }
       ],
       "severity": "low",
@@ -817,11 +830,11 @@
         "kind": "query",
         "name": "04cd7be9c366fadc"
       },
-      "summary": "The associated statements used 34.5 s of database time over the 2 minutes since statistics were reset (12%). The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit (1.0 MB, the smaller of tmp_table_size and max_heap_table_size, where these tables use the MEMORY engine; the TempTable engine stops at tmp_table_size and temptable_max_ram instead) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs.",
-      "title": "A read from orders builds an on-disk temporary table about once per run",
+      "summary": "34.5 s of database time over the 2 minutes since statistics were reset (12%). It ran 20 times in 2 minutes at 1.7 s on average: 12% of all database time in the 2 minutes since statistics were reset. Its only step with a cost is a table scan of shop.orders that examines 500K rows a run (MySQL puts no cost on the sort and the temporary table).",
+      "title": "A read from orders takes 34.5 s of database time over the 2 minutes since statistics were reset (12%)",
       "verification_basis": "rescan",
       "verify": [
-        "Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan)."
+        "performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."
       ]
     },
     {
@@ -1211,6 +1224,57 @@
       "verify": [
         "Re-scan once the change has taken effect: this finding is gone."
       ]
+    },
+    {
+      "actionability": "information",
+      "category": "queries",
+      "caveats": [
+        "Disk tables can be created directly or after memory-backed work. Native counts may omit other temporary-storage paths; zero disk tables does not prove that all temporary work stayed in memory.",
+        "These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run."
+      ],
+      "check": "temp-spill",
+      "confidence": "high",
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits."
+      },
+      "id": "temp-spill:04cd7be9c366fadc",
+      "impact": {
+        "db_time_share": null,
+        "label": "",
+        "score": 8.0,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T12:07:48Z",
+      "metrics": [
+        {
+          "key": "view.temporary_work.disk_tables",
+          "label": "Native internal disk tables created",
+          "text": "20",
+          "unit": "text",
+          "value": 0.0
+        }
+      ],
+      "queries": [
+        {
+          "id": "04cd7be9c366fadc",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "low",
+      "subject": {
+        "kind": "query",
+        "name": "04cd7be9c366fadc"
+      },
+      "summary": "The source recorded internal temporary-table and sort-pass counts for this statement. Their byte volume and elapsed cost remain unknown.",
+      "title": "A read from orders: Recorded internal temporary-table work",
+      "verification_basis": "rescan",
+      "verify": [
+        "Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change."
+      ]
     }
   ],
   "locked": [
@@ -1327,7 +1391,6 @@
         "a plan's index request is the finding for its table and key",
         "a rewrite, not an index, fixes a scan behind a function or wildcard",
         "a spill explains the big sort",
-        "a spill carries the result it sorts",
         "an index to add covers the foreign key",
         "an index the engine builds for itself is the foreign key's",
         "an index to add replaces a histogram",
@@ -1360,20 +1423,6 @@
   },
   "refinement": [
     {
-      "finding": "heavy-query:04cd7be9c366fadc",
-      "outcome": {
-        "by": [
-          "temp-spill:04cd7be9c366fadc"
-        ],
-        "kind": "covered"
-      },
-      "queries": [
-        "04cd7be9c366fadc"
-      ],
-      "rule": "cause-covers-heavy-query",
-      "tables": []
-    },
-    {
       "finding": "scan-heavy:shop.orders",
       "outcome": {
         "kind": "last-execution",
@@ -1405,6 +1454,18 @@
       },
       "queries": [
         "fc709554a9248878"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:04cd7be9c366fadc",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T12:07:48Z"
+      },
+      "queries": [
+        "04cd7be9c366fadc"
       ],
       "rule": "stopped-running",
       "tables": []
@@ -1518,6 +1579,18 @@
       "tables": []
     },
     {
+      "finding": "heavy-query:04cd7be9c366fadc",
+      "outcome": {
+        "aspect": "absolute-cost",
+        "kind": "presentation"
+      },
+      "queries": [
+        "04cd7be9c366fadc"
+      ],
+      "rule": "absolute-query-cost",
+      "tables": []
+    },
+    {
       "finding": "chatty-query:9b30e6ad79d940fe",
       "outcome": {
         "aspect": "absolute-cost",
@@ -1525,18 +1598,6 @@
       },
       "queries": [
         "9b30e6ad79d940fe"
-      ],
-      "rule": "absolute-query-cost",
-      "tables": []
-    },
-    {
-      "finding": "temp-spill:04cd7be9c366fadc",
-      "outcome": {
-        "aspect": "absolute-cost",
-        "kind": "presentation"
-      },
-      "queries": [
-        "04cd7be9c366fadc"
       ],
       "rule": "absolute-query-cost",
       "tables": []
@@ -3443,7 +3504,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -3634,7 +3694,13 @@
             "p99_ms": 3162.277660168
           },
           "stddev_time_ms": null,
-          "temp_writes": 20.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "20",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMIT ?",
           "total_time_ms": 34481.608169,
           "trend": null,
@@ -3837,7 +3903,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -4015,7 +4080,13 @@
             "p99_ms": 109.647819614
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT `o` . `id` , `o` . `customer_id` , `o` . `total` FROM `orders` `o` WHERE `o` . `promo_code` = ? ORDER BY `o` . `total` DESC LIMIT ?",
           "total_time_ms": 4256.719263,
           "trend": null,
@@ -4185,7 +4256,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -4393,7 +4463,13 @@
             "p99_ms": 4.786300923
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT COUNT ( * ) FROM `orders` WHERE STATUS = ? AND `created_at` >= ?",
           "total_time_ms": 4114.625993,
           "trend": null,
@@ -4554,7 +4630,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -4782,7 +4857,13 @@
             "p99_ms": 0.549540873
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT `id` , NAME , `price` FROM `products` WHERE `id` = ?",
           "total_time_ms": 1062.144698,
           "trend": null,
@@ -4977,7 +5058,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -5165,7 +5245,13 @@
             "p99_ms": 0.416869383
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT `id` , STATUS , `total` , `created_at` FROM `orders` WHERE `customer_id` = ? ORDER BY `created_at` DESC LIMIT ?",
           "total_time_ms": 485.896395,
           "trend": null,
@@ -5428,7 +5514,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -5646,7 +5731,13 @@
             "p99_ms": 0.436515832
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT `oi` . `quantity` , `oi` . `price` , `p` . `name` FROM `order_items` `oi` JOIN `products` `p` ON `p` . `id` = `oi` . `product_id` WHERE `oi` . `order_id` = ?",
           "total_time_ms": 470.368069,
           "trend": null,
@@ -5804,7 +5895,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -5902,7 +5992,13 @@
             "p99_ms": 43651.583224017
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE",
           "total_time_ms": 115300.482885,
           "trend": null,
@@ -6041,7 +6137,13 @@
             "p99_ms": 1047.12854805
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "UPDATE `orders` SET STATUS = STATUS WHERE `id` = ?",
           "total_time_ms": 12045.940034,
           "trend": null,
@@ -6204,7 +6306,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6352,7 +6453,13 @@
             "p99_ms": 5.248074602
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "SELECT `id` , `order_id` , `product_id` , `quantity` FROM `order_items` WHERE `id` <= ?",
           "total_time_ms": 81.568985,
           "trend": null,
@@ -6446,7 +6553,13 @@
             "p99_ms": 43651.583224017
           },
           "stddev_time_ms": null,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "created_tables": null,
+            "disk_tables": "0",
+            "kind": "table-creation",
+            "sort_merge_passes": null,
+            "source": "performance_schema.events_statements_summary_by_digest"
+          },
           "text": "UPDATE `orders` SET `id` = `id` WHERE `id` = ?",
           "total_time_ms": 115300.346185,
           "trend": null,

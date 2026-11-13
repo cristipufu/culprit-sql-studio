@@ -1050,7 +1050,8 @@ pub struct QueryStat {
     pub rows: Option<f64>,
     pub logical_reads: Option<f64>,
     pub physical_reads: Option<f64>,
-    pub temp_writes: Option<f64>,
+    /// Native statement resource work with explicit units and meaning; this is not a measured spill-time share.
+    pub temporary_work: Option<crate::StatementTemporaryWork>,
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
     pub plans: Vec<PlanVariant>,

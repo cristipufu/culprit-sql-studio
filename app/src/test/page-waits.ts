@@ -5,6 +5,8 @@ import type { PageWaitSnapshot } from "../gen/PageWaitSnapshot";
 export const PAGE_SOURCE = "page wait targets";
 export const PAGE_FROM = "2026-11-13T10:00:00.200000Z";
 export const PAGE_UNTIL = "2026-11-13T10:00:00.800000Z";
+export const PAGE_BEFORE = "2026-11-13T10:00:00.300000Z";
+export const PAGE_AFTER = "2026-11-13T10:00:00.700000Z";
 
 /** A bounded original waiter and independently resolved page, shared by rendering and browser fixtures. */
 export function pageWait(session = "42", page = 42): PageWaitObservation {
@@ -24,6 +26,9 @@ export function pageWait(session = "42", page = 42): PageWaitObservation {
       query_hash: null, client: { application: "observed-label", user: null, host: null },
       statement: { state: "available", text: "SELECT * FROM [orders] WHERE name=N'<script>canary</script>'", sha256: "a".repeat(64), redaction_version: 1 },
     },
+    observed_address: { database_id: 5, file_id: 1, page_id: page },
+    before_check: { observed_at: PAGE_BEFORE, request: "same-statement", wait: "original-observed" },
+    after_check: { observed_at: PAGE_AFTER, request: "same-statement", wait: "original-observed" },
     statement_identity: { id: "native-statement-handle", qualifiers: { statement_start_offset: "0" } },
     plan_identity: { id: "native-plan-handle", qualifiers: {} }, resource, resolution: "observed-at-both-bounds",
     target: {

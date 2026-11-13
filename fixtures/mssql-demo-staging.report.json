@@ -109,6 +109,12 @@
       "title": "Queries that are fast for most calls and slow for some"
     },
     {
+      "check": "temp-spill",
+      "reason": "Query Store is OFF on this database.",
+      "status": "unavailable",
+      "title": "Temporary resource work"
+    },
+    {
       "check": "stale-stats",
       "reason": null,
       "status": "assessed",
@@ -898,7 +904,6 @@
         "a plan's index request is the finding for its table and key",
         "a rewrite, not an index, fixes a scan behind a function or wildcard",
         "a spill explains the big sort",
-        "a spill carries the result it sorts",
         "an index to add covers the foreign key",
         "an index the engine builds for itself is the foreign key's",
         "an index to add replaces a histogram",

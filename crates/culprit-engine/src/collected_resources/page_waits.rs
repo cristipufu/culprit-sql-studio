@@ -1,4 +1,4 @@
-//! Page targets are capture-local observations. Original waiters survive failed checks without becoming owners.
+//! Capture-local page proof remains independent from later requester/wait changes. Original waiters are not owners.
 use super::*;
 use culprit_core::collected_resource_analysis::CollectedPageWaitAnalysis;
 
@@ -11,6 +11,7 @@ pub fn page_waits(capture: &EvidenceCapture) -> Result<CollectedPageWaitAnalysis
         .into_iter()
         .map(|row| {
             let OperationalFact::PageWait(observation) = &row.fact else { return Err(invalid()) };
+            // Native validation owns recheck validity/order within these bounds and the exact checked-reference policy.
             if !bounds.contains(&observation.observed_from) || !bounds.contains(&observation.observed_until) {
                 return Err(invalid());
             }

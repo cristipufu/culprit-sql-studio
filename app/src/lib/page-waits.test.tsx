@@ -4,7 +4,7 @@ import { HealthTab } from "../components/Health";
 import { PageWaitTargets } from "../components/PageWaitTargets";
 import type { Report } from "../gen/Report";
 import { partial } from "../test/fixtures";
-import { PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageWait } from "../test/page-waits";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageWait } from "../test/page-waits";
 import { t } from "./i18n";
 import { pageWaitReferenceKey } from "./page-wait-reference";
 
@@ -68,27 +68,57 @@ test("page memory contention and page IO preserve different native meanings and 
   expect(html).not.toContain("Open in Queries");
 });
 
-test("unresolved rows retain original native wait and historical SQL while withholding mapping and unqualified handles", () => {
+test("unavailable metadata retains the original native wait and historical SQL without inventing a target", () => {
   const row = pageWait();
-  row.resolution = "changed-request";
+  row.resolution = "permission-denied";
   row.target = null;
-  row.statement_identity = undefined;
-  row.plan_identity = undefined;
   const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
   expect(html).toContain("5:1:42");
   expect(html).toContain("PAGELATCH_EX");
   expect(html).toContain("Originally observed statement context");
   expect(html).toContain("&lt;script&gt;");
   expect(html).not.toContain("Observed page and object metadata");
-  expect(html).not.toContain("native-statement-handle");
+  expect(html).toContain("native-statement-handle");
   expect(html).not.toContain("<script>");
-  // Defensive rendering still cannot turn unverified metadata into a qualified current mapping.
-  row.target = pageWait().target;
-  row.statement_identity = pageWait().statement_identity;
-  row.plan_identity = pageWait().plan_identity;
-  const unqualified = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
-  expect(unqualified).not.toContain("orders_id");
-  expect(unqualified).not.toContain("native-statement-handle");
+});
+
+test("a completed or different short-lived wait does not rewrite the original request or discard matching page metadata", () => {
+  const row = pageWait();
+  row.before_check!.wait = "different";
+  row.after_check!.wait = "no-longer-observed";
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
+  expect(html).toContain(PAGE_BEFORE);
+  expect(html).toContain(PAGE_AFTER);
+  expect(html).toContain(t("ui.page_waits.recheck.wait.different"));
+  expect(html).toContain(t("ui.page_waits.recheck.wait.no_longer"));
+  expect(html).toContain("PAGELATCH_EX");
+  expect(html).toContain("5:1:42");
+  expect(html).toContain("orders_id");
+  expect(html).toContain("native-statement-handle");
+  expect(html).toContain("native-plan-handle");
+  expect(html).not.toContain("Request/statement changed");
+});
+
+test("changed, missing or unverified request checks preserve historical wait and independent mapping but never expose unqualified handles", () => {
+  for (const state of ["changed", "missing", "unverified"] as const) {
+    const row = pageWait();
+    row.after_check = { observed_at: PAGE_AFTER, request: state, wait: "unqualified" };
+    const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
+    expect(html).toContain("orders_id");
+    expect(html).toContain("PAGELATCH_EX");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("native-statement-handle");
+    expect(html).not.toContain("native-plan-handle");
+  }
+  for (const missing of ["before_check", "after_check"] as const) {
+    const row = pageWait();
+    row[missing] = undefined;
+    const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
+    expect(html).toContain(t("ui.page_waits.recheck.missing"));
+    expect(html).toContain("orders_id");
+    expect(html).not.toContain("native-statement-handle");
+    expect(html).not.toContain("native-plan-handle");
+  }
 });
 
 test("native counters and signed metadata IDs stay exact while SQL NULL and zero remain distinct", () => {

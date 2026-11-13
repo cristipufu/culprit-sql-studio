@@ -133,18 +133,6 @@ fn where_the_change_is(
              table and column names) and change {them} the way this project ships query changes (an ORM change or a \
              query rewrite). The fix's SQL is only the fallback it names, for when the application can't change."
         ));
-    } else if finding.check == "temp-spill" && s.server.engine == Engine::Mysql && sql.settings() && !declines {
-        said.push(format!(
-            "If you choose an index from the fix's options, ship it through this project's schema migrations. If you \
-             choose a query change, find where the application sends {these} (search for {their} table and column \
-             names) and make that change in the calling code."
-        ));
-        if finding.facts.advice.application == ApplicationAdvice::SessionSettings {
-            said.push(
-                "If you choose the session-setting option, set those variables on the application's connections."
-                    .into(),
-            );
-        }
     } else if !app.is_empty() && !declines && !sql.in_the_application && !sql.only_runs_on_the_database() && !index_only
     {
         said.push(

@@ -51,6 +51,10 @@ async fn boxed_native_instance_and_file_epoch_qualify_local_mapping_without_inve
     let mut reader = reader_with_identity(replies, IdentityDetail::Endpoint);
     let capture = reader.capture_page_wait_targets().await.unwrap();
     let target = capture.snapshot.observations[0].target.as_ref().unwrap();
+    assert_eq!(
+        capture.snapshot.observations[0].observed_address,
+        Some(PageWaitAddress { database_id: 7, file_id: 1, page_id: 4144 })
+    );
     assert_eq!(target.identity_basis, PageTargetIdentityBasis::LocalDatabaseFileEpoch);
     assert_eq!(target.database.id, "7");
     assert!(target.database.qualifiers.contains_key("instance_epoch"));
@@ -88,19 +92,21 @@ async fn denied_boxed_authority_preserves_waits_but_never_reads_headers_or_verif
 }
 
 #[tokio::test]
-async fn a_request_that_advances_before_header_admission_never_triggers_a_page_lookup() {
+async fn a_request_that_advances_keeps_its_original_wait_and_independently_qualified_current_header() {
     let row = page_wait(42, "PAGELATCH_EX", "7:1:4144");
     let checked = replace(&participant(0, &row), &[("checked_begin", Val::Int(2))]);
-    let mut reader = reader(vec![
-        Ok(vec![context()]),
-        Ok(vec![row]),
-        Ok(vec![checked]),
-        Ok(vec![details(42, "SELECT 1")]),
-        Ok(vec![context()]),
-    ]);
+    let mut replies = successful_replies(vec![row]);
+    replies[2] = Ok(vec![checked]);
+    replies[SQL_TEXT] = Ok(vec![replace(&details(42, "SELECT 1"), &[("matched", Val::Int(0))])]);
+    let mut reader = reader(replies);
     let capture = reader.capture_page_wait_targets().await.unwrap();
-    assert_eq!(capture.snapshot.observations[0].resolution, PageWaitResolution::ChangedRequest);
-    assert!(reader.io.calls.iter().all(|call| !call.sql.contains("OUTER APPLY sys.dm_db_page_info")));
+    let observation = &capture.snapshot.observations[0];
+    assert_eq!(observation.resolution, PageWaitResolution::ObservedAtBothBounds);
+    assert_eq!(observation.before_check.as_ref().unwrap().request, PageWaitRequestState::Changed);
+    assert_eq!(observation.before_check.as_ref().unwrap().wait, PageWaitRelation::Unqualified);
+    assert!(observation.target.is_some());
+    assert!(observation.statement_identity.is_none());
+    assert!(!observation.request.statement.is_available());
 }
 pub(crate) fn context() -> Rec {
     let base = metadata(42);
@@ -290,6 +296,7 @@ async fn short_positive_waits_share_page_lookups_without_claiming_a_holder_or_fe
     assert_eq!(capture.snapshot.observations.len(), 2);
     for row in &capture.snapshot.observations {
         assert_eq!(row.resolution, PageWaitResolution::ObservedAtBothBounds);
+        assert_eq!(row.observed_address, Some(PageWaitAddress { database_id: 7, file_id: 1, page_id: 4144 }));
         assert_eq!(row.target.as_ref().unwrap().kind, PageWaitTargetKind::IndexLeaf);
         assert_eq!(row.target.as_ref().unwrap().object.as_ref().unwrap().index_name.as_deref(), Some("PK_orders"));
         assert_eq!(row.target.as_ref().unwrap().header.partition_id.as_deref(), Some("9007199254740993"));
@@ -340,8 +347,10 @@ async fn native_header_changes_and_object_reuse_withhold_mapping_but_not_the_ori
         let row = &capture.snapshot.observations[0];
         assert_eq!(row.resolution, PageWaitResolution::ChangedMetadata, "{column}");
         assert!(row.target.is_none());
-        assert!(row.statement_identity.is_none());
+        assert!(row.statement_identity.is_some(), "page metadata changes do not erase checked request identity");
+        assert_eq!(row.after_check.as_ref().unwrap().request, PageWaitRequestState::SameStatement);
         assert_eq!(row.request.wait.as_ref().unwrap().native_type.as_deref(), Some("PAGELATCH_EX"));
+        assert!(capture.snapshot.is_valid());
     }
 }
 
@@ -359,7 +368,7 @@ async fn legitimate_page_writes_do_not_turn_lsn_or_next_links_into_identity_guar
 }
 
 #[tokio::test]
-async fn recycled_sessions_requests_statements_and_plans_never_receive_a_page_mapping() {
+async fn recycled_requests_or_plan_drift_do_not_receive_an_unqualified_statement_or_plan_link() {
     for (column, value) in [
         ("checked_session_id", Val::Null),
         ("checked_session_generation", Val::Text("2020-01-01T07:01:00".into())),
@@ -376,14 +385,70 @@ async fn recycled_sessions_requests_statements_and_plans_never_receive_a_page_ma
         replies[CHECK_AFTER] = Ok(vec![checked]);
         let capture = reader(replies).capture_page_wait_targets().await.unwrap();
         let row = &capture.snapshot.observations[0];
-        assert!(
-            matches!(row.resolution, PageWaitResolution::ChangedRequest | PageWaitResolution::MissingRequest),
-            "{column}"
-        );
-        assert!(row.target.is_none());
-        assert!(row.plan_identity.is_none());
+        assert_eq!(row.resolution, PageWaitResolution::ObservedAtBothBounds);
+        assert!(row.target.is_some(), "{column}: current header qualification is independent");
+        if column == "checked_plan_handle" {
+            assert!(row.statement_identity.is_some());
+            assert!(row.plan_identity.is_none());
+            assert_eq!(row.after_check.as_ref().unwrap().request, PageWaitRequestState::SameStatement);
+        } else if column == "checked_wait_resource" {
+            assert!(row.statement_identity.is_some());
+            assert!(row.plan_identity.is_some());
+            assert_eq!(row.after_check.as_ref().unwrap().wait, PageWaitRelation::Different);
+        } else {
+            assert!(row.statement_identity.is_none());
+            assert!(row.plan_identity.is_none());
+            assert!(matches!(
+                row.after_check.as_ref().unwrap().request,
+                PageWaitRequestState::Changed | PageWaitRequestState::Missing
+            ));
+        }
         assert_eq!(row.request.key.session.id, "42");
     }
+}
+
+#[tokio::test]
+async fn an_ended_or_changed_wait_does_not_erase_checked_statement_identity_or_current_page_headers() {
+    for (native_wait, native_resource, relation) in [
+        (Val::Null, Val::Text(String::new()), PageWaitRelation::NoLongerObserved),
+        (Val::Text("WRITELOG".into()), Val::Text(String::new()), PageWaitRelation::Different),
+        (Val::Text("PAGELATCH_EX".into()), Val::Text("7:1:999".into()), PageWaitRelation::Different),
+    ] {
+        let row = page_wait(42, "PAGELATCH_EX", "7:1:4144");
+        let checked = replace(
+            &participant(0, &row),
+            &[("checked_wait_type", native_wait), ("checked_wait_resource", native_resource)],
+        );
+        let mut replies = successful_replies(vec![row]);
+        replies[2] = Ok(vec![checked.clone()]);
+        replies[CHECK_AFTER] = Ok(vec![checked]);
+        let captured = reader(replies).capture_page_wait_targets().await.unwrap();
+        let observation = &captured.snapshot.observations[0];
+        assert_eq!(observation.resolution, PageWaitResolution::ObservedAtBothBounds);
+        assert_eq!(observation.before_check.as_ref().unwrap().request, PageWaitRequestState::SameStatement);
+        assert_eq!(observation.after_check.as_ref().unwrap().wait, relation);
+        assert_eq!(observation.request.wait.as_ref().unwrap().native_type.as_deref(), Some("PAGELATCH_EX"));
+        assert_eq!(observation.resource.native.id, "7:1:4144");
+        assert!(observation.statement_identity.is_some());
+        assert!(observation.plan_identity.is_some());
+    }
+}
+
+#[tokio::test]
+async fn missing_statement_locator_keeps_independent_header_evidence_without_fetching_sql_or_forging_a_query_link() {
+    let row = replace(&page_wait(42, "PAGELATCH_EX", "7:1:4144"), &[("sql_handle", Val::Null)]);
+    let mut replies = successful_replies(vec![row]);
+    let _ = replies.remove(SQL_TEXT);
+    let mut reader = reader(replies);
+    let captured = reader.capture_page_wait_targets().await.unwrap();
+    let observation = &captured.snapshot.observations[0];
+    assert_eq!(observation.resolution, PageWaitResolution::ObservedAtBothBounds);
+    assert!(observation.target.is_some());
+    assert_eq!(observation.before_check.as_ref().unwrap().request, PageWaitRequestState::Unverified);
+    assert_eq!(observation.after_check.as_ref().unwrap().wait, PageWaitRelation::Unqualified);
+    assert!(observation.statement_identity.is_none());
+    assert!(observation.plan_identity.is_none());
+    assert!(reader.io.calls.iter().all(|call| !call.sql.contains("dm_exec_sql_text")));
 }
 
 #[tokio::test]
@@ -418,7 +483,18 @@ async fn foreign_tempdb_and_unrecognized_addresses_never_reach_the_header_functi
             Ok(vec![context()]),
         ]);
         let capture = reader.capture_page_wait_targets().await.unwrap();
-        assert_eq!(capture.snapshot.observations[0].resolution, resolution);
+        let original = &capture.snapshot.observations[0];
+        assert_eq!(original.resolution, resolution);
+        assert_eq!(original.resource.native.id, address);
+        assert_eq!(
+            original.observed_address,
+            (resolution == PageWaitResolution::OutsideDatabase).then_some(PageWaitAddress {
+                database_id: 2,
+                file_id: 1,
+                page_id: 4144
+            })
+        );
+        assert!(original.target.is_none());
         assert_eq!(reader.query_count(), 4);
         assert!(reader.io.calls.iter().all(|call| !call.sql.contains("OUTER APPLY sys.dm_db_page_info")));
     }
@@ -514,6 +590,37 @@ async fn unqualified_index_layouts_keep_header_facts_without_rowstore_leaf_claim
 }
 
 #[tokio::test]
+async fn limited_null_header_version_uses_only_observed_native_layout_and_rowstore_catalog_facts() {
+    for (changes, expected) in [
+        (vec![], PageWaitTargetKind::IndexLeaf),
+        (vec![("page_type", Val::Int(2)), ("page_level", Val::Int(1))], PageWaitTargetKind::IndexBranch),
+        (vec![("page_header_version", Val::Int(99))], PageWaitTargetKind::Unclassified),
+        (vec![("page_level", Val::Null)], PageWaitTargetKind::Unclassified),
+        (vec![("index_type", Val::Null)], PageWaitTargetKind::Unclassified),
+        (vec![("page_type", Val::Int(99))], PageWaitTargetKind::Unclassified),
+    ] {
+        let limited = replace(&header(0, 4144), &[("page_header_version", Val::Null)]);
+        let limited = replace(&limited, &changes);
+        let mut replies = successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
+        replies[HEADER_BEFORE] = Ok(vec![limited.clone()]);
+        replies[HEADER_AFTER] = Ok(vec![limited]);
+        let mut reader = reader(replies);
+        let capture = reader.capture_page_wait_targets().await.unwrap();
+        let target = capture.snapshot.observations[0].target.as_ref().unwrap();
+        assert_eq!(target.kind, expected, "{changes:?}");
+        assert_eq!(
+            target.header.header_version,
+            if changes.first().is_some_and(|(name, _)| *name == "page_header_version") { Some(99) } else { None }
+        );
+        assert!(capture.snapshot.is_valid());
+        for index in [HEADER_BEFORE, HEADER_AFTER] {
+            assert!(reader.io.calls[index].sql.contains("'LIMITED'"));
+            assert!(!reader.io.calls[index].sql.contains("'DETAILED'"));
+        }
+    }
+}
+
+#[tokio::test]
 async fn missing_file_authority_and_null_page_headers_never_become_none_equals_none_proof() {
     for (columns, resolution) in [
         (vec![("file_guid", Val::Null)], PageWaitResolution::UnverifiedSource),
@@ -529,6 +636,11 @@ async fn missing_file_authority_and_null_page_headers_never_become_none_equals_n
         let capture = reader(replies).capture_page_wait_targets().await.unwrap();
         assert_eq!(capture.snapshot.observations[0].resolution, resolution);
         assert!(capture.snapshot.observations[0].target.is_none());
+        if resolution == PageWaitResolution::UnverifiedSource {
+            assert!(capture.snapshot.observations[0].statement_identity.is_none());
+            assert!(capture.snapshot.observations[0].plan_identity.is_none());
+        }
+        assert!(capture.snapshot.is_valid());
     }
 }
 

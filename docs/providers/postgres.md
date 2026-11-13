@@ -38,6 +38,13 @@ Planning can invoke functions. Culprit restricts elevated planning to safely own
 
 A changed query text receives its own identity. Statistics resets, eviction and scope changes constrain comparisons; the date of a Culprit scan is not the beginning of a cumulative counter's history.
 
+Scans and statement-counter export share one native temporary-work projection: exact read/write block counts,
+the source's block size, and separately available read/write timings. Adding these scan fields uses the existing
+statement read. Resource totals can include planning and execution work; parallel I/O time is not an exclusive
+elapsed-time component, and current `track_io_timing` cannot qualify historical zeros. Recorded temporary work is
+query context, without a guessed disk speed, spilling operator or memory-limit recommendation. Actual plan spill
+evidence remains separate. Archived `statement-work` analysis reads the same typed observations without SQL access.
+
 ## Live activity and waits
 
 `pg_stat_activity` provides sessions and current activity; `pg_blocking_pids` supplies blocking relationships. Live wait sampling observes busy sessions once a second. `pg_stat_progress_*` views add progress for supported operations, while an estimated plan remains separate from measured live operator activity.

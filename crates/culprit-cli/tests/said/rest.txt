@@ -39,8 +39,8 @@ unstable-query    Unstable queries
                   SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Queries whose duration swings wildly between runs with the same plan, a sign of parameter sensitivity or blocking.
 parameter-sensitive  Queries that are fast for most calls and slow for some
                   SQL Server, MySQL/MariaDB · Statements whose run time depends heavily on the values they run with: two plans used side by side, one fast and one slow (SQL Server Query Store), or a long tail in the run-time histogram (MySQL). Single-plan variance on any engine is `unstable-query`.
-temp-spill        Queries writing temp files
-                  PostgreSQL, MySQL/MariaDB · Statements whose sorts, hashes or temporary tables outgrow memory and spill to disk.
+temp-spill        Temporary resource work
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Recorded temporary I/O, internal table creation and space use, without inferring elapsed cost or a memory shortage.
 stale-stats       Stale statistics
                   SQL Server, PostgreSQL · Tables whose optimizer statistics are far behind their data, which leads to bad row estimates and plans.
 heap-table        Large tables without a clustered index

@@ -1,4 +1,6 @@
-use culprit_core::{MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, SourceState, t};
+use culprit_core::{
+    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, SourceState, StatementWorkReport, format, t,
+};
 
 struct Summary<'a> {
     title: &'a str,
@@ -45,6 +47,37 @@ pub(crate) fn page_waits(report: &PageWaitReport) -> String {
                 title = entry.title.as_str(),
                 session = entry.request_key.session.id.as_str(),
                 resource = entry.resource.native.id.as_str()
+            )
+        })
+        .collect::<Vec<_>>();
+    render(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source_state: report.source_state,
+            source_reason: report.source_reason.as_deref(),
+            limitations: &report.limitations,
+        },
+        titles.iter().map(String::as_str),
+    )
+}
+
+pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
+    let titles = report
+        .entries
+        .iter()
+        .take(super::BRIEF_FINDING_LIMIT)
+        .map(|entry| {
+            let work = if entry.work.is_empty() {
+                t!("evidence.cli.statement_work_unmeasured")
+            } else {
+                format::list(&entry.work.iter().map(|work| work.title.clone()).collect::<Vec<_>>())
+            };
+            t!(
+                "evidence.cli.statement_work_entry",
+                query = entry.identity.query_id.as_str(),
+                observed = entry.observed_at.as_str(),
+                work = work
             )
         })
         .collect::<Vec<_>>();
@@ -176,5 +209,35 @@ mod tests {
         assert!(text.contains(&t!("evidence.cli.source_partial")));
         assert!(text.contains(&report.limitations[0]));
         assert!(!text.contains("native-generation") && !text.contains("private detailed explanation"));
+    }
+
+    #[test]
+    fn statement_work_summary_retains_point_identity_and_source_qualification_without_repeating_native_rows() {
+        let report = StatementWorkReport {
+            source_state: Some(SourceState::Partial),
+            source_reason: Some("native source is incomplete".into()),
+            title: "native statement work".into(),
+            summary: "counter points, not a measured interval".into(),
+            limitations: vec!["native reset remains unknown".into()],
+            entries: (0..8)
+                .map(|index| culprit_core::StatementWorkEntry {
+                    observation_key: "proof-reference".into(),
+                    identity: culprit_core::telemetry::NativeQueryIdentity {
+                        query_id: format!("query-{index}"),
+                        qualifiers: Default::default(),
+                    },
+                    observed_at: "2020-01-01T12:00:00.123456789Z".into(),
+                    reset: culprit_core::ResetMarker::Unknown,
+                    work: vec![],
+                })
+                .collect(),
+        };
+        let text = statement_work(&report);
+        assert!(text.contains("query-0") && text.contains("2020-01-01T12:00:00.123456789Z"));
+        assert!(text.contains(&t!("evidence.cli.statement_work_unmeasured")));
+        assert!(text.contains(&t!("evidence.cli.source_partial")));
+        assert!(text.contains("native reset remains unknown"));
+        assert_eq!(text.matches('•').count(), super::super::BRIEF_FINDING_LIMIT);
+        assert!(!text.contains("proof-reference") && !text.contains("query-7"));
     }
 }

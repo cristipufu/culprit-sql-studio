@@ -14,6 +14,8 @@ Culprit connects to a database and tells you, in plain language, what is making 
 8. **Honest.** Each finding states its confidence and the data window it is based on ("Query Store, last 7 days"). Missing permissions or features are shown as locked checks with the exact fix, never as silence.
 9. **Find the cause developers can fix.** Apply this to every signal: connect the symptom to evidenced queries, transactions and resources, then a code or database change and verification. Distinguish established causes, supported explanations, candidates and unknowns. A waiting query is affected; it is not automatically the owner or cause. When the source cannot establish attribution, say what evidence is missing and give a bounded next step.
 
+Temporary-resource counters keep their native meaning: block traffic, internal-table counts and used-space observations are separate facts. They remain informational without evidence of delay or a cause. The app does not estimate spill time from disk speed, size memory from average writes, or hide a separate sort/large-result finding because a query also recorded temporary work.
+
 ## Who it is for
 
 | Who | Job | Where they start |

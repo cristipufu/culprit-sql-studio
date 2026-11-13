@@ -6,7 +6,7 @@ use crate::{
 };
 use culprit_core::{
     ObservedWaitResource, Result,
-    telemetry::{NativeIdentity, PageWaitResolution, canonical_time},
+    telemetry::{NativeIdentity, PageWaitRecheck, PageWaitRelation, PageWaitRequestState, canonical_time},
 };
 
 #[derive(Clone)]
@@ -48,18 +48,35 @@ impl Check {
         })
     }
 
-    pub(super) fn resolution(
-        &self,
-        record: &ActivityRecord,
-        resource: &ObservedWaitResource,
-    ) -> Option<PageWaitResolution> {
+    pub(super) fn recheck(&self, record: &ActivityRecord, resource: &ObservedWaitResource) -> PageWaitRecheck {
+        let request = self.request_state(record);
+        let wait = if request == PageWaitRequestState::SameStatement {
+            match self.wait_type.as_deref() {
+                None => PageWaitRelation::NoLongerObserved,
+                Some(native)
+                    if Some(native) != record.facts.wait.as_ref().and_then(|wait| wait.native_type.as_deref()) =>
+                {
+                    PageWaitRelation::Different
+                }
+                Some(_) => match self.resource.as_deref().filter(|resource| !resource.is_empty()) {
+                    Some(current) if current == resource.native.id => PageWaitRelation::OriginalObserved,
+                    Some(_) => PageWaitRelation::Different,
+                    None => PageWaitRelation::Unqualified,
+                },
+            }
+        } else {
+            PageWaitRelation::Unqualified
+        };
+        PageWaitRecheck { observed_at: self.at.clone(), request, wait }
+    }
+
+    fn request_state(&self, record: &ActivityRecord) -> PageWaitRequestState {
         if self.session.is_none() || self.request.is_none() {
-            return Some(PageWaitResolution::MissingRequest);
+            return PageWaitRequestState::Missing;
         }
         let key = &record.facts.key;
-        let Some(request) = &key.request else { return Some(PageWaitResolution::MissingRequest) };
-        let Some(locator) = &record.current_locator else { return Some(PageWaitResolution::UnverifiedSource) };
-        let native_wait = record.facts.wait.as_ref().and_then(|wait| wait.native_type.as_deref());
+        let Some(request) = &key.request else { return PageWaitRequestState::Missing };
+        let Some(locator) = &record.current_locator else { return PageWaitRequestState::Unverified };
         let expected_hash =
             record.facts.query_hash.as_deref().filter(|value| !value.bytes().all(|value| value == b'0'));
         if self.session.as_deref() != Some(key.session.id.as_str())
@@ -70,14 +87,12 @@ impl Check {
             || self.begin != Some(locator.start)
             || self.end != Some(locator.end)
             || self.database != Some(locator.database)
-            || self.wait_type.as_deref() != native_wait
-            || self.resource.as_deref() != Some(resource.native.id.as_str())
             || expected_hash
                 .is_some_and(|hash| !self.query_hash.as_ref().is_some_and(|current| current.eq_ignore_ascii_case(hash)))
         {
-            Some(PageWaitResolution::ChangedRequest)
+            PageWaitRequestState::Changed
         } else {
-            None
+            PageWaitRequestState::SameStatement
         }
     }
 
@@ -87,12 +102,12 @@ impl Check {
             && self.query_hash == other.query_hash
     }
 
-    pub(super) fn identities(&self) -> Option<(NativeIdentity, Option<NativeIdentity>)> {
+    pub(super) fn identities(&self, other: &Self) -> Option<(NativeIdentity, Option<NativeIdentity>)> {
         let statement = NativeIdentity::new(self.sql_handle.as_ref()?)
             .qualified("native_object", "sys.dm_exec_requests.sql_handle")
             .qualified("statement_start_offset", self.begin?.to_string())
             .qualified("statement_end_offset", self.end?.to_string());
-        let plan = self.plan_handle.as_ref().map(|handle| {
+        let plan = self.plan_handle.as_ref().filter(|_| self.same_plan(other)).map(|handle| {
             let mut identity =
                 NativeIdentity::new(handle).qualified("native_object", "sys.dm_exec_requests.plan_handle");
             if let Some(hash) = &self.plan_hash {
@@ -108,7 +123,17 @@ pub(super) fn selectors(frame: &ActivityFrame, indices: &[usize]) -> Result<Stri
     let mut xml = String::from("<activity>");
     for &index in indices {
         let record = frame.records.get(index).ok_or_else(invalid_data)?;
-        xml.push_str(&format!("<row ordinal=\"{index}\" {}/>", super::super::current_selector_attributes(record)?));
+        let session = record.facts.key.session.id.parse::<i32>().map_err(|_| invalid_data())?;
+        let request = record
+            .facts
+            .key
+            .request
+            .as_ref()
+            .ok_or_else(invalid_data)?
+            .id
+            .parse::<i32>()
+            .map_err(|_| invalid_data())?;
+        xml.push_str(&format!("<row ordinal=\"{index}\" session=\"{session}\" request=\"{request}\"/>"));
     }
     xml.push_str("</activity>");
     Ok(xml)

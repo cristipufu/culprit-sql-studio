@@ -6,10 +6,33 @@
 use culprit_checks::{agent_brief, analyze};
 use culprit_core::{Category, Finding, Fix, Metric, QueryRef, Report, Snapshot, SubjectKind, Unit};
 
-fn report(name: &str) -> Report {
+fn snapshot(name: &str) -> Snapshot {
     let text =
         std::fs::read_to_string(format!("{}/../../fixtures/{name}", env!("CARGO_MANIFEST_DIR"))).expect("fixture");
-    analyze(serde_json::from_str::<Snapshot>(&text).expect("snapshot"))
+    serde_json::from_str(&text).expect("snapshot")
+}
+
+fn report(name: &str) -> Report {
+    analyze(snapshot(name))
+}
+
+/// Native JIT time establishes the diagnosis; an unavailable threshold permits only the role-scoped option.
+fn postgres_with_jit_role_advice() -> Report {
+    let mut snapshot = snapshot("postgres-demo.json");
+    snapshot.settings.retain(|setting| setting.name != "jit_above_cost");
+    let query = snapshot
+        .workload
+        .as_mut()
+        .unwrap()
+        .queries
+        .iter_mut()
+        .find(|query| query.id == "9065391607317686058")
+        .expect("the repeatedly executed application statement");
+    assert!(query.executions > 1.0 && query.total_time_ms > 40_000.0);
+    let costs = query.costs.get_or_insert_default();
+    costs.jit_ms = Some(40_000.0);
+    costs.jit_functions = Some(800.0);
+    analyze(snapshot)
 }
 
 /// The first finding whose id starts with `prefix`.
@@ -44,6 +67,8 @@ fn with_fix(finding: &Finding, summary: &str, sql: Option<&str>) -> Finding {
 fn about(report: &Report, query: &str, node: Option<u32>) -> Finding {
     let mut f = report.findings[0].clone();
     f.queries = vec![QueryRef { id: query.into(), plan_node: node, note: None }];
+    // The replacement query's plan has not been explained by the original finding's summary.
+    f.facts.uncosted_plan_explained = None;
     f
 }
 
@@ -148,18 +173,17 @@ fn a_scan_heavy_diagnostic_gathers_measurements_before_choosing_a_change() {
 
 #[test]
 fn a_role_only_query_fix_leaves_calling_code_alone_but_keeps_local_options() {
-    let postgres = report("postgres-demo.json");
-    let query = finding(&postgres, "temp-spill:");
-    let role =
-        with_fix(query, "Turn JIT off for the application's role.", Some("ALTER ROLE <app_role> SET jit = off;"));
-    let section = codebase(&agent_brief(&postgres, &role));
+    let postgres = postgres_with_jit_role_advice();
+    let query = finding(&postgres, "jit-overhead:");
+    assert!(query.fix.as_ref().unwrap().sql.as_ref().unwrap().contains("ALTER ROLE <app_role> SET jit = off"));
+    let section = codebase(&agent_brief(&postgres, query));
     assert!(section.contains("The role setting in the fix's SQL"), "{section}");
     assert!(!section.contains("apply the fix in that calling code"), "{section}");
 
     let local = with_fix(
         query,
-        "Raise memory for the application's role or just for this statement.",
-        Some("ALTER ROLE <app_role> SET work_mem = '64MB';\nSET LOCAL work_mem = '64MB';"),
+        "Turn JIT off for the application's role or just for this transaction.",
+        Some("ALTER ROLE <app_role> SET jit = off;\nSET LOCAL jit = off;"),
     );
     let section = codebase(&agent_brief(&postgres, &local));
     assert!(section.contains("The role setting in the fix's SQL"), "{section}");
@@ -169,29 +193,44 @@ fn a_role_only_query_fix_leaves_calling_code_alone_but_keeps_local_options() {
 }
 
 #[test]
-fn temp_spill_options_route_application_and_index_work_conditionally() {
+fn temporary_resource_observations_request_no_setting_or_guessed_operator_change() {
     let mysql = report("mysql-demo.json");
     let path = format!("{}/../../fixtures/mariadb-demo.report.json", env!("CARGO_MANIFEST_DIR"));
     let saved: Report = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let mariadb = analyze(saved.snapshot);
     for report in [&mysql, &mariadb] {
         let spill = finding(report, "temp-spill:");
+        assert_eq!(spill.actionability, culprit_core::Actionability::Information);
+        assert!(spill.impact.db_time_share.is_none());
+        assert!(spill.fix.as_ref().unwrap().sql.is_none());
+        assert!(spill.queries.iter().all(|query| query.plan_node.is_none()));
+        assert!(spill.metrics.iter().any(|metric| metric.key == "view.temporary_work.disk_tables"));
         let section = codebase(&agent_brief(report, spill));
-        assert!(section.contains("If you choose an index") && section.contains("schema migrations"), "{section}");
-        assert!(section.contains("If you choose a query change") && section.contains("calling code"), "{section}");
-        assert!(section.contains("If you choose the session-setting option"), "{section}");
-        assert!(section.contains("The setting in the fix's SQL belongs to the database server"), "{section}");
+        assert!(section.contains("This observation requests no immediate database change"), "{section}");
+        assert!(section.contains("follow its verification guidance"), "{section}");
+        assert!(!section.contains("schema migrations"), "{section}");
+        assert!(!section.contains("The setting in the fix's SQL"), "{section}");
         assert!(!section.contains("apply the fix in that calling code"), "{section}");
+        assert!(!agent_brief(report, spill).lines().any(|line| line.starts_with("Plan:")));
     }
-    // The TempTable engine's shared RAM cap offers no session-variable route.
-    let shared = with_fix(
-        finding(&mysql, "temp-spill:"),
-        "Check whether an index helps, or raise the shared TempTable RAM cap.",
-        Some("SET GLOBAL temptable_max_ram = 2147483648;"),
+}
+
+#[test]
+fn explicit_query_and_index_alternatives_keep_their_separate_ownership() {
+    let postgres = report("postgres-demo.json");
+    let index = finding(&postgres, "filtered-scan:public.orders(customer_id)");
+    let sql = format!(
+        "{}\n\n-- Alternatively change the statement in the application to reduce its input.",
+        index.fix.as_ref().unwrap().sql.as_ref().unwrap()
     );
-    let section = codebase(&agent_brief(&mysql, &shared));
-    assert!(section.contains("If you choose an index"), "{section}");
-    assert!(!section.contains("session-setting option"), "{section}");
+    let mut alternative = with_fix(index, "Test the index or change the application's query.", Some(&sql));
+    alternative.facts.advice.application = culprit_core::ApplicationAdvice::Alternative;
+    let section = codebase(&agent_brief(&postgres, &alternative));
+    assert!(section.contains("Ship the fix's index change"), "{section}");
+    assert!(section.contains("schema changes (a migration)"), "{section}");
+    assert!(section.contains("The fix's other option is a change in the application's code"), "{section}");
+    assert!(section.contains("query rewrite"), "{section}");
+    assert!(!section.contains("The setting in the fix's SQL"), "{section}");
 }
 
 #[test]
@@ -206,7 +245,7 @@ fn a_database_or_role_setting_is_sql_run_against_the_database() {
         .expect("a setting to change");
     for sql in [
         "ALTER DATABASE aptabase SET random_page_cost = 1.1;",
-        "ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;",
+        "ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;",
         "ALTER DATABASE [culprit_demo] SET QUERY_STORE (QUERY_CAPTURE_MODE = AUTO);",
         "ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;",
     ] {
@@ -221,8 +260,13 @@ fn a_database_or_role_setting_is_sql_run_against_the_database() {
     }
 
     // A role's setting changes that role's new connections; `SET LOCAL` only in the code, around the statement.
-    let postgres = self::report("postgres-demo.json");
-    let section = codebase(&agent_brief(&postgres, finding(&postgres, "temp-spill:")));
+    let postgres = postgres_with_jit_role_advice();
+    let local = with_fix(
+        finding(&postgres, "jit-overhead:"),
+        "Turn JIT off for the application's role or only inside this transaction.",
+        Some("ALTER ROLE <app_role> SET jit = off;\nSET LOCAL jit = off;"),
+    );
+    let section = codebase(&agent_brief(&postgres, &local));
     assert!(section.contains("The role setting in the fix's SQL (`ALTER ROLE … SET`)"), "{section}");
     assert!(section.contains("in place of `<app_role>`"), "{section}");
     assert!(!section.contains("belongs to the database server"), "{section}");
@@ -456,8 +500,9 @@ fn a_share_resting_on_a_default_guess_is_left_out() {
     // its share of the cost, rest on that guess.
     // The parser marks it, so the demo's brief gives no share.
     let mut postgres = report("postgres-demo.json");
-    let spill = finding(&postgres, "temp-spill:9065391607317686058").clone();
-    let guessed = plan_line(&agent_brief(&postgres, &spill));
+    // An explicitly referenced native Sort tests cost presentation; temporary counters identify no operator.
+    let sort = about(&postgres, "9065391607317686058", Some(1));
+    let guessed = plan_line(&agent_brief(&postgres, &sort));
     assert!(guessed.contains("the step this finding is about is `Sort`"), "{guessed}");
     assert!(!guessed.contains("of estimated cost"), "{guessed}");
     assert!(guessed.contains("rest on the planner's default guess for a parameter"), "{guessed}");
@@ -467,7 +512,7 @@ fn a_share_resting_on_a_default_guess_is_left_out() {
     let scan = &mut q.plan.as_mut().expect("its plan").root.children[0].children[0];
     scan.facts_mut().selectivity_guess = None;
     scan.props.remove(culprit_core::GUESSED_SELECTIVITY);
-    let measured = plan_line(&agent_brief(&postgres, &spill));
+    let measured = plan_line(&agent_brief(&postgres, &sort));
     assert!(measured.contains("the step this finding is about (23% of estimated cost) is `Sort`"), "{measured}");
 }
 
@@ -538,7 +583,7 @@ fn recurring_upkeep_runs_where_it_fits() {
     // A histogram reads the whole table: a scheduled job outside busy hours, never as connections open and close.
     let mysql = report("mysql-demo.json");
     let histogram = with_fix(
-        finding(&mysql, "temp-spill:"),
+        finding(&mysql, "heavy-query:04cd7be9c366fadc"),
         "Build a histogram on promo_code, and refresh it after the data changes a lot.",
         Some("ANALYZE TABLE `shop`.`orders` UPDATE HISTOGRAM ON `promo_code` WITH 64 BUCKETS;"),
     );
@@ -631,7 +676,12 @@ fn a_fix_that_advises_against_itself_ships_nothing() {
 fn a_setting_in_a_statement_fix_is_applied_where_the_server_is_managed() {
     // SET PERSIST is the server's: where the server's configuration is managed.
     let mysql = report("mysql-demo.json");
-    let section = codebase(&agent_brief(&mysql, finding(&mysql, "temp-spill:")));
+    let mut setting = finding(&mysql, "config:slow_query_log").clone();
+    assert!(setting.fix.as_ref().unwrap().sql.as_ref().unwrap().contains("SET PERSIST slow_query_log"));
+    // The same native setting may be offered with a statement as context; that does not change its owner.
+    setting.category = Category::Queries;
+    setting.queries = finding(&mysql, "heavy-query:04cd7be9c366fadc").queries.clone();
+    let section = codebase(&agent_brief(&mysql, &setting));
     assert!(section.contains("The setting in the fix's SQL belongs to the database server"), "{section}");
     assert!(
         section.contains(
@@ -687,12 +737,12 @@ fn without_a_verify_step_the_brief_says_what_a_later_scan_shows() {
     // pg_stat_statements keeps totals since its reset: the runs before the change stay in them. The brief says what to
     // compare: the finding's numbers under *Evidence*.
     let postgres = report("postgres-demo.json");
-    let mut spill = finding(&postgres, "temp-spill:").clone();
-    spill.verify.clear();
-    spill.facts.advice.running_totals_explained = false;
-    let section = codebase(&agent_brief(&postgres, &spill));
+    let mut chatty = finding(&postgres, "chatty-query:").clone();
+    chatty.verify.clear();
+    chatty.facts.advice.running_totals_explained = false;
+    let section = codebase(&agent_brief(&postgres, &chatty));
     assert!(
-        section.contains(&format!("compare `{}`'s numbers under *Evidence* with this scan's", spill.id)),
+        section.contains(&format!("compare `{}`'s numbers under *Evidence* with this scan's", chatty.id)),
         "{section}"
     );
     assert!(

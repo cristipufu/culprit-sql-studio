@@ -70,15 +70,13 @@ async fn authenticated_page_targets_reuse_scan_explanations_and_reference_origin
 }
 
 #[tokio::test]
-async fn changed_unavailable_and_unverified_checks_keep_original_context_without_checked_statement_or_target() {
+async fn request_rechecks_preserve_original_waiters_and_independent_page_metadata_without_checked_statement_links() {
     let (source, rows) = page_wait_evidence_cases().remove(1);
     let fixture = Fixture::new(source, rows).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     let result = collected_resources::page_waits(&capture).unwrap();
     assert_eq!(result.report.source_state, Some(SourceState::Partial));
-    for resolution in
-        [PageWaitResolution::ChangedRequest, PageWaitResolution::Unavailable, PageWaitResolution::UnverifiedSource]
-    {
+    for request in [PageWaitRequestState::Changed, PageWaitRequestState::Missing, PageWaitRequestState::Unverified] {
         let native = result
             .context
             .records
@@ -87,14 +85,76 @@ async fn changed_unavailable_and_unverified_checks_keep_original_context_without
                 TelemetryRecord::Operational(OperationalObservation {
                     fact: OperationalFact::PageWait(observation),
                     ..
-                }) if observation.resolution == resolution => Some(observation),
+                }) if observation.after_check.as_ref().is_some_and(|check| check.request == request) => {
+                    Some(observation)
+                }
                 _ => None,
             })
             .unwrap();
         assert!(native.request.key.request.is_some());
         assert!(native.request.statement.is_available(), "the originally observed SQL is retained as context");
-        assert!(native.target.is_none() && native.statement_identity.is_none() && native.plan_identity.is_none());
+        assert!(native.statement_identity.is_none() && native.plan_identity.is_none());
+        assert_eq!(native.after_check.as_ref().unwrap().wait, PageWaitRelation::Unqualified);
+        assert_eq!(native.target.is_some(), native.resolution == PageWaitResolution::ObservedAtBothBounds);
+        if request == PageWaitRequestState::Changed {
+            assert_eq!(
+                native.target.as_ref().unwrap().header.page_id,
+                66,
+                "independent header proof survives a changed requester"
+            );
+        }
         assert!(result.report.entries.iter().any(|entry| entry.observation_key == native.key().unwrap()));
+    }
+}
+
+#[tokio::test]
+async fn ended_waits_and_missing_requests_do_not_erase_independently_checked_original_page_targets() {
+    let (source, mut rows) = page_wait_evidence_cases().remove(1);
+    let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(row), .. }) =
+        &mut rows[2]
+    else {
+        panic!()
+    };
+    row.after_check.as_mut().unwrap().request = PageWaitRequestState::Missing;
+    let fixture = Fixture::new(source, rows).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let result = collected_resources::page_waits(&capture).unwrap();
+    let native = result
+        .context
+        .records
+        .iter()
+        .filter_map(|row| match &row.row.record {
+            TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::PageWait(observation),
+                ..
+            }) => Some(observation),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let ended = native
+        .iter()
+        .find(|row| row.after_check.as_ref().is_some_and(|check| check.wait == PageWaitRelation::NoLongerObserved))
+        .unwrap();
+    assert_eq!(ended.after_check.as_ref().unwrap().request, PageWaitRequestState::SameStatement);
+    assert!(ended.target.is_some() && ended.statement_identity.is_some() && ended.plan_identity.is_some());
+    let missing = native
+        .iter()
+        .find(|row| {
+            row.after_check.as_ref().is_some_and(|check| check.request == PageWaitRequestState::Missing)
+                && row.target.is_some()
+        })
+        .unwrap();
+    assert_eq!(missing.target.as_ref().unwrap().header.page_id, 66);
+    assert!(missing.statement_identity.is_none() && missing.plan_identity.is_none());
+    assert_eq!(missing.request.wait.as_ref().unwrap().native_type.as_deref(), Some("PAGELATCH_EX"));
+    for row in [ended, missing] {
+        assert!(
+            result
+                .report
+                .entries
+                .iter()
+                .any(|entry| entry.request_key == row.request.key && entry.resource == row.resource)
+        );
     }
 }
 
@@ -198,9 +258,11 @@ async fn unresolved_waiters_from_another_scope_remain_unowned_original_context()
     let TelemetryRecord::Operational(record) = &mut rows[2] else { panic!() };
     let OperationalFact::PageWait(row) = &mut record.fact else { panic!() };
     row.resolution = PageWaitResolution::OutsideDatabase;
+    row.target = None;
     row.request.scope = ActivityScopeBasis::OtherDatabase;
     row.request.database = Some("outside-db".into());
     row.resource.native.id = "99:1:42".into();
+    row.observed_address = Some(PageWaitAddress { database_id: 99, file_id: 1, page_id: 42 });
     row.request.wait.as_mut().unwrap().identified_resources = vec![row.resource.clone()];
     record.key = row.key().unwrap();
     let original = record.clone();
@@ -208,5 +270,61 @@ async fn unresolved_waiters_from_another_scope_remain_unowned_original_context()
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     let result = collected_resources::page_waits(&capture).unwrap();
     assert!(result.context.records.iter().any(|row| row.row.record == TelemetryRecord::Operational(original.clone())));
+    assert!(result.report.entries.iter().any(|entry| entry.observation_key == original.key));
+}
+
+#[tokio::test]
+async fn mismatched_page_coordinates_cannot_enter_authenticated_export_or_a_scan_explanation() {
+    let (source, rows) = page_wait_evidence_cases().remove(0);
+    let fixture = Fixture::new(source.clone(), rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    for field in ["database", "file", "page", "missing-address"] {
+        let mut broken = rows.clone();
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(row), .. }) =
+            &mut broken[0]
+        else {
+            panic!()
+        };
+        match field {
+            "database" => row.target.as_mut().unwrap().header.database_id = 99,
+            "file" => row.target.as_mut().unwrap().header.file_id = 99,
+            "page" => row.target.as_mut().unwrap().header.page_id = 99,
+            "missing-address" => row.observed_address = None,
+            _ => unreachable!(),
+        }
+        assert!(!row.is_valid(), "{field}");
+        assert!(ExportedRecord::new(&source, capture.capture(), broken[0].clone()).is_err(), "{field}");
+        let rejected = culprit_checks::analyze(scan(&source, &broken));
+        assert!(rejected.page_waits.is_none(), "{field}");
+        assert!(
+            rejected
+                .snapshot
+                .sources
+                .iter()
+                .any(|outcome| outcome.source == source.observation.snapshot().unwrap().sources[0].source
+                    && outcome.state == SourceState::Unavailable)
+        );
+    }
+}
+
+#[tokio::test]
+async fn unparseable_original_page_address_survives_authenticated_readback_without_a_mapped_header() {
+    let (source, mut rows) = page_wait_evidence_cases().remove(0);
+    let TelemetryRecord::Operational(record) = &mut rows[0] else { panic!() };
+    let OperationalFact::PageWait(row) = &mut record.fact else { panic!() };
+    row.resource.native.id = "provider-specific-undecoded-page".into();
+    row.request.wait.as_mut().unwrap().identified_resources = vec![row.resource.clone()];
+    row.observed_address = None;
+    row.target = None;
+    row.resolution = PageWaitResolution::UnrecognizedAddress;
+    record.key = row.key().unwrap();
+    let original = record.clone();
+    let fixture = Fixture::new(source, rows).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let result = collected_resources::page_waits(&capture).unwrap();
+    assert_eq!(result.report.entries.len(), 2);
+    assert!(
+        result.context.records.iter().any(|record| record.row.record == TelemetryRecord::Operational(original.clone()))
+    );
     assert!(result.report.entries.iter().any(|entry| entry.observation_key == original.key));
 }

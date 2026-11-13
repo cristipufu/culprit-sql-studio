@@ -71,7 +71,7 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc
     rows: 10,
     logical_reads: 100,
     physical_reads: 0,
-    temp_writes: 0,
+    temporary_work: null,
     first_seen: null,
     last_seen: null,
     plans: [{

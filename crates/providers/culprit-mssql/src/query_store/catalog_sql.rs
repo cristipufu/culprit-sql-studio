@@ -10,15 +10,28 @@ OPTION (MAXDOP 1)"#;
 pub(crate) const REPLICAS: &str = "SELECT TOP (101) /* culprit */ replica_group_id FROM sys.query_store_replicas ORDER BY replica_group_id OPTION (MAXDOP 1)";
 pub(crate) const MAX_PLAN: &str =
     "SELECT TOP (1) /* culprit */ plan_id FROM sys.query_store_plan ORDER BY plan_id DESC OPTION (MAXDOP 1)";
+macro_rules! query_identity_columns {
+    ($query_id:literal) => {
+        concat!(
+            $query_id,
+            r#",q.context_settings_id,q.object_id,
+ CONVERT(varchar(16),q.query_hash,2) AS query_hash,
+ CONVERT(varchar(40),q.initial_compile_start_time,127) AS query_initial_compile_at"#
+        )
+    };
+}
+pub(crate) use query_identity_columns;
+
 macro_rules! definition_columns {
     () => {
-        r#"
- p.plan_id AS definition_plan_id, q.query_id, q.context_settings_id, q.object_id, OBJECT_SCHEMA_NAME(q.object_id)+'.'+OBJECT_NAME(q.object_id) AS object_name,
- CONVERT(varchar(16), q.query_hash, 2) AS query_hash,
+        concat!(
+            query_identity_columns!("q.query_id"),
+            r#",
+ p.plan_id AS definition_plan_id,OBJECT_SCHEMA_NAME(q.object_id)+'.'+OBJECT_NAME(q.object_id) AS object_name,
  CONVERT(varchar(16), p.query_plan_hash, 2) AS plan_hash,
- CONVERT(varchar(40), q.initial_compile_start_time, 127) AS query_initial_compile_at,
  CONVERT(varchar(40), p.initial_compile_start_time, 127) AS plan_initial_compile_at
 "#
+        )
     };
 }
 
@@ -83,12 +96,13 @@ CROSS APPLY(SELECT x.value('@id[1]','bigint') AS id) ids
 LEFT JOIN sys.query_store_plan p ON p.plan_id = ids.id
 ORDER BY ids.id OPTION (MAXDOP 1)"#;
 
-pub(crate) const QUERY_DEFINITIONS: &str = r#"
+pub(crate) const QUERY_DEFINITIONS: &str = concat!(
+    r#"
 DECLARE /* culprit */ @ids xml=CONVERT(xml,@P1);
-SELECT /* culprit */ ids.id, q.query_id, q.context_settings_id, q.object_id,
+SELECT /* culprit */ ids.id,"#,
+    query_identity_columns!("q.query_id"),
+    r#",
  CAST(q.is_internal_query AS int) AS engine_internal, CAST(q.is_clouddb_internal_query AS int) AS cloud_internal, OBJECT_SCHEMA_NAME(q.object_id)+'.'+OBJECT_NAME(q.object_id) AS object_name,
- CONVERT(varchar(16), q.query_hash, 2) AS query_hash,
- CONVERT(varchar(40), q.initial_compile_start_time, 127) AS query_initial_compile_at,
  DATALENGTH(t.query_sql_text) AS source_bytes,
  t.is_part_of_encrypted_module AS encrypted, t.has_restricted_text AS restricted,
  CASE WHEN DATALENGTH(t.query_sql_text) <= @P2 AND t.is_part_of_encrypted_module = 0
@@ -102,7 +116,8 @@ CROSS APPLY(SELECT x.value('@id[1]','bigint') AS id) ids
 LEFT JOIN sys.query_store_query q ON q.query_id = ids.id
 LEFT JOIN sys.query_store_query_text t ON t.query_text_id = q.query_text_id
 LEFT JOIN sys.query_context_settings c ON c.context_settings_id = q.context_settings_id
-ORDER BY ids.id OPTION (MAXDOP 1)"#;
+ORDER BY ids.id OPTION (MAXDOP 1)"#
+);
 
 pub(crate) const PLAN_DEFINITIONS: &str = concat!(
     r#"

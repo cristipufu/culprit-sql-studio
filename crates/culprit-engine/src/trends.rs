@@ -645,7 +645,7 @@ mod tests {
             "id": id, "query_hash": null, "text": "SELECT 1", "parameters": null, "object_name": null,
             "executions": runs, "total_time_ms": time, "mean_time_ms": time / runs.max(1.0), "max_time_ms": null,
             "stddev_time_ms": null, "cpu_time_ms": null, "rows": null, "logical_reads": null, "physical_reads": null,
-            "temp_writes": null, "first_seen": null, "last_seen": null, "plans": [], "plan": null, "waits": []
+            "temporary_work": null, "first_seen": null, "last_seen": null, "plans": [], "plan": null, "waits": []
         }))
         .unwrap();
         q.trend = None;

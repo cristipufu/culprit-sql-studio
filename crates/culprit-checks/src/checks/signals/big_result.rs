@@ -22,16 +22,6 @@ check!(
     evidence = &[Evidence::Query(QueryMeasure::Rows)],
 );
 
-/// What a statement's big result adds to the spill finding on it, which carries both (refine's "a spill carries the
-/// result it sorts"): one statement, one share, one finding. Its summary says the rows each run sends, its fix how to
-/// return fewer, and its verify what a later scan shows once it does (nothing for an export, whose rows are the point).
-/// The summary and fix start with a space: they follow the spill's own sentences.
-pub(crate) struct ResultOfASpill {
-    pub summary: String,
-    pub fix: String,
-    pub verify: Option<String>,
-}
-
 /// The rows a run of `q` sends, and their bytes where the plan's row width is known: "80K rows (≈ 11.4 MB)".
 fn sends(rows: f64, width: Option<f64>) -> String {
     match width {
@@ -45,30 +35,6 @@ fn sends(rows: f64, width: Option<f64>) -> String {
 /// The width of one of `q`'s rows: what the engine measured, else its plan's estimate.
 fn row_width(q: &QueryStat) -> Option<f64> {
     q.costs.as_ref().and_then(|c| c.row_bytes).or_else(|| q.plan.as_ref().and_then(plan_row_bytes))
-}
-
-/// [`ResultOfASpill`] for `q`, worded the way [`big_result_finding`] words it; `None` when its runs return no rows count.
-pub(crate) fn result_of_a_spill(snapshot: &Snapshot, q: &QueryStat) -> Option<ResultOfASpill> {
-    let rows = per_run(q.rows?, q.executions);
-    let sends = sends(rows, row_width(q));
-    Some(if looks_like_export(snapshot, q) {
-        ResultOfASpill {
-            summary: format!(" {}", t!("check.big_result.spill.summary_export", sends = sends)),
-            fix: format!(" {}", t!("check.big_result.spill.fix_export")),
-            verify: None,
-        }
-    } else {
-        ResultOfASpill {
-            summary: format!(" {}", t!("check.big_result.spill.summary", sends = sends)),
-            fix: format!(" {}", t!("check.big_result.spill.fix")),
-            // On running totals the spill's own step names the two scans to compare and says why, once.
-            verify: Some(if snapshot.workload.as_ref().is_some_and(|w| !w.is_windowed()) {
-                t!("check.big_result.spill.verify_between_scans")
-            } else {
-                t!("check.big_result.spill.verify_rescan")
-            }),
-        }
-    })
 }
 
 /// A read that sends 10,000 rows or more to the application on every run.

@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use culprit_core::{Coverage, PlanVariant, QueryStat, SnapshotOptions, WaitStat, Workload};
+use culprit_core::{Coverage, PlanVariant, QueryStat, SnapshotOptions, StatementTemporaryWork, WaitStat, Workload};
 
 use crate::plan_xml;
 use crate::query_store::waits;
 use crate::read::NativeRead;
-use culprit_core::telemetry::WaitCaptureState;
+use culprit_core::telemetry::{NativeQueryIdentity, WaitCaptureState};
 
 #[cfg(test)]
 #[path = "workload/window_tests.rs"]
@@ -94,6 +94,18 @@ struct QueryAgg {
 }
 
 impl QueryAgg {
+    fn temporary_space_usage(&self) -> Option<StatementTemporaryWork> {
+        if self.plans.is_empty() {
+            return None;
+        }
+        let usage_pages_total = self.plans.iter().map(|plan| plan.tempdb_pages).sum::<Option<f64>>()?;
+        Some(StatementTemporaryWork::SpaceUsage {
+            source: "sys.query_store_runtime_stats.avg_tempdb_space_used".into(),
+            bytes_per_page: crate::query_store::decode::SQL_SERVER_PAGE_BYTES,
+            usage_pages_total,
+        })
+    }
+
     fn sum(&self, f: impl Fn(&PlanAgg) -> f64) -> f64 {
         self.plans.iter().map(f).sum()
     }
@@ -162,6 +174,8 @@ pub(crate) fn id_list(ids: &[String]) -> String {
 
 pub(crate) struct WorkloadResult {
     pub(crate) workload: Workload,
+    /// Original definition identities remain private to this scan's later native attribution reads.
+    pub(crate) query_identities: HashMap<String, NativeQueryIdentity>,
     pub(crate) waits: Vec<WaitStat>,
     pub(crate) plans_parsed: usize,
     pub(crate) plan_errors: usize,
@@ -351,7 +365,9 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         min_logged_ms: None,
         log: None,
     };
-    Ok(WorkloadResult { workload, waits, plans_parsed, plan_errors, coverage })
+    let query_identities =
+        texts.into_iter().filter_map(|(id, definition)| definition.query.map(|identity| (id, identity))).collect();
+    Ok(WorkloadResult { workload, query_identities, waits, plans_parsed, plan_errors, coverage })
 }
 
 fn to_query_stat(
@@ -408,7 +424,7 @@ fn to_query_stat(
         rows: Some(q.sum(|p| p.rows)),
         logical_reads: Some(q.sum(|p| p.reads)),
         physical_reads: Some(q.sum(|p| p.physical_reads)),
-        temp_writes: q.plans.iter().map(|plan| plan.tempdb_pages).sum(),
+        temporary_work: q.temporary_space_usage(),
         first_seen: q.first_seen(),
         last_seen: q.last_seen(),
         plans: variants,
@@ -597,7 +613,7 @@ pub(crate) async fn from_plan_cache(
             stat.text = sql;
             stat.object_name = detail.and_then(|d| d.object_name.clone());
             stat.stddev_time_ms = None;
-            stat.temp_writes = None;
+            stat.temporary_work = None;
             if plan_counts.get(&q.query_id).copied().unwrap_or(1.0) <= 1.0 {
                 stat.plans.clear();
             }
@@ -638,7 +654,14 @@ pub(crate) async fn from_plan_cache(
         min_logged_ms: None,
         log: None,
     };
-    Ok(WorkloadResult { workload, waits: Vec::new(), plans_parsed, plan_errors, coverage })
+    Ok(WorkloadResult {
+        workload,
+        query_identities: HashMap::new(),
+        waits: Vec::new(),
+        plans_parsed,
+        plan_errors,
+        coverage,
+    })
 }
 
 #[cfg(test)]
@@ -668,6 +691,24 @@ mod tests {
             last_seen: Some(last.into()),
             ..PlanAgg::default()
         }
+    }
+
+    #[test]
+    fn temporary_space_usage_requires_measured_pages_for_every_native_plan() {
+        let mut query = QueryAgg::default();
+        assert!(query.temporary_space_usage().is_none());
+        query.plans.push(PlanAgg { tempdb_pages: Some(0.0), ..Default::default() });
+        assert!(matches!(
+            query.temporary_space_usage(),
+            Some(StatementTemporaryWork::SpaceUsage { usage_pages_total: 0.0, bytes_per_page: 8192, .. })
+        ));
+        query.plans.push(PlanAgg::default());
+        assert!(query.temporary_space_usage().is_none(), "an unmeasured plan is not zero temporary work");
+        query.plans[1].tempdb_pages = Some(12.5);
+        assert!(matches!(
+            query.temporary_space_usage(),
+            Some(StatementTemporaryWork::SpaceUsage { usage_pages_total: 12.5, .. })
+        ));
     }
 
     #[test]

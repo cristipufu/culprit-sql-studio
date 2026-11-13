@@ -7,6 +7,7 @@ import type { QueryTrend } from "./QueryTrend";
 import type { QueryWaitCoverage } from "./QueryWaitCoverage";
 import type { RequestEvidence } from "./RequestEvidence";
 import type { Spread } from "./Spread";
+import type { StatementTemporaryWork } from "./StatementTemporaryWork";
 import type { WaitStat } from "./WaitStat";
 
 export type QueryStat = { requests: RequestEvidence | null, 
@@ -17,7 +18,11 @@ resolved_write_target: string | null, id: string, query_hash: string | null, tex
 /**
  * Parameter declarations sent with the statement, e.g. `@P1 nvarchar(4000)`; they explain implicit conversions.
  */
-parameters: string | null, object_name: string | null, executions: number, total_time_ms: number, mean_time_ms: number, max_time_ms: number | null, stddev_time_ms: number | null, cpu_time_ms: number | null, rows: number | null, logical_reads: number | null, physical_reads: number | null, temp_writes: number | null, first_seen: string | null, last_seen: string | null, plans: Array<PlanVariant>, plan: Plan | null, waits: Array<WaitStat>, 
+parameters: string | null, object_name: string | null, executions: number, total_time_ms: number, mean_time_ms: number, max_time_ms: number | null, stddev_time_ms: number | null, cpu_time_ms: number | null, rows: number | null, logical_reads: number | null, physical_reads: number | null, 
+/**
+ * Native statement resource work with explicit units and meaning; this is not a measured spill-time share.
+ */
+temporary_work: StatementTemporaryWork | null, first_seen: string | null, last_seen: string | null, plans: Array<PlanVariant>, plan: Plan | null, waits: Array<WaitStat>, 
 /**
  * Classes this source measured for this query and whether their observation is complete. Positive rows alone
  * cannot establish that another class was zero. Missing coverage remains unknown.

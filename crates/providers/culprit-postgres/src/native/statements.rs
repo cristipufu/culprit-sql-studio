@@ -1,7 +1,7 @@
 //! PostgreSQL statement identities, counters and distributions. Layout and units are native facts, not SQL Server defaults.
 use super::metadata::{Metadata, StatementCatalog};
 use super::*;
-use culprit_core::{Engine, Error, ErrorCode, ResetMarker, telemetry::*};
+use culprit_core::{Engine, Error, ErrorCode, ResetMarker, StatementTemporaryWork, telemetry::*};
 use std::collections::BTreeMap;
 
 pub(crate) struct Layout {
@@ -13,6 +13,8 @@ pub(crate) struct Layout {
     pub io: &'static str,
     pub since: Option<&'static str>,
     pub toplevel: bool,
+    temp_read_time: bool,
+    temp_write_time: bool,
 }
 impl Layout {
     pub fn for_version(version: u32) -> Self {
@@ -28,6 +30,8 @@ impl Layout {
             io: crate::pressure::statements_io_column(version),
             since: (version >= 170_000).then_some("stats_since"),
             toplevel: version >= 140_000,
+            temp_read_time: version >= 150_000,
+            temp_write_time: version >= 150_000,
         }
     }
     pub fn legacy() -> Self {
@@ -40,6 +44,8 @@ impl Layout {
             io: "(blk_read_time + blk_write_time)",
             since: None,
             toplevel: false,
+            temp_read_time: false,
+            temp_write_time: false,
         }
     }
     pub fn detect(catalog: &StatementCatalog, version: u32) -> Result<Self> {
@@ -50,6 +56,8 @@ impl Layout {
         };
         layout.since = catalog.columns.contains("stats_since").then_some("stats_since");
         layout.toplevel = catalog.columns.contains("toplevel");
+        layout.temp_read_time = catalog.columns.contains(TEMP_READ_TIME.column);
+        layout.temp_write_time = catalog.columns.contains(TEMP_WRITE_TIME.column);
         if [
             "userid",
             "dbid",
@@ -78,6 +86,64 @@ struct MetricSpec {
     unit: RuntimeMetricUnit,
     integer: bool,
 }
+const TEMP_READ_BLOCKS: (&str, RuntimeMetricKey) = ("temp_blks_read", RuntimeMetricKey::TemporaryBlocksRead);
+const TEMP_WRITTEN_BLOCKS: (&str, RuntimeMetricKey) = ("temp_blks_written", RuntimeMetricKey::TemporaryBlocksWritten);
+const TEMP_READ_TIME: TemporaryTime =
+    TemporaryTime { column: "temp_blk_read_time", key: RuntimeMetricKey::TemporaryReadTime };
+const TEMP_WRITE_TIME: TemporaryTime =
+    TemporaryTime { column: "temp_blk_write_time", key: RuntimeMetricKey::TemporaryWriteTime };
+const TEMP_BLOCK_BYTES: &str = "temp_block_bytes";
+
+struct TemporaryTime {
+    column: &'static str,
+    key: RuntimeMetricKey,
+}
+
+/// The same native columns feed exact exported counters and the scan's statement-resource projection.
+/// Resource totals may include planning and execution; a zero timer does not establish historical timing coverage.
+/// https://www.postgresql.org/docs/current/pgstatstatements.html
+pub(crate) fn temporary_work(row: &Row) -> Result<Option<StatementTemporaryWork>> {
+    let read_blocks = integer_value(row, TEMP_READ_BLOCKS.0)?;
+    let written_blocks = integer_value(row, TEMP_WRITTEN_BLOCKS.0)?;
+    let read_time_ms = number(row, TEMP_READ_TIME.column)?;
+    let write_time_ms = number(row, TEMP_WRITE_TIME.column)?;
+    if read_blocks.is_none() && written_blocks.is_none() && read_time_ms.is_none() && write_time_ms.is_none() {
+        return Ok(None);
+    }
+    let bytes_per_block =
+        row.text(TEMP_BLOCK_BYTES).map(|value| value.parse::<u32>().map_err(|_| invalid())).transpose()?;
+    let work = StatementTemporaryWork::BlockIo {
+        source: "pg_stat_statements".into(),
+        bytes_per_block,
+        read_blocks,
+        written_blocks,
+        read_time_ms,
+        write_time_ms,
+    };
+    if work.is_valid() { Ok(Some(work)) } else { Err(invalid()) }
+}
+
+fn temporary_projection(layout: &Layout) -> String {
+    let mut columns = [TEMP_READ_BLOCKS.0, TEMP_WRITTEN_BLOCKS.0]
+        .into_iter()
+        .map(|column| format!("sum({column})::text AS {column}"))
+        .collect::<Vec<_>>();
+    for (spec, available) in [(&TEMP_READ_TIME, layout.temp_read_time), (&TEMP_WRITE_TIME, layout.temp_write_time)] {
+        let column = spec.column;
+        columns.push(if available {
+            format!("sum({column}) AS {column}")
+        } else {
+            format!("NULL::float8 AS {column}")
+        });
+    }
+    columns.push(format!("pg_catalog.current_setting('block_size', true)::integer AS {TEMP_BLOCK_BYTES}"));
+    columns.join(", ")
+}
+
+fn integer_value(row: &Row, name: &str) -> Result<Option<String>> {
+    row.text(name).map(|value| value.parse::<u64>().map(|value| value.to_string()).map_err(|_| invalid())).transpose()
+}
+
 fn metrics(meta: &Metadata, layout: &Layout) -> Vec<MetricSpec> {
     use RuntimeMetricKey as Key;
     use RuntimeMetricUnit as Unit;
@@ -97,8 +163,6 @@ fn metrics(meta: &Metadata, layout: &Layout) -> Vec<MetricSpec> {
         ("local_blks_read", "local-block-reads", pages, true),
         ("local_blks_dirtied", "local-blocks-dirtied", pages, true),
         ("local_blks_written", "local-blocks-written", pages, true),
-        ("temp_blks_read", "temporary-block-reads", pages, true),
-        ("temp_blks_written", "temporary-block-writes", pages, true),
         ("plans", "plans", Unit::Count, true),
         ("total_plan_time", "planning-duration", Unit::Milliseconds, false),
         ("wal_records", "wal-records", Unit::Count, true),
@@ -109,8 +173,6 @@ fn metrics(meta: &Metadata, layout: &Layout) -> Vec<MetricSpec> {
         ("shared_blk_write_time", "shared-io-write-time", Unit::Milliseconds, false),
         ("local_blk_read_time", "local-io-read-time", Unit::Milliseconds, false),
         ("local_blk_write_time", "local-io-write-time", Unit::Milliseconds, false),
-        ("temp_blk_read_time", "temporary-io-read-time", Unit::Milliseconds, false),
-        ("temp_blk_write_time", "temporary-io-write-time", Unit::Milliseconds, false),
         ("jit_functions", "jit-functions", Unit::Count, true),
         ("jit_generation_time", "jit-generation-time", Unit::Milliseconds, false),
         ("jit_inlining_count", "jit-inlining-count", Unit::Count, true),
@@ -125,6 +187,12 @@ fn metrics(meta: &Metadata, layout: &Layout) -> Vec<MetricSpec> {
         ("parallel_workers_launched", "parallel-workers-launched", Unit::Count, true),
     ] {
         specs.push(MetricSpec { column, key: Key::Native(format!("postgres.{key}")), unit, integer });
+    }
+    for (column, key) in [TEMP_READ_BLOCKS, TEMP_WRITTEN_BLOCKS] {
+        specs.push(MetricSpec { column, key, unit: pages, integer: true });
+    }
+    for spec in [TEMP_READ_TIME, TEMP_WRITE_TIME] {
+        specs.push(MetricSpec { column: spec.column, key: spec.key, unit: Unit::Milliseconds, integer: false });
     }
     specs
 }
@@ -220,9 +288,11 @@ pub(crate) fn counters(row: &Row, meta: &Metadata) -> Result<StatementCounterSam
     let layout = Layout::detect(catalog(meta)?, meta.version)?;
     let mut totals = vec![];
     for spec in metrics(meta, &layout) {
-        let Some(value) = row.text(spec.column) else { continue };
+        if row.value(spec.column).flatten().is_none() {
+            continue;
+        }
         let total = if spec.integer {
-            MeasurementValue::Integer(value.parse::<u64>().map_err(|_| invalid())?.to_string())
+            MeasurementValue::Integer(integer_value(row, spec.column)?.ok_or_else(invalid)?)
         } else {
             MeasurementValue::Real(number(row, spec.column)?.ok_or_else(invalid)?)
         };
@@ -318,7 +388,7 @@ pub(crate) fn aggregated_base(relation: &str, c: &Layout) -> String {
                 sqrt(greatest(sum(calls * ({stddev} ^ 2 + {mean} ^ 2)) / nullif(sum(calls), 0)::float8
                               - (sum({total}) / nullif(sum(calls), 0)::float8) ^ 2, 0)) AS stddev_ms,
                 sum(rows) AS rows, sum(shared_blks_hit + shared_blks_read) AS reads, sum(shared_blks_read) AS phys,
-                sum(temp_blks_written) AS temp, sum({io}) AS io_ms, {first_seen} AS first_seen,
+                {temporary}, sum({io}) AS io_ms, {first_seen} AS first_seen,
                 count(*) AS entries,
                 (array_agg(query ORDER BY {total} DESC)
                    FILTER (WHERE pg_get_userbyid(userid) = session_user AND current_user = session_user))[1] AS own_query
@@ -333,6 +403,7 @@ pub(crate) fn aggregated_base(relation: &str, c: &Layout) -> String {
         stddev = c.stddev,
         min = c.min,
         io = c.io,
+        temporary = temporary_projection(c),
     )
 }
 
@@ -342,3 +413,6 @@ pub(crate) fn statements_base(relation: &str, version_num: u32) -> String {
 pub(crate) fn statements_base_legacy(relation: &str) -> String {
     aggregated_base(relation, &Layout::legacy())
 }
+
+#[cfg(test)]
+mod tests;

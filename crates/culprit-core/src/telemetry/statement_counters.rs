@@ -13,8 +13,16 @@ impl StatementCounter {
     fn is_valid(&self) -> bool {
         self.key.accepts(self.unit)
             && self.total.is_valid()
-            && (!matches!(self.key, RuntimeMetricKey::Executions | RuntimeMetricKey::Rows)
-                || matches!(self.total, MeasurementValue::Integer(_)))
+            && (!matches!(
+                self.key,
+                RuntimeMetricKey::Executions
+                    | RuntimeMetricKey::Rows
+                    | RuntimeMetricKey::TemporaryBlocksRead
+                    | RuntimeMetricKey::TemporaryBlocksWritten
+                    | RuntimeMetricKey::TemporaryTables
+                    | RuntimeMetricKey::TemporaryDiskTables
+                    | RuntimeMetricKey::SortMergePasses
+            ) || matches!(self.total, MeasurementValue::Integer(_)))
     }
 }
 /// Some sources reset extrema independently from their cumulative mean and variance.

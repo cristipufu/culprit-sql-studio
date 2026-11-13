@@ -200,11 +200,18 @@ impl<R: NativeRead> Reader<R> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.read(&super::costs::compilation_sql(), vec![ids_parameter(ids)?], MAX_RESULT_ROWS)
-            .await?
-            .iter()
-            .map(super::costs::Compilation::decode)
-            .collect()
+        let rows = self.read(&super::costs::compilation_sql(), vec![ids_parameter(ids)?], MAX_RESULT_ROWS).await?;
+        let mut observed = std::collections::BTreeSet::new();
+        let mut compilations = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let compilation = super::costs::Compilation::decode(row)?;
+            if !ids.contains(&compilation.identity.query_id) || !observed.insert(compilation.identity.query_id.clone())
+            {
+                return Err(self.source_changed());
+            }
+            compilations.push(compilation);
+        }
+        Ok(compilations)
     }
     pub(crate) async fn close(&mut self) -> SourceShutdown {
         self.io.close().await

@@ -1,7 +1,10 @@
 //! Observed wait targets explain affected requests, never transient latch holders or an exclusive cause.
 use culprit_core::{
     Error, PageWaitExplanation, PageWaitReport, Result, SourceOutcome, SourceState, WaitResourceKind, format, key, t,
-    telemetry::{MAX_PAGE_WAIT_OBSERVATIONS, PageWaitObservation, PageWaitResolution, PageWaitTargetKind},
+    telemetry::{
+        MAX_PAGE_WAIT_OBSERVATIONS, PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState,
+        PageWaitResolution, PageWaitTargetKind,
+    },
 };
 use std::collections::BTreeSet;
 
@@ -116,6 +119,10 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
     } else {
         details.push(culprit_core::i18n::t(unresolved_message(observation.resolution), &[]));
     }
+    details.push(culprit_core::i18n::t(
+        recheck_message(observation.after_check.as_ref().or(observation.before_check.as_ref())),
+        &[],
+    ));
     let investigation = culprit_core::i18n::t(investigation_message(&case), &[]);
     PageWaitExplanation {
         observation_key: case.key,
@@ -143,14 +150,28 @@ fn unresolved_message(resolution: PageWaitResolution) -> &'static str {
         PageWaitResolution::Unsupported => key!("view.page_waits.unresolved.unsupported"),
         PageWaitResolution::PermissionDenied => key!("view.page_waits.unresolved.permission_denied"),
         PageWaitResolution::Unavailable => key!("view.page_waits.unresolved.unavailable"),
-        PageWaitResolution::MissingRequest => key!("view.page_waits.unresolved.missing_request"),
-        PageWaitResolution::ChangedRequest => key!("view.page_waits.unresolved.changed_request"),
         PageWaitResolution::ChangedMetadata => key!("view.page_waits.unresolved.changed_metadata"),
         PageWaitResolution::UnverifiedSource => key!("view.page_waits.unresolved.unverified_source"),
         PageWaitResolution::UnrecognizedAddress => key!("view.page_waits.unresolved.unrecognized_address"),
         PageWaitResolution::Limit => key!("view.page_waits.unresolved.limit"),
         // is_valid rejects an observed-at-both-bounds row without its native target.
         PageWaitResolution::ObservedAtBothBounds => key!("view.page_waits.unresolved.unavailable"),
+    }
+}
+fn recheck_message(check: Option<&PageWaitRecheck>) -> &'static str {
+    let Some(check) = check else {
+        return key!("view.page_waits.recheck.unavailable");
+    };
+    match check.request {
+        PageWaitRequestState::Missing => key!("view.page_waits.recheck.missing"),
+        PageWaitRequestState::Changed => key!("view.page_waits.recheck.changed"),
+        PageWaitRequestState::Unverified => key!("view.page_waits.recheck.unverified"),
+        PageWaitRequestState::SameStatement => match check.wait {
+            PageWaitRelation::OriginalObserved => key!("view.page_waits.recheck.original_observed"),
+            PageWaitRelation::NoLongerObserved => key!("view.page_waits.recheck.no_longer_observed"),
+            PageWaitRelation::Different => key!("view.page_waits.recheck.different"),
+            PageWaitRelation::Unqualified => key!("view.page_waits.recheck.unqualified"),
+        },
     }
 }
 fn investigation_message(case: &ObservedPage<'_>) -> &'static str {

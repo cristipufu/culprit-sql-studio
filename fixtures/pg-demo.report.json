@@ -142,7 +142,7 @@
       "check": "temp-spill",
       "reason": null,
       "status": "findings",
-      "title": "Queries writing temp files"
+      "title": "Temporary resource work"
     },
     {
       "check": "stale-stats",
@@ -276,7 +276,7 @@
       ],
       "check": "big-result",
       "reason": null,
-      "status": "assessed",
+      "status": "findings",
       "title": "Queries that return huge results"
     },
     {
@@ -327,7 +327,7 @@
       "actionability": "needs-attention",
       "category": "queries",
       "caveats": [],
-      "check": "temp-spill",
+      "check": "big-result",
       "confidence": "high",
       "facts": {
         "advice": {
@@ -350,40 +350,33 @@
         "usual_fast_plan": null
       },
       "fix": {
-        "cost": "work_mem is per sort or hash, per connection: size it with your connection count in mind.",
-        "sql": "-- For the role the application connects as (takes effect on its next connections):\nALTER ROLE <app_role> SET work_mem = '64MB';\n\n-- Or only for this statement, inside its transaction:\nSET LOCAL work_mem = '64MB';",
-        "summary": "Give this statement more sort memory (64MB instead of 4MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows. Where the application doesn't use every row it receives, return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database."
+        "cost": null,
+        "sql": null,
+        "summary": "Return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database."
       },
-      "id": "temp-spill:9065391607317686058",
+      "id": "big-result:9065391607317686058",
       "impact": {
         "db_time_share": 0.44029066258942773,
-        "label": "44% of DB time",
-        "label_key": "support.impact.share",
-        "score": 66.35440170700268,
+        "label": "247K rows per run",
+        "score": 66.35440170700267,
         "time_ms_per_day": null
       },
       "inactive": false,
       "last_seen": null,
       "metrics": [
         {
-          "label": "Temp written per run",
-          "text": null,
-          "unit": "bytes",
-          "value": 20824064.0
-        },
-        {
-          "key": "common.metric.average_duration",
-          "label": "Average duration",
-          "text": null,
-          "unit": "ms",
-          "value": 331.8799853551402
-        },
-        {
           "key": "check.big_result.metric.rows_per_run",
           "label": "Rows per run",
           "text": null,
           "unit": "rows",
           "value": 246582.89719626168
+        },
+        {
+          "key": "common.metric.runs",
+          "label": "Runs",
+          "text": null,
+          "unit": "count",
+          "value": 214.0
         },
         {
           "key": "check.big_result.metric.bytes_per_run",
@@ -397,7 +390,7 @@
         {
           "id": "9065391607317686058",
           "note": null,
-          "plan_node": 1
+          "plan_node": null
         }
       ],
       "severity": "medium",
@@ -405,12 +398,11 @@
         "kind": "query",
         "name": "9065391607317686058"
       },
-      "summary": "The associated statements used 1 min of database time over the 5 hours since statistics were reset (44%). A sort or hash in this statement needs more memory than work_mem (4MB in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory. Each run also sends 247K rows (≈ 17.4 MB) to the application, and few screens or jobs need that many at once: returning fewer can keep the sort in memory too. Latest activity: 25 runs observed over 32 minutes of Culprit's scans on Oct 11, 11:22–11:54 UTC. This count is shown without extrapolating a daily rate.",
-      "title": "A read from orders writes about 19.9 MB of temp files per run",
+      "summary": "The associated statements used 1 min of database time over the 5 hours since statistics were reset (44%). Each run sends 247K rows to the application, about 17.4 MB at the plan's estimated 74 B per row; its 214 runs since its statistics began 5 hours ago moved 52.8M rows. Few screens or jobs need that many at once: the database reads them, the network carries them and the application holds them in memory. Latest activity: 25 runs observed over 32 minutes of Culprit's scans on Oct 11, 11:22–11:54 UTC. This count is shown without extrapolating a daily rate.",
+      "title": "A read from orders returns 247K rows (≈ 17.4 MB) per run",
       "verification_basis": "rescan",
       "verify": [
-        "Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).",
-        "If it now returns fewer rows, the rows it returns per run between those two scans should drop to what a page or a job actually uses."
+        "Between two scans, the rows it returns per run should drop to what a page or a job actually uses: pg_stat_statements keeps running totals, so compare its rows and runs in a scan taken once the change is live and one a day or more later (52.8M rows in 214 runs in this scan)."
       ]
     },
     {
@@ -1320,6 +1312,57 @@
       ]
     },
     {
+      "actionability": "information",
+      "category": "queries",
+      "caveats": [
+        "Resource totals can include planning and execution work. Parallel I/O times are not an exclusive elapsed-time component, and zero timings do not establish complete historical timing coverage.",
+        "These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run."
+      ],
+      "check": "temp-spill",
+      "confidence": "high",
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits."
+      },
+      "id": "temp-spill:9065391607317686058",
+      "impact": {
+        "db_time_share": null,
+        "label": "",
+        "score": 8.0,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": null,
+      "metrics": [
+        {
+          "key": "view.temporary_work.written_blocks",
+          "label": "Native temporary blocks written",
+          "text": "543988",
+          "unit": "text",
+          "value": 0.0
+        }
+      ],
+      "queries": [
+        {
+          "id": "9065391607317686058",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "low",
+      "subject": {
+        "kind": "query",
+        "name": "9065391607317686058"
+      },
+      "summary": "The source recorded temporary block traffic and any available I/O timings for this statement. Individual executions and operators remain unresolved.",
+      "title": "A read from orders: Recorded temporary I/O",
+      "verification_basis": "rescan",
+      "verify": [
+        "Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change."
+      ]
+    },
+    {
       "actionability": "history",
       "category": "queries",
       "caveats": [
@@ -1614,7 +1657,6 @@
         "a plan's index request is the finding for its table and key",
         "a rewrite, not an index, fixes a scan behind a function or wildcard",
         "a spill explains the big sort",
-        "a spill carries the result it sorts",
         "an index to add covers the foreign key",
         "an index the engine builds for itself is the foreign key's",
         "an index to add replaces a histogram",
@@ -1646,18 +1688,6 @@
     }
   },
   "refinement": [
-    {
-      "finding": "big-result:9065391607317686058",
-      "outcome": {
-        "into": "temp-spill:9065391607317686058",
-        "kind": "absorbed"
-      },
-      "queries": [
-        "9065391607317686058"
-      ],
-      "rule": "spill-carries-result",
-      "tables": []
-    },
     {
       "finding": "unindexed-fk:public.orders(customer_id)",
       "outcome": {
@@ -1730,7 +1760,7 @@
       "finding": "heavy-query:9065391607317686058",
       "outcome": {
         "by": [
-          "temp-spill:9065391607317686058"
+          "big-result:9065391607317686058"
         ],
         "kind": "covered"
       },
@@ -1851,6 +1881,18 @@
       "tables": []
     },
     {
+      "finding": "big-result:9065391607317686058",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": null
+      },
+      "queries": [
+        "9065391607317686058"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
       "finding": "heavy-query:-8886085649470066503",
       "outcome": {
         "basis": "single-execution",
@@ -1951,30 +1993,6 @@
       "tables": []
     },
     {
-      "finding": "temp-spill:9065391607317686058",
-      "outcome": {
-        "aspect": "absolute-cost",
-        "kind": "presentation"
-      },
-      "queries": [
-        "9065391607317686058"
-      ],
-      "rule": "absolute-query-cost",
-      "tables": []
-    },
-    {
-      "finding": "temp-spill:9065391607317686058",
-      "outcome": {
-        "aspect": "observed-activity",
-        "kind": "presentation"
-      },
-      "queries": [
-        "9065391607317686058"
-      ],
-      "rule": "absolute-query-cost",
-      "tables": []
-    },
-    {
       "finding": "planning-time:-967240904657798800",
       "outcome": {
         "aspect": "absolute-cost",
@@ -1994,6 +2012,30 @@
       },
       "queries": [
         "6425265648074738764"
+      ],
+      "rule": "absolute-query-cost",
+      "tables": []
+    },
+    {
+      "finding": "big-result:9065391607317686058",
+      "outcome": {
+        "aspect": "absolute-cost",
+        "kind": "presentation"
+      },
+      "queries": [
+        "9065391607317686058"
+      ],
+      "rule": "absolute-query-cost",
+      "tables": []
+    },
+    {
+      "finding": "big-result:9065391607317686058",
+      "outcome": {
+        "aspect": "observed-activity",
+        "kind": "presentation"
+      },
+      "queries": [
+        "9065391607317686058"
       ],
       "rule": "absolute-query-cost",
       "tables": []
@@ -3735,7 +3777,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -3837,7 +3878,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 21.93120453003782,
-          "temp_writes": 543988.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "543988"
+          },
           "text": "SELECT id, note FROM orders WHERE created_at > now() - interval $1 ORDER BY note",
           "total_time_ms": 71022.31686599995,
           "trend": {
@@ -4139,7 +4188,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -4269,7 +4317,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 8.299890707788853,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT id, status, total, created_at FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT $2",
           "total_time_ms": 37678.48510800003,
           "trend": {
@@ -4392,7 +4448,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -4454,7 +4509,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 8963.45865766771,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT pg_sleep($1)",
           "total_time_ms": 20020.476877,
           "trend": {
@@ -4631,7 +4694,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -4713,7 +4775,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "UPDATE products SET name = name WHERE id = $1",
           "total_time_ms": 18957.566422,
           "trend": {
@@ -5009,7 +5079,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -5139,7 +5208,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 2.409066030206302,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT count(*), sum(quantity * price) FROM order_items WHERE product_id = $1",
           "total_time_ms": 6787.841944999999,
           "trend": {
@@ -5481,7 +5558,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -5623,7 +5699,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 3.120407355203056,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT status, count(*), sum(total) FROM orders WHERE created_at > now() - interval $1 GROUP BY status",
           "total_time_ms": 2376.705239000001,
           "trend": {
@@ -5845,7 +5929,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -5947,7 +6030,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.06958091203996157,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT kind, count(*) FROM events WHERE customer_id = $1 GROUP BY kind",
           "total_time_ms": 129.85778199999993,
           "trend": {
@@ -6078,7 +6169,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6140,7 +6230,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.11234093600405518,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT name, email FROM customers WHERE id = $1",
           "total_time_ms": 129.0606290000006,
           "trend": {
@@ -6210,7 +6308,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "CREATE DATABASE bare",
           "total_time_ms": 48.613977,
           "trend": {
@@ -6372,7 +6478,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6447,7 +6552,15 @@
           "rows_affected": null,
           "spread": null,
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "UPDATE products SET price = price WHERE id = $1",
           "total_time_ms": 0.31157999999999997,
           "trend": {
@@ -6571,7 +6684,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6626,7 +6738,15 @@
           "rows_affected": null,
           "spread": null,
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT pg_stat_statements_reset()",
           "total_time_ms": 0.06691599999999999,
           "trend": {
@@ -6804,7 +6924,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6879,7 +6998,15 @@
           "rows_affected": null,
           "spread": null,
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "select count(*), sum(calls) from pg_stat_statements where query like $1",
           "total_time_ms": 0.055082,
           "trend": {
@@ -7003,7 +7130,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -7058,7 +7184,15 @@
           "rows_affected": null,
           "spread": null,
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT pg_stat_reset()",
           "total_time_ms": 0.021083,
           "trend": {
@@ -7106,7 +7240,15 @@
           "rows_affected": null,
           "spread": null,
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "DROP DATABASE IF EXISTS bare",
           "total_time_ms": 0.009417,
           "trend": {
@@ -7154,7 +7296,15 @@
           "rows_affected": null,
           "spread": null,
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "COMMIT",
           "total_time_ms": 0.002167,
           "trend": {
@@ -7209,7 +7359,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.0007790701417165758,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "BEGIN",
           "total_time_ms": 0.002,
           "trend": {
@@ -7397,7 +7555,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -7479,7 +7636,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.0,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "UPDATE archive.wide SET touched = touched + $1 WHERE id % $2 = $3",
           "total_time_ms": 326.781899,
           "trend": null,
@@ -8642,7 +8807,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -9144,7 +9308,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.013392320049970183,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT o12.status FROM orders o1 JOIN orders o2 ON o2.id = o1.id JOIN orders o3 ON o3.id = o2.id JOIN orders o4 ON o4.id = o3.id JOIN orders o5 ON o5.id = o4.id JOIN orders o6 ON o6.id = o5.id JOIN orders o7 ON o7.id = o6.id JOIN orders o8 ON o8.id = o7.id JOIN orders o9 ON o9.id = o8.id JOIN orders o10 ON o10.id = o9.id JOIN orders o11 ON o11.id = o10.id JOIN orders o12 ON o12.id = o11.id WHERE o1.id = $1",
           "total_time_ms": 16.075515,
           "trend": null,
@@ -9328,7 +9500,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -9410,7 +9581,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 5.7957299848605315,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT count(*), sum(price * $1), max(length(name)) FROM products WHERE price > $2",
           "total_time_ms": 3813.546596,
           "trend": null,

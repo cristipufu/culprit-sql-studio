@@ -488,3 +488,106 @@ async fn native_activity_shares_live_facts_and_only_reads_locks_for_persistent_w
     let sql = serde_json::to_value(&healthy).unwrap();
     assert!(!sql.to_string().contains("pg_locks"), "healthy activity polls must not acquire a lock-manager snapshot");
 }
+
+#[tokio::test]
+#[ignore = "requires the owned loopback PostgreSQL provider fixture"]
+async fn native_temporary_work_matches_scan_and_capture_without_executing_application_plans() {
+    let provider = crate::PostgresProvider::new(&spec()).unwrap();
+    let admin = provider.connector.connect_unconfigured().await.unwrap().client;
+    // Deliberately generate bounded temporary work only in this disposable fixture. Collection changes no settings
+    // and never executes the recorded statement or an EXPLAIN plan to obtain these native counters.
+    admin
+        .batch_execute(
+            "BEGIN;
+        SET LOCAL work_mem='64kB';
+        SET LOCAL max_parallel_workers_per_gather=0;
+        SET LOCAL track_io_timing=on;
+        SELECT length(string_agg(repeat(md5(n::text),4),'|' ORDER BY repeat(md5(n::text),4)))
+          FROM generate_series(1,12000) n /* culprit_temporary_actor */;
+        COMMIT;",
+        )
+        .await
+        .unwrap();
+    let probe = crate::probe::probe(&admin, "127.0.0.1").await.unwrap();
+    let workload = crate::workload::collect_workload(
+        &admin,
+        &probe,
+        &culprit_core::SnapshotOptions { plans: 0, top_queries: 100, ..Default::default() },
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .workload;
+    let query = workload
+        .queries
+        .iter()
+        .find(|query| query.text.contains("/* culprit_temporary_actor */"))
+        .expect("the native application statement remains identifiable without executing its plan");
+    let work = query.temporary_work.as_ref().unwrap();
+    let culprit_core::StatementTemporaryWork::BlockIo {
+        bytes_per_block,
+        read_blocks,
+        written_blocks,
+        read_time_ms,
+        write_time_ms,
+        ..
+    } = work
+    else {
+        panic!("native temporary blocks, not a reservation or table count")
+    };
+    let block_bytes = crate::rows::query_one(&admin, "SELECT current_setting('block_size') AS block_bytes")
+        .await
+        .unwrap()
+        .unwrap()
+        .string("block_bytes")
+        .parse::<u32>()
+        .unwrap();
+    assert_eq!(*bytes_per_block, Some(block_bytes));
+    assert!(read_blocks.as_ref().unwrap().parse::<u64>().unwrap() > 0);
+    assert!(written_blocks.as_ref().unwrap().parse::<u64>().unwrap() > 0);
+    assert!(
+        read_time_ms.is_some() && write_time_ms.is_some(),
+        "native timers remain reported totals, not elapsed shares"
+    );
+    assert!(query.plan.is_none() && query.plans.is_empty());
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("statement-work");
+    let manifest = collect_once(
+        &SourceGate::default(),
+        &Factory(crate::PostgresProvider::new(&spec()).unwrap()),
+        CollectionRequest {
+            subject: CollectionSubject::Database,
+            selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementCounters },
+            budget: CollectionBudget { max_snapshot_rows: 10000, max_pages: 1000, ..Default::default() },
+        },
+        &output,
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(manifest.status, CollectionStatus::Complete);
+    let mut captured = None;
+    for file in &manifest.files {
+        for line in std::fs::read_to_string(output.join(&file.file)).unwrap().lines() {
+            let row: ExportedRecord = serde_json::from_str(line).unwrap();
+            let TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::StatementCounters(sample),
+                ..
+            }) = row.record
+            else {
+                continue;
+            };
+            if sample.identity.query_id == query.id {
+                assert!(captured.is_none(), "one native role/top-level entry belongs to this fixture statement");
+                captured = Some(sample);
+            }
+        }
+    }
+    let captured = captured.expect("the existing native capture retains the same statement resource facts");
+    assert_eq!(statement_temporary_work(&captured, "pg_stat_statements").unwrap(), vec![work.clone()]);
+    assert_eq!(captured.scope, culprit_core::MeasurementScope::Database);
+    assert!(matches!(captured.reset, culprit_core::ResetMarker::At(_)));
+    assert!(captured.identity.qualifiers.contains_key("userid"));
+    assert!(captured.identity.qualifiers.contains_key("toplevel"));
+    assert!(captured.identity.qualifiers.contains_key("stats_since"));
+}

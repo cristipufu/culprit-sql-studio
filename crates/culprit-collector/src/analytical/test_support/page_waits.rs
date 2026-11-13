@@ -10,20 +10,34 @@ pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRe
     io.request.command = Some("SELECT".into());
     io.request.statement =
         DefinitionPayload::sql("SELECT payload FROM dbo.orders WHERE customer_id=9264", culprit_core::Engine::Mssql);
+    io.after_check.as_mut().unwrap().wait = PageWaitRelation::NoLongerObserved;
     let full = vec![record(first), record(io)];
     let mut partial = full.clone();
-    for (id, address, resolution) in [
-        ("63", "5:1:66", PageWaitResolution::ChangedRequest),
-        ("64", "5:1:77", PageWaitResolution::Unavailable),
-        ("65", "5:1:88", PageWaitResolution::UnverifiedSource),
+    for (id, address, page, resolution, request) in [
+        ("63", "5:1:66", 66, PageWaitResolution::ObservedAtBothBounds, PageWaitRequestState::Changed),
+        ("64", "5:1:77", 77, PageWaitResolution::Unavailable, PageWaitRequestState::Missing),
+        ("65", "5:1:88", 88, PageWaitResolution::UnverifiedSource, PageWaitRequestState::Unverified),
     ] {
-        let mut unresolved = observation(id, address, WaitResourceKind::MemoryPage, 42);
+        let mut unresolved = observation(id, address, WaitResourceKind::MemoryPage, page);
         unresolved.resolution = resolution;
-        unresolved.target = None;
+        unresolved.after_check.as_mut().unwrap().request = request;
+        unresolved.after_check.as_mut().unwrap().wait = PageWaitRelation::Unqualified;
+        if resolution != PageWaitResolution::ObservedAtBothBounds {
+            unresolved.target = None;
+        }
         unresolved.statement_identity = None;
         unresolved.plan_identity = None;
         partial.push(record(unresolved));
     }
+    let mut undecoded = observation("66", "unparsed-native-page", WaitResourceKind::MemoryPage, 0);
+    undecoded.observed_address = None;
+    undecoded.resolution = PageWaitResolution::UnrecognizedAddress;
+    undecoded.target = None;
+    undecoded.before_check = None;
+    undecoded.after_check = None;
+    undecoded.statement_identity = None;
+    undecoded.plan_identity = None;
+    partial.push(record(undecoded));
     [
         (full, culprit_core::SourceState::Collected),
         (partial, culprit_core::SourceState::Partial),
@@ -83,11 +97,22 @@ fn observation(session: &str, address: &str, kind: WaitResourceKind, page: u32) 
         observed_from: "2020-01-01T12:00:00.250000000Z".into(),
         observed_until: "2020-01-01T12:00:00.750000000Z".into(),
         request,
+        before_check: Some(PageWaitRecheck {
+            observed_at: "2020-01-01T12:00:00.300000000Z".into(),
+            request: PageWaitRequestState::SameStatement,
+            wait: PageWaitRelation::OriginalObserved,
+        }),
+        after_check: Some(PageWaitRecheck {
+            observed_at: "2020-01-01T12:00:00.700000000Z".into(),
+            request: PageWaitRequestState::SameStatement,
+            wait: PageWaitRelation::OriginalObserved,
+        }),
         statement_identity: Some(
             NativeIdentity::new(format!("native-sql-{session}")).qualified("statement_start_offset", "0"),
         ),
         plan_identity: Some(NativeIdentity::new(format!("native-plan-{session}"))),
         resource,
+        observed_address: Some(PageWaitAddress { database_id: 5, file_id: 1, page_id: page }),
         resolution: PageWaitResolution::ObservedAtBothBounds,
         target: Some(Box::new(MappedPageTarget {
             identity_basis: PageTargetIdentityBasis::LocalDatabaseFileEpoch,

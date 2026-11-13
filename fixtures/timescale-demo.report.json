@@ -109,7 +109,7 @@
       "check": "temp-spill",
       "reason": null,
       "status": "assessed",
-      "title": "Queries writing temp files"
+      "title": "Temporary resource work"
     },
     {
       "check": "stale-stats",
@@ -508,7 +508,6 @@
         "a plan's index request is the finding for its table and key",
         "a rewrite, not an index, fixes a scan behind a function or wildcard",
         "a spill explains the big sort",
-        "a spill carries the result it sorts",
         "an index to add covers the foreign key",
         "an index the engine builds for itself is the foreign key's",
         "an index to add replaces a histogram",
@@ -3641,7 +3640,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -4423,7 +4421,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 5.094069300605403,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT device_id, avg(temperature) FROM public.sensor_readings WHERE observed_at >= timestamptz $1 GROUP BY device_id",
           "total_time_ms": 767.0731959999998,
           "trend": null,
@@ -5776,7 +5782,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6278,7 +6283,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.1615239255472588,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT observed_at, temperature FROM public.sensor_readings WHERE device_id = $1 AND observed_at >= timestamptz $2 ORDER BY observed_at DESC LIMIT $3",
           "total_time_ms": 9.767306,
           "trend": null,
@@ -6395,7 +6408,6 @@
                 "plan-regression",
                 "parameter-sensitive",
                 "plan-warnings",
-                "temp-spill",
                 "memory-grant",
                 "missing-index",
                 "filtered-scan",
@@ -6457,7 +6469,15 @@
             "p99_ms": null
           },
           "stddev_time_ms": 0.0031995476514501235,
-          "temp_writes": 0.0,
+          "temporary_work": {
+            "bytes_per_block": null,
+            "kind": "block-io",
+            "read_blocks": null,
+            "read_time_ms": null,
+            "source": "pg_stat_statements",
+            "write_time_ms": null,
+            "written_blocks": "0"
+          },
           "text": "SELECT name FROM public.devices WHERE id = $1",
           "total_time_ms": 0.5649309999999997,
           "trend": null,

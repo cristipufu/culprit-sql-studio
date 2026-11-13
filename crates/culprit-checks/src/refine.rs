@@ -38,7 +38,6 @@ pub(crate) fn rules() -> Vec<Arc<dyn Refine>> {
         Arc::new(indexes::Rule(indexes::Policy::PlanRequest)),
         Arc::new(coverage::Rule(coverage::Policy::Rewrite)),
         Arc::new(coverage::Rule(coverage::Policy::SpillSort)),
-        Arc::new(queries::Rule(queries::Policy::SpillResult)),
         Arc::new(coverage::Rule(coverage::Policy::ForeignKey)),
         Arc::new(indexes::Rule(indexes::Policy::AutomaticForeignKey)),
         Arc::new(indexes::Rule(indexes::Policy::Histogram)),
@@ -69,9 +68,11 @@ pub(crate) fn rules() -> Vec<Arc<dyn Refine>> {
 /// A finding whose share of database time is its statements' but measures none of it: a guess at what the optimizer
 /// may misjudge (a column with no histogram, statistics behind their table) or an engine's estimate of what an index
 /// would save (Azure's index advice), and the list of forced plans. It never explains a heavy query away. SQL Server's
-/// own plan advice stands on what it measured: the regression behind a plan to force, a forced plan's scan.
+/// own plan advice stands on what it measured: the regression behind a plan to force, a forced plan's scan. A native
+/// spill warning establishes resource work, without measuring how much query time spilling consumed.
 fn measures_no_time(f: &Finding) -> bool {
-    matches!(f.check.as_str(), "missing-histogram" | "stale-stats")
+    f.facts.cause == Some(FindingCause::Spill)
+        || matches!(f.check.as_str(), "missing-histogram" | "stale-stats")
         || (f.check == "tuning-advice"
             && f.facts.recommended_plan.is_none()
             && f.facts.cause != Some(FindingCause::ForcedPlanScan))
@@ -351,35 +352,53 @@ mod tests {
         assert_eq!(left(force), vec![format!("heavy-query:{}", ids[1])]);
     }
 
-    // The PostgreSQL demo: the sort that spills and the result it returns are one statement, one share: big-result
-    // and temp-spill each said 45% of database time, with two fixes.
+    // Native temporary totals do not establish that a particular sort created a large returned result.
     #[test]
-    fn a_spill_carries_the_big_result_it_sorts() {
+    fn temporary_resource_totals_preserve_the_independent_large_result_finding() {
         let report = crate::analyze(fixture("postgres-demo.json"));
         let id = "9065391607317686058";
-        assert!(!report.findings.iter().any(|f| f.id == format!("big-result:{id}")));
-        let spill = report.findings.iter().find(|f| f.id == format!("temp-spill:{id}")).expect("the spill");
-        assert!(
-            spill.summary.contains(" Each run also sends 247K rows (≈ 17.4 MB) to the application"),
-            "{}",
-            spill.summary
-        );
-        let fix = &spill.fix.as_ref().unwrap().summary;
-        assert!(
-            fix.contains(
-                "Where the application doesn't use every row it receives, return only what's used: page the results"
-            ),
-            "{fix}"
-        );
-        // The spill's step names the two scans to compare; the rows' step reads its rows between them.
-        assert!(
-            spill.verify.iter().any(|v| v
-                == "If it now returns fewer rows, the rows it returns per run between those two scans should drop to what a page or a job actually uses."),
-            "{:?}",
-            spill.verify
-        );
-        assert!(spill.metrics.iter().any(|m| m.label == "Rows per run"));
-        assert_eq!(report.findings.iter().filter(|f| f.queries.iter().any(|q| q.id == id)).count(), 1);
+        assert!(report.findings.iter().any(|finding| finding.id == format!("big-result:{id}")));
+        let observed = report.findings.iter().find(|finding| finding.id == format!("temp-spill:{id}")).unwrap();
+        assert_eq!(observed.actionability, culprit_core::Actionability::Information);
+        assert_eq!(observed.facts.cause, None);
+        assert!(observed.impact.db_time_share.is_none());
+        assert!(observed.fix.as_ref().unwrap().sql.is_none());
+    }
+
+    #[test]
+    fn an_actual_hash_spill_does_not_absorb_an_independent_large_result_or_invent_a_sort_memory_fix() {
+        let mut snapshot = fixture("postgres-demo.json");
+        let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+        let id = query.id.clone();
+        query.temporary_work = None;
+        let plan = query.plan.as_mut().unwrap();
+        plan.kind = culprit_core::PlanKind::Actual;
+        plan.insights = None;
+        plan.root.kind = culprit_core::NodeKind::Join;
+        plan.root.op = "Hash Join".into();
+        plan.root.children.clear();
+        plan.root.warnings = vec![culprit_core::PlanWarning::Spill];
+        plan.root.facts = Default::default();
+        plan.root.facts.hash_batches = Some(8);
+        plan.root.facts.disk_usage_kb = Some(65_536.0);
+        let native = culprit_core::Check::run(&crate::queries::PlanWarningsCheck, &snapshot);
+        let warning = native
+            .iter()
+            .find(|finding| finding.facts.cause == Some(FindingCause::Spill))
+            .expect("typed native warning");
+        assert_eq!(warning.queries[0].id, id);
+        assert!(warning.queries[0].plan_node.is_some());
+        let report = crate::analyze(snapshot);
+        assert!(report.findings.iter().any(|finding| finding.id == format!("big-result:{id}")));
+        let spill = report
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.facts.cause == Some(FindingCause::Spill) && finding.queries.iter().any(|query| query.id == id)
+            })
+            .expect("native hash spill");
+        assert!(!spill.summary.contains("returning fewer can keep the sort in memory"));
+        assert!(!spill.fix.as_ref().unwrap().summary.contains("the memory is the fix"));
     }
 
     // The fresh SQL Server reading: plan-regression:244 said to force the fast plan and filtered-scan to create an

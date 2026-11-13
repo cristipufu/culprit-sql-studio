@@ -1,38 +1,38 @@
 reading: MariaDB 11.8.9 · database shop · scanned 2026-10-11T16:05:40Z
 headline: 8 opportunities. The top ones touch 53.7 s of database time over the 1 minute since statistics were reset (95%).
 top share: 95%
-findings: 8
+findings: 9
 
-=== finding temp-spill:375c64398248650e
+=== finding heavy-query:375c64398248650e
 Optional improvement · low severity · high confidence · queries
-title: A read from orders builds an on-disk temporary table about once per run
-summary: The associated statements used 50.0 s of database time over the 1 minute since statistics were reset (89%). The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit (16.0 MB, the smaller of tmp_table_size and max_heap_table_size) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs. Latest activity: 60 runs observed over 16 minutes of Culprit's scans on Oct 11, 15:49–16:05 UTC. This count is shown without extrapolating a daily rate.
-impact: 89% of DB time · 88.6% of database time
+title: A read from orders takes 50.0 s of database time over the 1 minute since statistics were reset (89%)
+summary: 50.0 s of database time over the 1 minute since statistics were reset (89%). It ran 20 times in 1 minute at 2.5 s on average: 89% of all database time in the 1 minute since statistics were reset. Its only step with a cost is a table scan of shop.orders that examines 1.0M rows a run (MariaDB puts no cost on the sort and the temporary table). Latest activity: 60 runs observed over 16 minutes of Culprit's scans on Oct 11, 15:49–16:05 UTC. This count is shown without extrapolating a daily rate.
+impact: 50.0 s of database time over the 1 minute since statistics were reset (89%) · 88.6% of database time
 metrics:
-  - On-disk temporary tables per run: 1
+  - Share of DB time: 89%
   - Average duration: 2.5 s
-fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 64.0 MB (both variables: the smaller one wins). Set tmp_table_size to 67108864 now, and in the server's option file (my.cnf) so it survives a restart. Set max_heap_table_size to 67108864 now, and in the server's option file (my.cnf) so it survives a restart. Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.
-  sql:
-      SET GLOBAL tmp_table_size = 67108864;
-      SET GLOBAL max_heap_table_size = 67108864;
-  cost: The limit is per temporary table per connection; size it with your connection count in mind.
+  - Rows examined per run: 1.0M
+  - Rows returned per run: 20
+fix: Find this statement in the application and check whether it aggregates more rows than it needs, or whether the result could be kept up to date instead of recomputed on every run.
 verify:
-  1. Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).
+  1. performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
 queries:
-  - 375c64398248650e: 89% of database time · plan step 2
+  - 375c64398248650e: 89% of database time · plan step 3
 brief:
-    # A read from orders builds an on-disk temporary table about once per run
+    # A read from orders takes 50.0 s of database time over the 1 minute since statistics were reset (89%)
 
-    Database: **mariadb-demo** (MariaDB 11.8.9, database `shop`, development environment). Finding `temp-spill:375c64398248650e`: Optional improvement, low impact, high confidence. Scanned 2026-10-11T16:05:40Z.
+    Database: **mariadb-demo** (MariaDB 11.8.9, database `shop`, development environment). Finding `heavy-query:375c64398248650e`: Optional improvement, low impact, high confidence. Scanned 2026-10-11T16:05:40Z.
 
     ## What's happening
 
-    The associated statements used 50.0 s of database time over the 1 minute since statistics were reset (89%). The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit (16.0 MB, the smaller of tmp_table_size and max_heap_table_size) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs. Latest activity: 60 runs observed over 16 minutes of Culprit's scans on Oct 11, 15:49–16:05 UTC. This count is shown without extrapolating a daily rate.
+    50.0 s of database time over the 1 minute since statistics were reset (89%). It ran 20 times in 1 minute at 2.5 s on average: 89% of all database time in the 1 minute since statistics were reset. Its only step with a cost is a table scan of shop.orders that examines 1.0M rows a run (MariaDB puts no cost on the sort and the temporary table). Latest activity: 60 runs observed over 16 minutes of Culprit's scans on Oct 11, 15:49–16:05 UTC. This count is shown without extrapolating a daily rate.
 
     ## Evidence
 
-    - On-disk temporary tables per run: 1
+    - Share of DB time: 89%
     - Average duration: 2.5 s
+    - Rows examined per run: 1.0M
+    - Rows returned per run: 20
 
     ## Queries involved
 
@@ -42,26 +42,19 @@ brief:
     SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMIT ?
     ```
 
-    Plan: the step this finding is about is `Temporary table`. The database leaves some of this plan's work without a cost estimate, so no step is given a share.
+    Plan: the step this finding is about is `Table scan` on `shop.orders`.
 
     ## Suggested fix
 
-    Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 64.0 MB (both variables: the smaller one wins). Set tmp_table_size to 67108864 now, and in the server's option file (my.cnf) so it survives a restart. Set max_heap_table_size to 67108864 now, and in the server's option file (my.cnf) so it survives a restart. Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.
-
-    ```sql
-    SET GLOBAL tmp_table_size = 67108864;
-    SET GLOBAL max_heap_table_size = 67108864;
-    ```
-
-    Cost: The limit is per temporary table per connection; size it with your connection count in mind.
+    Find this statement in the application and check whether it aggregates more rows than it needs, or whether the result could be kept up to date instead of recomputed on every run.
 
     ## How to verify
 
-    - Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).
+    - performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes mariadb-demo --since <ship time>`): there its time per run should drop. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
 
     ## What to do in the codebase
 
-    If you choose an index from the fix's options, ship it through this project's schema migrations. If you choose a query change, find where the application sends the statements above (search for their table and column names) and make that change in the calling code. If you choose the session-setting option, set those variables on the application's connections. The setting in the fix's SQL belongs to the database server, not to the application's code: apply it where this project manages the server's configuration (infrastructure as code, the platform's parameter group, the server's configuration file). Where nothing manages it, run the setting's statements from the fix's SQL against the server as a login allowed to change its settings. After any change is live, run `culprit scan mariadb-demo` and check `temp-spill:375c64398248650e` the way *How to verify* says.
+    Find where the application sends the statements above (search for their table and column names) and apply the fix in that calling code. Where it changes SQL, use the way this project ships query changes (an ORM change or a query rewrite). After any change is live, run `culprit scan mariadb-demo` and check `heavy-query:375c64398248650e` the way *How to verify* says.
 
 === finding chatty-query:a92bb0be330ac53a
 Optional improvement · low severity · medium confidence · queries
@@ -418,6 +411,59 @@ brief:
     ## What to do in the codebase
 
     No statement is listed under *Queries involved*: the fix above says where the change is. After any change is live, run `culprit scan mariadb-demo` and check `row-lock-waits:server` the way *How to verify* says.
+
+=== finding temp-spill:375c64398248650e
+Information · low severity · high confidence · queries
+title: A read from orders: Recorded internal temporary-table work
+summary: The source recorded internal temporary-table and sort-pass counts for this statement. Their byte volume and elapsed cost remain unknown.
+impact:
+metrics:
+  - Native internal disk tables created: 20
+fix: Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.
+verify:
+  1. Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change.
+caveats:
+  - Disk tables can be created directly or after memory-backed work. Native counts may omit other temporary-storage paths; zero disk tables does not prove that all temporary work stayed in memory.
+  - These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run.
+queries:
+  - 375c64398248650e: 89% of database time
+brief:
+    # A read from orders: Recorded internal temporary-table work
+
+    Database: **mariadb-demo** (MariaDB 11.8.9, database `shop`, development environment). Finding `temp-spill:375c64398248650e`: Information, low impact, high confidence. Scanned 2026-10-11T16:05:40Z.
+
+    ## What's happening
+
+    The source recorded internal temporary-table and sort-pass counts for this statement. Their byte volume and elapsed cost remain unknown.
+
+    ## Evidence
+
+    - Native internal disk tables created: 20
+
+    ## Queries involved
+
+    Query `375c64398248650e` — 89% of DB time, 60 runs observed over 16 minutes of Culprit's scans on Oct 11, 15:49–16:05 UTC, 2.5 s average (share and average over the 1 minute since statistics were reset; the observed calls have their own period):
+
+    ```sql
+    SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMIT ?
+    ```
+
+    ## Suggested fix
+
+    Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.
+
+    ## How to verify
+
+    - Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change.
+
+    ## Caveats
+
+    - Disk tables can be created directly or after memory-backed work. Native counts may omit other temporary-storage paths; zero disk tables does not prove that all temporary work stayed in memory.
+    - These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run.
+
+    ## What to do in the codebase
+
+    Information: inspect the evidence and follow its verification guidance if the workload warrants it. This observation requests no immediate database change. Use `culprit scan mariadb-demo` for a later comparison if needed, as *How to verify* describes.
 
 === plan 375c64398248650e
 insight temp-table-sort · low severity · impact no share stated

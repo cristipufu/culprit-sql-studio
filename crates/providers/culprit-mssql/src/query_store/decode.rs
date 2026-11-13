@@ -52,7 +52,7 @@ pub(crate) fn plan_identity(row: &Rec) -> Result<Option<NativePlanIdentity>> {
     }))
 }
 
-const SQL_SERVER_PAGE_BYTES: u32 = 8192;
+pub(crate) const SQL_SERVER_PAGE_BYTES: u32 = 8192;
 
 pub(crate) fn record(row: &Rec, stream: TelemetryStream, references: StatementReferences) -> Result<TelemetryRecord> {
     let outcome: u8 = integer(row, "execution_type")?.try_into().map_err(|_| malformed())?;

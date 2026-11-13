@@ -59,7 +59,7 @@ fn base() -> (Plan, QueryStat) {
     query.stddev_time_ms = None;
     query.cpu_time_ms = None;
     query.physical_reads = None;
-    query.temp_writes = None;
+    query.temporary_work = None;
     query.first_seen = None;
     query.last_seen = None;
     query.rows_affected = None;

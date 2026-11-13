@@ -1,7 +1,7 @@
 reading: SQL Server 2022 · database culprit_demo · scanned 2026-10-11T12:13:47Z
 headline: 23 opportunities. The top ones touch 3 min of database time over the last 5 hours (61%).
 top share: 61%
-findings: 27
+findings: 28
 
 === finding heavy-query:138
 Needs attention · high severity · high confidence · queries
@@ -1222,6 +1222,61 @@ brief:
     ## What to do in the codebase
 
     The fix is a setting kept in this database alone: run its SQL once against the database as its owner, by hand or shipped as a migration. It isn't a change to the application's code, nor to the server's configuration (infrastructure as code, the platform's parameter group, a configuration file), which is for settings of the whole server. After any change is live, run `culprit scan mssql-demo` and check `last-actual-plans:last-query-plan-stats` the way *How to verify* says.
+
+=== finding temp-spill:263
+Information · low severity · high confidence · queries
+title: A read from order_items: Recorded temporary-space use
+summary: The source weighted native space-use averages by recorded executions. Simultaneous footprint and write volume remain unknown.
+impact:
+metrics:
+  - Weighted sum of native used-page observations: 56
+  - Native bytes per page: 8.0 KB
+fix: Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.
+verify:
+  1. Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change.
+caveats:
+  - A weighted sum of used-page observations is not current allocation, a peak, temporary-file writes or a spill diagnosis.
+  - These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run.
+queries:
+  - 263: 27% of database time
+brief:
+    # A read from order_items: Recorded temporary-space use
+
+    Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `temp-spill:263`: Information, low impact, high confidence. Scanned 2026-10-11T12:13:47Z.
+
+    ## What's happening
+
+    The source weighted native space-use averages by recorded executions. Simultaneous footprint and write volume remain unknown.
+
+    ## Evidence
+
+    - Weighted sum of native used-page observations: 56
+    - Native bytes per page: 8.0 KB
+
+    ## Queries involved
+
+    Query `263` — 27% of DB time, 6 runs over the last 5 hours, 15.0 s average:
+
+    ```sql
+    SELECT COUNT_BIG(*) FROM shop.order_items a JOIN shop.order_items b ON a.id % 1000 = b.id % 999 OPTION (LOOP JOIN, MAXDOP 1)
+    ```
+
+    ## Suggested fix
+
+    Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.
+
+    ## How to verify
+
+    - Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change.
+
+    ## Caveats
+
+    - A weighted sum of used-page observations is not current allocation, a peak, temporary-file writes or a spill diagnosis.
+    - These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run.
+
+    ## What to do in the codebase
+
+    Information: inspect the evidence and follow its verification guidance if the workload warrants it. This observation requests no immediate database change. Use `culprit scan mssql-demo` for a later comparison if needed, as *How to verify* describes.
 
 === finding hot-rows:shop.orders
 Information · low severity · high confidence · indexes

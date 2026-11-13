@@ -12,6 +12,8 @@ mod session_memory;
 pub use session_memory::session_memory;
 mod page_waits;
 pub use page_waits::page_waits;
+mod statement_work;
+pub use statement_work::statement_work;
 
 /// Positions identify captured rows, never incidents across observations. Native offset-free event time remains
 /// distinct from UTC capture and delivery clocks.

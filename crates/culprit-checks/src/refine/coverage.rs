@@ -1,6 +1,6 @@
 //! A finding is covered only by an identified cause. Select relationships without mutating findings or reading prose.
 use super::*;
-use culprit_core::{RefinementDecision, RefinementOutcome};
+use culprit_core::{NodeKind, PlanKind, PlanWarning, QueryRef, RefinementDecision, RefinementOutcome};
 
 #[derive(Clone, Copy)]
 pub(super) enum Policy {
@@ -76,6 +76,52 @@ fn shares_query(a: &Finding, b: &Finding) -> bool {
     a.queries.iter().any(|a| b.queries.iter().any(|b| a.id == b.id))
 }
 
+fn spill_covering_sort(s: &Snapshot, sort: &Finding, findings: &[Finding]) -> Vec<usize> {
+    if sort.queries.is_empty() {
+        return Vec::new();
+    }
+    let mut covering = BTreeSet::new();
+    for reference in &sort.queries {
+        if !selected_spilling_sort(s, reference) {
+            return Vec::new();
+        }
+        let matching = findings
+            .iter()
+            .enumerate()
+            .filter(|(_, finding)| {
+                finding.facts.cause == Some(FindingCause::Spill)
+                    && finding
+                        .queries
+                        .iter()
+                        .any(|spill| spill.id == reference.id && spill.plan_node == reference.plan_node)
+            })
+            .map(|(at, _)| at)
+            .collect::<Vec<_>>();
+        if matching.is_empty() {
+            return Vec::new();
+        }
+        covering.extend(matching);
+    }
+    covering.into_iter().collect()
+}
+
+/// Native node IDs are local to the selected plan; a query-wide spill or an estimated operator is not this proof.
+fn selected_spilling_sort(s: &Snapshot, reference: &QueryRef) -> bool {
+    let Some(node_id) = reference.plan_node else { return false };
+    let Some(plan) =
+        s.workload.as_ref().and_then(|workload| workload.query(&reference.id)).and_then(|query| query.plan.as_ref())
+    else {
+        return false;
+    };
+    if plan.kind != PlanKind::Actual {
+        return false;
+    }
+    let nodes = plan.nodes();
+    let mut matching = nodes.iter().filter(|node| node.id == node_id);
+    let Some(node) = matching.next() else { return false };
+    matching.next().is_none() && node.kind == NodeKind::Sort && node.warnings.contains(&PlanWarning::Spill)
+}
+
 fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
     let heavy = if matches!(policy, Policy::Heavy) { heavy_causes(s, findings) } else { BTreeMap::new() };
     let mut out = Vec::new();
@@ -91,21 +137,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                 })
                 .map(|(at, _)| at)
                 .collect(),
-            Policy::SpillSort if f.facts.cause == Some(FindingCause::Sort) => {
-                let spilled: Vec<_> = findings
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, g)| g.check == "temp-spill" || g.facts.cause == Some(FindingCause::Spill))
-                    .collect();
-                // A malformed finding with no query evidence cannot be covered by vacuous truth.
-                if f.queries.is_empty()
-                    || !f.queries.iter().all(|r| spilled.iter().any(|(_, g)| g.queries.iter().any(|q| q.id == r.id)))
-                {
-                    Vec::new()
-                } else {
-                    spilled.iter().filter(|(_, g)| shares_query(f, g)).map(|(at, _)| *at).collect()
-                }
-            }
+            Policy::SpillSort if f.facts.cause == Some(FindingCause::Sort) => spill_covering_sort(s, f, findings),
             Policy::ForeignKey if f.check == "unindexed-fk" => {
                 let cols = &f.facts.index_keys;
                 if cols.is_empty() {
@@ -226,6 +258,35 @@ mod tests {
         f.severity = Severity::High;
         f
     }
+
+    fn spilling_sort_snapshot() -> Snapshot {
+        let mut snapshot = snapshot();
+        let plan = snapshot.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap();
+        plan.kind = PlanKind::Actual;
+        let mut hash = plan.root.clone();
+        hash.id = 3;
+        hash.kind = NodeKind::Join;
+        hash.op = "Hash Join".into();
+        hash.children.clear();
+        hash.warnings = vec![PlanWarning::Spill];
+        plan.root.id = 8;
+        plan.root.kind = NodeKind::Sort;
+        plan.root.op = "Sort".into();
+        plan.root.warnings = vec![PlanWarning::Spill];
+        plan.root.children = vec![hash];
+        snapshot
+    }
+
+    fn sort_and_spill(snapshot: &Snapshot, sort_node: Option<u32>, spill_node: Option<u32>) -> Vec<Finding> {
+        let id = &snapshot.queries()[0].id;
+        let mut sort = finding("plan-insights", "native-sort", id);
+        sort.facts.cause = Some(FindingCause::Sort);
+        sort.queries[0].plan_node = sort_node;
+        let mut spill = finding("plan-insights", "native-spill", id);
+        spill.facts.cause = Some(FindingCause::Spill);
+        spill.queries[0].plan_node = spill_node;
+        vec![sort, spill]
+    }
     fn index_pair(s: &Snapshot) -> Vec<Finding> {
         let mut candidate = finding("filtered-scan", "shop.orders(state)", &s.queries()[0].id);
         candidate.subject = support::subject(SubjectKind::Table, "shop.orders");
@@ -245,7 +306,7 @@ mod tests {
     fn a_covered_finding_names_the_cause_that_remains() {
         let s = snapshot();
         let id = &s.queries()[0].id;
-        let mut findings = vec![finding("heavy-query", id, id), finding("temp-spill", id, id)];
+        let mut findings = vec![finding("heavy-query", id, id), finding("regression", id, id)];
         let trace = Rule(Policy::Heavy).refine_traced(&s, &mut findings);
         assert_eq!(findings.len(), 1);
         assert!(matches!(&trace[0].outcome,RefinementOutcome::Covered {by} if by==&vec![findings[0].id.clone()]));
@@ -257,7 +318,7 @@ mod tests {
         let s = snapshot();
         let id = &s.queries()[0].id;
         let mut heavy = finding("heavy-query", id, id);
-        let cause = finding("temp-spill", id, id);
+        let cause = finding("regression", id, id);
         heavy.impact.db_time_share = None;
         assert!(decide(Policy::Heavy, &s, &[heavy.clone(), cause.clone()]).is_empty());
         heavy.impact.db_time_share = Some(1.0);
@@ -274,6 +335,91 @@ mod tests {
         sort.facts.cause = Some(FindingCause::Sort);
         sort.queries.clear();
         assert!(decide(Policy::SpillSort, &s, &[sort, finding("temp-spill", id, id)]).is_empty());
+    }
+
+    #[test]
+    fn recorded_temporary_work_does_not_cover_an_independent_sort_or_explain_query_time_away() {
+        let s = spilling_sort_snapshot();
+        let id = &s.queries()[0].id;
+        let mut sort = finding("plan-insights", "sort", id);
+        sort.facts.cause = Some(FindingCause::Sort);
+        sort.queries[0].plan_node = Some(8);
+        let heavy = finding("heavy-query", id, id);
+        let mut observed = finding("temp-spill", id, id);
+        observed.actionability = culprit_core::Actionability::Information;
+        observed.impact.db_time_share = None;
+        observed.impact.time_ms_per_day = None;
+        assert!(decide(Policy::SpillSort, &s, &[sort.clone(), observed.clone()]).is_empty());
+        assert!(decide(Policy::Heavy, &s, &[heavy, observed]).is_empty());
+
+        let mut confirmed = finding("plan-warnings", "native-spill", id);
+        confirmed.facts.cause = Some(FindingCause::Spill);
+        confirmed.queries[0].plan_node = Some(8);
+        assert_eq!(decide(Policy::SpillSort, &s, &[sort, confirmed]).len(), 1);
+    }
+
+    #[test]
+    fn only_the_same_native_spilling_sort_in_the_selected_actual_plan_covers_its_sort_finding() {
+        let s = spilling_sort_snapshot();
+        let mut findings = sort_and_spill(&s, Some(8), Some(8));
+        let trace = Rule(Policy::SpillSort).refine_traced(&s, &mut findings);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].facts.cause, Some(FindingCause::Spill));
+        assert_eq!(trace.len(), 1);
+        assert!(matches!(&trace[0].outcome, RefinementOutcome::Covered { by } if by == &vec![findings[0].id.clone()]));
+    }
+
+    #[test]
+    fn a_native_spill_warning_keeps_its_typed_operator_but_does_not_cover_independently_measured_query_time() {
+        let s = spilling_sort_snapshot();
+        let id = &s.queries()[0].id;
+        let native = culprit_core::Check::run(&crate::queries::PlanWarningsCheck, &s);
+        let spill = native
+            .into_iter()
+            .find(|finding| finding.facts.cause == Some(FindingCause::Spill))
+            .expect("native spill warning");
+        assert_eq!(spill.queries[0].id, *id);
+        assert_eq!(spill.queries[0].plan_node, Some(8));
+        assert_eq!(spill.impact.db_time_share, Some(1.0), "query context is distinct from a timed spill contribution");
+        let heavy = finding("heavy-query", id, id);
+        assert!(decide(Policy::Heavy, &s, &[heavy, spill]).is_empty());
+    }
+
+    #[test]
+    fn a_hash_spill_or_an_unknown_operator_cannot_cover_an_independent_sort_in_the_same_statement() {
+        let mut s = spilling_sort_snapshot();
+        s.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap().root.warnings.clear();
+        assert!(decide(Policy::SpillSort, &s, &sort_and_spill(&s, Some(8), Some(3))).is_empty());
+        let s = spilling_sort_snapshot();
+        for (sort, spill) in [(None, Some(8)), (Some(8), None), (None, None), (Some(99), Some(99)), (Some(8), Some(3))]
+        {
+            assert!(decide(Policy::SpillSort, &s, &sort_and_spill(&s, sort, spill)).is_empty());
+        }
+        let mut grouped = sort_and_spill(&s, Some(8), Some(8));
+        grouped[0].queries.push(QueryRef { id: "unqualified-statement".into(), plan_node: Some(8), note: None });
+        assert!(decide(Policy::SpillSort, &s, &grouped).is_empty());
+    }
+
+    #[test]
+    fn absent_estimated_or_ambiguous_selected_plan_nodes_do_not_establish_operator_coverage() {
+        for shape in ["estimated", "generic", "missing-plan", "wrong-kind", "no-verdict", "duplicate-node"] {
+            let mut s = spilling_sort_snapshot();
+            let query = &mut s.workload.as_mut().unwrap().queries[0];
+            if shape == "missing-plan" {
+                query.plan = None;
+            } else {
+                let plan = query.plan.as_mut().unwrap();
+                match shape {
+                    "estimated" => plan.kind = PlanKind::Estimated,
+                    "generic" => plan.kind = PlanKind::Generic,
+                    "wrong-kind" => plan.root.kind = NodeKind::Join,
+                    "no-verdict" => plan.root.warnings.clear(),
+                    "duplicate-node" => plan.root.children[0].id = 8,
+                    _ => unreachable!(),
+                }
+            }
+            assert!(decide(Policy::SpillSort, &s, &sort_and_spill(&s, Some(8), Some(8))).is_empty(), "{shape}");
+        }
     }
 
     #[test]
@@ -316,19 +462,24 @@ mod tests {
 
     #[test]
     fn translating_human_text_does_not_change_coverage() {
-        let s = snapshot();
+        let s = spilling_sort_snapshot();
         let id = &s.queries()[0].id;
         let mut rewrite = finding("plan-insights", "non-sargable:shop.orders", id);
         rewrite.facts.cause = Some(FindingCause::PredicateRewrite);
         rewrite.subject = support::subject(SubjectKind::Table, "shop.orders");
         let mut sort = finding("plan-insights", "big-sort:shop.orders", id);
         sort.facts.cause = Some(FindingCause::Sort);
+        sort.queries[0].plan_node = Some(8);
+        let mut native_spill = finding("plan-warnings", "native-spill", id);
+        native_spill.facts.cause = Some(FindingCause::Spill);
+        native_spill.queries[0].plan_node = Some(8);
+        native_spill.severity = Severity::High;
         let pairs = [
             (Policy::Rewrite, vec![finding("filtered-scan", "shop.orders", id), rewrite]),
-            (Policy::Heavy, vec![finding("heavy-query", id, id), finding("temp-spill", id, id)]),
+            (Policy::Heavy, vec![finding("heavy-query", id, id), finding("regression", id, id)]),
             (Policy::ForeignKey, index_pair(&s)),
             (Policy::Regression, vec![finding("plan-regression", id, id), finding("regression", id, id)]),
-            (Policy::SpillSort, vec![sort, finding("temp-spill", id, id)]),
+            (Policy::SpillSort, vec![sort, native_spill]),
         ];
         for (policy, mut findings) in pairs {
             let expected = decide(policy, &s, &findings);

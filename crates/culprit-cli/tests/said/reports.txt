@@ -48,14 +48,16 @@ $ culprit --format text findings x --report <repo>/fixtures/mssql-demo.report.js
  23  ●  LAST_QUERY_PLAN_STATS is off for this database  · Diagnostics
        last-actual-plans:last-query-plan-stats
 
-Information and history (4)
- 24  ○  orders has 5 recorded historical lock waits
+Information and history (5)
+ 24  ○  A read from order_items: Recorded temporary-space use
+       temp-spill:263
+ 25  ○  orders has 5 recorded historical lock waits
        hot-rows:shop.orders
- 25  ○  Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory
+ 26  ○  Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory
        lock-escalations:shop.support_tickets
- 26  ○  Page-latch waits on pk_hot
+ 27  ○  Page-latch waits on pk_hot
        last-page-insert:archive.hot.pk_hot
- 27  ○  An update of wide writes 7.9 KB of transaction log per row it changes
+ 28  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
 
 Check coverage: 8 assessed without a finding; 25 limited by missing or incomplete evidence. JSON includes each check's reason.
@@ -124,7 +126,7 @@ Needs a look: 23 opportunities; the top ones touch 3 min of database time over t
                     → culprit changes mssql-demo
 
 ● Findings          23 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).
-                    High 3 · Medium 9 · Low 11 · Information and history 4
+                    High 3 · Medium 9 · Low 11 · Information and history 5
                     ● An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock)  2 min of database time over the last 5 hours (34%)
                     ● A read from order_items times out on every run, at about 15 s  100% of runs fail
                     ● A read from orders fails 25% of the time  25% of runs fail
@@ -267,8 +269,8 @@ Storage (average per operation, since start)
 $ culprit --format text findings x --report <repo>/fixtures/pg-demo.report.json
 14 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
 
-  1  ●  A read from orders writes about 19.9 MB of temp files per run  · 44% of DB time
-       temp-spill:9065391607317686058
+  1  ●  A read from orders returns 247K rows (≈ 17.4 MB) per run  · 247K rows per run
+       big-result:9065391607317686058
   2  ●  orders is read in full to find rows by customer_id  · 37.7 s of database time over the 5 hours since statistics were reset (23%)
        filtered-scan:public.orders(customer_id)
   3  ●  Planning takes almost all of the time of a read from orders  · 100% planning
@@ -296,17 +298,19 @@ $ culprit --format text findings x --report <repo>/fixtures/pg-demo.report.json
  14  ●  The check constraint wide_touched_positive on wide was never validated  · 1 untrusted
        untrusted-constraint:archive.wide
 
-Information and history (2)
- 15  ○  An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%)
+Information and history (3)
+ 15  ○  A read from orders: Recorded temporary I/O
+       temp-spill:9065391607317686058
+ 16  ○  An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%)
        heavy-query:4911431806993420100
- 16  ○  A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping
+ 17  ○  A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping
        heavy-query:-8886085649470066503
 
-Check coverage: 10 assessed without a finding; 22 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 9 assessed without a finding; 22 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor pg-demo`.
 
-Next: culprit show pg-demo 'temp-spill:9065391607317686058'
+Next: culprit show pg-demo 'big-result:9065391607317686058'
 $ culprit --format text top x --report <repo>/fixtures/pg-demo.report.json
 pg_stat_statements · the 5 hours since statistics were reset · share of DB time · runs · avg
   44%       214     332 ms  9065391607317686058  SELECT id, note FROM orders WHERE created_at > now() - interval $1 ORDER BY note
@@ -366,8 +370,8 @@ Needs a look: 14 opportunities; the top ones touch 2 min of database time over t
                     → culprit changes pg-demo
 
 ● Findings          14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
-                    High 0 · Medium 4 · Low 10 · Information and history 2
-                    ● A read from orders writes about 19.9 MB of temp files per run  44% of DB time
+                    High 0 · Medium 4 · Low 10 · Information and history 3
+                    ● A read from orders returns 247K rows (≈ 17.4 MB) per run  247K rows per run
                     ● orders is read in full to find rows by customer_id  37.7 s of database time over the 5 hours since statistics were reset (23%)
                     ● Planning takes almost all of the time of a read from orders  100% planning
                     → culprit findings pg-demo
@@ -493,8 +497,8 @@ $ culprit --format text findings x --report <repo>/fixtures/mysql-demo.report.js
        lock-time:fc709554a9248878
   6  ●  A read from products runs 30K times in 2 minutes, one key at a time  · 1.1 s of database time over the 2 minutes since statistics were reset (<1%)
        chatty-query:9b30e6ad79d940fe
-  7  ●  A read from orders builds an on-disk temporary table about once per run  · 12% of DB time
-       temp-spill:04cd7be9c366fadc
+  7  ●  A read from orders takes 34.5 s of database time over the 2 minutes since statistics were reset (12%)  · 34.5 s of database time over the 2 minutes since statistics were reset (12%)
+       heavy-query:04cd7be9c366fadc
   8  ●  orders is read in full 81 times since the server started or its performance_schema counters were last reset (40.5M rows)  · 1% of DB time
        scan-heavy:shop.orders
   9  ●  ix_orders_status is covered by the wider ix_orders_status_created on orders  · 10.5 MB redundant
@@ -507,6 +511,10 @@ $ culprit --format text findings x --report <repo>/fixtures/mysql-demo.report.js
        big-result:7f47c8550af0c644
  13  ●  The slow query log is off  · Setting
        config:slow_query_log
+
+Information and history (1)
+ 14  ○  A read from orders: Recorded internal temporary-table work
+       temp-spill:04cd7be9c366fadc
 
 Check coverage: 6 assessed without a finding; 18 limited by missing or incomplete evidence. JSON includes each check's reason.
 
@@ -554,7 +562,7 @@ Needs a look: 13 opportunities; the top ones touch 4 min of database time over t
                     → culprit changes mysql-demo
 
 ● Findings          13 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).
-                    High 1 · Medium 2 · Low 10
+                    High 1 · Medium 2 · Low 10 · Information and history 1
                     ● An update of orders fails 28% of the time (1205 lock wait timeout)  28% of runs fail
                     ● A read from orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)  2 min of database time over the 2 minutes since statistics were reset (40%)
                     ● An update of orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)  2 min of database time over the 2 minutes since statistics were reset (40%)
@@ -692,7 +700,7 @@ $ culprit --format text findings x --report <repo>/fixtures/sqlite-demo.report.j
   5  ●  47.0 MB of the file is free pages (71% of it)  · 47.0 MB free
        config:sqlite-free-pages
 
-Check coverage: 1 assessed without a finding; 7 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 1 assessed without a finding; 8 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 Next: culprit show sqlite-demo 'unindexed-fk:main.orders(customer_id)'
 $ culprit --format text top x --report <repo>/fixtures/sqlite-demo.report.json
@@ -802,7 +810,7 @@ Information and history (1)
   5  ○  orders is read in full to find rows by customer_id
        filtered-scan:public.orders(customer_id)
 
-Check coverage: 5 assessed without a finding; 9 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 5 assessed without a finding; 10 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 3 checks are locked (Unused indexes, Overlapping indexes and Repeated statements within logged requests). See `culprit doctor yugabyte-demo`.
 
@@ -1024,14 +1032,15 @@ SQL Server 2022 · database `culprit_demo` · Sun Oct 11 12:13 UTC
 | 22 | Optional improvement | Query Store records every statement, including one-off ones | Setting | `config:query-store-capture` |
 | 23 | Optional improvement | LAST_QUERY_PLAN_STATS is off for this database | Diagnostics | `last-actual-plans:last-query-plan-stats` |
 
-## Information and history (4)
+## Information and history (5)
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
-| 24 | Information | orders has 5 recorded historical lock waits | 3 min 7 s waiting on locks | `hot-rows:shop.orders` |
-| 25 | Information | Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory | 5 table locks | `lock-escalations:shop.support_tickets` |
-| 26 | Information | Page-latch waits on pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
-| 27 | History | An update of wide writes 7.9 KB of transaction log per row it changes | 232 MB of transaction log | `log-volume:255` |
+| 24 | Information | A read from order_items: Recorded temporary-space use |  | `temp-spill:263` |
+| 25 | Information | orders has 5 recorded historical lock waits | 3 min 7 s waiting on locks | `hot-rows:shop.orders` |
+| 26 | Information | Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory | 5 table locks | `lock-escalations:shop.support_tickets` |
+| 27 | Information | Page-latch waits on pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
+| 28 | History | An update of wide writes 7.9 KB of transaction log per row it changes | 232 MB of transaction log | `log-volume:255` |
 $ culprit --format md analyze <repo>/fixtures/pg-demo.report.json
 # Culprit report: pg-demo
 
@@ -1041,7 +1050,7 @@ PostgreSQL 18.6 · database `demo` · Sun Oct 11 11:54 UTC
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
-| 1 | Needs attention | A read from orders writes about 19.9 MB of temp files per run | 44% of DB time | `temp-spill:9065391607317686058` |
+| 1 | Needs attention | A read from orders returns 247K rows (≈ 17.4 MB) per run | 247K rows per run | `big-result:9065391607317686058` |
 | 2 | Needs attention | orders is read in full to find rows by customer_id | 37.7 s of database time over the 5 hours since statistics were reset (23%) | `filtered-scan:public.orders(customer_id)` |
 | 3 | Needs attention | Planning takes almost all of the time of a read from orders | 100% planning | `planning-time:-967240904657798800` |
 | 4 | Needs attention | The inactive replication slot analytics_slot keeps 1.1 GB of WAL | 1.1 GB of WAL kept | `replica-lag:analytics_slot` |
@@ -1056,12 +1065,13 @@ PostgreSQL 18.6 · database `demo` · Sun Oct 11 11:54 UTC
 | 13 | Optional improvement | PostgreSQL resolved 1 deadlock since Oct 11 | 1 deadlock | `deadlocks:counter` |
 | 14 | Optional improvement | The check constraint wide_touched_positive on wide was never validated | 1 untrusted | `untrusted-constraint:archive.wide` |
 
-## Information and history (2)
+## Information and history (3)
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
-| 15 | History | An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%) | 19.0 s of database time over the 5 hours since statistics were reset (12%) | `heavy-query:4911431806993420100` |
-| 16 | History | A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping | 20.0 s of database time over the 5 hours since statistics were reset (12%) | `heavy-query:-8886085649470066503` |
+| 15 | Information | A read from orders: Recorded temporary I/O |  | `temp-spill:9065391607317686058` |
+| 16 | History | An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%) | 19.0 s of database time over the 5 hours since statistics were reset (12%) | `heavy-query:4911431806993420100` |
+| 17 | History | A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping | 20.0 s of database time over the 5 hours since statistics were reset (12%) | `heavy-query:-8886085649470066503` |
 $ culprit --format md dashboard <repo>/fixtures/pg-demo.report.json
 ## pg-demo · PostgreSQL 18.6
 
@@ -1071,7 +1081,7 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
 
 - **Database time** (fine): Database time is steady: 3 min over the 5 hours since statistics were reset.
 - **Findings** (worth a look): 14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
-  - A read from orders writes about 19.9 MB of temp files per run — 44% of DB time
+  - A read from orders returns 247K rows (≈ 17.4 MB) per run — 247K rows per run
   - orders is read in full to find rows by customer_id — 37.7 s of database time over the 5 hours since statistics were reset (23%)
   - Planning takes almost all of the time of a read from orders — 100% planning
 - **Top queries** (for context): One query is 44% of database time: a read from orders.

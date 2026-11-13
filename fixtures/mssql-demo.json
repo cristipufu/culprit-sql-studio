@@ -120,7 +120,12 @@
         "rows": 1200,
         "logical_reads": 1068000,
         "physical_reads": 311,
-        "temp_writes": 0,
+        "temporary_work": {
+          "bytes_per_page": 8192,
+          "kind": "space-usage",
+          "usage_pages_total": 0,
+          "source": "sys.query_store_runtime_stats.avg_tempdb_space_used"
+        },
         "first_seen": "2026-10-11T07:44:33Z",
         "last_seen": "2026-10-11T12:13:36Z",
         "plans": [
@@ -456,7 +461,12 @@
         "rows": 906,
         "logical_reads": 4795800,
         "physical_reads": 7864.999999999999,
-        "temp_writes": 0,
+        "temporary_work": {
+          "bytes_per_page": 8192,
+          "kind": "space-usage",
+          "usage_pages_total": 0,
+          "source": "sys.query_store_runtime_stats.avg_tempdb_space_used"
+        },
         "first_seen": "2026-10-11T07:44:47Z",
         "last_seen": "2026-10-11T12:13:44Z",
         "plans": [
@@ -750,7 +760,12 @@
         "rows": 3900000,
         "logical_reads": 12442994,
         "physical_reads": 3768,
-        "temp_writes": 0,
+        "temporary_work": {
+          "bytes_per_page": 8192,
+          "kind": "space-usage",
+          "usage_pages_total": 0,
+          "source": "sys.query_store_runtime_stats.avg_tempdb_space_used"
+        },
         "first_seen": "2026-10-11T07:44:50Z",
         "last_seen": "2026-10-11T12:13:47Z",
         "plans": [
@@ -1083,7 +1098,12 @@
         "rows": 984960,
         "logical_reads": 2308200,
         "physical_reads": 0,
-        "temp_writes": 0,
+        "temporary_work": {
+          "bytes_per_page": 8192,
+          "kind": "space-usage",
+          "usage_pages_total": 0,
+          "source": "sys.query_store_runtime_stats.avg_tempdb_space_used"
+        },
         "first_seen": "2026-10-11T07:44:45Z",
         "last_seen": "2026-10-11T12:13:40Z",
         "plans": [
@@ -1393,7 +1413,12 @@
         "rows": 60000,
         "logical_reads": 120000,
         "physical_reads": 0,
-        "temp_writes": 0,
+        "temporary_work": {
+          "bytes_per_page": 8192,
+          "kind": "space-usage",
+          "usage_pages_total": 0,
+          "source": "sys.query_store_runtime_stats.avg_tempdb_space_used"
+        },
         "first_seen": "2026-10-11T07:44:28Z",
         "last_seen": "2026-10-11T12:13:25Z",
         "plans": [
@@ -1598,7 +1623,12 @@
         "rows": 20016,
         "logical_reads": 72110,
         "physical_reads": 10560,
-        "temp_writes": 0,
+        "temporary_work": {
+          "bytes_per_page": 8192,
+          "kind": "space-usage",
+          "usage_pages_total": 0,
+          "source": "sys.query_store_runtime_stats.avg_tempdb_space_used"
+        },
         "first_seen": "2026-10-11T07:44:27Z",
         "last_seen": "2026-10-11T12:13:20Z",
         "plans": [
@@ -1982,7 +2012,12 @@
         "rows": 0,
         "logical_reads": 0,
         "physical_reads": 0,
-        "temp_writes": 0,
+        "temporary_work": {
+          "bytes_per_page": 8192,
+          "kind": "space-usage",
+          "usage_pages_total": 0,
+          "source": "sys.query_store_runtime_stats.avg_tempdb_space_used"
+        },
         "first_seen": "2026-10-11T11:54:28Z",
         "last_seen": "2026-10-11T12:13:25Z",
         "plans": [

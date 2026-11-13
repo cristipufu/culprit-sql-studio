@@ -17,13 +17,13 @@ test("A finding opens in place with its evidence, its fix and how to verify it",
 test("The filter narrows the findings as you type", async ({ page }) => {
   await openConnection(page, "pg-demo");
   await page.keyboard.press("2");
-  const temp = page.getByRole("button", { name: /temp files per run/ });
+  const largeResult = page.getByRole("button", { name: /^A read from orders returns/ });
   const fullRead = page.getByRole("button", { name: /^orders is read in full/ });
-  await expect(temp).toBeVisible();
+  await expect(largeResult).toBeVisible();
   await expect(fullRead).toBeVisible();
 
-  await page.getByRole("main").getByPlaceholder("Filter").fill("temp files");
-  await expect(temp).toBeVisible();
+  await page.getByRole("main").getByPlaceholder("Filter").fill("returns");
+  await expect(largeResult).toBeVisible();
   await expect(fullRead).toBeHidden();
 });
 

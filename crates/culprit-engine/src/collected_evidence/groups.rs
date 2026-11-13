@@ -256,7 +256,7 @@ fn query(
         rows,
         logical_reads: None,
         physical_reads: None,
-        temp_writes: None,
+        temporary_work: None,
         first_seen: has_first.then_some(first).flatten(),
         last_seen: has_last.then_some(last).flatten(),
         plans: vec![],

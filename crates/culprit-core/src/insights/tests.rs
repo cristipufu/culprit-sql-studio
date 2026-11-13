@@ -2018,7 +2018,7 @@ fn a_cheap_plans_runs_say_why_they_are_not_cheap() {
         "id": "36649", "query_hash": null, "text": "SELECT id FROM app.call_sessions WHERE tenant_id = @p0",
         "parameters": null, "object_name": null, "executions": 2026.0, "total_time_ms": 2026.0, "mean_time_ms": 1.0,
         "max_time_ms": null, "stddev_time_ms": null, "cpu_time_ms": null, "rows": 2026.0,
-        "logical_reads": 2026.0 * 750.0, "physical_reads": null, "temp_writes": null, "first_seen": null,
+        "logical_reads": 2026.0 * 750.0, "physical_reads": null, "temporary_work": null, "first_seen": null,
         "last_seen": null, "plans": [], "plan": null, "waits": []
     }))
     .unwrap();

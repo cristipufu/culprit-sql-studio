@@ -213,12 +213,15 @@ fn optional_runtime_costs_preserve_nulls_and_reject_invalid_values() {
 pub(crate) fn compilation_row() -> Rec {
     Rec::of(&[
         ("query_id", Val::Int(3)),
+        ("context_settings_id", Val::Int(5)),
+        ("object_id", Val::Int(0)),
+        ("query_hash", Val::Text("0123456789ABCDEF".into())),
+        ("query_initial_compile_at", Val::Text("2020-01-01T06:00:00.1533333Z".into())),
         ("count_compiles", Val::Int(9_007_199_254_740_993)),
         ("avg_compile_duration", Val::Float(1500.5)),
         ("avg_compile_memory_kb", Val::Float(4096.5)),
         ("last_compile_memory_kb", Val::Int(8192)),
         ("max_compile_memory_kb", Val::Int(16384)),
-        ("first_compile", Val::Text("2020-01-01T06:00:00.1533333Z".into())),
         ("last_compile", Val::Text("2020-01-01T06:01:00Z".into())),
         ("compiling_s", Val::Int(60)),
     ])
@@ -248,7 +251,9 @@ fn compilation_lifetime_is_exact_and_never_borrows_the_runtime_window() {
         ("avg_compile_memory_kb", Val::Float(f64::NAN)),
         ("last_compile_memory_kb", Val::Int(-1)),
         ("max_compile_memory_kb", Val::Float(f64::INFINITY)),
-        ("first_compile", Val::Text("2020-01-01T06:00:00".into())),
+        ("query_initial_compile_at", Val::Text("2020-01-01T06:00:00".into())),
+        ("context_settings_id", Val::Null),
+        ("query_hash", Val::Null),
     ] {
         assert!(costs::Compilation::decode(&replace(&compilation_row(), &[(column, value)])).is_err());
     }

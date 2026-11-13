@@ -1,12 +1,56 @@
 //! Digest layout is discovered once; counters never fetch statement bodies or application samples.
 use super::*;
-use culprit_core::{Engine, Error, ErrorCode, ResetMarker, telemetry::*};
+use culprit_core::{Engine, Error, ErrorCode, ResetMarker, StatementTemporaryWork, telemetry::*};
 use mysql_async::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const SOURCE: &str = "performance_schema.events_statements_summary_by_digest";
 pub(crate) const LOCK_TIME_COLUMN: &str = "SUM_LOCK_TIME";
 pub(crate) const LOCK_TIME_METRIC: &str = "mysql.lock-time";
+
+struct TemporaryColumn {
+    column: &'static str,
+    key: RuntimeMetricKey,
+}
+const CREATED_TABLES: TemporaryColumn =
+    TemporaryColumn { column: "SUM_CREATED_TMP_TABLES", key: RuntimeMetricKey::TemporaryTables };
+const DISK_TABLES: TemporaryColumn =
+    TemporaryColumn { column: "SUM_CREATED_TMP_DISK_TABLES", key: RuntimeMetricKey::TemporaryDiskTables };
+const SORT_MERGE_PASSES: TemporaryColumn =
+    TemporaryColumn { column: "SUM_SORT_MERGE_PASSES", key: RuntimeMetricKey::SortMergePasses };
+const TEMPORARY_COLUMNS: [TemporaryColumn; 3] = [CREATED_TABLES, DISK_TABLES, SORT_MERGE_PASSES];
+
+impl TemporaryColumn {
+    fn read(&self, row: &Rec, columns: &BTreeSet<String>) -> Result<Option<String>> {
+        if columns.contains(self.column) {
+            row.unsigned(self.column).map(|value| value.map(|value| value.to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// These count native table creations and sort passes, never bytes, current allocations or elapsed spill time.
+/// MySQL's disk-table count omits TempTable memory-mapped overflow; its zero cannot establish absent temp I/O.
+/// https://dev.mysql.com/doc/refman/8.4/en/internal-temporary-tables.html
+/// MariaDB retains the same native counters, without implying the same storage engines or overflow mechanisms.
+pub(crate) fn temporary_work(row: &Rec, columns: &BTreeSet<String>) -> Result<Option<StatementTemporaryWork>> {
+    let created_tables = CREATED_TABLES.read(row, columns)?;
+    let disk_tables = DISK_TABLES.read(row, columns)?;
+    let sort_merge_passes = SORT_MERGE_PASSES.read(row, columns)?;
+    Ok((created_tables.is_some() || disk_tables.is_some() || sort_merge_passes.is_some()).then(|| {
+        StatementTemporaryWork::TableCreation { source: SOURCE.into(), created_tables, disk_tables, sort_merge_passes }
+    }))
+}
+
+/// Reuses the native column set already discovered for this digest read; missing fields remain SQL NULL.
+pub(crate) fn temporary_projection(columns: &BTreeSet<String>) -> String {
+    TEMPORARY_COLUMNS
+        .iter()
+        .map(|spec| if columns.contains(spec.column) { spec.column.into() } else { format!("NULL AS {}", spec.column) })
+        .collect::<Vec<_>>()
+        .join(",")
+}
 
 /// Keep the native subtotal, not a complete lock-wait breakdown or a particular lock resource.
 /// MySQL 8.0.28 fixed TABLE/DATA lock accounting (Bug 33236909); that does not establish MariaDB's coverage.
@@ -102,6 +146,9 @@ impl Layout {
                     .filter(|spec| self.has(spec.column) && (spec.column != "SUM_CPU_TIME" || self.cpu_enabled))
                     .map(|spec| spec.column.to_owned()),
             );
+            columns.extend(
+                TEMPORARY_COLUMNS.iter().filter(|spec| self.has(spec.column)).map(|spec| spec.column.to_owned()),
+            );
         }
         Ok(format!(
             "SELECT {} FROM {SOURCE} WHERE SCHEMA_NAME=? AND DIGEST IS NOT NULL LIMIT {row_limit}",
@@ -144,11 +191,8 @@ fn metrics() -> Vec<Metric> {
         ("SUM_ROWS_AFFECTED", "rows-affected", Unit::Count),
         ("SUM_ERRORS", "errors", Unit::Count),
         ("SUM_WARNINGS", "warnings", Unit::Count),
-        ("SUM_CREATED_TMP_DISK_TABLES", "temporary-disk-tables", Unit::Count),
-        ("SUM_CREATED_TMP_TABLES", "temporary-tables", Unit::Count),
         ("SUM_SELECT_FULL_JOIN", "full-joins", Unit::Count),
         ("SUM_SELECT_SCAN", "table-scans", Unit::Count),
-        ("SUM_SORT_MERGE_PASSES", "sort-merge-passes", Unit::Count),
         ("SUM_SORT_ROWS", "sorted-rows", Unit::Count),
         ("SUM_NO_INDEX_USED", "no-index-used", Unit::Count),
         ("SUM_NO_GOOD_INDEX_USED", "no-good-index-used", Unit::Count),
@@ -169,7 +213,7 @@ fn identity(row: &Rec, database: &str) -> Result<NativeQueryIdentity> {
     Ok(NativeQueryIdentity { query_id: digest, qualifiers: BTreeMap::from([("schema".into(), database.into())]) })
 }
 pub(crate) fn counters(row: &Rec, layout: &Layout, database: &str) -> Result<StatementCounterSample> {
-    let totals = metrics()
+    let mut totals = metrics()
         .into_iter()
         .filter(|spec| layout.has(spec.column) && (spec.column != "SUM_CPU_TIME" || layout.cpu_enabled))
         .map(|spec| {
@@ -180,6 +224,15 @@ pub(crate) fn counters(row: &Rec, layout: &Layout, database: &str) -> Result<Sta
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    for spec in TEMPORARY_COLUMNS {
+        if let Some(total) = spec.read(row, &layout.columns)? {
+            totals.push(StatementCounter {
+                key: spec.key,
+                unit: RuntimeMetricUnit::Count,
+                total: MeasurementValue::Integer(total),
+            });
+        }
+    }
     let sample = StatementCounterSample {
         scope: culprit_core::MeasurementScope::Database,
         identity: identity(row, database)?,

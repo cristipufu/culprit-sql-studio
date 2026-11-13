@@ -82,51 +82,53 @@ async fn collect_with_base(
     let rows = query(client, &top_sql).await?;
     let mut queries: Vec<QueryStat> = rows
         .iter()
-        .map(|r| QueryStat {
-            plan_history: None,
-            resolved_write_target: None,
-            requests: None,
-            id: r.string("id"),
-            query_hash: None,
-            text: r.string("query"),
-            parameters: None,
-            object_name: None,
-            executions: r.number("calls").unwrap_or(0.0),
-            total_time_ms: r.number("total_ms").unwrap_or(0.0),
-            mean_time_ms: r.number("mean_ms").unwrap_or(0.0),
-            max_time_ms: r.number("max_ms"),
-            stddev_time_ms: r.number("stddev_ms"),
-            cpu_time_ms: None,
-            rows: r.number("rows"),
-            logical_reads: r.number("reads"),
-            physical_reads: r.number("phys"),
-            temp_writes: r.number("temp"),
-            first_seen: r.text("first_seen"),
-            last_seen: None,
-            plans: Vec::new(),
-            plan: None,
-            // Disk time is the only part of a statement's time PostgreSQL measures per statement.
-            waits: r
-                .number("io_ms")
-                .filter(|ms| *ms > 0.0)
-                .map(|ms| {
-                    vec![WaitStat {
-                        category: "IO".into(),
-                        wait_type: Some(t!("provider.postgres.wait.data_files")),
-                        wait_ms: ms,
-                        tasks: None,
-                    }]
-                })
-                .unwrap_or_default(),
-            waits_coverage: None,
-            trend: None,
-            spread: r.number("min_ms").map(|min_ms| Spread { min_ms: Some(min_ms), ..Default::default() }),
-            costs: None,
-            // PostgreSQL's `rows` counts rows returned and rows changed alike.
-            rows_affected: None,
-            plan_id: None,
+        .map(|r| {
+            Ok(QueryStat {
+                plan_history: None,
+                resolved_write_target: None,
+                requests: None,
+                id: r.string("id"),
+                query_hash: None,
+                text: r.string("query"),
+                parameters: None,
+                object_name: None,
+                executions: r.number("calls").unwrap_or(0.0),
+                total_time_ms: r.number("total_ms").unwrap_or(0.0),
+                mean_time_ms: r.number("mean_ms").unwrap_or(0.0),
+                max_time_ms: r.number("max_ms"),
+                stddev_time_ms: r.number("stddev_ms"),
+                cpu_time_ms: None,
+                rows: r.number("rows"),
+                logical_reads: r.number("reads"),
+                physical_reads: r.number("phys"),
+                temporary_work: crate::native::statements::temporary_work(r)?,
+                first_seen: r.text("first_seen"),
+                last_seen: None,
+                plans: Vec::new(),
+                plan: None,
+                // Disk time is the only part of a statement's time PostgreSQL measures per statement.
+                waits: r
+                    .number("io_ms")
+                    .filter(|ms| *ms > 0.0)
+                    .map(|ms| {
+                        vec![WaitStat {
+                            category: "IO".into(),
+                            wait_type: Some(t!("provider.postgres.wait.data_files")),
+                            wait_ms: ms,
+                            tasks: None,
+                        }]
+                    })
+                    .unwrap_or_default(),
+                waits_coverage: None,
+                trend: None,
+                spread: r.number("min_ms").map(|min_ms| Spread { min_ms: Some(min_ms), ..Default::default() }),
+                costs: None,
+                // PostgreSQL's `rows` counts rows returned and rows changed alike.
+                rows_affected: None,
+                plan_id: None,
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
     // The text of each statement as this login ran it, when it did: the only text an elevated login plans, so what is
     // planned is what passed that check, never another role's copy of the same statement.
     let own: std::collections::HashMap<String, String> =

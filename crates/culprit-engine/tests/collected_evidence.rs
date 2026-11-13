@@ -9,6 +9,7 @@ mod native_failures;
 mod page_waits;
 mod request_memory;
 mod session_memory;
+mod statement_work;
 mod waits;
 use fixture::Fixture;
 

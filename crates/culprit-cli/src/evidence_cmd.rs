@@ -111,6 +111,7 @@ enum Analysis {
     RequestMemory,
     SessionMemory,
     PageWaits,
+    StatementWork,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
@@ -125,7 +126,8 @@ impl Analysis {
             | Self::NativeFailures
             | Self::RequestMemory
             | Self::SessionMemory
-            | Self::PageWaits => {
+            | Self::PageWaits
+            | Self::StatementWork => {
                 vec![EvidenceFamily::OperationalSamples]
             }
         }
@@ -195,6 +197,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::PageWaits) => {
             let analysis = culprit_engine::collected_resources::page_waits(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::page_waits(&analysis.report))?;
+        }
+        Some(Analysis::StatementWork) => {
+            let analysis = culprit_engine::collected_resources::statement_work(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::statement_work(&analysis.report))?;
         }
     }
     if !complete && out.format() == Format::Text {

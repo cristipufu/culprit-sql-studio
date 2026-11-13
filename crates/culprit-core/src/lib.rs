@@ -44,11 +44,13 @@ pub mod plan_view;
 pub mod platform;
 pub mod provenance;
 pub mod provider;
+pub mod query_temporary_work;
 pub mod redact;
 pub mod refinement;
 pub mod retained_failure_report;
 pub mod signals;
 pub mod sql;
+pub mod statement_work_report;
 pub mod telemetry;
 pub mod verification;
 pub mod wait_resources;
@@ -120,6 +122,7 @@ pub use provenance::{
     CollectionProvenance, ComponentVersion, PipelineProvenance, ReportEvidence, ScanReference,
 };
 pub use provider::{ExplainMode, Provider, SnapshotOptions};
+pub use query_temporary_work::{StatementTemporaryWork, TemporaryWorkExplanation};
 pub use refinement::{FixWithholdingBasis, HistoryBasis, PresentationAspect, RefinementDecision, RefinementOutcome};
 pub use retained_failure_report::{RetainedFailureExplanation, RetainedFailureReport};
 pub use signals::{
@@ -128,6 +131,7 @@ pub use signals::{
     ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
+pub use statement_work_report::{StatementWorkEntry, StatementWorkReport};
 pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_reports};
 pub use wait_resources::{ObservedWaitResource, WaitResourceKind};
 pub use waits::{

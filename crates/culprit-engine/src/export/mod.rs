@@ -202,8 +202,10 @@ fn confidence_id(confidence: Confidence) -> &'static str {
 /// "28% of runs fail · Needs attention · high impact, high confidence · MySQL 8.4.11, local environment": what a
 /// finding is, under its title. `impact` is its impact as the format shows it.
 pub(crate) fn finding_line(report: &Report, finding: &Finding, impact: String) -> String {
+    let has_impact = if impact.is_empty() { "no" } else { "yes" };
     t!(
         "engine.export.finding_line",
+        has_impact = has_impact,
         impact = impact,
         actionability = finding.actionability.label(),
         severity = severity_id(finding.severity),

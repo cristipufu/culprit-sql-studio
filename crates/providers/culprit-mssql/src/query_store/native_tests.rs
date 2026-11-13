@@ -137,6 +137,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
         .expect("captured fixture query");
     assert_eq!(definition.payload.text(), Some(sql));
     let query_id = definition.id.clone();
+    let query_identity = definition.query.clone().expect("original native query identity");
     let selected = summary.iter().filter(|row| row.query_id == query_id).collect::<Vec<_>>();
     assert_eq!(selected.iter().map(|row| row.moments.executions).sum::<u64>(), 4);
     let intervals = reader
@@ -213,11 +214,13 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     let plans = selected.iter().map(|row| row.plan_id.clone()).collect::<Vec<_>>();
     let costs = reader.costs(60, std::slice::from_ref(&query_id)).await.unwrap();
     assert_eq!(costs.len(), 1);
+    assert_eq!(costs[0].identity, query_identity);
     assert_eq!((costs[0].aborted, costs[0].failed), (0, 0));
     assert!(costs[0].log_bytes.is_some());
     assert!(costs[0].total_log_bytes.is_some());
     let compilations = reader.compilations(std::slice::from_ref(&query_id)).await.unwrap();
     assert_eq!(compilations.len(), 1);
+    assert_eq!(compilations[0].identity, query_identity);
     assert!(compilations[0].count > 0);
     assert!(compilations[0].within_window(60));
     let memory = compilations[0].memory.expect("Query Store retains per-query compiler memory");
@@ -234,7 +237,9 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     let snapshots =
         reader.read(&costs::compilation_snapshot_sql(), vec![Parameter::Integer(1000)], 1000).await.unwrap();
     let snapshots = snapshots.iter().map(costs::Compilation::decode).collect::<culprit_core::Result<Vec<_>>>().unwrap();
-    assert!(snapshots.iter().any(|row| row.query_id == query_id && row.count > 0 && row.observation().is_valid()));
+    assert!(
+        snapshots.iter().any(|row| row.identity.query_id == query_id && row.count > 0 && row.observation().is_valid())
+    );
     reader.read(&families::sql(), vec![Parameter::Integer(60)], 75).await.unwrap();
     let tuning = tuning::read(&mut reader).await;
     let definitions = reader.definitions(&plans, definitions::Kind::Plan, 2 * 1024 * 1024).await.unwrap();
@@ -243,6 +248,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     reader.waits(60, Some(&plans)).await.unwrap();
     let options = SnapshotOptions { window_minutes: 60, top_queries: 10, plans: 1, ..SnapshotOptions::default() };
     let app = crate::workload::from_query_store(&mut reader, &options).await.unwrap();
+    assert_eq!(app.query_identities.get(&query_id), Some(&query_identity));
     let query = app.workload.queries.iter().find(|row| row.id == query_id).expect("interactive query");
     assert!(query.text.contains("private-query-store-canary"));
     assert!(

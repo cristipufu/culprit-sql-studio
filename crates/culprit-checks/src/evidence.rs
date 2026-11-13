@@ -32,7 +32,7 @@ pub enum QueryMeasure {
     LogBytes,
     Rows,
     Histograms,
-    TempWrites,
+    TemporaryWork,
     Grants,
     Waits(WaitClass),
 }
@@ -347,7 +347,7 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
                 QueryMeasure::LogBytes => costs(|c| c.log_bytes.is_some()),
                 QueryMeasure::Rows => q.rows_per_execution().is_some(),
                 QueryMeasure::Histograms => s.histograms.is_some(),
-                QueryMeasure::TempWrites => q.temp_writes.is_some(),
+                QueryMeasure::TemporaryWork => q.temporary_work.as_ref().is_some_and(|work| work.has_measurements()),
                 QueryMeasure::Grants => s.pressure.as_ref().is_some_and(|p| {
                     p.grants
                         .iter()

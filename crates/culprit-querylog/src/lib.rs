@@ -340,7 +340,7 @@ impl Aggregator {
                     rows: None,
                     logical_reads: None,
                     physical_reads: None,
-                    temp_writes: None,
+                    temporary_work: None,
                     first_seen: iso(s.first),
                     last_seen: iso(s.last),
                     plans: Vec::new(),

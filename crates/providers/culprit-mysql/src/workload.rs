@@ -10,7 +10,7 @@ use crate::{
 use culprit_core::i18n::{Message, MessageValue};
 use culprit_core::{Engine, Plan, PlanKind, QueryStat, Result, SnapshotOptions, Spread, WaitStat, Workload, key};
 use mysql_async::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub(crate) struct CollectedWorkload {
     pub(crate) workload: Workload,
@@ -53,7 +53,7 @@ pub(crate) async fn collect_workload(
     let sql = format!(
         "SELECT DIGEST AS digest, DIGEST_TEXT AS digest_text, COUNT_STAR AS calls, SUM_TIMER_WAIT AS total_ps,
                 MAX_TIMER_WAIT AS max_ps, MIN_TIMER_WAIT AS min_ps, SUM_ROWS_SENT AS rows_sent, SUM_ROWS_EXAMINED AS rows_examined,
-                SUM_CREATED_TMP_DISK_TABLES AS tmp_disk, SUM_NO_INDEX_USED AS no_index, {lock},
+                {temporary}, SUM_NO_INDEX_USED AS no_index, {lock},
                 {cpu}, {sample}, {p95}, {p99}, {affected},
                 DATE_FORMAT(FIRST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS first_seen,
                 DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS last_seen
@@ -67,6 +67,7 @@ pub(crate) async fn collect_workload(
         p99 = optional("QUANTILE_99"),
         affected = optional("SUM_ROWS_AFFECTED"),
         lock = optional(crate::native::statements::LOCK_TIME_COLUMN),
+        temporary = crate::native::statements::temporary_projection(&available),
     );
     let rows = query_with(conn, &sql, vec![Value::from(probe.database.clone())]).await?;
     let all: Vec<Digest> = rows
@@ -76,7 +77,7 @@ pub(crate) async fn collect_workload(
                 culprit_core::telemetry::StatementOrigin::from_sql(Some(&s), Engine::Mysql).0.is_culprit()
             })
         })
-        .map(|r| digest(r, has("SUM_CPU_TIME")))
+        .map(|r| digest(r, has("SUM_CPU_TIME"), &available))
         .collect::<Result<_>>()?;
     let total_time_ms: f64 = all.iter().map(|d| d.stat.total_time_ms).sum();
     // SUM_CPU_TIME stays 0 unless CPU instrumentation is on; all zeros means unknown, not free.
@@ -215,7 +216,7 @@ async fn slow_log_workload(
     Ok(Some(CollectedWorkload { workload, waits, notes, no_plans }))
 }
 
-fn digest(r: &Rec, has_cpu: bool) -> Result<Digest> {
+fn digest(r: &Rec, has_cpu: bool, columns: &BTreeSet<String>) -> Result<Digest> {
     let ms = |key: &str| r.number(key).map(|p| p / PICOS_PER_MS);
     let executions = r.number("calls").unwrap_or(0.0);
     let total = r.number("total_ps").unwrap_or(0.0) / PICOS_PER_MS;
@@ -240,7 +241,7 @@ fn digest(r: &Rec, has_cpu: bool) -> Result<Digest> {
             rows: r.number("rows_sent"),
             logical_reads: r.number("rows_examined"),
             physical_reads: None,
-            temp_writes: r.number("tmp_disk"),
+            temporary_work: crate::native::statements::temporary_work(r, columns)?,
             first_seen: r.text("first_seen"),
             last_seen: r.text("last_seen"),
             plans: Vec::new(),
@@ -641,7 +642,11 @@ mod tests {
     use super::*;
 
     fn native_digest(lock_time: Value) -> Rec {
-        Rec::from_values(vec![
+        native_digest_with_temporary(lock_time, None)
+    }
+
+    fn native_digest_with_temporary(lock_time: Value, temporary: Option<[Value; 3]>) -> Rec {
+        let mut values = vec![
             ("digest", Value::from("0123456789abcdef0123456789abcdef")),
             ("schema_name", Value::from("shop")),
             ("observed_at", Value::from("2026-11-13T08:00:00.123456Z")),
@@ -650,7 +655,143 @@ mod tests {
             ("total_ps", Value::UInt(1_000_000_000)),
             ("SUM_TIMER_WAIT", Value::UInt(1_000_000_000)),
             (crate::native::statements::LOCK_TIME_COLUMN, lock_time),
-        ])
+        ];
+        if let Some([created, disk, passes]) = temporary {
+            values.extend([
+                ("SUM_CREATED_TMP_TABLES", created),
+                ("SUM_CREATED_TMP_DISK_TABLES", disk),
+                ("SUM_SORT_MERGE_PASSES", passes),
+            ]);
+        }
+        Rec::from_values(values)
+    }
+
+    fn temporary_layout() -> crate::native::statements::Layout {
+        crate::native::statements::Layout {
+            columns: [
+                "SCHEMA_NAME",
+                "DIGEST",
+                "DIGEST_TEXT",
+                "COUNT_STAR",
+                "SUM_TIMER_WAIT",
+                "SUM_CREATED_TMP_TABLES",
+                "SUM_CREATED_TMP_DISK_TABLES",
+                "SUM_SORT_MERGE_PASSES",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+            cpu_enabled: false,
+            digest_enabled: true,
+            overflow_calls: 0,
+        }
+    }
+
+    #[test]
+    fn scan_and_export_preserve_exact_native_table_and_sort_counts_without_converting_them_to_bytes_or_time() {
+        use culprit_core::{ResetMarker, StatementTemporaryWork, telemetry::*};
+        let row = native_digest_with_temporary(
+            Value::NULL,
+            Some([Value::UInt(u64::MAX), Value::UInt(0), Value::from("9007199254740993")]),
+        );
+        let layout = temporary_layout();
+        let q = super::digest(&row, false, &layout.columns).unwrap().stat;
+        assert_eq!(
+            q.temporary_work,
+            Some(StatementTemporaryWork::TableCreation {
+                source: crate::native::statements::SOURCE.into(),
+                created_tables: Some(u64::MAX.to_string()),
+                disk_tables: Some("0".into()),
+                sort_merge_passes: Some("9007199254740993".into()),
+            })
+        );
+        let exported = crate::native::statements::counters(&row, &layout, "shop").unwrap();
+        assert_eq!(exported.reset, ResetMarker::Unknown, "the server process is not the digest counter generation");
+        for (key, expected) in [
+            (RuntimeMetricKey::TemporaryTables, u64::MAX.to_string()),
+            (RuntimeMetricKey::TemporaryDiskTables, "0".into()),
+            (RuntimeMetricKey::SortMergePasses, "9007199254740993".into()),
+        ] {
+            let counter = exported.totals.iter().find(|counter| counter.key == key).unwrap();
+            assert_eq!(counter.unit, RuntimeMetricUnit::Count);
+            assert_eq!(counter.total, MeasurementValue::Integer(expected));
+        }
+        assert!(q.costs.is_none(), "a count does not establish spill time or allocation size");
+    }
+
+    #[test]
+    fn nullable_and_unavailable_temp_fields_stay_distinct_from_native_zero_in_scan_and_export() {
+        use culprit_core::{StatementTemporaryWork, telemetry::*};
+        let layout = temporary_layout();
+        let row = native_digest_with_temporary(Value::NULL, Some([Value::UInt(0), Value::NULL, Value::NULL]));
+        let q = super::digest(&row, false, &layout.columns).unwrap().stat;
+        assert_eq!(
+            q.temporary_work,
+            Some(StatementTemporaryWork::TableCreation {
+                source: crate::native::statements::SOURCE.into(),
+                created_tables: Some("0".into()),
+                disk_tables: None,
+                sort_merge_passes: None,
+            })
+        );
+        let exported = crate::native::statements::counters(&row, &layout, "shop").unwrap();
+        assert!(exported.totals.iter().any(|counter| counter.key == RuntimeMetricKey::TemporaryTables
+            && counter.total == MeasurementValue::Integer("0".into())));
+        assert!(!exported.totals.iter().any(|counter| matches!(
+            counter.key,
+            RuntimeMetricKey::TemporaryDiskTables | RuntimeMetricKey::SortMergePasses
+        )));
+
+        let unknown = native_digest_with_temporary(Value::NULL, Some([Value::NULL, Value::NULL, Value::NULL]));
+        assert!(super::digest(&unknown, false, &layout.columns).unwrap().stat.temporary_work.is_none());
+        let mut unsupported = layout;
+        unsupported
+            .columns
+            .retain(|column| !column.starts_with("SUM_CREATED_TMP_") && column != "SUM_SORT_MERGE_PASSES");
+        let no_fields = native_digest(Value::NULL);
+        assert!(super::digest(&no_fields, false, &unsupported.columns).unwrap().stat.temporary_work.is_none());
+        assert!(crate::native::statements::counters(&no_fields, &unsupported, "shop").unwrap().totals.iter().all(
+            |counter| !matches!(
+                counter.key,
+                RuntimeMetricKey::TemporaryTables
+                    | RuntimeMetricKey::TemporaryDiskTables
+                    | RuntimeMetricKey::SortMergePasses
+            )
+        ));
+    }
+
+    #[test]
+    fn malformed_or_missing_selected_native_temp_fields_cannot_become_zero_or_partial_success() {
+        let layout = temporary_layout();
+        for value in
+            [Value::Int(-1), Value::Double(3.0), Value::from("not-a-counter"), Value::from("18446744073709551616")]
+        {
+            let row = native_digest_with_temporary(Value::NULL, Some([Value::UInt(1), value, Value::UInt(0)]));
+            assert!(super::digest(&row, false, &layout.columns).is_err());
+            assert!(crate::native::statements::counters(&row, &layout, "shop").is_err());
+        }
+        let missing = native_digest(Value::NULL);
+        assert!(super::digest(&missing, false, &layout.columns).is_err());
+        assert!(crate::native::statements::counters(&missing, &layout, "shop").is_err());
+    }
+
+    #[test]
+    fn scan_and_counter_projections_share_native_temp_columns_and_unsupported_columns_are_explicitly_null() {
+        use crate::native::statements;
+        let mut layout = temporary_layout();
+        let columns = statements::temporary_projection(&layout.columns);
+        assert_eq!(columns, "SUM_CREATED_TMP_TABLES,SUM_CREATED_TMP_DISK_TABLES,SUM_SORT_MERGE_PASSES");
+        let counters = layout.query(false, 129, 4096).unwrap();
+        for column in columns.split(',') {
+            assert!(counters.contains(column));
+        }
+        assert!(counters.ends_with("WHERE SCHEMA_NAME=? AND DIGEST IS NOT NULL LIMIT 129"));
+        layout.columns.remove("SUM_CREATED_TMP_DISK_TABLES");
+        assert_eq!(
+            statements::temporary_projection(&layout.columns),
+            "SUM_CREATED_TMP_TABLES,NULL AS SUM_CREATED_TMP_DISK_TABLES,SUM_SORT_MERGE_PASSES"
+        );
+        assert!(!layout.query(false, 129, 4096).unwrap().contains("SUM_CREATED_TMP_DISK_TABLES"));
     }
 
     #[test]
@@ -659,7 +800,7 @@ mod tests {
         use culprit_core::telemetry::{MeasurementValue, RuntimeMetricKey, RuntimeMetricUnit, WaitClass};
         let raw = 9_007_199_254_740_993_u64;
         let row = native_digest(Value::UInt(raw));
-        let q = super::digest(&row, false).unwrap().stat;
+        let q = super::digest(&row, false, &BTreeSet::new()).unwrap().stat;
         let layout = statements::Layout {
             columns: ["SCHEMA_NAME", "DIGEST", "DIGEST_TEXT", "COUNT_STAR", "SUM_TIMER_WAIT", LOCK_TIME_COLUMN]
                 .into_iter()
@@ -695,7 +836,7 @@ mod tests {
     fn unknown_and_zero_native_lock_timers_do_not_establish_absent_row_lock_waits() {
         use culprit_core::telemetry::WaitClass;
         for (native, expected) in [(Value::NULL, None), (Value::UInt(0), Some(0.0))] {
-            let q = super::digest(&native_digest(native), false).unwrap().stat;
+            let q = super::digest(&native_digest(native), false, &BTreeSet::new()).unwrap().stat;
             assert_eq!(q.spread.as_ref().unwrap().lock_ms, expected);
             assert!(q.waits.is_empty());
             assert_eq!(q.measured_wait_ms(WaitClass::Lock), None);
@@ -703,9 +844,9 @@ mod tests {
         for malformed in
             [Value::Int(-1), Value::Double(2.0), Value::from("not-a-counter"), Value::from("18446744073709551616")]
         {
-            assert!(super::digest(&native_digest(malformed), false).is_err());
+            assert!(super::digest(&native_digest(malformed), false, &BTreeSet::new()).is_err());
         }
-        assert!(super::digest(&Rec::from_values(vec![]), false).is_err());
+        assert!(super::digest(&Rec::from_values(vec![]), false, &BTreeSet::new()).is_err());
     }
 
     fn digest(id: &str, time: f64, calls: f64, examined: f64) -> Digest {
@@ -728,7 +869,7 @@ mod tests {
                 rows: None,
                 logical_reads: Some(examined),
                 physical_reads: None,
-                temp_writes: None,
+                temporary_work: None,
                 first_seen: None,
                 last_seen: None,
                 plans: Vec::new(),

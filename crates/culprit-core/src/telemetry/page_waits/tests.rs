@@ -55,9 +55,20 @@ fn observation() -> PageWaitObservation {
         observed_from: "2026-11-13T10:00:00.200000Z".into(),
         observed_until: "2026-11-13T10:00:00.800000Z".into(),
         request,
+        before_check: Some(PageWaitRecheck {
+            observed_at: "2026-11-13T10:00:00.3Z".into(),
+            request: PageWaitRequestState::SameStatement,
+            wait: PageWaitRelation::OriginalObserved,
+        }),
+        after_check: Some(PageWaitRecheck {
+            observed_at: "2026-11-13T10:00:00.7Z".into(),
+            request: PageWaitRequestState::SameStatement,
+            wait: PageWaitRelation::OriginalObserved,
+        }),
         statement_identity: Some(NativeIdentity::new("native-sql-handle").qualified("statement_start_offset", "0")),
         plan_identity: Some(NativeIdentity::new("native-plan-handle")),
         resource,
+        observed_address: Some(PageWaitAddress { database_id: 5, file_id: 1, page_id: 42 }),
         resolution: PageWaitResolution::ObservedAtBothBounds,
         target: Some(Box::new(target())),
     }
@@ -119,8 +130,6 @@ fn unresolved_mapping_keeps_original_context_but_never_publishes_a_target() {
         PageWaitResolution::Unsupported,
         PageWaitResolution::PermissionDenied,
         PageWaitResolution::Unavailable,
-        PageWaitResolution::MissingRequest,
-        PageWaitResolution::ChangedRequest,
         PageWaitResolution::ChangedMetadata,
         PageWaitResolution::UnverifiedSource,
         PageWaitResolution::UnrecognizedAddress,
@@ -142,23 +151,78 @@ fn unresolved_mapping_keeps_original_context_but_never_publishes_a_target() {
 
 #[test]
 fn native_statement_links_need_a_checked_request_and_plan_links_need_a_statement() {
-    for resolution in
-        [PageWaitResolution::MissingRequest, PageWaitResolution::ChangedRequest, PageWaitResolution::UnverifiedSource]
-    {
+    for state in [PageWaitRequestState::Missing, PageWaitRequestState::Changed, PageWaitRequestState::Unverified] {
         let mut value = observation();
-        value.target = None;
-        value.resolution = resolution;
-        assert!(!value.is_valid(), "{resolution:?} cannot publish statement or plan handles");
+        value.after_check.as_mut().unwrap().request = state;
+        value.after_check.as_mut().unwrap().wait = PageWaitRelation::Unqualified;
+        assert!(!value.is_valid(), "{state:?} cannot publish statement or plan handles");
         value.plan_identity = None;
-        assert!(!value.is_valid(), "{resolution:?} cannot publish a statement handle alone");
+        assert!(!value.is_valid(), "{state:?} cannot publish a statement handle alone");
         value.statement_identity = None;
-        assert!(value.is_valid());
+        assert!(
+            value.is_valid(),
+            "qualified current header remains useful when request continuity cannot be established"
+        );
     }
     let mut value = observation();
     value.statement_identity = None;
     assert!(!value.is_valid(), "a plan handle cannot independently qualify its statement");
     value.plan_identity = None;
+    value.before_check = None;
+    value.after_check = None;
     assert!(value.is_valid(), "a native page header remains useful without statement or plan identity");
+}
+
+#[test]
+fn matching_request_checks_cannot_authorize_statement_links_from_an_unverified_source() {
+    let mut value = observation();
+    value.target = None;
+    value.resolution = PageWaitResolution::UnverifiedSource;
+    assert!(!value.is_valid(), "matching request checks do not establish native source authority");
+    value.plan_identity = None;
+    assert!(!value.is_valid(), "an unverified source cannot publish a statement handle alone");
+    value.statement_identity = None;
+    assert!(value.is_valid(), "the original observed wait remains useful without unqualified handles");
+
+    for resolution in
+        [PageWaitResolution::Unsupported, PageWaitResolution::Unavailable, PageWaitResolution::PermissionDenied]
+    {
+        let mut value = observation();
+        value.target = None;
+        value.resolution = resolution;
+        assert!(value.is_valid(), "{resolution:?} need not invalidate independent native statement proof");
+    }
+}
+
+#[test]
+fn a_completed_or_changed_short_wait_does_not_erase_its_original_participant_or_qualified_current_header() {
+    let original = observation();
+    for relation in [PageWaitRelation::NoLongerObserved, PageWaitRelation::Different] {
+        let mut value = original.clone();
+        value.before_check.as_mut().unwrap().wait = relation;
+        value.after_check.as_mut().unwrap().wait = relation;
+        assert!(value.is_valid());
+        assert_eq!(value.request, original.request);
+        assert_eq!(value.resource, original.resource);
+        assert_eq!(value.key().unwrap(), original.key().unwrap());
+    }
+}
+
+#[test]
+fn recheck_clocks_and_original_wait_relationship_cannot_be_forged_across_a_changed_request() {
+    for at in ["2026-11-13T10:00:00.1Z", "2026-11-13T10:00:00.9Z", "not-a-clock"] {
+        let mut value = observation();
+        value.after_check.as_mut().unwrap().observed_at = at.into();
+        assert!(!value.is_valid(), "{at}");
+    }
+    let mut value = observation();
+    value.before_check.as_mut().unwrap().observed_at = "2026-11-13T10:00:00.75Z".into();
+    assert!(!value.is_valid(), "before cannot follow after");
+    let mut check = observation().before_check.unwrap();
+    check.request = PageWaitRequestState::Changed;
+    assert!(!check.is_valid(), "a different request cannot establish whether the original wait persists");
+    check.wait = PageWaitRelation::Unqualified;
+    assert!(check.is_valid());
 }
 
 #[test]
@@ -216,6 +280,7 @@ fn counter_progress_and_page_lsn_changes_do_not_replace_the_native_wait_row_iden
     replaced_request.request.key.request.as_mut().unwrap().generation = "request-2".into();
     assert_ne!(replaced_request.key().unwrap(), original);
     value.resource.native.id = "5:1:43".into();
+    value.observed_address.as_mut().unwrap().page_id = 43;
     value.request.wait.as_mut().unwrap().identified_resources = vec![value.resource.clone()];
     value.target = None;
     value.resolution = PageWaitResolution::ChangedMetadata;
@@ -315,4 +380,60 @@ fn snapshot_sharing_strips_page_wait_clients_and_physical_metadata_without_chang
         serde_json::to_value(&shared).unwrap(),
         serde_json::to_value(crate::redact::redact_snapshot(&shared)).unwrap()
     );
+}
+
+#[test]
+fn mapped_headers_require_the_source_decoded_original_database_file_and_page() {
+    for field in ["database", "file", "page", "missing-address", "invalid-database", "invalid-file"] {
+        let mut value = observation();
+        match field {
+            "database" => value.target.as_mut().unwrap().header.database_id = 99,
+            "file" => value.target.as_mut().unwrap().header.file_id = 99,
+            "page" => value.target.as_mut().unwrap().header.page_id = 99,
+            "missing-address" => value.observed_address = None,
+            "invalid-database" => value.observed_address.as_mut().unwrap().database_id = 0,
+            "invalid-file" => value.observed_address.as_mut().unwrap().file_id = 0,
+            _ => unreachable!(),
+        }
+        assert!(!value.is_valid(), "{field}");
+        let mut captured = snapshot();
+        captured.observations = vec![value];
+        assert!(!captured.is_valid(), "{field}");
+    }
+    let mut value = observation();
+    value.observed_address.as_mut().unwrap().page_id = 0;
+    value.target.as_mut().unwrap().header.page_id = 0;
+    assert!(value.is_valid(), "native page zero is a valid address, not an absent coordinate");
+}
+
+#[test]
+fn unresolved_undecoded_native_addresses_remain_original_evidence_without_header_access() {
+    let mut value = observation();
+    value.resource.native.id = "unrecognized-native-page".into();
+    value.request.wait.as_mut().unwrap().identified_resources = vec![value.resource.clone()];
+    value.observed_address = None;
+    value.resolution = PageWaitResolution::UnrecognizedAddress;
+    value.target = None;
+    assert!(value.is_valid());
+    let original = value.request.clone();
+    let serialized = serde_json::to_string(&value).unwrap();
+    assert!(!serialized.contains("observed_address"));
+    let restored: PageWaitObservation = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(restored.request, original);
+    assert_eq!(restored.observed_address, None);
+    value.resolution = PageWaitResolution::ObservedAtBothBounds;
+    value.target = Some(Box::new(target()));
+    assert!(!value.is_valid(), "an undecoded wait cannot acquire another page's header");
+}
+
+#[test]
+fn coordinate_validation_does_not_parse_source_native_tokens_or_compare_incarnation_guids_to_ordinals() {
+    let mut value = observation();
+    value.resource.native = NativeIdentity::new("opaque-page-token").qualified("provider", "custom-native-layout");
+    value.request.wait.as_mut().unwrap().identified_resources = vec![value.resource.clone()];
+    let target = value.target.as_mut().unwrap();
+    target.database = NativeIdentity::new("opaque-database-incarnation-guid");
+    target.file = NativeIdentity::new("opaque-file-incarnation-guid");
+    assert!(value.is_valid());
+    assert_eq!(value.observed_address, Some(PageWaitAddress { database_id: 5, file_id: 1, page_id: 42 }));
 }

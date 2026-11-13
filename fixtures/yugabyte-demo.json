@@ -2634,7 +2634,7 @@
         "rows": 600,
         "logical_reads": null,
         "physical_reads": null,
-        "temp_writes": null,
+        "temporary_work": null,
         "first_seen": null,
         "last_seen": null,
         "plans": [
@@ -3015,7 +3015,7 @@
         "rows": 300,
         "logical_reads": null,
         "physical_reads": null,
-        "temp_writes": null,
+        "temporary_work": null,
         "first_seen": null,
         "last_seen": null,
         "plans": [
@@ -3310,7 +3310,7 @@
         "rows": 30,
         "logical_reads": null,
         "physical_reads": null,
-        "temp_writes": null,
+        "temporary_work": null,
         "first_seen": null,
         "last_seen": null,
         "plans": [
@@ -3613,7 +3613,7 @@
         "rows": 200,
         "logical_reads": null,
         "physical_reads": null,
-        "temp_writes": null,
+        "temporary_work": null,
         "first_seen": null,
         "last_seen": null,
         "plans": [
@@ -4055,7 +4055,7 @@
         "rows": 30,
         "logical_reads": null,
         "physical_reads": null,
-        "temp_writes": null,
+        "temporary_work": null,
         "first_seen": null,
         "last_seen": null,
         "plans": [

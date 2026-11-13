@@ -3,6 +3,8 @@ import type { ActivityObservation } from "./ActivityObservation";
 import type { MappedPageTarget } from "./MappedPageTarget";
 import type { NativeIdentity } from "./NativeIdentity";
 import type { ObservedWaitResource } from "./ObservedWaitResource";
+import type { PageWaitAddress } from "./PageWaitAddress";
+import type { PageWaitRecheck } from "./PageWaitRecheck";
 import type { PageWaitResolution } from "./PageWaitResolution";
 
 export type PageWaitObservation = { source: string, observed_from: string, observed_until: string, 
@@ -11,6 +13,15 @@ export type PageWaitObservation = { source: string, observed_from: string, obser
  */
 request: ActivityObservation, 
 /**
+ * Later request and wait-state checks do not rewrite the originally observed participant or page address.
+ */
+before_check?: PageWaitRecheck, after_check?: PageWaitRecheck, 
+/**
  * Source-scoped native statement/plan handles and offsets agreed at both request checks; not global IDs.
  */
-statement_identity?: NativeIdentity, plan_identity?: NativeIdentity, resource: ObservedWaitResource, resolution: PageWaitResolution, target: MappedPageTarget | null, };
+statement_identity?: NativeIdentity, plan_identity?: NativeIdentity, resource: ObservedWaitResource, 
+/**
+ * None means the original raw wait could not be decoded into qualified page coordinates. It remains visible
+ * as unresolved evidence and cannot acquire a mapped header.
+ */
+observed_address?: PageWaitAddress, resolution: PageWaitResolution, target: MappedPageTarget | null, };

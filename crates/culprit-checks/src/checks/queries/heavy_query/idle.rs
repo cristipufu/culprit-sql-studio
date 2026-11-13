@@ -333,8 +333,8 @@ pub(in crate::checks::queries) fn idle_time(snapshot: &Snapshot, q: &QueryStat) 
         ReadUnit::Pages => PAGE_READ_MS,
     };
     let reads = q.reads_per_execution();
-    let reads_small =
-        reads.is_some_and(|r| r * read_cost < q.mean_time_ms * 0.1) && q.temp_writes.is_none_or(|t| t <= 0.0);
+    let reads_small = reads.is_some_and(|r| r * read_cost < q.mean_time_ms * 0.1)
+        && q.temporary_work.as_ref().is_none_or(|work| work.has_measurements() && !work.has_observed_work());
     let cpu_ms = q.cpu_time_ms.filter(|cpu| cpu.is_finite() && *cpu >= 0.0);
     let cpu_share = cpu_ms.map(|cpu| cpu / q.total_time_ms);
 

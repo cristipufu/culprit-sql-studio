@@ -36,8 +36,7 @@ pub(crate) fn runs_sql(with_log: bool) -> String {
     format!(
         r#"{window}DECLARE /* culprit */ @ids xml=CONVERT(xml,@P2);
 {relation},costs AS (
- SELECT p.query_id,q.context_settings_id,q.object_id,CONVERT(varchar(16),q.query_hash,2) AS query_hash,
- CONVERT(varchar(40),q.initial_compile_start_time,127) AS query_initial_compile_at,
+ SELECT {identity},
  SUM(rs.count_executions) AS executions,
  SUM(CASE WHEN rs.execution_type=3 THEN rs.count_executions ELSE 0 END) AS aborted,
  SUM(CASE WHEN rs.execution_type=3 THEN rs.culprit_duration_us ELSE 0 END) AS aborted_us,
@@ -46,7 +45,8 @@ pub(crate) fn runs_sql(with_log: bool) -> String {
  {population} AND p.query_id IN(SELECT n.x.value('@id[1]','bigint') FROM @ids.nodes('/ids/id') n(x))
  GROUP BY p.query_id,q.context_settings_id,q.object_id,q.query_hash,q.initial_compile_start_time
 ){denominator}
-SELECT /* culprit */ costs.*,{total} FROM costs {join} OPTION(MAXDOP 1,LOOP JOIN)"#
+SELECT /* culprit */ costs.*,{total} FROM costs {join} OPTION(MAXDOP 1,LOOP JOIN)"#,
+        identity = super::catalog_sql::query_identity_columns!("p.query_id")
     )
 }
 
@@ -81,11 +81,14 @@ impl RunCosts {
     }
 }
 
-pub(crate) const COMPILATION_COLUMNS: &str = r#"q.query_id,q.count_compiles,q.avg_compile_duration,
+pub(crate) const COMPILATION_COLUMNS: &str = concat!(
+    super::catalog_sql::query_identity_columns!("q.query_id"),
+    r#",
+ q.count_compiles,q.avg_compile_duration,
  q.avg_compile_memory_kb,q.last_compile_memory_kb,q.max_compile_memory_kb,
- CONVERT(varchar(40),q.initial_compile_start_time,127) AS first_compile,
  CONVERT(varchar(40),q.last_compile_start_time,127) AS last_compile,
- DATEDIFF_BIG(second,q.initial_compile_start_time,SYSDATETIMEOFFSET()) AS compiling_s"#;
+ DATEDIFF_BIG(second,q.initial_compile_start_time,SYSDATETIMEOFFSET()) AS compiling_s"#
+);
 
 pub(crate) fn compilation_sql() -> String {
     format!(
@@ -107,7 +110,7 @@ OPTION(MAXDOP 1)"#
 }
 
 pub(crate) struct Compilation {
-    pub query_id: String,
+    pub identity: culprit_core::telemetry::NativeQueryIdentity,
     pub count: u64,
     pub avg_duration_us: f64,
     pub memory: Option<culprit_core::CompilationMemory>,
@@ -117,24 +120,25 @@ pub(crate) struct Compilation {
 }
 impl Compilation {
     pub fn decode(row: &Rec) -> Result<Self> {
+        let identity = super::decode::query_identity(row)?;
         let memory = culprit_core::CompilationMemory {
             average_kb: crate::read::optional_nonnegative_number(row, "avg_compile_memory_kb")?,
             last_kb: crate::read::optional_nonnegative_number(row, "last_compile_memory_kb")?,
             maximum_kb: crate::read::optional_nonnegative_number(row, "max_compile_memory_kb")?,
         };
         Ok(Self {
-            query_id: integer(row, "query_id")?.to_string(),
+            first_at: identity.qualifiers.get("initial_compile_at").cloned().ok_or_else(invalid_data)?,
+            identity,
             count: integer(row, "count_compiles")?.try_into().map_err(|_| invalid_data())?,
             avg_duration_us: crate::read::required_nonnegative_number(row, "avg_compile_duration")?,
             memory: memory.is_measured().then_some(memory),
-            first_at: canonical_time(&crate::read::text(row, "first_compile")?)?,
             last_at: canonical_time(&crate::read::text(row, "last_compile")?)?,
             seconds_since_first: signed_integer(row, "compiling_s")?,
         })
     }
     pub fn observation(&self) -> culprit_core::telemetry::MssqlQueryCompilation {
         culprit_core::telemetry::MssqlQueryCompilation {
-            query_id: self.query_id.clone(),
+            query_id: self.identity.query_id.clone(),
             first_compile_at: self.first_at.clone(),
             last_compile_at: self.last_at.clone(),
             compilations: self.count.to_string(),

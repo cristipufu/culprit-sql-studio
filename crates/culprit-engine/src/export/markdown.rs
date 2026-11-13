@@ -412,7 +412,8 @@ fn finding_section(
         None => finding,
     };
     let _ = writeln!(out, "{level} {}\n", text(&finding.title));
-    let _ = writeln!(out, "{}\n", finding_line(report, finding, format!("**{}**", finding.impact.label)));
+    let impact = if finding.impact.label.is_empty() { String::new() } else { format!("**{}**", finding.impact.label) };
+    let _ = writeln!(out, "{}\n", finding_line(report, finding, impact));
     let _ = writeln!(out, "{}\n", text(&finding.summary));
     if !finding.metrics.is_empty() {
         for m in &finding.metrics {

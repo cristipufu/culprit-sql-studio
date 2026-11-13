@@ -49,14 +49,14 @@
         "items": [
           {
             "at": null,
-            "finding_id": "temp-spill:375c64398248650e",
-            "id": "temp-spill:375c64398248650e",
+            "finding_id": "heavy-query:375c64398248650e",
+            "id": "heavy-query:375c64398248650e",
             "kind": "finding",
-            "label": "A read from orders builds an on-disk temporary table about once per run",
+            "label": "A read from orders takes 50.0 s of database time over the 1 minute since statistics were reset (89%)",
             "query_id": null,
             "share": 0.8855883790586936,
             "status": "info",
-            "value": "89% of DB time"
+            "value": "50.0 s of database time over the 1 minute since statistics were reset (89%)"
           },
           {
             "at": null,
@@ -100,6 +100,12 @@
             "label": "Low",
             "text": "8",
             "value": 8.0
+          },
+          {
+            "key": "context",
+            "label": "Information and history",
+            "text": "1",
+            "value": 1.0
           }
         ],
         "next": "culprit findings mariadb-demo",
@@ -744,8 +750,8 @@
           {
             "key": "context",
             "label": "Information and history",
-            "text": "4",
-            "value": 4.0
+            "text": "5",
+            "value": 5.0
           }
         ],
         "next": "culprit findings mssql-demo",
@@ -1981,6 +1987,12 @@
             "label": "Low",
             "text": "10",
             "value": 10.0
+          },
+          {
+            "key": "context",
+            "label": "Information and history",
+            "text": "1",
+            "value": 1.0
           }
         ],
         "next": "culprit findings mysql-demo",
@@ -2616,14 +2628,14 @@
         "items": [
           {
             "at": null,
-            "finding_id": "temp-spill:9065391607317686058",
-            "id": "temp-spill:9065391607317686058",
+            "finding_id": "big-result:9065391607317686058",
+            "id": "big-result:9065391607317686058",
             "kind": "finding",
-            "label": "A read from orders writes about 19.9 MB of temp files per run",
+            "label": "A read from orders returns 247K rows (≈ 17.4 MB) per run",
             "query_id": null,
             "share": 0.44029066258942773,
             "status": "watch",
-            "value": "44% of DB time"
+            "value": "247K rows per run"
           },
           {
             "at": null,
@@ -2671,8 +2683,8 @@
           {
             "key": "context",
             "label": "Information and history",
-            "text": "2",
-            "value": 2.0
+            "text": "3",
+            "value": 3.0
           }
         ],
         "next": "culprit findings pg-demo",

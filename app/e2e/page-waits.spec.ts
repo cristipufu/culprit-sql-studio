@@ -4,7 +4,7 @@ import type { PageWaitReport } from "../src/gen/PageWaitReport";
 import type { PageWaitSnapshot } from "../src/gen/PageWaitSnapshot";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
 import type { State } from "../src/lib/store";
-import { PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageWait } from "../src/test/page-waits";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageWait } from "../src/test/page-waits";
 import { openConnection } from "./demo";
 
 const TITLE = english["view.page_waits.title"];
@@ -12,6 +12,7 @@ const TITLE = english["view.page_waits.title"];
 function fixture(): { evidence: PageWaitSnapshot; report: PageWaitReport } {
   const observations = Array.from({ length: 12 }, (_, index) => pageWait(String(42 + index), 42 + index));
   observations[0]!.target!.header.partition_id = "-9223372036854775808";
+  observations[0]!.after_check!.wait = "no-longer-observed";
   const unresolved = observations[1]!;
   unresolved.resource.kind = "page-io";
   unresolved.request.wait!.native_type = "PAGEIOLATCH_SH";
@@ -84,6 +85,12 @@ test("page waits retain the original affected request and qualified metadata in 
   await expect(first).toContainText(PAGE_UNTIL);
   await expect(first).toContainText("18446744073709551615");
   await expect(first).toContainText("9007199254740993 ms");
+  await first.getByText("Native request and wait rechecks", { exact: true }).click();
+  await expect(first).toContainText(PAGE_BEFORE);
+  await expect(first).toContainText(PAGE_AFTER);
+  await expect(first).toContainText("Original wait no longer observed");
+  await expect(first).toContainText("Same statement");
+  await expect(first).toContainText("native-statement-handle");
   await first.getByText("Observed page and object metadata", { exact: true }).click();
   await expect(first).toContainText("orders_id");
   await expect(first).toContainText("-9223372036854775808");

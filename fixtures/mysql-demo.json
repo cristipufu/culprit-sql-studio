@@ -103,7 +103,13 @@
         "rows": 400,
         "logical_reads": 10000400,
         "physical_reads": null,
-        "temp_writes": 20,
+        "temporary_work": {
+          "created_tables": null,
+          "disk_tables": "20",
+          "kind": "table-creation",
+          "sort_merge_passes": null,
+          "source": "performance_schema.events_statements_summary_by_digest"
+        },
         "first_seen": "2026-10-11T12:07:16Z",
         "last_seen": "2026-10-11T12:07:48Z",
         "plans": [],
@@ -294,7 +300,13 @@
         "rows": 300,
         "logical_reads": 30000300,
         "physical_reads": null,
-        "temp_writes": 0,
+        "temporary_work": {
+          "created_tables": null,
+          "disk_tables": "0",
+          "kind": "table-creation",
+          "sort_merge_passes": null,
+          "source": "performance_schema.events_statements_summary_by_digest"
+        },
         "first_seen": "2026-10-11T12:07:13Z",
         "last_seen": "2026-10-11T12:07:17Z",
         "plans": [],
@@ -450,7 +462,13 @@
         "rows": 2000,
         "logical_reads": 21430710,
         "physical_reads": null,
-        "temp_writes": 0,
+        "temporary_work": {
+          "created_tables": null,
+          "disk_tables": "0",
+          "kind": "table-creation",
+          "sort_merge_passes": null,
+          "source": "performance_schema.events_statements_summary_by_digest"
+        },
         "first_seen": "2026-10-11T12:07:13Z",
         "last_seen": "2026-10-11T12:07:19Z",
         "plans": [],
@@ -583,7 +601,13 @@
         "rows": 30000,
         "logical_reads": 30000,
         "physical_reads": null,
-        "temp_writes": 0,
+        "temporary_work": {
+          "created_tables": null,
+          "disk_tables": "0",
+          "kind": "table-creation",
+          "sort_merge_passes": null,
+          "source": "performance_schema.events_statements_summary_by_digest"
+        },
         "first_seen": "2026-10-11T12:07:13Z",
         "last_seen": "2026-10-11T12:07:18Z",
         "plans": [],
@@ -714,7 +738,13 @@
         "rows": 9991,
         "logical_reads": 19982,
         "physical_reads": null,
-        "temp_writes": 0,
+        "temporary_work": {
+          "created_tables": null,
+          "disk_tables": "0",
+          "kind": "table-creation",
+          "sort_merge_passes": null,
+          "source": "performance_schema.events_statements_summary_by_digest"
+        },
         "first_seen": "2026-10-11T12:07:13Z",
         "last_seen": "2026-10-11T12:07:19Z",
         "plans": [],
@@ -879,7 +909,13 @@
         "rows": 6398,
         "logical_reads": 12796,
         "physical_reads": null,
-        "temp_writes": 0,
+        "temporary_work": {
+          "created_tables": null,
+          "disk_tables": "0",
+          "kind": "table-creation",
+          "sort_merge_passes": null,
+          "source": "performance_schema.events_statements_summary_by_digest"
+        },
         "first_seen": "2026-10-11T12:07:13Z",
         "last_seen": "2026-10-11T12:07:19Z",
         "plans": [],

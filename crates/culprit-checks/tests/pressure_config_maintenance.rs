@@ -3,8 +3,8 @@
 
 use culprit_checks::analyze;
 use culprit_core::{
-    CleanupHolder, Finding, OpenTransaction, PlanCacheUse, Pressure, Report, Setting, Severity, Signal, SignalScope,
-    SignalUnit, Snapshot, StatisticsInfo, TableStorage, WaitStat,
+    Actionability, CleanupHolder, Finding, OpenTransaction, PlanCacheUse, Pressure, Report, Setting, Severity, Signal,
+    SignalScope, SignalUnit, Snapshot, StatementTemporaryWork, StatisticsInfo, TableStorage, Unit, WaitStat,
 };
 
 fn snapshot(name: &str) -> Snapshot {
@@ -545,91 +545,100 @@ fn a_restart_is_named_only_where_the_setting_needs_one() {
 }
 
 #[test]
-fn mysql_and_mariadb_temp_limits_reach_existing_connections_only_when_the_app_sets_them() {
-    let spill = |s: Snapshot| analyze(s).findings.into_iter().find(|f| f.check == "temp-spill").unwrap();
-    for s in [snapshot("mysql-demo.json"), report_snapshot("mariadb-demo")] {
-        let f = spill(s);
-        let fix = f.fix.as_ref().unwrap();
-        assert!(fix.summary.contains("Global values apply to new connections"), "{}", fix.summary);
-        assert!(
-            fix.summary.contains("reopen the application's existing connections")
-                && fix.summary.contains("set these session variables on them"),
-            "{}",
-            fix.summary
-        );
-        assert!(f.verify[0].starts_with("Once the application's connections use the new limits"), "{:?}", f.verify);
+fn mysql_and_mariadb_temporary_table_counts_do_not_establish_memory_limits() {
+    for (base, query) in
+        [(snapshot("mysql-demo.json"), "04cd7be9c366fadc"), (report_snapshot("mariadb-demo"), "375c64398248650e")]
+    {
+        for (engine, limit) in [("MEMORY", "1048576"), ("TempTable", "2147483648")] {
+            let mut s = base.clone();
+            set(&mut s, "internal_tmp_mem_storage_engine", engine);
+            for setting in ["tmp_table_size", "max_heap_table_size", "temptable_max_ram"] {
+                set(&mut s, setting, limit);
+            }
+            let report = analyze(s);
+            let f = find(&report.findings, &format!("temp-spill:{query}")).expect("recorded disk tables");
+            assert_eq!(f.actionability, Actionability::Information);
+            assert_eq!(f.severity, Severity::Low);
+            let disk_tables = f.metrics.iter().find(|m| m.is("view.temporary_work.disk_tables")).unwrap();
+            assert_eq!(disk_tables.text.as_deref(), Some("20"));
+            assert_eq!(f.metrics.len(), 1, "unmeasured bytes, timing and table counts stay unknown");
+            assert_eq!(disk_tables.unit, Unit::Text);
+            let fix = f.fix.as_ref().expect("investigation without an assumed memory remedy");
+            assert_eq!(fix.sql, None, "native counts cannot size memory or prescribe session variables");
+            assert_eq!(fix.cost, None);
+            assert!(fix.summary.contains("establish the mechanism before changing memory limits"));
+            assert_eq!(f.impact.db_time_share, None);
+            assert_eq!(f.impact.time_ms_per_day, None);
+        }
     }
-    // Before MySQL 8.0.28, the TempTable engine has only its server-wide RAM cap: no new session is needed for that.
-    let mut shared = snapshot("mysql-demo.json");
-    shared.server.version = "8.0.27".into();
-    set(&mut shared, "internal_tmp_mem_storage_engine", "TempTable");
-    set(&mut shared, "temptable_max_ram", "1073741824");
-    let f = spill(shared);
-    assert!(!f.fix.as_ref().unwrap().summary.contains("new connections"), "{:?}", f.fix);
-    assert!(f.verify[0].starts_with("Once the change is live"), "{:?}", f.verify);
 }
 
-// MySQL demo MY-2: the demo server keeps internal temporary tables in the MEMORY engine, where the cap is the smaller
-// of tmp_table_size and max_heap_table_size: raising tmp_table_size alone changes nothing. A scan that didn't read the
-// engine raises both and states no temptable_max_ram value; only TempTable's own limit is said with one, as read.
+// A count is useful context alongside measured query cost. It neither absorbs the latency finding nor explains its
+// time: removing the count leaves the independently measured heavy-query evidence intact.
 #[test]
-fn mysql_temp_spill_raises_what_caps_the_engine_the_server_uses() {
-    let spill = |s: Snapshot| {
-        analyze(s).findings.into_iter().find(|f| f.check == "temp-spill").expect("the demo's on-disk temporary tables")
+fn temporary_table_counts_preserve_independent_query_latency_evidence() {
+    let mut s = snapshot("mysql-demo.json");
+    let query = "04cd7be9c366fadc";
+    let with_counts = analyze(s.clone());
+    let temporary = find(&with_counts.findings, &format!("temp-spill:{query}")).expect("native resource context");
+    let heavy = find(&with_counts.findings, &format!("heavy-query:{query}")).expect("independent measured query cost");
+    assert_eq!(temporary.actionability, Actionability::Information);
+    assert_eq!(temporary.impact.db_time_share, None);
+    assert!(heavy.impact.db_time_share.is_some_and(|share| share > 0.0));
+
+    s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == query).unwrap().temporary_work = None;
+    let without_counts = analyze(s);
+    assert!(find(&without_counts.findings, &format!("temp-spill:{query}")).is_none());
+    let independent = find(&without_counts.findings, &format!("heavy-query:{query}")).expect("latency remains known");
+    assert_eq!(independent.impact.db_time_share, heavy.impact.db_time_share);
+    assert_eq!(independent.severity, heavy.severity);
+}
+
+// A smaller counter in a new reset window does not establish an improvement. Preserve the new native total without
+// deriving bytes, elapsed savings or a counter difference whose continuity was never established.
+#[test]
+fn temporary_work_verification_requires_latency_and_counter_continuity() {
+    let mut later = report_snapshot("pg-demo");
+    let before = analyze(later.clone());
+    let id = "temp-spill:9065391607317686058";
+    let original = find(&before.findings, id).expect("native temporary blocks");
+    let written = original.metrics.iter().find(|m| m.is("view.temporary_work.written_blocks")).unwrap();
+    assert_eq!(written.text.as_deref(), Some("543988"));
+
+    let reset = later.taken_at.clone();
+    later.taken_at = chrono_like(&later.taken_at, 1);
+    let workload = later.workload.as_mut().unwrap();
+    workload.window_start = Some(reset.clone());
+    workload.window_end = Some(later.taken_at.clone());
+    workload.window_hours = 24.0;
+    workload.timeline = None;
+    let query = workload.queries.iter_mut().find(|q| q.id == "9065391607317686058").unwrap();
+    query.first_seen = Some(reset);
+    query.last_seen = Some(later.taken_at.clone());
+    query.trend = None;
+    let Some(StatementTemporaryWork::BlockIo { written_blocks, bytes_per_block, .. }) = query.temporary_work.as_mut()
+    else {
+        panic!("the native fixture records block I/O");
     };
-    let base = snapshot("mysql-demo.json");
-    // The engine wasn't read (the saved demo): both caps, and no 1 GB said as the server's.
-    let f = spill(base.clone());
-    let sql = f.fix.as_ref().and_then(|x| x.sql.clone()).unwrap();
-    assert!(sql.contains("tmp_table_size = 67108864") && sql.contains("max_heap_table_size = 67108864"), "{sql}");
-    assert!(!f.summary.contains("GB"), "{}", f.summary);
-    assert!(f.summary.contains("1.0 MB, the smaller of tmp_table_size and max_heap_table_size"), "{}", f.summary);
-    // MEMORY, as the demo runs: both caps, the smaller one wins.
-    let mut memory = base.clone();
-    set(&mut memory, "internal_tmp_mem_storage_engine", "MEMORY");
-    let f = spill(memory);
-    let sql = f.fix.as_ref().and_then(|x| x.sql.clone()).unwrap();
-    assert!(sql.contains("max_heap_table_size = 67108864"), "{sql}");
-    assert!(!f.summary.contains("temptable_max_ram"), "{}", f.summary);
-    // TempTable: tmp_table_size per table on 8.4, and temptable_max_ram as the server has it.
-    let mut temptable = base.clone();
-    set(&mut temptable, "internal_tmp_mem_storage_engine", "TempTable");
-    set(&mut temptable, "temptable_max_ram", "2147483648");
-    let f = spill(temptable.clone());
-    let sql = f.fix.as_ref().and_then(|x| x.sql.clone()).unwrap();
-    assert!(sql.contains("tmp_table_size = 67108864") && !sql.contains("max_heap_table_size"), "{sql}");
-    assert!(f.summary.contains("temptable_max_ram, 2.0 GB, for all such tables together"), "{}", f.summary);
-    // TempTable whose shared limit wasn't read: named, with no value.
-    temptable.settings.retain(|x| x.name != "temptable_max_ram");
-    let f = spill(temptable);
-    assert!(f.summary.contains("and temptable_max_ram, for all such tables together"), "{}", f.summary);
-    assert!(!f.summary.contains("GB"), "{}", f.summary);
-}
+    assert_eq!(*bytes_per_block, None);
+    *written_blocks = Some("3".into());
 
-// SQL Server/PostgreSQL demos P2-5c: temp-spill had no verify step. pg_stat_statements and performance_schema keep
-// totals since their last reset: the step names the numbers to compare and what shows the spill gone.
-#[test]
-fn temp_spill_says_what_a_later_scan_shows() {
-    let f = analyze(report_snapshot("pg-demo"))
-        .findings
-        .into_iter()
-        .find(|f| f.check == "temp-spill")
-        .expect("the demo's spilling sort");
-    // What to look at is the spill's total between two scans, not whether this finding (which reads the totals) is
-    // still listed.
-    let verify = &f.verify[0];
-    assert!(verify.starts_with("Once the application's connections use the new setting"), "{verify}");
-    assert!(
-        verify.ends_with(", its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan)."),
-        "{verify}"
-    );
-    assert!(!verify.contains("finding can stay"), "{verify}");
-    let f = analyze(snapshot("mysql-demo.json")).findings.into_iter().find(|f| f.check == "temp-spill").unwrap();
-    assert!(
-        f.verify[0].contains("compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan)"),
-        "{:?}",
-        f.verify
-    );
+    let after = analyze(later);
+    let current = find(&after.findings, id).expect("a smaller positive counter still records work");
+    let written = current.metrics.iter().find(|m| m.is("view.temporary_work.written_blocks")).unwrap();
+    assert_eq!(written.text.as_deref(), Some("3"));
+    assert!(current.metrics.iter().all(|m| m.unit == Unit::Text), "no measured block size or timing");
+    assert_eq!(current.actionability, Actionability::Information);
+    assert_eq!(current.impact.db_time_share, None);
+    assert_eq!(current.impact.time_ms_per_day, None);
+    assert_eq!(current.verify, original.verify);
+    for f in [current, original] {
+        let verify = &f.verify[0];
+        assert!(verify.contains("independently measured query latency under comparable load"), "{verify}");
+        assert!(verify.contains("source identity, scope and reset continuity are verified"), "{verify}");
+        assert!(verify.contains("do not reset production statistics"), "{verify}");
+        assert!(f.fix.as_ref().unwrap().sql.is_none());
+    }
 }
 
 // MariaDB demo: with the slow log writing to its table, MariaDB counts a logged statement's whole run as its lock time

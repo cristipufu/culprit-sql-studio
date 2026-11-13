@@ -16,4 +16,6 @@ pub mod plan_view;
 pub mod request_memory;
 pub mod session_memory;
 pub mod sql_lint;
+pub mod statement_work;
+pub mod temporary_work;
 pub mod waits;

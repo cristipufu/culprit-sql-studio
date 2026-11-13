@@ -272,43 +272,33 @@
 === pg-demo.report.json temp-spill:9065391607317686058
 {
   "confidence": "high",
-  "summary": "The associated statements used 1 min of database time over the 5 hours since statistics were reset (44%). A sort or hash in this statement needs more memory than work_mem (4MB in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory. Each run also sends 247K rows (≈ 17.4 MB) to the application, and few screens or jobs need that many at once: returning fewer can keep the sort in memory too. Latest activity: 25 runs observed over 32 minutes of Culprit's scans on Oct 11, 11:22–11:54 UTC. This count is shown without extrapolating a daily rate.",
+  "summary": "The source recorded temporary block traffic and any available I/O timings for this statement. Individual executions and operators remain unresolved.",
   "metrics": [
     {
-      "label": "Temp written per run",
-      "value": "19.9 MB"
-    },
-    {
-      "label": "Average duration",
-      "value": "332 ms"
-    },
-    {
-      "label": "Rows per run",
-      "value": "247K"
-    },
-    {
-      "label": "Bytes per run (estimated)",
-      "value": "17.4 MB"
+      "label": "Native temporary blocks written",
+      "value": "543988"
     }
   ],
   "queries": [
     {
       "stats": "44% of database time · 25 runs observed over 32 minutes of Culprit's scans on Oct 11, 11:22–11:54 UTC · 332 ms on average",
       "sql": "SELECT id, note FROM orders WHERE created_at > now() - interval $1 ORDER BY note",
-      "plan": "Sort: 667K rows",
+      "plan": null,
       "note": null
     }
   ],
   "fix": {
-    "summary": "Give this statement more sort memory (64MB instead of 4MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows. Where the application doesn't use every row it receives, return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.",
-    "sql": "-- For the role the application connects as (takes effect on its next connections):\nALTER ROLE <app_role> SET work_mem = '64MB';\n\n-- Or only for this statement, inside its transaction:\nSET LOCAL work_mem = '64MB';",
-    "cost": "work_mem is per sort or hash, per connection: size it with your connection count in mind."
+    "summary": "Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.",
+    "sql": null,
+    "cost": null
   },
   "verify": [
-    "Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).",
-    "If it now returns fewer rows, the rows it returns per run between those two scans should drop to what a page or a job actually uses."
+    "Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change."
   ],
-  "caveats": []
+  "caveats": [
+    "Resource totals can include planning and execution work. Parallel I/O times are not an exclusive elapsed-time component, and zero timings do not establish complete historical timing coverage.",
+    "These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run."
+  ]
 }
 === pg-demo.report.json filtered-scan:public.orders(customer_id)
 {
@@ -522,34 +512,33 @@
 === mysql-demo.report.json temp-spill:04cd7be9c366fadc
 {
   "confidence": "high",
-  "summary": "The associated statements used 34.5 s of database time over the 2 minutes since statistics were reset (12%). The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit (1.0 MB, the smaller of tmp_table_size and max_heap_table_size, where these tables use the MEMORY engine; the TempTable engine stops at tmp_table_size and temptable_max_ram instead) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs.",
+  "summary": "The source recorded internal temporary-table and sort-pass counts for this statement. Their byte volume and elapsed cost remain unknown.",
   "metrics": [
     {
-      "label": "On-disk temporary tables per run",
-      "value": "1"
-    },
-    {
-      "label": "Average duration",
-      "value": "1.7 s"
+      "label": "Native internal disk tables created",
+      "value": "20"
     }
   ],
   "queries": [
     {
       "stats": "12% of database time · 20 runs over the 2 minutes since statistics were reset · 1.7 s on average",
       "sql": "SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMIT ?",
-      "plan": "Group: 499K rows",
+      "plan": null,
       "note": null
     }
   ],
   "fix": {
-    "summary": "Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 64.0 MB (both variables: with the MEMORY engine the smaller one wins). Set tmp_table_size to 67108864; SET PERSIST keeps it across restarts. Set max_heap_table_size to 67108864; SET PERSIST keeps it across restarts. Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.",
-    "sql": "SET PERSIST tmp_table_size = 67108864;\nSET PERSIST max_heap_table_size = 67108864;",
-    "cost": "The limit is per temporary table per connection; size it with your connection count in mind."
+    "summary": "Inspect a representative measured plan and the statement’s input size to locate temporary work. Test a query, index or input-size change under comparable load; establish the mechanism before changing memory limits.",
+    "sql": null,
+    "cost": null
   },
   "verify": [
-    "Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan)."
+    "Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change."
   ],
-  "caveats": []
+  "caveats": [
+    "Disk tables can be created directly or after memory-backed work. Native counts may omit other temporary-storage paths; zero disk tables does not prove that all temporary work stayed in memory.",
+    "These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run."
+  ]
 }
 === mysql-demo.report.json heavy-query:4167fe7f2c20deb7
 {

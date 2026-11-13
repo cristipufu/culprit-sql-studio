@@ -341,6 +341,7 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
             }
         }
         Warned::Spill => {
+            f.facts.cause = Some(culprit_core::FindingCause::Spill);
             f.title = t!("check.plan_warnings.title.spill", query = capitalize(&query), tense = tense);
             f.summary = t!("check.plan_warnings.summary.spill");
             f.fix = Some(Fix {

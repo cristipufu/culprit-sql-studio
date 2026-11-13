@@ -1,5 +1,5 @@
 //! The query checks say only what the statistics show: a plan change needs the times to back it, a spread one outlier
-//! can't explain, a spill big enough to matter, a wait that reads can't explain, and fixes the server can run. Each test
+//! can't explain, native temporary work whose cost remains unknown, a wait that reads can't explain, and fixes the server can run. Each test
 //! plants one condition on a demo snapshot, with the case that must be flagged next to the ones that must not.
 
 use culprit_checks::analyze;
@@ -1394,49 +1394,81 @@ fn a_statement_quiet_since_the_first_scan_may_have_stopped_earlier() {
 
 // ── temp-spill ───────────────────────────────────────────────────────────────────────────────────
 
+#[test]
+fn temporary_source_metadata_does_not_complete_an_unmeasured_check() {
+    let mut s = snapshot("postgres-demo.json");
+    for q in &mut s.workload.as_mut().unwrap().queries {
+        q.temporary_work = Some(culprit_core::StatementTemporaryWork::BlockIo {
+            source: "native".into(),
+            bytes_per_block: Some(8192),
+            read_blocks: None,
+            written_blocks: None,
+            read_time_ms: None,
+            write_time_ms: None,
+        });
+    }
+    let report = analyze(s.clone());
+    let assessment = report.assessments.iter().find(|assessment| assessment.check == "temp-spill").unwrap();
+    assert_eq!(assessment.status, culprit_core::CheckStatus::InsufficientEvidence);
+    assert!(assessment.assessed_queries.is_empty());
+    for q in &mut s.workload.as_mut().unwrap().queries {
+        if let Some(culprit_core::StatementTemporaryWork::BlockIo { written_blocks, .. }) = &mut q.temporary_work {
+            *written_blocks = Some("0".into());
+        }
+    }
+    let report = analyze(s);
+    assert_eq!(
+        report.assessments.iter().find(|assessment| assessment.check == "temp-spill").unwrap().status,
+        culprit_core::CheckStatus::Assessed
+    );
+}
+
 const ORDERS_SORT: &str = "9065391607317686058";
 
 #[test]
-fn a_spill_too_small_to_matter_is_not_a_finding() {
-    // 16 KB per run on a 332 ms statement: writing it takes a fraction of a millisecond.
+fn temporary_work_does_not_estimate_delay_from_an_assumed_disk_speed() {
     let mut s = snapshot("postgres-demo.json");
     let q = query(&mut s, ORDERS_SORT);
-    q.temp_writes = Some(2.0 * q.executions);
+    q.temporary_work = Some(culprit_core::StatementTemporaryWork::BlockIo {
+        source: "pg_stat_statements".into(),
+        bytes_per_block: Some(8192),
+        read_blocks: None,
+        written_blocks: Some(format!("{:.0}", 2.0 * q.executions)),
+        read_time_ms: None,
+        write_time_ms: None,
+    });
     let report = analyze(s);
-    assert!(find(&report.findings, &format!("temp-spill:{ORDERS_SORT}")).is_none());
+    let f = find(&report.findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap();
+    assert_eq!(f.actionability, culprit_core::Actionability::Information);
+    assert_eq!(f.severity, Severity::Low);
+    assert!(f.impact.db_time_share.is_none() && f.impact.time_ms_per_day.is_none());
+    assert!(f.fix.as_ref().unwrap().sql.is_none());
 }
 
 #[test]
-fn work_mem_advice_is_for_the_applications_role_and_never_lower() {
-    let report = analyze(snapshot("postgres-demo.json"));
-    let f = find(&report.findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap();
-    assert!(!f.summary.contains("on every run"), "{}", f.summary);
-    let sql = f.fix.as_ref().unwrap().sql.clone().unwrap();
-    assert!(sql.contains("ALTER ROLE <app_role> SET work_mem = '64MB';") && !sql.contains("current_user"), "{sql}");
-
-    // Already 64MB: more than that, never the same or less.
-    let mut s = snapshot("postgres-demo.json");
-    set(&mut s, "work_mem", "64MB");
-    let sql =
-        find(&analyze(s).findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap().fix.clone().unwrap().sql.unwrap();
-    assert!(sql.contains("work_mem = '128MB'"), "{sql}");
-    // Already 1GB: no more memory, read less.
-    let mut s = snapshot("postgres-demo.json");
-    set(&mut s, "work_mem", "1GB");
-    let fix = find(&analyze(s).findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap().fix.clone().unwrap();
-    assert!(fix.sql.is_none() && fix.summary.starts_with("work_mem is already 1GB"), "{}", fix.summary);
+fn temporary_totals_do_not_size_application_memory_from_average_written_bytes() {
+    for limit in ["4MB", "64MB", "1GB"] {
+        let mut s = snapshot("postgres-demo.json");
+        set(&mut s, "work_mem", limit);
+        let report = analyze(s);
+        let f = find(&report.findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap();
+        assert!(f.fix.as_ref().unwrap().sql.is_none());
+        assert_eq!(f.confidence, culprit_core::Confidence::High);
+        assert_eq!(f.actionability, culprit_core::Actionability::Information);
+        assert!(f.caveats.iter().any(|text| text.contains("without establishing memory exhaustion")));
+    }
 }
 
 #[test]
-fn a_spill_points_at_the_step_that_spills() {
-    // PostgreSQL: the plan's one sort (under a Gather Merge).
-    let report = analyze(snapshot("postgres-demo.json"));
-    let f = find(&report.findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap();
-    assert_eq!(f.queries[0].plan_node, Some(1), "{:?}", f.queries);
-    // MySQL: the grouping step's internal temporary table, not the filesort above it.
-    let report = analyze(snapshot("mysql-demo.json"));
-    let f = find(&report.findings, &format!("temp-spill:{GROUP_BY}")).unwrap();
-    assert_eq!(f.queries[0].plan_node, Some(2), "{:?}", f.queries);
+fn cumulative_temp_work_does_not_blame_a_plans_only_capable_operator() {
+    for (name, id) in [("postgres-demo.json", ORDERS_SORT), ("mysql-demo.json", GROUP_BY)] {
+        let report = analyze(snapshot(name));
+        let f = find(&report.findings, &format!("temp-spill:{id}")).unwrap();
+        assert_eq!(f.queries[0].plan_node, None);
+        assert_eq!(f.facts.cause, None);
+        assert!(f.impact.db_time_share.is_none());
+        assert!(f.fix.as_ref().unwrap().sql.is_none());
+    }
 }
 
 #[test]
@@ -1452,52 +1484,33 @@ fn an_exchange_is_never_a_plans_costliest_step() {
 const GROUP_BY: &str = "04cd7be9c366fadc";
 
 #[test]
-fn mysql_temp_table_advice_raises_only_what_limits_and_never_lowers() {
-    // MySQL 8.4 running internal temporary tables on TempTable: max_heap_table_size doesn't limit them.
-    let mut s = snapshot("mysql-demo.json");
-    set(&mut s, "internal_tmp_mem_storage_engine", "TempTable");
-    let report = analyze(s);
-    let f = find(&report.findings, &format!("temp-spill:{GROUP_BY}")).unwrap();
-    let sql = f.fix.as_ref().unwrap().sql.clone().unwrap();
-    assert_eq!(sql, "SET PERSIST tmp_table_size = 67108864;");
-    let fix = &f.fix.as_ref().unwrap().summary;
-    assert!(fix.contains("can still need a temporary table and sort"), "{fix}");
-    assert!(!fix.contains("so no temporary table is needed"), "{fix}");
-    assert!(f.title.ends_with("builds an on-disk temporary table about once per run"), "{}", f.title);
-    // Which engine it uses unread (the demo's saved scan): MEMORY's cap is both variables, so both are raised.
-    let f = find(&analyze(snapshot("mysql-demo.json")).findings, &format!("temp-spill:{GROUP_BY}")).cloned().unwrap();
-    assert_eq!(
-        f.fix.unwrap().sql.as_deref(),
-        Some("SET PERSIST tmp_table_size = 67108864;\nSET PERSIST max_heap_table_size = 67108864;")
-    );
-
-    // MariaDB (MEMORY engine): the smaller of the two limits wins; the larger one is left alone.
-    let mut s = snapshot("mysql-demo.json");
-    s.server.product = "MariaDB 10.11.8".into();
-    s.server.version = "10.11.8-MariaDB".into();
-    set(&mut s, "tmp_table_size", &(256.0 * 1024.0 * 1024.0).to_string());
-    set(&mut s, "max_heap_table_size", &(16.0 * 1024.0 * 1024.0).to_string());
-    let sql = find(&analyze(s).findings, &format!("temp-spill:{GROUP_BY}")).unwrap().fix.clone().unwrap().sql.unwrap();
-    assert_eq!(sql, "SET GLOBAL max_heap_table_size = 67108864;", "tmp_table_size is already 256 MB");
+fn native_disk_table_counts_do_not_prove_memory_exhaustion_or_a_required_limit_change() {
+    for engine in ["TempTable", "MEMORY"] {
+        let mut s = snapshot("mysql-demo.json");
+        set(&mut s, "internal_tmp_mem_storage_engine", engine);
+        set(&mut s, "big_tables", "ON");
+        let report = analyze(s);
+        let f = find(&report.findings, &format!("temp-spill:{GROUP_BY}")).unwrap();
+        assert!(f.fix.as_ref().unwrap().sql.is_none());
+        assert!(f.impact.db_time_share.is_none());
+        assert!(f.caveats.iter().any(|text| text.contains("Disk tables can be created directly")));
+    }
 }
 
 #[test]
-fn a_text_column_sends_a_mariadb_temporary_table_to_disk_whatever_the_limit() {
+fn native_table_and_sort_pass_counts_preserve_exact_values_without_time_allocation() {
     let mut s = snapshot("mysql-demo.json");
-    s.server.product = "MariaDB 10.11.8".into();
-    s.server.version = "10.11.8-MariaDB".into();
-    let mut note = s.columns.iter().find(|c| c.table == "orders").cloned().expect("a column of orders");
-    note.name = "channel".into();
-    note.data_type = "text".into();
-    s.columns.retain(|c| !(c.table == "orders" && c.name.eq_ignore_ascii_case("channel")));
-    s.columns.push(note);
-    let f = find(&analyze(s).findings, &format!("temp-spill:{GROUP_BY}")).cloned().unwrap();
-    assert!(
-        f.summary.contains("whatever its size") && f.summary.contains("Raising the memory limit won't change that"),
-        "{}",
-        f.summary
-    );
-    assert!(f.fix.unwrap().sql.is_none());
+    query(&mut s, GROUP_BY).temporary_work = Some(culprit_core::StatementTemporaryWork::TableCreation {
+        source: "performance_schema.events_statements_summary_by_digest".into(),
+        created_tables: Some("18446744073709551615".into()),
+        disk_tables: Some("9007199254740993".into()),
+        sort_merge_passes: Some("0".into()),
+    });
+    let report = analyze(s);
+    let f = find(&report.findings, &format!("temp-spill:{GROUP_BY}")).unwrap();
+    let values: Vec<_> = f.metrics.iter().filter_map(|metric| metric.text.as_deref()).collect();
+    assert!(values.contains(&"18446744073709551615") && values.contains(&"9007199254740993") && values.contains(&"0"));
+    assert!(f.impact.db_time_share.is_none() && f.impact.time_ms_per_day.is_none());
 }
 
 /// `s` with statement `id` stopped: it ran for a day, two days before the data ends.
@@ -1534,230 +1547,34 @@ fn measured_by_scans(name: &str, id: &str, runs: f64, time_ms: f64) -> Snapshot 
     s
 }
 
-// What temp-spill says, word for word, beyond the demos' (PostgreSQL's sort that needs 64MB, MySQL's and MariaDB's
-// GROUP BY over both limits): work_mem already at its ceiling, unread or due for a gigabyte; a statement that stopped,
-// on a windowed source; totals Culprit's scans measured apart; and each way MySQL and MariaDB limit a temporary table
-// in memory, several tables a run or some runs only, and one sent to disk for a TEXT column. Its messages come from
-// locales/en.json.
+// Native resource observations retain their own meaning without sizing memory or assigning elapsed cost.
 #[test]
-fn a_spill_says_what_it_writes_and_what_limits_it_in_english() {
+fn temporary_work_states_its_native_meaning_and_unknown_cause_in_english() {
     assert_eq!(
         crate::info("temp-spill"),
-        "Queries writing temp files\n\
-        Statements whose sorts, hashes or temporary tables outgrow memory and spill to disk."
+        "Temporary resource work\nRecorded temporary I/O, internal table creation and space use, without inferring elapsed cost or a memory shortage."
     );
-    let said = |s: Snapshot, id: &str| {
-        let found = crate::run("temp-spill", &s);
-        crate::words(found.iter().find(|f| f.id == format!("temp-spill:{id}")).expect("a spill"))
-    };
-    let pg = || snapshot("postgres-demo.json");
-    let with = |mut s: Snapshot, settings: &[(&str, &str)]| {
-        for (name, value) in settings {
-            set(&mut s, name, value);
-        }
-        s
-    };
-    let mut no_work_mem = pg();
-    no_work_mem.settings.retain(|x| x.name != "work_mem");
-    let mut windowed = stopped(pg(), ORDERS_SORT);
-    crate::last_hours(windowed.workload.as_mut().unwrap(), 96.0);
+    let report = analyze(snapshot("postgres-demo.json"));
+    let f = find(&report.findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap();
     assert_eq!(
-        [
-            said(with(pg(), &[("work_mem", "1GB")]), ORDERS_SORT),
-            said(no_work_mem, ORDERS_SORT),
-            said(with(pg(), &[("work_mem", "600MB")]), ORDERS_SORT),
-            said(windowed, ORDERS_SORT),
-            said(measured_by_scans("postgres-demo.json", ORDERS_SORT, 10.0, 3_000.0), ORDERS_SORT),
-        ],
-        [
-            "A read from orders writes about 19.9 MB of temp files per run · Medium · High\n\
-                A sort or hash in this statement needs more memory than work_mem (1GB in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory.\n\
-                impact: 45% of DB time\n\
-                metric: Temp written per run\n\
-                metric: Average duration\n\
-                fix: work_mem is already 1GB; more sort memory per operation is no longer a reasonable fix, so add an index that returns rows already in the order the sort needs, or sort fewer rows.\n\
-                verify: Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).",
-            "A read from orders writes about 19.9 MB of temp files per run · Medium · High\n\
-                A sort or hash in this statement needs more memory than work_mem (4MB, the default in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory.\n\
-                impact: 45% of DB time\n\
-                metric: Temp written per run\n\
-                metric: Average duration\n\
-                fix: Give this statement more sort memory (64MB instead of 4.0 MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows.\n\
-                sql: -- For the role the application connects as (takes effect on its next connections):\n\
-                ALTER ROLE <app_role> SET work_mem = '64MB';\n\n\
-                -- Or only for this statement, inside its transaction:\n\
-                SET LOCAL work_mem = '64MB';\n\
-                cost: work_mem is per sort or hash, per connection: size it with your connection count in mind.\n\
-                verify: Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).",
-            "A read from orders writes about 19.9 MB of temp files per run · Medium · High\n\
-                A sort or hash in this statement needs more memory than work_mem (600MB in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory.\n\
-                impact: 45% of DB time\n\
-                metric: Temp written per run\n\
-                metric: Average duration\n\
-                fix: Give this statement more sort memory (1GB instead of 600MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows.\n\
-                sql: -- For the role the application connects as (takes effect on its next connections):\n\
-                ALTER ROLE <app_role> SET work_mem = '1GB';\n\n\
-                -- Or only for this statement, inside its transaction:\n\
-                SET LOCAL work_mem = '1GB';\n\
-                cost: work_mem is per sort or hash, per connection: size it with your connection count in mind.\n\
-                verify: Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).",
-            "A read from orders wrote about 19.9 MB of temp files per run · Low · High\n\
-                A sort or hash in this statement needed more memory than work_mem (4MB in Culprit's session; a setting on the application's role or database can differ) and wrote the overflow to temporary files: 4.2 GB over 214 runs. pg_stat_statements counts the total, so whether every run spilled or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory.\n\
-                impact: 45% of DB time\n\
-                metric: Temp written per run\n\
-                metric: Average duration\n\
-                fix: Give this statement more sort memory (64MB instead of 4MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows.\n\
-                sql: -- For the role the application connects as (takes effect on its next connections):\n\
-                ALTER ROLE <app_role> SET work_mem = '64MB';\n\n\
-                -- Or only for this statement, inside its transaction:\n\
-                SET LOCAL work_mem = '64MB';\n\
-                cost: work_mem is per sort or hash, per connection: size it with your connection count in mind.\n\
-                verify: Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), scan again once the scan's window holds only runs from after it: this finding is gone.",
-            "A read from orders writes about 19.9 MB of temp files per run · Low · High\n\
-                A sort or hash in this statement needs more memory than work_mem (4MB in Culprit's session; a setting on the application's role or database can differ) and writes the overflow to temporary files: 4.2 GB over 214 runs in the 40 days since statistics were reset. pg_stat_statements counts the total, so whether every run spills or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory.\n\
-                impact: 30% of DB time\n\
-                metric: Temp written per run over the 40 days since statistics were reset\n\
-                metric: Average duration over Culprit's scans\n\
-                fix: Give this statement more sort memory (64MB instead of 4MB, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or add an index that returns rows already in the order the sort needs, or sort fewer rows.\n\
-                sql: -- For the role the application connects as (takes effect on its next connections):\n\
-                ALTER ROLE <app_role> SET work_mem = '64MB';\n\n\
-                -- Or only for this statement, inside its transaction:\n\
-                SET LOCAL work_mem = '64MB';\n\
-                cost: work_mem is per sort or hash, per connection: size it with your connection count in mind.\n\
-                verify: Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change), its temp files should stop growing while its runs go on: pg_stat_statements keeps running totals, so compare its temp files and runs in a scan taken once the change is live and one a day or more later (4.2 GB over 214 runs in this scan).",
-        ]
+        f.summary,
+        "The source recorded temporary block traffic and any available I/O timings for this statement. Individual executions and operators remain unresolved."
     );
-    let mysql = |version: &str| {
-        let mut s = snapshot("mysql-demo.json");
-        s.server.version = version.into();
-        s
-    };
-    let mariadb = || {
-        let mut s = snapshot("mysql-demo.json");
-        s.server.product = "MariaDB 10.11.8".into();
-        s.server.version = "10.11.8-MariaDB".into();
-        s
-    };
-    let temptable = |version: &str, ram: Option<&str>| {
-        let mut s = with(mysql(version), &[("internal_tmp_mem_storage_engine", "TempTable")]);
-        s.settings.retain(|x| x.name != "temptable_max_ram");
-        match ram {
-            Some(ram) => with(s, &[("temptable_max_ram", ram)]),
-            None => s,
-        }
-    };
-    let runs = |mut s: Snapshot, tables_a_run: f64| {
-        let q = query(&mut s, GROUP_BY);
-        q.temp_writes = Some(q.executions * tables_a_run);
-        s
-    };
-    let mut unread = mariadb();
-    unread.settings.retain(|x| x.name != "tmp_table_size");
-    let mut text = mariadb();
-    let mut note = text.columns.iter().find(|c| c.table == "orders").cloned().expect("a column of orders");
-    (note.name, note.data_type) = ("channel".into(), "text".into());
-    text.columns.retain(|c| !(c.table == "orders" && c.name.eq_ignore_ascii_case("channel")));
-    text.columns.push(note);
+    let report = analyze(snapshot("mysql-demo.json"));
+    let f = find(&report.findings, &format!("temp-spill:{GROUP_BY}")).unwrap();
     assert_eq!(
-        [
-            said(temptable("8.0.36", Some("1073741824")), GROUP_BY),
-            said(temptable("8.0.20", Some("1073741824")), GROUP_BY),
-            said(temptable("8.0.20", None), GROUP_BY),
-            said(runs(unread, 2.6), GROUP_BY),
-            said(runs(stopped(mariadb(), GROUP_BY), 0.4), GROUP_BY),
-            said(text, GROUP_BY),
-            said(measured_by_scans("mysql-demo.json", GROUP_BY, 3.0, 7_500.0), GROUP_BY),
-        ],
-        [
-            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit (tmp_table_size, 1.0 MB; and temptable_max_ram, 1.0 GB, for all such tables together) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs.\n\
-                impact: 77% of DB time\n\
-                metric: On-disk temporary tables per run\n\
-                metric: Average duration\n\
-                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 64.0 MB. Set tmp_table_size to 67108864; SET PERSIST keeps it across restarts. Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.\n\
-                sql: SET PERSIST tmp_table_size = 67108864;\n\
-                cost: The limit is per temporary table per connection; size it with your connection count in mind.\n\
-                verify: Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
-            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows temptable_max_ram (1.0 GB, for all temporary tables together) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs.\n\
-                impact: 77% of DB time\n\
-                metric: On-disk temporary tables per run\n\
-                metric: Average duration\n\
-                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 2.0 GB. Set temptable_max_ram to 2147483648; SET PERSIST keeps it across restarts.\n\
-                sql: SET PERSIST temptable_max_ram = 2147483648;\n\
-                cost: temptable_max_ram is memory the server may use for all temporary tables together.\n\
-                verify: Once the change is live, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
-            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows temptable_max_ram (the memory for all temporary tables together) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs.\n\
-                impact: 77% of DB time\n\
-                metric: On-disk temporary tables per run\n\
-                metric: Average duration\n\
-                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise temptable_max_ram (the scan didn't read its current value).\n\
-                verify: Once the change is live, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
-            "A read from orders builds about 3 on-disk temporary tables per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit (1.0 MB, the smaller of tmp_table_size and max_heap_table_size) and moves to disk, which is many times slower: 52 on-disk tables in 20 runs.\n\
-                impact: 77% of DB time\n\
-                metric: On-disk temporary tables per run\n\
-                metric: Average duration\n\
-                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise tmp_table_size and max_heap_table_size (the scan didn't read their current values). Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.\n\
-                verify: Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (52 in 20 runs in this scan).",
-            "A read from orders built on-disk temporary tables in up to 40% of its runs · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrew the in-memory limit (1.0 MB, the smaller of tmp_table_size and max_heap_table_size) and moved to disk, which is many times slower: 8 on-disk tables in 20 runs.\n\
-                impact: 77% of DB time\n\
-                metric: On-disk temporary tables per run\n\
-                metric: Average duration\n\
-                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 64.0 MB (both variables: the smaller one wins). Set tmp_table_size to 67108864 now, and in the server's option file (my.cnf) so it survives a restart. Set max_heap_table_size to 67108864 now, and in the server's option file (my.cnf) so it survives a restart. Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.\n\
-                sql: SET GLOBAL tmp_table_size = 67108864;\n\
-                SET GLOBAL max_heap_table_size = 67108864;\n\
-                cost: The limit is per temporary table per connection; size it with your connection count in mind.\n\
-                verify: Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (8 in 20 runs in this scan).",
-            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement holds channel, and MariaDB keeps a temporary table with TEXT or BLOB values on disk whatever its size: 20 on-disk tables in 20 runs. Raising the memory limit won't change that.\n\
-                impact: 77% of DB time\n\
-                metric: On-disk temporary tables per run\n\
-                metric: Average duration\n\
-                fix: Leave channel out of the grouped, distinct or sorted rows (group by the key, then fetch the large columns for the rows you keep), or add an index that delivers rows already grouped or ordered so no temporary table is needed.\n\
-                verify: Once the change is live, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
-            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit (1.0 MB, the smaller of tmp_table_size and max_heap_table_size, where these tables use the MEMORY engine; the TempTable engine stops at tmp_table_size and temptable_max_ram instead) and moves to disk, which is many times slower: 20 on-disk tables in 20 runs over the 40 days since statistics were reset.\n\
-                impact: 75% of DB time\n\
-                metric: On-disk temporary tables per run over the 40 days since statistics were reset\n\
-                metric: Average duration over Culprit's scans\n\
-                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise the in-memory limit to 64.0 MB (both variables: with the MEMORY engine the smaller one wins). Set tmp_table_size to 67108864; SET PERSIST keeps it across restarts. Set max_heap_table_size to 67108864; SET PERSIST keeps it across restarts. Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.\n\
-                sql: SET PERSIST tmp_table_size = 67108864;\n\
-                SET PERSIST max_heap_table_size = 67108864;\n\
-                cost: The limit is per temporary table per connection; size it with your connection count in mind.\n\
-                verify: Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
-        ]
+        f.summary,
+        "The source recorded internal temporary-table and sort-pass counts for this statement. Their byte volume and elapsed cost remain unknown."
     );
-    // TempTable with tmp_table_size unread; a TEXT column on MariaDB, with totals Culprit's scans measured apart.
-    let mut unread_cap = temptable("8.0.36", Some("1073741824"));
-    unread_cap.settings.retain(|x| x.name != "tmp_table_size");
-    let mut text_scanned = measured_by_scans("mysql-demo.json", GROUP_BY, 3.0, 7_500.0);
-    (text_scanned.server.product, text_scanned.server.version) = ("MariaDB 10.11.8".into(), "10.11.8-MariaDB".into());
-    let mut note = text_scanned.columns.iter().find(|c| c.table == "orders").cloned().expect("a column of orders");
-    (note.name, note.data_type) = ("channel".into(), "text".into());
-    text_scanned.columns.retain(|c| !(c.table == "orders" && c.name.eq_ignore_ascii_case("channel")));
-    text_scanned.columns.push(note);
+    let history = analyze(stopped(snapshot("postgres-demo.json"), ORDERS_SORT));
     assert_eq!(
-        [said(unread_cap, GROUP_BY), said(text_scanned, GROUP_BY)],
-        [
-            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit and moves to disk, which is many times slower: 20 on-disk tables in 20 runs.\n\
-                impact: 77% of DB time\n\
-                metric: On-disk temporary tables per run\n\
-                metric: Average duration\n\
-                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise tmp_table_size (the scan didn't read its current value). Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.\n\
-                verify: Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
-            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
-                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement holds channel, and MariaDB keeps a temporary table with TEXT or BLOB values on disk whatever its size: 20 on-disk tables in 20 runs over the 40 days since statistics were reset. Raising the memory limit won't change that.\n\
-                impact: 75% of DB time\n\
-                metric: On-disk temporary tables per run over the 40 days since statistics were reset\n\
-                metric: Average duration over Culprit's scans\n\
-                fix: Leave channel out of the grouped, distinct or sorted rows (group by the key, then fetch the large columns for the rows you keep), or add an index that delivers rows already grouped or ordered so no temporary table is needed.\n\
-                verify: Once the change is live, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
-        ]
+        find(&history.findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap().actionability,
+        culprit_core::Actionability::History
     );
+    let compared = analyze(measured_by_scans("postgres-demo.json", ORDERS_SORT, 10.0, 2000.0));
+    let f = find(&compared.findings, &format!("temp-spill:{ORDERS_SORT}")).unwrap();
+    assert!(f.caveats.iter().any(|text| text.starts_with("These resource totals cover ")));
+    assert!(f.impact.db_time_share.is_none());
 }
 
 // ── heavy-query ──────────────────────────────────────────────────────────────────────────────────

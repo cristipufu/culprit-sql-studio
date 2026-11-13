@@ -4,21 +4,18 @@ use culprit_core::{FindingPlanChange, RefinementDecision};
 
 #[derive(Clone, Copy)]
 pub(super) enum Policy {
-    SpillResult,
     PlanStory,
     ScanRegression,
 }
 impl Policy {
     fn id(self) -> &'static str {
         match self {
-            Self::SpillResult => "spill-carries-result",
             Self::PlanStory => "one-plan-story",
             Self::ScanRegression => "scan-carries-regression",
         }
     }
     fn label(self) -> &'static str {
         match self {
-            Self::SpillResult => "a spill carries the result it sorts",
             Self::PlanStory => "one plan story per query",
             Self::ScanRegression => "a scan that came with a plan change carries the regression",
         }
@@ -26,7 +23,6 @@ impl Policy {
 }
 pub(super) struct Rule(pub Policy);
 enum Action {
-    Spill,
     Timeline,
     Recommendation,
     Scan(ReadChange),
@@ -100,11 +96,6 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
     for (from, f) in findings.iter().enumerate() {
         let Some(q) = single(f).and_then(|id| w.query(id)) else { continue };
         match policy {
-            Policy::SpillResult if f.check == "big-result" && q.rows.is_some() => {
-                if let Some(into) = findings.iter().position(|g| g.check == "temp-spill" && single(g) == Some(&q.id)) {
-                    return Some(Decision { from, into, action: Action::Spill });
-                }
-            }
             Policy::ScanRegression if matches!(f.check.as_str(), "regression" | "plan-regression") => {
                 let Some(reads) = f.facts.plan_change.as_ref().and_then(|change| ReadChange::recorded(q, change))
                 else {
@@ -122,10 +113,10 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
     }
     None
 }
-fn add_metrics(target: &mut Finding, source: &Finding, skip_runs: bool) {
+fn add_metrics(target: &mut Finding, source: &Finding) {
     for m in &source.metrics {
         let already_present = !m.key.is_empty() && target.metrics.iter().any(|metric| metric.is(&m.key));
-        if (!skip_runs || !m.is(key!("common.metric.runs"))) && !already_present {
+        if !already_present {
             target.metrics.push(m.clone());
         }
     }
@@ -173,8 +164,8 @@ impl Refine for Rule {
         while let Some(d) = decide(self.0, s, findings) {
             trace.push(merge::trace(self.0.id(), findings, d.from, d.into));
             let source = findings[d.from].clone();
-            let absorption = matches!(d.action, Action::Spill | Action::Scan(_))
-                .then(|| merge::Absorption::decide(s, findings, d.into, d.from));
+            let absorption =
+                matches!(d.action, Action::Scan(_)).then(|| merge::Absorption::decide(s, findings, d.into, d.from));
             if let Some(a) = &absorption {
                 a.apply_state(findings);
             } else {
@@ -187,23 +178,11 @@ impl Refine for Rule {
             }
             let target = &mut findings[d.into];
             match d.action {
-                Action::Spill => {
-                    let Some(q) = source.queries.first().and_then(|r| s.workload.as_ref()?.query(&r.id)) else {
-                        continue;
-                    };
-                    let said = signals::result_of_a_spill(s, q).expect("selected result rows");
-                    target.summary.push_str(&said.summary);
-                    if let Some(fix) = &mut target.fix {
-                        fix.summary.push_str(&said.fix);
-                    }
-                    target.verify.extend(said.verify);
-                    add_metrics(target, &source, true);
-                }
                 Action::Timeline => {
                     if let Some(sentence) = timeline(s, &source, false) {
                         target.summary = format!("{} {sentence}", target.summary.trim_end());
                     }
-                    add_metrics(target, &source, false);
+                    add_metrics(target, &source);
                     for line in source.verify {
                         if !target.verify.contains(&line) {
                             target.verify.push(line);
@@ -227,7 +206,7 @@ impl Refine for Rule {
                         .chain([reads.render(query_is_history(s, q)).as_str()])
                         .collect::<Vec<_>>()
                         .join(" ");
-                    add_metrics(target, &source, false);
+                    add_metrics(target, &source);
                 }
             }
             if let Some(a) = absorption {
@@ -257,13 +236,13 @@ mod tests {
             Metric::new("Renamed label", 3.0, Unit::Count).keyed("first"),
             Metric::new("Same label", 4.0, Unit::Count),
         ];
-        add_metrics(&mut target, &source, false);
+        add_metrics(&mut target, &source);
         assert_eq!(target.metrics.iter().map(|metric| metric.value).collect::<Vec<_>>(), [1.0, 2.0, 4.0]);
     }
 
-    // A result's runs are left out of the spill it joins by what the metric is, in any language.
+    // Metrics keep their declared identity independently of their translated labels.
     #[test]
-    fn runs_are_left_out_by_key_in_another_language() {
+    fn translated_metrics_keep_their_units_and_native_keys() {
         culprit_core::i18n::scope("fr", || {
             let subject = support::subject(SubjectKind::Query, "q1");
             let mut source = support::finding("big-result", "q1", Category::Queries, subject.clone());
@@ -273,8 +252,11 @@ mod tests {
             ];
             assert_ne!(source.metrics[0].label, "Runs");
             let mut target = support::finding("temp-spill", "q1", Category::Queries, subject);
-            add_metrics(&mut target, &source, true);
-            assert_eq!(target.metrics.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(), ["Lignes par exécution"]);
+            add_metrics(&mut target, &source);
+            assert_eq!(target.metrics.len(), 2);
+            assert!(target.metrics[0].is(key!("common.metric.runs")));
+            assert_eq!(target.metrics[0].unit, Unit::Count);
+            assert_eq!(target.metrics[1].label, "Lignes par exécution");
         });
     }
 }

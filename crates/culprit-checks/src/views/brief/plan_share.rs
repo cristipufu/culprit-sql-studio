@@ -13,7 +13,6 @@ pub(crate) const ABOUT_THE_PLAN: &[&str] = &[
     "plan-regression",
     "parameter-sensitive",
     "plan-warnings",
-    "temp-spill",
     "memory-grant",
     "missing-index",
     "filtered-scan",

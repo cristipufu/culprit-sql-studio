@@ -59,6 +59,15 @@ establish historical session thresholds, other logging filters, or that every st
 zero. See the [MySQL slow-log rules](https://dev.mysql.com/doc/refman/8.0/en/slow-query-log.html) and
 [MariaDB's native statement timers](https://mariadb.com/docs/server/reference/system-tables/performance-schema/performance-schema-tables/performance-schema-events_statements_current-table).
 
+## Recorded temporary statement work
+
+Digest scans and export share the native definitions for internal temporary tables, disk tables and sort-merge
+passes. The counts retain exact unsigned integers, with unsupported or null measurements left unknown. These
+fields use the existing digest read. They measure neither temporary bytes nor elapsed spill cost; disk tables can
+be created directly, and MySQL's counters can omit memory-mapped overflow. Native count observations do not establish
+memory exhaustion or size a new memory limit. `statement-work` explains published counter points using the same
+pure view as scans, without inferring rates, SQL definitions or an allocating operator.
+
 ## Tracked session allocations
 
 `culprit scan shop --collect-session-memory` requests native thread-allocation counters on MySQL 8.0.31+.

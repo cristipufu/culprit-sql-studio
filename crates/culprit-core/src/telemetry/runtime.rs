@@ -43,6 +43,13 @@ pub enum RuntimeMetricKey {
     PeakMemory,
     LogBytes,
     TemporaryStorage,
+    TemporaryBlocksRead,
+    TemporaryBlocksWritten,
+    TemporaryReadTime,
+    TemporaryWriteTime,
+    TemporaryTables,
+    TemporaryDiskTables,
+    SortMergePasses,
     Native(String),
 }
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,8 +78,15 @@ impl RuntimeMetricKey {
     pub fn accepts(&self, unit: RuntimeMetricUnit) -> bool {
         unit.is_valid()
             && match self {
-                Self::Duration | Self::CpuTime => unit.is_time(),
-                Self::Executions | Self::Rows => unit == RuntimeMetricUnit::Count,
+                Self::Duration | Self::CpuTime | Self::TemporaryReadTime | Self::TemporaryWriteTime => unit.is_time(),
+                Self::Executions
+                | Self::Rows
+                | Self::TemporaryTables
+                | Self::TemporaryDiskTables
+                | Self::SortMergePasses => unit == RuntimeMetricUnit::Count,
+                Self::TemporaryBlocksRead | Self::TemporaryBlocksWritten => {
+                    matches!(unit, RuntimeMetricUnit::Pages { .. })
+                }
                 Self::LogicalReads | Self::PhysicalReads | Self::LogicalWrites => matches!(
                     unit,
                     RuntimeMetricUnit::Count | RuntimeMetricUnit::Bytes | RuntimeMetricUnit::Pages { .. }

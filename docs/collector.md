@@ -128,6 +128,8 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis session-memory --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis page-waits --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis statement-work --json
 ```
 
 `memory-failures` selects the retained SQL Server OOM analysis; `native-failures` selects native structured
@@ -147,10 +149,18 @@ mode sums unrelated amounts, derives a rate from one observation, constructs a s
 reconnects to the monitored server. Their report entries reference the original native facts by key and identity.
 
 `page-waits` explains a database-target `page-wait-targets` capture through the scan's pure view. It distinguishes
-memory-page contention from page I/O and references the original request and wait resource. Changed, missing or
-unverified checks retain historical waiter context while withholding mapped targets and checked statement/plan
-references. Unresolved context outside the database remains unowned. Metadata observed at both checks does not
-establish a continuous page identity, a latch holder or an exact causal share.
+memory-page contention from page I/O and references the original request and wait resource. Page mapping and
+request rechecks are independent: checked current page metadata can remain after an original wait or request ends.
+Before/after clocks distinguish a matching statement, a changed request and a wait that is no longer observed.
+Statement links require matching statement checks and trusted source context; plan links require matching native
+plans too. Unresolved context outside the database remains unowned. Equal page metadata does not establish
+continuous physical identity, a latch holder or an exact causal share.
+
+`statement-work` reads database-target `statement-counters` captures. It preserves native query identities, point
+clocks and reset qualification, and shares the scan's temporary-work explanation. Typed native metrics distinguish
+block traffic and recorded I/O timing from internal-table and sort-pass counts. Exact integer counters survive
+readback; missing metrics remain unknown. A point does not establish an interval or safe delta, and matching a
+query ID does not attach SQL from a separately captured definition. No mode reconnects to the monitored database.
 
 For ADX, select warehouse provider `adx`, its query endpoint/database and an independently named bearer profile.
 Azure recovery uses the existing recovery adapter and profile shape. Neither route needs an ingestion identity.

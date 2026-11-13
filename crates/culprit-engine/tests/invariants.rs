@@ -888,10 +888,46 @@ fn demo_reports_with_long_totals() -> Vec<(String, Report)> {
             for q in &mut w.queries {
                 q.executions *= 10.0;
                 q.total_time_ms *= 10.0;
-                for v in
-                    [&mut q.cpu_time_ms, &mut q.rows, &mut q.logical_reads, &mut q.physical_reads, &mut q.temp_writes]
-                {
+                for v in [&mut q.cpu_time_ms, &mut q.rows, &mut q.logical_reads, &mut q.physical_reads] {
                     ten(v);
+                }
+                if let Some(work) = &mut q.temporary_work {
+                    let count = |value: &mut Option<String>| {
+                        *value = value.as_ref().map(|raw| {
+                            raw.parse::<u64>()
+                                .expect("fixture native count")
+                                .checked_mul(10)
+                                .expect("scaled fixture count fits u64")
+                                .to_string()
+                        });
+                    };
+                    match work {
+                        culprit_core::StatementTemporaryWork::BlockIo {
+                            read_blocks,
+                            written_blocks,
+                            read_time_ms,
+                            write_time_ms,
+                            ..
+                        } => {
+                            count(read_blocks);
+                            count(written_blocks);
+                            ten(read_time_ms);
+                            ten(write_time_ms);
+                        }
+                        culprit_core::StatementTemporaryWork::TableCreation {
+                            created_tables,
+                            disk_tables,
+                            sort_merge_passes,
+                            ..
+                        } => {
+                            count(created_tables);
+                            count(disk_tables);
+                            count(sort_merge_passes);
+                        }
+                        culprit_core::StatementTemporaryWork::SpaceUsage { usage_pages_total, .. } => {
+                            *usage_pages_total *= 10.0
+                        }
+                    }
                 }
                 ten(&mut q.rows_affected);
                 for wait in &mut q.waits {
@@ -907,13 +943,12 @@ fn demo_reports_with_long_totals() -> Vec<(String, Report)> {
 /// Metrics that state a statement's runs, share or average with no basis: beside figures over Culprit's scans, a reader
 /// can't tell which period such a figure covers.
 const BARE_STATEMENT_METRICS: &[&str] = &["Runs per day", "Share of executions", "Average duration", "Average"];
-/// Metrics of what the source keeps only in a statement's totals: a part of its time, what a run spills.
-const TOTALS_ONLY_METRICS: &[&str] =
-    &["Slow runs' extra time", "Temp written per run", "On-disk temporary tables per run"];
+/// Timing metrics the source keeps only in a statement's totals.
+const TOTALS_ONLY_METRICS: &[&str] = &["Slow runs' extra time"];
 
 /// Where a finding's statement is read over Culprit's scans, each figure says what it is over: the scans' runs, share
-/// and average are named so (never a bare "Runs per day"), and what the totals alone keep (its slow runs' excess, a
-/// spill, the rows a run handles) is named over the totals, so the two periods aren't read as one. Returns how many
+/// and average are named so (never a bare "Runs per day"), and what the totals alone keep (its slow runs' excess,
+/// native resource work, the rows a run handles) is named over the totals, so the two periods aren't read as one. Returns how many
 /// findings it read.
 fn bases_named(name: &str, report: &Report) -> usize {
     let Some(w) = report.snapshot.workload.as_ref() else { return 0 };
@@ -940,7 +975,15 @@ fn bases_named(name: &str, report: &Report) -> usize {
                 f.id
             );
         }
-        if f.check == "temp-spill" || summary.contains("more than the average, together") {
+        if f.check == "temp-spill" {
+            assert!(
+                f.caveats.iter().any(|caveat| caveat.contains(&totals)),
+                "{name} {}: native resource totals lack their own period {totals}: {:?}",
+                f.id,
+                f.caveats,
+            );
+        }
+        if summary.contains("more than the average, together") {
             assert!(summary.contains(&totals), "{name} {}: {summary}", f.id);
         }
     }
@@ -948,7 +991,7 @@ fn bases_named(name: &str, report: &Report) -> usize {
 }
 
 // Theme A's open ends. On running totals a statement's runs, share and average are what Culprit's scans measured, and
-// a part of its time (slow runs' excess, a spill) is kept only in its totals: wherever both are said, each names its
+// native resource work and slow runs' excess are kept only in its totals: wherever both are said, each names its
 // period. A stopped statement's share is "until it stopped", whatever it spent the time on.
 #[test]
 fn each_figure_says_what_it_is_over_beside_culprits_scans() {

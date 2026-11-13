@@ -34,17 +34,25 @@ struct Candidate {
     resource: ObservedWaitResource,
     address: Option<PageAddress>,
     state: LookupState,
+    before_check: Option<PageWaitRecheck>,
+    after_check: Option<PageWaitRecheck>,
+    statement_identity: Option<NativeIdentity>,
+    plan_identity: Option<NativeIdentity>,
 }
 enum LookupState {
     Pending,
     Unresolved(PageWaitResolution),
-    Observed { target: Box<MappedPageTarget>, statement: NativeIdentity, plan: Option<NativeIdentity> },
+    Observed { target: Box<MappedPageTarget> },
 }
 impl Candidate {
     fn is_pending(&self) -> bool {
         matches!(self.state, LookupState::Pending)
     }
     fn withhold(&mut self, resolution: PageWaitResolution) {
+        if resolution == PageWaitResolution::UnverifiedSource {
+            self.statement_identity = None;
+            self.plan_identity = None;
+        }
         self.state = LookupState::Unresolved(resolution);
     }
 }
@@ -145,15 +153,8 @@ impl<R: NativeRead> ActivityReader<R> {
             }
             let record = &frame.records[candidate.record];
             let checked = after.get(&candidate.record).ok_or_else(invalid_data)?;
-            if let Some(resolution) = checked.resolution(record, &candidate.resource) {
-                candidate.withhold(resolution);
-                continue;
-            }
+            candidate.after_check = Some(checked.recheck(record, &candidate.resource));
             let original = before.get(&candidate.record).ok_or_else(invalid_data)?;
-            if !original.same_plan(checked) {
-                candidate.withhold(PageWaitResolution::ChangedRequest);
-                continue;
-            }
             let address = candidate.address.ok_or_else(invalid_data)?;
             let header_before = headers_before.get(&address).ok_or_else(invalid_data)?;
             let header_after = headers_after.get(&address).ok_or_else(invalid_data)?;
@@ -168,6 +169,15 @@ impl<R: NativeRead> ActivityReader<R> {
             ]) {
                 return Err(CollectionStop::SourceChanged.error());
             }
+            if [&candidate.before_check, &candidate.after_check]
+                .into_iter()
+                .all(|check| check.as_ref().is_some_and(|check| check.request == PageWaitRequestState::SameStatement))
+                && matches!(record.current_sql, super::NativeStatement::Available(_))
+                && let Some((statement, plan)) = checked.identities(original)
+            {
+                candidate.statement_identity = Some(statement);
+                candidate.plan_identity = plan;
+            }
             if !address.matches(&header_before.header)? || !address.matches(&header_after.header)? {
                 candidate.withhold(PageWaitResolution::Unavailable);
                 continue;
@@ -180,13 +190,9 @@ impl<R: NativeRead> ActivityReader<R> {
                 candidate.withhold(PageWaitResolution::ChangedMetadata);
                 continue;
             }
-            let Some((statement, plan)) = checked.identities() else {
-                candidate.withhold(PageWaitResolution::UnverifiedSource);
-                continue;
-            };
             match mapped_target(&initial, header_after) {
                 Ok(target) => {
-                    candidate.state = LookupState::Observed { target: Box::new(target), statement, plan };
+                    candidate.state = LookupState::Observed { target: Box::new(target) };
                 }
                 Err(_) => candidate.withhold(PageWaitResolution::UnverifiedSource),
             }
@@ -321,9 +327,6 @@ fn select(frame: &ActivityFrame, context: &context::LookupContext) -> (Vec<Candi
                 {
                     LookupState::Unresolved(PageWaitResolution::OutsideDatabase)
                 }
-                Some(_) if record.current_locator.is_none() => {
-                    LookupState::Unresolved(PageWaitResolution::UnverifiedSource)
-                }
                 Some(address) if !addresses.contains(&address) && addresses.len() == MAX_PAGES => {
                     limited = true;
                     LookupState::Unresolved(PageWaitResolution::Limit)
@@ -333,7 +336,16 @@ fn select(frame: &ActivityFrame, context: &context::LookupContext) -> (Vec<Candi
                     LookupState::Pending
                 }
             };
-            candidates.push(Candidate { record: index, resource: resource.clone(), address, state });
+            candidates.push(Candidate {
+                record: index,
+                resource: resource.clone(),
+                address,
+                state,
+                before_check: None,
+                after_check: None,
+                statement_identity: None,
+                plan_identity: None,
+            });
         }
     }
     (candidates, limited)
@@ -356,13 +368,9 @@ fn apply_request_checks(
     checks: &BTreeMap<usize, participants::Check>,
 ) {
     for candidate in candidates.iter_mut().filter(|candidate| candidate.is_pending()) {
-        if let Some(resolution) =
-            checks.get(&candidate.record).map_or(Some(PageWaitResolution::Unavailable), |checked| {
-                checked.resolution(&frame.records[candidate.record], &candidate.resource)
-            })
-        {
-            candidate.withhold(resolution);
-        }
+        candidate.before_check = checks
+            .get(&candidate.record)
+            .map(|checked| checked.recheck(&frame.records[candidate.record], &candidate.resource));
     }
 }
 fn mark_pending(candidates: &mut [Candidate], resolution: PageWaitResolution) {
@@ -393,23 +401,28 @@ fn finish(
     let observations = candidates
         .into_iter()
         .map(|candidate| {
-            let (resolution, target, statement_identity, plan_identity) = match candidate.state {
-                LookupState::Pending => (PageWaitResolution::Unavailable, None, None, None),
-                LookupState::Unresolved(resolution) => (resolution, None, None, None),
-                LookupState::Observed { target, statement, plan } => {
-                    (PageWaitResolution::ObservedAtBothBounds, Some(target), Some(statement), plan)
-                }
+            let (resolution, target) = match candidate.state {
+                LookupState::Pending => (PageWaitResolution::Unavailable, None),
+                LookupState::Unresolved(resolution) => (resolution, None),
+                LookupState::Observed { target } => (PageWaitResolution::ObservedAtBothBounds, Some(target)),
             };
             Ok(PageWaitObservation {
                 source: culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
                 observed_from: frame.context.at.clone(),
                 observed_until: until.clone(),
                 request: records.get(&candidate.record).ok_or_else(invalid_data)?.clone(),
+                before_check: candidate.before_check,
+                after_check: candidate.after_check,
                 resource: candidate.resource,
+                observed_address: candidate.address.map(|address| PageWaitAddress {
+                    database_id: address.database,
+                    file_id: address.file,
+                    page_id: address.page,
+                }),
                 resolution,
                 target,
-                statement_identity,
-                plan_identity,
+                statement_identity: candidate.statement_identity,
+                plan_identity: candidate.plan_identity,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -507,7 +520,10 @@ fn target_kind(header: &PageHeaderFacts, index_type: Option<i32>) -> PageWaitTar
     // https://ptgmedia.pearsoncmg.com/images/9780735658561/samplepages/9780735658561.pdf
     // https://techcommunity.microsoft.com/blog/sqlserver/how-to-use-dbcc-page/383094
     // https://learn.microsoft.com/sql/relational-databases/system-catalog-views/sys-indexes-transact-sql
-    if header.header_version != Some(1) {
+    // LIMITED can omit page_header_version even while returning the native numeric layout fields. Preserve
+    // that absence; known type/level plus an observed rowstore catalog entry qualify those fields directly.
+    // A present unfamiliar format still cannot inherit the known layout's meaning.
+    if header.header_version.is_some_and(|version| version != 1) {
         return PageWaitTargetKind::Unclassified;
     }
     match (header.page_type, header.level, header.index_id.as_deref()) {

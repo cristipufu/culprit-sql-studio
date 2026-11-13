@@ -310,7 +310,7 @@ pub(crate) fn sample() -> QueryStat {
         rows: None,
         logical_reads: None,
         physical_reads: None,
-        temp_writes: None,
+        temporary_work: None,
         first_seen: None,
         last_seen: None,
         plans: Vec::new(),

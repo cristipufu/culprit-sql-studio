@@ -21,6 +21,7 @@ type Outcome = Coverage;
 #[derive(Default)]
 struct WorkloadPart {
     workload: Option<Workload>,
+    query_identities: std::collections::HashMap<String, culprit_core::telemetry::NativeQueryIdentity>,
     waits: Vec<WaitStat>,
     outcome: Outcome,
 }
@@ -178,6 +179,7 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
                 part.outcome.delivered(Capability::WaitStats);
             }
             part.waits = result.waits;
+            part.query_identities = result.query_identities;
             part.workload = Some(result.workload);
             return part;
         }
@@ -484,7 +486,15 @@ pub(crate) async fn snapshot(
         operations: Default::default(),
     };
     let mut client = ReadSession::application(provider.pool.clone());
-    signals::collect(&mut client, provider.pool.clone(), &probe, options, &mut snapshot).await;
+    signals::collect(
+        &mut client,
+        provider.pool.clone(),
+        &probe,
+        options,
+        &workload_part.query_identities,
+        &mut snapshot,
+    )
+    .await;
     if client.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
     }
