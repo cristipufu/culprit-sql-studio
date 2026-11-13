@@ -17,7 +17,9 @@ sample: string,
  */
 variants: number, executions: number, total_time_ms: number, 
 /**
- * Plan cache memory the family's single-use plans hold (SQL Server), when known.
+ * Bytes in this family's exclusively attributable single-lookup Adhoc cache objects (SQL Server).
+ * Prepared/reused objects are excluded. A shared batch or unresolved ownership makes the value unknown;
+ * cache lookups are not execution counts, and a batch object's bytes are never repeated per statement.
  */
 cached_bytes: number | null, 
 /**

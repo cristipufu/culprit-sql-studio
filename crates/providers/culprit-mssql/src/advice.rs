@@ -4,32 +4,55 @@ use std::collections::HashSet;
 
 use culprit_core::QueryFamily;
 
-use crate::read::{NativeRead, ReadError, integer, invalid_data, optional_text, required_nonnegative_number, text};
+use crate::read::{
+    NativeRead, ReadError, integer, invalid_data, optional_integer, optional_text, required_nonnegative_number,
+    stops_remaining_reads, text,
+};
 use crate::value::Rec;
 
 /// Ad-hoc plans in this database's plan cache grouped by query_hash: the fallback when Query Store is off, and the
-/// memory each family's single-use plans hold. A plan belongs to the database it was compiled in (the plan attribute
-/// `dbid`); the batch text's own dbid is empty for ad-hoc and prepared statements. Variants are counted as for Query
+/// memory attributable to each family's single-lookup Adhoc cache objects. A plan belongs to its compilation
+/// database (the plan attribute `dbid`); the batch text's own dbid is empty for ad-hoc and prepared statements.
+/// Variants are counted as for Query
 /// Store, and Culprit's own statements are left out.
+///
+/// Cache objects belong to batches, while query_stats describes individual completed statements. A batch can have
+/// unexecuted statements missing from that DMV. Attribute its bytes only when one native statement spans the entire
+/// text; otherwise ownership is unknown. Prepared/reused objects do not belong to this measured subset.
+///
+/// One native relation supplies both families and ownership. The window partition and family aggregates still visit
+/// native cache metadata: TOP bounds the result, not that work. There are no correlated per-plan cache rereads.
 fn cache_families_sql() -> String {
     format!(
         r#"
-SELECT TOP 15 CONVERT(varchar(20), qs.query_hash, 1) AS query_hash,
-  COUNT(DISTINCT HASHBYTES('SHA2_256', LEFT({body}, 4000))) AS variants, SUM(qs.execution_count) AS executions,
-  SUM(qs.total_elapsed_time) / 1000.0 AS total_ms,
-  SUM(CAST(cp.size_in_bytes AS bigint)) AS cached_bytes,
+WITH native_statements AS (
+ SELECT qs.query_hash,qs.execution_count,qs.total_elapsed_time,st.text,cp.objtype,cp.usecounts,cp.size_in_bytes,
+  COUNT_BIG(*) OVER(PARTITION BY qs.plan_handle) AS native_statement_rows,
+  CASE WHEN st.text IS NOT NULL AND qs.statement_start_offset=0 AND (qs.statement_end_offset=-1
+   OR CONVERT(bigint,qs.statement_end_offset)+2=DATALENGTH(st.text)) THEN 1 ELSE 0 END AS spans_batch
+ {relation}
+ JOIN sys.dm_exec_cached_plans cp ON cp.plan_handle=qs.plan_handle
+ WHERE cp.objtype IN ('Adhoc','Prepared') AND {database}
+), cache_statements AS (
+ SELECT *,CASE WHEN objtype<>'Adhoc' OR usecounts<>1 THEN CAST(0 AS bigint)
+  WHEN objtype='Adhoc' AND usecounts=1 AND native_statement_rows=1 AND spans_batch=1 THEN CAST(size_in_bytes AS bigint)
+  ELSE NULL END AS owned_cache_bytes
+ FROM native_statements
+)
+SELECT TOP 15 CONVERT(varchar(20), st.query_hash, 1) AS query_hash,
+  COUNT(DISTINCT HASHBYTES('SHA2_256', LEFT({body}, 4000))) AS variants, SUM(st.execution_count) AS executions,
+  SUM(st.total_elapsed_time) / 1000.0 AS total_ms,
+  CASE WHEN COUNT_BIG(owned_cache_bytes)=COUNT_BIG(*) THEN SUM(owned_cache_bytes) END AS cached_bytes,
   MAX(LEFT(CAST(st.text AS nvarchar(max)), 600)) AS sample
-FROM sys.dm_exec_query_stats qs
-JOIN sys.dm_exec_cached_plans cp ON cp.plan_handle = qs.plan_handle
-CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) pa
-CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
-WHERE cp.objtype IN ('Adhoc', 'Prepared') AND pa.attribute = 'dbid' AND CAST(pa.value AS int) = DB_ID()
-  AND {application}
-GROUP BY qs.query_hash
+FROM cache_statements st
+WHERE {application} AND st.query_hash IS NOT NULL
+GROUP BY st.query_hash
 HAVING COUNT(DISTINCT HASHBYTES('SHA2_256', LEFT({body}, 4000))) >= 10
 ORDER BY variants DESC OPTION(MAXDOP 1)
 "#,
         body = crate::query_store::families::body_sql("CAST(st.text AS nvarchar(max))"),
+        relation = crate::cached_statements::relation(),
+        database = crate::cached_statements::DATABASE_PREDICATE,
         application = crate::statement_origin::application_candidates_sql("st.text"),
     )
 }
@@ -98,11 +121,7 @@ pub(crate) async fn query_families<R: NativeRead>(
         });
     let cached = match cached {
         Ok(rows) => rows,
-        Err(error)
-            if has_query_store
-                && culprit_core::telemetry::CollectionStop::from_error(&error)
-                    != culprit_core::telemetry::CollectionStop::CancellationUnconfirmed =>
-        {
+        Err(error) if has_query_store && !stops_remaining_reads(&error) => {
             return Ok(QueryFamilies { families, cache_failure: Some(error) });
         }
         Err(error) => return Err(error),
@@ -140,7 +159,9 @@ fn decode_family(row: &Rec, source: FamilySource) -> culprit_core::Result<QueryF
             }
             (optional_text(row, "sample")?.unwrap_or_default(), None, vec![query_id])
         }
-        FamilySource::PlanCache => (text(row, "sample")?, Some(integer(row, "cached_bytes")? as f64), vec![]),
+        FamilySource::PlanCache => {
+            (text(row, "sample")?, optional_integer(row, "cached_bytes")?.map(|value| value as f64), vec![])
+        }
     };
     Ok(QueryFamily {
         key,
@@ -186,7 +207,7 @@ mod tests {
         assert!(sql.contains("PATINDEX(N'%)[^,)]%', qt.query_sql_text)"));
         assert!(sql.contains(&crate::statement_origin::application_candidates_sql("qt.query_sql_text")));
         let cache = cache_families_sql();
-        assert!(cache.contains("pa.attribute = 'dbid' AND CAST(pa.value AS int) = DB_ID()"), "{cache}");
+        assert!(cache.contains(crate::cached_statements::DATABASE_PREDICATE), "{cache}");
         assert!(!cache.contains("st.dbid IS NULL"), "another database's ad-hoc statements aren't this one's");
         assert!(cache.contains(&crate::statement_origin::application_candidates_sql("st.text")));
         assert!(is_monitoring_text("SELECT session_id FROM sys.dm_exec_requests WHERE x = 1"));
@@ -220,14 +241,57 @@ mod tests {
         assert!(query_families(&mut cache, 60, None::<&mut crate::query_store::Reader<FakeRead>>).await.is_err());
     }
     #[tokio::test]
-    async fn uncertain_cache_cancellation_is_never_a_successful_partial_read() {
+    async fn terminal_cache_failures_are_never_a_successful_partial_read() {
         use crate::{read::ReadError, resources::test_support::FakeRead};
         use culprit_core::telemetry::CollectionStop;
-        let mut cache = FakeRead::new(vec![Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed))]);
-        let mut stored = crate::query_store::Reader::new(FakeRead::new(vec![Ok(vec![stored_family()])]));
-        let error = query_families(&mut cache, 60, Some(&mut stored)).await.err().unwrap();
-        assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
-        assert_eq!(cache.calls.len(), 1);
+        use culprit_core::{Error, ErrorCode};
+        let failures = [
+            CollectionStop::CancellationUnconfirmed,
+            CollectionStop::Cancelled,
+            CollectionStop::TimedOut,
+            CollectionStop::QueryLimit,
+            CollectionStop::ByteLimit,
+            CollectionStop::Pressure,
+        ]
+        .into_iter()
+        .map(CollectionStop::error)
+        .chain(
+            [ErrorCode::AuthFailed, ErrorCode::ConnectionFailed]
+                .into_iter()
+                .map(|code| Error::new(code, "fixture native failure")),
+        );
+        for failure in failures {
+            let mut cache = FakeRead::new(vec![Err(ReadError::Source(failure.clone()))]);
+            let mut stored = crate::query_store::Reader::new(FakeRead::new(vec![Ok(vec![stored_family()])]));
+            let error = query_families(&mut cache, 60, Some(&mut stored)).await.err().unwrap();
+            assert_eq!(error.code, failure.code);
+            assert_eq!(error.detail, failure.detail);
+            assert_eq!(cache.calls.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_shared_batch_bytes_survive_cache_projection_without_becoming_zero_or_a_source_failure() {
+        use crate::{resources::test_support::FakeRead, value::Val};
+        for bytes in [Val::Null, Val::Int(0), Val::Int(32_768)] {
+            let mut columns =
+                stored_family().columns().map(|(name, value)| (name.to_owned(), value.clone())).collect::<Vec<_>>();
+            columns.push(("cached_bytes".into(), bytes.clone()));
+            let row = Rec::of(&columns.iter().map(|(name, value)| (name.as_str(), value.clone())).collect::<Vec<_>>());
+            let mut cache = FakeRead::new(vec![Ok(vec![row])]);
+            let read = query_families(&mut cache, 60, None::<&mut crate::query_store::Reader<FakeRead>>).await.unwrap();
+            assert!(read.cache_failure.is_none());
+            assert_eq!(read.families.len(), 1);
+            assert_eq!(read.families[0].variants, 12.0);
+            assert_eq!(
+                read.families[0].cached_bytes,
+                match bytes {
+                    Val::Int(value) => Some(value as f64),
+                    _ => None,
+                }
+            );
+            assert_eq!(cache.calls.len(), 1);
+        }
     }
     #[test]
     fn missing_or_invalid_family_statistics_never_become_zero_cost_advice() {
@@ -244,3 +308,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod native_tests;
