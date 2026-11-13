@@ -171,7 +171,10 @@ class Database:
             args += ["-e", name]
         self.commands.run([*args, fixture.image, *command, *fixture.options], env=environment)
         self.commands.run(["docker", "start", self.name])
-        _, port = self.commands.run(["docker", "port", self.name, str(fixture.port)])
+        self.wait_until_ready()
+
+    def wait_until_ready(self):
+        _, port = self.commands.run(["docker", "port", self.name, str(self.fixture.port)])
         self.port = port.strip().removeprefix("127.0.0.1:")
         if not self.port.isdigit():
             raise RuntimeError("Docker did not publish exactly one loopback port")
@@ -182,11 +185,17 @@ class Database:
             except TimeoutError:
                 status = 1
             if status == 0:
-                print(f"  {fixture.name} ready at 127.0.0.1:{self.port}", flush=True)
+                print(f"  {self.fixture.name} ready at 127.0.0.1:{self.port}", flush=True)
                 return
             time.sleep(2)
         self.commands.run(["docker", "logs", "--tail", "60", self.name], check=False, echo=True)
-        raise TimeoutError(f"{fixture.name} did not become ready")
+        raise TimeoutError(f"{self.fixture.name} did not become ready")
+
+    def restart(self):
+        if not self.owns_container():
+            raise RuntimeError("the owned fixture disappeared before restart")
+        self.commands.run(["docker", "restart", self.name])
+        self.wait_until_ready()
 
     def configuration(self):
         fixture = self.fixture
@@ -262,9 +271,16 @@ class Database:
                                       "/usr/share/postgresql/18/extension/hypopg.control"], check=False)
         if status:
             # Only the owned fixture gets packages. Provider collection never installs extensions.
+            if not self.owns_container():
+                raise RuntimeError("the owned fixture disappeared before extension setup")
             self.commands.run(["docker", "exec", self.name, "apt-get", "update"], timeout=300)
             self.commands.run(["docker", "exec", self.name, "apt-get", "install", "-y", "--no-install-recommends",
                                "postgresql-18-hypopg"], timeout=300)
+            # The package manager can replace server libraries and binaries with a newer minor release.
+            # Restart before loading any extension so the running server and its libraries agree.
+            self.restart()
+            _, version = self.sql("SHOW server_version;", database=self.admin_database())
+            print(f"  PostgreSQL after extension package setup:\n{version.strip()}", flush=True)
         self.sql("CREATE DATABASE culprit_hypopg;", database="postgres")
 
     def create_reader(self, table):
@@ -334,14 +350,19 @@ class Database:
             self.test("culprit-postgres", "wire::tests::live_ysql_")
             self.test("culprit-engine", "services::live_native_", library=False)
 
-    def close(self):
-        # A cancelled create can succeed before its CLI returns. Verify the exact ownership label even then.
+    def owns_container(self):
         status, owner = self.commands.run(["docker", "inspect", "--format",
                                           '{{index .Config.Labels "' + OWNER_LABEL + '"}}', self.name], check=False)
         if status:
-            return
+            return False
         if owner.strip() != self.owner:
-            raise RuntimeError("refusing to remove a container without this run's ownership label")
+            raise RuntimeError("refusing to change a container without this run's ownership label")
+        return True
+
+    def close(self):
+        # A cancelled create can succeed before its CLI returns. Verify the exact ownership label even then.
+        if not self.owns_container():
+            return
         self.commands.run(["docker", "unpause", self.name], check=False)
         self.commands.run(["docker", "rm", "--force", "--volumes", self.name])
         print(f"Removed owned {self.fixture.name} container and anonymous volumes", flush=True)

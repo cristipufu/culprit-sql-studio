@@ -45,6 +45,66 @@ class DisposableOwnership(unittest.TestCase):
         database.close()
         self.assertEqual(database.commands.run.call_count, 1)
 
+    def test_restart_refuses_foreign_or_missing_containers_before_mutation(self):
+        for result in [(0, "another-owner\n"), (1, "missing")]:
+            database = self.database()
+            database.commands.run.return_value = result
+            with self.assertRaises(RuntimeError):
+                database.restart()
+            self.assertEqual(database.commands.run.call_count, 1)
+
+    def test_extension_setup_refuses_foreign_container_before_installing_packages(self):
+        database = self.database()
+        database.commands.run.side_effect = [(1, "missing control file"), (0, "another-owner\n")]
+        with self.assertRaisesRegex(RuntimeError, "ownership label"):
+            database.prepare_hypopg()
+        self.assertFalse(any("apt-get" in call.args[0] for call in database.commands.run.call_args_list))
+
+    def test_existing_extension_needs_no_package_changes_or_server_restart(self):
+        database = self.database()
+        database.sql = Mock(return_value=(0, ""))
+        database.prepare_hypopg()
+        self.assertEqual(database.commands.run.call_count, 1)
+        database.sql.assert_called_once_with("CREATE DATABASE culprit_hypopg;", database="postgres")
+
+    def test_installed_server_libraries_are_activated_before_extension_sql(self):
+        database = self.database()
+        events = []
+
+        def command(args, **_):
+            events.append(args)
+            if args[1] == "inspect":
+                return (0, database.owner)
+            return (1, "") if "test" in args else (0, "")
+
+        def sql(statement, **_):
+            events.append(statement)
+            return (0, "18.7")
+
+        database.commands.run.side_effect = command
+        database.wait_until_ready = Mock(side_effect=lambda: events.append("ready"))
+        database.sql = Mock(side_effect=sql)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            database.prepare_hypopg()
+        restart = events.index(["docker", "restart", database.name])
+        installed = next(i for i, event in enumerate(events) if isinstance(event, list) and "install" in event)
+        self.assertLess(installed, restart)
+        self.assertLess(restart, events.index("ready"))
+        self.assertLess(events.index("ready"), events.index("SHOW server_version;"))
+        self.assertLess(events.index("SHOW server_version;"), events.index("CREATE DATABASE culprit_hypopg;"))
+        self.assertIn("18.7", output.getvalue())
+
+    def test_readiness_deadline_cannot_wait_forever_after_restart(self):
+        database = self.database()
+        database.commands.run.return_value = (0, "127.0.0.1:55439\n")
+        database.sql = Mock(return_value=(1, "starting"))
+        with patch.object(smoke.time, "monotonic", side_effect=[0, 1, smoke.STARTUP_BUDGET + 1]), patch.object(smoke.time, "sleep"):
+            with self.assertRaisesRegex(TimeoutError, "did not become ready"):
+                database.wait_until_ready()
+        database.sql.assert_called_once_with("SELECT 1;", database="postgres", check=False, timeout=5)
+        self.assertEqual(database.commands.run.call_args_list[-1].args[0], ["docker", "logs", "--tail", "60", database.name])
+
 
 class ChildProcesses(unittest.TestCase):
     def test_failures_never_print_disposable_passwords(self):
