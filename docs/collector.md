@@ -58,9 +58,20 @@ server snapshot. Runtime groups join only exact native query/plan references wit
 rows withhold the workload denominator. Available statements can still be analyzed when unrelated definitions are
 missing, using the complete captured runtime totals. Unsupported metrics remain in the native context.
 Known monitoring and engine-internal statements are excluded from application totals as well as application
-recommendations. Unresolved definitions keep their known runtime in the conservative denominator. Native wait
-category IDs have no declared portable meaning yet, so waits remain exact context with a projection limitation;
-they are not relabeled as another engine's wait categories or used for semantic wait diagnoses.
+recommendations. Unresolved definitions keep their known runtime in the conservative denominator.
+
+Sources can declare a bounded native wait vocabulary in the authenticated capture description. Both warehouses
+preserve the same declaration; the analysis consumer never chooses a dictionary by engine or source name. Known
+categories contribute observed totals, while unknown categories and inexact values remain explicit limitations.
+Workers, CPU, compilation and memory waits are distinct classes. Native category IDs and names remain in
+the retained context; a category does not identify an individual native wait type or a blocking query.
+
+The current capture setting and historical interval qualification are independent facts. Query Store's current
+`ON` setting does not prove that waits were collected throughout an earlier interval, and `OFF` does not erase
+retained positive waits. The SQL Server adapter reports historical wait coverage as unverified. A zero for an absent
+wait class requires independently qualified interval coverage, a complete selected wait family, exact query/plan
+joins and a declaration that the source measures that class. Partial captures can still support positive findings.
+Aggregate waits do not identify which executions were slow or rule out parameter-sensitive behavior.
 
 This consumer does not combine captures, estimate database health from absent measurements or expose a warehouse
 connection in the desktop app. Missing current metadata, schema and settings prevent executable fix SQL; the

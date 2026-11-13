@@ -166,6 +166,9 @@ cannot publish complete data. Missing CPU or other metrics remain absent. Metric
 page size. Cumulative statement totals are current point facts with reset evidence, not native interval aggregates;
 unknown resets never authorize a delta. Destination schemas preserve these contracts without provider-specific field
 interpretation. Provider extensions that retain native engine structures remain explicitly named.
+The shared export boundary canonicalizes runtime UTC instants without changing their nanosecond value. Equivalent
+offset or fractional spellings produce the same authenticated payload; oversized or subnanosecond values are
+rejected rather than truncated. Opaque native generation timestamps remain unchanged.
 
 Schedulers ask `Provider::telemetry_intervals` for bounded pages of closed native history intervals. SQL Server capture
 and discovery share `query_store::intervals`, including the boundary projection and decoder. Discovery fixes its server
@@ -187,6 +190,12 @@ identities and complete bounded payload reads. Interactive summaries, timelines,
 remain database-side projections; background capture preserves native interval/outcome/replica fragments. Native
 layout detection handles optional statistics without treating timeouts as schema fallback. Both consumers keep
 native unknowns, units and fractional timestamps. SQL text stays private for interactive use and is redacted for export.
+An interactive scan freezes a bounded native interval population before reading runtime statistics. Waits, timelines,
+plan variants and runtime costs share that population and reader. A final native metadata recheck supplies precise
+observation bounds; retention gaps, changed membership or an uncertain terminal read invalidate the workload rather
+than supplying a different source's denominator. Costs with a later execution count cannot borrow an earlier query's
+denominator. Mutable open intervals are still separate native observations, not an atomic snapshot. Compilation
+history retains its independent lifetime.
 
 Deadlock history uses one bounded native event reader and the existing graph parser. Native file/buffer positions,
 event digests and fractional timestamps identify exported events independently of redaction or retry. Interactive
@@ -320,6 +329,9 @@ counts, and withholds workload shares when runtime membership or totals are inco
 native inputs, limitations and archived-telemetry provenance rather than exposing the internal snapshot adapter as
 a current server observation. It needs no source provider or credential. Missing schema/settings/server facts lock
 their assessments and withhold executable fix SQL while preserving supported findings and verification.
+Native wait categories are interpreted through the bounded, authenticated vocabulary declared by the source.
+Unknown categories remain unknown, and workers, CPU, compilation and memory waits stay distinct.
+Current capture configuration does not qualify historical coverage or invalidate retained positive observations.
 
 Capture and outbox code have no ADX or Blob dependencies. Destinations consume immutable validated evidence and keep
 their registration, authentication and delivery state separate from database providers. Adding a destination must not
@@ -767,9 +779,17 @@ finding has a stable id (`<check>:<subject>`), a title and a plain-language summ
 behind it), a fix that is safe to run, a way to verify it, a severity, a confidence and an impact used for ranking.
 
 Per-statement assessments retain the exact query ids measured, including measured zero WAL, JIT and wait counters.
-Wait evidence names its category; another category cannot prove zero lock or network waiting. Query Store zeroes
-require a successful wait read and enabled capture. Cached memory grants are sampled for discovery, then the captured
+Wait evidence names its category; another category cannot prove zero lock or network waiting. A measured zero
+requires qualified coverage of that class and interval, a complete source read and exact runtime joins. Current
+Query Store capture mode alone does not qualify historical recording; the native adapter keeps this coverage
+unverified. A native scalar timer can measure only a subset of a class; its zero alone does not qualify absence.
+Invalidating a counter also withdraws its class qualification, so removing invalid data cannot create
+a measured zero. Aggregate locks can motivate investigation without identifying the slow executions or excluding
+parameter sensitivity. Cached memory grants are sampled for discovery, then the captured
 workload's hashes are read separately (at most 200), including zero grants; absence from the cache stays unknown.
+SQL shape and a disabled READ_COMMITTED_SNAPSHOT setting identify a row-versioning candidate, not the lock owner or
+resource. Aggregate read-lock waits cannot establish data-lock causality or exclude schema locks. Advice derived
+elsewhere is not native evidence for an isolation change.
 A plan regression retains a typed fast-plan baseline in the finding and digest. Recovery may use one later plan,
 forced or naturally selected, only with fresh, sufficiently sampled runs inside the new window that no longer meet
 the regression threshold. Losing an earlier variant alone never verifies recovery. Source failures, incompatible

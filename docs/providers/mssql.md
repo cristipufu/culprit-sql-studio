@@ -47,6 +47,11 @@ Gateway pool IDs identify native Resource Governor pools, not Azure elastic-pool
 
 Live shows current sessions, running statements, idle transactions and blocking chains. Query Store attributes recorded wait categories to statements; live wait samples compare server wait counters over the sample interval.
 
+Query Store wait totals remain usable when capture is currently off. Its current setting does not establish whether
+all waits were retained for an earlier interval, so absent rows remain unknown. The same native category mapping
+serves scans and telemetry export. Worker admission (`THREADPOOL`), CPU, compilation and memory waits remain
+separate; an aggregate category does not identify a blocker or which calls were slow.
+
 Live identifies connections through native session IDs, login generations, application names and logins. It excludes the observing session itself; another Culprit connection can still appear as a blocker or long-running request. Local connection aliases are not server-side client identities.
 
 Live and background activity capture use the same native reader and counter interpretation. Live requests visible activity and can show an idle transaction's previous batch; background capture keeps qualifying requests and blocker context, with redacted SQL. Request counters remain distinct from session lifetime counters. Missing database-wide permissions fail explicitly, and an unavailable SQL detail does not discard readable session metadata.
