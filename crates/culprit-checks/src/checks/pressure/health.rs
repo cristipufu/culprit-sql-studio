@@ -26,6 +26,7 @@ pub(crate) fn grade_findings(snapshot: &mut Snapshot, findings: &[Finding]) {
         let check = match s.key.as_str() {
             "memory-grants-pending" => "memory-queue",
             "threadpool-waiting" => "worker-pressure",
+            culprit_core::signal_id::COMPILATION_WAITING => "compile-queue",
             "oldest-transaction" => "held-cleanup",
             _ => continue,
         };

@@ -15,6 +15,7 @@ pub(super) enum Family {
     CleanupHorizon,
     PersistentVersions,
     ProcessorTopology,
+    CompilationGateways,
     PlanCacheSummary,
     MissingIndexes,
     Tuning(crate::query_store::tuning::Kind),
@@ -53,6 +54,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
                 Family::CleanupHorizon,
                 Family::PersistentVersions,
                 Family::ProcessorTopology,
+                Family::CompilationGateways,
             ])
             .collect(),
         SnapshotDataset::PlanCacheSummary => vec![Family::PlanCacheSummary],
@@ -96,6 +98,7 @@ impl Family {
             Self::CleanupHorizon => &sources::OPEN_TRANSACTIONS,
             Self::PersistentVersions => &sources::PERSISTENT_VERSION_STORE,
             Self::ProcessorTopology => &sources::PROCESSOR_TOPOLOGY,
+            Self::CompilationGateways => &sources::COMPILATION_GATEWAYS,
             Self::PlanCacheSummary => &sources::PLAN_CACHE_USE,
             Self::MissingIndexes => &sources::MISSING_INDEXES,
             Self::Tuning(kind) => kind.source(),
@@ -185,6 +188,11 @@ impl Family {
                     .map(TelemetryRecord::Operational)
                     .collect()
             }
+            Self::CompilationGateways => crate::compiler_gateways::read(reader, limit)
+                .await?
+                .iter()
+                .map(|sample| sample.observation().map(TelemetryRecord::Operational))
+                .collect::<Result<Vec<_>>>()?,
             Self::PersistentVersions => {
                 let Some(sample) = crate::version_store::persistent::read(reader).await? else {
                     return Ok(ReadOutcome::NotApplicable);

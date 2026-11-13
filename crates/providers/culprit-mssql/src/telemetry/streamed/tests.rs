@@ -531,6 +531,7 @@ async fn compilation_capture_streams_retained_lifetime_totals_through_the_shared
     let OperationalFact::MssqlQueryCompilation(compilation) = &record.fact else { panic!("compilation") };
     assert_eq!(record.key, compilation.key().unwrap());
     assert_eq!(compilation.compilations, "9007199254740993");
+    assert_eq!(compilation.memory.unwrap().maximum_kb, Some(16384.0));
     let exported = ExportedRecord::new(
         &initial,
         &CaptureIdentity { observation_id: "fixture".into(), revision: None },

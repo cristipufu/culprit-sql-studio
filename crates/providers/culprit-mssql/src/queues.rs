@@ -6,6 +6,7 @@ use culprit_core::{
 };
 
 const MIN_WORKER_WAIT_MS: u32 = 100;
+const MIN_COMPILATION_WAIT_MS: u32 = 1000;
 macro_rules! queue_sql {
     ($wait:literal, $session:literal, $relations:literal, $predicate:literal) => {
         concat!(
@@ -47,24 +48,34 @@ const WORKERS: &str = queue_sql!(
  LEFT JOIN sys.dm_exec_requests r ON r.session_id=t.session_id AND r.request_id=t.request_id",
     "w.wait_type=N'THREADPOOL' AND w.wait_duration_ms>=@P1"
 );
+const COMPILATION: &str = queue_sql!(
+    "r.wait_time",
+    "r.session_id",
+    "sys.dm_exec_requests r LEFT JOIN sys.dm_exec_sessions s ON s.session_id=r.session_id",
+    "r.wait_type=N'RESOURCE_SEMAPHORE_QUERY_COMPILE' AND r.wait_time>=@P1"
+);
 
-pub(crate) const KINDS: [QueueKind; 2] = [QueueKind::MemoryGrants, QueueKind::WorkerTasks];
+pub(crate) const KINDS: [QueueKind; 3] =
+    [QueueKind::MemoryGrants, QueueKind::WorkerTasks, QueueKind::CompilationRequests];
 pub(crate) fn source(kind: QueueKind) -> &'static culprit_core::Source {
     match kind {
         QueueKind::MemoryGrants => &crate::sources::PENDING_GRANTS,
         QueueKind::WorkerTasks => &crate::sources::WORKER_QUEUE,
+        QueueKind::CompilationRequests => &crate::sources::COMPILATION_QUEUE,
     }
 }
 fn minimum_wait_ms(kind: QueueKind) -> u32 {
     match kind {
         QueueKind::MemoryGrants => 0,
         QueueKind::WorkerTasks => MIN_WORKER_WAIT_MS,
+        QueueKind::CompilationRequests => MIN_COMPILATION_WAIT_MS,
     }
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R, kind: QueueKind) -> Result<QueueSample> {
     let (sql, parameters) = match kind {
         QueueKind::MemoryGrants => (MEMORY, vec![]),
         QueueKind::WorkerTasks => (WORKERS, vec![Parameter::Integer(i64::from(MIN_WORKER_WAIT_MS))]),
+        QueueKind::CompilationRequests => (COMPILATION, vec![Parameter::Integer(i64::from(MIN_COMPILATION_WAIT_MS))]),
     };
     let rows = reader.query(sql, parameters, 2).await.map_err(ReadError::into_error)?;
     let [row] = rows.as_slice() else {
@@ -89,6 +100,7 @@ pub(crate) fn observation(sample: QueueSample) -> OperationalObservation {
         key: match sample.kind {
             QueueKind::MemoryGrants => "memory-grants",
             QueueKind::WorkerTasks => "worker-tasks",
+            QueueKind::CompilationRequests => "compilation-requests",
         }
         .into(),
         fact: OperationalFact::Queue(sample),
@@ -107,6 +119,7 @@ fn record_application_result(coverage: &mut Coverage, kind: QueueKind, result: R
     Some(match kind {
         QueueKind::MemoryGrants => crate::pressure::pending_grants_signal(count),
         QueueKind::WorkerTasks => crate::pressure::threadpool_now_signal(count),
+        QueueKind::CompilationRequests => crate::pressure::compilation_waiting_signal(count, sample.minimum_wait_ms),
     })
 }
 pub(crate) async fn application(
@@ -114,26 +127,29 @@ pub(crate) async fn application(
     probe: &crate::probe::Probe,
     coverage: &mut Coverage,
 ) -> Vec<Signal> {
-    let mut reader = crate::read::ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
-    let mut signals = Vec::new();
+    let reader = crate::read::ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
+    collect_queues(reader, probe.grant_hint(), coverage).await
+}
+
+async fn collect_queues<R: NativeRead>(mut reader: R, permission_hint: String, coverage: &mut Coverage) -> Vec<Signal> {
+    let mut observations = Vec::with_capacity(KINDS.len());
     for kind in KINDS {
         let result = read(&mut reader, kind).await.map_err(|error| {
             if error.code == culprit_core::ErrorCode::PermissionDenied {
-                error.with_hint(probe.grant_hint())
+                error.with_hint(&permission_hint)
             } else {
                 error
             }
         });
-        if let Some(signal) = record_application_result(coverage, kind, result) {
-            signals.push(signal);
-        }
+        observations.push((kind, result));
     }
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         for kind in KINDS {
             coverage.source_failed(source(kind), &CollectionStop::CancellationUnconfirmed.error());
         }
+        return Vec::new();
     }
-    signals
+    observations.into_iter().filter_map(|(kind, result)| record_application_result(coverage, kind, result)).collect()
 }
 
 #[cfg(test)]

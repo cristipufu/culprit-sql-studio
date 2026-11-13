@@ -10,6 +10,7 @@ pub struct MssqlQueryCompilation {
     pub last_compile_at: String,
     pub compilations: String,
     pub average_duration_us: f64,
+    pub memory: Option<crate::CompilationMemory>,
     /// The native clock comparison can be negative after clock skew; it is not a measured duration.
     pub seconds_since_first_compile: i64,
     pub reset: crate::ResetMarker,
@@ -29,6 +30,7 @@ impl MssqlQueryCompilation {
                 .all(|at| at.len() <= 64 && canonical_time(at).is_ok())
             && self.average_duration_us.is_finite()
             && self.average_duration_us >= 0.0
+            && self.memory.as_ref().is_none_or(|memory| memory.is_valid() && memory.is_measured())
             && valid_reset(&self.reset)
     }
 }
@@ -44,12 +46,19 @@ mod tests {
             last_compile_at: "2020-01-01T06:01:00Z".into(),
             compilations: "9007199254740993".into(),
             average_duration_us: 1500.5,
+            memory: Some(crate::CompilationMemory {
+                average_kb: Some(4096.5),
+                last_kb: Some(8192.0),
+                maximum_kb: Some(16384.0),
+            }),
             seconds_since_first_compile: -1,
             reset: crate::ResetMarker::Unknown,
         };
         assert!(value.is_valid());
         let mut changed = value.clone();
         changed.compilations = "9007199254740994".into();
+        assert_eq!(value.key().unwrap(), changed.key().unwrap());
+        changed.memory.as_mut().unwrap().maximum_kb = Some(32768.0);
         assert_eq!(value.key().unwrap(), changed.key().unwrap());
         changed.first_compile_at = "2020-01-01T06:00:00.153333300+00:00".into();
         assert_eq!(value.key().unwrap(), changed.key().unwrap());

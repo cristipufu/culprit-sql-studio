@@ -21,6 +21,10 @@ pub struct CompileHistory {
     pub first_at: Option<String>,
     pub last_at: Option<String>,
     pub within_window: bool,
+    /// Retained per-compilation working memory, over this entry's own lifetime. Never a total or current allocation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub memory: Option<crate::CompilationMemory>,
 }
 
 /// What a statement's runs cost besides elapsed time, as far as the engine keeps it. Totals cover all its runs in the

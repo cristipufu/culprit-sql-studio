@@ -14,6 +14,7 @@ use crate::support::*;
 
 mod checkpoint_pressure;
 mod compile_pressure;
+mod compile_queue;
 mod health;
 mod held_cleanup;
 mod memory_grant;
@@ -29,6 +30,7 @@ mod worker_pressure;
 
 pub use checkpoint_pressure::*;
 pub use compile_pressure::*;
+pub use compile_queue::*;
 pub use held_cleanup::*;
 pub use memory_grant::*;
 pub use memory_queue::*;
@@ -42,6 +44,7 @@ pub(crate) const CHECKS: &[&dyn Check] = &[
     &MemoryGrantCheck,
     &MemoryQueueCheck,
     &CompilePressureCheck,
+    &CompileQueueCheck,
     &WorkerPressureCheck,
     &HeldCleanupCheck,
     &NetworkWaitCheck,

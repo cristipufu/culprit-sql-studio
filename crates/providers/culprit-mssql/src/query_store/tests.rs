@@ -208,6 +208,9 @@ pub(crate) fn compilation_row() -> Rec {
         ("query_id", Val::Int(3)),
         ("count_compiles", Val::Int(9_007_199_254_740_993)),
         ("avg_compile_duration", Val::Float(1500.5)),
+        ("avg_compile_memory_kb", Val::Float(4096.5)),
+        ("last_compile_memory_kb", Val::Int(8192)),
+        ("max_compile_memory_kb", Val::Int(16384)),
         ("first_compile", Val::Text("2020-01-01T06:00:00.1533333Z".into())),
         ("last_compile", Val::Text("2020-01-01T06:01:00Z".into())),
         ("compiling_s", Val::Int(60)),
@@ -219,6 +222,12 @@ fn compilation_lifetime_is_exact_and_never_borrows_the_runtime_window() {
     let exported = native.observation();
     assert_eq!(exported.compilations, "9007199254740993");
     assert_eq!(exported.average_duration_us, 1500.5);
+    assert_eq!(exported.memory, native.memory);
+    assert_eq!(native.history(1).memory, exported.memory);
+    assert_eq!(native.history(0).memory, exported.memory, "changing a runtime window does not change compile memory");
+    assert_eq!(exported.memory.unwrap().average_kb, Some(4096.5));
+    assert_eq!(exported.memory.unwrap().last_kb, Some(8192.0));
+    assert_eq!(exported.memory.unwrap().maximum_kb, Some(16384.0));
     assert_eq!(exported.first_compile_at, "2020-01-01T06:00:00.153333300Z");
     assert_eq!(native.total_ms(), native.avg_duration_us * native.count as f64 / 1000.0);
     assert!(native.within_window(1));
@@ -229,10 +238,23 @@ fn compilation_lifetime_is_exact_and_never_borrows_the_runtime_window() {
         ("count_compiles", Val::Null),
         ("count_compiles", Val::Int(-1)),
         ("avg_compile_duration", Val::Float(f64::NAN)),
+        ("avg_compile_memory_kb", Val::Float(f64::NAN)),
+        ("last_compile_memory_kb", Val::Int(-1)),
+        ("max_compile_memory_kb", Val::Float(f64::INFINITY)),
         ("first_compile", Val::Text("2020-01-01T06:00:00".into())),
     ] {
         assert!(costs::Compilation::decode(&replace(&compilation_row(), &[(column, value)])).is_err());
     }
+    let unavailable = costs::Compilation::decode(&replace(
+        &compilation_row(),
+        &[
+            ("avg_compile_memory_kb", Val::Null),
+            ("last_compile_memory_kb", Val::Null),
+            ("max_compile_memory_kb", Val::Null),
+        ],
+    ))
+    .unwrap();
+    assert_eq!(unavailable.memory, None, "unavailable native memory is not a zero allocation");
 }
 
 #[test]

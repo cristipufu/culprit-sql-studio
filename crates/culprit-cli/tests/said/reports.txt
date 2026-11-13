@@ -50,7 +50,7 @@ Information and history (3)
  23  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
 
-Check coverage: 9 assessed without a finding; 24 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 9 assessed without a finding; 25 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mssql-demo`.
 

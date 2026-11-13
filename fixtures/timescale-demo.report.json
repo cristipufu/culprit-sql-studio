@@ -449,6 +449,7 @@
         "memory-grant",
         "memory-queue",
         "compile-pressure",
+        "compile-queue",
         "worker-pressure",
         "held-cleanup",
         "network-wait",

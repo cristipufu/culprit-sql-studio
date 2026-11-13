@@ -34,8 +34,14 @@ Query Store must be enabled and readable for interval history, recorded plans an
 | Plan and query regressions | Plan history and timed runtime evidence; plans with different retention periods are not treated as interchangeable |
 | Tuning recommendations | Query Store plan-forcing recommendations, forced-plan state and failures, where readable |
 | Statement families | Query hashes, parameter declarations and the captured statement texts |
+| Compilation memory | Query Store compile counts, times and average/latest/peak working memory per query; repeated costly compilation findings link to that query |
+| Compiler admission | Database-scoped requests waiting at least one second to compile; bounded resource-pool gateway counts, limits and native thresholds retained as shared server context |
 
 Planning, compile history, execution time, CPU, waits, rows, reads and log bytes retain their source's own meaning and dates. Compilation entry totals are not silently assigned to a selected runtime window.
+
+Compiler working memory, cached plan bytes and execution memory grants are separate measurements. A waiting request is affected; it is not a compiler-memory owner. Recent high-memory compilations are linked as investigation candidates, with their native timestamps. Historical peaks do not prove simultaneous use, and gateway counts across tiers must not be summed into a unique compiler count. Retained plan variants, including dispatcher and parameter-sensitive variants, are not by themselves evidence of a compilation problem.
+
+Gateway pool IDs identify native Resource Governor pools, not Azure elastic-pool resource IDs. Their shared scope does not establish which database consumed the compiler budget.
 
 ## Live activity and waits
 

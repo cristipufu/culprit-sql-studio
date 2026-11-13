@@ -8,7 +8,6 @@ use culprit_core::{Coverage, Pressure, Signal, SignalScope, SignalUnit, Snapshot
 
 use crate::probe::Probe;
 use crate::query_store::Reader;
-#[cfg(test)]
 use crate::query_store::costs::Compilation;
 use crate::read::NativeRead;
 use crate::sources;
@@ -23,24 +22,18 @@ pub(crate) async fn collect(
     snapshot: &mut Snapshot,
 ) {
     let mut coverage = Coverage::default();
-    let from_query_store =
-        snapshot.workload.as_ref().is_some_and(|w| w.kind() == Some(culprit_core::WorkloadKind::QueryStore));
-    if from_query_store {
-        let mut reader = Reader::open(pool.clone());
-        if let Some(workload) = snapshot.workload.as_mut() {
-            let costs = attach_costs(&mut reader, options.window_in_minutes(), &mut workload.queries).await;
-            coverage.read(&sources::QUERY_COSTS, costs);
-            culprit_core::signals::fill_row_bytes(&mut workload.queries);
-        }
-        let compiles = database_compiles(&mut reader).await;
-        let shutdown = reader.close().await;
-        let compiles = if shutdown == culprit_core::telemetry::SourceShutdown::Unconfirmed {
-            Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error())
-        } else {
-            compiles
-        };
-        let compiles = coverage.read(&sources::QUERY_COMPILATION, compiles);
-        snapshot.pressure.get_or_insert_with(Pressure::default).signals.extend(compiles.unwrap_or_default());
+    if let Some(workload) =
+        snapshot.workload.as_mut().filter(|workload| workload.kind() == Some(culprit_core::WorkloadKind::QueryStore))
+    {
+        let compiles = collect_query_costs(
+            Reader::open(pool.clone()),
+            options.window_in_minutes(),
+            &mut workload.queries,
+            &mut coverage,
+        )
+        .await;
+        culprit_core::signals::fill_row_bytes(&mut workload.queries);
+        snapshot.pressure.get_or_insert_with(Pressure::default).signals.extend(compiles);
     }
     if probe.can_read_dmvs() {
         crate::index_operations::collect(pool.clone(), probe, snapshot).await;
@@ -88,7 +81,7 @@ pub(crate) async fn collect(
 // ── per query ──────────────────────────────────────────────────────────────────────────────────────
 
 /// An exact database-scoped count, not a ratio against the instance's batches or an estimate for a runtime window.
-async fn database_compiles(reader: &mut Reader) -> culprit_core::Result<Vec<Signal>> {
+async fn database_compiles(reader: &mut Reader<impl NativeRead>) -> culprit_core::Result<Vec<Signal>> {
     let rows = reader.read_rows(&crate::query_store::costs::database_compilation_sql()).await?;
     let Some(r) = rows.first() else { return Ok(Vec::new()) };
     let (Some(compiles), Some(ms)) = (r.f64("compiles"), r.f64("compile_ms")) else { return Ok(Vec::new()) };
@@ -122,22 +115,55 @@ pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -
     ]
 }
 
-/// Aborted (3) and exception (4) runs, their log bytes, and compile time from Query Store.
-async fn attach_costs(
-    reader: &mut Reader,
+/// Independent cost sources are projected only after their one native owner confirms shutdown.
+async fn collect_query_costs<R: NativeRead>(
+    mut reader: Reader<R>,
     window_minutes: u32,
     queries: &mut [culprit_core::QueryStat],
-) -> culprit_core::Result<()> {
+    coverage: &mut Coverage,
+) -> Vec<Signal> {
     let ids: Vec<String> = queries.iter().map(|query| query.id.clone()).collect();
-    if ids.is_empty() {
-        return Ok(());
+    let runs = read_run_costs(&mut reader, window_minutes, &ids).await;
+    let compilations = reader.compilations(&ids).await;
+    let database = database_compiles(&mut reader).await;
+    if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+        let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
+        coverage.source_failed(&sources::QUERY_COSTS, &error);
+        coverage.source_failed(&sources::QUERY_COMPILATION, &error);
+        return vec![];
     }
-    let rows = reader.costs(window_minutes, &ids).await?;
-    let total_log = reader.total_log_bytes(window_minutes).await?;
-    let by_id = rows.into_iter().map(|row| (row.query_id.clone(), row)).collect::<HashMap<_, _>>();
-    let compiles =
-        reader.compilations(&ids).await?.into_iter().map(|row| (row.query_id.clone(), row)).collect::<HashMap<_, _>>();
+    if let Some(runs) = coverage.read(&sources::QUERY_COSTS, runs) {
+        attach_run_costs(queries, runs);
+    }
+    if let Some(compilations) = coverage.read(&sources::QUERY_COMPILATION, compilations) {
+        attach_compilations(queries, compilations, window_minutes);
+    }
+    coverage.read(&sources::QUERY_COMPILATION, database).unwrap_or_default()
+}
 
+#[derive(Default)]
+struct RuntimeCosts {
+    rows: Vec<crate::query_store::costs::RunCosts>,
+    total_log_bytes: Option<f64>,
+}
+
+async fn read_run_costs(
+    reader: &mut Reader<impl NativeRead>,
+    window_minutes: u32,
+    ids: &[String],
+) -> culprit_core::Result<RuntimeCosts> {
+    if ids.is_empty() {
+        return Ok(RuntimeCosts::default());
+    }
+    Ok(RuntimeCosts {
+        rows: reader.costs(window_minutes, ids).await?,
+        total_log_bytes: reader.total_log_bytes(window_minutes).await?,
+    })
+}
+
+/// Aborted (3) and exception (4) runs and their log bytes use the selected runtime window.
+fn attach_run_costs(queries: &mut [culprit_core::QueryStat], captured: RuntimeCosts) {
+    let by_id = captured.rows.into_iter().map(|row| (row.query_id.clone(), row)).collect::<HashMap<_, _>>();
     for q in queries.iter_mut() {
         let mut costs = q.costs.take().unwrap_or_default();
         if let Some(r) = by_id.get(&q.id) {
@@ -147,23 +173,26 @@ async fn attach_costs(
             costs.aborted_mean_ms =
                 (aborted > 0.0).then(|| crate::query_store::runtime::milliseconds(r.aborted_us) / aborted);
             costs.log_bytes = r.log_bytes;
-            costs.log_share = match (costs.log_bytes, total_log) {
+            costs.log_share = match (costs.log_bytes, captured.total_log_bytes) {
                 (Some(own), Some(all)) if all > 0.0 => Some((own / all).min(1.0)),
                 _ => None,
             };
         }
+        q.costs = (!costs.is_empty()).then_some(costs);
+    }
+}
+
+/// Compilation history keeps its own lifetime even when runtime costs are unavailable.
+fn attach_compilations(queries: &mut [culprit_core::QueryStat], compilations: Vec<Compilation>, window_minutes: u32) {
+    let compiles = compilations.into_iter().map(|row| (row.query_id.clone(), row)).collect::<HashMap<_, _>>();
+    for q in queries {
+        let mut costs = q.costs.take().unwrap_or_default();
         let compiled = compiles.get(&q.id);
         costs.plan_ms = None;
         costs.plans = None;
         if let Some(c) = compiled {
             let within_window = c.within_window(window_minutes);
-            costs.compile_history = Some(culprit_core::signals::CompileHistory {
-                count: c.count as f64,
-                total_ms: c.total_ms(),
-                first_at: Some(c.first_at.clone()),
-                last_at: Some(c.last_at.clone()),
-                within_window,
-            });
+            costs.compile_history = Some(c.history(window_minutes));
             if within_window {
                 costs.plan_ms = Some(c.total_ms());
                 costs.plans = Some(c.count as f64);
@@ -171,7 +200,6 @@ async fn attach_costs(
         }
         q.costs = (!costs.is_empty()).then_some(costs);
     }
-    Ok(())
 }
 
 /// Foreign keys and check constraints loaded or re-enabled WITH NOCHECK, or switched off. NOT FOR REPLICATION foreign
@@ -312,6 +340,68 @@ pub(crate) fn login_signals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        resources::test_support::FakeRead,
+        value::{Rec, Val},
+    };
+
+    fn query_without_costs() -> culprit_core::QueryStat {
+        let snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+        let mut query = snapshot.workload.unwrap().queries.remove(0);
+        query.id = "3".into();
+        query.costs = None;
+        query
+    }
+
+    fn database_compilation_row() -> Rec {
+        Rec::of(&[
+            ("compiles", Val::Float(5.0)),
+            ("compile_ms", Val::Float(6000.0)),
+            ("first_compile", Val::Text("2020-01-01T06:00:00Z".into())),
+            ("last_compile", Val::Text("2020-01-01T06:01:00Z".into())),
+        ])
+    }
+
+    #[tokio::test]
+    async fn query_compilation_survives_unavailable_runtime_costs_but_no_costs_survive_unconfirmed_native_shutdown() {
+        for shutdown in
+            [culprit_core::telemetry::SourceShutdown::Quiescent, culprit_core::telemetry::SourceShutdown::Unconfirmed]
+        {
+            let mut io = FakeRead::new(vec![
+                Err(crate::read::ReadError::Source(culprit_core::Error::new(
+                    culprit_core::ErrorCode::PermissionDenied,
+                    "fixture runtime-cost permission",
+                ))),
+                Ok(vec![crate::query_store::tests::compilation_row()]),
+                Ok(vec![database_compilation_row()]),
+            ]);
+            io.shutdown = shutdown;
+            let mut queries = vec![query_without_costs()];
+            let mut coverage = Coverage::default();
+            let signals = collect_query_costs(Reader::new(io), 60, &mut queries, &mut coverage).await;
+            if shutdown == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+                assert!(queries[0].costs.is_none(), "unsettled native work cannot publish fresh per-query evidence");
+                assert!(signals.is_empty());
+                assert!(
+                    coverage.outcomes().iter().all(|outcome| outcome.state == culprit_core::SourceState::Unavailable)
+                );
+            } else {
+                let costs = queries[0].costs.as_ref().unwrap();
+                assert!(costs.failed.is_none() && costs.aborted.is_none());
+                assert_eq!(costs.compile_history.as_ref().unwrap().memory.unwrap().last_kb, Some(8192.0));
+                assert_eq!(signals.len(), 2);
+                assert_eq!(
+                    coverage
+                        .outcomes()
+                        .iter()
+                        .find(|outcome| outcome.source == sources::QUERY_COSTS.name)
+                        .unwrap()
+                        .state,
+                    culprit_core::SourceState::Unavailable
+                );
+            }
+        }
+    }
 
     #[test]
     fn only_compiles_wholly_in_the_selected_period_are_compared_with_its_runs() {
@@ -319,6 +409,7 @@ mod tests {
             query_id: "1".into(),
             count: 1500,
             avg_duration_us: 20_000.0,
+            memory: None,
             seconds_since_first: 3600,
             first_at: "2020-01-01T00:00:00Z".into(),
             last_at: "2020-01-01T01:00:00Z".into(),

@@ -155,6 +155,16 @@ pub const PROCESSOR_TOPOLOGY: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.processor_topology"),
     delivers: &[],
 };
+pub const COMPILATION_GATEWAYS: Source = Source {
+    name: source_id::COMPILATION_GATEWAYS,
+    reads: culprit_core::key!("provider.mssql.source.compilation_gateways"),
+    delivers: &[],
+};
+pub const COMPILATION_QUEUE: Source = Source {
+    name: source_id::COMPILATION_QUEUE,
+    reads: culprit_core::key!("provider.mssql.source.compilation_queue"),
+    delivers: &[],
+};
 /// Performance counters: batches, compiles, page life.
 pub const PERFORMANCE_COUNTERS: Source = Source {
     name: source_id::PERFORMANCE_COUNTERS,
@@ -292,6 +302,8 @@ pub const MISC: &[Source] = &[
     FORCED_PLANS,
     QUERY_HINTS,
     PROCESSOR_TOPOLOGY,
+    COMPILATION_GATEWAYS,
+    COMPILATION_QUEUE,
     PERFORMANCE_COUNTERS,
     LOGINS,
     PENDING_GRANTS,
@@ -354,6 +366,8 @@ pub const ALL: &[Source] = &[
     SERVER_SETTINGS,
     QUERY_STORE_SETTINGS,
     PROCESSOR_TOPOLOGY,
+    COMPILATION_GATEWAYS,
+    COMPILATION_QUEUE,
     PERFORMANCE_COUNTERS,
     RESOURCE_USE,
     PENDING_GRANTS,

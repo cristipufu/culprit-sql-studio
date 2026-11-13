@@ -228,6 +228,7 @@ pub mod signal_id {
     pub const BATCH_REQUESTS: &str = "batch-requests";
     pub const DATABASE_COMPILES: &str = "database-compiles";
     pub const DATABASE_COMPILE_TIME: &str = "database-compile-time";
+    pub const COMPILATION_WAITING: &str = "compilation-waiting";
     pub const CONNECTIONS: &str = "connections";
     pub const MAX_USED_CONNECTIONS: &str = "max-used-connections";
     pub const MAX_USED_CONNECTIONS_AGO: &str = "max-used-connections-ago";

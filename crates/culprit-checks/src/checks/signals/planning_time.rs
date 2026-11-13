@@ -36,6 +36,7 @@ pub struct PlanningTime<'s> {
     /// SQL Server's OPTION (RECOMPILE) asks for a new plan on every run.
     recompile_hint: bool,
     severity: Severity,
+    memory: Option<culprit_core::CompilationMemory>,
 }
 
 fn planning_times(snapshot: &Snapshot) -> Vec<PlanningTime<'_>> {
@@ -62,6 +63,7 @@ fn planning_times(snapshot: &Snapshot) -> Vec<PlanningTime<'_>> {
                 every_run: plans >= q.executions * 0.9,
                 recompile_hint: !pg && culprit_core::sql::has_mssql_recompile_hint(&q.text),
                 severity,
+                memory: q.costs.as_ref().and_then(|costs| costs.compile_history.as_ref()?.memory),
             };
             (case, query_score(snapshot, q, severity))
         })
@@ -128,6 +130,18 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
         Metric::said(culprit_core::key!("check.planning_time.metric.plans"), plans, Unit::Count),
         Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
     ];
+    if let Some(memory) = case.memory.filter(|memory| memory.is_valid() && memory.is_measured()) {
+        for (key, kb) in [
+            (key!("common.metric.compile_memory_average"), memory.average_kb),
+            (key!("common.metric.compile_memory_last"), memory.last_kb),
+            (key!("common.metric.compile_memory_maximum"), memory.maximum_kb),
+        ] {
+            if let Some(kb) = kb {
+                f.metrics.push(Metric::said(key, kb * 1024.0, Unit::Bytes));
+            }
+        }
+        f.caveats.push(t!("check.planning_time.caveat.compile_memory"));
+    }
     f.fix = Some(if pg {
         Fix { summary: t!("check.planning_time.fix.prepare"), sql: None, cost: None }
     } else if case.recompile_hint {

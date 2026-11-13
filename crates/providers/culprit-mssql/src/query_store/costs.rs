@@ -58,6 +58,7 @@ impl RunCosts {
 }
 
 pub(crate) const COMPILATION_COLUMNS: &str = r#"q.query_id,q.count_compiles,q.avg_compile_duration,
+ q.avg_compile_memory_kb,q.last_compile_memory_kb,q.max_compile_memory_kb,
  CONVERT(varchar(40),q.initial_compile_start_time,127) AS first_compile,
  CONVERT(varchar(40),q.last_compile_start_time,127) AS last_compile,
  DATEDIFF_BIG(second,q.initial_compile_start_time,SYSDATETIMEOFFSET()) AS compiling_s"#;
@@ -85,16 +86,23 @@ pub(crate) struct Compilation {
     pub query_id: String,
     pub count: u64,
     pub avg_duration_us: f64,
+    pub memory: Option<culprit_core::CompilationMemory>,
     pub first_at: String,
     pub last_at: String,
     pub seconds_since_first: i64,
 }
 impl Compilation {
     pub fn decode(row: &Rec) -> Result<Self> {
+        let memory = culprit_core::CompilationMemory {
+            average_kb: crate::read::optional_nonnegative_number(row, "avg_compile_memory_kb")?,
+            last_kb: crate::read::optional_nonnegative_number(row, "last_compile_memory_kb")?,
+            maximum_kb: crate::read::optional_nonnegative_number(row, "max_compile_memory_kb")?,
+        };
         Ok(Self {
             query_id: integer(row, "query_id")?.to_string(),
             count: integer(row, "count_compiles")?.try_into().map_err(|_| invalid_data())?,
             avg_duration_us: crate::read::required_nonnegative_number(row, "avg_compile_duration")?,
+            memory: memory.is_measured().then_some(memory),
             first_at: canonical_time(&crate::read::text(row, "first_compile")?)?,
             last_at: canonical_time(&crate::read::text(row, "last_compile")?)?,
             seconds_since_first: signed_integer(row, "compiling_s")?,
@@ -107,12 +115,23 @@ impl Compilation {
             last_compile_at: self.last_at.clone(),
             compilations: self.count.to_string(),
             average_duration_us: self.avg_duration_us,
+            memory: self.memory,
             seconds_since_first_compile: self.seconds_since_first,
             reset: culprit_core::ResetMarker::Unknown,
         }
     }
     pub fn within_window(&self, minutes: u32) -> bool {
         self.count > 0 && self.seconds_since_first >= 0 && self.seconds_since_first <= i64::from(minutes) * 60
+    }
+    pub fn history(&self, window_minutes: u32) -> culprit_core::signals::CompileHistory {
+        culprit_core::signals::CompileHistory {
+            count: self.count as f64,
+            total_ms: self.total_ms(),
+            first_at: Some(self.first_at.clone()),
+            last_at: Some(self.last_at.clone()),
+            within_window: self.within_window(window_minutes),
+            memory: self.memory,
+        }
     }
     pub fn total_ms(&self) -> f64 {
         super::runtime::milliseconds(self.avg_duration_us * self.count as f64)

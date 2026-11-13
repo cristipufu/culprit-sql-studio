@@ -494,6 +494,7 @@ const INFOS: &[(&str, &str)] = &[(
     r#"memory-grant: Queries that reserve far more memory than they use: Statements whose memory grant (reserved before they run, for sorts and hashes) is many times what they use, so other queries queue for memory.
 memory-queue: Queries waiting in line for memory: Waiting for memory takes a real amount of time (a minute an hour or more), or queries in this database were queueing for a memory grant when the scan ran.
 compile-pressure: Instance compilation context: Shared compilation counters provide context for this database's literal query families; measured Query Store costs establish its compilation impact.
+compile-queue: Compiler admission: Requests in this database delayed by compiler admission, with recent per-query compile-memory evidence where available.
 worker-pressure: Running out of workers or connections: SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.
 held-cleanup: A long open transaction holds cleanup back: The transaction that holds this database's cleanup back: one with uncommitted changes or row versions here (SQL Server), the oldest snapshot, replication slot or prepared transaction behind VACUUM's horizon (PostgreSQL), or the oldest read view behind InnoDB's purge (MySQL).
 network-wait: Results the application reads slowly: Queries that spend much of their time waiting for the application to take results (ASYNC_NETWORK_IO), usually because they return large result sets.

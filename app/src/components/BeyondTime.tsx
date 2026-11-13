@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Engine } from "../gen/Engine";
+import type { CompilationMemory } from "../gen/CompilationMemory";
 import type { FileIo } from "../gen/FileIo";
 import type { Finding } from "../gen/Finding";
 import type { QueryStat } from "../gen/QueryStat";
@@ -34,6 +35,16 @@ function verb(text: string): string {
 
 function lockMs(q: QueryStat): number {
   return q.waits.filter((w) => waitKey(w.category) === "lock").reduce((sum, w) => sum + w.wait_ms, 0);
+}
+
+function compilationMemoryRow(memory: CompilationMemory | null | undefined): Row | null {
+  const measured = (kb: number | null | undefined): kb is number => kb != null && Number.isFinite(kb) && kb >= 0;
+  if (!memory || ![memory.average_kb, memory.last_kb, memory.maximum_kb].some(measured)) return null;
+  const size = (kb: number | null) => measured(kb) ? bytes(kb * 1024) : t("ui.beyond_time.not_measured");
+  return {
+    key: "compile-memory", label: t("common.metric.compile_memory_average"), value: size(memory.average_kb),
+    note: t("ui.beyond_time.compile_memory_note", { last: size(memory.last_kb), maximum: size(memory.maximum_kb) }), status: "info",
+  };
 }
 
 function costRows(report: Report, q: QueryStat): Row[] {
@@ -100,6 +111,9 @@ function costRows(report: Report, q: QueryStat): Row[] {
       status: "info",
     });
   }
+
+  const memory = compilationMemoryRow(c?.compile_history?.memory);
+  if (memory) rows.push(memory);
 
   if (c?.jit_ms != null && q.total_time_ms > 0) {
     const share = c.jit_ms / q.total_time_ms;

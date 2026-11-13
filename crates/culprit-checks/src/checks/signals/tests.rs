@@ -65,6 +65,40 @@ fn planning_share_needs_reuse_and_volume() {
 }
 
 #[test]
+fn repeated_compilation_keeps_per_query_memory_separate_from_frequency_and_execution_grants() {
+    let mut snapshot = snapshot_with(Engine::Mssql);
+    let query = first_query(&mut snapshot);
+    query.executions = 100.0;
+    query.total_time_ms = 2000.0;
+    query.costs = Some(QueryCosts {
+        plan_ms: Some(6000.0),
+        plans: Some(100.0),
+        compile_history: Some(culprit_core::signals::CompileHistory {
+            count: 100.0,
+            total_ms: 6000.0,
+            within_window: true,
+            memory: Some(culprit_core::CompilationMemory {
+                average_kb: Some(32768.0),
+                last_kb: Some(16384.0),
+                maximum_kb: Some(65536.0),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let query_id = query.id.clone();
+    let finding = PlanningTimeCheck.run(&snapshot).remove(0);
+    assert!(finding.queries.iter().any(|query| query.id == query_id));
+    let memories: Vec<_> = finding.metrics.iter().filter(|metric| metric.unit == Unit::Bytes).collect();
+    assert_eq!(memories.len(), 3);
+    assert_eq!(memories[0].value, 33554432.0, "per-compilation memory is not multiplied by the count");
+    assert_eq!(memories[1].value, 16777216.0);
+    assert_eq!(memories[2].value, 67108864.0);
+    assert!(finding.caveats.iter().any(|caveat| caveat.contains("simultaneous memory")));
+    assert_eq!(snapshot.pressure.as_ref().map_or(0, |pressure| pressure.grants.len()), 0);
+}
+
+#[test]
 fn jit_longer_than_the_query() {
     let mut s = snapshot_with(Engine::Postgres);
     let q = first_query(&mut s);

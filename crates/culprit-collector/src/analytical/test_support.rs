@@ -386,6 +386,39 @@ pub fn cumulative_queries(destination: &str, schema: &str) -> Recovery {
     Recovery::capture(destination, schema, manifest.source, vec![row], 10)
 }
 
+pub fn query_compilation(destination: &str, schema: &str) -> Recovery {
+    let (mut manifest, _) = fixture();
+    let source = culprit_core::source_id::QUERY_COMPILATION;
+    manifest.source.source = "query-compilation-fixture".into();
+    manifest.source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
+        dataset: SnapshotDataset::QueryCompilation,
+        observed_from: "2020-01-01T12:00:00Z".into(),
+        observed_until: "2020-01-01T12:00:01Z".into(),
+        records: 1,
+        sources: vec![StateSourceCoverage::collected(source.into(), 1)],
+    });
+    let compilation = MssqlQueryCompilation {
+        query_id: "42".into(),
+        first_compile_at: "2020-01-01T06:00:00.1533333Z".into(),
+        last_compile_at: "2020-01-01T11:59:00.1533333Z".into(),
+        compilations: "9007199254740993".into(),
+        average_duration_us: 1500.5,
+        memory: Some(culprit_core::CompilationMemory {
+            average_kb: Some(32768.5),
+            last_kb: Some(16384.0),
+            maximum_kb: Some(65536.0),
+        }),
+        seconds_since_first_compile: 21600,
+        reset: culprit_core::ResetMarker::Unknown,
+    };
+    let record = TelemetryRecord::Operational(OperationalObservation {
+        source: source.into(),
+        key: compilation.key().unwrap(),
+        fact: OperationalFact::MssqlQueryCompilation(Box::new(compilation)),
+    });
+    Recovery::capture(destination, schema, manifest.source, vec![record], 20_000)
+}
+
 pub fn activity(destination: &str, schema: &str, sequence: u64, empty: bool) -> Recovery {
     let (mut manifest, _) = fixture();
     manifest.source.source = "activity".into();

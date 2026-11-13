@@ -151,6 +151,12 @@
       "title": "Instance compilation context"
     },
     {
+      "check": "compile-queue",
+      "reason": "The required pressure measurement was not recorded by this scan.",
+      "status": "insufficient-evidence",
+      "title": "Compiler admission"
+    },
+    {
       "check": "worker-pressure",
       "reason": "The required pressure measurement was not recorded by this scan.",
       "status": "insufficient-evidence",
@@ -849,6 +855,7 @@
         "memory-grant",
         "memory-queue",
         "compile-pressure",
+        "compile-queue",
         "worker-pressure",
         "held-cleanup",
         "network-wait",

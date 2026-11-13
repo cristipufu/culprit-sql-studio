@@ -218,3 +218,27 @@ async fn observed_wait_resources_survive_exact_readback_and_a_changed_native_tar
         assert!(reader.receipts(&fixture.range, None, 1000).await.is_err());
     }
 }
+
+#[tokio::test]
+async fn native_query_compilation_memory_survives_readback_and_changed_memory_cannot_verify() {
+    let catalog = SchemaCatalog::new().unwrap();
+    let recovery = culprit_collector::analytical::test_support::query_compilation("adx:test", catalog.digest());
+    let fixture = Fixture::from_recovery(recovery).await;
+    let schema = fixture.catalog.get(fixture.range.manifest().batches[0].stream).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+    let mut details: Value = serde_json::from_str(fixture.values[column].as_str().unwrap()).unwrap();
+    assert_eq!(details["compilations"], "9007199254740993");
+    assert_eq!(details["memory"]["average_kb"], 32768.5);
+    assert_eq!(details["memory"]["last_kb"], 16384.0);
+    assert_eq!(details["memory"]["maximum_kb"], 65536.0);
+    let (reader, _) = fixture.reader(vec![Reply::Audit(0), Reply::Rows(vec![fixture.values.clone()])]);
+    assert_eq!(
+        reader.receipts(&fixture.range, None, 1000).await.unwrap().rows,
+        fixture.range.manifest().batches[0].rows
+    );
+    details["memory"]["last_kb"] = json!(1.0);
+    let mut changed = fixture.values.clone();
+    changed[column] = json!(details.to_string());
+    let (reader, _) = fixture.reader(vec![Reply::Audit(0), Reply::Rows(vec![changed])]);
+    assert!(reader.receipts(&fixture.range, None, 1000).await.is_err());
+}

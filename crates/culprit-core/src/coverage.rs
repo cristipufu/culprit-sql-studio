@@ -102,6 +102,8 @@ pub mod source_id {
     pub const CLEANUP_PREPARED: &str = "cleanup prepared";
     pub const PENDING_GRANTS: &str = "memory grants";
     pub const WORKER_QUEUE: &str = "worker queue";
+    pub const COMPILATION_QUEUE: &str = "compilation queue";
+    pub const COMPILATION_GATEWAYS: &str = "compilation gateways";
     pub const VERSION_STORE: &str = "version store";
     pub const PERSISTENT_VERSION_STORE: &str = "persistent version store";
     pub const TUNING_OPTIONS: &str = "automatic tuning options";
@@ -193,6 +195,8 @@ pub mod source_id {
         CLEANUP_PREPARED,
         PENDING_GRANTS,
         WORKER_QUEUE,
+        COMPILATION_QUEUE,
+        COMPILATION_GATEWAYS,
         VERSION_STORE,
         PERSISTENT_VERSION_STORE,
         TUNING_OPTIONS,

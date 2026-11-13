@@ -90,6 +90,7 @@ fn source(metadata: bool, fail_files: bool, final_identity: Rec) -> StateSource<
         Ok(vec![Rec::of(&[("adr", Val::Int(0))])]),
     ]);
     replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::processors::tests::row()])]);
+    replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::compiler_gateways::tests::row()])]);
     replies.extend([Ok(vec![clock(metadata, "2020-01-01T06:02:01Z")]), Ok(vec![final_identity])]);
     StateSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap()
 }
@@ -159,7 +160,7 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
     let mut source = source(true, false, identity());
     let description = source.describe().await.unwrap();
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.records, 13);
+    assert_eq!(snapshot.records, 15);
     assert_eq!(snapshot.sources[4].state, SourceState::NotApplicable);
     let mut cursor = None;
     let mut records = vec![];
@@ -176,7 +177,7 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
         }
         cursor = next_cursor;
     }
-    assert_eq!(records.len(), 13);
+    assert_eq!(records.len(), 15);
     assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
     for record in &records {
         let exported = ExportedRecord::new(

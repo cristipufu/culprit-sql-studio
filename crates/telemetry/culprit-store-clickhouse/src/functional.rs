@@ -174,6 +174,43 @@ async fn functional_contract_and_canonical_sets() {
     unexpected_members_and_missing_rows(&server, &catalog).await;
     shared_resource_scopes(&server, &catalog).await;
     observed_wait_resources(&server, &catalog).await;
+    native_compilation_memory(&server, &catalog).await;
+}
+
+async fn native_compilation_memory(server: &Server, catalog: &SchemaCatalog) {
+    let scenario =
+        Scenario::new(server, test_support::query_compilation(server.client.destination(), catalog.digest())).await;
+    scenario.complete().await;
+    let text = format!(
+        "SELECT JSONExtractString(ifNull(Details,'{{}}'),'query_id') AS QueryId,JSONExtractString(ifNull(Details,'{{}}'),'compilations') AS Compiles,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','average_kb') AS AverageKb,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','last_kb') AS LastKb,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','maximum_kb') AS MaximumKb FROM {}",
+        server.view("CulpritOperationalV1Current", true)
+    );
+    let mut parameters = server.scope(&scenario.range);
+    parameters.remove("from");
+    parameters.remove("until");
+    parameters.insert("asof".into(), "2020-01-01 12:05:00".into());
+    parameters.insert("age".into(), "3600000".into());
+    let rows = server
+        .values(
+            text,
+            parameters,
+            &[
+                ("QueryId", "String"),
+                ("Compiles", "String"),
+                ("AverageKb", "Float64"),
+                ("LastKb", "Float64"),
+                ("MaximumKb", "Float64"),
+            ],
+        )
+        .await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], json!("42"));
+    assert_eq!(rows[0][1], json!("9007199254740993"));
+    // ClickHouse can encode whole-valued Float64 cells without a decimal point in JSON.
+    assert_eq!(
+        rows[0][2..].iter().map(Value::as_f64).collect::<Vec<_>>(),
+        vec![Some(32768.5), Some(16384.0), Some(65536.0)]
+    );
 }
 
 async fn shared_resource_scopes(server: &Server, catalog: &SchemaCatalog) {

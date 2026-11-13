@@ -15,6 +15,7 @@ mod catalog_visibility;
 mod check_constraints;
 mod collect;
 mod columns;
+mod compiler_gateways;
 mod conn;
 mod constraints;
 pub mod deadlocks;

@@ -170,6 +170,7 @@ pub(crate) async fn collect(
         p.signals.extend(wait_total_signals(&waits::totals(&rows), azure, uptime));
     }
     p.signals.extend(crate::queues::application(pool.clone(), probe, &mut coverage).await);
+    p.signals.extend(crate::compiler_gateways::collect(pool.clone(), probe, &mut coverage).await);
     if let Some(topology) = crate::processors::collect(pool.clone(), probe, &mut coverage).await {
         (p.cpus, p.numa_nodes) = topology.application();
     }
@@ -284,6 +285,31 @@ pub(crate) fn threadpool_now_signal(waiting: f64) -> Signal {
         SignalScope::Now,
     )
     .graded(&t!("provider.mssql.signal.threadpool_waiting.healthy"), 1.0, f64::INFINITY, true)
+}
+
+pub(crate) fn compilation_waiting_signal(waiting: f64, minimum_wait_ms: u32) -> Signal {
+    Signal {
+        measurement_scope: Some(culprit_core::MeasurementScope::Database),
+        ..Signal::new(
+            culprit_core::signal_id::COMPILATION_WAITING,
+            culprit_core::message!(
+                "provider.mssql.signal.compilation_waiting",
+                minimum = format::duration(f64::from(minimum_wait_ms))
+            ),
+            waiting,
+            SignalUnit::Count,
+            SignalScope::Now,
+        )
+        .graded(
+            &t!(
+                "provider.mssql.signal.compilation_waiting.context",
+                minimum = format::duration(f64::from(minimum_wait_ms))
+            ),
+            1.0,
+            f64::INFINITY,
+            true,
+        )
+    }
 }
 
 /// tempdb's version store, which open snapshot transactions keep from shrinking.

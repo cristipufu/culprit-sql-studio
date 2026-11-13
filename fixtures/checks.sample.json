@@ -401,6 +401,16 @@
     "title": "Instance compilation context"
   },
   {
+    "category": "queries",
+    "description": "Requests in this database delayed by compiler admission, with recent per-query compile-memory evidence where available.",
+    "engines": [
+      "mssql"
+    ],
+    "id": "compile-queue",
+    "requires": [],
+    "title": "Compiler admission"
+  },
+  {
     "category": "configuration",
     "description": "SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.",
     "engines": [

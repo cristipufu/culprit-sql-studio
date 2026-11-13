@@ -220,6 +220,16 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     assert_eq!(compilations.len(), 1);
     assert!(compilations[0].count > 0);
     assert!(compilations[0].within_window(60));
+    let memory = compilations[0].memory.expect("Query Store retains per-query compiler memory");
+    assert!(memory.is_valid());
+    assert!(memory.average_kb.is_some() && memory.last_kb.is_some() && memory.maximum_kb.is_some());
+    let gateways = crate::compiler_gateways::read(&mut reader, 512).await.unwrap();
+    assert!(!gateways.is_empty());
+    assert!(gateways.iter().all(|gateway| gateway.observation().unwrap().is_valid()));
+    let compile_queue =
+        crate::queues::read(&mut reader, culprit_core::telemetry::QueueKind::CompilationRequests).await.unwrap();
+    assert_eq!(compile_queue.count, "0");
+    assert_eq!(compile_queue.minimum_wait_ms, 1000);
     reader.read_rows(&costs::database_compilation_sql()).await.unwrap();
     let snapshots =
         reader.read(&costs::compilation_snapshot_sql(), vec![Parameter::Integer(1000)], 1000).await.unwrap();

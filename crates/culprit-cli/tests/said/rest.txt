@@ -61,6 +61,8 @@ memory-queue      Queries waiting in line for memory
                   SQL Server · Waiting for memory takes a real amount of time (a minute an hour or more), or queries in this database were queueing for a memory grant when the scan ran.
 compile-pressure  Instance compilation context
                   SQL Server · Shared compilation counters provide context for this database's literal query families; measured Query Store costs establish its compilation impact.
+compile-queue     Compiler admission
+                  SQL Server · Requests in this database delayed by compiler admission, with recent per-query compile-memory evidence where available.
 worker-pressure   Running out of workers or connections
                   SQL Server, PostgreSQL, MySQL/MariaDB · SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.
 held-cleanup      A long open transaction holds cleanup back
@@ -157,6 +159,8 @@ SQL Server
   server settings           configured and active server settings · adds detail
   query store settings      Query Store configuration and status · adds detail
   processor topology        host processors and online SQL scheduler topology · adds detail
+  compilation gateways      the optimizer’s resource-pool compiler gateways · adds detail
+  compilation queue         requests waiting for compiler admission · adds detail
   performance counters      performance counters · adds detail
   resource use              resource use · adds detail
   memory grants             pending memory grants · adds detail

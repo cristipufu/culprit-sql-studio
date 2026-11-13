@@ -7,6 +7,8 @@ use super::*;
 pub enum QueueKind {
     MemoryGrants,
     WorkerTasks,
+    /// Requests delayed by compiler admission; these are waiters, not execution-grant or compiler-memory owners.
+    CompilationRequests,
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
