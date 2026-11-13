@@ -24,7 +24,7 @@ fn options(t: &mut culprit_core::TableStat, options: &[&str]) {
 }
 
 fn holder(s: &mut Snapshot, t: OpenTransaction) {
-    s.pressure.get_or_insert_with(Default::default).oldest_transaction = Some(t);
+    crate::retention_fixture::install(s, t);
 }
 
 fn session(behind: f64) -> OpenTransaction {
@@ -263,7 +263,7 @@ const XID_AGE: &[(&str, &str)] = &[
         "behind",
         r#"xid-age:demo · High · High · OptionalImprovement · score 70.00
 title: Transaction IDs are 65% of the way to wraparound
-summary: The oldest unfrozen transaction ID in this database is 1.3B transactions old. Autovacuum starts freezing a table at autovacuum_freeze_max_age (200.0M), and this is 6.5 times that: freezing isn't keeping up. A cleanup holder was observed in this scan (session 4242, 5.0M transactions behind): VACUUM cannot freeze row versions newer than its horizon until it finishes or is removed. At about 2 billion PostgreSQL stops accepting writes until a full vacuum completes. 700.0M transactions remain.
+summary: The oldest unfrozen transaction ID in this database is 1.3B transactions old. Autovacuum starts freezing a table at autovacuum_freeze_max_age (200.0M), and this is 6.5 times that: freezing isn't keeping up. Cleanup retainers were observed in this scan (session 4242, 5.0M transactions behind). Inspect their native horizons alongside VACUUM progress. At about 2 billion PostgreSQL stops accepting writes until a full vacuum completes. 700.0M transactions remain.
 impact: 700.0M left
 metric: Transaction ID age
 metric: Remaining before wraparound
@@ -289,7 +289,7 @@ cost: A freeze vacuum reads the whole table; it doesn't block reads or writes."#
         "prepared",
         r#"xid-age:demo · High · High · OptionalImprovement · score 95.00
 title: Transaction IDs are 80% of the way to wraparound
-summary: The oldest unfrozen transaction ID in this database is 1.6B transactions old. Autovacuum starts freezing a table at autovacuum_freeze_max_age (1.5B), and this is 1.1 times that: freezing isn't keeping up. A cleanup holder was observed in this scan (prepared transaction 'tx-17', 2.0K transactions behind): VACUUM cannot freeze row versions newer than its horizon until it finishes or is removed. At about 2 billion PostgreSQL stops accepting writes until a full vacuum completes. 400.0M transactions remain.
+summary: The oldest unfrozen transaction ID in this database is 1.6B transactions old. Autovacuum starts freezing a table at autovacuum_freeze_max_age (1.5B), and this is 1.1 times that: freezing isn't keeping up. Cleanup retainers were observed in this scan (prepared transaction 'tx-17', 2.0K transactions behind). Inspect their native horizons alongside VACUUM progress. At about 2 billion PostgreSQL stops accepting writes until a full vacuum completes. 400.0M transactions remain.
 impact: 400.0M left
 metric: Transaction ID age
 metric: Remaining before wraparound
@@ -303,7 +303,7 @@ cost: A freeze vacuum reads the whole table; it doesn't block reads or writes."#
         "slot",
         r#"xid-age:demo · High · High · OptionalImprovement · score 70.00
 title: Transaction IDs are 65% of the way to wraparound
-summary: The oldest unfrozen transaction ID in this database is 1.3B transactions old. A cleanup holder was observed in this scan (replication slot 'standby_1', 90.0M transactions behind): VACUUM cannot freeze row versions newer than its horizon until it finishes or is removed. At about 2 billion PostgreSQL stops accepting writes until a full vacuum completes. 700.0M transactions remain.
+summary: The oldest unfrozen transaction ID in this database is 1.3B transactions old. Cleanup retainers were observed in this scan (replication slot 'standby_1', 90.0M transactions behind). Inspect their native horizons alongside VACUUM progress. At about 2 billion PostgreSQL stops accepting writes until a full vacuum completes. 700.0M transactions remain.
 impact: 700.0M left
 metric: Transaction ID age
 metric: Remaining before wraparound
@@ -335,7 +335,7 @@ verify: Re-scan after VACUUM (ANALYZE): the dead-row count should fall below the
         "held",
         r#"dead-rows:public.orders · Low · High · OptionalImprovement · score 11.33
 title: 33% of orders is dead rows
-summary: public.orders holds 1.0M dead rows next to 2.0M live ones. Every sequential scan still reads them, indexes still point at them, and the table stays larger than it needs to be. A cleanup holder was observed in this scan (session 4242, 5.0M transactions behind). It can prevent removal of some dead rows; this count does not establish how many it retains. Check the holder and vacuum progress before changing maintenance. It was last vacuumed 2.0 days ago.
+summary: public.orders holds 1.0M dead rows next to 2.0M live ones. Every sequential scan still reads them, indexes still point at them, and the table stays larger than it needs to be. Cleanup retainers were observed in this scan (session 4242, 5.0M transactions behind). They can prevent removal of some dead rows; this count does not establish how many they retain. Check the retainers and vacuum progress before changing maintenance. It was last vacuumed 2.0 days ago.
 impact: 1.0M dead rows
 metric: Dead rows
 metric: Live rows

@@ -216,8 +216,12 @@ fn open_transactions_are_explained_per_engine() {
         (Engine::Mysql, None, "check its locks and read view"),
     ] {
         let mut s = with_signals(engine, vec![]);
-        s.pressure.as_mut().unwrap().oldest_transaction =
-            Some(OpenTransaction { held_bytes: held, ..transaction("92", 3.0 * 3600.0) });
+        let transaction = OpenTransaction { held_bytes: held, ..transaction("92", 3.0 * 3600.0) };
+        if engine == Engine::Postgres {
+            crate::retention_fixture::install(&mut s, transaction);
+        } else {
+            s.pressure.as_mut().unwrap().oldest_transaction = Some(transaction);
+        }
         let f = held_cleanup(&s);
         assert!(f[0].title.contains(needle), "{engine:?}: {}", f[0].title);
         assert!(f[0].summary.contains("billing-worker"));
@@ -261,13 +265,16 @@ fn sql_server_says_what_the_transaction_holds() {
 #[test]
 fn postgres_slots_and_prepared_transactions_get_their_own_fix() {
     let mut s = with_signals(Engine::Postgres, vec![]);
-    s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
-        session: "standby_1".into(),
-        activity: TransactionActivity::SlotInactive,
-        holder: CleanupHolder::ReplicationSlot,
-        xid_age: Some(150_000_000.0),
-        ..OpenTransaction::default()
-    });
+    crate::retention_fixture::install(
+        &mut s,
+        OpenTransaction {
+            session: "standby_1".into(),
+            activity: TransactionActivity::SlotInactive,
+            holder: CleanupHolder::ReplicationSlot,
+            xid_age: Some(150_000_000.0),
+            ..OpenTransaction::default()
+        },
+    );
     let f = held_cleanup(&s);
     assert_eq!(f[0].title, "Replication slot standby_1 holds VACUUM back by 150.0M transactions");
     assert_eq!(f[0].severity, Severity::High);
@@ -275,24 +282,30 @@ fn postgres_slots_and_prepared_transactions_get_their_own_fix() {
     assert!(fix.sql.is_none());
     assert!(fix.summary.contains("restore its progress"));
     assert!(fix.summary.contains("rebuilding the consumer"));
-    s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
-        session: "tx-17".into(),
-        seconds: 7200.0,
-        activity: TransactionActivity::Prepared,
-        holder: CleanupHolder::PreparedTransaction,
-        xid_age: Some(40_000.0),
-        ..OpenTransaction::default()
-    });
+    crate::retention_fixture::install(
+        &mut s,
+        OpenTransaction {
+            session: "tx-17".into(),
+            seconds: 7200.0,
+            activity: TransactionActivity::Prepared,
+            holder: CleanupHolder::PreparedTransaction,
+            xid_age: Some(40_000.0),
+            ..OpenTransaction::default()
+        },
+    );
     let f = held_cleanup(&s);
     assert!(f[0].title.starts_with("Prepared transaction 'tx-17' has waited 2 h "), "{}", f[0].title);
-    assert_eq!(f[0].fix.as_ref().unwrap().sql.as_deref(), Some("ROLLBACK PREPARED 'tx-17';"));
+    assert!(f[0].fix.as_ref().unwrap().sql.is_none(), "the retained XID is not the native prepared GID");
     // A slot only a few transactions behind holds nothing worth a finding.
-    s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
-        session: "standby_2".into(),
-        holder: CleanupHolder::ReplicationSlot,
-        xid_age: Some(800.0),
-        ..OpenTransaction::default()
-    });
+    crate::retention_fixture::install(
+        &mut s,
+        OpenTransaction {
+            session: "standby_2".into(),
+            holder: CleanupHolder::ReplicationSlot,
+            xid_age: Some(800.0),
+            ..OpenTransaction::default()
+        },
+    );
     assert!(held_cleanup(&s).is_empty());
 }
 
@@ -451,4 +464,81 @@ fn measured_zero_query_waits_do_not_shorten_the_clock_of_server_memory_waits() {
     s.workload.as_mut().unwrap().queries[0].waits =
         vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 0.0, tasks: None }];
     assert_eq!(waits_window(&s), (Some(100.0), false));
+}
+
+#[test]
+fn mixed_retention_horizons_produce_separate_data_and_catalog_evidence() {
+    use culprit_core::telemetry::*;
+    let mut snapshot = with_signals(Engine::Postgres, vec![]);
+    crate::retention_fixture::install(
+        &mut snapshot,
+        OpenTransaction {
+            session: "mixed-consumer".into(),
+            holder: CleanupHolder::ReplicationSlot,
+            activity: TransactionActivity::SlotInactive,
+            xid_age: Some(2_000_000.0),
+            ..Default::default()
+        },
+    );
+    let retention = snapshot.pressure.as_mut().unwrap().retention.as_mut().unwrap();
+    retention.holders[0].horizons.push(RetentionHorizon {
+        protects: vec![CleanupHorizon::Catalog, CleanupHorizon::SharedCatalog],
+        native_name: "catalog_xmin".into(),
+        native_value: "90".into(),
+        transactions_behind: Some("150000000".into()),
+    });
+    let findings = held_cleanup(&snapshot);
+    assert_eq!(findings.len(), 2);
+    let data = findings.iter().find(|finding| finding.facts.cleanup_horizon == Some(CleanupHorizon::Data)).unwrap();
+    let catalog =
+        findings.iter().find(|finding| finding.facts.cleanup_horizon == Some(CleanupHorizon::Catalog)).unwrap();
+    assert!(data.title.contains("2.0M transactions"));
+    assert!(catalog.title.contains("150.0M transactions"));
+    assert_ne!(data.id, catalog.id);
+    assert_eq!(data.facts.cleanup_retention_key, catalog.facts.cleanup_retention_key);
+    assert!(data.queries.is_empty() && catalog.queries.is_empty(), "retainer context never invents code ownership");
+}
+
+#[test]
+fn tied_and_partial_retainers_remain_explicit_without_pid_termination_sql() {
+    use culprit_core::SourceState;
+    let mut snapshot = with_signals(Engine::Postgres, vec![]);
+    let first = OpenTransaction { xid_age: Some(5_000_000.0), ..transaction("42", 3600.0) };
+    crate::retention_fixture::install(&mut snapshot, first);
+    let second = crate::retention_fixture::observation(
+        &snapshot,
+        &OpenTransaction { xid_age: Some(5_000_000.0), ..transaction("43", 3600.0) },
+    );
+    let retention = snapshot.pressure.as_mut().unwrap().retention.as_mut().unwrap();
+    retention.holders.push(second);
+    retention.sources[0].state = SourceState::Partial;
+    let findings = held_cleanup(&snapshot);
+    assert_eq!(findings.len(), 2);
+    assert!(findings.iter().all(|finding| finding.facts.cleanup_visibility_complete == Some(false)
+        && finding.facts.cleanup_tied_holders == Some(2)));
+    assert!(findings.iter().all(|finding| finding.fix.as_ref().unwrap().sql.is_none()));
+    assert!(findings.iter().all(|finding| finding.summary.contains("other retainers may be missing")
+        && finding.summary.contains("this horizon: 2")));
+    snapshot.pressure.as_mut().unwrap().retention.as_mut().unwrap().sources[0].state = SourceState::Unavailable;
+    assert!(
+        held_cleanup(&snapshot).is_empty(),
+        "contradictory unavailable-source rows cannot establish a native diagnosis"
+    );
+}
+
+#[test]
+fn a_partial_recovery_horizon_remains_observed_context_without_exclusive_cleanup_advice() {
+    let mut snapshot = with_signals(Engine::Postgres, vec![]);
+    crate::retention_fixture::install(
+        &mut snapshot,
+        OpenTransaction { xid_age: Some(5_000_000.0), ..transaction("42", 7200.0) },
+    );
+    snapshot.pressure.as_mut().unwrap().retention.as_mut().unwrap().sources[0].state =
+        culprit_core::SourceState::Partial;
+    let findings = held_cleanup(&snapshot);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].facts.cleanup_visibility_complete, Some(false));
+    assert!(findings[0].summary.contains("other retainers may be missing"));
+    assert!(findings[0].fix.as_ref().unwrap().sql.is_none());
+    assert!(findings[0].queries.is_empty());
 }

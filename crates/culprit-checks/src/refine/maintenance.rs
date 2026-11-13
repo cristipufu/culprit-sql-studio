@@ -72,28 +72,40 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
             }
         }
         Policy::Slot => {
-            let Some(holder) = s
-                .pressure
-                .as_ref()
-                .and_then(|p| p.oldest_transaction.as_ref())
-                .filter(|h| h.holder == CleanupHolder::ReplicationSlot)
+            let Some(retention) =
+                s.pressure.as_ref().and_then(|p| p.retention.as_ref()).filter(|retention| retention.is_valid())
             else {
                 return out;
             };
-            let Some(transactions) = holder.xid_age.filter(|n| n.is_finite() && *n > 0.0) else {
-                return out;
-            };
-            if let (Some(from), Some(into)) = (
-                findings.iter().position(|f| {
-                    f.check == "held-cleanup" && f.facts.cleanup_holder.as_deref() == Some(holder.session.as_str())
-                }),
-                findings.iter().position(|f| f.check == "replica-lag" && f.subject.name == holder.session),
-            ) {
-                out.push(Decision {
-                    from,
-                    into,
-                    evidence: Evidence::Slot { transactions, catalog_only: holder.catalog_only },
-                });
+            for (from, finding) in findings.iter().enumerate().filter(|(_, finding)| finding.check == "held-cleanup") {
+                let (Some(key), Some(horizon)) = (&finding.facts.cleanup_retention_key, finding.facts.cleanup_horizon)
+                else {
+                    continue;
+                };
+                if !retention.is_horizon_complete(horizon) {
+                    continue;
+                }
+                if retention.oldest_observed(horizon).len() != 1 {
+                    continue;
+                }
+                let Some(holder) = retention.holders.iter().find(|holder| {
+                    holder.holder == CleanupHolder::ReplicationSlot && holder.key().is_ok_and(|native| &native == key)
+                }) else {
+                    continue;
+                };
+                let Some(transactions) = holder.transactions_behind(horizon).filter(|age| *age > 0) else { continue };
+                if let Some(into) =
+                    findings.iter().position(|f| f.check == "replica-lag" && f.subject.name == holder.name)
+                {
+                    out.push(Decision {
+                        from,
+                        into,
+                        evidence: Evidence::Slot {
+                            transactions: transactions as f64,
+                            catalog_only: horizon == culprit_core::telemetry::CleanupHorizon::Catalog,
+                        },
+                    });
+                }
             }
         }
     }
@@ -184,12 +196,15 @@ mod tests {
     use culprit_core::{Category, OpenTransaction};
     fn slot() -> (Snapshot, Vec<Finding>) {
         let mut s: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
-        s.pressure.get_or_insert_with(Default::default).oldest_transaction = Some(OpenTransaction {
-            holder: CleanupHolder::ReplicationSlot,
-            session: "consumer_a".into(),
-            xid_age: Some(2_000_000.0),
-            ..Default::default()
-        });
+        crate::retention_fixture::install(
+            &mut s,
+            OpenTransaction {
+                holder: CleanupHolder::ReplicationSlot,
+                session: "consumer_a".into(),
+                xid_age: Some(2_000_000.0),
+                ..Default::default()
+            },
+        );
         let finding = |check: &str| {
             let mut f = support::finding(
                 check,
@@ -198,9 +213,13 @@ mod tests {
                 support::subject(SubjectKind::Database, "consumer_a"),
             );
             f.facts.cleanup_holder = Some("consumer_a".into());
+            let holder = &s.pressure.as_ref().unwrap().retention.as_ref().unwrap().holders[0];
+            f.facts.cleanup_horizon = Some(culprit_core::telemetry::CleanupHorizon::Data);
+            f.facts.cleanup_retention_key = Some(holder.key().unwrap());
             f
         };
-        (s, vec![finding("held-cleanup"), finding("replica-lag")])
+        let findings = vec![finding("held-cleanup"), finding("replica-lag")];
+        (s, findings)
     }
     #[test]
     fn cleanup_relationship_uses_the_holder_instead_of_the_title() {
@@ -217,7 +236,7 @@ mod tests {
     #[test]
     fn a_title_alone_cannot_turn_a_session_into_a_replication_slot() {
         let (mut s, mut findings) = slot();
-        s.pressure.as_mut().unwrap().oldest_transaction.as_mut().unwrap().holder = CleanupHolder::Session;
+        s.pressure.as_mut().unwrap().retention.as_mut().unwrap().holders[0].holder = CleanupHolder::Session;
         findings[0].title = "Replication slot consumer_a holds VACUUM back".into();
         assert!(decide(Policy::Slot, &s, &findings).is_empty());
         Rule(Policy::Slot).refine(&s, &mut findings);
@@ -226,11 +245,30 @@ mod tests {
     #[test]
     fn catalog_only_horizons_do_not_claim_to_hold_back_every_application_table() {
         let (mut s, mut findings) = slot();
-        s.pressure.as_mut().unwrap().oldest_transaction.as_mut().unwrap().catalog_only = true;
+        s.pressure.as_mut().unwrap().retention.as_mut().unwrap().holders[0].horizons[0].protects = vec![
+            culprit_core::telemetry::CleanupHorizon::Catalog,
+            culprit_core::telemetry::CleanupHorizon::SharedCatalog,
+        ];
+        findings[0].facts.cleanup_horizon = Some(culprit_core::telemetry::CleanupHorizon::Catalog);
         Rule(Policy::Slot).refine(&s, &mut findings);
         assert!(findings[0].summary.contains("system-catalog cleanup"));
         assert!(!findings[0].summary.contains("any table, in any database"));
         assert!(findings[0].summary.contains("does not establish"));
+    }
+
+    #[test]
+    fn partial_retention_or_tied_observations_cannot_be_folded_into_an_exclusive_cause() {
+        let (mut snapshot, findings) = slot();
+        snapshot.pressure.as_mut().unwrap().retention.as_mut().unwrap().sources[0].state =
+            culprit_core::SourceState::Partial;
+        assert!(decide(Policy::Slot, &snapshot, &findings).is_empty());
+        snapshot.pressure.as_mut().unwrap().retention.as_mut().unwrap().sources[0].state =
+            culprit_core::SourceState::Collected;
+        let mut tied = snapshot.pressure.as_ref().unwrap().retention.as_ref().unwrap().holders[0].clone();
+        tied.identity = culprit_core::telemetry::NativeIdentity::new("another-slot");
+        tied.name = "another-slot".into();
+        snapshot.pressure.as_mut().unwrap().retention.as_mut().unwrap().holders.push(tied);
+        assert!(decide(Policy::Slot, &snapshot, &findings).is_empty());
     }
 
     // The metrics a rule carries or reads are found by what they are, in whatever language they were said.

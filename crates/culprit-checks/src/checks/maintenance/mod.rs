@@ -47,6 +47,29 @@ pub(super) fn cleanup_holder_phrase(h: &culprit_core::OpenTransaction) -> String
     }
 }
 
+/// Native data horizons only. A larger catalog horizon cannot hide a smaller application-data hold.
+fn data_cleanup_holders(snapshot: &Snapshot) -> Vec<culprit_core::OpenTransaction> {
+    snapshot
+        .pressure
+        .as_ref()
+        .and_then(|pressure| pressure.retention.as_ref())
+        .filter(|retention| retention.is_valid())
+        .map(|retention| {
+            retention
+                .oldest_observed(culprit_core::telemetry::CleanupHorizon::Data)
+                .into_iter()
+                .filter(|holder| {
+                    holder.transactions_behind(culprit_core::telemetry::CleanupHorizon::Data).is_some_and(|age| age > 0)
+                })
+                .map(|holder| holder.display(culprit_core::telemetry::CleanupHorizon::Data))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+fn cleanup_holders_phrase(holders: &[culprit_core::OpenTransaction]) -> String {
+    format::list(&holders.iter().map(cleanup_holder_phrase).collect::<Vec<_>>())
+}
+
 /// Dead rows past this many times a table's autovacuum trigger mean autovacuum is behind on it, not about to run.
 const DEAD_MARGIN: f64 = 2.0;
 

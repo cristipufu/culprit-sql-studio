@@ -32,7 +32,7 @@ pub struct XidAge<'s> {
     /// autovacuum_freeze_max_age, when the age is past it: autovacuum should be freezing and isn't keeping up.
     past_freeze_max: Option<f64>,
     /// The cleanup holder this scan observed: VACUUM can't freeze row versions newer than its horizon.
-    holder: Option<&'s OpenTransaction>,
+    holders: Vec<OpenTransaction>,
     /// The table with the oldest transaction ID, to freeze first.
     oldest: Option<&'s TableStat>,
     severity: Severity,
@@ -58,15 +58,11 @@ fn xid_ages(snapshot: &Snapshot) -> Vec<XidAge<'_>> {
     if age < threshold {
         return Vec::new();
     }
-    let holder = snapshot
-        .pressure
-        .as_ref()
-        .and_then(|p| p.oldest_transaction.as_ref())
-        .filter(|h| !h.catalog_only && h.xid_age.is_some_and(|a| a > 0.0));
+    let holders = data_cleanup_holders(snapshot);
     vec![XidAge {
         age,
         past_freeze_max: freeze_max.filter(|m| age >= *m),
-        holder,
+        holders,
         oldest,
         severity: if age >= 1_200_000_000.0 { Severity::High } else { Severity::Medium },
         score: if age >= 1_500_000_000.0 {
@@ -97,8 +93,8 @@ fn xid_age_finding(snapshot: &Snapshot, xid: XidAge<'_>) -> Finding {
             times = format!("{:.1}", age / m.max(1.0))
         ));
     }
-    if let Some(h) = xid.holder {
-        summary.push(t!("check.xid_age.summary.holder", holder = cleanup_holder_phrase(h)));
+    if !xid.holders.is_empty() {
+        summary.push(t!("check.xid_age.summary.holder", holder = cleanup_holders_phrase(&xid.holders)));
     }
     summary.push(t!("check.xid_age.summary.wraparound", remaining = format::count(remaining)));
     f.summary = summary.join(" ");
@@ -111,8 +107,11 @@ fn xid_age_finding(snapshot: &Snapshot, xid: XidAge<'_>) -> Finding {
     if let Some(t) = xid.oldest {
         f.metrics.push(Metric::said_text(culprit_core::key!("check.xid_age.metric.oldest_table"), t.qualified()));
     }
-    if let Some(h) = xid.holder {
-        f.metrics.push(Metric::said_text(culprit_core::key!("check.xid_age.metric.holder"), cleanup_holder_phrase(h)));
+    if !xid.holders.is_empty() {
+        f.metrics.push(Metric::said_text(
+            culprit_core::key!("check.xid_age.metric.holder"),
+            cleanup_holders_phrase(&xid.holders),
+        ));
     }
     f.fix = Some(Fix {
         summary: t!("check.xid_age.fix"),

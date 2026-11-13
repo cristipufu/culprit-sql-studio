@@ -5,8 +5,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use culprit_core::{
-    CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample,
-    WaitStat, t,
+    CleanupHolder, Coverage, Engine, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample, WaitStat, t,
 };
 use tokio_postgres::Client;
 
@@ -230,15 +229,32 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             .graded(&t!("provider.postgres.signal.connections_healthy"), 80.0, 90.0, true),
         );
     }
-    if probe.privileged
-        && let Some(t) = cleanup_holder(client, &mut coverage).await
-    {
-        if t.holder != CleanupHolder::ReplicationSlot {
+    let retention = cleanup_holders(client, probe, &mut coverage).await;
+    project_cleanup(&mut p, retention);
+    (p, coverage)
+}
+
+fn project_cleanup(p: &mut Pressure, retention: culprit_core::telemetry::RetentionSnapshot) {
+    use culprit_core::telemetry::CleanupHorizon;
+    let data = retention.oldest_observed(CleanupHorizon::Data);
+    let catalog = retention.oldest_observed(CleanupHorizon::Catalog);
+    let selected = data
+        .first()
+        .map(|holder| (*holder, CleanupHorizon::Data, data.len()))
+        .or_else(|| catalog.first().map(|holder| (*holder, CleanupHorizon::Catalog, catalog.len())));
+    if let Some((holder, horizon, tied)) = selected {
+        // Display-only unknown ages never become measured zero seconds or a graded global oldest.
+        if holder.holder != CleanupHolder::ReplicationSlot
+            && retention.is_horizon_complete(horizon)
+            && tied == 1
+            && holder.scope == culprit_core::MeasurementScope::Database
+            && let Some(seconds) = holder.age_seconds
+        {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::OLDEST_TRANSACTION,
                     culprit_core::message!("provider.postgres.signal.oldest_transaction"),
-                    t.seconds,
+                    seconds,
                     SignalUnit::Seconds,
                     SignalScope::Now,
                 )
@@ -250,33 +266,79 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
                 ),
             );
         }
-        p.oldest_transaction = Some(t);
+        // The old duration card cannot express an unknown session age. The typed retainer stays available.
+        if holder.holder == CleanupHolder::ReplicationSlot || holder.age_seconds.is_some() {
+            p.oldest_transaction = Some(holder.display(horizon));
+        }
     }
-    (p, coverage)
+    p.retention = Some(retention);
 }
 
 /// Sessions of this database (and physical walsenders, which carry a standby's feedback for every database) whose
 /// snapshot or transaction id holds VACUUM's horizon back. A session idle in a read-committed transaction has neither,
 /// and a session in another database doesn't hold this one's tables back, so neither is listed. Autovacuum's own
 /// workers are ignored by VACUUM.
-async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<OpenTransaction> {
-    use crate::native::cleanup::{Kind, project, query as native_query};
-    let mut found = vec![];
+async fn cleanup_holders(
+    client: &Client,
+    probe: &Probe,
+    coverage: &mut Coverage,
+) -> culprit_core::telemetry::RetentionSnapshot {
+    use crate::native::cleanup::{self, Kind};
+    use culprit_core::{SourceState, telemetry::*};
+    let mut reader = client;
+    let mut holders = vec![];
+    let mut native_sources = vec![];
     for (kind, source) in [
         (Kind::Session, &sources::OPEN_TRANSACTIONS),
         (Kind::Slot, &sources::CLEANUP_SLOTS),
         (Kind::Prepared, &sources::CLEANUP_PREPARED),
     ] {
-        if let Some(Some(row)) = coverage.read(source, query_one(client, &native_query(kind, Some(1))).await) {
-            found.push(project(kind, &row));
-        }
+        let remaining = MAX_RETENTION_HOLDERS.saturating_sub(holders.len());
+        let result = if !probe.privileged {
+            Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::PermissionDenied,
+                t!("provider.postgres.capability.waits.hidden"),
+            ))
+        } else if remaining == 0 {
+            Err(CollectionStop::RowLimit.error())
+        } else {
+            cleanup::read(&mut reader, kind, probe.version_num, remaining).await
+        };
+        let state = if let Some(reading) = coverage.read(source, result) {
+            let state = cleanup_coverage(coverage, source, kind.source(), probe.standby, &reading);
+            holders.extend(reading.holders);
+            state
+        } else {
+            SourceState::Unavailable
+        };
+        native_sources.push(RetentionSourceCoverage { source: kind.source().into(), state });
     }
-    oldest_holder(found)
+    RetentionSnapshot { coverage: cleanup::coverage(probe.standby), holders, sources: native_sources }
 }
 
-/// The holder furthest behind; on a tie the first found (a session before a slot before a prepared transaction).
-fn oldest_holder(found: Vec<OpenTransaction>) -> Option<OpenTransaction> {
-    found.into_iter().reduce(|a, b| if b.xid_age.unwrap_or(0.0) > a.xid_age.unwrap_or(0.0) { b } else { a })
+fn cleanup_coverage(
+    coverage: &mut Coverage,
+    source: &culprit_core::Source,
+    native_source: &str,
+    standby: bool,
+    reading: &crate::native::cleanup::Reading,
+) -> culprit_core::SourceState {
+    use culprit_core::{SourceState, telemetry::CollectionStop};
+    let scope_complete = crate::native::cleanup::scope_complete(native_source, standby);
+    coverage.completed(source, reading.holders.len());
+    if reading.truncated {
+        coverage.partial(source, CollectionStop::RowLimit.error().message_source());
+    }
+    if !scope_complete {
+        coverage.partial(source, culprit_core::message!("provider.postgres.cleanup.recovery_horizon"));
+    }
+    if reading.truncated || !scope_complete {
+        SourceState::Partial
+    } else if reading.holders.is_empty() {
+        SourceState::Empty
+    } else {
+        SourceState::Collected
+    }
 }
 
 /// The shared category for a PostgreSQL wait event. A session with no wait event is running on CPU.
@@ -447,20 +509,113 @@ mod tests {
     }
 
     #[test]
-    fn the_holder_furthest_behind_holds_the_horizon() {
-        let holder = |session: &str, kind, age| OpenTransaction {
-            session: session.into(),
-            holder: kind,
-            xid_age: Some(age),
-            ..OpenTransaction::default()
+    fn display_only_unknown_or_incomplete_retention_ages_never_become_graded_zeroes() {
+        use culprit_core::{MeasurementScope, SourceState, TransactionActivity, telemetry::*};
+        let holder = RetentionObservation {
+            source: "pg_stat_activity".into(),
+            identity: NativeIdentity::new("session-42"),
+            observed_at: "2026-11-13T08:00:00Z".into(),
+            scope: MeasurementScope::Database,
+            holder: CleanupHolder::Session,
+            name: "42".into(),
+            horizons: vec![RetentionHorizon {
+                protects: vec![CleanupHorizon::Data, CleanupHorizon::Catalog, CleanupHorizon::SharedCatalog],
+                native_name: "backend_xmin".into(),
+                native_value: "100".into(),
+                transactions_behind: Some("10".into()),
+            }],
+            session: Some(NativeActivityIdentity { id: "42".into(), generation: "2026-11-13T07:00:00Z".into() }),
+            unresolved_session_id: None,
+            transaction: None,
+            query: None,
+            client: None,
+            activity: TransactionActivity::Reported,
+            native_state: None,
+            age_seconds: None,
+            database: Some("application".into()),
+            code_ownership: PayloadUnavailable::NotCollected,
         };
-        let oldest = oldest_holder(vec![
-            holder("4242", CleanupHolder::Session, 1_200.0),
-            holder("standby_1", CleanupHolder::ReplicationSlot, 9_000_000.0),
-            holder("tx-17", CleanupHolder::PreparedTransaction, 300.0),
-        ])
-        .unwrap();
-        assert_eq!((oldest.session.as_str(), oldest.holder), ("standby_1", CleanupHolder::ReplicationSlot));
-        assert!(oldest_holder(Vec::new()).is_none());
+        let original = RetentionSnapshot {
+            coverage: RetentionCoverage {
+                native_sources: vec!["pg_stat_activity".into()],
+                qualified_horizons: vec![CleanupHorizon::Data, CleanupHorizon::Catalog],
+            },
+            holders: vec![holder],
+            sources: vec![RetentionSourceCoverage { source: "pg_stat_activity".into(), state: SourceState::Collected }],
+        };
+        let mut pressure = Pressure::default();
+        project_cleanup(&mut pressure, original.clone());
+        assert!(pressure.oldest_transaction.is_none(), "the duration display cannot express an unknown native age");
+        assert_eq!(pressure.retention.as_ref().unwrap().holders.len(), 1, "typed retainer context remains available");
+        assert!(pressure.signals.is_empty(), "display seconds=0 is not a native age measurement");
+        let mut measured = original.clone();
+        measured.holders[0].age_seconds = Some(7200.0);
+        let mut pressure = Pressure::default();
+        project_cleanup(&mut pressure, measured.clone());
+        assert_eq!(pressure.signals[0].value, 7200.0);
+        for state in [SourceState::Partial, SourceState::Unavailable] {
+            let mut partial = measured.clone();
+            partial.sources[0].state = state;
+            let mut pressure = Pressure::default();
+            project_cleanup(&mut pressure, partial);
+            assert!(pressure.signals.is_empty(), "{state:?} cannot establish a graded oldest");
+        }
+        let mut tied = measured.clone();
+        let mut second = tied.holders[0].clone();
+        second.identity = NativeIdentity::new("session-43");
+        second.name = "43".into();
+        tied.holders.push(second);
+        let mut pressure = Pressure::default();
+        project_cleanup(&mut pressure, tied);
+        assert!(pressure.signals.is_empty(), "ties cannot select an arbitrary measured oldest age");
+        measured.holders[0].scope = MeasurementScope::Server;
+        let mut pressure = Pressure::default();
+        project_cleanup(&mut pressure, measured);
+        assert!(pressure.signals.is_empty(), "shared feedback cannot become database-specific pressure");
+    }
+
+    #[test]
+    fn recovery_coverage_retains_native_rows_and_explains_the_missing_cluster_boundary() {
+        use culprit_core::{SourceState, telemetry::*};
+        let row = crate::rows::Row::from_fields([
+            ("native_source".into(), Some("pg_stat_activity".into())),
+            (
+                "native_values".into(),
+                Some(
+                    serde_json::json!({
+                        "native_id":"42","name":"42","observed_at":"2026-11-13T08:00:00.000001Z",
+                        "native_scope":"database","database_oid":"16384","backend_start":"2026-11-13T06:00:00.000001Z",
+                        "data_xmin":"100","data_xmin_age":"5000000","seconds":"7200"
+                    })
+                    .to_string(),
+                ),
+            ),
+        ]);
+        let reading = crate::native::cleanup::Reading {
+            holders: vec![crate::native::cleanup::decode(&row).unwrap()],
+            truncated: false,
+        };
+        let mut coverage = Coverage::default();
+        let state = cleanup_coverage(&mut coverage, &sources::OPEN_TRANSACTIONS, "pg_stat_activity", true, &reading);
+        assert_eq!(state, SourceState::Partial);
+        let outcome =
+            coverage.outcomes().into_iter().find(|source| source.source == sources::OPEN_TRANSACTIONS.name).unwrap();
+        assert!(outcome.reason_message.is_some());
+        assert!(outcome.reason.unwrap().contains("complete cleanup boundary is unknown"));
+        let mut pressure = Pressure::default();
+        project_cleanup(
+            &mut pressure,
+            RetentionSnapshot {
+                coverage: RetentionCoverage {
+                    native_sources: vec!["pg_stat_activity".into()],
+                    qualified_horizons: vec![],
+                },
+                holders: reading.holders,
+                sources: vec![RetentionSourceCoverage { source: "pg_stat_activity".into(), state }],
+            },
+        );
+        assert_eq!(pressure.retention.as_ref().unwrap().holders.len(), 1);
+        assert!(!pressure.retention.as_ref().unwrap().is_horizon_complete(CleanupHorizon::Data));
+        assert!(pressure.signals.is_empty());
     }
 }

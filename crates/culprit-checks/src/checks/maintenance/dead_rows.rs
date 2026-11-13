@@ -62,7 +62,7 @@ pub struct Backlog<'s> {
     ratio: f64,
     /// The dead rows at which autovacuum visits it; `None` with autovacuum off for it.
     trigger: Option<f64>,
-    cause: Cause<'s>,
+    cause: Cause,
     last_vacuum: LastVacuum<'s>,
     /// The storage options the fix sets, when it vacuums: a smaller scale factor, autovacuum back on, or both.
     options: Option<&'static str>,
@@ -70,9 +70,9 @@ pub struct Backlog<'s> {
 }
 
 /// What the scan establishes about why the dead rows are there, which also decides the fix and how to verify it.
-enum Cause<'s> {
+enum Cause {
     /// A cleanup holder was observed: it can keep some of them, how many isn't known.
-    Held(&'s OpenTransaction),
+    Held(Vec<OpenTransaction>),
     /// Vacuum ran within the last hour: they may have died since, or an older snapshot may keep them.
     RecentVacuum,
     /// Autovacuum should have visited at this many dead rows, and is behind.
@@ -138,11 +138,8 @@ fn backlog<'s>(snapshot: &'s Snapshot, t: &'s TableStat) -> Option<Backlog<'s>> 
     let last = t.last_vacuum.as_deref().and_then(|d| days_between(d, &snapshot.taken_at)).filter(|d| *d >= 0.0);
     // A recent vacuum and a dead-row estimate do not prove a blocked horizon: writes may have followed it.
     let recent_vacuum = last.is_some_and(|d| d * 24.0 < 1.0);
-    let holder = snapshot
-        .pressure
-        .as_ref()
-        .and_then(|p| p.oldest_transaction.as_ref())
-        .filter(|h| !h.catalog_only && h.xid_age.is_some_and(|age| age > 0.0));
+    let holders = data_cleanup_holders(snapshot);
+    let holder = (!holders.is_empty()).then_some(holders);
     let cause = match (trigger, holder) {
         (Some(_), Some(h)) => Cause::Held(h),
         (Some(_), None) if recent_vacuum => Cause::RecentVacuum,
@@ -286,7 +283,7 @@ fn backlog_finding(b: Backlog<'_>) -> Finding {
         live = format::count(b.live)
     )];
     summary.push(match b.cause {
-        Cause::Held(h) => t!("check.dead_rows.summary.held", holder = cleanup_holder_phrase(h)),
+        Cause::Held(ref holders) => t!("check.dead_rows.summary.held", holder = cleanup_holders_phrase(holders)),
         Cause::RecentVacuum => t!("check.dead_rows.summary.recent_vacuum"),
         Cause::Behind(tr) => t!(
             "check.dead_rows.summary.behind",

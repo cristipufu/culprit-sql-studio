@@ -265,6 +265,17 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
                     OperationalFact::CatalogCounters(set) => {
                         assert!(set.is_valid());
                     }
+                    OperationalFact::Retention(holder) => {
+                        assert!(holder.is_valid());
+                        assert!(!holder.horizons.is_empty());
+                        assert_eq!(holder.code_ownership, PayloadUnavailable::NotCollected);
+                    }
+                    OperationalFact::RetentionCoverage(coverage) => {
+                        assert_eq!(dataset, SnapshotDataset::Cleanup);
+                        assert!(coverage.is_valid());
+                        assert_eq!(coverage.qualified_horizons, vec![CleanupHorizon::Data, CleanupHorizon::Catalog]);
+                        assert!(!coverage.qualified_horizons.contains(&CleanupHorizon::SharedCatalog));
+                    }
                     OperationalFact::CounterSet(set) => {
                         assert!(!set.counters.is_empty());
                         if dataset == SnapshotDataset::Operational {
@@ -319,6 +330,51 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
         }
     }
     horizon.batch_execute("ROLLBACK").await.unwrap();
+    let empty_directory = tempfile::tempdir().unwrap();
+    let empty_output = empty_directory.path().join("empty-cleanup");
+    let empty = collect_once(
+        &SourceGate::default(),
+        &Factory(crate::PostgresProvider::new(&spec()).unwrap()),
+        CollectionRequest {
+            subject: CollectionSubject::Database,
+            selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Cleanup },
+            budget: CollectionBudget::default(),
+        },
+        &empty_output,
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(empty.status, CollectionStatus::Complete);
+    let SourceObservation::Snapshot(completion) = &empty.description.as_ref().unwrap().observation else { panic!() };
+    assert!(
+        completion
+            .sources
+            .iter()
+            .filter(|source| source.source != RetentionCoverage::SOURCE)
+            .all(|source| source.state == culprit_core::SourceState::Empty && source.complete_scope)
+    );
+    let records = std::fs::read_to_string(empty_output.join(&empty.files[0].file))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<ExportedRecord>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1, "an empty native holder set still carries its qualification metadata");
+    let TelemetryRecord::Operational(record) = &records[0].record else { panic!() };
+    let OperationalFact::RetentionCoverage(qualification) = &record.fact else { panic!() };
+    let restored = RetentionSnapshot {
+        holders: vec![],
+        coverage: qualification.clone(),
+        sources: completion
+            .sources
+            .iter()
+            .filter(|source| qualification.native_sources.contains(&source.source))
+            .map(|source| RetentionSourceCoverage { source: source.source.clone(), state: source.state })
+            .collect(),
+    };
+    assert!(restored.is_horizon_complete(CleanupHorizon::Data));
+    assert!(restored.is_horizon_complete(CleanupHorizon::Catalog));
+    assert!(!restored.is_horizon_complete(CleanupHorizon::SharedCatalog));
     let unsupported = CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::QueryHistory {

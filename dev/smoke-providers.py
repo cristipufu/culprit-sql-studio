@@ -331,6 +331,7 @@ class Database:
             self.test("culprit-postgres", "read::native_tests::")
             self.test("culprit-postgres", "telemetry::native_tests::")
             self.test("culprit-postgres", "native::memory::tests::live_")
+            self.test("culprit-postgres", "native::cleanup::tests::live_")
             self.test("culprit-postgres", "wire::tests::live_table_preview")
             if fixture.name == "timescale":
                 self.test("culprit-postgres", "timescale::tests::live_")

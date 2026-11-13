@@ -194,7 +194,7 @@ pub async fn probe(client: &Client, spec_host: &str) -> Result<Probe> {
                 {now} AS now,
                 current_user AS username,
                 (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)
-                  OR pg_has_role(current_user, 'pg_read_all_stats', 'MEMBER') AS privileged,
+                  OR pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') AS privileged,
                 (SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
                   WHERE e.extname = 'pg_stat_statements') AS pgss_schema,
                 (SELECT string_agg(DISTINCT split_part(name, '.', 1), ',') FROM pg_settings

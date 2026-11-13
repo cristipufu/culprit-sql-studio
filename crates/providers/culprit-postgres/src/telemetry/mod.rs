@@ -105,7 +105,7 @@ impl Recipe {
             Self::Settings => Ok(native::settings::capture_query(limit)),
             Self::Catalog(kind) => Ok(native::catalog::query(kind, meta.version, false, limit)),
             Self::Sequences => Ok(native::sequences::query(Some(limit))),
-            Self::Cleanup => Ok(native::cleanup::capture_query(limit)),
+            Self::Cleanup => native::cleanup::capture_query(meta.version, meta.standby, limit),
             Self::Replication => Ok(native::replication::query(meta.version, meta.standby, &meta.database_oid, limit)),
             Self::Indexes => Ok(native::indexes::query(meta.version, false, false, Some(limit))),
             Self::Tables => Ok(native::relations::table_query(
@@ -178,14 +178,26 @@ impl Recipe {
                 Ok((source, record))
             }
             Self::Cleanup => {
-                let holder = native::cleanup::decode(row, &meta.database_oid)?;
-                let source = native::text(row, "native_source")?;
+                if native::text(row, "native_source")? == RetentionCoverage::SOURCE {
+                    let coverage = native::cleanup::decode_coverage(row, meta.standby)?;
+                    let source = RetentionCoverage::SOURCE.to_owned();
+                    return Ok((
+                        source.clone(),
+                        TelemetryRecord::Operational(OperationalObservation {
+                            source,
+                            key: coverage.key()?,
+                            fact: OperationalFact::RetentionCoverage(coverage),
+                        }),
+                    ));
+                }
+                let holder = native::cleanup::decode(row)?;
+                let source = holder.source.clone();
                 Ok((
                     source.clone(),
                     TelemetryRecord::Operational(OperationalObservation {
                         source,
-                        key: holder.catalog.key()?,
-                        fact: OperationalFact::CatalogCounters(Box::new(holder)),
+                        key: holder.key()?,
+                        fact: OperationalFact::Retention(Box::new(holder)),
                     }),
                 ))
             }
@@ -202,7 +214,7 @@ impl Recipe {
                 ))
             }
             Self::Replication => {
-                let row = native::replication::decode(row, &meta.database_oid)?;
+                let row = native::replication::decode(row)?;
                 Ok((row.source.clone(), TelemetryRecord::Replication(row)))
             }
             Self::Indexes => {
@@ -395,7 +407,9 @@ impl SnapshotReader for PostgresSnapshotReader {
     fn decode(&self, row: &Row, description: &CollectionDescription) -> Result<SnapshotRecord> {
         let meta = self.metadata.as_ref().ok_or_else(native::invalid)?;
         let (source, record) = self.recipe.decode(row, meta, description, &self.budget)?;
-        Ok(SnapshotRecord { source, record, complete_scope: true })
+        let complete_scope =
+            !matches!(self.recipe, Recipe::Cleanup) || native::cleanup::scope_complete(&source, meta.standby);
+        Ok(SnapshotRecord { source, record, complete_scope })
     }
     async fn recheck(&mut self, _: &CollectionDescription) -> Result<SnapshotRecheck> {
         let after = metadata::read(&mut self.io, &self.host, self.port).await?;
@@ -436,10 +450,16 @@ impl SnapshotReader for PostgresSnapshotReader {
                             native::memory::Access::Unsupported => SnapshotScope::NotApplicable { source },
                         };
                     }
+                    let recovery_scope = !matches!(self.recipe, Recipe::Cleanup)
+                        || native::cleanup::scope_complete(&source, before.standby);
                     SnapshotScope::Available {
                         source,
-                        complete: complete_scope,
-                        error_code: (!complete_scope).then_some(ErrorCode::PermissionDenied),
+                        complete: complete_scope && recovery_scope,
+                        error_code: if !recovery_scope {
+                            Some(ErrorCode::Unsupported)
+                        } else {
+                            (!complete_scope).then_some(ErrorCode::PermissionDenied)
+                        },
                     }
                 })
                 .collect(),

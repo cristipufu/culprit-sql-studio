@@ -408,13 +408,16 @@ fn a_slot_holding_vacuum_back_joins_its_replica_finding() {
     let mut s = report_snapshot("pg-demo");
     let slot = s.pressure.as_ref().unwrap().replicas.iter().find(|r| r.name == "analytics_slot").cloned();
     assert!(slot.is_some(), "the demo keeps an inactive slot");
-    s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
-        session: "analytics_slot".into(),
-        activity: culprit_core::TransactionActivity::SlotInactive,
-        holder: CleanupHolder::ReplicationSlot,
-        xid_age: Some(5_000_000.0),
-        ..OpenTransaction::default()
-    });
+    crate::retention_fixture::install(
+        &mut s,
+        OpenTransaction {
+            session: "analytics_slot".into(),
+            activity: culprit_core::TransactionActivity::SlotInactive,
+            holder: CleanupHolder::ReplicationSlot,
+            xid_age: Some(5_000_000.0),
+            ..OpenTransaction::default()
+        },
+    );
     let report = analyze(s);
     assert!(report.findings.iter().all(|f| f.check != "held-cleanup"));
     let lag = find(&report.findings, "replica-lag:analytics_slot").expect("replica finding");

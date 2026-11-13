@@ -56,6 +56,9 @@ pub async fn snapshot(
     let mut server = probe.server_info();
     // What the sources could read, starting from what the probe found (`culprit_core::Coverage`).
     let mut coverage = Coverage::with(std::mem::take(&mut server.capabilities), std::mem::take(&mut server.missing));
+    if options.collect_request_memory {
+        coverage.request_memory_unavailable(Engine::Postgres);
+    }
 
     let mut families = Vec::new();
     let mut statement_status = Vec::new();

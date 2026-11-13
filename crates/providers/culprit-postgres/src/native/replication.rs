@@ -24,12 +24,15 @@ pub(crate) fn query(version: u32, standby: bool, database_oid: &str, limit: usiz
         "SELECT 'pg_replication_slots'::text AS native_source,s.slot_name::text AS native_id,
         pg_catalog.jsonb_build_object('kind','slot','name',s.slot_name,'slot_type',s.slot_type,'active',s.active,
         'database',s.database,'database_oid',s.datoid::text,'xmin',s.xmin::text,'catalog_xmin',s.catalog_xmin::text,
+        'slot_name',s.slot_name,'active_pid',s.active_pid::text,'backend_start',{},
         'restart_lsn',s.restart_lsn::text,'confirmed_flush_lsn',s.confirmed_flush_lsn::text,
         'wal_status',{wal_status},'safe_wal_size',({safe_wal})::text,'inactive_s',({inactive})::text,
         'invalidation_reason',pg_catalog.to_jsonb(s)->>'invalidation_reason',
         'failover',pg_catalog.to_jsonb(s)->>'failover','synced',pg_catalog.to_jsonb(s)->>'synced',
         'kept',pg_catalog.pg_wal_lsn_diff({position},s.restart_lsn)::text)::text AS native_values
-        FROM pg_catalog.pg_replication_slots s WHERE s.datoid IS NULL OR s.datoid={database_oid}"
+        FROM pg_catalog.pg_replication_slots s LEFT JOIN pg_catalog.pg_stat_replication r ON r.pid=s.active_pid
+        WHERE s.datoid IS NULL OR s.datoid={database_oid}",
+        iso("r.backend_start")
     );
     let endpoint = if standby {
         "SELECT 'pg_recovery'::text AS native_source,'local'::text AS native_id,
@@ -41,17 +44,18 @@ pub(crate) fn query(version: u32, standby: bool, database_oid: &str, limit: usiz
         'behind',pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_last_wal_receive_lsn(),pg_catalog.pg_last_wal_replay_lsn())::text,
         'since_replay',extract(epoch FROM pg_catalog.clock_timestamp()-pg_catalog.pg_last_xact_replay_timestamp())::text)::text AS native_values".to_owned()
     } else {
-        "SELECT 'pg_stat_replication'::text AS native_source,r.pid::text AS native_id,
+        format!("SELECT 'pg_stat_replication'::text AS native_source,r.pid::text AS native_id,
         pg_catalog.jsonb_build_object('kind','sender','name',coalesce(nullif(r.application_name,''),r.client_addr::text,r.pid::text),
-        'backend_start',r.backend_start::text,'state',r.state,'sync_state',r.sync_state,'database',s.database,
+        'backend_start',{},'active_pid',r.pid::text,'slot_name',s.slot_name,'backend_xmin',r.backend_xmin::text,
+        'state',r.state,'sync_state',r.sync_state,'database',s.database,
         'logical',coalesce(s.slot_type='logical',false),'sent_lsn',r.sent_lsn::text,'write_lsn',r.write_lsn::text,
         'flush_lsn',r.flush_lsn::text,'replay_lsn',r.replay_lsn::text,
         'lag_s',extract(epoch FROM r.replay_lag)::text,'behind',pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(),r.replay_lsn)::text)::text AS native_values
-        FROM pg_catalog.pg_stat_replication r LEFT JOIN pg_catalog.pg_replication_slots s ON s.active_pid=r.pid".to_owned()
+        FROM pg_catalog.pg_stat_replication r LEFT JOIN pg_catalog.pg_replication_slots s ON s.active_pid=r.pid",iso("r.backend_start"))
     };
     format!("SELECT * FROM ({endpoint} UNION ALL {slots}) native_replication LIMIT {limit}")
 }
-pub(crate) fn decode(row: &Row, database_oid: &str) -> Result<ReplicationObservation> {
+pub(crate) fn decode(row: &Row) -> Result<ReplicationObservation> {
     let source = text(row, "native_source")?;
     if !matches!(source.as_str(), "pg_recovery" | "pg_stat_replication" | "pg_replication_slots") {
         return Err(invalid());
@@ -75,6 +79,9 @@ pub(crate) fn decode(row: &Row, database_oid: &str) -> Result<ReplicationObserva
         "failover",
         "synced",
         "backend_start",
+        "active_pid",
+        "slot_name",
+        "backend_xmin",
         "state",
         "sync_state",
         "logical",
@@ -92,17 +99,14 @@ pub(crate) fn decode(row: &Row, database_oid: &str) -> Result<ReplicationObserva
                 value => serde_json::to_string(value).map_err(|_| invalid())?,
             };
             if name == "backend_start" {
+                canonical_time(&value)?;
                 identity = identity.qualified("backend_start", &value);
             }
             properties.insert(name.into(), value);
         }
     }
-    let scope =
-        if source == "pg_replication_slots" && properties.get("database_oid").is_some_and(|id| id == database_oid) {
-            MeasurementScope::Database
-        } else {
-            MeasurementScope::Server
-        };
+    // A logical slot's database identifies its decoded workload. Native WAL positions span the whole instance.
+    let scope = MeasurementScope::Server;
     let mut counters = vec![];
     for (name, unit, integer) in [
         ("behind", CounterUnit::Bytes, true),
@@ -141,8 +145,25 @@ pub(crate) fn decode(row: &Row, database_oid: &str) -> Result<ReplicationObserva
             native_type: None,
         });
     }
+    let session_id = properties.get("active_pid").cloned();
+    if let Some(id) = &session_id {
+        id.parse::<u32>().map_err(|_| invalid())?;
+    }
+    let session = session_id
+        .as_ref()
+        .zip(properties.get("backend_start"))
+        .map(|(id, generation)| NativeActivityIdentity { id: id.clone(), generation: generation.clone() });
+    let unresolved_session_id = session_id.filter(|_| session.is_none());
+    let slot_name = properties.get("slot_name").cloned();
     let measurements = NativeCounterSet { identity, scope, counters, properties };
-    let fact = ReplicationFact::Native(Box::new(NativeReplicationSample::new(measurements)?));
+    let mut sample = NativeReplicationSample::new(measurements)?;
+    sample.session = session;
+    sample.unresolved_session_id = unresolved_session_id;
+    sample.slot_name = slot_name;
+    if !sample.is_valid() {
+        return Err(invalid());
+    }
+    let fact = ReplicationFact::Native(Box::new(sample));
     Ok(ReplicationObservation { source, fact })
 }
 fn number(set: &NativeCounterSet, name: &str) -> Option<f64> {
@@ -307,5 +328,34 @@ mod tests {
         assert!(!query(160_000, false, "1", 1000).contains("s.inactive_since"));
         assert!(query(170_000, false, "1", 1000).contains("s.inactive_since"));
         assert!(!query(180_000, true, "1", 1000).contains("SELECT conninfo"));
+    }
+
+    #[test]
+    fn logical_slot_wal_positions_keep_server_scope_and_generation_checked_consumer_links() {
+        let mut values = serde_json::json!({
+            "kind":"slot","name":"consumer","slot_name":"consumer","slot_type":"logical",
+            "database_oid":"16384","database":"application","active":true,
+            "active_pid":"42","backend_start":"2026-11-13T06:00:00.123456Z",
+            "restart_lsn":"0/1234","kept":"9007199254740993"
+        });
+        let row = |values: &serde_json::Value| {
+            Row::from_fields([
+                ("native_source".into(), Some("pg_replication_slots".into())),
+                ("native_id".into(), Some("consumer".into())),
+                ("native_values".into(), Some(values.to_string())),
+            ])
+        };
+        let decoded = decode(&row(&values)).unwrap();
+        let ReplicationFact::Native(sample) = decoded.fact else { panic!() };
+        assert_eq!(sample.measurements.scope, MeasurementScope::Server);
+        assert!(sample.measurements.counters.iter().all(|counter| counter.scope == MeasurementScope::Server));
+        assert_eq!(sample.measurements.counters[0].value.integer(), Some(9_007_199_254_740_993));
+        assert_eq!(sample.session.as_ref().unwrap().generation, "2026-11-13T06:00:00.123456Z");
+        assert_eq!(sample.slot_name.as_deref(), Some("consumer"));
+        values["backend_start"] = serde_json::Value::Null;
+        let decoded = decode(&row(&values)).unwrap();
+        let ReplicationFact::Native(unresolved) = decoded.fact else { panic!() };
+        assert!(unresolved.session.is_none());
+        assert_eq!(unresolved.unresolved_session_id.as_deref(), Some("42"));
     }
 }

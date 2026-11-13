@@ -13,6 +13,9 @@ pub mod pipeline;
 #[cfg(test)]
 mod provenance_tests;
 mod refine;
+#[cfg(test)]
+#[path = "../tests/retention_fixture.rs"]
+mod retention_fixture;
 mod summary;
 pub(crate) mod support;
 mod views;

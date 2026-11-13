@@ -329,7 +329,11 @@ fn worker_pressure_words() {
 
 fn holding(engine: Engine, t: OpenTransaction) -> Snapshot {
     let mut s = with_signals(engine, vec![]);
-    s.pressure.as_mut().unwrap().oldest_transaction = Some(t);
+    if engine == Engine::Postgres {
+        crate::retention_fixture::install(&mut s, t);
+    } else {
+        s.pressure.as_mut().unwrap().oldest_transaction = Some(t);
+    }
     s
 }
 
@@ -972,9 +976,9 @@ verify: Re-scan: the oldest open transaction should be minutes old, not hours."#
     ),
     (
         "pg-slot",
-        r#"held-cleanup:standby_1 · High · High · OptionalImprovement · score 45.00
+        r#"held-cleanup:2438fc31c24ef50a2613958a9963dee056bc63ab1bc910d31242f27c2c47c2d9:data · High · High · OptionalImprovement · score 45.00
 title: Replication slot standby_1 holds VACUUM back by 150.0M transactions
-summary: A replication slot with an xmin (a standby with hot_standby_feedback) keeps VACUUM from removing rows deleted or updated after it, in every database. It is inactive: the standby that used it is gone or disconnected, so it never moves on.
+summary: The slot’s xmin keeps a data cleanup horizon across databases. It can prevent removal of newer dead rows. No consumer was attached when observed; this sample does not establish how long it has been inactive.
 impact: 150.0M transactions behind
 metric: Transactions behind
 fix: Identify the slot's physical standby or logical-decoding consumer and restore its progress. Confirm whether it is intentionally retained before any removal; removing a slot can require rebuilding the consumer and lose its ability to resume.
@@ -983,9 +987,9 @@ verify: Re-scan: no replication slot should hold VACUUM back by millions of tran
     ),
     (
         "pg-active-slot",
-        r#"held-cleanup:standby_1 · High · High · OptionalImprovement · score 45.00
+        r#"held-cleanup:2438fc31c24ef50a2613958a9963dee056bc63ab1bc910d31242f27c2c47c2d9:data · High · High · OptionalImprovement · score 45.00
 title: Replication slot standby_1 holds VACUUM back by 150.0M transactions
-summary: A replication slot with an xmin (a standby with hot_standby_feedback) keeps VACUUM from removing rows deleted or updated after it, in every database.
+summary: The slot’s xmin keeps a data cleanup horizon across databases. It can prevent removal of newer dead rows.
 impact: 150.0M transactions behind
 metric: Transactions behind
 fix: Identify the slot's physical standby or logical-decoding consumer and restore its progress. Confirm whether it is intentionally retained before any removal; removing a slot can require rebuilding the consumer and lose its ability to resume.
@@ -994,7 +998,7 @@ verify: Re-scan: no replication slot should hold VACUUM back by millions of tran
     ),
     (
         "pg-catalog-slot",
-        r#"held-cleanup:standby_1 · High · High · OptionalImprovement · score 45.00
+        r#"held-cleanup:2438fc31c24ef50a2613958a9963dee056bc63ab1bc910d31242f27c2c47c2d9:catalog · High · High · OptionalImprovement · score 45.00
 title: Replication slot standby_1 holds system-catalog cleanup back by 150.0M transactions
 summary: This replication slot's catalog_xmin keeps old system-catalog row versions for logical decoding, 150.0M transactions behind. It does not establish that this slot holds back cleanup of application-table rows. Check the consumer's progress and recovery requirements before changing or removing a slot.
 impact: 150.0M transactions behind
@@ -1005,53 +1009,47 @@ verify: Re-scan: no replication slot should hold VACUUM back by millions of tran
     ),
     (
         "pg-prepared",
-        r#"held-cleanup:tx-17 · Medium · High · OptionalImprovement · score 22.00
+        r#"held-cleanup:9bc2a76121d9050359e7171f00dc0258c69e0437a912a92299bad78e56db2ecd:data · Medium · High · OptionalImprovement · score 22.00
 title: Prepared transaction 'tx-17' has waited 2 h to be committed or rolled back, so VACUUM can't clean up behind it
 summary: A prepared transaction (two-phase commit) keeps its locks and VACUUM's horizon until someone commits or rolls it back, and it survives restarts. 40K transactions have started since its snapshot. It was prepared by tm-coordinator.
 impact: open 2 h
 metric: Open for
 metric: Transactions behind
 fix: Find what prepared it (the transaction manager or application doing two-phase commit) and have it commit or roll back. If nothing will, a DBA can roll it back.
-sql: ROLLBACK PREPARED 'tx-17';
 cost: Rolling it back discards its changes.
 verify: Re-scan: the oldest open transaction should be minutes old, not hours."#,
     ),
     (
         "pg-prepared-bare",
-        r#"held-cleanup:tx-17 · Medium · High · OptionalImprovement · score 22.00
+        r#"held-cleanup:9bc2a76121d9050359e7171f00dc0258c69e0437a912a92299bad78e56db2ecd:data · Medium · High · OptionalImprovement · score 22.00
 title: Prepared transaction 'tx-17' has waited 2 h to be committed or rolled back, so VACUUM can't clean up behind it
 summary: A prepared transaction (two-phase commit) keeps its locks and VACUUM's horizon until someone commits or rolls it back, and it survives restarts.
 impact: open 2 h
 metric: Open for
 fix: Find what prepared it (the transaction manager or application doing two-phase commit) and have it commit or roll back. If nothing will, a DBA can roll it back.
-sql: ROLLBACK PREPARED 'tx-17';
 cost: Rolling it back discards its changes.
 verify: Re-scan: the oldest open transaction should be minutes old, not hours."#,
     ),
     (
         "pg-idle",
-        r#"held-cleanup:4242 · High · High · OptionalImprovement · score 45.00
+        r#"held-cleanup:9f6b209501131055f5cf7503cfea1d1d48711a2bf3bfc46e8233ec23d90d9406:data · High · High · OptionalImprovement · score 45.00
 title: Session 4242 has kept a transaction open for 5 h doing nothing, so VACUUM can't clean up behind it
-summary: PostgreSQL can't remove rows deleted or updated after this transaction's snapshot, so tables and indexes bloat and scans read dead rows. 25K transactions have started since its snapshot. This one is idle: the application opened it and never committed. It comes from billing-worker.
+summary: This session’s transaction or snapshot keeps a data cleanup horizon. It can prevent removal of newer dead rows; the scan does not measure how many it retains. 25K transactions have started since its snapshot. This one is idle: the application opened it and never committed. It comes from billing-worker.
 impact: open 5 h
 metric: Open for
 metric: Transactions behind
 fix: Find out what the application does in that session and make it commit or roll back promptly; transactions should never wait on a person or a slow call. After checking it is safe, a DBA can end the session, which rolls its transaction back.
-sql: -- Ends the session and rolls back its open transaction
-SELECT pg_terminate_backend(4242);
 cost: Ending the session discards that transaction's uncommitted changes.
 verify: Re-scan: the oldest open transaction should be minutes old, not hours."#,
     ),
     (
         "pg-active",
-        r#"held-cleanup:4243 · Medium · High · OptionalImprovement · score 22.00
+        r#"held-cleanup:d3c9fd7593ddf520d5f854afd4b87ffc84add39b84b9c971eb983c290b8d37b4:data · Medium · High · OptionalImprovement · score 22.00
 title: Session 4243 has kept a transaction open for 40 min, so VACUUM can't clean up behind it
-summary: PostgreSQL can't remove rows deleted or updated after this transaction's snapshot, so tables and indexes bloat and scans read dead rows.
+summary: This session’s transaction or snapshot keeps a data cleanup horizon. It can prevent removal of newer dead rows; the scan does not measure how many it retains.
 impact: open 40 min
 metric: Open for
 fix: Find out what the application does in that session and make it commit or roll back promptly; transactions should never wait on a person or a slow call. After checking it is safe, a DBA can end the session, which rolls its transaction back.
-sql: -- Ends the session and rolls back its open transaction
-SELECT pg_terminate_backend(4243);
 cost: Ending the session discards that transaction's uncommitted changes.
 verify: Re-scan: the oldest open transaction should be minutes old, not hours."#,
     ),

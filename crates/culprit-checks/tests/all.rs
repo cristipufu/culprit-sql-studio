@@ -32,6 +32,7 @@ mod pressure_config_maintenance;
 mod provider_audit;
 mod query_checks;
 mod registry;
+mod retention_fixture;
 mod signal_false_flags;
 mod signal_words;
 mod sql_lint_words;

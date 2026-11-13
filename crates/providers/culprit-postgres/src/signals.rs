@@ -552,10 +552,7 @@ async fn replicas(
     }
     let database_oid = crate::native::text(&context, "database_oid")?;
     let rows = query(client, &crate::native::replication::query(version_num, standby, &database_oid, 100_001)).await?;
-    let facts = rows
-        .iter()
-        .map(|row| crate::native::replication::decode(row, &database_oid))
-        .collect::<culprit_core::Result<Vec<_>>>()?;
+    let facts = rows.iter().map(crate::native::replication::decode).collect::<culprit_core::Result<Vec<_>>>()?;
     Ok(facts.iter().filter_map(|row| crate::native::replication::project(&row.fact)).collect())
 }
 

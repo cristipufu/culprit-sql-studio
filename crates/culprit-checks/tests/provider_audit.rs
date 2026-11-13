@@ -540,13 +540,16 @@ fn logged_errors_say_what_each_code_means_in_english() {
 #[test]
 fn catalog_only_holds_do_not_explain_application_dead_rows() {
     let mut s = snapshot(Engine::Postgres);
-    s.pressure.get_or_insert_with(Default::default).oldest_transaction = Some(culprit_core::OpenTransaction {
-        session: "decoder".into(),
-        holder: culprit_core::CleanupHolder::ReplicationSlot,
-        xid_age: Some(150_000_000.0),
-        catalog_only: true,
-        ..Default::default()
-    });
+    crate::retention_fixture::install(
+        &mut s,
+        culprit_core::OpenTransaction {
+            session: "decoder".into(),
+            holder: culprit_core::CleanupHolder::ReplicationSlot,
+            xid_age: Some(150_000_000.0),
+            catalog_only: true,
+            ..Default::default()
+        },
+    );
     for table in &mut s.tables {
         table.rows = Some(100_000.0);
         table.dead_rows = Some(1_000_000.0);
@@ -556,7 +559,7 @@ fn catalog_only_holds_do_not_explain_application_dead_rows() {
     let f = r.findings.iter().find(|f| f.check == "held-cleanup").unwrap();
     assert!(f.title.contains("system-catalog cleanup"));
     for f in r.findings.iter().filter(|f| f.check == "dead-rows") {
-        assert!(!f.summary.contains("A cleanup holder was observed"));
+        assert!(!f.summary.contains("Cleanup retainers were observed"));
         assert!(f.fix.as_ref().unwrap().sql.is_none());
     }
 }
