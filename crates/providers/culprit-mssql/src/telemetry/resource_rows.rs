@@ -14,19 +14,18 @@ impl ResourcePager {
         }
         Ok(())
     }
-    pub(super) fn accept(&mut self, rows: Vec<crate::resources::Sample>, limit: u32) -> Result<CollectionRead> {
+    pub(super) fn accept(&mut self, rows: Vec<ResourceMeasurement>, limit: u32) -> Result<CollectionRead> {
         if limit == 0 || rows.len() > limit as usize + 1 {
             return Err(decode::malformed());
         }
         let more = rows.len() > limit as usize;
         let mut records = Vec::new();
         for sample in &rows {
-            // Primary-only capture is an export policy, not a restriction on interactive native reads.
-            if sample.replica_role != 0 {
-                return Err(CollectionStop::SourceChanged.error());
+            if !sample.is_valid() {
+                return Err(decode::malformed());
             }
             if records.len() < limit as usize {
-                records.push(TelemetryRecord::ResourceSample(sample.exported()));
+                records.push(TelemetryRecord::ResourceSample(sample.clone()));
             }
         }
         let next = records.last().and_then(|row| match row {

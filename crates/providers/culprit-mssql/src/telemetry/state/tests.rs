@@ -56,6 +56,7 @@ fn sequence() -> Rec {
 }
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
         budget: CollectionBudget { page_rows: 2, ..Default::default() },
     }
@@ -115,6 +116,7 @@ async fn missing_index_capture_preserves_partial_associations_and_catalog_visibi
         }
         replies.extend([Ok(vec![clock(final_metadata, "2020-01-01T06:02:01Z")]), Ok(vec![identity()])]);
         let request = CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::MissingIndexes },
             budget: Default::default(),
         };
@@ -455,6 +457,7 @@ async fn settings_use_one_point_profile_with_source_coverage_and_stable_capture_
     }
     replies.extend([Ok(vec![clock(true, "2020-01-01T06:02:01Z")]), Ok(vec![identity()])]);
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings },
         budget: CollectionBudget { page_rows: 10, ..Default::default() },
     };
@@ -485,6 +488,7 @@ async fn settings_use_one_point_profile_with_source_coverage_and_stable_capture_
 #[tokio::test]
 async fn settings_flattened_from_one_native_row_cannot_overrun_the_total_snapshot_budget() {
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings },
         budget: CollectionBudget { max_snapshot_rows: 1, ..Default::default() },
     };

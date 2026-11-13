@@ -528,6 +528,14 @@ pub(crate) fn optional_text(row: &Rec, name: &str) -> Result<Option<String>> {
         _ => Err(invalid_data()),
     }
 }
+pub(crate) fn require_primary(writable: Option<bool>) -> Result<()> {
+    if writable == Some(true) {
+        Ok(())
+    } else {
+        Err(Error::new(culprit_core::ErrorCode::Unsupported, culprit_core::t!("collection.azure_sql_primary_only")))
+    }
+}
+
 pub(crate) fn database_writable(row: &Rec) -> Result<Option<bool>> {
     match row.str("updateability").as_deref() {
         Some("READ_WRITE") => Ok(Some(true)),

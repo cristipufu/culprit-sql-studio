@@ -12,6 +12,8 @@ struct Backend {
     discoveries: Mutex<u32>,
     failure: Mutex<Option<CollectionStop>>,
     database: Mutex<DatabaseIdentity>,
+    target_override: Mutex<Option<CollectionTarget>>,
+    resource_bounds: Mutex<Option<(String, String)>>,
     status: Mutex<CollectionStatus>,
 }
 impl Backend {
@@ -21,6 +23,8 @@ impl Backend {
             discoveries: Mutex::new(0),
             failure: Mutex::new(None),
             database: Mutex::new(DatabaseIdentity::server(Engine::Mssql, "fixture", "loopback.invalid", 1433, None)),
+            target_override: Mutex::new(None),
+            resource_bounds: Mutex::new(None),
             status: Mutex::new(CollectionStatus::Complete),
         }
     }
@@ -74,18 +78,24 @@ impl FleetBackend for Backend {
                 sources: vec![StateSourceCoverage::collected("fixture".into(), 0)],
             }),
             CollectionSelection::ResourceHistory { from, until } => {
+                let (available_from, available_until) =
+                    self.resource_bounds.lock().unwrap().clone().unwrap_or_else(|| (from.clone(), until.clone()));
                 SourceObservation::RetainedSamples(SampleHistoryDescription {
                     from: from.clone(),
                     until: until.clone(),
                     observed_at: "2026-11-10T12:00:00Z".into(),
-                    available_from: Some(from.clone()),
-                    available_until: Some(until.clone()),
+                    available_from: Some(available_from),
+                    available_until: Some(available_until),
                     expected_samples: 0,
-                    nominal_period_ms: 15_000,
+                    nominal_period_ms: Some(15_000),
                 })
             }
             _ => return Err(state_failed()),
         };
+        let target = self.target_override.lock().unwrap().clone().unwrap_or_else(|| match &request.subject {
+            CollectionSubject::Database => self.database.lock().unwrap().clone().into(),
+            CollectionSubject::Shared { resource } => CollectionTarget::Shared(resource.clone()),
+        });
         Ok(CollectionManifest {
             format_version: EXPORT_FORMAT_VERSION,
             capture: CaptureIdentity {
@@ -96,7 +106,7 @@ impl FleetBackend for Backend {
             finished_at: Some("2026-11-10T12:00:01Z".into()),
             request,
             description: Some(CollectionDescription {
-                target: self.database.lock().unwrap().clone().into(),
+                target,
                 source: "query_store".into(),
                 continuity: SourceContinuity::Unverified,
                 observation,
@@ -121,6 +131,8 @@ fn interval(hour: u32) -> TelemetryInterval {
 fn inventory(collection: ScheduledCollection) -> FleetInventory {
     FleetInventory {
         targets: vec![FleetTarget {
+            id: "fixture".into(),
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             connection: "fixture".into(),
             shard: "one".into(),
             admission_group: "pool".into(),
@@ -144,6 +156,172 @@ async fn outbox(path: &std::path::Path) -> Outbox {
     let mut value = Outbox::create(path, OutboxLimits::default()).unwrap();
     value.recover().await.unwrap();
     value
+}
+
+fn database_and_pool_inventory() -> FleetInventory {
+    let mut inventory = inventory(ScheduledCollection::ResourceHistory { window_seconds: 300, overlap_seconds: 30 });
+    let mut pool = inventory.targets[0].clone();
+    pool.id = "pool-owner".into();
+    pool.subject = CollectionSubject::Shared {
+        resource: SharedResourceIdentity {
+            engine: Engine::Mssql,
+            kind: SharedResourceKind::Pool,
+            namespace: NativeIdentity::new("fixture-server"),
+            native: NativeIdentity::new("fixture-pool"),
+        },
+    };
+    inventory.targets.push(pool);
+    inventory
+}
+
+fn subject_jobs(inventory: &FleetInventory) -> [Job; 2] {
+    let mut scheduler = Scheduler::new(inventory, "one").unwrap();
+    let database = scheduler.take(Duration::ZERO).unwrap().unwrap();
+    scheduler.finish(Duration::ZERO, scheduler::Outcome::Complete).unwrap();
+    let pool = scheduler.take(Duration::from_secs(60)).unwrap().unwrap();
+    [database, pool]
+}
+
+#[tokio::test]
+async fn one_connection_keeps_subject_requests_checkpoints_and_retention_gaps_separate_across_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = database_and_pool_inventory();
+    let jobs = subject_jobs(&inventory);
+    assert_eq!(jobs[0].connection, jobs[1].connection);
+    assert_ne!(jobs[0].key, jobs[1].key);
+    let state = root.path().join("state");
+    let journal = FleetJournal::open(&state, &inventory, "one").await.unwrap();
+    let mut outbox = outbox(&root.path().join("outbox")).await;
+    let backend = Backend::new();
+    *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::RetentionGap);
+    *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:59:00Z".into(), "2026-11-10T12:00:00Z".into()));
+    for job in &jobs {
+        let result = work::execute(
+            &backend,
+            &journal,
+            &mut CaptureStorage::local(&mut outbox),
+            job,
+            &CollectionCancellation::default(),
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.event.target, job.target);
+        assert_eq!(result.event.status, CollectionStatus::Incomplete(CollectionStop::RetentionGap));
+        assert_eq!(backend.requests.lock().unwrap().last().unwrap().subject, job.subject);
+    }
+    drop(journal);
+    let reopened = FleetJournal::open(&state, &inventory, "one").await.unwrap();
+    for job in &jobs {
+        let checkpoint = reopened.load(&job.key).await.unwrap();
+        assert!(checkpoint.pending.is_none());
+        assert!(job.subject.accepts(checkpoint.target.as_ref().unwrap()));
+        assert_eq!(checkpoint.last_until.as_deref(), Some("2026-11-10T12:00:00+00:00"));
+    }
+    let gaps = reopened.gaps(None, 10).await.unwrap().gaps;
+    assert_eq!(gaps.len(), 2);
+    assert_eq!(gaps[0].connection, gaps[1].connection);
+    assert_ne!(gaps[0].target, gaps[1].target);
+    assert_ne!(gaps[0].id, gaps[1].id);
+}
+
+#[tokio::test]
+async fn a_wrong_native_pool_result_cannot_pin_or_advance_the_expected_subject() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = database_and_pool_inventory();
+    let [_, job] = subject_jobs(&inventory);
+    let journal = FleetJournal::open(&root.path().join("state"), &inventory, "one").await.unwrap();
+    let mut outbox = outbox(&root.path().join("outbox")).await;
+    let backend = Backend::new();
+    let CollectionSubject::Shared { mut resource } = job.subject.clone() else { unreachable!() };
+    resource.native = NativeIdentity::new("unrelated-pool");
+    *backend.target_override.lock().unwrap() = Some(CollectionTarget::Shared(resource));
+    let result = work::execute(
+        &backend,
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &CollectionCancellation::default(),
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.event.status, CollectionStatus::Incomplete(CollectionStop::InvalidPage));
+    let checkpoint = journal.load(&job.key).await.unwrap();
+    assert!(checkpoint.target.is_none());
+    assert!(checkpoint.last_until.is_none());
+    assert_eq!(checkpoint.pending.unwrap().subject, job.subject);
+}
+
+#[tokio::test]
+async fn an_unobserved_tail_retries_the_exact_window_until_native_samples_close_it() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = database_and_pool_inventory();
+    let [_, job] = subject_jobs(&inventory);
+    let journal = FleetJournal::open(&root.path().join("state"), &inventory, "one").await.unwrap();
+    let mut outbox = outbox(&root.path().join("outbox")).await;
+    let backend = Backend::new();
+    *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::SourceNotReady);
+    *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:30:00Z".into(), "2026-11-10T11:59:50Z".into()));
+    let cancellation = CollectionCancellation::default();
+    let result = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
+        .await
+        .unwrap();
+    assert_eq!(result.event.status, CollectionStatus::Incomplete(CollectionStop::SourceNotReady));
+    assert!(matches!(result.outcome, scheduler::Outcome::More));
+    let pending = journal.load(&job.key).await.unwrap();
+    assert!(pending.last_until.is_none());
+    assert!(pending.pending.is_some());
+    assert!(journal.gaps(None, 10).await.unwrap().gaps.is_empty());
+    *backend.failure.lock().unwrap() = Some(CollectionStop::SourceNotReady);
+    let retry = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
+        .await
+        .unwrap();
+    assert_eq!(retry.event.status, CollectionStatus::Incomplete(CollectionStop::SourceNotReady));
+    assert!(matches!(retry.outcome, scheduler::Outcome::More));
+    *backend.status.lock().unwrap() = CollectionStatus::Complete;
+    *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:30:00Z".into(), "2026-11-10T12:00:00Z".into()));
+    let later = now() + chrono::TimeDelta::minutes(5);
+    let result = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, later)
+        .await
+        .unwrap();
+    assert_eq!(result.event.status, CollectionStatus::Complete);
+    {
+        let requests = backend.requests.lock().unwrap();
+        assert_eq!(requests[0], requests[1]);
+        assert_eq!(requests[1], requests[2]);
+    }
+    let completed = journal.load(&job.key).await.unwrap();
+    assert!(completed.pending.is_none());
+    assert_eq!(completed.last_until.as_deref(), Some("2026-11-10T12:00:00+00:00"));
+    assert!(journal.gaps(None, 10).await.unwrap().gaps.is_empty());
+}
+
+#[tokio::test]
+async fn an_incorrect_retention_gap_cannot_skip_an_unobserved_tail() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = database_and_pool_inventory();
+    let [_, job] = subject_jobs(&inventory);
+    let journal = FleetJournal::open(&root.path().join("state"), &inventory, "one").await.unwrap();
+    let mut outbox = outbox(&root.path().join("outbox")).await;
+    let backend = Backend::new();
+    *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::RetentionGap);
+    *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:30:00Z".into(), "2026-11-10T11:59:50Z".into()));
+    let result = work::execute(
+        &backend,
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &CollectionCancellation::default(),
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.event.status, CollectionStatus::Incomplete(CollectionStop::InvalidPage));
+    let checkpoint = journal.load(&job.key).await.unwrap();
+    assert!(checkpoint.pending.is_some());
+    assert!(checkpoint.last_until.is_none());
+    assert!(journal.gaps(None, 10).await.unwrap().gaps.is_empty());
 }
 
 #[tokio::test]
@@ -247,6 +425,7 @@ async fn coverage_gaps_survive_checkpoint_reopen_and_repeated_receipts_do_not_du
     let key = job(&inventory).key;
     let journal = FleetJournal::open(&state, &inventory, "one").await.unwrap();
     let gap = FleetGap {
+        target: "fixture".into(),
         id: digest(b"gap"),
         connection: "fixture".into(),
         schedule: "test".into(),
@@ -298,6 +477,7 @@ async fn failed_windows_retry_identically_and_unrecoverable_retention_advances_o
     let gap = journal.gaps(None, 10).await.unwrap();
     assert_eq!(gap.gaps[0].reason, FleetGapReason::BackfillLimit);
     *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::RetentionGap);
+    *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:59:00Z".into(), "2026-11-10T12:00:00Z".into()));
     let result = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
         .await
         .unwrap();

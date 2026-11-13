@@ -35,6 +35,7 @@ async fn volume_loss_restores_incidents_by_native_identity_and_a_complete_empty_
     // The connection alias did not survive the lost volume. The native database identity did.
     outbox.begin_remote_epoch(&Fence::issued(2, "new-owner".into(), store.id().into()).unwrap(), 1).await.unwrap();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
         budget: CollectionBudget::default(),
     };

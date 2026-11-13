@@ -248,6 +248,57 @@ missed-work metrics and qualify the combined workload before adding targets or s
 activity threshold is 30 seconds for blocking and 60 seconds for running requests, with a three-minute poll period.
 Transient activity between polls is not a complete event history.
 
+## Database and shared subjects
+
+A saved connection is a route. Each capture separately selects the database or an exact native shared resource.
+`collect once` defaults to the connection's database. Discover supported shared resources through bounded metadata
+reads, then save the selected entry's `identity` object as a JSON file:
+
+```sh
+culprit collect resources shop-staging --kind pool --json > resources.json
+jq -e '.[0].identity' resources.json > pool.json
+culprit collect once shop-staging --resource ./pool.json --collection resource-history \
+  --from 2026-11-13T10:00:00Z --until 2026-11-13T10:05:00Z --output ./pool-capture --json
+```
+
+Choose recent completed bounds within the source's actual retained range. No discovered resource means there is
+no eligible resource through that route; a permission failure remains an error. The identity file is bounded to
+64 KiB, must contain the complete returned identity, and never substitutes a connection alias for native identity.
+The adapter verifies the requested resource before reading its statistics. Unsupported kinds or collections are
+rejected; they never fall back to collecting the member database.
+
+A native sample can arrive after its timestamp. `source-not-ready` keeps the exact requested window pending until
+the source has closed it; it neither advances the checkpoint nor records a retention gap. Only a proven missing
+lower history bound permits a native-retention gap. Waiting does not count as a completed capture.
+
+| Native route | Discovery | Capture | Meaning and limits |
+|---|---|---|---|
+| Azure SQL elastic pool, through a writable member database | `--kind pool` | `--resource pool.json --collection resource-history` | Pool demand/storage with explicitly broader instance context; no fabricated replica identity or fixed sampling period |
+| PostgreSQL instance, through a TCP database connection | `--kind instance` | `--resource instance.json --collection operational` | Shared archive, writer, WAL, I/O, checkpointer and available statistics-eviction counters; database counters stay on database captures |
+
+Azure pool history uses `sys.dm_elastic_pool_resource_stats`, whose documented retention is approximately
+40 minutes. It is distinct from the 14-day `sys.elastic_pool_resource_stats` history in `master`. The native
+source requires `VIEW SERVER STATE`; Culprit does not grant permissions. Pool identity comes from the logical
+server and pool metadata, while the member's logical/physical database identities anchor capture verification.
+Membership is rechecked before each page. A pool move or changed member storage prevents complete publication.
+The source does not prove a pool incarnation, so continuity remains unverified. See Microsoft's
+[pool-history reference](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-elastic-pool-resource-stats-azure-sql-database?view=azuresqldb-current).
+
+PostgreSQL uses its native system identifier and server address/port, independently of the connection's database.
+This identifies system lineage and the observed network endpoint, rather than a globally unique physical host.
+Discovery requires access to `pg_control_system()`; unavailable permissions or a Unix-socket connection without a
+native network address cannot produce a guessed identity. The instance route reads `pg_stat_statements_info`
+only when that route's database exposes the extension's view. Select an appropriate existing route when this
+source is needed; Culprit never installs an extension or changes its settings. PostgreSQL documents the
+[control-data functions and server address](https://www.postgresql.org/docs/current/functions-info.html).
+
+Fleet targets have a required stable `id`, a connection and an explicit `subject`. Database jobs use
+`{"kind":"database"}`; shared jobs set `kind` to `shared` and `resource` to the complete returned identity.
+A database target and a shared target may use the same connection, with independent schedules, checkpoints and
+health. Assign the shared resource once in the complete inventory: duplicate native shared identities are rejected
+even through different member aliases or shards. Keep related targets in the same `admission_group` and shard. That group enforces scheduling policy; it
+does not establish native scope. Separate deployments still need coordinated assignments and state ownership.
+
 ## PostgreSQL source coverage
 
 PostgreSQL uses the same capture, outbox, fleet and delivery path as SQL Server. Configure PostgreSQL connections
@@ -257,7 +308,7 @@ schedules must not be copied wholesale: PostgreSQL has cumulative counters rathe
 | Selection | Native observations | Suggested starting cadence |
 |---|---|---|
 | `snapshot: statement-counters` | `pg_stat_statements(false)`: calls, duration, rows, available buffers, WAL, I/O timings, planning, JIT and runtime distributions | 5 minutes |
-| `snapshot: operational` | Current-database health, conflicts, XID/MultiXact ages and subscription errors; explicitly shared WAL, I/O, writer/checkpointer, archive and statistics-eviction counters | 5 minutes |
+| `snapshot: operational` | Current-database health, conflicts, XID/MultiXact ages and subscription errors; shared counters use the explicit instance route above | 5 minutes |
 | `activity` | Persistent requests, lock waits, blocker closure, idle transaction context, lock resources and incident transitions | 3 minutes |
 | `snapshot: replication` | Senders, local standby state and physical/current-database logical slots; unknown lag stays unknown | 10 minutes |
 | `snapshot: settings` | Allowlisted effective settings, native unit/context/source, defaults and pending restart | 1 hour |
@@ -333,7 +384,7 @@ Timescale uses the PostgreSQL reader and native counter semantics. Hypertable/ch
 not part of background telemetry; base relation observations must not be interpreted as logical hypertable totals.
 SQL Server background admission remains restricted to the separately qualified Azure SQL Database topology.
 
-The current export format is **10**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **14**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 ## Recovery and activation

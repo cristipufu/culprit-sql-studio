@@ -46,6 +46,7 @@ async fn file_snapshots_close_before_paging_and_keep_native_values_private() {
             SnapshotDataset::Sequences,
         ] {
             let request = CollectionRequest {
+                subject: culprit_core::telemetry::CollectionSubject::Database,
                 selection: CollectionSelection::Snapshot { dataset },
                 budget: CollectionBudget { page_rows: 1, ..Default::default() },
             };
@@ -103,6 +104,7 @@ async fn file_replacement_invalidates_the_observation() {
     let fixture = Fixture::new("DELETE");
     let provider = fixture.provider();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings },
         budget: Default::default(),
     };
@@ -122,6 +124,7 @@ async fn query_limit_preserves_failed_read_accounting_and_still_rolls_back_and_c
     let fixture = Fixture::new("DELETE");
     let provider = fixture.provider();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings },
         budget: CollectionBudget { max_queries: 4, ..Default::default() },
     };

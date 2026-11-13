@@ -37,8 +37,8 @@ async fn snapshot_and_export_keep_the_same_native_values_precision_and_scopes() 
     assert_eq!(snapshot_reader.closed, 1);
     assert_eq!(snapshot_reader.calls.len(), 1);
     assert_eq!(export_reader.calls.len(), 1);
-    assert_eq!(snapshot_reader.calls[0].sql, sql::RETAINED);
-    assert_eq!(export_reader.calls[0].sql, sql::WINDOWED);
+    assert_eq!(snapshot_reader.calls[0].sql, sql::DATABASE.retained());
+    assert_eq!(export_reader.calls[0].sql, sql::DATABASE.windowed());
     assert_eq!(export_reader.calls[0].limit, 11);
     assert!(matches!(&export_reader.calls[0].parameters[0], Parameter::Integer(11)));
 }
@@ -102,7 +102,7 @@ async fn malformed_pages_duplicates_and_out_of_window_rows_never_publish_a_parti
 async fn native_secondary_samples_keep_their_replica_identity() {
     let mut io = FakeRead::new(vec![Ok(vec![replace(&row("2020-01-01T06:00:15Z"), &[("replica_role", Val::Int(2))])])]);
     let sample = retained(&mut io).await.map_err(ReadError::into_error).unwrap().remove(0);
-    assert_eq!(sample.exported().replica_id, "2");
+    assert_eq!(sample.exported().replica_id.as_deref(), Some("2"));
     assert_eq!(sample.snapshot().cpu_pct, Some(0.0));
 }
 #[tokio::test]

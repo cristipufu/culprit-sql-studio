@@ -174,7 +174,7 @@ impl Sample {
     pub(crate) fn exported(&self) -> ResourceMeasurement {
         ResourceMeasurement {
             at: self.at.clone(),
-            replica_id: self.replica_role.to_string(),
+            replica_id: Some(self.replica_role.to_string()),
             metrics: FIELDS
                 .iter()
                 .map(|field| ResourceMetricSample {
@@ -200,7 +200,10 @@ impl Sample {
         }
     }
 }
-fn number(row: &Rec, name: &str) -> Result<Option<f64>> {
+pub(super) fn columns() -> String {
+    std::iter::once("replica_role").chain(FIELDS.iter().map(|field| field.column)).collect::<Vec<_>>().join(",")
+}
+pub(super) fn number(row: &Rec, name: &str) -> Result<Option<f64>> {
     match row.columns().find(|(column, _)| *column == name).map(|(_, value)| value) {
         Some(Val::Null) => Ok(None),
         Some(Val::Int(value)) if *value >= 0 => Ok(Some(*value as f64)),

@@ -1,5 +1,6 @@
 //! Provider-owned Azure SQL resource evidence, shared by snapshots and collection adapters.
 mod inventory;
+pub(crate) mod pool;
 mod sample;
 mod sql;
 
@@ -34,23 +35,22 @@ impl Window {
     }
 }
 pub(crate) async fn inventory<R: NativeRead>(io: &mut R, window: &Window) -> Result<Inventory> {
+    Inventory::decode(&inventory_row(io, window, &sql::DATABASE.inventory()).await?, window)
+}
+async fn inventory_row<R: NativeRead>(io: &mut R, window: &Window, query: &str) -> Result<Rec> {
     let rows = io
-        .query(
-            sql::INVENTORY,
-            vec![Parameter::Text(window.from.to_rfc3339()), Parameter::Text(window.until.to_rfc3339())],
-            1,
-        )
+        .query(query, vec![Parameter::Text(window.from.to_rfc3339()), Parameter::Text(window.until.to_rfc3339())], 1)
         .await
         .map_err(ReadError::into_error)?;
     if rows.len() != 1 {
         return Err(invalid_data());
     }
-    Inventory::decode(&rows[0], window)
+    rows.into_iter().next().ok_or_else(invalid_data)
 }
 pub(crate) async fn retained<R: NativeRead>(io: &mut R) -> ReadResult<Vec<Sample>> {
     let rows = io
         .query(
-            sql::RETAINED,
+            &sql::DATABASE.retained(),
             vec![Parameter::Integer(i64::from(MAX_RETAINED_SAMPLES) + 1)],
             MAX_RETAINED_SAMPLES as usize + 1,
         )
@@ -66,6 +66,20 @@ pub(crate) async fn windowed<R: NativeRead>(
     after: Option<&str>,
     limit: u32,
 ) -> ReadResult<Vec<Sample>> {
+    windowed_rows(io, window, after, limit, &sql::DATABASE.windowed())
+        .await?
+        .iter()
+        .map(Sample::decode)
+        .collect::<Result<Vec<_>>>()
+        .map_err(ReadError::from)
+}
+async fn windowed_rows<R: NativeRead>(
+    io: &mut R,
+    window: &Window,
+    after: Option<&str>,
+    limit: u32,
+    query: &str,
+) -> ReadResult<Vec<Rec>> {
     if limit == 0 || limit > MAX_RETAINED_SAMPLES {
         return Err(invalid_data().into());
     }
@@ -77,7 +91,7 @@ pub(crate) async fn windowed<R: NativeRead>(
     }
     let rows = io
         .query(
-            sql::WINDOWED,
+            query,
             vec![
                 Parameter::Integer(i64::from(limit) + 1),
                 Parameter::Text(window.from.to_rfc3339()),
@@ -90,13 +104,15 @@ pub(crate) async fn windowed<R: NativeRead>(
     if rows.len() > limit as usize + 1 {
         return Err(invalid_data().into());
     }
-    let samples = samples(rows, after.as_deref())?;
-    for sample in &samples {
-        if !window.contains(&sample.at)? {
+    let mut previous = after;
+    for row in &rows {
+        let at = canonical_time(&text(row, "sample_at")?)?;
+        if !window.contains(&at)? || previous.as_ref().is_some_and(|previous| previous >= &at) {
             return Err(invalid_data().into());
         }
+        previous = Some(at);
     }
-    Ok(samples)
+    Ok(rows)
 }
 fn samples(rows: Vec<Rec>, after: Option<&str>) -> ReadResult<Vec<Sample>> {
     let samples = rows.iter().map(Sample::decode).collect::<Result<Vec<_>>>()?;
@@ -120,7 +136,7 @@ impl Latest {
     }
 }
 pub(crate) async fn latest<R: NativeRead>(io: &mut R) -> ReadResult<Option<Latest>> {
-    let rows = io.query(sql::LATEST, vec![], 1).await?;
+    let rows = io.query(&sql::DATABASE.latest(), vec![], 1).await?;
     if rows.len() > 1 {
         return Err(invalid_data().into());
     }

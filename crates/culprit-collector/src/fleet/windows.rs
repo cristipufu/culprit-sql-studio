@@ -8,12 +8,16 @@ use culprit_core::{Result, telemetry::*};
 
 pub(super) fn request(
     schedule: &FleetSchedule,
+    subject: &CollectionSubject,
     checkpoint: &Checkpoint,
     now: DateTime<Utc>,
 ) -> Result<(CollectionRequest, Option<TelemetryRange>)> {
     if let Some(request) = &checkpoint.pending {
         request.validate()?;
-        if request.collection() != schedule.collection.collection() || request.budget != schedule.budget {
+        if request.collection() != schedule.collection.collection()
+            || request.budget != schedule.budget
+            || &request.subject != subject
+        {
             return Err(state_failed());
         }
         match &schedule.collection {
@@ -58,7 +62,7 @@ pub(super) fn request(
         }
         ScheduledCollection::QueryHistory { .. } => return Err(state_failed()),
     };
-    let request = CollectionRequest { selection, budget: schedule.budget.clone() };
+    let request = CollectionRequest { subject: subject.clone(), selection, budget: schedule.budget.clone() };
     request.validate()?;
     Ok((request, gap))
 }

@@ -11,11 +11,26 @@ fn schedule() -> FleetSchedule {
 }
 fn target(connection: &str, shard: &str, group: &str) -> FleetTarget {
     FleetTarget {
+        id: connection.into(),
+        subject: crate::telemetry::CollectionSubject::Database,
         connection: connection.into(),
         shard: shard.into(),
         admission_group: group.into(),
         schedules: vec![schedule()],
     }
+}
+fn pool_owner(connection: &str, shard: &str, group: &str) -> FleetTarget {
+    let mut shared = target(connection, shard, group);
+    shared.subject = CollectionSubject::Shared {
+        resource: SharedResourceIdentity {
+            engine: crate::Engine::Mssql,
+            kind: SharedResourceKind::Pool,
+            namespace: NativeIdentity::new("logical-server"),
+            native: NativeIdentity::new("pool"),
+        },
+    };
+    shared.schedules[0].collection = ScheduledCollection::ResourceHistory { window_seconds: 900, overlap_seconds: 60 };
+    shared
 }
 #[test]
 fn one_physical_resource_cannot_be_split_between_static_owners() {
@@ -26,6 +41,43 @@ fn one_physical_resource_cannot_be_split_between_static_owners() {
     assert!(inventory.validate("missing").is_err());
     inventory.targets[1].connection = "a".into();
     assert!(inventory.validate("one").is_err());
+}
+
+#[test]
+fn a_route_can_reach_separate_subjects_but_a_shared_native_resource_has_only_one_static_owner() {
+    let database = target("member", "one", "pool");
+    let mut shared = pool_owner("pool-owner", "one", "pool");
+    shared.connection = database.connection.clone();
+    let mut inventory = FleetInventory { targets: vec![database, shared] };
+    inventory.validate("one").unwrap();
+    let mut second_owner = inventory.targets[1].clone();
+    second_owner.id = "another-owner".into();
+    second_owner.connection = "another-member-connection".into();
+    second_owner.shard = "two".into();
+    second_owner.admission_group = "another-policy-group".into();
+    inventory.targets.push(second_owner);
+    assert!(inventory.validate("one").is_err(), "different aliases and shards do not establish different native pools");
+}
+
+#[test]
+fn multiple_subjects_on_one_route_cannot_bypass_its_admission_group_or_static_owner() {
+    let database = target("member", "one", "pool");
+    let mut shared = pool_owner("pool-owner", "one", "pool");
+    shared.connection = database.connection.clone();
+    let mut inventory = FleetInventory { targets: vec![database, shared] };
+    inventory.validate("one").unwrap();
+    inventory.targets[1].admission_group = "another-group".into();
+    assert!(inventory.validate("one").is_err());
+    inventory.targets[1].shard = "two".into();
+    assert!(inventory.validate("one").is_err());
+}
+
+#[test]
+fn shared_native_intervals_are_refused_before_the_database_discovery_route_runs() {
+    let mut shared = pool_owner("pool-owner", "one", "pool");
+    shared.schedules[0].collection =
+        ScheduledCollection::QueryHistory { lookback_seconds: 3_600, reconcile_seconds: 3_600 };
+    assert!(FleetInventory { targets: vec![shared] }.validate("one").is_err());
 }
 #[test]
 fn reject_duplicate_jobs_and_accelerated_or_unbounded_schedules() {

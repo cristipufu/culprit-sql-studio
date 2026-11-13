@@ -18,6 +18,7 @@ enum Recipe {
     Statements,
     Definitions,
     Operational,
+    InstanceOperational,
     Settings,
     Tables,
     Indexes,
@@ -31,7 +32,7 @@ impl Recipe {
         match self {
             Self::Statements => SnapshotDataset::StatementCounters,
             Self::Definitions => SnapshotDataset::StatementDefinitions,
-            Self::Operational => SnapshotDataset::Operational,
+            Self::Operational | Self::InstanceOperational => SnapshotDataset::Operational,
             Self::Settings => SnapshotDataset::Settings,
             Self::Tables => SnapshotDataset::Tables,
             Self::Indexes => SnapshotDataset::Indexes,
@@ -46,6 +47,7 @@ impl Recipe {
             Self::Statements => "postgres-statement-counters",
             Self::Definitions => "postgres-statement-definitions",
             Self::Operational => "postgres-operational-state",
+            Self::InstanceOperational => "postgres-instance-state",
             Self::Settings => "postgres-settings",
             Self::Tables => "postgres-tables",
             Self::Indexes => "postgres-indexes",
@@ -58,7 +60,16 @@ impl Recipe {
     fn sources(self, meta: &Metadata) -> Vec<String> {
         match self {
             Self::Statements | Self::Definitions => vec!["pg_stat_statements".into()],
-            Self::Operational => native::operational::sources(meta).into_iter().map(str::to_owned).collect(),
+            Self::Operational => native::operational::selected_sources(meta, native::operational::Selection::Database)
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            Self::InstanceOperational => {
+                native::operational::selected_sources(meta, native::operational::Selection::Instance)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect()
+            }
             Self::Settings => vec!["pg_settings".into()],
             Self::Tables => vec!["pg_stat_user_tables".into()],
             Self::Indexes => vec!["pg_index".into()],
@@ -74,7 +85,12 @@ impl Recipe {
             Self::Statements | Self::Definitions => {
                 native::statements::query(meta, matches!(self, Self::Definitions), limit, budget.max_sql_bytes as usize)
             }
-            Self::Operational => Ok(native::operational::query(meta, limit)),
+            Self::Operational => {
+                Ok(native::operational::selected_query(meta, limit, native::operational::Selection::Database))
+            }
+            Self::InstanceOperational => {
+                Ok(native::operational::selected_query(meta, limit, native::operational::Selection::Instance))
+            }
             Self::Settings => Ok(native::settings::capture_query(limit)),
             Self::Catalog(kind) => Ok(native::catalog::query(kind, meta.version, false, limit)),
             Self::Sequences => Ok(native::sequences::query(Some(limit))),
@@ -197,8 +213,13 @@ impl Recipe {
                 Ok((record.source.clone(), TelemetryRecord::Operational(record)))
             }
             Self::Settings => Ok(("pg_settings".into(), TelemetryRecord::Setting(native::settings::decode(row)?))),
-            Self::Operational => {
-                let record = native::operational::decode(row, meta)?;
+            Self::Operational | Self::InstanceOperational => {
+                let selection = if matches!(self, Self::InstanceOperational) {
+                    native::operational::Selection::Instance
+                } else {
+                    native::operational::Selection::Database
+                };
+                let record = native::operational::decode(row, meta, selection)?;
                 let TelemetryRecord::Operational(observation) = &record else { unreachable!() };
                 Ok((observation.source.clone(), record))
             }
@@ -207,6 +228,15 @@ impl Recipe {
 }
 pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
+    if let CollectionSubject::Shared { resource } = &request.subject {
+        if resource.engine != culprit_core::Engine::Postgres
+            || resource.kind != SharedResourceKind::Instance
+            || request.collection() != TelemetryCollection::Snapshot(SnapshotDataset::Operational)
+        {
+            return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+        }
+        return snapshot_source(connector, request, Recipe::InstanceOperational);
+    }
     if request.collection() == TelemetryCollection::Activity {
         return activity::source(connector, request);
     }
@@ -237,6 +267,43 @@ pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Resul
         }
         _ => return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported"))),
     };
+    snapshot_source(connector, request, recipe)
+}
+
+pub(crate) async fn resources(
+    connector: Connector,
+    request: &ResourceDiscoveryRequest,
+) -> Result<Vec<CollectionResource>> {
+    request.budget.validate()?;
+    if request.kind != SharedResourceKind::Instance {
+        return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+    }
+    let host = connector.host.clone();
+    let port = connector.port;
+    let mut reader = ReadSession::new(connector, request.budget.clone());
+    let result = async {
+        let metadata = metadata::read(&mut reader, &host, port).await?;
+        let instance = native::instance::read(&mut reader, metadata.version).await?;
+        let resources = vec![CollectionResource {
+            identity: instance.identity,
+            observed_at: instance.observed_at,
+            collections: vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)],
+        }];
+        request.validate_result(&resources)?;
+        Ok(resources)
+    }
+    .await;
+    if reader.close().await == SourceShutdown::Unconfirmed {
+        return Err(CollectionStop::CancellationUnconfirmed.error());
+    }
+    result
+}
+
+fn snapshot_source(
+    connector: Connector,
+    request: &CollectionRequest,
+    recipe: Recipe,
+) -> Result<Box<dyn TelemetrySource>> {
     let reader = PostgresSnapshotReader {
         host: connector.host.clone(),
         port: connector.port,
@@ -244,6 +311,7 @@ pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Resul
         budget: request.budget.clone(),
         recipe,
         metadata: None,
+        instance: None,
     };
     Ok(Box::new(SnapshotSource::new(reader, request)?))
 }
@@ -254,12 +322,18 @@ struct PostgresSnapshotReader {
     host: String,
     port: u16,
     metadata: Option<Metadata>,
+    instance: Option<SharedResourceIdentity>,
 }
 #[async_trait::async_trait]
 impl SnapshotReader for PostgresSnapshotReader {
     type Row = Row;
     async fn describe(&mut self, request: &CollectionRequest) -> Result<CollectionDescription> {
         let meta = metadata::read(&mut self.io, &self.host, self.port).await?;
+        let instance = if matches!(self.recipe, Recipe::InstanceOperational) {
+            Some(native::instance::read(&mut self.io, meta.version).await?.identity)
+        } else {
+            None
+        };
         // Validate native support and permissions before admitting the statistics statement.
         self.recipe.query(&meta, &request.budget)?;
         if matches!(self.recipe, Recipe::Replication | Recipe::Cleanup) && !meta.full_visibility {
@@ -271,7 +345,7 @@ impl SnapshotReader for PostgresSnapshotReader {
             return Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source")));
         }
         let description = CollectionDescription {
-            target: meta.database.clone().into(),
+            target: instance.clone().map(CollectionTarget::Shared).unwrap_or_else(|| meta.database.clone().into()),
             source: self.recipe.name().into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
@@ -280,6 +354,10 @@ impl SnapshotReader for PostgresSnapshotReader {
                 sources: self.recipe.sources(&meta),
             }),
         };
+        if !description.matches_request(request) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        self.instance = instance;
         self.metadata = Some(meta);
         Ok(description)
     }
@@ -299,13 +377,17 @@ impl SnapshotReader for PostgresSnapshotReader {
     async fn recheck(&mut self, _: &CollectionDescription) -> Result<SnapshotRecheck> {
         let after = metadata::read(&mut self.io, &self.host, self.port).await?;
         let before = self.metadata.as_ref().ok_or_else(native::invalid)?;
+        let same_instance = match &self.instance {
+            Some(before) => native::instance::read(&mut self.io, after.version).await?.identity == *before,
+            None => true,
+        };
         let complete_scope = if matches!(self.recipe, Recipe::Catalog(native::catalog::Kind::Statistics)) {
             native::catalog::statistics_visible(&mut self.io).await?
         } else {
             true
         };
         Ok(SnapshotRecheck {
-            unchanged: before.same_source(&after),
+            unchanged: before.same_source(&after) && same_instance,
             observed_until: after.at,
             scopes: self
                 .recipe

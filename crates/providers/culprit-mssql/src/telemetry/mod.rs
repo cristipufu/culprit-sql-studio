@@ -25,6 +25,7 @@ mod point;
 mod progress;
 mod resource_rows;
 mod resources;
+pub(crate) use resources::discover_resources;
 mod state;
 mod statistics;
 mod tables;
@@ -35,6 +36,15 @@ pub(crate) fn source(
     host: String,
     port: u16,
 ) -> Result<Box<dyn TelemetrySource>> {
+    request.validate()?;
+    if let culprit_core::telemetry::CollectionSubject::Shared { resource } = &request.subject
+        && resource.engine == culprit_core::Engine::Mssql
+        && resource.kind == culprit_core::telemetry::SharedResourceKind::Pool
+        && request.collection() == culprit_core::telemetry::TelemetryCollection::ResourceHistory
+    {
+        return resources::pool_source(pool, request);
+    }
+    request.subject.require_database()?;
     match request.collection() {
         culprit_core::telemetry::TelemetryCollection::Snapshot(
             SnapshotDataset::StatementCounters

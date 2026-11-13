@@ -173,8 +173,45 @@ async fn functional_contract_and_canonical_sets() {
     native_query_semantics(&server, &catalog).await;
     unexpected_members_and_missing_rows(&server, &catalog).await;
     shared_resource_scopes(&server, &catalog).await;
+    pool_history(&server, &catalog).await;
     observed_wait_resources(&server, &catalog).await;
     native_compilation_memory(&server, &catalog).await;
+}
+
+async fn pool_history(server: &Server, catalog: &SchemaCatalog) {
+    let (source, record) = test_support::pool_history();
+    let observation = source.observation.clone();
+    let scenario = Scenario::new(
+        server,
+        Recovery::capture(server.client.destination(), catalog.digest(), source, vec![record], 1_500),
+    )
+    .await;
+    scenario.complete().await;
+    let rows = server
+        .values(
+            format!("SELECT ReplicaId, Metrics FROM {}", server.view("CulpritResourceSamplesV1Rows", false)),
+            server.scope(&scenario.range),
+            &[("ReplicaId", "Nullable(String)"), ("Metrics", "String")],
+        )
+        .await;
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0][0].is_null());
+    let metrics: Value = serde_json::from_str(rows[0][1].as_str().unwrap()).unwrap();
+    assert_eq!(metrics[0]["value"].as_f64(), Some(0.0));
+    assert!(metrics[1]["value"].is_null());
+    assert_eq!(metrics[2]["unit"], "bytes");
+    assert_eq!(metrics[2]["value"].as_f64(), Some(536870912.0));
+    assert_eq!(metrics[3]["describes_subject"], false);
+    let coverage = server
+        .values(
+            "SELECT SourceDescription FROM CulpritPublishedRangesV1 WHERE RangeId={range:String}".into(),
+            BTreeMap::from([("range".into(), scenario.range.manifest().range_id.clone())]),
+            &[("SourceDescription", "String")],
+        )
+        .await;
+    let description: Value = serde_json::from_str(coverage[0][0].as_str().unwrap()).unwrap();
+    assert_eq!(description["observation"], serde_json::to_value(observation).unwrap());
+    assert!(description["observation"]["data"]["nominal_period_ms"].is_null());
 }
 
 async fn native_compilation_memory(server: &Server, catalog: &SchemaCatalog) {

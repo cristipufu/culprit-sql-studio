@@ -25,6 +25,23 @@ impl SourceFactory for AuthenticatedSource<'_> {
     }
 }
 impl Workspace {
+    pub async fn discover_resources(
+        &self,
+        name: &str,
+        request: &culprit_core::telemetry::ResourceDiscoveryRequest,
+    ) -> Result<Vec<culprit_core::telemetry::CollectionResource>> {
+        request.budget.validate()?;
+        let observed = self.connection_service().observed_provider(name).await?;
+        let result = observed.provider().telemetry_resources(request).await.and_then(|resources| {
+            request.validate_result(&resources)?;
+            if resources.iter().any(|resource| resource.identity.engine != observed.provider().engine()) {
+                return Err(culprit_core::telemetry::CollectionStop::InvalidPage.error());
+            }
+            Ok(resources)
+        });
+        observed.finish(result).await
+    }
+
     pub async fn discover_intervals(
         &self,
         name: &str,

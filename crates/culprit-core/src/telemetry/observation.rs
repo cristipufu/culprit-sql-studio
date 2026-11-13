@@ -164,9 +164,32 @@ pub struct SampleHistoryDescription {
     pub available_from: Option<String>,
     pub available_until: Option<String>,
     pub expected_samples: u32,
-    pub nominal_period_ms: u32,
+    /// None when the native source does not promise a sampling period.
+    pub nominal_period_ms: Option<u32>,
 }
 impl SampleHistoryDescription {
+    /// A delayed native head is recoverable; only a proven missing lower bound establishes retention loss.
+    pub fn coverage_stop(&self) -> Option<CollectionStop> {
+        if !self.is_valid() {
+            return Some(CollectionStop::InvalidPage);
+        }
+        if self.covers_request() {
+            return None;
+        }
+        let Ok(from) = DateTime::parse_from_rfc3339(&self.from) else {
+            return Some(CollectionStop::InvalidPage);
+        };
+        if self
+            .available_from
+            .as_deref()
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .is_some_and(|first| first > from)
+        {
+            Some(CollectionStop::RetentionGap)
+        } else {
+            Some(CollectionStop::SourceNotReady)
+        }
+    }
     pub fn covers_request(&self) -> bool {
         let parse = |value: &str| DateTime::parse_from_rfc3339(value).ok();
         match (
@@ -187,11 +210,14 @@ impl SampleHistoryDescription {
             && self.available_from.as_deref().is_none_or(time)
             && self.available_until.as_deref().is_none_or(time)
             && self.available_from.is_some() == self.available_until.is_some()
-            && self.nominal_period_ms > 0
+            && self.nominal_period_ms != Some(0)
+            && DateTime::parse_from_rfc3339(&self.from).ok() < DateTime::parse_from_rfc3339(&self.until).ok()
             && DateTime::parse_from_rfc3339(&self.until).ok() <= DateTime::parse_from_rfc3339(&self.observed_at).ok()
             && match (&self.available_from, &self.available_until) {
                 (Some(from), Some(until)) => {
                     DateTime::parse_from_rfc3339(from).ok() <= DateTime::parse_from_rfc3339(until).ok()
+                        && DateTime::parse_from_rfc3339(until).ok()
+                            <= DateTime::parse_from_rfc3339(&self.observed_at).ok()
                 }
                 _ => self.expected_samples == 0,
             }
@@ -338,7 +364,7 @@ impl CollectionDescription {
         }
     }
     pub fn matches_request(&self, request: &CollectionRequest) -> bool {
-        if self.source.is_empty() || !self.target.is_valid() {
+        if self.source.is_empty() || !self.target.is_valid() || !request.subject.accepts(&self.target) {
             return false;
         }
         if let (SourceObservation::Activity(snapshot), CollectionSelection::Activity { policy }) =

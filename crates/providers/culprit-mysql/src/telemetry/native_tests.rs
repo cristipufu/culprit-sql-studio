@@ -77,6 +77,7 @@ async fn capture(
     dataset: SnapshotDataset,
 ) -> (CollectionDescription, Vec<TelemetryRecord>) {
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset },
         budget: CollectionBudget { page_rows: 2, ..Default::default() },
     };
@@ -166,6 +167,7 @@ async fn every_native_snapshot_preserves_membership_counts_scope_and_native_unit
 
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings },
         budget: CollectionBudget { page_rows: 2, ..Default::default() },
     }
@@ -173,6 +175,7 @@ fn request() -> CollectionRequest {
 
 async fn activity(provider: &crate::MysqlProvider) -> (CollectionDescription, Vec<TelemetryRecord>, ReadWorkMetrics) {
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity {
             policy: ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 1000, ..Default::default() },
         },
@@ -311,6 +314,7 @@ async fn latest_deadlock_buffer_keeps_stable_native_evidence_without_claiming_fu
         .await
         .unwrap();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::DeadlockHistory {
             from: native::text(&bounds[0], "from_time").unwrap(),
             until: native::text(&bounds[0], "until_time").unwrap(),
@@ -372,6 +376,7 @@ fn construction_declares_only_real_support_without_a_runtime_or_database_probe()
     assert_eq!(source.query_count(), 0);
     assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);
     let unsupported = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::PlanCacheSummary },
         ..request()
     };
@@ -445,6 +450,7 @@ async fn disabled_activity_instrumentation_is_unknown_and_never_a_complete_empty
         .await
         .unwrap();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity { policy: Default::default() },
         budget: Default::default(),
     };

@@ -128,6 +128,7 @@ mod paging_tests {
     fn a_paged_descriptor_admits_only_declared_sources_and_cannot_claim_completed_coverage() {
         let before = source();
         let request = CollectionRequest {
+            subject: crate::telemetry::CollectionSubject::Database,
             selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
             budget: CollectionBudget::default(),
         };

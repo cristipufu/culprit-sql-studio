@@ -5,6 +5,7 @@ use crate::{
 };
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::ResourceHistory {
             from: "2020-01-01T06:00:00Z".into(),
             until: "2020-01-01T06:01:00Z".into(),

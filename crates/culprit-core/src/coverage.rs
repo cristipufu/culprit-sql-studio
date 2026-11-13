@@ -95,6 +95,7 @@ pub mod source_id {
     pub const PERFORMANCE_COUNTERS: &str = "performance counters";
     pub const DATABASE_STATS: &str = "database statistics";
     pub const RESOURCES: &str = "resources";
+    pub const POOL_RESOURCES: &str = "pool resources";
     pub const RESOURCE_USE: &str = "resource use";
     pub const CHECKPOINTS: &str = "checkpoints";
     pub const OPEN_TRANSACTIONS: &str = "open transactions";
@@ -188,6 +189,7 @@ pub mod source_id {
         PERFORMANCE_COUNTERS,
         DATABASE_STATS,
         RESOURCES,
+        POOL_RESOURCES,
         RESOURCE_USE,
         CHECKPOINTS,
         OPEN_TRANSACTIONS,

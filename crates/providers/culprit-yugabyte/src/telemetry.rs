@@ -80,6 +80,7 @@ impl Recipe {
 }
 pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
+    request.subject.require_database()?;
     if request.collection() == TelemetryCollection::Activity {
         return activity::source(connector, request);
     }

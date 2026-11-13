@@ -6,6 +6,7 @@ mod restored_activity;
 
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: culprit_core::telemetry::CollectionSelection::QueryHistory {
             from: "2020-01-01T06:00:00Z".into(),
             until: "2020-01-01T07:00:00Z".into(),

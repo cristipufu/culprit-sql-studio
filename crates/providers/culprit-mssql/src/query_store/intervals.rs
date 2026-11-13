@@ -125,6 +125,7 @@ mod tests {
         let from = "2026-11-10T06:00:00.1234567+00:00";
         let until = "2026-11-10T07:00:00.7654321+00:00";
         let request = CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             selection: CollectionSelection::QueryHistory { from: from.into(), until: until.into() },
             budget: CollectionBudget::default(),
         };

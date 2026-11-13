@@ -4,4 +4,8 @@ export type SampleHistoryDescription = { from: string, until: string, observed_a
 /**
  * Retained native timestamp bounds observed before paging. They do not prove continuity between samples.
  */
-available_from: string | null, available_until: string | null, expected_samples: number, nominal_period_ms: number, };
+available_from: string | null, available_until: string | null, expected_samples: number, 
+/**
+ * None when the native source does not promise a sampling period.
+ */
+nominal_period_ms: number | null, };

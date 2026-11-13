@@ -59,6 +59,13 @@ enum Scenario {
     ActivityWrongEdges,
     ActivityUnconfirmed,
     ActivityRestricted,
+    ResourceDiscoveryDuplicate,
+    ResourceDiscoveryWrongKind,
+    ResourceDiscoveryWrongEngine,
+    ResourceDiscoveryMalformed,
+    ResourceDiscoveryOversized,
+    ResourceDiscoveryDenied,
+    ResourceDiscoveryUnconfirmed,
 }
 struct State {
     scenario: Scenario,
@@ -504,6 +511,57 @@ impl TelemetrySource for TestSource {
 struct TestProvider(Arc<State>);
 #[async_trait]
 impl Provider for TestProvider {
+    async fn telemetry_resources(
+        &self,
+        _: &culprit_core::telemetry::ResourceDiscoveryRequest,
+    ) -> Result<Vec<culprit_core::telemetry::CollectionResource>> {
+        use culprit_core::telemetry::*;
+        self.0.calls.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.0.scenario, Scenario::Blocked) {
+            self.0.active.store(true, Ordering::SeqCst);
+            let _guard = ActiveRead(self.0.clone());
+            self.0.entered.notify_one();
+            return std::future::pending().await;
+        }
+        if matches!(self.0.scenario, Scenario::Empty) {
+            return Ok(vec![]);
+        }
+        if matches!(self.0.scenario, Scenario::ResourceDiscoveryDenied) {
+            return Err(Error::new(ErrorCode::PermissionDenied, "fixture discovery permission denied"));
+        }
+        let mut resource = CollectionResource {
+            identity: SharedResourceIdentity {
+                engine: Engine::Postgres,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("native-system"),
+                native: NativeIdentity::new("native-instance"),
+            },
+            observed_at: "2020-01-01T06:02:00Z".into(),
+            collections: vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)],
+        };
+        match self.0.scenario {
+            Scenario::ResourceDiscoveryWrongKind => resource.identity.kind = SharedResourceKind::Pool,
+            Scenario::ResourceDiscoveryWrongEngine => resource.identity.engine = Engine::Mssql,
+            Scenario::ResourceDiscoveryMalformed => resource.identity.native.id.clear(),
+            Scenario::ResourceDiscoveryOversized => {
+                resource.identity.native =
+                    NativeIdentity::new("x".repeat(512)).qualified("native-property", "x".repeat(512));
+            }
+            _ => {}
+        }
+        Ok(if matches!(self.0.scenario, Scenario::ResourceDiscoveryDuplicate) {
+            vec![resource.clone(), resource]
+        } else {
+            vec![resource]
+        })
+    }
+    fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        if matches!(self.0.scenario, Scenario::ResourceDiscoveryUnconfirmed) {
+            culprit_core::telemetry::SourceShutdown::Unconfirmed
+        } else {
+            culprit_core::telemetry::SourceShutdown::Quiescent
+        }
+    }
     fn engine(&self) -> Engine {
         Engine::Postgres
     }
@@ -566,12 +624,103 @@ impl TestDirectory {
 }
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: culprit_core::telemetry::CollectionSelection::QueryHistory {
             from: "2020-01-01T06:00:00Z".into(),
             until: "2020-01-01T07:00:00Z".into(),
         },
         budget: CollectionBudget::default(),
     }
+}
+
+fn resource_discovery_request() -> culprit_core::telemetry::ResourceDiscoveryRequest {
+    culprit_core::telemetry::ResourceDiscoveryRequest {
+        kind: culprit_core::telemetry::SharedResourceKind::Instance,
+        budget: CollectionBudget::default(),
+    }
+}
+
+#[tokio::test]
+async fn resource_discovery_checks_budgets_before_authentication_and_releases_confirmed_ownership() {
+    let directory = TestDirectory::new();
+    let state = State::new(Scenario::Success);
+    let workspace = directory.workspace(state.clone());
+    let mut request = resource_discovery_request();
+    request.budget.max_queries = 0;
+    assert!(workspace.discover_resources("pilot", &request).await.is_err());
+    assert_eq!(state.factories.load(Ordering::SeqCst), 0);
+    assert_eq!(state.calls.load(Ordering::SeqCst), 0);
+    request.budget.max_queries = CollectionBudget::default().max_queries;
+    let resources = workspace.discover_resources("pilot", &request).await.unwrap();
+    assert_eq!(resources.len(), 1);
+    assert_eq!(resources[0].identity.native.id, "native-instance");
+    assert!(!workspace.collection_admission_status().await.unwrap().source_quiescence_required);
+    workspace.discover_resources("pilot", &request).await.unwrap();
+    assert_eq!(state.factories.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn resource_discovery_rejects_invalid_plugin_results_without_mistaking_them_for_native_shutdown_debt() {
+    for scenario in [
+        Scenario::ResourceDiscoveryDuplicate,
+        Scenario::ResourceDiscoveryWrongKind,
+        Scenario::ResourceDiscoveryWrongEngine,
+        Scenario::ResourceDiscoveryMalformed,
+        Scenario::ResourceDiscoveryOversized,
+    ] {
+        let directory = TestDirectory::new();
+        let state = State::new(scenario);
+        let workspace = directory.workspace(state.clone());
+        let mut request = resource_discovery_request();
+        request.budget.page_bytes = 1024;
+        let error = workspace.discover_resources("pilot", &request).await.unwrap_err();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
+        assert!(!workspace.collection_admission_status().await.unwrap().source_quiescence_required);
+        assert_eq!(state.calls.load(Ordering::SeqCst), 1);
+    }
+    let directory = TestDirectory::new();
+    let workspace = directory.workspace(State::new(Scenario::Empty));
+    assert!(workspace.discover_resources("pilot", &resource_discovery_request()).await.unwrap().is_empty());
+    let directory = TestDirectory::new();
+    let workspace = directory.workspace(State::new(Scenario::ResourceDiscoveryDenied));
+    assert_eq!(
+        workspace.discover_resources("pilot", &resource_discovery_request()).await.unwrap_err().code,
+        ErrorCode::PermissionDenied
+    );
+    assert!(!workspace.collection_admission_status().await.unwrap().source_quiescence_required);
+}
+
+#[tokio::test]
+async fn resource_discovery_cannot_claim_success_after_unconfirmed_native_shutdown() {
+    let directory = TestDirectory::new();
+    let state = State::new(Scenario::ResourceDiscoveryUnconfirmed);
+    let workspace = directory.workspace(state.clone());
+    let request = resource_discovery_request();
+    let error = workspace.discover_resources("pilot", &request).await.unwrap_err();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
+    assert!(workspace.collection_admission_status().await.unwrap().source_quiescence_required);
+    assert!(workspace.discover_resources("pilot", &request).await.is_err());
+    assert_eq!(state.factories.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn dropping_resource_discovery_preserves_admission_debt_and_blocks_a_replacement_provider() {
+    let directory = TestDirectory::new();
+    let state = State::new(Scenario::Blocked);
+    let workspace = directory.workspace(state.clone());
+    let request = resource_discovery_request();
+    {
+        let discovery = workspace.discover_resources("pilot", &request);
+        tokio::pin!(discovery);
+        tokio::select! {
+            _ = &mut discovery => panic!("fixture discovery must wait"),
+            result = tokio::time::timeout(std::time::Duration::from_secs(2), state.entered.notified()) => result.unwrap(),
+        }
+    }
+    assert!(!state.active.load(Ordering::SeqCst));
+    assert!(workspace.collection_admission_status().await.unwrap().source_quiescence_required);
+    assert!(workspace.discover_resources("pilot", &request).await.is_err());
+    assert_eq!(state.factories.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -1028,7 +1177,7 @@ fn resource_record(at: &str) -> TelemetryRecord {
     use culprit_core::telemetry::*;
     TelemetryRecord::ResourceSample(ResourceMeasurement {
         at: at.into(),
-        replica_id: "primary".into(),
+        replica_id: Some("primary".into()),
         metrics: vec![ResourceMetricSample {
             key: "cpu".into(),
             scope: culprit_core::MeasurementScope::Database,
@@ -1060,12 +1209,13 @@ fn resource_description(scenario: Scenario) -> CollectionDescription {
             ),
             available_until: Some("2020-01-01T07:05:00Z".into()),
             expected_samples: if matches!(scenario, Scenario::ResourceCountMismatch) { 2 } else { 1 },
-            nominal_period_ms: 15_000,
+            nominal_period_ms: Some(15_000),
         }),
     }
 }
 fn resource_request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: culprit_core::telemetry::CollectionSelection::ResourceHistory {
             from: request().bounds().unwrap().0.to_rfc3339(),
             until: request().bounds().unwrap().1.to_rfc3339(),
@@ -1209,6 +1359,7 @@ fn activity_description(scenario: Scenario, step: usize) -> CollectionDescriptio
 fn activity_request() -> CollectionRequest {
     use culprit_core::telemetry::*;
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
         budget: CollectionBudget::default(),
     }
@@ -1464,6 +1615,7 @@ fn operational_rows(scenario: Scenario) -> Vec<TelemetryRecord> {
 }
 fn operational_request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: culprit_core::telemetry::CollectionSelection::Snapshot {
             dataset: culprit_core::telemetry::SnapshotDataset::Operational,
         },

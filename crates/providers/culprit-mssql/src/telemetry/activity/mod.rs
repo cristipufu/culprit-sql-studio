@@ -77,7 +77,7 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
     policy: &ActivityPolicy,
 ) -> Result<(CollectionDescription, Vec<ActivityObservation>, Vec<BlockingObservation>)> {
     let mut frame = reader.observe().await?;
-    super::description::require_primary(frame.context.writable)?;
+    crate::read::require_primary(frame.context.writable)?;
     let selected = ActivityEvidence::select(&frame.observations(), policy)?;
     let keys: BTreeSet<_> = selected.observations.iter().map(|row| row.key.clone()).collect();
     let details = reader.enrich(&mut frame, &keys, false, MAX_ACTIVITY_SQL_BYTES).await?;

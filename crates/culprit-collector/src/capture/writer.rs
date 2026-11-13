@@ -59,6 +59,7 @@ mod tests {
     async fn stalled_storage_keeps_cancellation_timers_live_and_cannot_write_after_finalization() {
         let directory = tempfile::tempdir().unwrap();
         let request = CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             selection: CollectionSelection::QueryHistory {
                 from: "2020-01-01T06:00:00Z".into(),
                 until: "2020-01-01T07:00:00Z".into(),

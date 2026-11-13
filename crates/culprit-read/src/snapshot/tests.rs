@@ -116,6 +116,7 @@ impl SnapshotReader for Reader {
 }
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
         budget: CollectionBudget { page_rows: 1, max_snapshot_rows: 2, ..Default::default() },
     }

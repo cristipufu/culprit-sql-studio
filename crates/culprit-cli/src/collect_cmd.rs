@@ -10,6 +10,8 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub(crate) enum CollectCommand {
+    #[command(about=culprit_core::t!("collection.cli.resources"))]
+    Resources(ResourcesArgs),
     #[command(about=culprit_core::t!("delivery.cli.schema"))]
     Schema(SchemaArgs),
     #[command(subcommand,about=culprit_core::t!("service.cli.about"))]
@@ -29,6 +31,8 @@ pub(crate) enum CollectCommand {
 #[derive(Args)]
 pub(crate) struct OnceArgs {
     connection: String,
+    #[arg(long,value_name="FILE",help=culprit_core::t!("collection.cli.resource"))]
+    resource: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t=CollectionChoice::QueryHistory, help=culprit_core::t!("collection.cli.collection"))]
     collection: CollectionChoice,
     #[arg(long,requires="until",required_unless_present="collection",required_if_eq_any=[("collection","query-history"),("collection","resource-history"),("collection","deadlock-history")],help=culprit_core::t!("collection.cli.from"))]
@@ -45,6 +49,72 @@ pub(crate) struct OnceArgs {
     tuning: ActivityTuning,
     #[command(flatten)]
     identity: AzureIdentityArgs,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ResourceKindChoice {
+    Instance,
+    Pool,
+    Cluster,
+    Node,
+}
+
+impl From<ResourceKindChoice> for culprit_core::telemetry::SharedResourceKind {
+    fn from(value: ResourceKindChoice) -> Self {
+        match value {
+            ResourceKindChoice::Instance => Self::Instance,
+            ResourceKindChoice::Pool => Self::Pool,
+            ResourceKindChoice::Cluster => Self::Cluster,
+            ResourceKindChoice::Node => Self::Node,
+        }
+    }
+}
+
+#[derive(Args)]
+pub(crate) struct ResourcesArgs {
+    connection: String,
+    #[arg(long,value_enum,help=culprit_core::t!("collection.cli.resource_kind"))]
+    kind: ResourceKindChoice,
+    #[command(flatten)]
+    budget: BudgetArgs,
+    #[command(flatten)]
+    identity: AzureIdentityArgs,
+}
+
+impl ResourcesArgs {
+    async fn run(self, out: &Out) -> Result<u8> {
+        let request =
+            culprit_core::telemetry::ResourceDiscoveryRequest { kind: self.kind.into(), budget: self.budget.budget() };
+        request.budget.validate()?;
+        let workspace = self.identity.configure(Workspace::open()?)?;
+        let resources = workspace.discover_resources(&self.connection, &request).await?;
+        out.value(
+            &serde_json::to_value(resources)
+                .map_err(|_| culprit_core::Error::internal(culprit_core::t!("collection.manifest_failed")))?,
+        );
+        Ok(0)
+    }
+}
+
+fn requested_subject(path: Option<&std::path::Path>) -> Result<culprit_core::telemetry::CollectionSubject> {
+    use culprit_core::telemetry::{CollectionSubject, SharedResourceIdentity};
+    use std::io::Read;
+    const MAX_RESOURCE_IDENTITY_BYTES: u64 = 64 * 1024;
+    let Some(path) = path else { return Ok(CollectionSubject::Database) };
+    let invalid = || culprit_core::Error::invalid(culprit_core::t!("collection.invalid_subject"));
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|_| invalid())?
+        .take(MAX_RESOURCE_IDENTITY_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid())?;
+    if bytes.len() as u64 > MAX_RESOURCE_IDENTITY_BYTES {
+        return Err(invalid());
+    }
+    let resource: SharedResourceIdentity = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    let subject = CollectionSubject::Shared { resource };
+    subject.validate()?;
+    Ok(subject)
 }
 
 #[derive(Args)]
@@ -233,7 +303,11 @@ impl OnceArgs {
                     _ => unreachable!("snapshot datasets were handled above"),
                 }
             };
-        let request = CollectionRequest { selection, budget: self.budget.budget() };
+        let request = CollectionRequest {
+            subject: requested_subject(self.resource.as_deref())?,
+            selection,
+            budget: self.budget.budget(),
+        };
         request.validate()?;
         Ok(request)
     }
@@ -241,6 +315,7 @@ impl OnceArgs {
 
 pub(crate) fn run(command: CollectCommand, out: &Out) -> crate::CommandTask<'_> {
     match command {
+        CollectCommand::Resources(args) => crate::command_task(|| args.run(out)),
         CollectCommand::Schema(args) => crate::command_task(|| async { schema(args, out) }),
         CollectCommand::Service(command) => crate::command_task(|| crate::service_cmd::run(command, out)),
         CollectCommand::Outbox(command) => crate::command_task(|| crate::outbox_cmd::run(command, out)),
@@ -259,8 +334,8 @@ pub(crate) fn run(command: CollectCommand, out: &Out) -> crate::CommandTask<'_> 
     }
 }
 async fn once(args: OnceArgs, out: &Out) -> Result<u8> {
-    let ws = args.identity.configure(Workspace::open()?)?;
     let request = args.request()?;
+    let ws = args.identity.configure(Workspace::open()?)?;
     let cancellation = CollectionCancellation::default();
     let directory = args
         .output
@@ -342,6 +417,52 @@ pub(crate) fn schema(args: SchemaArgs, out: &Out) -> Result<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resource_discovery_and_capture_require_explicit_bounded_native_identity() {
+        use clap::Parser;
+        use culprit_core::telemetry::*;
+        assert!(crate::Cli::try_parse_from(["culprit", "collect", "resources", "fixture"]).is_err());
+        let cli = crate::Cli::try_parse_from(["culprit", "collect", "resources", "fixture", "--kind", "pool"]).unwrap();
+        let crate::Command::Collect(super::CollectCommand::Resources(args)) = cli.command else { panic!() };
+        assert!(matches!(args.kind, super::ResourceKindChoice::Pool));
+        assert_eq!(super::requested_subject(None).unwrap(), CollectionSubject::Database);
+        let directory = std::env::temp_dir().join(format!("culprit-resource-identity-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("resource.json");
+        let identity = SharedResourceIdentity {
+            engine: culprit_core::Engine::Mssql,
+            kind: SharedResourceKind::Pool,
+            namespace: NativeIdentity::new("fixture-server"),
+            native: NativeIdentity::new("fixture-pool"),
+        };
+        std::fs::write(&path, serde_json::to_vec(&identity).unwrap()).unwrap();
+        assert_eq!(super::requested_subject(Some(&path)).unwrap(), CollectionSubject::Shared { resource: identity });
+        let args = [
+            "culprit",
+            "collect",
+            "once",
+            "fixture",
+            "--collection",
+            "resource-history",
+            "--from",
+            "2020-01-01T00:00:00Z",
+            "--until",
+            "2020-01-01T00:01:00Z",
+            "--output",
+            "capture",
+            "--resource",
+        ];
+        let cli = crate::Cli::try_parse_from(args.into_iter().chain([path.to_str().unwrap()])).unwrap();
+        let crate::Command::Collect(super::CollectCommand::Once(args)) = cli.command else { panic!() };
+        assert!(matches!(args.request().unwrap().subject, CollectionSubject::Shared { .. }));
+        for invalid in [vec![b'x'; 64 * 1024 + 1], b"{\"secret-canary\":\"must-not-appear-in-errors\"}".to_vec()] {
+            std::fs::write(&path, invalid).unwrap();
+            let error = super::requested_subject(Some(&path)).unwrap_err();
+            assert!(!error.to_string().contains("secret-canary"));
+            assert!(!error.to_string().contains("must-not-appear"));
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
     #[test]
     fn point_collections_choose_their_dataset_and_reject_historical_windows() {
         use clap::Parser;

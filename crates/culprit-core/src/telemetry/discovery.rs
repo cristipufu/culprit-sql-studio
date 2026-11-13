@@ -93,6 +93,7 @@ mod tests {
         discovery.from = "2026-11-03T08:00:00Z".into();
         discovery.validate().unwrap();
         let capture = CollectionRequest {
+            subject: crate::telemetry::CollectionSubject::Database,
             selection: CollectionSelection::QueryHistory {
                 from: discovery.from.clone(),
                 until: discovery.until.clone(),

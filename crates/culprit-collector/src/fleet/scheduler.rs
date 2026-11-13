@@ -7,7 +7,9 @@ const MAX_FAILURE_DELAY: Duration = Duration::from_secs(900);
 
 #[derive(Clone)]
 pub(super) struct Job {
+    pub target: String,
     pub connection: String,
+    pub subject: CollectionSubject,
     pub resource: String,
     pub schedule: FleetSchedule,
     pub key: String,
@@ -62,17 +64,19 @@ impl Scheduler {
                     };
                     for lane in lanes {
                         let key = digest(
-                            &serde_json::to_vec(&(&target.connection, &schedule.id, *lane == HistoryLane::Backfill))
+                            &serde_json::to_vec(&(&target.id, &schedule.id, *lane == HistoryLane::Backfill))
                                 .map_err(|_| state_failed())?,
                         );
                         let job = Job {
+                            target: target.id.clone(),
                             connection: target.connection.clone(),
+                            subject: target.subject.clone(),
                             resource: target.admission_group.clone(),
                             schedule: schedule.clone(),
                             key,
                             lane: *lane,
                             family: digest(
-                                &serde_json::to_vec(&(&target.connection, &schedule.id)).map_err(|_| state_failed())?,
+                                &serde_json::to_vec(&(&target.id, &schedule.id)).map_err(|_| state_failed())?,
                             ),
                         };
                         let due = jitter(&job, 0);

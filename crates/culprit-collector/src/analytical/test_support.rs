@@ -24,7 +24,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
             available_from: Some("2020-01-01T05:00:00Z".into()),
             available_until: Some("2020-01-01T06:01:30Z".into()),
             expected_samples: 1,
-            nominal_period_ms: 15000,
+            nominal_period_ms: Some(15000),
         }),
     };
     let capture = CaptureIdentity {
@@ -33,7 +33,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
     };
     let record = TelemetryRecord::ResourceSample(ResourceMeasurement {
         at: "2020-01-01T06:00:15Z".into(),
-        replica_id: "primary".into(),
+        replica_id: Some("primary".into()),
         metrics: vec![ResourceMetricSample {
             key: "cpu".into(),
             unit: ResourceUnit::Percent,
@@ -87,6 +87,38 @@ pub fn shared_resource(kind: SharedResourceKind, namespace: &str) -> (Collection
     sample.metrics[0].scope = manifest.source.target.measurement_scope();
     sample.metrics[0].limit_basis = ResourceLimitBasis::Absolute;
     (manifest.source, row.record)
+}
+
+/// Pool history supplies no replica or promised period; host context is broader than the measured pool.
+pub fn pool_history() -> (CollectionDescription, TelemetryRecord) {
+    let (mut source, mut record) = shared_resource(SharedResourceKind::Pool, "fixture-server");
+    let CollectionTarget::Shared(resource) = &mut source.target else { unreachable!() };
+    resource.engine = culprit_core::Engine::Mssql;
+    source.source = culprit_core::source_id::POOL_RESOURCES.into();
+    let SourceObservation::RetainedSamples(history) = &mut source.observation else { unreachable!() };
+    history.nominal_period_ms = None;
+    let TelemetryRecord::ResourceSample(sample) = &mut record else { unreachable!() };
+    sample.replica_id = None;
+    let cpu = &mut sample.metrics[0];
+    cpu.period_ms = None;
+    cpu.limit_basis = ResourceLimitBasis::PoolLimit;
+    cpu.value = Some(0.0);
+    let mut io = cpu.clone();
+    io.key = "data_io".into();
+    io.value = None;
+    let mut storage = cpu.clone();
+    storage.key = "used_storage".into();
+    storage.statistic = ResourceStatistic::Point;
+    storage.unit = ResourceUnit::Bytes;
+    storage.limit_basis = ResourceLimitBasis::Absolute;
+    storage.value = Some(512.0 * 1024.0 * 1024.0);
+    let mut host = cpu.clone();
+    host.key = "instance_memory".into();
+    host.scope = culprit_core::MeasurementScope::Server;
+    host.limit_basis = ResourceLimitBasis::InstanceLimit;
+    host.value = Some(65.0);
+    sample.metrics.extend([io, storage, host]);
+    (source, record)
 }
 
 use crate::delivery::{object_store::transport::*, recovery::*};

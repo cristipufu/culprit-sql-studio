@@ -6,4 +6,4 @@ import type { TelemetryRange } from "./TelemetryRange";
 /**
  * Bounds identify work whose coverage is missing or incomplete, not a fabricated count of lost native events.
  */
-export type FleetGap = { id: string, connection: string, schedule: string, range: TelemetryRange, reason: FleetGapReason, recorded_at: string, capture: CaptureIdentity | null, };
+export type FleetGap = { id: string, target: string, connection: string, schedule: string, range: TelemetryRange, reason: FleetGapReason, recorded_at: string, capture: CaptureIdentity | null, };

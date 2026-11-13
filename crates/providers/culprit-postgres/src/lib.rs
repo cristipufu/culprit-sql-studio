@@ -259,6 +259,13 @@ impl Provider for PostgresProvider {
         telemetry::source(self.connector.clone(), request)
     }
 
+    async fn telemetry_resources(
+        &self,
+        request: &culprit_core::telemetry::ResourceDiscoveryRequest,
+    ) -> Result<Vec<culprit_core::telemetry::CollectionResource>> {
+        telemetry::resources(self.connector.clone(), request).await
+    }
+
     fn collector_version(&self) -> culprit_core::ComponentVersion {
         component_version()
     }

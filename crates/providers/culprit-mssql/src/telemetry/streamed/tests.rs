@@ -63,6 +63,7 @@ fn pressure() -> Rec {
 }
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementGrants },
         budget: CollectionBudget { page_rows: 1, max_snapshot_rows: 100_000, ..Default::default() },
     }
@@ -137,7 +138,11 @@ fn catalog_source<D: SnapshotRecipe>(
     };
     StreamedSnapshot::with_io(
         io,
-        &CollectionRequest { selection: CollectionSelection::Snapshot { dataset: D::DATASET }, budget },
+        &CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
+            selection: CollectionSelection::Snapshot { dataset: D::DATASET },
+            budget,
+        },
         "fixture.invalid".into(),
         1433,
         recipe,
@@ -250,6 +255,7 @@ async fn a_different_physical_database_cannot_certify_even_a_drained_stream() {
 async fn index_recipe_uses_the_shared_stream_owner_and_final_coverage() {
     use crate::telemetry::index_operations::IndexOperations;
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::IndexOperations },
         budget: Default::default(),
     };

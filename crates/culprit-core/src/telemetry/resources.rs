@@ -7,6 +7,7 @@ use super::*;
 pub enum ResourceUnit {
     Percent,
     Cores,
+    Bytes,
     DatabaseTransactionUnits,
 }
 
@@ -67,8 +68,8 @@ impl ResourceMetricSample {
 pub struct ResourceMeasurement {
     /// Native UTC timestamp. The collection window selects samples without prorating their values.
     pub at: String,
-    /// Native replica identity in the source's namespace; no engine-specific numeric meaning in the collector.
-    pub replica_id: String,
+    /// Native replica identity when supplied by the source. A pool sample does not invent a replica.
+    pub replica_id: Option<String>,
     pub metrics: Vec<ResourceMetricSample>,
 }
 impl ResourceMeasurement {
@@ -76,9 +77,10 @@ impl ResourceMeasurement {
         let mut keys = std::collections::HashSet::new();
         self.at.len() <= 64
             && DateTime::parse_from_rfc3339(&self.at).is_ok()
-            && !self.replica_id.is_empty()
-            && self.replica_id.len() <= 128
-            && self.replica_id.chars().all(|ch| !ch.is_control())
+            && self
+                .replica_id
+                .as_deref()
+                .is_none_or(|id| !id.is_empty() && id.len() <= 128 && id.chars().all(|ch| !ch.is_control()))
             && (1..=64).contains(&self.metrics.len())
             && self
                 .metrics
@@ -93,7 +95,7 @@ mod tests {
     fn sample() -> ResourceMeasurement {
         ResourceMeasurement {
             at: "2020-01-01T06:00:15Z".into(),
-            replica_id: "primary".into(),
+            replica_id: Some("primary".into()),
             metrics: vec![ResourceMetricSample {
                 key: "cpu".into(),
                 scope: crate::MeasurementScope::Database,
@@ -118,7 +120,7 @@ mod tests {
                 available_from: Some("2020-01-01T05:55:00Z".into()),
                 available_until: Some("2020-01-01T06:01:30Z".into()),
                 expected_samples: 1,
-                nominal_period_ms: 15_000,
+                nominal_period_ms: Some(15_000),
             }),
         }
     }
@@ -143,6 +145,40 @@ mod tests {
         let mut row = sample();
         row.at = "2020-01-01T06:01:00Z".into();
         assert!(ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(row)).is_err());
+    }
+
+    #[test]
+    fn absent_replica_and_unpromised_period_remain_unknown_instead_of_a_primary_or_default_interval() {
+        let mut source = source();
+        let SourceObservation::RetainedSamples(history) = &mut source.observation else { unreachable!() };
+        history.nominal_period_ms = None;
+        let capture = CaptureIdentity { observation_id: "unknown-replica".into(), revision: None };
+        let mut record = sample();
+        record.replica_id = None;
+        assert!(record.is_valid());
+        let absent = ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(record.clone())).unwrap();
+        record.replica_id = Some("0".into());
+        let primary = ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(record.clone())).unwrap();
+        assert_ne!(absent.record_id, primary.record_id);
+        record.replica_id = Some(String::new());
+        assert!(!record.is_valid());
+    }
+
+    #[test]
+    fn native_sample_availability_distinguishes_delayed_head_from_proven_lost_history() {
+        let SourceObservation::RetainedSamples(mut history) = source().observation else { unreachable!() };
+        history.nominal_period_ms = None;
+        assert_eq!(history.coverage_stop(), None);
+        history.available_until = Some("2020-01-01T06:00:30Z".into());
+        assert_eq!(history.coverage_stop(), Some(CollectionStop::SourceNotReady));
+        history.available_from = Some("2020-01-01T06:00:15Z".into());
+        assert_eq!(history.coverage_stop(), Some(CollectionStop::RetentionGap));
+        history.available_from = None;
+        history.available_until = None;
+        history.expected_samples = 0;
+        assert_eq!(history.coverage_stop(), Some(CollectionStop::SourceNotReady));
+        history.nominal_period_ms = Some(0);
+        assert_eq!(history.coverage_stop(), Some(CollectionStop::InvalidPage));
     }
     #[test]
     fn resources_distinguish_shared_scope_and_unknown_values_and_reject_invalid_metrics() {

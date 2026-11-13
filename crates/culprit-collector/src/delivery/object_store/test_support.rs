@@ -98,7 +98,7 @@ fn empty_range(contract: crate::delivery::contract::Contract, epoch: u64) -> cra
             available_from: Some("2020-01-01T05:00:00Z".into()),
             available_until: Some("2020-01-01T06:01:30Z".into()),
             expected_samples: 1,
-            nominal_period_ms: 15000,
+            nominal_period_ms: Some(15000),
         }),
     };
     let batches = source

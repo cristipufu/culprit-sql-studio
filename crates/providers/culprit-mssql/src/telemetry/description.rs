@@ -78,17 +78,10 @@ pub(super) async fn identity<R: NativeRead>(
         return Err(malformed());
     }
     let row = &rows[0];
-    require_primary(crate::read::database_writable(row)?)?;
+    crate::read::require_primary(crate::read::database_writable(row)?)?;
     let mut database = DatabaseIdentity::server(Engine::Mssql, &text(row, "database_name")?, host, port, None);
     database.incarnation = Some(text(row, "incarnation")?);
     Ok((database, text(row, "physical_incarnation")?))
-}
-pub(crate) fn require_primary(writable: Option<bool>) -> Result<()> {
-    if writable == Some(true) {
-        Ok(())
-    } else {
-        Err(Error::new(ErrorCode::Unsupported, t!("collection.azure_sql_primary_only")))
-    }
 }
 
 async fn replicas<R: NativeRead>(session: &mut R) -> Result<Vec<String>> {

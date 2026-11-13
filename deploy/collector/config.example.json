@@ -7,7 +7,9 @@
   "inventory": {
     "targets": [
       {
+        "id": "pilot-database",
         "connection": "pilot",
+        "subject": { "kind": "database" },
         "shard": "pilot",
         "admission_group": "REPLACE_PHYSICAL_RESOURCE_GROUP",
         "schedules": [

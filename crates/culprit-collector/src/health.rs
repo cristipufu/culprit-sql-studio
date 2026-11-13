@@ -33,6 +33,7 @@ struct State {
 #[derive(Clone)]
 struct Schedule {
     id: String,
+    connection: String,
     maximum_silence: Duration,
     last_attempt: Option<Instant>,
     last_complete: Option<Instant>,
@@ -40,6 +41,28 @@ struct Schedule {
     attempts: u64,
     complete: u64,
     incomplete: u64,
+}
+impl Schedule {
+    fn record(&mut self, status: &CollectionStatus, now: Instant) {
+        self.last_attempt = Some(now);
+        self.attempts = self.attempts.saturating_add(1);
+        match status {
+            CollectionStatus::Complete => {
+                self.complete = self.complete.saturating_add(1);
+                self.last_complete = Some(now);
+                self.last_failed = false;
+            }
+            CollectionStatus::Incomplete(stopped) => {
+                self.incomplete = self.incomplete.saturating_add(1);
+                if *stopped != CollectionStop::SourceNotReady {
+                    self.last_failed = true;
+                }
+            }
+        }
+    }
+    fn overdue(&self, now: Instant, started: Instant) -> bool {
+        now.duration_since(self.last_complete.unwrap_or(started)) > self.maximum_silence
+    }
 }
 #[derive(Clone)]
 struct OutboxHealth {
@@ -62,7 +85,7 @@ impl CollectorHealth {
         let mut schedules = BTreeMap::new();
         for target in inventory.targets.iter().filter(|t| t.shard == shard) {
             for schedule in &target.schedules {
-                let key = (target.connection.clone(), schedule.id.clone());
+                let key = (target.id.clone(), schedule.id.clone());
                 let id = digest(&serde_json::to_vec(&key).map_err(|_| DeliveryProblem::Integrity.error())?);
                 let milliseconds = 2 * u64::from(schedule.every_seconds) * 1000
                     + u64::from(schedule.jitter_seconds) * 1000
@@ -71,6 +94,7 @@ impl CollectorHealth {
                     key,
                     Schedule {
                         id,
+                        connection: target.connection.clone(),
                         maximum_silence: Duration::from_millis(milliseconds),
                         last_attempt: None,
                         last_complete: None,
@@ -108,18 +132,13 @@ impl CollectorHealth {
     }
     pub fn collection(&self, event: &FleetCollectionEvent) -> Result<()> {
         self.with(|state| {
-            let Some(schedule) = state.schedules.get_mut(&(event.connection.clone(), event.schedule.clone())) else {
+            let Some(schedule) = state.schedules.get_mut(&(event.target.clone(), event.schedule.clone())) else {
                 return;
             };
-            schedule.last_attempt = Some(Instant::now());
-            schedule.attempts = schedule.attempts.saturating_add(1);
-            schedule.last_failed = event.status != CollectionStatus::Complete;
-            if schedule.last_failed {
-                schedule.incomplete = schedule.incomplete.saturating_add(1);
-            } else {
-                schedule.complete = schedule.complete.saturating_add(1);
-                schedule.last_complete = schedule.last_attempt;
+            if schedule.connection != event.connection {
+                return;
             }
+            schedule.record(&event.status, Instant::now());
         })
     }
     pub fn delivery(&self, result: &Result<DeliveryEntry>) -> Result<()> {
@@ -166,8 +185,7 @@ impl CollectorHealth {
         writeln!(body, "culprit_collector_uptime_seconds {}", now.duration_since(state.started).as_secs())
             .map_err(metric_error)?;
         for schedule in state.schedules.values() {
-            let overdue = state.source_enabled
-                && now.duration_since(schedule.last_attempt.unwrap_or(state.started)) > schedule.maximum_silence;
+            let overdue = state.source_enabled && schedule.overdue(now, state.started);
             for (name, count) in [
                 ("attempts_total", schedule.attempts),
                 ("completed_operations_total", schedule.complete),
@@ -245,10 +263,10 @@ impl State {
                 outbox.unconfirmed_sources == 0 && now.duration_since(outbox.updated_at) <= MAX_STATUS_AGE
             })
             && (!self.source_enabled
-                || self.schedules.values().all(|schedule| {
-                    !schedule.last_failed
-                        && now.duration_since(schedule.last_attempt.unwrap_or(self.started)) <= schedule.maximum_silence
-                }))
+                || self
+                    .schedules
+                    .values()
+                    .all(|schedule| !schedule.last_failed && !schedule.overdue(now, self.started)))
     }
 }
 fn metric_error(_: std::io::Error) -> culprit_core::Error {

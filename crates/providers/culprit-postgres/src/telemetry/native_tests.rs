@@ -24,6 +24,97 @@ impl SourceFactory for Factory {
         self.0.telemetry_source(request)
     }
 }
+
+#[tokio::test]
+#[ignore = "requires the owned loopback PostgreSQL provider fixture"]
+async fn native_instance_discovery_and_capture_share_identity_across_database_routes() {
+    let specification = spec();
+    let provider = crate::PostgresProvider::new(&specification).unwrap();
+    let discovery =
+        ResourceDiscoveryRequest { kind: SharedResourceKind::Instance, budget: CollectionBudget::default() };
+    let first = provider.telemetry_resources(&discovery).await.unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].collections, vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)]);
+    let mut peer = specification.clone();
+    peer.database = Some("postgres".into());
+    let peer = crate::PostgresProvider::new(&peer).unwrap();
+    let second = peer.telemetry_resources(&discovery).await.unwrap();
+    assert_eq!(first[0].identity, second[0].identity);
+    let resource = first[0].identity.clone();
+    let request = CollectionRequest {
+        subject: CollectionSubject::Shared { resource: resource.clone() },
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
+        budget: CollectionBudget::default(),
+    };
+    let factory = Factory(provider);
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("instance");
+    let manifest =
+        collect_once(&SourceGate::default(), &factory, request.clone(), &output, &CollectionCancellation::default())
+            .await
+            .unwrap();
+    assert_eq!(manifest.status, CollectionStatus::Complete);
+    assert!(
+        manifest
+            .description
+            .as_ref()
+            .is_some_and(|description| description.target == CollectionTarget::Shared(resource.clone()))
+    );
+    let file = &manifest.files[0];
+    let records = std::fs::read_to_string(output.join(&file.file))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<ExportedRecord>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert!(!records.is_empty());
+    for record in records {
+        let TelemetryRecord::Operational(sample) = record.record else { panic!() };
+        let OperationalFact::CounterSet(counters) = sample.fact else { panic!() };
+        assert_eq!(counters.scope, culprit_core::MeasurementScope::Server);
+        assert!(counters.counters.iter().all(|counter| counter.scope == culprit_core::MeasurementScope::Server));
+        assert!(!counters.identity.qualifiers.contains_key("dbid"));
+        assert!(
+            !["pg_stat_database", "pg_database", "pg_stat_database_conflicts", "pg_stat_subscription_stats"]
+                .contains(&counters.identity.id.as_str())
+        );
+    }
+    let mut wrong = request;
+    let CollectionSubject::Shared { resource } = &mut wrong.subject else { panic!() };
+    resource.native = NativeIdentity::new("another-instance");
+    wrong.budget.max_queries = 3; // Session setup, route metadata and native instance identity; no statistics query.
+    let failed = collect_once(
+        &SourceGate::default(),
+        &factory,
+        wrong,
+        &directory.path().join("wrong-instance"),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(failed.status, CollectionStatus::Incomplete(CollectionStop::SourceChanged));
+    assert_eq!(failed.source_queries, 3);
+    assert_eq!(failed.files.iter().map(|file| file.rows).sum::<u32>(), 0);
+
+    let mut limited_specification = specification;
+    limited_specification.user = Some(std::env::var("CULPRIT_SMOKE_LIMITED_USER").unwrap());
+    limited_specification.password = Some(std::env::var("CULPRIT_SMOKE_LIMITED_PASSWORD").unwrap());
+    let limited = crate::PostgresProvider::new(&limited_specification).unwrap();
+    let visible = limited.telemetry_resources(&discovery).await.unwrap();
+    assert_eq!(
+        visible[0].identity, first[0].identity,
+        "native identity does not require granting an administrator role"
+    );
+    let admin = factory.0.connector.connect_unconfigured().await.unwrap().client;
+    admin.batch_execute("REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system() FROM PUBLIC").await.unwrap();
+    let denied = limited.telemetry_resources(&discovery).await;
+    admin.batch_execute("GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system() TO PUBLIC").await.unwrap();
+    assert_eq!(denied.err().unwrap().code, ErrorCode::PermissionDenied);
+    assert_eq!(
+        limited.source_shutdown(),
+        SourceShutdown::Quiescent,
+        "permission failure must finish its native read before returning"
+    );
+}
 #[tokio::test]
 #[ignore = "requires the owned loopback PostgreSQL provider fixture"]
 async fn native_streamed_statements_definitions_and_health_pass_through_common_capture() {
@@ -96,6 +187,7 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
             &SourceGate::default(),
             &Factory(crate::PostgresProvider::new(&spec()).unwrap()),
             CollectionRequest {
+                subject: culprit_core::telemetry::CollectionSubject::Database,
                 selection: CollectionSelection::Snapshot { dataset },
                 budget: CollectionBudget {
                     page_rows: 2,
@@ -150,6 +242,15 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
                     }
                     OperationalFact::CounterSet(set) => {
                         assert!(!set.counters.is_empty());
+                        if dataset == SnapshotDataset::Operational {
+                            assert_eq!(set.scope, culprit_core::MeasurementScope::Database);
+                            assert!(
+                                set.counters
+                                    .iter()
+                                    .all(|counter| counter.scope == culprit_core::MeasurementScope::Database)
+                            );
+                            assert!(set.identity.qualifiers.contains_key("dbid"));
+                        }
                     }
                     _ => panic!("wrong PostgreSQL native fact"),
                 },
@@ -194,6 +295,7 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
     }
     horizon.batch_execute("ROLLBACK").await.unwrap();
     let unsupported = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::QueryHistory {
             from: "2020-01-01T00:00:00Z".into(),
             until: "2020-01-01T01:00:00Z".into(),
@@ -242,6 +344,7 @@ async fn native_activity_shares_live_facts_and_only_reads_locks_for_persistent_w
     }
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity {
             policy: ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 1000, update_every_ms: 60000 },
         },

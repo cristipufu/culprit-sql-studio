@@ -80,6 +80,7 @@ pub(super) async fn activity_with_baseline(
     before: &[ActivityIncidentState],
 ) -> CollectionManifest {
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
         budget: CollectionBudget::default(),
     };
@@ -145,6 +146,7 @@ async fn latest_activity_checkpoint_stays_local_until_its_successor_is_sealed() 
     assert!(delivery.evict(&committed).await.unwrap());
     assert_eq!(outbox.status(50, None).await.unwrap().captures, 1);
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
         budget: CollectionBudget::default(),
     };

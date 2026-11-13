@@ -24,6 +24,7 @@ impl Workspace {
             }
             summary.attempts = summary.attempts.checked_add(1).ok_or_else(|| CollectionStop::QueryLimit.error())?;
             let request = CollectionRequest {
+                subject: culprit_core::telemetry::CollectionSubject::Database,
                 selection: CollectionSelection::Activity { policy: options.policy.clone() },
                 budget: options.budget.clone(),
             };

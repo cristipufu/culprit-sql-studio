@@ -25,8 +25,35 @@ pub(crate) fn sources(meta: &Metadata) -> Vec<&'static str> {
     }
     sources
 }
-pub(crate) fn query(meta: &Metadata, limit: usize) -> String {
-    let branches=sources(meta).iter().map(|name| {
+
+#[derive(Clone, Copy)]
+pub(crate) enum Selection {
+    Database,
+    Instance,
+}
+impl Selection {
+    fn includes(self, source: &str) -> bool {
+        match self {
+            Self::Database => source_scope(source) == MeasurementScope::Database,
+            Self::Instance => source_scope(source) == MeasurementScope::Server,
+        }
+    }
+}
+pub(crate) fn selected_sources(meta: &Metadata, selection: Selection) -> Vec<&'static str> {
+    sources(meta).into_iter().filter(|source| selection.includes(source)).collect()
+}
+fn source_scope(source: &str) -> MeasurementScope {
+    if matches!(
+        source,
+        "pg_stat_database" | "pg_stat_database_conflicts" | "pg_database" | "pg_stat_subscription_stats"
+    ) {
+        MeasurementScope::Database
+    } else {
+        MeasurementScope::Server
+    }
+}
+pub(crate) fn selected_query(meta: &Metadata, limit: usize, selection: Selection) -> String {
+    let branches=selected_sources(meta, selection).iter().map(|name| {
         let values=if *name=="pg_database" {
             "pg_catalog.jsonb_build_object('datname',s.datname,'xid_age',pg_catalog.age(s.datfrozenxid),'mxid_age',pg_catalog.mxid_age(s.datminmxid))".to_owned()
         } else {"pg_catalog.to_jsonb(s)".to_owned()};
@@ -41,23 +68,14 @@ pub(crate) fn query(meta: &Metadata, limit: usize) -> String {
     }).collect::<Vec<_>>();
     format!("SELECT * FROM ({}) native_health LIMIT {limit}", branches.join(" UNION ALL "))
 }
-pub(crate) fn decode(row: &Row, meta: &Metadata) -> Result<TelemetryRecord> {
+pub(crate) fn decode(row: &Row, meta: &Metadata, selection: Selection) -> Result<TelemetryRecord> {
     let source = text(row, "native_source")?;
-    if !sources(meta).contains(&source.as_str()) {
+    if !sources(meta).contains(&source.as_str()) || !selection.includes(&source) {
         return Err(invalid());
     }
     let values: Value = serde_json::from_str(&text(row, "native_values")?).map_err(|_| invalid())?;
-    if !values.is_object() {
-        return Err(invalid());
-    }
-    let scope = if matches!(
-        source.as_str(),
-        "pg_stat_database" | "pg_stat_database_conflicts" | "pg_database" | "pg_stat_subscription_stats"
-    ) {
-        MeasurementScope::Database
-    } else {
-        MeasurementScope::Server
-    };
+    let fields = values.as_object().ok_or_else(invalid)?;
+    let scope = source_scope(&source);
     let reset = values
         .get("stats_reset")
         .and_then(Value::as_str)
@@ -92,7 +110,7 @@ pub(crate) fn decode(row: &Row, meta: &Metadata) -> Result<TelemetryRecord> {
         identity = identity.qualified("subid", id.to_string());
     }
     let mut counters = vec![];
-    for (name, value) in values.as_object().unwrap() {
+    for (name, value) in fields {
         let Some((mut unit, nature)) = spec(&source, name) else { continue };
         if matches!(
             name.as_str(),
@@ -139,6 +157,9 @@ pub(crate) fn decode(row: &Row, meta: &Metadata) -> Result<TelemetryRecord> {
     }
     Ok(TelemetryRecord::Operational(observation))
 }
+
+#[cfg(test)]
+mod tests;
 fn spec(source: &str, name: &str) -> Option<(CounterUnit, CounterNature)> {
     use CounterNature::{Cumulative, Gauge};
     use CounterUnit::{Bytes, Count, Milliseconds};

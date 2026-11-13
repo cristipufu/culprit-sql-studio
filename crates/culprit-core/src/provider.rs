@@ -82,6 +82,15 @@ pub trait Provider: Send + Sync {
         Err(Error::new(ErrorCode::Unsupported, crate::t!("collection.unsupported")))
     }
 
+    /// Resolve native shared-resource identities and supported collection routes using bounded metadata reads.
+    /// Permission failures and unsupported kinds are explicit; connection aliases never establish native identity.
+    async fn telemetry_resources(
+        &self,
+        _request: &crate::telemetry::ResourceDiscoveryRequest,
+    ) -> Result<Vec<crate::telemetry::CollectionResource>> {
+        Err(Error::new(ErrorCode::Unsupported, crate::t!("collection.unsupported")))
+    }
+
     /// The collector that actually supplied this snapshot. Runtime wrappers need not claim a builtin's version.
     fn collector_version(&self) -> crate::ComponentVersion {
         crate::ComponentVersion::unknown("external provider")

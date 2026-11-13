@@ -106,6 +106,11 @@ pub const RESOURCES: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.resources"),
     delivers: &[Capability::ResourceUsage],
 };
+pub const POOL_RESOURCES: Source = Source {
+    name: source_id::POOL_RESOURCES,
+    reads: culprit_core::key!("provider.mssql.source.pool_resources"),
+    delivers: &[],
+};
 /// Heaps' forwarded fetches, for the index advisor.
 pub const FORWARDED_FETCHES: Source = Source {
     name: source_id::FORWARDED_FETCHES,
@@ -352,6 +357,7 @@ pub const ALL: &[Source] = &[
     MISSING_INDEXES,
     WAITS,
     RESOURCES,
+    POOL_RESOURCES,
     FORWARDED_FETCHES,
     QUERY_FAMILIES,
     PLAN_CACHE_USE,

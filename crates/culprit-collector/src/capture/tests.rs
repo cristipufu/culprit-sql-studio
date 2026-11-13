@@ -57,6 +57,7 @@ impl TelemetrySource for Source {
 async fn cancellation_closes_native_work_before_waiting_for_stalled_artifact_io() {
     let directory = tempfile::tempdir().unwrap();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
         budget: CollectionBudget::default(),
     };

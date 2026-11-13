@@ -37,6 +37,7 @@ pub(super) async fn step(
     checkpoint: &mut Checkpoint,
     policy: Policy,
 ) -> Result<WorkResult> {
+    job.subject.require_database()?;
     if checkpoint.history.is_none() {
         checkpoint.history = Some(Scan {
             request: IntervalDiscoveryRequest {
@@ -80,6 +81,7 @@ pub(super) async fn step(
         return Ok(metadata_result(job, FleetWork::SkipCommitted, more));
     }
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::QueryHistory { from: interval.from.clone(), until: interval.until.clone() },
         budget: job.schedule.budget.clone(),
     };
@@ -182,6 +184,7 @@ fn advance(checkpoint: &mut Checkpoint) -> Result<bool> {
 fn metadata_result(job: &Job, work: FleetWork, more: bool) -> WorkResult {
     WorkResult {
         event: FleetCollectionEvent {
+            target: job.target.clone(),
             connection: job.connection.clone(),
             schedule: job.schedule.id.clone(),
             work,

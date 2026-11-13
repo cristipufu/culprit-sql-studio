@@ -16,7 +16,10 @@ pub struct FleetInventory {
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct FleetTarget {
+    /// Stable logical assignment, separate from its connection route and native resource identity.
+    pub id: String,
     pub connection: String,
+    pub subject: CollectionSubject,
     pub shard: String,
     /// Configured physical-resource group. All members must belong to the same static shard.
     /// This is an admission policy, never evidence that a native measurement has this scope.
@@ -75,20 +78,27 @@ impl ScheduledCollection {
 }
 impl FleetInventory {
     pub fn validate(&self, shard: &str) -> Result<()> {
-        let mut connections = std::collections::BTreeSet::new();
+        let mut targets = std::collections::BTreeSet::new();
+        let mut owners = std::collections::BTreeSet::new();
         let mut groups = std::collections::BTreeMap::new();
+        let mut routes = std::collections::BTreeMap::new();
         if !identifier(shard) || self.targets.is_empty() || self.targets.len() > MAX_FLEET_TARGETS {
             return Err(invalid_inventory());
         }
         let mut selected = false;
         for target in &self.targets {
-            if !identifier(&target.connection)
+            target.subject.validate()?;
+            let assignment = (&target.shard, &target.admission_group);
+            if !identifier(&target.id)
+                || !identifier(&target.connection)
                 || !identifier(&target.shard)
                 || !identifier(&target.admission_group)
-                || !connections.insert(&target.connection)
+                || !targets.insert(&target.id)
+                || !owners.insert(target.subject.assignment_key(&target.connection)?)
                 || target.schedules.is_empty()
                 || target.schedules.len() > MAX_TARGET_SCHEDULES
                 || groups.insert(&target.admission_group, &target.shard).is_some_and(|owner| owner != &target.shard)
+                || routes.insert(&target.connection, assignment).is_some_and(|owner| owner != assignment)
             {
                 return Err(invalid_inventory());
             }
@@ -99,6 +109,12 @@ impl FleetInventory {
                 schedule.validate()?;
                 let collection = schedule.collection.collection();
                 if !ids.insert(&schedule.id) || collections.contains(&collection) {
+                    return Err(invalid_inventory());
+                }
+                // Native interval discovery is explicitly a database API. Shared histories require their own route.
+                if collection == TelemetryCollection::QueryHistory
+                    && matches!(target.subject, CollectionSubject::Shared { .. })
+                {
                     return Err(invalid_inventory());
                 }
                 collections.push(collection);
@@ -154,6 +170,7 @@ fn invalid_inventory() -> Error {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct FleetCollectionEvent {
+    pub target: String,
     pub connection: String,
     pub schedule: String,
     pub work: FleetWork,
@@ -186,6 +203,7 @@ pub enum FleetGapReason {
 #[ts(export)]
 pub struct FleetGap {
     pub id: String,
+    pub target: String,
     pub connection: String,
     pub schedule: String,
     pub range: TelemetryRange,

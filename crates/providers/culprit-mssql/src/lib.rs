@@ -107,6 +107,12 @@ impl MssqlProvider {
 
 #[async_trait]
 impl Provider for MssqlProvider {
+    async fn telemetry_resources(
+        &self,
+        request: &culprit_core::telemetry::ResourceDiscoveryRequest,
+    ) -> Result<Vec<culprit_core::telemetry::CollectionResource>> {
+        telemetry::discover_resources(self.pool.clone(), request).await
+    }
     fn telemetry_source(
         &self,
         request: &culprit_core::telemetry::CollectionRequest,

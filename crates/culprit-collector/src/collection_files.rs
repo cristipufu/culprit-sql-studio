@@ -225,11 +225,15 @@ impl ObservationFiles {
             .is_some_and(|source| source.observation.matches_file_counts(&self.manifest.files))
         {
             self.invalidate(CollectionStop::SourceChanged);
+            return Ok(());
         }
         if let Some(source) = &self.manifest.description
             && !source.observation.covers_request()
         {
             let reason = match source.observation {
+                culprit_core::telemetry::SourceObservation::RetainedSamples(ref history) => {
+                    history.coverage_stop().unwrap_or(CollectionStop::InvalidPage)
+                }
                 culprit_core::telemetry::SourceObservation::Activity(_) => CollectionStop::SourceUnavailable,
                 _ => CollectionStop::RetentionGap,
             };
@@ -352,6 +356,7 @@ mod tests {
 
     fn request() -> CollectionRequest {
         CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             selection: culprit_core::telemetry::CollectionSelection::QueryHistory {
                 from: "2020-01-01T06:00:00Z".into(),
                 until: "2020-01-01T07:00:00Z".into(),
@@ -365,6 +370,7 @@ mod tests {
         for (reported, limit) in [(1, 2), (2, 2), (2, 1)] {
             let temporary = tempfile::TempDir::new().unwrap();
             let request = CollectionRequest {
+                subject: culprit_core::telemetry::CollectionSubject::Database,
                 selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
                 budget: CollectionBudget { max_snapshot_rows: limit, ..Default::default() },
             };
@@ -466,8 +472,11 @@ mod tests {
         ] {
             let temporary = tempfile::TempDir::new().unwrap();
             let capture = CaptureIdentity { observation_id: durable_fs::random_id().unwrap(), revision: None };
-            let request =
-                CollectionRequest { selection: CollectionSelection::Snapshot { dataset }, budget: Default::default() };
+            let request = CollectionRequest {
+                subject: culprit_core::telemetry::CollectionSubject::Database,
+                selection: CollectionSelection::Snapshot { dataset },
+                budget: Default::default(),
+            };
             let directory = temporary.path().join("observation");
             let mut files = ObservationFiles::create(&directory, request, capture).unwrap();
             files

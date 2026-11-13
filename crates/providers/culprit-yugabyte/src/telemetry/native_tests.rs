@@ -23,12 +23,14 @@ fn construction_is_offline_and_does_not_advertise_unimplemented_native_sources()
     })
     .unwrap();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Settings },
         budget: Default::default(),
     };
     let source = provider.telemetry_source(&request).unwrap();
     assert_eq!(source.query_count(), 0);
     let unsupported = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::MissingIndexes },
         ..request
     };
@@ -54,6 +56,7 @@ async fn node_snapshots_preserve_native_scope_and_export_no_postgres_heap_counte
         SnapshotDataset::RetainedPlans,
     ] {
         let request = CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             selection: CollectionSelection::Snapshot { dataset },
             budget: CollectionBudget { page_rows: 2, ..Default::default() },
         };
@@ -109,7 +112,11 @@ async fn capture_source(
     provider: &crate::YugabyteProvider,
     selection: CollectionSelection,
 ) -> (CollectionDescription, Vec<TelemetryRecord>, ReadWorkMetrics) {
-    let request = CollectionRequest { selection, budget: Default::default() };
+    let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
+        selection,
+        budget: Default::default(),
+    };
     let collection = request.collection();
     let mut source = provider.telemetry_source(&request).unwrap();
     let initial = source.describe().await.unwrap();
@@ -179,6 +186,7 @@ async fn persistent_docdb_blocking_preserves_the_idle_owner_without_claiming_com
     });
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity {
             policy: ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 1000, ..Default::default() },
         },
@@ -255,6 +263,7 @@ async fn retained_plan_payloads_use_the_common_inventory_and_restricted_logins_n
     restricted.password = std::env::var("CULPRIT_SMOKE_LIMITED_PASSWORD").ok();
     let provider = crate::YugabyteProvider::new(&restricted).unwrap();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::RetainedPlans },
         budget: Default::default(),
     };

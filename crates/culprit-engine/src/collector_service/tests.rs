@@ -28,6 +28,8 @@ fn config(root: &Path) -> CollectorConfig {
         state: root.join("runtime"),
         inventory: FleetInventory {
             targets: vec![FleetTarget {
+                id: "fixture".into(),
+                subject: culprit_core::telemetry::CollectionSubject::Database,
                 connection: "fixture".into(),
                 shard: "alpha".into(),
                 admission_group: "pool".into(),
@@ -189,6 +191,7 @@ fn one_fleet_can_bind_azure_and_aws_sources_to_distinct_credential_profiles_offl
         })
         .unwrap();
     let mut target = config.inventory.targets[0].clone();
+    target.id = "rds-database".into();
     target.connection = "rds".into();
     target.admission_group = "rds".into();
     config.inventory.targets.push(target);

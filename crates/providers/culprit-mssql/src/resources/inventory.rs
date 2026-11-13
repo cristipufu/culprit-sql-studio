@@ -12,8 +12,21 @@ pub(crate) struct Inventory {
 }
 impl Inventory {
     pub(super) fn decode(row: &Rec, window: &super::Window) -> Result<Self> {
+        let mut value = Self::decode_history(row, window, Some(SAMPLE_PERIOD_MS))?;
+        if integer(row, "retained_count")? > 0 {
+            value.replica_role = Some(integer(row, "replica_role")?);
+        }
+        Ok(value)
+    }
+    pub(super) fn shared(row: &Rec, window: &super::Window) -> Result<Self> {
+        Self::decode_history(row, window, None)
+    }
+    fn decode_history(row: &Rec, window: &super::Window, period_ms: Option<u32>) -> Result<Self> {
         let expected_samples = u32::try_from(integer(row, "selected_count")?).map_err(|_| invalid_data())?;
         let retained = integer(row, "retained_count")?;
+        if retained < 0 {
+            return Err(invalid_data());
+        }
         if retained > i64::from(MAX_RETAINED_SAMPLES) {
             return Err(CollectionStop::RowLimit.error());
         }
@@ -21,7 +34,7 @@ impl Inventory {
             return Err(invalid_data());
         }
         let value = Self {
-            replica_role: if retained > 0 { Some(integer(row, "replica_role")?) } else { None },
+            replica_role: None,
             history: SampleHistoryDescription {
                 from: window.from.to_rfc3339(),
                 until: window.until.to_rfc3339(),
@@ -29,7 +42,7 @@ impl Inventory {
                 available_from: timestamp(row, "available_from")?,
                 available_until: timestamp(row, "available_until")?,
                 expected_samples,
-                nominal_period_ms: SAMPLE_PERIOD_MS,
+                nominal_period_ms: period_ms,
             },
             first: timestamp(row, "selected_first")?,
             last: timestamp(row, "selected_last")?,

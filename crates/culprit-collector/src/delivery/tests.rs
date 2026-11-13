@@ -11,6 +11,7 @@ pub(super) fn prepared(root: &std::path::Path, sequence: u64) -> PreparedRange {
 }
 fn prepared_database(root: &std::path::Path, sequence: u64, database: &str) -> PreparedRange {
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::ResourceHistory {
             from: "2020-01-01T06:00:00Z".into(),
             until: "2020-01-01T06:01:00Z".into(),
@@ -35,7 +36,7 @@ fn prepared_database(root: &std::path::Path, sequence: u64, database: &str) -> P
             available_from: Some("2020-01-01T05:00:00Z".into()),
             available_until: Some("2020-01-01T06:01:30Z".into()),
             expected_samples: 1,
-            nominal_period_ms: 15000,
+            nominal_period_ms: Some(15000),
         }),
     };
     let capture = CaptureIdentity {
@@ -51,7 +52,7 @@ fn prepared_database(root: &std::path::Path, sequence: u64, database: &str) -> P
     writer.describe(source).unwrap();
     let row = TelemetryRecord::ResourceSample(ResourceMeasurement {
         at: "2020-01-01T06:00:15Z".into(),
-        replica_id: "primary".into(),
+        replica_id: Some("primary".into()),
         metrics: vec![ResourceMetricSample {
             key: "cpu".into(),
             unit: ResourceUnit::Percent,

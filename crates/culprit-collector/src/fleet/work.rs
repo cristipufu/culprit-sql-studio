@@ -56,7 +56,7 @@ pub(super) async fn execute(
         )
         .await;
     }
-    let (request, mut gap) = windows::request(&job.schedule, &checkpoint, now)?;
+    let (request, mut gap) = windows::request(&job.schedule, &job.subject, &checkpoint, now)?;
     checkpoint.pending = Some(request.clone());
     checkpoint.pending_gap = gap.clone();
     journal.save(&job.key, &checkpoint).await?;
@@ -74,6 +74,15 @@ pub(super) async fn execute(
         return failure(job, FleetWork::Capture, CollectionStop::InvalidPage.error(), gap);
     }
     let retention_gap = manifest.status == CollectionStatus::Incomplete(CollectionStop::RetentionGap);
+    if retention_gap
+        && request.collection() == TelemetryCollection::ResourceHistory
+        && manifest.description.as_ref().is_none_or(|description| {
+            !matches!(&description.observation, SourceObservation::RetainedSamples(history)
+                if history.coverage_stop() == Some(CollectionStop::RetentionGap))
+        })
+    {
+        return failure(job, FleetWork::Capture, CollectionStop::InvalidPage.error(), gap);
+    }
     if manifest.status == CollectionStatus::Complete || retention_gap {
         if let CollectionSelection::ResourceHistory { from, until }
         | CollectionSelection::DeadlockHistory { from, until } = &request.selection
@@ -94,6 +103,7 @@ pub(super) async fn execute(
             let id = digest(&serde_json::to_vec(&(&job.key, &range, reason)).map_err(|_| state_failed())?);
             Ok::<_, Error>(FleetGap {
                 id,
+                target: job.target.clone(),
                 connection: job.connection.clone(),
                 schedule: job.schedule.id.clone(),
                 range,
@@ -136,13 +146,11 @@ pub(super) fn completed(
                 Outcome::Complete
             }
         }
-        CollectionStatus::Incomplete(CollectionStop::Pressure | CollectionStop::PressureUnavailable) => {
-            Outcome::Pressure
-        }
-        _ => Outcome::Failed,
+        CollectionStatus::Incomplete(stopped) => retry_outcome(stopped),
     };
     Ok(WorkResult {
         event: FleetCollectionEvent {
+            target: job.target.clone(),
             connection: job.connection.clone(),
             schedule: job.schedule.id.clone(),
             work: FleetWork::Capture,
@@ -168,13 +176,10 @@ pub(super) fn failure(job: &Job, work: FleetWork, error: Error, gap: Option<Tele
         return Err(error);
     }
     let stopped = CollectionStop::from_error(&error);
-    let outcome = if matches!(stopped, CollectionStop::Pressure | CollectionStop::PressureUnavailable) {
-        Outcome::Pressure
-    } else {
-        Outcome::Failed
-    };
+    let outcome = retry_outcome(stopped);
     Ok(WorkResult {
         event: FleetCollectionEvent {
+            target: job.target.clone(),
             connection: job.connection.clone(),
             schedule: job.schedule.id.clone(),
             work,
@@ -186,6 +191,13 @@ pub(super) fn failure(job: &Job, work: FleetWork, error: Error, gap: Option<Tele
         outcome,
         pause_all: error.detail == Some(ErrorDetail::Outbox(OutboxProblem::Capacity)),
     })
+}
+fn retry_outcome(stopped: CollectionStop) -> Outcome {
+    match stopped {
+        CollectionStop::SourceNotReady => Outcome::More,
+        CollectionStop::Pressure | CollectionStop::PressureUnavailable => Outcome::Pressure,
+        _ => Outcome::Failed,
+    }
 }
 pub(super) fn parse_time(value: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value).map(|at| at.with_timezone(&Utc)).map_err(|_| state_failed())

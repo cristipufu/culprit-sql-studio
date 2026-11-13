@@ -48,6 +48,7 @@ mod settings;
 mod state;
 mod statement_counters;
 mod statistics;
+mod subject;
 mod tables;
 mod target;
 mod transactions;
@@ -94,6 +95,7 @@ pub use settings::*;
 pub use state::*;
 pub use statement_counters::*;
 pub use statistics::*;
+pub use subject::*;
 pub use tables::*;
 pub use target::*;
 pub use transactions::*;
@@ -176,6 +178,7 @@ impl CollectionBudget {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct CollectionRequest {
+    pub subject: CollectionSubject,
     pub selection: CollectionSelection,
     pub budget: CollectionBudget,
 }
@@ -201,6 +204,7 @@ impl CollectionRequest {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.subject.validate()?;
         self.budget.validate()?;
         if let Some(policy) = self.activity_policy() {
             policy.validate()?;
@@ -358,7 +362,7 @@ pub enum NativeRecordIdentity {
     Waits { key: NativeIdentity, category: String },
     QueryDefinition(String),
     PlanDefinition(String),
-    ResourceSample { at: String, replica_id: String },
+    ResourceSample { at: String, replica_id: Option<String> },
     Activity(ActivityKey),
     Blocking(ActivityKey, ActivityWaitOwner),
     Incident(String),
@@ -552,6 +556,8 @@ pub enum CollectionStop {
     PressureUnavailable,
     SourceChanged,
     SourceUnavailable,
+    /// The requested retained window has not closed at the native source yet; retry its exact bounds.
+    SourceNotReady,
     StorageFailed,
     InvalidPage,
     MissingDefinitions,
@@ -565,6 +571,7 @@ impl CollectionStop {
             Self::CancellationUnconfirmed => {
                 Error::new(ErrorCode::QueryFailed, t!("collection.cancellation_unconfirmed"))
             }
+            Self::SourceNotReady => Error::new(ErrorCode::QueryFailed, t!("collection.source_not_ready")),
             _ => Error::new(ErrorCode::QueryFailed, t!("collection.source_stopped")),
         };
         error.with_detail(crate::ErrorDetail::CollectionStopped(self))
@@ -678,6 +685,7 @@ mod tests {
     #[test]
     fn budgets_and_time_bounds_fail_before_any_source_work() {
         let mut request = CollectionRequest {
+            subject: crate::telemetry::CollectionSubject::Database,
             selection: crate::telemetry::CollectionSelection::QueryHistory {
                 from: "2026-11-09T06:00:00Z".into(),
                 until: "2026-11-09T07:00:00Z".into(),

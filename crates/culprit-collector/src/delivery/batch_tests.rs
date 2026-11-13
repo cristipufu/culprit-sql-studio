@@ -104,6 +104,7 @@ impl TelemetrySink for Transfers {
 pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
     let policy = ActivityPolicy::default();
     let request = CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Activity { policy: policy.clone() },
         budget: CollectionBudget::default(),
     };

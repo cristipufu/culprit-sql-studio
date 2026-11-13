@@ -26,8 +26,11 @@ async fn live_cluster_telemetry_keeps_node_captures_in_distinct_namespaces() {
     for endpoint in [Endpoint::First, Endpoint::Second] {
         let provider = YugabyteProvider::new(&spec(endpoint, "culprit_cluster_monitor")).unwrap();
         for dataset in [SnapshotDataset::Settings, SnapshotDataset::RetainedPlans] {
-            let request =
-                CollectionRequest { selection: CollectionSelection::Snapshot { dataset }, budget: Default::default() };
+            let request = CollectionRequest {
+                subject: culprit_core::telemetry::CollectionSubject::Database,
+                selection: CollectionSelection::Snapshot { dataset },
+                budget: Default::default(),
+            };
             let mut source = provider.telemetry_source(&request).unwrap();
             assert_eq!(source.query_count(), 0);
             let initial = source.describe().await.unwrap();

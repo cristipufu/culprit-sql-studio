@@ -286,8 +286,11 @@ fn resource_metrics_preserve_scope_units_aggregation_and_unknown_values() {
         limit_basis: ResourceLimitBasis::DatabaseLimit,
         value: None,
     };
-    let native =
-        ResourceMeasurement { at: "2026-11-11T06:00:00Z".into(), replica_id: "primary".into(), metrics: vec![metric] };
+    let native = ResourceMeasurement {
+        at: "2026-11-11T06:00:00Z".into(),
+        replica_id: Some("primary".into()),
+        metrics: vec![metric],
+    };
     let record = TelemetryRecord::ResourceSample(native);
     let mut input = json!({"record":record});
     let (manifest, _) = culprit_collector::analytical::test_support::fixture();
@@ -301,6 +304,40 @@ fn resource_metrics_preserve_scope_units_aggregation_and_unknown_values() {
     assert_eq!(metrics[0]["period_ms"], 15000);
     assert_eq!(metrics[0]["describes_subject"], true);
     assert!(metrics[0]["value"].is_null());
+}
+
+#[test]
+fn pool_history_keeps_absent_replica_storage_units_and_broader_host_context_in_exact_readback() {
+    let (source, record) = culprit_collector::analytical::test_support::pool_history();
+    let mut input = json!({"record": record});
+    culprit_collector::analytical::prepared::prepare(&mut input, &record, &source.target).unwrap();
+    let schema = Schema::from_logical(culprit_collector::analytical::schema::samples::resources(&[]).unwrap()).unwrap();
+    let values = schema.project(&input).unwrap();
+    let encoded: Value = serde_json::from_slice(&schema.encode(&values).unwrap()).unwrap();
+    assert_eq!(encoded["HasReplicaId"], false);
+    assert_eq!(encoded["ReplicaId"], "");
+    let metrics: Value = serde_json::from_str(encoded["Metrics"].as_str().unwrap()).unwrap();
+    assert_eq!(metrics[0]["value"], 0.0);
+    assert!(metrics[1]["value"].is_null());
+    assert_eq!(metrics[2]["unit"], "bytes");
+    assert_eq!(metrics[2]["value"], 536870912.0);
+    assert_eq!(metrics[3]["describes_subject"], false);
+    assert!(metrics.as_array().unwrap().iter().all(|metric| metric["period_ms"].is_null()));
+    let returned = schema.columns().iter().map(|column| encoded[&column.name].clone()).collect::<Vec<_>>();
+    let expected = projection::digest(&values).unwrap();
+    assert_eq!(schema.returned_digest(&returned).unwrap(), expected);
+    for column in ["HasReplicaId", "Metrics"] {
+        let mut corrupt = returned.clone();
+        let index = schema.columns().iter().position(|candidate| candidate.name == column).unwrap();
+        corrupt[index] = if column == "HasReplicaId" {
+            json!(true)
+        } else {
+            let mut metrics = metrics.clone();
+            metrics[3]["describes_subject"] = json!(true);
+            json!(metrics.to_string())
+        };
+        assert_ne!(schema.returned_digest(&corrupt).unwrap(), expected);
+    }
 }
 
 #[test]

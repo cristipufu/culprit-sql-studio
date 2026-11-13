@@ -183,6 +183,7 @@ mod tests {
     };
     fn request() -> CollectionRequest {
         CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             selection: CollectionSelection::DeadlockHistory {
                 from: "2020-01-01T06:00:00Z".into(),
                 until: "2020-01-01T06:01:00Z".into(),

@@ -145,6 +145,7 @@ SQL Server
   missing_indexes           missing-index requests · Missing-index suggestions
   waits                     wait statistics · Wait statistics
   resources                 resource statistics · Resource usage
+  pool resources            Elastic-pool resource history · adds detail
   forwarded_fetches         forwarded fetches · adds detail
   query_families            query families · adds detail
   plan cache use            plan cache use · adds detail

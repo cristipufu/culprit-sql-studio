@@ -119,6 +119,7 @@ fn configured(home: &std::path::Path, state: &Arc<State>) -> Workspace {
 }
 fn request() -> CollectionRequest {
     CollectionRequest {
+        subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
         budget: Default::default(),
     }

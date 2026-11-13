@@ -158,6 +158,7 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
     }
     for (number, selection) in selections.into_iter().enumerate() {
         let request = CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
             selection: selection.clone(),
             budget: CollectionBudget { page_rows: 2, max_snapshot_rows: 10000, max_pages: 1000, ..Default::default() },
         };

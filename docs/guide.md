@@ -296,12 +296,22 @@ For a standalone observation, use `collect once CONNECTION --collection activity
 
 ### Collect a static fleet
 
-`collect fleet` uses the same authenticated providers, native admission guard and durable outbox as one-off collection. Its inventory assigns every connection to one static shard and one physical admission group. Databases sharing an instance or elastic pool must use the same group; a group cannot be split across shards. Only one process may own a shard's scheduling state and outbox. The workspace still permits only one native operation at a time, including interactive reads; group names do not establish the scope of exported measurements.
+`collect fleet` uses the same authenticated providers, native admission guard and durable outbox as one-off collection.
+Each inventory target has a stable `id`, a connection, an explicit database or shared-resource `subject`, one static
+shard and a physical admission group. A database and its shared pool/instance can use the same connection with
+separate schedules and checkpoints. A shared native resource has one owner across the complete inventory, even
+when several member connections can read it. Databases sharing an instance or elastic pool must use the same
+admission group; a group cannot be split across shards. Only one process may own a shard's scheduling state and
+outbox. The workspace permits one native operation at a time, including interactive reads. Group names do not
+establish measurement scope. See [shared-subject discovery and collection](collector.md#database-and-shared-subjects)
+for the available native routes.
 
 ```json
 {
   "targets": [{
+    "id": "shop-database",
     "connection": "shop-staging",
+    "subject": { "kind": "database" },
     "shard": "alpha",
     "admission_group": "shop-elastic-pool",
     "schedules": [

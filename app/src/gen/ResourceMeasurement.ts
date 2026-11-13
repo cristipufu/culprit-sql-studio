@@ -7,6 +7,6 @@ export type ResourceMeasurement = {
  */
 at: string, 
 /**
- * Native replica identity in the source's namespace; no engine-specific numeric meaning in the collector.
+ * Native replica identity when supplied by the source. A pool sample does not invent a replica.
  */
-replica_id: string, metrics: Array<ResourceMetricSample>, };
+replica_id: string | null, metrics: Array<ResourceMetricSample>, };

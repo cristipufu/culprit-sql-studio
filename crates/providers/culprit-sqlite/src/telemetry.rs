@@ -21,6 +21,7 @@ pub(crate) fn source(
     request: &CollectionRequest,
 ) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
+    request.subject.require_database()?;
     let TelemetryCollection::Snapshot(dataset) = request.collection() else {
         return Err(unsupported());
     };
