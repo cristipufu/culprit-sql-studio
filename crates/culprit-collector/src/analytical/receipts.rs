@@ -2,6 +2,7 @@
 use super::{
     ProjectionCatalog,
     indexes::{ExpectedRow, IndexKey, ProjectionIndexes},
+    read_store::MAX_READ_RESPONSE_BYTES,
     sink::AnalyticalStore,
 };
 use crate::delivery::{recovery::CommittedRange, sink::ReceiptPage};
@@ -49,7 +50,7 @@ impl ReceiptReader {
             }
             Some(_) => return Err(invalid()),
             None => {
-                self.store.audit_membership(range).await?;
+                self.store.audit_membership(range, MAX_READ_RESPONSE_BYTES).await?;
                 Cursor { manifest: range.manifest_digest().into(), batch: 0, after: 0 }
             }
         };
@@ -73,7 +74,7 @@ impl ReceiptReader {
             let key = IndexKey::for_batch(range, &batch.batch_id, schema.digest())?;
             let expected = self.indexes.read(&key).await?;
             let until = page_end(&expected, position.after, page_rows as usize)?;
-            let rows = self.store.rows(range, &batch.batch_id, position.after, until).await?;
+            let rows = self.store.rows(range, &batch.batch_id, position.after, until, PAGE_RESPONSE_BYTES).await?.rows;
             if rows.len() > until - position.after {
                 return Err(invalid());
             }

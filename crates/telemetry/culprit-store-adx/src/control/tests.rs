@@ -6,6 +6,7 @@ use culprit_collector::delivery::{
     sink::{TelemetrySink, VerificationBudget, verify},
 };
 use culprit_core::telemetry::digest;
+use serde_json::Value;
 use std::{collections::VecDeque, sync::Mutex};
 
 #[tokio::test]

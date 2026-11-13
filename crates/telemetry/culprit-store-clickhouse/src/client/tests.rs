@@ -48,6 +48,7 @@ fn server(body: Vec<u8>, status: u16) -> (String, std::thread::JoinHandle<Vec<u8
 async fn queries_are_bounded_readonly_and_values_and_credentials_stay_out_of_sql() {
     let body =
         serde_json::to_vec(&json!({"meta":[{"name":"Value","type":"String"}],"data":[["ok"]],"rows":1})).unwrap();
+    let response_bytes = body.len();
     let (endpoint, worker) = server(body, 200);
     let client = ClickHouseClient::new(config(endpoint), credentials()).unwrap();
     let response = client
@@ -56,14 +57,17 @@ async fn queries_are_bounded_readonly_and_values_and_credentials_stay_out_of_sql
             parameters: BTreeMap::from([("value".into(), "quote'\t\\canary".into())]),
             columns: vec![Column { name: "Value".into(), kind: "String".into() }],
             row_limit: 1,
+            byte_limit: 1024,
         })
         .await
         .unwrap();
     assert_eq!(response.rows, vec![vec![json!("ok")]]);
+    assert_eq!(response.response_bytes, response_bytes);
     let request = String::from_utf8(worker.join().unwrap()).unwrap();
     let (headers, sql) = request.split_once("\r\n\r\n").unwrap();
     assert!(headers.contains("readonly=1"));
     assert!(headers.contains("max_result_rows=10001"));
+    assert!(headers.contains("max_result_bytes=1024"));
     assert!(headers.contains("cancel_http_readonly_queries_on_client_close=1"));
     assert!(headers.to_ascii_lowercase().contains("x-clickhouse-key: private-header-canary"));
     assert!(sql.starts_with("/* culprit */ SELECT"));
@@ -92,12 +96,45 @@ async fn write_acks_are_hints_and_late_errors_are_ambiguous_without_leaking_bodi
             parameters: BTreeMap::new(),
             columns: vec![Column { name: "n".into(), kind: "UInt8".into() }],
             row_limit: 1,
+            byte_limit: crate::response::MAX_RESPONSE_BYTES,
         })
         .await
         .err()
         .unwrap();
     assert!(!serde_json::to_string(&error).unwrap().contains("private-header-canary"));
     worker.join().unwrap();
+}
+
+#[tokio::test]
+async fn query_wire_reads_obey_the_smaller_request_limit() {
+    let body = serde_json::to_vec(&json!({"meta":[{"name":"Value","type":"String"}],
+        "data":[["x".repeat(4096)]],"rows":1}))
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let worker = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let request = crate::http_fixture::request(&mut socket).unwrap();
+        let mut response =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+        response.extend(body);
+        // Closing an oversized response early is expected; the server must not require the client to drain it.
+        let _ = socket.write_all(&response);
+        request
+    });
+    let client = ClickHouseClient::new(config(endpoint), credentials()).unwrap();
+    let result = client
+        .query(QueryRequest {
+            text: "SELECT 'value' AS Value".into(),
+            parameters: BTreeMap::new(),
+            columns: vec![Column { name: "Value".into(), kind: "String".into() }],
+            row_limit: 1,
+            byte_limit: 1024,
+        })
+        .await;
+    assert!(result.is_err());
+    let request = String::from_utf8(worker.join().unwrap()).unwrap();
+    assert!(request.contains("max_result_bytes=1024"));
 }
 
 #[tokio::test]

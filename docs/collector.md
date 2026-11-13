@@ -31,6 +31,30 @@ implement their respective interfaces; they do not acquire database connections.
 `Snapshot` through the existing pure analysis pipeline. Reading archived telemetry back into a Culprit report is a
 separate consumer; this service does not add an ADX-backed desktop connection.
 
+Embedders can read a specifically selected committed capture through
+`culprit_collector::analytical::evidence::EvidenceReader`; both store crates expose a read-only constructor under
+`evidence::new`. The reader accepts an authenticated `CommittedRange`, selected evidence families and a read budget.
+It supports resource samples and inline typed operational facts, including counter sets, scalar counters and space
+observations, through `EvidenceFamily::ResourceSamples` and `EvidenceFamily::OperationalSamples`. Scope, reset
+evidence, source coverage and observation bounds remain attached to the typed records. It does not select a latest
+head, merge epochs or create a report.
+`is_read_complete()` confirms retrieval of the selected capture's evidence. Native source coverage remains
+independent: a fully retrieved capture can still contain partial or unavailable native sources.
+
+Reads need warehouse query access, without an ingestion identity, plus the independently configured recovery
+identity for the committed manifest and immutable projection indexes. Reopening the manifest and checking those indexes does not reread every native
+payload. Keep validation indexes for as long as these warehouse investigations are required. Missing publication,
+rows or proof indexes remain explicit gaps; conflicting content is rejected. Large recovery-only details and native
+timestamp precision absent from a warehouse projection require native recovery and cannot be reported as complete.
+The initial read API reports those requirements without downloading the raw payload or connecting to the database.
+
+`EvidenceReadBudget` bounds rows, queries, proof bytes and caller wait. Its per-response and total byte limits cover
+complete native query response bodies, including metadata and completion frames; HTTP headers, TLS and
+authentication traffic are outside those byte budgets. Each request is also limited by the remaining body budget;
+decoded row encodings respect the per-response ceiling, and proof objects have a separate ceiling.
+Caller timeout ends the caller's wait; it does not acknowledge that a
+warehouse query has stopped.
+
 ## Configure and validate
 
 The examples are [collector configuration](../deploy/collector/config.example.json),

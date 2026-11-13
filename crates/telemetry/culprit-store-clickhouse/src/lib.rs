@@ -2,6 +2,7 @@
 pub mod catalog;
 pub mod client;
 pub mod deployment;
+pub mod evidence;
 #[cfg(test)]
 mod functional;
 #[cfg(test)]

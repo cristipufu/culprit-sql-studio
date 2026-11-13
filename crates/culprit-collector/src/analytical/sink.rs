@@ -1,9 +1,9 @@
 //! Shared warehouse delivery: dispatch never proves visibility, and retirement requires exact readback plus publication.
 use super::{
-    ProjectionCatalog,
     encoding::{BatchEncoder, EncodedBatch},
     indexes::ProjectionIndexes,
     publication::ControlPublisher,
+    read_store::AnalyticalReadStore,
     receipts::ReceiptReader,
 };
 use crate::delivery::{
@@ -13,14 +13,11 @@ use crate::delivery::{
 };
 use async_trait::async_trait;
 use culprit_core::{Result, telemetry::DeliveryProblem};
-use serde_json::Value;
 use std::{path::Path, sync::Arc};
 
 /// Native warehouse operations. Implementations own wire/query details; no lifecycle or receipt policy is delegated.
 #[async_trait]
-pub trait AnalyticalStore: Send + Sync {
-    fn destination(&self) -> &str;
-    fn catalog(&self) -> Arc<dyn ProjectionCatalog>;
+pub trait AnalyticalStore: AnalyticalReadStore {
     fn polling_mode(&self) -> &'static str;
     async fn dispatch(
         &self,
@@ -28,11 +25,7 @@ pub trait AnalyticalStore: Send + Sync {
         attempt: &DeliveryAttempt,
         batch: Arc<EncodedBatch>,
     ) -> Result<Submission>;
-    async fn audit_membership(&self, range: &CommittedRange) -> Result<()>;
-    async fn rows(&self, range: &CommittedRange, batch_id: &str, after: usize, until: usize)
-    -> Result<Vec<Vec<Value>>>;
     async fn publish(&self, range: &CommittedRange, attempt: &DeliveryAttempt, id: &str, bytes: Vec<u8>) -> Result<()>;
-    async fn publication_rows(&self, range: &CommittedRange) -> Result<Vec<Vec<Value>>>;
 }
 
 pub struct AnalyticalSink {

@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+pub use culprit_collector::analytical::read_store::MAX_READ_RESPONSE_BYTES as MAX_RESPONSE_BYTES;
 const MAX_FRAMES: usize = 16;
 const MAX_COLUMNS: usize = 128;
 const MAX_AUXILIARY_ROWS: usize = 512;
@@ -21,6 +21,7 @@ pub struct Column {
 pub struct QueryTable {
     pub columns: Vec<Column>,
     pub rows: Vec<Vec<Value>>,
+    pub response_bytes: usize,
 }
 
 #[derive(Deserialize)]
@@ -34,8 +35,10 @@ enum Frame {
     Completion { has_errors: bool, cancelled: bool, one_api_errors: Option<Vec<Value>> },
 }
 
-pub fn parse(bytes: &[u8], expected: &[Column], row_limit: usize) -> Result<QueryTable> {
-    if bytes.len() > MAX_RESPONSE_BYTES
+pub fn parse(bytes: &[u8], expected: &[Column], row_limit: usize, byte_limit: usize) -> Result<QueryTable> {
+    if byte_limit == 0
+        || byte_limit > MAX_RESPONSE_BYTES
+        || bytes.len() > byte_limit
         || row_limit == 0
         || row_limit > MAX_QUERY_ROWS
         || expected.is_empty()
@@ -70,7 +73,7 @@ pub fn parse(bytes: &[u8], expected: &[Column], row_limit: usize) -> Result<Quer
             if rows.len() > row_limit {
                 return Err(DeliveryProblem::Capacity.error());
             }
-            primary = Some(QueryTable { columns, rows });
+            primary = Some(QueryTable { columns, rows, response_bytes: bytes.len() });
         } else {
             auxiliary_rows += rows.len();
             if auxiliary_rows > MAX_AUXILIARY_ROWS {

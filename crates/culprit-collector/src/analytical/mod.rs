@@ -2,10 +2,12 @@
 pub mod catalog;
 pub mod encoding;
 pub mod envelope;
+pub mod evidence;
 pub mod indexes;
 pub mod prepared;
 pub mod projection;
 pub mod publication;
+pub mod read_store;
 pub mod receipts;
 pub mod schema;
 pub mod semantics;

@@ -1,5 +1,5 @@
 //! Bounded ClickHouse HTTP operations. Credentials are supplied by the engine and never serialized or diagnosed.
-use crate::response::{Column, QueryTable};
+use crate::response::{self, Column, QueryTable};
 use async_trait::async_trait;
 use culprit_collector::{
     analytical::encoding::EncodedBatch,
@@ -96,6 +96,7 @@ pub struct QueryRequest {
     pub parameters: BTreeMap<String, String>,
     pub columns: Vec<Column>,
     pub row_limit: usize,
+    pub byte_limit: usize,
 }
 impl QueryRequest {
     fn validate(&self) -> Result<()> {
@@ -106,6 +107,8 @@ impl QueryRequest {
             || self.columns.len() > culprit_collector::analytical::schema::MAX_COLUMNS
             || self.row_limit == 0
             || self.row_limit > MAX_QUERY_ROWS
+            || self.byte_limit == 0
+            || self.byte_limit > response::MAX_RESPONSE_BYTES
             || self.parameters.iter().any(|(name, value)| {
                 !culprit_collector::analytical::schema::identifier(name) || value.len() > 64 * 1024
             })

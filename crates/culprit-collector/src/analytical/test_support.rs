@@ -451,6 +451,118 @@ pub fn query_compilation(destination: &str, schema: &str) -> Recovery {
     Recovery::capture(destination, schema, manifest.source, vec![record], 20_000)
 }
 
+pub fn native_counter_sets() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut manifest, _) = fixture();
+    manifest.source.target = CollectionTarget::Shared(SharedResourceIdentity {
+        engine: culprit_core::Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("fixture-lineage"),
+        native: NativeIdentity::new("fixture-instance"),
+    });
+    manifest.source.source = "native-instance-state".into();
+    let source = "native-memory-clerks";
+    let records = (0..2)
+        .map(|node| {
+            let mut cumulative = NativeCounterSample::gauge(
+                "allocations",
+                9_007_199_254_740_993,
+                CounterUnit::Count,
+                culprit_core::MeasurementScope::Server,
+                source,
+                "allocations",
+            );
+            cumulative.nature = CounterNature::Cumulative;
+            cumulative.reset = culprit_core::ResetMarker::At("2020-01-01T01:00:00.000000001Z".into());
+            let set = NativeCounterSet {
+                identity: NativeIdentity::new("native-clerk")
+                    .qualified("memory_node_id", node.to_string())
+                    .qualified("incarnation", "native-generation"),
+                scope: culprit_core::MeasurementScope::Server,
+                counters: vec![
+                    NativeCounterSample::gauge(
+                        "pages_kb",
+                        0,
+                        CounterUnit::Kibibytes,
+                        culprit_core::MeasurementScope::Server,
+                        source,
+                        "pages_kb",
+                    ),
+                    cumulative,
+                ],
+                properties: [
+                    ("native_nulls".into(), "committed_kb".into()),
+                    ("unavailable_columns".into(), "target_kb".into()),
+                ]
+                .into(),
+            };
+            TelemetryRecord::Operational(OperationalObservation {
+                source: source.into(),
+                key: set.key().unwrap(),
+                fact: OperationalFact::CounterSet(Box::new(set)),
+            })
+        })
+        .collect::<Vec<_>>();
+    manifest.source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
+        dataset: SnapshotDataset::Operational,
+        observed_from: "2020-01-01T12:00:00Z".into(),
+        observed_until: "2020-01-01T12:00:01Z".into(),
+        records: records.len() as u32,
+        sources: vec![StateSourceCoverage::collected(source.into(), records.len() as u32)],
+    });
+    (manifest.source, records)
+}
+
+pub fn counter_sets(destination: &str, schema: &str) -> Recovery {
+    let (source, records) = native_counter_sets();
+    Recovery::capture(destination, schema, source, records, 30_000)
+}
+
+pub fn shared_operational() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (mut source, mut records) = native_counter_sets();
+    records.push(TelemetryRecord::Operational(OperationalObservation {
+        source: "native-performance-counters".into(),
+        key: "connections".into(),
+        fact: OperationalFact::Counter(NativeCounterSample::gauge(
+            "connections",
+            0,
+            CounterUnit::Count,
+            culprit_core::MeasurementScope::Server,
+            "native-instance",
+            "connections",
+        )),
+    }));
+    records.push(TelemetryRecord::Operational(OperationalObservation {
+        source: "native-tempdb-space".into(),
+        key: "tempdb:data".into(),
+        fact: OperationalFact::Space(OperationalSpace {
+            kind: culprit_core::FileKind::Temp,
+            scope: culprit_core::FileScope::Server,
+            native_name: Some("tempdb".into()),
+            total_bytes: Some(1024.0),
+            used_bytes: None,
+            limit_bytes: None,
+            growth_enabled: Some(true),
+            reuse_wait: None,
+            parts: vec![
+                SpaceAllocation { kind: SpaceAllocationKind::InternalObjects, bytes: Some(0.0) },
+                SpaceAllocation { kind: SpaceAllocationKind::VersionStore, bytes: None },
+            ],
+        }),
+    }));
+    let SourceObservation::Snapshot(snapshot) = &mut source.observation else { unreachable!() };
+    snapshot.records = records.len() as u32;
+    snapshot.sources.extend([
+        StateSourceCoverage::collected("native-performance-counters".into(), 1),
+        StateSourceCoverage::collected("native-tempdb-space".into(), 1),
+    ]);
+    (source, records)
+}
+
+pub fn shared_operational_capture(destination: &str, schema: &str) -> Recovery {
+    let (source, records) = shared_operational();
+    Recovery::capture(destination, schema, source, records, 30_001)
+}
+
 pub fn activity(destination: &str, schema: &str, sequence: u64, empty: bool) -> Recovery {
     let (mut manifest, _) = fixture();
     manifest.source.source = "activity".into();

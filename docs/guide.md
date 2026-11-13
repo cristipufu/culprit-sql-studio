@@ -461,6 +461,15 @@ Embedding applications can compose a remote outbox with `ObjectRecoveryStore`, `
 
 Run the owned, loopback-only Blob integration fixture with `python3 dev/smoke-delivery.py`. It builds the affected engine tests, creates an isolated Azurite container with synthetic credentials, runs the conditional-write/recovery test and removes the container. It does not use Azure credentials or connect to a database.
 
+Applications embedding the Rust libraries can read explicitly selected ADX or ClickHouse captures through the
+[verified evidence API](collector.md#components-and-ownership), using warehouse query credentials and independent
+recovery-proof access. It reconstructs resource samples and inline operational facts after exact verification;
+missing or recovery-only details remain explicit gaps. It does not open the source database, choose the latest
+capture, combine epochs or build a Culprit report yet.
+Byte limits cover complete native query response bodies, including metadata/completion frames, and decoded rows
+also respect the per-response ceiling. Recovery proofs have their own ceiling. HTTP/TLS/authentication overhead is outside those byte limits. Caller timeout does
+not acknowledge remote warehouse query shutdown.
+
 ### Upgrading
 
 Connections, saved passwords, saved queries and editor tabs carry over. Scans and reports are read only in the format the installed version saves: when an upgrade changes that format (the release notes say so), scans an earlier version saved are set aside, and history (trends, What changed, digests) starts again with your first scan after upgrading. A saved plan is read as it was saved; a later fix to a plan parser reaches a plan when it is explained or scanned again.

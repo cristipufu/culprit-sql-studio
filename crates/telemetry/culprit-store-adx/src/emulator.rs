@@ -54,7 +54,16 @@ impl Emulator {
         self.management(true,&format!(".ingest inline into table {table} with (format=\"json\",ingestionMappingReference=\"{table}Mapping\") <|\n{text}"));
     }
     async fn values(&self, text: String, parameters: BTreeMap<String, Value>, columns: Vec<Column>) -> Vec<Vec<Value>> {
-        self.query(QueryRequest { text, parameters, columns, row_limit: 10_000 }).await.unwrap().rows
+        self.query(QueryRequest {
+            text,
+            parameters,
+            columns,
+            row_limit: 10_000,
+            byte_limit: crate::response::MAX_RESPONSE_BYTES,
+        })
+        .await
+        .unwrap()
+        .rows
     }
     async fn count(&self, function: &str, range: &CommittedRange, current: bool) -> u64 {
         let clock =

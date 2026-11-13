@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod client;
 pub mod control;
 pub mod deployment;
+pub mod evidence;
 mod http;
 pub mod ingestion;
 pub mod projection;

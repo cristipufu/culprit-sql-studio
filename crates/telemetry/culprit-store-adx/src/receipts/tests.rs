@@ -7,6 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use culprit_collector::analytical::{indexes::ProjectionIndexes, receipts::ReceiptReader};
 use culprit_collector::delivery::{recovery::reopen, sink::*};
+use serde_json::Value;
 use std::sync::Mutex;
 
 struct Fixture {

@@ -40,7 +40,7 @@ pub(super) fn query(
     let mut request = request(origin, config, credentials, id)
         .query("readonly", "1")
         .query("max_result_rows", MAX_QUERY_ROWS.to_string())
-        .query("max_result_bytes", response::MAX_RESPONSE_BYTES.to_string())
+        .query("max_result_bytes", input.byte_limit.to_string())
         .query("result_overflow_mode", "throw")
         .query("read_overflow_mode", "throw")
         .query("max_rows_to_read", MAX_READ_ROWS.to_string())
@@ -59,13 +59,9 @@ pub(super) fn query(
     {
         return Err(transport());
     }
-    let bytes = response
-        .body_mut()
-        .with_config()
-        .limit(response::MAX_RESPONSE_BYTES as u64)
-        .read_to_vec()
-        .map_err(|_| transport())?;
-    response::parse(&bytes, &input.columns, input.row_limit)
+    let bytes =
+        response.body_mut().with_config().limit(input.byte_limit as u64).read_to_vec().map_err(|_| transport())?;
+    response::parse(&bytes, &input.columns, input.row_limit, input.byte_limit)
 }
 pub(super) fn insert(
     origin: &str,

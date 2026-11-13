@@ -87,7 +87,7 @@ async fn empty_batches_need_no_object_and_oversized_or_inconsistent_indexes_are_
     let first = key(5, 1);
     assert!(indexes.put(&first, &[]).await.is_err());
     let maximum = key(5, MAX_RANGE_RECORDS);
-    assert_eq!(maximum.bytes(), 3_600_072);
+    assert_eq!(maximum.encoded_bytes(), 3_600_072);
     let hash = culprit_core::telemetry::digest(b"id");
     assert!(IndexKey::new(&hash, &hash, &hash, &hash, &hash, MAX_RANGE_RECORDS + 1).is_err());
 }

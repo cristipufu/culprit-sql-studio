@@ -75,7 +75,7 @@ impl IndexKey {
     pub fn rows(&self) -> usize {
         self.rows
     }
-    fn bytes(&self) -> usize {
+    pub fn encoded_bytes(&self) -> usize {
         HEADER_BYTES + self.rows * ENTRY_BYTES + FOOTER_BYTES
     }
 }
@@ -128,23 +128,23 @@ impl ProjectionIndexes {
     }
     async fn read_bytes(&self, key: &IndexKey) -> Result<Vec<u8>> {
         let mut object = self.transport.get(&key.object).await?.ok_or_else(|| DeliveryProblem::NotReady.error())?;
-        if object.bytes != key.bytes() as u64 {
+        if object.bytes != key.encoded_bytes() as u64 {
             return Err(invalid());
         }
         let mut bytes = Vec::new();
         (&mut object.body)
-            .take(key.bytes() as u64 + 1)
+            .take(key.encoded_bytes() as u64 + 1)
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| DeliveryProblem::Transport.error())?;
-        if bytes.len() != key.bytes() {
+        if bytes.len() != key.encoded_bytes() {
             return Err(invalid());
         }
         Ok(bytes)
     }
 }
 fn encode(key: &IndexKey, digests: &[ExpectedRow]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(key.bytes());
+    let mut bytes = Vec::with_capacity(key.encoded_bytes());
     bytes.extend_from_slice(MAGIC);
     bytes.extend_from_slice(&key.identity);
     for digest in digests {
@@ -156,7 +156,9 @@ fn encode(key: &IndexKey, digests: &[ExpectedRow]) -> Vec<u8> {
     bytes
 }
 fn decode(key: &IndexKey, bytes: &[u8]) -> Result<Vec<ExpectedRow>> {
-    if bytes.len() != key.bytes() || &bytes[..MAGIC.len()] != MAGIC || bytes[MAGIC.len()..HEADER_BYTES] != key.identity
+    if bytes.len() != key.encoded_bytes()
+        || &bytes[..MAGIC.len()] != MAGIC
+        || bytes[MAGIC.len()..HEADER_BYTES] != key.identity
     {
         return Err(invalid());
     }

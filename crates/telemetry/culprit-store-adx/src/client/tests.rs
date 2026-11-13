@@ -7,11 +7,13 @@ fn request() -> QueryRequest {
         parameters: BTreeMap::from([("batch".into(), json!("quoted \" value\nwith newline"))]),
         columns: vec![Column { column_name: "RecordId".into(), column_type: "string".into() }],
         row_limit: 1000,
+        byte_limit: crate::response::MAX_RESPONSE_BYTES,
     }
 }
 #[test]
 fn query_properties_keep_verification_strong_read_only_bounded_and_uncached() {
-    let query = request();
+    let mut query = request();
+    query.byte_limit = 4096;
     let bytes = query.encode("db \" name", "Culprit.Delivery;test").unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["db"], "db \" name");
@@ -24,7 +26,7 @@ fn query_properties_keep_verification_strong_read_only_bounded_and_uncached() {
     assert_eq!(options["request_readonly_hardline"], true);
     assert_eq!(options["request_callout_disabled"], true);
     assert_eq!(options["results_progressive_enabled"], false);
-    assert_eq!(options["truncationmaxsize"], response::MAX_RESPONSE_BYTES);
+    assert_eq!(options["truncationmaxsize"], 4096);
     assert_eq!(options["servertimeout"], "00:00:30");
 }
 #[test]
@@ -53,6 +55,11 @@ fn invalid_targets_and_unbounded_or_malformed_parameters_are_rejected_before_aut
     let mut query = request();
     query.row_limit = 0;
     assert!(query.encode("db", "id").is_err());
+    for limit in [0, response::MAX_RESPONSE_BYTES + 1] {
+        let mut query = request();
+        query.byte_limit = limit;
+        assert!(query.encode("db", "id").is_err());
+    }
     let mut query = request();
     query.text = "x".repeat(MAX_QUERY_BYTES + 1);
     assert!(query.encode("db", "id").is_err());
@@ -65,6 +72,44 @@ fn invalid_targets_and_unbounded_or_malformed_parameters_are_rejected_before_aut
     let mut query = request();
     query.parameters.insert("large".into(), json!("x".repeat(MAX_REQUEST_BYTES)));
     assert!(query.encode("db", "id").is_err());
+}
+
+#[test]
+fn native_http_and_server_options_obey_the_smaller_query_response_limit() {
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let body = json!([
+        {"FrameType":"DataSetHeader","Version":"v2.0","IsProgressive":false},
+        {"FrameType":"DataTable","TableId":0,"TableKind":"PrimaryResult","Columns":[{"ColumnName":"RecordId","ColumnType":"string"}],"Rows":[["x".repeat(4096)]]},
+        {"FrameType":"DataSetCompletion","HasErrors":false,"Cancelled":false}
+    ]).to_string();
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let request = crate::http_fixture::request(&mut socket).unwrap();
+        let response =
+            format!("HTTP/1.1 200 Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        let _ = socket.write_all(response.as_bytes());
+        String::from_utf8(request).unwrap()
+    });
+    let mut request = request();
+    request.byte_limit = 1024;
+    assert!(
+        http::query(
+            &origin,
+            "synthetic-token",
+            "Culprit.Delivery;bounded",
+            request.encode("db", "id").unwrap(),
+            &request.columns,
+            request.row_limit,
+            request.byte_limit
+        )
+        .is_err()
+    );
+    let sent = server.join().unwrap();
+    let (_, body) = sent.split_once("\r\n\r\n").unwrap();
+    let body: Value = serde_json::from_str(body).unwrap();
+    let properties: Value = serde_json::from_str(body["properties"].as_str().unwrap()).unwrap();
+    assert_eq!(properties["Options"]["truncationmaxsize"], 1024);
 }
 #[test]
 fn query_http_checks_native_completion_and_never_exposes_service_error_bodies() {
@@ -96,6 +141,7 @@ fn query_http_checks_native_completion_and_never_exposes_service_error_bodies() 
             request.encode("db", "id").unwrap(),
             &request.columns,
             request.row_limit,
+            request.byte_limit,
         );
         assert_eq!(result.is_ok(), success);
         if let Err(error) = result {

@@ -8,7 +8,10 @@ import urllib.request
 from telemetry_fixture import command, test_binary, run_test
 
 IMAGE = "clickhouse/clickhouse-server@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7"
-TEST = "functional::functional_contract_and_canonical_sets"
+TESTS = (
+    "functional::functional_contract_and_canonical_sets",
+    "functional::evidence::typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter_epochs",
+)
 
 
 def wait_for_engine(port):
@@ -54,7 +57,8 @@ def fixture():
 def main():
     binary = test_binary("culprit-store-clickhouse")
     with fixture() as environment:
-        run_test(binary, TEST, environment)
+        for test in TESTS:
+            run_test(binary, test, environment)
 
 
 if __name__ == "__main__":

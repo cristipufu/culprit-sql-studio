@@ -5,9 +5,10 @@ use crate::{
     response::Column,
     schema::Schema,
 };
+use culprit_collector::analytical::read_store::AnalyticalReadPage;
 use culprit_collector::delivery::recovery::CommittedRange;
 use culprit_core::{Result, telemetry::DeliveryProblem};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
 
 pub struct AdxReadback {
@@ -24,16 +25,20 @@ impl AdxReadback {
         batch_id: &str,
         after: usize,
         until: usize,
-    ) -> Result<Vec<Vec<Value>>> {
+        byte_limit: usize,
+    ) -> Result<AnalyticalReadPage> {
         let batch = range.manifest().batches.iter().find(|batch| batch.batch_id == batch_id).ok_or_else(invalid)?;
         let schema = self.catalog.get(batch.stream)?;
-        let table = self.query.query(page_query(schema, &range.manifest().range_id, batch_id, after, until)).await?;
+        let table = self
+            .query
+            .query(page_query(schema, &range.manifest().range_id, batch_id, after, until, byte_limit))
+            .await?;
         if table.columns != schema.verification_columns() {
             return Err(invalid());
         }
-        Ok(table.rows)
+        Ok(AnalyticalReadPage { rows: table.rows, response_bytes: table.response_bytes })
     }
-    pub async fn audit_membership(&self, range: &CommittedRange) -> Result<()> {
+    pub async fn audit_membership(&self, range: &CommittedRange, byte_limit: usize) -> Result<usize> {
         // Check every landing table, including families absent from this capture. A foreign batch or ordinal
         // cannot hide outside the expected per-batch value pages. This count is only an envelope guard;
         // every admitted typed value is separately compared with its immutable expected projection.
@@ -73,15 +78,23 @@ impl AdxReadback {
                 parameters: BTreeMap::from([("pRange".into(), json!(range.manifest().range_id))]),
                 columns: columns.clone(),
                 row_limit: 1,
+                byte_limit,
             })
             .await?;
         if table.columns != columns || table.rows != vec![vec![json!(0)]] {
             return Err(invalid());
         }
-        Ok(())
+        Ok(table.response_bytes)
     }
 }
-fn page_query(schema: &Schema, range: &str, batch: &str, after: usize, until: usize) -> QueryRequest {
+fn page_query(
+    schema: &Schema,
+    range: &str,
+    batch: &str,
+    after: usize,
+    until: usize,
+    byte_limit: usize,
+) -> QueryRequest {
     let columns = schema.columns().iter().map(|column| column.name.as_str()).collect::<Vec<_>>().join(", ");
     let text = format!(
         "declare query_parameters(pRange:string,pBatch:string,pAfter:long,pUntil:long);\n{}\n| where RangeId == pRange and BatchId == pBatch\n| where RowOrdinal > pAfter and RowOrdinal <= pUntil\n| project {}\n| distinct {}\n| take {}",
@@ -100,6 +113,7 @@ fn page_query(schema: &Schema, range: &str, batch: &str, after: usize, until: us
         ]),
         columns: schema.verification_columns(),
         row_limit: until - after + 1,
+        byte_limit,
     }
 }
 fn invalid() -> culprit_core::Error {

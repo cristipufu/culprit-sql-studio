@@ -47,11 +47,12 @@ impl QueryTransport for Queries {
         let reply = self.replies.lock().unwrap().pop_front().expect("unexpected query");
         let columns = request.columns.clone();
         self.requests.lock().unwrap().push(request);
-        match reply {
-            Reply::Audit(count) => Ok(QueryTable { columns, rows: vec![vec![json!(count)]] }),
-            Reply::Rows(rows) => Ok(QueryTable { columns, rows }),
-            Reply::Failure => Err(DeliveryProblem::Transport.error()),
-        }
+        let rows = match reply {
+            Reply::Audit(count) => vec![vec![json!(count)]],
+            Reply::Rows(rows) => rows,
+            Reply::Failure => return Err(DeliveryProblem::Transport.error()),
+        };
+        Ok(QueryTable { columns, response_bytes: serde_json::to_vec(&rows).unwrap().len(), rows })
     }
 }
 

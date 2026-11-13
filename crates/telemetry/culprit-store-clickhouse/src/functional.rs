@@ -21,6 +21,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use zeroize::Zeroizing;
 const USER: &str = "culprit_fixture";
 const PASSWORD: &str = "owned-fixture-password";
+mod evidence;
 struct Server {
     origin: String,
     client: Arc<ClickHouseClient>,
@@ -77,6 +78,7 @@ impl Server {
                     .map(|(name, kind)| Column { name: (*name).into(), kind: (*kind).into() })
                     .collect(),
                 row_limit: 10_000,
+                byte_limit: crate::response::MAX_RESPONSE_BYTES,
             })
             .await
             .unwrap()
@@ -328,6 +330,7 @@ async fn native_scalar_roundtrip(server: &Server) {
                 parameters,
                 columns: schema.verification_columns(),
                 row_limit: 1,
+                byte_limit: crate::response::MAX_RESPONSE_BYTES,
             })
             .await
             .unwrap()

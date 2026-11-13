@@ -73,6 +73,31 @@ impl Schema {
     pub fn column_names(&self) -> String {
         self.columns.iter().map(|column| quote(&column.name)).collect::<Vec<_>>().join(", ")
     }
+    fn returned_values(&self, values: &[Value]) -> Result<Vec<Value>> {
+        if values.len() != self.columns.len() {
+            return Err(invalid());
+        }
+        self.columns
+            .iter()
+            .zip(values)
+            .map(|(column, value)| {
+                if column.kind == ScalarType::Timestamp && !value.is_null() {
+                    let nanos = value.as_str().and_then(|s| s.parse::<i64>().ok()).ok_or_else(invalid)?;
+                    let date = chrono::DateTime::from_timestamp_nanos(nanos);
+                    return Ok(Value::String(date.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)));
+                }
+                column.kind.returned(value, column.nullable)
+            })
+            .collect()
+    }
+    pub fn logical_values(&self, values: &[Value]) -> Result<serde_json::Map<String, Value>> {
+        Ok(self
+            .columns
+            .iter()
+            .zip(self.returned_values(values)?)
+            .map(|(column, value)| (column.name.clone(), value))
+            .collect())
+    }
 }
 impl RowProjection for Schema {
     fn from_logical(schema: LogicalSchema) -> Result<Self> {
@@ -100,23 +125,7 @@ impl RowProjection for Schema {
         encode_row(&self.columns, values)
     }
     fn returned_digest(&self, values: &[Value]) -> Result<[u8; 32]> {
-        if values.len() != self.columns.len() {
-            return Err(invalid());
-        }
-        let normalized = self
-            .columns
-            .iter()
-            .zip(values)
-            .map(|(column, value)| {
-                if column.kind == ScalarType::Timestamp && !value.is_null() {
-                    let nanos = value.as_str().and_then(|s| s.parse::<i64>().ok()).ok_or_else(invalid)?;
-                    let date = chrono::DateTime::from_timestamp_nanos(nanos);
-                    return Ok(Value::String(date.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)));
-                }
-                column.kind.returned(value, column.nullable)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        projection::digest(&normalized)
+        projection::digest(&self.returned_values(values)?)
     }
 }
 /// Reject DateTime64(9) overflow before dispatch; never silently round or wrap a native timestamp.

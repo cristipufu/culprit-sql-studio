@@ -11,6 +11,7 @@ use culprit_collector::{
         ProjectionCatalog,
         encoding::EncodedBatch,
         indexes::ProjectionIndexes,
+        read_store::{AnalyticalReadPage, AnalyticalReadStore},
         sink::{AnalyticalSink, AnalyticalStore},
     },
     delivery::{
@@ -49,21 +50,22 @@ pub fn new(
     )
 }
 #[async_trait]
-impl AnalyticalStore for ClickHouseStore {
+impl AnalyticalReadStore for ClickHouseStore {
     fn destination(&self) -> &str {
         self.query.destination()
     }
     fn catalog(&self) -> Arc<dyn ProjectionCatalog> {
         self.catalog.clone()
     }
-    fn polling_mode(&self) -> &'static str {
-        "clickhouse-readback-v1"
+    fn logical_values(
+        &self,
+        stream: culprit_core::telemetry::TelemetryStream,
+        row: &[Value],
+    ) -> Result<serde_json::Map<String, Value>> {
+        self.catalog.get(stream)?.logical_values(row)
     }
-    async fn dispatch(&self, _: &CommittedRange, _: &DeliveryAttempt, batch: Arc<EncodedBatch>) -> Result<Submission> {
-        let table = batch.table.clone();
-        self.query.insert(&table, InsertData::Batch(batch)).await
-    }
-    async fn audit_membership(&self, range: &CommittedRange) -> Result<()> {
+
+    async fn audit_membership(&self, range: &CommittedRange, byte_limit: usize) -> Result<usize> {
         let branches = self
             .catalog
             .schemas()
@@ -101,12 +103,13 @@ impl AnalyticalStore for ClickHouseStore {
                 parameters: range_parameter(range),
                 columns: vec![Column { name: "InvalidRows".into(), kind: "UInt64".into() }],
                 row_limit: 1,
+                byte_limit,
             })
             .await?;
         if table.rows != vec![vec![json!(0)]] {
             return Err(invalid());
         }
-        Ok(())
+        Ok(table.response_bytes)
     }
     async fn rows(
         &self,
@@ -114,7 +117,8 @@ impl AnalyticalStore for ClickHouseStore {
         batch_id: &str,
         after: usize,
         until: usize,
-    ) -> Result<Vec<Vec<Value>>> {
+        byte_limit: usize,
+    ) -> Result<AnalyticalReadPage> {
         let batch = range.manifest().batches.iter().find(|batch| batch.batch_id == batch_id).ok_or_else(invalid)?;
         let schema = self.catalog.get(batch.stream)?;
         let text = format!(
@@ -129,16 +133,46 @@ impl AnalyticalStore for ClickHouseStore {
             ("after".into(), after.to_string()),
             ("until".into(), until.to_string()),
         ]);
-        Ok(self
+        let table = self
             .query
             .query(QueryRequest {
                 text,
                 parameters,
                 columns: schema.verification_columns(),
                 row_limit: until - after + 1,
+                byte_limit,
             })
-            .await?
-            .rows)
+            .await?;
+        Ok(AnalyticalReadPage { rows: table.rows, response_bytes: table.response_bytes })
+    }
+    async fn publication_rows(&self, range: &CommittedRange, byte_limit: usize) -> Result<AnalyticalReadPage> {
+        let schema = self.catalog.publication();
+        let text = format!(
+            "SELECT DISTINCT {} FROM {} WHERE RangeId={{range:String}} LIMIT 2",
+            schema.verification_projection(),
+            quote(schema.table())
+        );
+        let table = self
+            .query
+            .query(QueryRequest {
+                text,
+                parameters: range_parameter(range),
+                columns: schema.verification_columns(),
+                row_limit: 2,
+                byte_limit,
+            })
+            .await?;
+        Ok(AnalyticalReadPage { rows: table.rows, response_bytes: table.response_bytes })
+    }
+}
+#[async_trait]
+impl AnalyticalStore for ClickHouseStore {
+    fn polling_mode(&self) -> &'static str {
+        "clickhouse-readback-v1"
+    }
+    async fn dispatch(&self, _: &CommittedRange, _: &DeliveryAttempt, batch: Arc<EncodedBatch>) -> Result<Submission> {
+        let table = batch.table.clone();
+        self.query.insert(&table, InsertData::Batch(batch)).await
     }
     async fn publish(&self, _: &CommittedRange, _: &DeliveryAttempt, _: &str, bytes: Vec<u8>) -> Result<()> {
         match self.query.insert(self.catalog.publication().table(), InsertData::Control(bytes)).await? {
@@ -146,25 +180,8 @@ impl AnalyticalStore for ClickHouseStore {
             Submission::Rejected => Err(DeliveryProblem::Transport.error()),
         }
     }
-    async fn publication_rows(&self, range: &CommittedRange) -> Result<Vec<Vec<Value>>> {
-        let schema = self.catalog.publication();
-        let text = format!(
-            "SELECT DISTINCT {} FROM {} WHERE RangeId={{range:String}} LIMIT 2",
-            schema.verification_projection(),
-            quote(schema.table())
-        );
-        Ok(self
-            .query
-            .query(QueryRequest {
-                text,
-                parameters: range_parameter(range),
-                columns: schema.verification_columns(),
-                row_limit: 2,
-            })
-            .await?
-            .rows)
-    }
 }
+
 fn range_parameter(range: &CommittedRange) -> BTreeMap<String, String> {
     BTreeMap::from([("range".into(), range.manifest().range_id.clone())])
 }

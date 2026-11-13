@@ -141,6 +141,7 @@ pub(crate) fn query(
     body: Vec<u8>,
     columns: &[Column],
     row_limit: usize,
+    byte_limit: usize,
 ) -> Result<QueryTable> {
     let auth = Zeroizing::new(format!("Bearer {token}"));
     let mut response = agent(origin)
@@ -160,10 +161,10 @@ pub(crate) fn query(
     let bytes = response
         .body_mut()
         .with_config()
-        .limit(response::MAX_RESPONSE_BYTES as u64)
+        .limit(byte_limit as u64)
         .read_to_vec()
         .map_err(|_| DeliveryProblem::Transport.error())?;
-    response::parse(&bytes, columns, row_limit)
+    response::parse(&bytes, columns, row_limit, byte_limit)
 }
 pub(crate) fn agent(origin: &str) -> &'static ureq::Agent {
     static CLOUD: OnceLock<ureq::Agent> = OnceLock::new();

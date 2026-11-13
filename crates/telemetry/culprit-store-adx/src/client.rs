@@ -45,6 +45,7 @@ pub struct QueryRequest {
     pub parameters: BTreeMap<String, Value>,
     pub columns: Vec<Column>,
     pub row_limit: usize,
+    pub byte_limit: usize,
 }
 impl QueryRequest {
     fn encode(&self, database: &str, request_id: &str) -> Result<Vec<u8>> {
@@ -55,6 +56,8 @@ impl QueryRequest {
             || self.columns.len() > 128
             || self.row_limit == 0
             || self.row_limit > 10_001
+            || self.byte_limit == 0
+            || self.byte_limit > response::MAX_RESPONSE_BYTES
             || self.parameters.iter().any(|(key, value)| !parameter_name(key) || !(value.is_string() || value.is_i64()))
         {
             return Err(DeliveryProblem::InvalidContract.error());
@@ -63,7 +66,7 @@ impl QueryRequest {
             "queryconsistency": "strongconsistency", "query_results_cache_max_age": "00:00:00",
             "results_progressive_enabled": false, "results_v2_fragment_primary_tables": false,
             "results_error_reporting_placement": "end_of_dataset", "servertimeout": "00:00:30",
-            "truncationmaxrecords": 10_001, "truncationmaxsize": response::MAX_RESPONSE_BYTES,
+            "truncationmaxrecords": 10_001, "truncationmaxsize": self.byte_limit,
             "maxmemoryconsumptionperiterator": MAX_QUERY_MEMORY_BYTES,
             "max_memory_consumption_per_query_per_node": MAX_QUERY_MEMORY_BYTES,
             "request_readonly": true, "request_readonly_hardline": true, "request_callout_disabled": true
@@ -114,7 +117,7 @@ impl QueryTransport for AdxClient {
         let body = request.encode(&self.database, &request_id)?;
         self.service
             .execute(move |origin, token| {
-                http::query(origin, token, &request_id, body, &request.columns, request.row_limit)
+                http::query(origin, token, &request_id, body, &request.columns, request.row_limit, request.byte_limit)
             })
             .await
     }
@@ -131,5 +134,6 @@ pub(super) fn emulator_query(port: u16, request: QueryRequest) -> Result<QueryTa
         body,
         &request.columns,
         request.row_limit,
+        request.byte_limit,
     )
 }

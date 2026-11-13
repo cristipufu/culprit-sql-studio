@@ -84,16 +84,42 @@ impl Schema {
         Ok(values)
     }
     pub fn returned_digest(&self, values: &[Value]) -> Result<[u8; 32]> {
+        projection::digest(&self.returned_values(values)?)
+    }
+    fn returned_values(&self, values: &[Value]) -> Result<Vec<Value>> {
         if values.len() != self.columns.len() {
             return Err(DeliveryProblem::Integrity.error());
         }
-        let normalized = self
-            .columns
+        self.columns
             .iter()
             .zip(values)
             .map(|(column, value)| projection::returned(column.kind, value, column.nullable))
-            .collect::<Result<Vec<_>>>()?;
-        projection::digest(&normalized)
+            .collect::<Result<Vec<_>>>()
+    }
+    pub fn logical_values(&self, values: &[Value]) -> Result<serde_json::Map<String, Value>> {
+        let normalized = self.returned_values(values)?;
+        let mut position = 0;
+        let mut logical = serde_json::Map::new();
+        for field in &self.fields {
+            let value = if has_presence(*field) {
+                let present = normalized[position].as_bool().ok_or_else(|| DeliveryProblem::Integrity.error())?;
+                position += 1;
+                let value = normalized[position].clone();
+                if present {
+                    value
+                } else {
+                    if value.as_str() != Some("") {
+                        return Err(DeliveryProblem::Integrity.error());
+                    }
+                    Value::Null
+                }
+            } else {
+                normalized[position].clone()
+            };
+            logical.insert(field.name.into(), value);
+            position += 1;
+        }
+        Ok(logical)
     }
     pub fn encode(&self, values: &[Value]) -> Result<Vec<u8>> {
         encode_row(&self.columns, values)

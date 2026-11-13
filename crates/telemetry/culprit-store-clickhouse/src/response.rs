@@ -3,7 +3,7 @@ use culprit_core::{Result, telemetry::DeliveryProblem};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+pub use culprit_collector::analytical::read_store::MAX_READ_RESPONSE_BYTES as MAX_RESPONSE_BYTES;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Column {
@@ -14,6 +14,7 @@ pub struct Column {
 pub struct QueryTable {
     pub columns: Vec<Column>,
     pub rows: Vec<Vec<Value>>,
+    pub response_bytes: usize,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,8 +27,10 @@ struct Response {
     #[serde(default)]
     statistics: Option<Value>,
 }
-pub fn parse(bytes: &[u8], columns: &[Column], row_limit: usize) -> Result<QueryTable> {
-    if bytes.len() > MAX_RESPONSE_BYTES
+pub fn parse(bytes: &[u8], columns: &[Column], row_limit: usize, byte_limit: usize) -> Result<QueryTable> {
+    if byte_limit == 0
+        || byte_limit > MAX_RESPONSE_BYTES
+        || bytes.len() > byte_limit
         || columns.is_empty()
         || columns.len() > 128
         || row_limit == 0
@@ -44,7 +47,7 @@ pub fn parse(bytes: &[u8], columns: &[Column], row_limit: usize) -> Result<Query
     {
         return Err(invalid());
     }
-    Ok(QueryTable { columns: response.meta, rows: response.data })
+    Ok(QueryTable { columns: response.meta, rows: response.data, response_bytes: bytes.len() })
 }
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()

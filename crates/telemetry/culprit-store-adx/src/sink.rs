@@ -1,10 +1,9 @@
 //! ADX composes one analytical lifecycle with Kusto readback and a selected ingestion transport.
 use crate::{
-    catalog::SchemaCatalog,
     client::QueryTransport,
     control::AdxPublication,
+    evidence::AdxReadStore,
     ingestion::{IngestionBatch, IngestionTransport},
-    receipts::AdxReadback,
 };
 use async_trait::async_trait;
 use culprit_collector::{
@@ -12,6 +11,7 @@ use culprit_collector::{
         ProjectionCatalog,
         encoding::EncodedBatch,
         indexes::ProjectionIndexes,
+        read_store::{AnalyticalReadPage, AnalyticalReadStore},
         sink::{AnalyticalSink, AnalyticalStore},
     },
     delivery::{
@@ -26,22 +26,14 @@ use serde_json::Value;
 use std::{path::Path, sync::Arc};
 
 pub struct AdxStore {
-    catalog: Arc<SchemaCatalog>,
-    query: Arc<dyn QueryTransport>,
+    read: AdxReadStore,
     ingestion: Arc<dyn IngestionTransport>,
-    readback: AdxReadback,
     control: AdxPublication,
 }
 impl AdxStore {
     pub fn new(query: Arc<dyn QueryTransport>, ingestion: Arc<dyn IngestionTransport>) -> Result<Self> {
-        let catalog = Arc::new(SchemaCatalog::new()?);
-        Ok(Self {
-            readback: AdxReadback::new(query.clone(), catalog.clone()),
-            control: AdxPublication::new(catalog.clone(), query.clone(), ingestion.clone()),
-            ingestion,
-            catalog,
-            query,
-        })
+        let read = AdxReadStore::new(query.clone())?;
+        Ok(Self { control: AdxPublication::new(read.schema_catalog(), ingestion.clone()), ingestion, read })
     }
 }
 pub fn new(
@@ -56,13 +48,39 @@ pub fn new(
     AnalyticalSink::new(contract, recovery, indexes, Arc::new(AdxStore::new(query, ingestion)?), scratch)
 }
 #[async_trait]
-impl AnalyticalStore for AdxStore {
+impl AnalyticalReadStore for AdxStore {
     fn destination(&self) -> &str {
-        self.query.destination()
+        self.read.destination()
     }
     fn catalog(&self) -> Arc<dyn ProjectionCatalog> {
-        self.catalog.clone()
+        self.read.catalog()
     }
+    fn logical_values(
+        &self,
+        stream: culprit_core::telemetry::TelemetryStream,
+        row: &[Value],
+    ) -> Result<serde_json::Map<String, Value>> {
+        self.read.logical_values(stream, row)
+    }
+    async fn audit_membership(&self, range: &CommittedRange, byte_limit: usize) -> Result<usize> {
+        self.read.audit_membership(range, byte_limit).await
+    }
+    async fn rows(
+        &self,
+        range: &CommittedRange,
+        batch: &str,
+        after: usize,
+        until: usize,
+        byte_limit: usize,
+    ) -> Result<AnalyticalReadPage> {
+        self.read.rows(range, batch, after, until, byte_limit).await
+    }
+    async fn publication_rows(&self, range: &CommittedRange, byte_limit: usize) -> Result<AnalyticalReadPage> {
+        self.read.publication_rows(range, byte_limit).await
+    }
+}
+#[async_trait]
+impl AnalyticalStore for AdxStore {
     fn polling_mode(&self) -> &'static str {
         "adx-readback-v2"
     }
@@ -75,16 +93,7 @@ impl AnalyticalStore for AdxStore {
         self.ingestion.submit(Arc::new(IngestionBatch::encoded(range, attempt, batch)?)).await?;
         Ok(Submission::Accepted)
     }
-    async fn audit_membership(&self, range: &CommittedRange) -> Result<()> {
-        self.readback.audit_membership(range).await
-    }
-    async fn rows(&self, range: &CommittedRange, batch: &str, after: usize, until: usize) -> Result<Vec<Vec<Value>>> {
-        self.readback.rows(range, batch, after, until).await
-    }
     async fn publish(&self, range: &CommittedRange, attempt: &DeliveryAttempt, id: &str, bytes: Vec<u8>) -> Result<()> {
         self.control.publish(range, attempt, id, bytes).await
-    }
-    async fn publication_rows(&self, range: &CommittedRange) -> Result<Vec<Vec<Value>>> {
-        self.control.rows(range).await
     }
 }
