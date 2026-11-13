@@ -34,7 +34,7 @@ OUTER APPLY (
   CONVERT(varchar(40),CAST(s.last_request_end_time AS datetime2),126) AS last_request_end,
   s.cpu_time AS session_cpu_ms,s.logical_reads AS session_logical_reads,s.reads AS session_physical_reads,s.writes AS session_writes,
   r.cpu_time AS request_cpu_ms,r.logical_reads AS request_logical_reads,r.reads AS request_physical_reads,r.writes AS request_writes,
-  r.wait_type,CASE WHEN r.wait_type IS NOT NULL THEN r.wait_time END AS wait_ms,r.blocking_session_id,
+  r.wait_type,r.wait_resource,CASE WHEN r.wait_type IS NOT NULL THEN r.wait_time END AS wait_ms,r.blocking_session_id,
   CASE WHEN r.blocking_session_id>0 THEN CONVERT(varchar(40),CAST(b.login_time AS datetime2),126) END AS blocker_generation,
   CONVERT(varchar(16),r.query_hash,2) AS query_hash,CONVERT(varchar(128),r.sql_handle,2) AS sql_handle,
   r.statement_start_offset AS statement_start,r.statement_end_offset AS statement_end,r.database_id AS request_database_id

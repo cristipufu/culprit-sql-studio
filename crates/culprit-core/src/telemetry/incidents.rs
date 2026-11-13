@@ -175,12 +175,26 @@ fn meaningful_change(before: &ActivityIncidentState, now: &ActivityIncidentState
     before.status != now.status
         || before.observation.query_hash != now.observation.query_hash
         || before.conditions != now.conditions
-        || before.observation.wait.as_ref().map(|wait| (&wait.native_type, &wait.owners))
-            != now.observation.wait.as_ref().map(|wait| (&wait.native_type, &wait.owners))
+        || wait_changed(before.observation.wait.as_ref(), now.observation.wait.as_ref())
         || (now.progress == ActivityProgress::NoObservedCounterChange && before.progress != now.progress)
         || (before.progress == ActivityProgress::NoObservedCounterChange
             && now.progress == ActivityProgress::ChangedCounters)
 }
+fn wait_changed(before: Option<&super::ActivityWait>, now: Option<&super::ActivityWait>) -> bool {
+    match (before, now) {
+        (None, None) => false,
+        (Some(before), Some(now)) => {
+            before.native_type != now.native_type
+                || !same_members(&before.owners, &now.owners)
+                || !same_members(&before.identified_resources, &now.identified_resources)
+        }
+        _ => true,
+    }
+}
+fn same_members<T: Eq + std::hash::Hash>(before: &[T], now: &[T]) -> bool {
+    before.iter().collect::<std::collections::HashSet<_>>() == now.iter().collect::<std::collections::HashSet<_>>()
+}
+
 fn update_due(now: &str, before: &str, interval_ms: u32) -> bool {
     match (chrono::DateTime::parse_from_rfc3339(now), chrono::DateTime::parse_from_rfc3339(before)) {
         (Ok(now), Ok(before)) => (now - before).num_milliseconds() >= i64::from(interval_ms),

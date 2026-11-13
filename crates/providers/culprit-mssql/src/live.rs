@@ -140,6 +140,7 @@ fn session_of(record: &crate::activity::ActivityRecord) -> Session {
         waiting_on_lock: wait_type.as_deref().map(|wait| wait_type_category(wait) == "Lock"),
         wait: wait_type,
         wait_ms: number(wait.and_then(|wait| wait.elapsed_ms.as_deref())),
+        wait_resources: wait.map(|wait| wait.identified_resources.clone()).filter(|resources| !resources.is_empty()),
         blocked_by,
         elapsed_ms: number(if facts.key.request.is_some() {
             facts.elapsed_ms.as_deref()

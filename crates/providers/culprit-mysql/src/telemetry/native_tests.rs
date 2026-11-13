@@ -244,6 +244,7 @@ async fn persistent_row_blocking_keeps_the_idle_owner_and_current_request_genera
     });
     tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
     let (description, rows, _) = activity(&provider).await;
+    let live = provider.live().await.unwrap();
     owner.query_drop("ROLLBACK").await.unwrap();
     let _ = owner.disconnect().await;
     blocked.await.unwrap().unwrap();
@@ -256,6 +257,13 @@ async fn persistent_row_blocking_keeps_the_idle_owner_and_current_request_genera
         })
         .expect("the blocked request was not selected");
     assert!(waiter.key.request.is_some());
+    let resources = &waiter.wait.as_ref().unwrap().identified_resources;
+    assert!(!resources.is_empty(), "native lock identity must reach the persistent observation");
+    let live_waiter = live.sessions.iter().find(|row| row.id == waiter_id).unwrap();
+    assert_eq!(live_waiter.wait_resources.as_ref().unwrap(), resources);
+    assert!(resources.iter().all(|resource| resource.kind == culprit_core::WaitResourceKind::DataLock
+        && resource.native.qualifiers.get("engine").map(String::as_str) == Some("INNODB")));
+
     assert!(
         waiter
             .conditions(&ActivityPolicy { blocked_after_ms: 1000, ..Default::default() })

@@ -111,6 +111,7 @@ fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             session_counters: ActivityCounters::default(),
             request_counters: active.then(ActivityCounters::default),
             wait: native_type.map(|native_type| ActivityWait {
+                identified_resources: vec![],
                 resources: None,
                 native_type: Some(native_type),
                 elapsed_ms: None,
@@ -390,6 +391,7 @@ pub(crate) fn project(record: &ActivityRecord) -> Session {
         },
         wait: if active { wait } else { None },
         waiting_on_lock: Some(active && row.text("wait_event_type").as_deref() == Some("Lock")),
+        wait_resources: None,
         wait_ms: record
             .facts
             .as_ref()

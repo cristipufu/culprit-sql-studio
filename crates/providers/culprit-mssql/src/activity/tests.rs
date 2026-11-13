@@ -90,6 +90,7 @@ fn metadata(id: i64) -> Rec {
         ("request_physical_reads", Val::Int(30)),
         ("request_writes", Val::Int(40)),
         ("wait_type", Val::Text("LCK_M_X".into())),
+        ("wait_resource", Val::Null),
         ("wait_ms", Val::Int(40_000)),
         ("blocking_session_id", Val::Int(55)),
         ("blocker_generation", Val::Text("2020-01-01T07:00:00.1533333".into())),
@@ -540,4 +541,68 @@ async fn an_observed_request_wins_over_a_later_absence_probe_without_attributing
     assert!(observations[0].key.request.is_some());
     assert_eq!(observations[0].request_counters.as_ref().unwrap().cpu_ms.as_deref(), Some("10"));
     assert_eq!(observations[0].statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::Missing });
+}
+
+#[tokio::test]
+async fn page_wait_targets_share_the_request_identity_without_inventing_a_holder_or_more_reads() {
+    for (wait, kind) in [
+        ("PAGELATCH_EX", culprit_core::WaitResourceKind::MemoryPage),
+        ("PAGEIOLATCH_SH", culprit_core::WaitResourceKind::PageIo),
+    ] {
+        let row = replace(
+            &metadata(42),
+            &[
+                ("wait_type", Val::Text(wait.into())),
+                ("wait_resource", Val::Text("5:1:4144".into())),
+                ("blocking_session_id", Val::Int(-5)),
+                ("blocker_generation", Val::Null),
+            ],
+        );
+        let sql = "SELECT id FROM dbo.orders";
+        let mut interactive = reader(
+            vec![Ok(vec![row.clone()]), Ok(vec![details(42, sql)])],
+            ActivityScope::Visible,
+            IdentityDetail::Endpoint,
+        );
+        let live = crate::live::collect_from(&mut interactive).await.unwrap();
+        let session = &live.sessions[0];
+        let targets = session.wait_resources.as_ref().unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].kind, kind);
+        assert_eq!(targets[0].native.id, "5:1:4144");
+        assert_eq!(targets[0].native.qualifiers["source"], "sys.dm_exec_requests.wait_resource");
+        assert!(session.blocked_by.is_none(), "a waited-on page is not its holder");
+        assert_eq!(session.sql.as_deref(), Some(sql));
+        let mut exporting = reader(
+            vec![Ok(vec![row]), Ok(vec![details(42, sql)])],
+            ActivityScope::CurrentDatabase,
+            IdentityDetail::AzureDatabase,
+        );
+        let (_, observations, blocking) =
+            crate::telemetry::activity::capture(&mut exporting, &ActivityPolicy::default()).await.unwrap();
+        let wait = observations[0].wait.as_ref().unwrap();
+        assert_eq!(&wait.identified_resources, targets);
+        assert!(wait.owners.iter().all(|owner| !owner.is_blocker()));
+        assert_eq!(observations[0].conditions(&ActivityPolicy::default()), vec![ActivityCondition::LongRunning]);
+        assert!(blocking.is_empty());
+        assert_eq!(interactive.query_count(), 2);
+        assert_eq!(exporting.query_count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn an_unidentified_page_stays_unknown_and_invalid_native_identifiers_cannot_complete_capture() {
+    let row = replace(&metadata(42), &[("wait_type", Val::Text("PAGELATCH_EX".into())), ("wait_resource", Val::Null)]);
+    let mut unknown = reader(vec![Ok(vec![row])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+    let frame = unknown.observe().await.unwrap();
+    assert!(frame.records[0].facts.wait.as_ref().unwrap().identified_resources.is_empty());
+    for invalid in ["control\nidentifier".to_owned(), "x".repeat(513)] {
+        let row = replace(
+            &metadata(42),
+            &[("wait_type", Val::Text("PAGELATCH_EX".into())), ("wait_resource", Val::Text(invalid))],
+        );
+        let mut reader = reader(vec![Ok(vec![row])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+        assert!(reader.observe().await.is_err());
+        assert_eq!(reader.query_count(), 1);
+    }
 }

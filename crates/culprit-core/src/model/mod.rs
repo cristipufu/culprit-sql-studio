@@ -845,6 +845,10 @@ pub struct Session {
     pub command: Option<String>,
     pub wait: Option<String>,
     pub wait_ms: Option<f64>,
+    /// Native targets observed with this wait; absence does not establish a contention-free request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wait_resources: Option<Vec<crate::ObservedWaitResource>>,
     pub blocked_by: Option<String>,
     pub elapsed_ms: Option<f64>,
     pub transaction_ms: Option<f64>,

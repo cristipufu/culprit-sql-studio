@@ -72,6 +72,7 @@ fn session(id: &str, state: &str) -> Session {
         command: None,
         wait: None,
         waiting_on_lock: None,
+        wait_resources: None,
         wait_ms: None,
         blocked_by: None,
         elapsed_ms: None,

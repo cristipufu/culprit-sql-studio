@@ -173,6 +173,7 @@ async fn functional_contract_and_canonical_sets() {
     native_query_semantics(&server, &catalog).await;
     unexpected_members_and_missing_rows(&server, &catalog).await;
     shared_resource_scopes(&server, &catalog).await;
+    observed_wait_resources(&server, &catalog).await;
 }
 
 async fn shared_resource_scopes(server: &Server, catalog: &SchemaCatalog) {
@@ -420,6 +421,38 @@ async fn unexpected_members_and_missing_rows(server: &Server, catalog: &SchemaCa
         assert!(
             verify(&scenario.sink, &scenario.range, VerificationBudget::default()).await.is_err(),
             "{mutation} must invalidate delivery proof"
+        );
+    }
+}
+
+async fn observed_wait_resources(server: &Server, catalog: &SchemaCatalog) {
+    use culprit_core::WaitResourceKind;
+    for (offset, kind) in
+        [WaitResourceKind::MemoryPage, WaitResourceKind::PageIo, WaitResourceKind::DataLock].into_iter().enumerate()
+    {
+        let scenario = Scenario::new(
+            server,
+            test_support::activity_with_wait_resource(
+                server.client.destination(),
+                catalog.digest(),
+                2_000 + offset as u64,
+                kind,
+            ),
+        )
+        .await;
+        scenario.complete().await;
+        let text = format!(
+            "SELECT JSONExtractString(arrayElement(JSONExtractArrayRaw(ifNull(WaitResources,'[]')),1),'kind') AS Kind,JSONExtractString(arrayElement(JSONExtractArrayRaw(ifNull(WaitResources,'[]')),1),'native','id') AS NativeId FROM {}",
+            server.view("CulpritActivityV1Current", true)
+        );
+        let mut parameters = server.scope(&scenario.range);
+        parameters.remove("from");
+        parameters.remove("until");
+        parameters.insert("asof".into(), "2020-01-01 12:05:00".into());
+        parameters.insert("age".into(), "3600000".into());
+        assert_eq!(
+            server.values(text, parameters, &[("Kind", "String"), ("NativeId", "String")]).await,
+            vec![vec![serde_json::to_value(kind).unwrap(), json!("native-wait-resource")]]
         );
     }
 }

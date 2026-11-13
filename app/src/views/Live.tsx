@@ -9,6 +9,7 @@ import { can, serverName } from "../lib/engines";
 import { count, dateLocale, duration, oneLine } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { t } from "../lib/i18n";
+import { waitResourceLabel } from "../lib/wait-resources";
 import { currentReport, setState, toast, useStore } from "../lib/store";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
@@ -352,7 +353,14 @@ function SessionRow({
       </td>
       <td>{s.state}</td>
       <td className="r">{duration(s.elapsed_ms)}</td>
-      <td>{s.wait ? `${s.wait}${s.wait_ms ? ` · ${duration(s.wait_ms)}` : ""}` : "—"}</td>
+      <td>
+        {s.wait ? `${s.wait}${s.wait_ms ? ` · ${duration(s.wait_ms)}` : ""}` : "—"}
+        {s.wait_resources?.map((resource) => (
+          <small className="live-wait-resource mono muted" key={JSON.stringify(resource)} title={waitResourceLabel(resource)}>
+            {waitResourceLabel(resource)}
+          </small>
+        ))}
+      </td>
       <td className="mono">{s.blocked_by ?? ""}</td>
       <td className="r">{s.cpu_ms != null ? duration(s.cpu_ms) : "—"}</td>
       <td className="r">{s.reads != null ? count(s.reads) : "—"}</td>

@@ -146,6 +146,7 @@ async fn volume_loss_preserves_uncertain_incidents_when_current_lock_details_are
     let mut row = observation();
     row.elapsed_ms = Some("45000".into());
     row.wait = Some(ActivityWait {
+        identified_resources: vec![],
         native_type: Some("native-lock".into()),
         elapsed_ms: Some("40000".into()),
         resources: None,

@@ -21,6 +21,7 @@ fn activity() -> ActivityObservation {
         session_counters: ActivityCounters { cpu_ms: Some("11".into()), ..Default::default() },
         request_counters: Some(ActivityCounters { cpu_ms: Some("0".into()), ..Default::default() }),
         wait: Some(ActivityWait {
+            identified_resources: vec![],
             resources: None,
             native_type: Some("LCK_M_X".into()),
             elapsed_ms: Some("40000".into()),

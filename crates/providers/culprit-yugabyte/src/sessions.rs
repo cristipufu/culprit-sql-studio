@@ -89,6 +89,7 @@ async fn read_live(observed: &mut ReadSession, environment: Environment) -> Resu
                 (Some(kind), Some(event)) => Some(format!("{kind}: {event}")),
                 (kind, event) => event.or(kind),
             },
+            wait_resources: None,
             wait_ms: None,
             blocked_by: None,
             elapsed_ms: if text(&v, "state").as_deref() == Some("active") {

@@ -45,6 +45,7 @@ fn idle(id: &str) -> ActivityObservation {
 fn blocked(row: &mut ActivityObservation, owners: Vec<ActivityWaitOwner>) {
     row.elapsed_ms = Some("1000".into());
     row.wait = Some(ActivityWait {
+        identified_resources: vec![],
         resources: None,
         native_type: Some("LCK_M_X".into()),
         elapsed_ms: Some("40000".into()),

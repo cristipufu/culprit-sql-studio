@@ -145,6 +145,8 @@ impl ActivityCounters {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ActivityWait {
+    /// Identified wait targets only. An empty list does not establish absence of resource contention.
+    pub identified_resources: Vec<crate::ObservedWaitResource>,
     pub native_type: Option<String>,
     pub elapsed_ms: Option<String>,
     pub owners: Vec<ActivityWaitOwner>,
@@ -207,6 +209,10 @@ impl ActivityObservation {
             && self.wait.as_ref().is_none_or(|wait| {
                 wait.native_type.as_deref().is_none_or(identifier)
                     && wait.elapsed_ms.as_deref().is_none_or(counter)
+                    && wait.identified_resources.len() <= crate::wait_resources::MAX_IDENTIFIED_WAIT_RESOURCES
+                    && wait.identified_resources.iter().all(crate::ObservedWaitResource::is_valid)
+                    && wait.identified_resources.iter().collect::<std::collections::HashSet<_>>().len()
+                        == wait.identified_resources.len()
                     && wait.owners.len() <= 64
                     && wait.owners.iter().all(ActivityWaitOwner::is_valid)
                     && wait.resources.as_ref().is_none_or(|resources| {

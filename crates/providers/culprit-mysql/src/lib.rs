@@ -311,7 +311,8 @@ impl Provider for MysqlProvider {
             ),
         )
         .await?;
-        let (blockers, locks, mut notes) = deadlocks::blocking_evidence(&mut conn, flavor).await;
+        let deadlocks::BlockingEvidence { blockers, locks, resources, mut notes } =
+            deadlocks::blocking_evidence(&mut conn, flavor).await;
         let last_statements = deadlocks::last_statements(&mut conn).await;
         conn.close().await;
 
@@ -346,6 +347,7 @@ impl Provider for MysqlProvider {
                     ),
                     wait: wait.map(|w| with_progress(w, r)),
                     wait_ms: None,
+                    wait_resources: resources.get(&id).cloned(),
                     elapsed_ms: r.number("ms").or_else(|| r.number("seconds").map(|s| s * 1000.0)),
                     transaction_ms: r.number("trx_ms"),
                     cpu_ms: None,

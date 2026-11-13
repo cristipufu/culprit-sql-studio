@@ -402,7 +402,12 @@ pub fn activity(destination: &str, schema: &str, sequence: u64, empty: bool) -> 
         blocking_edges: 0,
         details: ActivityDetailStatus::Collected,
     });
-    let record = TelemetryRecord::Activity(ActivityObservation {
+    let record = TelemetryRecord::Activity(activity_sample());
+    Recovery::capture(destination, schema, manifest.source, if empty { vec![] } else { vec![record] }, sequence)
+}
+
+fn activity_sample() -> ActivityObservation {
+    ActivityObservation {
         blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: "61".into(), generation: "login-1".into() },
@@ -424,8 +429,36 @@ pub fn activity(destination: &str, schema: &str, sequence: u64, empty: bool) -> 
         query_hash: None,
         client: None,
         statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+    }
+}
+
+pub fn activity_with_wait_resource(
+    destination: &str,
+    schema: &str,
+    sequence: u64,
+    kind: culprit_core::WaitResourceKind,
+) -> Recovery {
+    let source = activity(destination, schema, sequence, false).manifest.source;
+    let mut row = activity_sample();
+    row.state = "waiting".into();
+    row.wait = Some(ActivityWait {
+        native_type: Some(
+            match kind {
+                culprit_core::WaitResourceKind::MemoryPage => "PAGELATCH_EX",
+                culprit_core::WaitResourceKind::PageIo => "PAGEIOLATCH_SH",
+                culprit_core::WaitResourceKind::DataLock => "native-data-lock",
+            }
+            .into(),
+        ),
+        elapsed_ms: Some("40000".into()),
+        owners: vec![],
+        resources: None,
+        identified_resources: vec![culprit_core::ObservedWaitResource {
+            kind,
+            native: NativeIdentity::new("native-wait-resource").qualified("namespace", "native-local"),
+        }],
     });
-    Recovery::capture(destination, schema, manifest.source, if empty { vec![] } else { vec![record] }, sequence)
+    Recovery::capture(destination, schema, source, vec![TelemetryRecord::Activity(row)], sequence)
 }
 
 pub fn waits(destination: &str, schema: &str, sequence: u64, empty: bool, complete: bool) -> Recovery {

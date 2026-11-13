@@ -428,12 +428,24 @@ memory consumption can be relative to a pool limit without describing the pool's
 that database. This flag establishes measurement scope, not a causal link to any query. Query ownership and cause
 require their own native evidence; a high resource value or a concurrent query alone establishes neither.
 
+Activity rows and incident rows retain `WaitResources`: source-local native identities observed with the waiting
+request. SQL Server distinguishes in-memory page latches from page-I/O waits and preserves `wait_resource`.
+MySQL and MariaDB preserve the requested native lock ID with its storage engine; the ID's internal format is never
+parsed, and locked key contents are not collected. Live and background collection use the same native decoders.
+These references are included in exact analytical readback. An empty list means that no targets were identified,
+not that there was no contention.
+
+These fields keep the existing blocked/running thresholds and polling cadence. Page-to-object/index enrichment
+and identification of an owning statement require separate evidence. A wait target, a concurrent writer, or the
+current/last statement of a blocking session does not by itself establish the statement that acquired a resource.
+
 Structured JSON is stored as text so ingestion preserves nested timestamp strings, identifiers and exact counter
-digits. The generated analytical functions parse those fields after verification. Raw-table consumers can parse the
-JSON explicitly. Kusto `dynamic` ingestion can promote string values to other types; see the
+digits. ADX's generated analytical functions parse those fields after verification; ClickHouse retains verified
+JSON text for explicit typed extraction. Optional arrays use `JSONExtractArrayRaw(ifNull(WaitResources, '[]'))` in
+ClickHouse. Raw-table consumers can parse the JSON explicitly. Kusto `dynamic` ingestion can promote string values to other types; see the
 [dynamic type documentation](https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/dynamic).
 
-Query the generated `...Rows` functions with explicit contract, store, database and collection-time bounds. Apply
+Query the generated `...Rows` functions with explicit contract, store, resource and collection-time bounds. Apply
 native measurement-time filters separately. Current activity and snapshot functions additionally require an
 `asof` and positive maximum age. Complete empty observations replace prior sets; partial sources cannot clear them.
 Native epoch changes replace the same logical activity source. Revisions use owner epoch and capture sequence,

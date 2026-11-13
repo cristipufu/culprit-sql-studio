@@ -1,5 +1,5 @@
 //! Native facts are decoded once. Unredacted statement text stays private until a consumer projects it.
-use super::{ActivityRecord, NativeStatement, PreviousBatchLocator, RequestLocator};
+use super::{ActivityRecord, NativeStatement, PreviousBatchLocator, RequestLocator, resources};
 use crate::{
     read::{boolean, integer, invalid_data, optional_counter, optional_text, text},
     sql_time::native_time,
@@ -48,6 +48,10 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
     let owner = owner(row)?;
     let wait = if native_type.is_some() || owner.is_some() {
         Some(ActivityWait {
+            identified_resources: resources::identify(
+                native_type.as_deref(),
+                optional_text(row, "wait_resource")?.as_deref(),
+            ),
             resources: None,
             native_type,
             elapsed_ms: optional_counter(row, "wait_ms")?,

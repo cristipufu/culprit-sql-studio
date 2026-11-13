@@ -36,10 +36,7 @@ impl Fixture {
             temp.path(),
         )
         .unwrap();
-        dispatcher
-            .dispatch(&range, &DeliveryAttempt::new(1).unwrap(), &range.manifest().batches[0].batch_id)
-            .await
-            .unwrap();
+        dispatch_range(&dispatcher, &range, &DeliveryAttempt::new(1).unwrap()).await.unwrap();
         let objects = blobs.objects.lock().unwrap();
         let wire = objects.iter().find(|(key, _)| key.starts_with("ready/")).unwrap().1;
         let row: Value = serde_json::from_slice(wire).unwrap();
@@ -196,4 +193,28 @@ async fn stale_or_out_of_bounds_receipt_cursors_are_refused_before_a_destination
         assert!(reader.receipts(&fixture.range, Some(&cursor.to_string()), 1000).await.is_err());
     }
     assert!(queries.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn observed_wait_resources_survive_exact_readback_and_a_changed_native_target_is_rejected() {
+    use culprit_collector::analytical::test_support::activity_with_wait_resource;
+    use culprit_core::WaitResourceKind;
+    let catalog = SchemaCatalog::new().unwrap();
+    for kind in [WaitResourceKind::MemoryPage, WaitResourceKind::PageIo, WaitResourceKind::DataLock] {
+        let fixture = Fixture::from_recovery(activity_with_wait_resource("adx:test", catalog.digest(), 2, kind)).await;
+        let schema = fixture.catalog.get(fixture.range.manifest().batches[0].stream).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "WaitResources").unwrap();
+        let resources: Value = serde_json::from_str(fixture.values[column].as_str().unwrap()).unwrap();
+        assert_eq!(resources[0]["kind"], serde_json::to_value(kind).unwrap());
+        assert_eq!(resources[0]["native"]["id"], "native-wait-resource");
+        let (reader, _) = fixture.reader(vec![Reply::Audit(0), Reply::Rows(vec![fixture.values.clone()])]);
+        let page = reader.receipts(&fixture.range, None, 1000).await.unwrap();
+        assert_eq!(page.rows, fixture.range.manifest().batches[0].rows);
+        let mut changed = resources;
+        changed[0]["native"]["id"] = json!("another-resource");
+        let mut values = fixture.values.clone();
+        values[column] = json!(changed.to_string());
+        let (reader, _) = fixture.reader(vec![Reply::Audit(0), Reply::Rows(vec![values])]);
+        assert!(reader.receipts(&fixture.range, None, 1000).await.is_err());
+    }
 }

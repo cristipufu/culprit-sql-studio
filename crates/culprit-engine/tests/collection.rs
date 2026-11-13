@@ -1175,6 +1175,7 @@ fn activity_rows(scenario: Scenario, step: usize) -> Vec<culprit_core::telemetry
     let mut row = activity_row();
     if matches!(scenario, Scenario::ActivityWrongEdges) {
         row.wait = Some(ActivityWait {
+            identified_resources: vec![],
             resources: None,
             native_type: Some("Lock".into()),
             elapsed_ms: Some("40000".into()),

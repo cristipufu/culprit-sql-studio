@@ -13393,3 +13393,12 @@ li code,
     filter: brightness(0) invert(1);
   }
 }
+
+/* Native wait coordinates belong to the request; long opaque IDs remain readable in the tooltip. */
+.live-wait-resource {
+  display: block;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

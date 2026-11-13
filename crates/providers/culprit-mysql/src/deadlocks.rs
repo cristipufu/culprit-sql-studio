@@ -9,19 +9,26 @@ use culprit_core::{
 };
 use mysql_async::Value;
 
-use crate::rows::{Rec, query, query_one, query_with};
+use crate::rows::{query, query_one, query_with};
 use crate::{connect::Flavor, native::locks};
 pub(crate) const LATEST_SQL: &str = "SHOW ENGINE INNODB STATUS";
 
-pub(crate) async fn blocking_evidence(
-    conn: &mut impl crate::read::QueryRead,
-    flavor: Flavor,
-) -> (HashMap<String, String>, Vec<LockWait>, Vec<String>) {
+pub(crate) struct BlockingEvidence {
+    pub blockers: HashMap<String, String>,
+    pub locks: Vec<LockWait>,
+    pub resources: HashMap<String, Vec<culprit_core::ObservedWaitResource>>,
+    pub notes: Vec<String>,
+}
+
+pub(crate) async fn blocking_evidence(conn: &mut impl crate::read::QueryRead, flavor: Flavor) -> BlockingEvidence {
     let mut coverage = culprit_core::Coverage::default();
     let mut rows = coverage.read(&crate::sources::LIVE_LOCKS, wait_pairs(conn, flavor).await).unwrap_or_default();
     rows.extend(
         coverage
-            .read(&crate::sources::METADATA_LOCKS, query(conn, locks::METADATA_LOCK_WAITS_SQL).await)
+            .read(
+                &crate::sources::METADATA_LOCKS,
+                query(conn, locks::METADATA_LOCK_WAITS_SQL).await.and_then(locks::decode),
+            )
             .unwrap_or_default(),
     );
     if let Some(Some(instrument)) = coverage.read(&crate::sources::METADATA_LOCKS, query_one(conn, "SELECT ENABLED AS enabled FROM performance_schema.setup_instruments WHERE NAME = 'wait/lock/metadata/sql/mdl'").await)
@@ -29,29 +36,30 @@ pub(crate) async fn blocking_evidence(
     {
         coverage.note("metadata_locks", metadata_instrument_off());
     }
-    let pairs = rows.iter().map(|r| (r.string("session"), r.string("blocking"))).collect::<Vec<_>>();
-    let locks = rows
-        .iter()
-        .map(|r| LockWait {
-            session: r.string("session"),
-            mode: r.text("mode"),
-            resource: r.text("resource"),
-            object: r.text("object"),
-            index: r.text("index_name"),
-        })
-        .collect();
-    (
-        direct_blockers(&pairs),
+    let pairs = rows.iter().map(|row| (row.session.to_string(), row.blocking.to_string())).collect::<Vec<_>>();
+    let locks = rows.iter().map(locks::LockPair::lock_wait).collect();
+    let mut resources: HashMap<String, Vec<culprit_core::ObservedWaitResource>> = HashMap::new();
+    for row in rows {
+        if let Some(resource) = row.identified_resource {
+            let identified = resources.entry(row.session.to_string()).or_default();
+            if !identified.contains(&resource) {
+                identified.push(resource);
+            }
+        }
+    }
+    BlockingEvidence {
+        blockers: direct_blockers(&pairs),
         locks,
-        coverage.finish().2.into_iter().map(|n| format!("{}: {}", n.collector, n.message)).collect(),
-    )
+        resources,
+        notes: coverage.finish().2.into_iter().map(|n| format!("{}: {}", n.collector, n.message)).collect(),
+    }
 }
 
 /// Every (waiting, blocking) pair with what the waiter asked for, from whichever lock views this server has.
-async fn wait_pairs(conn: &mut impl crate::read::QueryRead, flavor: Flavor) -> Result<Vec<Rec>> {
+async fn wait_pairs(conn: &mut impl crate::read::QueryRead, flavor: Flavor) -> Result<Vec<locks::LockPair>> {
     let version = query_one(conn, "SELECT VERSION() AS version").await?.ok_or_else(crate::native::invalid)?;
     let version = crate::native::text(&version, "version")?;
-    query(conn, locks::row_waits(flavor, &version).sql).await
+    locks::decode(query(conn, locks::row_waits(flavor, &version).sql).await?)
 }
 
 /// A waiter queued behind several sessions is reported once per session ahead of it. The one it waits on directly is
@@ -74,8 +82,7 @@ fn direct_blockers(pairs: &[(String, String)]) -> HashMap<String, String> {
 }
 
 pub(crate) async fn lock_waits(conn: &mut impl crate::read::QueryRead, flavor: Flavor) -> Result<Vec<LockWait>> {
-    let (_, locks, _) = blocking_evidence(conn, flavor).await;
-    Ok(locks)
+    Ok(blocking_evidence(conn, flavor).await.locks)
 }
 
 /// The most recent statement of each sleeping connection (performance_schema keeps it after it finished). MariaDB

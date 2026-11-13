@@ -1,4 +1,5 @@
 //! One native activity reader. Consumers choose scope, enrichment and presentation after reading the same facts.
+mod resources;
 mod rows;
 mod sql;
 

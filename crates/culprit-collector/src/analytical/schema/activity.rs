@@ -27,6 +27,7 @@ const OBSERVATION: &[Field] = &[
     Field::optional("RequestWrites", "/_projection/activity/request_counters/writes", ExactCounter),
     Field::optional("WaitType", "/_projection/activity/wait/native_type", String),
     Field::optional("WaitElapsedMs", "/_projection/activity/wait/elapsed_ms", ExactCounter),
+    Field::optional("WaitResources", "/_projection/activity/wait/identified_resources", JsonContainer),
     Field::optional("WaitOwners", "/_projection/activity/wait/owners", JsonContainer),
     Field::optional("QueryHash", "/_projection/activity/query_hash", String),
     Field::optional("ClientApplication", "/_projection/activity/client/application", String),

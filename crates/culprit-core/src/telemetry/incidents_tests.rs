@@ -120,6 +120,7 @@ fn unknown_lock_evidence_retains_the_request_and_old_blocker_as_uncertain_until_
     let mut waiter = request("waiter");
     waiter.elapsed_ms = Some("45000".into());
     waiter.wait = Some(ActivityWait {
+        identified_resources: vec![],
         native_type: Some("DocDB lock".into()),
         elapsed_ms: Some("40000".into()),
         owners: vec![ActivityWaitOwner::Session {
@@ -163,4 +164,48 @@ fn unknown_lock_evidence_retains_the_request_and_old_blocker_as_uncertain_until_
     let resolved = ActivityIncidentUpdate::observe(&ended, &capture("ended"), &[], &refreshed.active).unwrap();
     assert!(resolved.active.is_empty());
     assert_eq!(resolved.changes[0].transition, ActivityIncidentTransition::Resolved);
+}
+
+#[test]
+fn a_changed_wait_target_updates_the_same_incident_without_claiming_ownership_or_spamming_unchanged_polls() {
+    let mut row = request("waiter");
+    row.wait = Some(ActivityWait {
+        identified_resources: ["5:1:4144", "5:1:4145"]
+            .into_iter()
+            .map(|id| crate::ObservedWaitResource {
+                kind: crate::WaitResourceKind::MemoryPage,
+                native: NativeIdentity::new(id),
+            })
+            .collect(),
+        native_type: Some("PAGELATCH_EX".into()),
+        elapsed_ms: Some("40000".into()),
+        owners: vec![],
+        resources: None,
+    });
+    let mut before = vec![];
+    for second in 0..3 {
+        if second == 2 {
+            row.wait.as_mut().unwrap().identified_resources.reverse();
+        }
+        let at = format!("2026-11-12T00:00:0{second}Z");
+        let source = observed_source(&at, &[row.clone()]);
+        let updated =
+            ActivityIncidentUpdate::observe(&source, &capture(&format!("poll-{second}")), &[row.clone()], &before)
+                .unwrap();
+        if second == 2 {
+            assert!(updated.changes.is_empty());
+        }
+        before = updated.active;
+    }
+    let incident_id = before[0].id.clone();
+    row.wait.as_mut().unwrap().identified_resources[0].native.id = "5:1:8192".into();
+    let source = observed_source("2026-11-12T00:00:03Z", &[row.clone()]);
+    let moved = ActivityIncidentUpdate::observe(&source, &capture("moved"), &[row], &before).unwrap();
+    assert_eq!(moved.active.len(), 1);
+    assert_eq!(moved.active[0].id, incident_id);
+    assert_eq!(moved.changes.len(), 1);
+    assert_eq!(moved.changes[0].transition, ActivityIncidentTransition::Updated);
+    let wait = moved.active[0].observation.wait.as_ref().unwrap();
+    assert_eq!(wait.identified_resources[0].native.id, "5:1:8192");
+    assert!(wait.owners.is_empty());
 }

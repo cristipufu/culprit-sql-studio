@@ -209,6 +209,7 @@ async fn blocking(
                 mode: row.text("mode"),
             };
             let wait = facts.wait.get_or_insert(ActivityWait {
+                identified_resources: vec![],
                 native_type: Some("DocDB lock".into()),
                 elapsed_ms: None,
                 owners: vec![],

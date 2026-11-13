@@ -72,10 +72,7 @@ pub(crate) async fn observe<R: QueryRead>(
             Err(error) => return Err(error),
         };
         details = ActivityDetailStatus::Collected;
-        let owners = pairs
-            .iter()
-            .map(|row| integer(row, "blocking").map(|id| id.to_string()))
-            .collect::<Result<BTreeSet<_>>>()?;
+        let owners = pairs.iter().map(|row| row.blocking.to_string()).collect::<BTreeSet<_>>();
         let missing: Vec<_> =
             owners.iter().filter(|id| !rows.iter().any(|row| row.key.session.id == **id)).cloned().collect();
         if !missing.is_empty() {
@@ -104,8 +101,8 @@ pub(crate) async fn observe<R: QueryRead>(
         let generations: BTreeMap<_, _> =
             rows.iter().map(|row| (row.key.session.id.clone(), row.key.session.generation.clone())).collect();
         for pair in pairs {
-            let waiter = integer(&pair, "session")?.to_string();
-            let owner = integer(&pair, "blocking")?.to_string();
+            let waiter = pair.session.to_string();
+            let owner = pair.blocking.to_string();
             if waiter == owner {
                 continue;
             }
@@ -119,6 +116,7 @@ pub(crate) async fn observe<R: QueryRead>(
                     .map(|age| age.to_string())
                     .or(state_age);
                 let wait = row.wait.get_or_insert(ActivityWait {
+                    identified_resources: vec![],
                     native_type: None,
                     elapsed_ms: None,
                     owners: vec![],
@@ -132,13 +130,12 @@ pub(crate) async fn observe<R: QueryRead>(
                     id: owner.clone(),
                     generation: generations.get(&owner).cloned(),
                 });
-                wait.resources.get_or_insert_default().push(culprit_core::LockWait {
-                    session: waiter,
-                    mode: pair.native_text("mode")?,
-                    resource: pair.native_text("resource")?,
-                    object: pair.native_text("object")?,
-                    index: pair.native_text("index_name")?,
-                });
+                wait.resources.get_or_insert_default().push(pair.lock_wait());
+                if let Some(resource) = pair.identified_resource
+                    && !wait.identified_resources.contains(&resource)
+                {
+                    wait.identified_resources.push(resource);
+                }
             }
         }
         pending = owners.difference(&seen).cloned().collect();
@@ -228,6 +225,7 @@ fn decode(row: &Rec, database: Option<&str>) -> Result<ActivityObservation> {
         session_counters: Default::default(),
         request_counters: (!idle).then(ActivityCounters::default),
         wait: metadata_wait.then(|| ActivityWait {
+            identified_resources: vec![],
             native_type: Some("metadata-lock".into()),
             elapsed_ms: wait_elapsed,
             owners: vec![],
@@ -247,7 +245,7 @@ async fn lock_pairs<R: QueryRead>(
     meta: &metadata::Metadata,
     ids: &[String],
     limit: usize,
-) -> Result<Vec<Rec>> {
+) -> Result<Vec<locks::LockPair>> {
     let layout = locks::row_waits(meta.flavor, &meta.version);
     let (sql, alias) = (layout.sql, layout.session_column);
     let mut rows = reader
@@ -268,7 +266,7 @@ async fn lock_pairs<R: QueryRead>(
     if rows.len() >= limit {
         return Err(CollectionStop::RowLimit.error());
     }
-    Ok(rows)
+    locks::decode(rows)
 }
 async fn transaction_context<R: QueryRead>(
     reader: &mut R,

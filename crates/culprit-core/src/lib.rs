@@ -44,6 +44,7 @@ pub mod signals;
 pub mod sql;
 pub mod telemetry;
 pub mod verification;
+pub mod wait_resources;
 pub mod waits;
 pub mod window;
 pub mod xml;
@@ -114,6 +115,7 @@ pub use signals::{
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_reports};
+pub use wait_resources::{ObservedWaitResource, WaitResourceKind};
 pub use waits::{
     ActivityCategory, ActivityEvent, ActivityHistory, ActivityPeriod, ActivityQuery, ActivityReport, CleanupHolder,
     GrantStat, OpenTransaction, Pressure, Signal, SignalScope, SignalStatus, SignalUnit, TransactionActivity,
