@@ -39,7 +39,10 @@ impl TelemetrySink for PagedSink<'_> {
         let page = cursor.unwrap_or("0").parse::<usize>().unwrap();
         self.calls.lock().unwrap().push(page);
         let stalled = page == 7 && self.stall_once.swap(false, Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(if stalled { 300 } else { 20 })).await;
+        if stalled {
+            std::future::pending::<()>().await;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let mut receipt = range.manifest().expected_receipts().next().unwrap().clone();
         if page == 19 && self.corrupt_final {
             receipt.critical_fields_valid = false;
@@ -94,16 +97,20 @@ async fn verification_exceeding_one_request_deadline_resumes_across_restart_and_
     let mut now = 0;
     {
         let mut capabilities = crate::delivery::committed_cache::CommittedRangeCache::default();
-        let mut driver = DeliveryDriver::new(&mut journal, &store, &sink, &mut capabilities, policy).unwrap();
         for _ in 0..32 {
-            let result = driver.step(&id, owner.fence(), now).await;
+            let result = {
+                let mut driver = DeliveryDriver::new(&mut journal, &store, &sink, &mut capabilities, policy).unwrap();
+                driver.step(&id, owner.fence(), now).await
+            };
             now += 1000;
             if let Err(error) = result {
                 // A loaded host can also exceed this deliberately short deadline during setup or an early page.
                 assert_eq!(problem(error), DeliveryProblem::Transport);
-                continue;
             }
-            if sink.calls.lock().unwrap().last() == Some(&4) {
+            let pending = journal.load(&id).await.unwrap();
+            if pending.state.phase == DeliveryPhase::AwaitingData
+                && pending.state.verification.as_ref().and_then(|progress| progress.cursor.as_deref()) == Some("5")
+            {
                 break;
             }
         }
@@ -124,27 +131,32 @@ async fn verification_exceeding_one_request_deadline_resumes_across_restart_and_
     let mut first_pass = false;
     {
         let mut capabilities = crate::delivery::committed_cache::CommittedRangeCache::default();
-        let mut driver = DeliveryDriver::new(&mut journal, &store, &sink, &mut capabilities, policy).unwrap();
         for _ in 0..80 {
             now += 1000;
-            match driver.step(&id, owner.fence(), now).await {
+            let result = {
+                let mut driver = DeliveryDriver::new(&mut journal, &store, &sink, &mut capabilities, policy).unwrap();
+                driver.step(&id, owner.fence(), now).await
+            };
+            let phase = match result {
                 Err(error) => {
                     assert_eq!(problem(error), DeliveryProblem::Transport);
                     timeouts += 1;
+                    // A journal write can durably advance the phase before the outer deadline expires.
+                    // Observe that transition before the next step starts a separate publication proof.
+                    journal.load(&id).await.unwrap().state.phase
                 }
-                Ok(state) => {
-                    if state.phase == DeliveryPhase::PublicationPending && !first_pass {
-                        let calls = sink.calls.lock().unwrap();
-                        assert_eq!(calls.iter().filter(|page| **page == 0).count(), first_page_reads);
-                        assert!(calls.iter().filter(|page| **page == 7).count() >= 2);
-                        assert_eq!(calls.last(), Some(&19));
-                        first_pass = true;
-                    }
-                    if state.phase == DeliveryPhase::Retired {
-                        retired = true;
-                        break;
-                    }
-                }
+                Ok(state) => state.phase,
+            };
+            if phase == DeliveryPhase::PublicationPending && !first_pass {
+                let calls = sink.calls.lock().unwrap();
+                assert_eq!(calls.iter().filter(|page| **page == 0).count(), first_page_reads);
+                assert!(calls.iter().filter(|page| **page == 7).count() >= 2);
+                assert_eq!(calls.last(), Some(&19));
+                first_pass = true;
+            }
+            if phase == DeliveryPhase::Retired {
+                retired = true;
+                break;
             }
         }
     }
