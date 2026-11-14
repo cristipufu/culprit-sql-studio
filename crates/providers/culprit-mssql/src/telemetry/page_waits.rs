@@ -66,6 +66,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
             }
             _ => (self.reader.capture_page_wait_targets().await?, None),
         };
+        let task_visibility_unavailable = captured.task_visibility_unavailable();
         let records = captured
             .snapshot
             .observations
@@ -80,13 +81,18 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
             .collect::<Result<Vec<_>>>()?;
         let mut coverage =
             StateSourceCoverage::observed(sources::PAGE_WAIT_TARGETS.name.into(), records.len() as u32, false);
-        coverage.stopped = captured.limited.then_some(CollectionStop::RowLimit);
+        coverage.stopped = if captured.limited {
+            Some(CollectionStop::RowLimit)
+        } else {
+            task_visibility_unavailable.then_some(CollectionStop::SourceUnavailable)
+        };
         let snapshot = StateSnapshotDescription {
             dataset: SnapshotDataset::PageWaitTargets,
             observed_from: captured.snapshot.observed_from,
             observed_until: captured.snapshot.observed_until,
             records: records.len() as u32,
-            // A verified frozen row population is still only native request/coordinator coverage.
+            // A verified frozen row population remains a bounded, non-atomic native sample. Unavailable task
+            // visibility cannot become a complete empty population when coordinator rows are absent.
             sources: vec![coverage],
         };
         let observation = match result {

@@ -69,6 +69,7 @@ pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRe
         observed.index_operations = Some(point);
         cases.push((vec![record(observed)], culprit_core::SourceState::Partial));
     }
+    cases.extend(task_wait_cases());
     cases
         .into_iter()
         .map(|(records, state)| {
@@ -91,6 +92,88 @@ pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRe
             (source, records)
         })
         .collect()
+}
+
+fn task_wait_cases() -> Vec<(Vec<TelemetryRecord>, culprit_core::SourceState)> {
+    let first = parallel_observation("71", WaitResourceKind::MemoryPage, 42, 1);
+    let mut second = first.clone();
+    let task = second.task_wait.as_mut().unwrap();
+    task.execution_context_id = 2;
+    task.task_address = "0000000000001002".into();
+    task.wait_duration_ms = Some("0".into());
+    let mut io = parallel_observation("71", WaitResourceKind::PageIo, 55, 3);
+    io.request.wait = None;
+    let parallel = vec![record(first), record(second), record(io)];
+
+    let owner_context = [Some(-2), Some(-3), Some(-4), Some(-99), Some(0), Some(91), None]
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, owner)| {
+            let mut row = parallel_observation("72", WaitResourceKind::MemoryPage, 42, ordinal as u32 + 1);
+            let task = row.task_wait.as_mut().unwrap();
+            task.blocking_session_id = owner;
+            task.blocking_execution_context_id = owner.map(|_| -1);
+            task.blocking_task_address = owner.map(|_| "0000000000000000".into());
+            record(row)
+        })
+        .collect();
+
+    let finished = [
+        (PageWaitRequestState::SameStatement, PageWaitRelation::NoLongerObserved),
+        (PageWaitRequestState::SameStatement, PageWaitRelation::Different),
+        (PageWaitRequestState::Changed, PageWaitRelation::Unqualified),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(ordinal, (request, relation))| {
+        let mut row = parallel_observation("73", WaitResourceKind::MemoryPage, 42, ordinal as u32 + 1);
+        row.after_check.as_mut().unwrap().wait = relation;
+        row.after_check.as_mut().unwrap().request = request;
+        row.statement_identity = None;
+        row.plan_identity = None;
+        row.index_operations =
+            Some(index_point(row.target.as_ref().unwrap(), PageIndexOperationRelation::CheckedTarget));
+        record(row)
+    })
+    .collect();
+    vec![
+        (parallel, culprit_core::SourceState::Collected),
+        (owner_context, culprit_core::SourceState::Collected),
+        (finished, culprit_core::SourceState::Partial),
+    ]
+}
+
+fn parallel_observation(session: &str, kind: WaitResourceKind, page: u32, context: u32) -> PageWaitObservation {
+    let mut row = observation(session, &format!("5:1:{page}"), kind, page);
+    row.resource.native =
+        NativeIdentity::new(format!("5:1:{page}")).qualified("source", "sys.dm_os_waiting_tasks.resource_description");
+    row.task_wait = Some(MssqlPageTaskWait {
+        observed_at: row.observed_from.clone(),
+        session_id: session.parse().unwrap(),
+        request_id: row.request.key.request.as_ref().unwrap().id.parse().unwrap(),
+        execution_context_id: context,
+        task_address: format!("{:016X}", 0x1000 + context),
+        wait_type: match kind {
+            WaitResourceKind::MemoryPage => "PAGELATCH_EX",
+            WaitResourceKind::PageIo => "PAGEIOLATCH_SH",
+            WaitResourceKind::DataLock => unreachable!(),
+        }
+        .into(),
+        wait_duration_ms: Some("250".into()),
+        resource: row.resource.clone(),
+        resource_address: Some("0000000000002000".into()),
+        blocking_task_address: None,
+        blocking_session_id: Some(-4),
+        blocking_execution_context_id: None,
+    });
+    row.request.wait = Some(ActivityWait {
+        native_type: Some("CXCONSUMER".into()),
+        elapsed_ms: Some("17".into()),
+        owners: vec![],
+        resources: None,
+        identified_resources: vec![],
+    });
+    row
 }
 
 fn index_point(target: &MappedPageTarget, relation: PageIndexOperationRelation) -> PageIndexOperations {
@@ -140,6 +223,8 @@ pub fn page_wait_tamper_cases(original: &serde_json::Value) -> Vec<serde_json::V
     } else {
         json!("checked-target")
     };
+    let changed_owner =
+        if original.pointer("/task_wait/blocking_session_id") == Some(&json!(91)) { json!(-4) } else { json!(91) };
     [
         ("/target/header/page_id", json!(999)),
         ("/observed_address/page_id", json!(999)),
@@ -149,6 +234,17 @@ pub fn page_wait_tamper_cases(original: &serde_json::Value) -> Vec<serde_json::V
         ("/index_operations/counters/identity/partition_number", json!(2)),
         ("/index_operations/counters/counters/page-latch-wait-ms", json!("0")),
         ("/index_operations/relation", changed_link),
+        ("/task_wait/observed_at", json!("2020-01-01T12:00:00.200000000Z")),
+        ("/task_wait/session_id", json!(99)),
+        ("/task_wait/request_id", json!(99)),
+        ("/task_wait/execution_context_id", json!(99)),
+        ("/task_wait/task_address", json!("0000000000009999")),
+        ("/task_wait/wait_duration_ms", json!("123")),
+        ("/task_wait/resource/native/id", json!("5:1:999")),
+        ("/task_wait/resource_address", json!("0000000000009999")),
+        ("/task_wait/blocking_task_address", json!("0000000000009999")),
+        ("/task_wait/blocking_session_id", changed_owner),
+        ("/task_wait/blocking_execution_context_id", json!(-99)),
     ]
     .into_iter()
     .filter_map(|(pointer, replacement)| {
@@ -192,6 +288,7 @@ fn observation(session: &str, address: &str, kind: WaitResourceKind, page: u32) 
         observed_from: "2020-01-01T12:00:00.250000000Z".into(),
         observed_until: "2020-01-01T12:00:00.750000000Z".into(),
         request,
+        task_wait: None,
         before_check: Some(PageWaitRecheck {
             observed_at: "2020-01-01T12:00:00.300000000Z".into(),
             request: PageWaitRequestState::SameStatement,

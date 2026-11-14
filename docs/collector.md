@@ -186,7 +186,10 @@ request rechecks are independent: checked current page metadata can remain after
 Before/after clocks distinguish a matching statement, a changed request and a wait that is no longer observed.
 Statement links require matching statement checks and trusted source context; plan links require matching native
 plans too. Unresolved context outside the database remains unowned. Equal page metadata does not establish
-continuous physical identity, a latch holder or an exact causal share.
+continuous physical identity, a latch holder or an exact causal share. Parallel workers keep separate capture-local
+task references, native waits and raw blocking fields while retaining their coordinator's independent context.
+An unverified task population leaves coordinator rows useful and marks coverage partial. A focused activity
+follow-up has no original task identity and therefore cannot substitute a parallel worker for its coordinator.
 Verified SQL Server headers distinguish PFS, GAM, SGAM and IAM maps from heap and index pages. Their next steps
 address the observed allocation mechanism; page-I/O waits retain storage guidance. These classes do not establish
 which writer caused contention or qualify an application-database reader to inspect shared tempdb.
@@ -250,7 +253,12 @@ SQL owner by matching transaction numbers. Both warehouse paths retain the origi
 `task-space` explains database-target task allocation/deallocation captures from `operational-samples`. It retains
 exact page counters, native task tuples, request-check clocks and source coverage. The same pure view serves
 scans and authenticated readback from either warehouse. Current checked SQL does not prove allocation ownership;
-partial, unavailable and complete-empty sources stay distinct. The dataset is opt-in and is not added to a default
+partial, unavailable and complete-empty sources stay distinct. The shared explanation distinguishes recorded
+user-object, internal-object and mixed allocation/deallocation activity. Only four explicitly measured zero
+counters establish a zero point; missing counters remain unknown, and neither a positive class nor deallocation
+establishes a current footprint, spill, allocating statement or maintenance owner. Page-wait and task-space
+explanations also appear as bounded entries in the MCP `waits` response without copying raw SQL or observations.
+The dataset is opt-in and is not added to a default
 fleet schedule. See [SQL Server task observations](providers/mssql.md#task-level-temporary-space-observations) for
 the current source support and read budgets.
 
@@ -821,7 +829,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **21**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **22**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 [pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats

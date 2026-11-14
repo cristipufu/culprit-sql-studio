@@ -73,6 +73,7 @@ impl CapturedInvestigation {
             wait: PageWaitRelation::OriginalObserved,
         };
         let page = PageWaitObservation {
+            task_wait: None,
             source: "page wait targets".into(),
             observed_from: result.observed_from.clone(),
             observed_until: result.observed_until.clone(),

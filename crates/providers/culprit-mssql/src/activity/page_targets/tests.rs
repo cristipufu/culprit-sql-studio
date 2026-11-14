@@ -1,10 +1,10 @@
 use super::*;
 pub(crate) mod index_operations;
-const HEADER_BEFORE: usize = 4;
-const HEADER_AFTER: usize = 7;
-const CHECK_AFTER: usize = 8;
-const SQL_TEXT: usize = 5;
-const FINAL_CONTEXT: usize = 9;
+pub(super) const HEADER_BEFORE: usize = 4;
+pub(super) const HEADER_AFTER: usize = 7;
+pub(super) const CHECK_AFTER: usize = 8;
+pub(super) const SQL_TEXT: usize = 5;
+pub(super) const FINAL_CONTEXT: usize = 9;
 use crate::{
     activity::{
         IdentityDetail, ReadOptions,
@@ -135,11 +135,15 @@ pub(crate) fn boxed_context() -> Rec {
 fn page_context(edition: i64) -> Rec {
     let base = crate::activity::database_context::tests::row(edition);
     let mut values = base.columns().map(|(key, value)| (key, value.clone())).collect::<Vec<_>>();
-    values.extend([("page_info_available", Val::Int(1)), ("page_permission", Val::Int(1))]);
+    values.extend([
+        ("page_info_available", Val::Int(1)),
+        ("page_permission", Val::Int(1)),
+        ("task_visibility", Val::Bool(true)),
+    ]);
     replace(&Rec::of(&values), &[("session_id", Val::Null)])
 }
 pub(crate) fn page_wait(session: i64, wait_type: &str, address: &str) -> Rec {
-    replace(
+    super::task_waits::no_task(&replace(
         &metadata(session),
         &[
             ("wait_type", Val::Text(wait_type.into())),
@@ -149,7 +153,7 @@ pub(crate) fn page_wait(session: i64, wait_type: &str, address: &str) -> Rec {
             ("blocking_session_id", Val::Int(-5)),
             ("blocker_generation", Val::Null),
         ],
-    )
+    ))
 }
 fn native<'a>(row: &'a Rec, name: &str) -> &'a Val {
     row.columns().find(|(key, _)| *key == name).map(|(_, value)| value).unwrap()

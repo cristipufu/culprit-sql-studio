@@ -129,3 +129,53 @@ fn later_lookup_bounds_cannot_move_the_original_native_observation_forward() {
     result.observed_until = "2019-12-31T23:59:59Z".into();
     assert!(!result.is_valid());
 }
+
+#[test]
+fn coordinator_focus_cannot_accept_a_parallel_task_with_the_same_request_and_page() {
+    let mut focus = focus();
+    focus.resource.native =
+        focus.resource.native.clone().qualified("source", "sys.dm_os_waiting_tasks.resource_description");
+    focus.original.wait.as_mut().unwrap().identified_resources = vec![focus.resource.clone()];
+    let result = ActivityWaitFocusResult {
+        focus,
+        observed_from: "2020-01-01T00:00:01Z".into(),
+        observed_until: "2020-01-01T00:00:02Z".into(),
+        source: FocusSourceState::Matched,
+        request: PageWaitRequestState::SameStatement,
+        wait: PageWaitRelation::OriginalObserved,
+    };
+    let mut page = PageWaitObservation {
+        source: "focused-page-fixture".into(),
+        observed_from: result.observed_from.clone(),
+        observed_until: result.observed_until.clone(),
+        request: result.focus.original.clone(),
+        task_wait: None,
+        before_check: None,
+        after_check: None,
+        statement_identity: None,
+        plan_identity: None,
+        resource: result.focus.resource.clone(),
+        observed_address: None,
+        resolution: PageWaitResolution::UnverifiedSource,
+        target: None,
+        index_operations: None,
+    };
+    assert!(page.is_valid());
+    assert!(result.accepts_observation(&page));
+    page.task_wait = Some(MssqlPageTaskWait {
+        observed_at: page.observed_from.clone(),
+        session_id: page.request.key.session.id.parse().unwrap(),
+        request_id: page.request.key.request.as_ref().unwrap().id.parse().unwrap(),
+        execution_context_id: 1,
+        task_address: "0000000000000001".into(),
+        wait_type: "PAGELATCH_EX".into(),
+        wait_duration_ms: Some("1".into()),
+        resource: page.resource.clone(),
+        resource_address: None,
+        blocking_task_address: None,
+        blocking_session_id: Some(-5),
+        blocking_execution_context_id: None,
+    });
+    assert!(page.is_valid(), "a structurally valid task still belongs to a different evidence population");
+    assert!(!result.accepts_observation(&page));
+}

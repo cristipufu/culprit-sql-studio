@@ -92,7 +92,7 @@ fn validate<'a>(
             if !keys.insert(key.clone()) {
                 return Err(invalid());
             }
-            let wait = match observation.resource.kind {
+            let wait = match observation.observed_wait().resource.kind {
                 WaitResourceKind::MemoryPage => WaitKind::Memory,
                 WaitResourceKind::PageIo => WaitKind::Io,
                 _ => return Err(invalid()),
@@ -126,11 +126,17 @@ fn limitations(source: Option<&SourceOutcome>, has_index_points: bool) -> Vec<St
 
 fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
     let observation = case.observation;
-    let (title, base) = match case.wait {
-        WaitKind::Memory => (t!("view.page_waits.memory.title"), t!("view.page_waits.memory.explanation")),
-        WaitKind::Io => (t!("view.page_waits.io.title"), t!("view.page_waits.io.explanation")),
+    let (title, base) = match (case.wait, observation.task_wait.is_some()) {
+        (WaitKind::Memory, false) => (t!("view.page_waits.memory.title"), t!("view.page_waits.memory.explanation")),
+        (WaitKind::Memory, true) => (t!("view.page_waits.memory.title"), t!("view.page_waits.task.memory")),
+        (WaitKind::Io, false) => (t!("view.page_waits.io.title"), t!("view.page_waits.io.explanation")),
+        (WaitKind::Io, true) => (t!("view.page_waits.io.title"), t!("view.page_waits.task.io")),
     };
     let mut details = vec![base];
+    if let Some(task) = &observation.task_wait {
+        details
+            .push(t!("view.page_waits.task.context", context = format::digits(task.execution_context_id.to_string())));
+    }
     if let Some(target) = &observation.target {
         details.push(culprit_core::i18n::t(kind_message(target.kind), &[]));
         if let Some(object) = &target.object {
@@ -159,6 +165,7 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
     PageWaitExplanation {
         observation_key: case.key,
         request_key: observation.request.key.clone(),
+        task: observation.task_wait.as_ref().map(Into::into),
         resource: observation.resource.clone(),
         title,
         explanation: details.join(" "),

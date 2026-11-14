@@ -1,5 +1,6 @@
 //! Explicit, bounded enrichment of pages the shared activity reader already observed. Request/coordinator waits
-//! identify affected participants, never a transient latch holder, allocator or complete parallel-task population.
+//! and native task waits identify sampled affected participants, never a transient latch holder, allocator or a
+//! complete parallel-task population. The exact focused route checks its original coordinator only.
 //! Header calls can perform I/O/latching, so this profile is opt-in and still requires native cost qualification.
 //! https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-page-info-transact-sql
 mod context;
@@ -13,6 +14,7 @@ mod native_tests;
 mod participants;
 mod rows;
 mod sql;
+mod task_waits;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -32,6 +34,11 @@ pub(crate) struct PageWaitCapture {
     pub guard: PageWaitGuard,
 }
 pub(crate) struct PageWaitGuard(context::LookupContext);
+impl PageWaitCapture {
+    pub(crate) fn task_visibility_unavailable(&self) -> bool {
+        self.guard.0.task_visibility == Some(false)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LookupAdmission {
@@ -49,6 +56,7 @@ struct Candidate {
     statement_identity: Option<NativeIdentity>,
     plan_identity: Option<NativeIdentity>,
     index_operations: Option<PageIndexOperations>,
+    task_wait: Option<MssqlPageTaskWait>,
 }
 enum LookupState {
     Pending,
@@ -75,27 +83,23 @@ impl<R: NativeRead> ActivityReader<R> {
             return Err(invalid_data());
         }
         let initial = context::initial(self).await?;
-        let frame = self
-            .read_frame(
-                &sql::observation(self.options.identity),
-                vec![Parameter::Integer(
-                    i64::from(self.options.budget.max_snapshot_rows.min(MAX_PAGE_WAIT_OBSERVATIONS as u32)) + 1,
-                )],
-            )
-            .await?;
-        if !initial.matches_initial(&frame) {
+        let population = self.page_population().await?;
+        if !initial.matches_initial(&population.frame) {
             return Err(CollectionStop::SourceChanged.error());
         }
-        self.capture_selected_page_wait_targets(frame, initial, LookupAdmission::ObservedPopulation).await
+        self.capture_selected_page_wait_targets(population, initial, LookupAdmission::ObservedPopulation).await
     }
 
     async fn capture_selected_page_wait_targets(
         &mut self,
-        mut frame: ActivityFrame,
-        initial: context::LookupContext,
+        population: task_waits::Population,
+        mut initial: context::LookupContext,
         admission: LookupAdmission,
     ) -> Result<PageWaitCapture> {
-        let (mut candidates, limited) = select(&frame, &initial);
+        let task_waits::Population { mut frame, tasks, limited, task_visibility } = population;
+        initial.task_visibility = task_visibility;
+        let (mut candidates, selection_limited) = select(&frame, &tasks, &initial);
+        let limited = limited || selection_limited;
         let keys = candidates.iter().map(|candidate| frame.records[candidate.record].facts.key.clone()).collect();
         if candidates.is_empty() {
             return self.finish_page_capture(frame, candidates, limited, initial).await;
@@ -107,20 +111,13 @@ impl<R: NativeRead> ActivityReader<R> {
                 }
             }
             if admission == LookupAdmission::ObservedPopulation {
-                self.enrich_using_policy(
-                    &mut frame,
-                    &keys,
-                    false,
-                    MAX_SQL_BYTES,
-                    super::sql::QueryPolicy::SerialMetadata,
-                )
-                .await?;
+                self.enrich_page_participants(&mut frame, &keys).await?;
             }
             return self.finish_page_capture(frame, candidates, limited, initial).await;
         }
 
         let indices = pending_indices(&candidates);
-        let before = match self.request_participants(&frame, &indices).await {
+        let before = match self.page_participants(&frame, &indices, &candidates).await {
             Ok(rows) => rows,
             Err(error) if stops_remaining_reads(&error) => return Err(error),
             Err(error) => {
@@ -144,14 +141,7 @@ impl<R: NativeRead> ActivityReader<R> {
         let addresses = admitted_addresses(&candidates);
         if addresses.is_empty() {
             if admission == LookupAdmission::ObservedPopulation {
-                self.enrich_using_policy(
-                    &mut frame,
-                    &keys,
-                    false,
-                    MAX_SQL_BYTES,
-                    super::sql::QueryPolicy::SerialMetadata,
-                )
-                .await?;
+                self.enrich_page_participants(&mut frame, &keys).await?;
             }
             return self.finish_page_capture(frame, candidates, limited, initial).await;
         }
@@ -161,19 +151,11 @@ impl<R: NativeRead> ActivityReader<R> {
             Err(error) if stops_remaining_reads(&error) => return Err(error),
             Err(error) => {
                 mark_pending(&mut candidates, error_resolution(error.code));
-                self.enrich_using_policy(
-                    &mut frame,
-                    &keys,
-                    false,
-                    MAX_SQL_BYTES,
-                    super::sql::QueryPolicy::SerialMetadata,
-                )
-                .await?;
+                self.enrich_page_participants(&mut frame, &keys).await?;
                 return self.finish_page_capture(frame, candidates, limited, initial).await;
             }
         };
-        self.enrich_using_policy(&mut frame, &keys, false, MAX_SQL_BYTES, super::sql::QueryPolicy::SerialMetadata)
-            .await?;
+        self.enrich_page_participants(&mut frame, &keys).await?;
         let index_read = index_context::ReadPlan::prepare(&mut self.io, &initial, &headers_before).await?;
         self.admit_page_headers(&initial).await?;
         let index_points = index_read.acquire(&mut self.io).await?;
@@ -188,7 +170,7 @@ impl<R: NativeRead> ActivityReader<R> {
                 return self.finish_page_capture(frame, candidates, limited, initial).await;
             }
         };
-        let after = match self.request_participants(&frame, &indices).await {
+        let after = match self.page_participants(&frame, &indices, &candidates).await {
             Ok(rows) => rows,
             Err(error) if stops_remaining_reads(&error) => return Err(error),
             Err(error) => {
@@ -206,7 +188,7 @@ impl<R: NativeRead> ActivityReader<R> {
             }
             let record = &frame.records[candidate.record];
             let checked = after.get(&candidate.record).ok_or_else(invalid_data)?;
-            candidate.after_check = Some(checked.recheck(record, &candidate.resource));
+            candidate.after_check = Some(checked.recheck(record, &candidate.resource, candidate.task_wait.as_ref()));
             let original = before.get(&candidate.record).ok_or_else(invalid_data)?;
             let address = candidate.address.ok_or_else(invalid_data)?;
             let header_before = headers_before.get(&address).ok_or_else(invalid_data)?;
@@ -222,10 +204,10 @@ impl<R: NativeRead> ActivityReader<R> {
             if !chronological(&[
                 &initial.authority.activity.at,
                 &frame.context.at,
-                &original.at,
+                &original.request.at,
                 &header_before.observed_at,
                 &header_after.observed_at,
-                &checked.at,
+                &checked.request.at,
                 &final_context.authority.activity.at,
             ]) {
                 return Err(CollectionStop::SourceChanged.error());
@@ -234,7 +216,11 @@ impl<R: NativeRead> ActivityReader<R> {
                 .into_iter()
                 .all(|check| check.as_ref().is_some_and(|check| check.request == PageWaitRequestState::SameStatement))
                 && matches!(record.current_sql, super::NativeStatement::Available(_))
-                && let Some((statement, plan)) = checked.identities(original)
+                && (candidate.task_wait.is_none()
+                    || [&candidate.before_check, &candidate.after_check].into_iter().all(|check| {
+                        check.as_ref().is_some_and(|check| check.wait == PageWaitRelation::OriginalObserved)
+                    }))
+                && let Some((statement, plan)) = checked.request.identities(&original.request)
             {
                 candidate.statement_identity = Some(statement);
                 candidate.plan_identity = plan;
@@ -340,7 +326,11 @@ impl<R: NativeRead> ActivityReader<R> {
     }
 }
 
-fn select(frame: &ActivityFrame, context: &context::LookupContext) -> (Vec<Candidate>, bool) {
+fn select(
+    frame: &ActivityFrame,
+    tasks: &[Option<MssqlPageTaskWait>],
+    context: &context::LookupContext,
+) -> (Vec<Candidate>, bool) {
     let mut candidates = Vec::new();
     let mut addresses = BTreeSet::new();
     let mut limited = false;
@@ -348,7 +338,12 @@ fn select(frame: &ActivityFrame, context: &context::LookupContext) -> (Vec<Candi
         if record.facts.key.request.is_none() {
             continue;
         }
-        for resource in record.facts.wait.iter().flat_map(|wait| &wait.identified_resources) {
+        let task = tasks.get(index).and_then(Option::as_ref);
+        let resources = match task {
+            Some(task) => std::slice::from_ref(&task.resource),
+            None => record.facts.wait.as_ref().map(|wait| wait.identified_resources.as_slice()).unwrap_or_default(),
+        };
+        for resource in resources {
             if !matches!(resource.kind, WaitResourceKind::MemoryPage | WaitResourceKind::PageIo) {
                 continue;
             }
@@ -384,6 +379,7 @@ fn select(frame: &ActivityFrame, context: &context::LookupContext) -> (Vec<Candi
                 statement_identity: None,
                 plan_identity: None,
                 index_operations: None,
+                task_wait: task.cloned(),
             });
         }
     }
@@ -404,12 +400,12 @@ fn admitted_addresses(candidates: &[Candidate]) -> BTreeSet<PageAddress> {
 fn apply_request_checks(
     frame: &ActivityFrame,
     candidates: &mut [Candidate],
-    checks: &BTreeMap<usize, super::participants::Check>,
+    checks: &BTreeMap<usize, participants::CheckedParticipant>,
 ) {
     for candidate in candidates.iter_mut().filter(|candidate| candidate.is_pending()) {
-        candidate.before_check = checks
-            .get(&candidate.record)
-            .map(|checked| checked.recheck(&frame.records[candidate.record], &candidate.resource));
+        candidate.before_check = checks.get(&candidate.record).map(|checked| {
+            checked.recheck(&frame.records[candidate.record], &candidate.resource, candidate.task_wait.as_ref())
+        });
     }
 }
 fn mark_pending(candidates: &mut [Candidate], resolution: PageWaitResolution) {
@@ -445,11 +441,19 @@ fn finish(
                 LookupState::Unresolved(resolution) => (resolution, None),
                 LookupState::Observed { target } => (PageWaitResolution::ObservedAtBothBounds, Some(target)),
             };
+            let mut request = records.get(&candidate.record).ok_or_else(invalid_data)?.clone();
+            if candidate.task_wait.is_some()
+                && candidate.statement_identity.is_none()
+                && request.statement.is_available()
+            {
+                request.statement = DefinitionPayload::Unavailable { reason: PayloadUnavailable::Missing };
+            }
             Ok(PageWaitObservation {
                 source: culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
                 observed_from: frame.context.at.clone(),
                 observed_until: until.clone(),
-                request: records.get(&candidate.record).ok_or_else(invalid_data)?.clone(),
+                request,
+                task_wait: candidate.task_wait,
                 before_check: candidate.before_check,
                 after_check: candidate.after_check,
                 resource: candidate.resource,

@@ -78,7 +78,7 @@ SQL Server and Managed Instance read the available `system_health` deadlock hist
 `culprit scan shop --collect-page-wait-targets` opts into native page mapping. The collector exposes the same
 reader through `--collection page-wait-targets`; ordinary scans and Live do not read page headers.
 
-The reader retains up to 64 coordinator request observations and maps at most eight distinct pages through two
+The reader retains up to 64 coordinator/task wait observations and maps at most eight distinct pages through two
 `sys.dm_db_page_info(..., 'LIMITED')` reads. It checks native source, database/file, request generation, statement
 and catalog identity around the reads. Visible rowstore metadata can identify the current table/index and leaf
 or branch page; allocation pages, heap pages and unqualified layouts stay distinct. `LIMITED` can leave the header
@@ -90,12 +90,19 @@ database/file/page address; this is enforced by the shared fact contract as well
 The original wait remains historical evidence when a later wait ends or changes. Independent before/after rechecks
 record request/statement continuity, later wait state and their own clocks; page metadata can remain checked even
 if its earlier requester is gone. SQL links require the same native statement and trusted source; changing plans
-withholds the plan link. None of these associations proves continuous physical page identity or latch ownership.
+withholds the plan link. Task associations additionally require the original task tuple and wait at both checks.
+None of these associations proves continuous physical page identity, task continuity or latch ownership.
 
 `PAGELATCH` is in-memory synchronization; `PAGEIOLATCH` concerns page I/O. Waiting SQL identifies an affected
 participant, not the latch holder, allocation owner or query that caused the I/O. Equal metadata at both bounds
-does not exclude page reuse between reads. Request-level observations omit parallel-task waits, so even an empty
-capture remains partial. The app keeps the explanation brief and puts native details behind disclosure.
+does not exclude page reuse between reads. Parallel-task waits retain their own native task address, execution
+context, wait, duration and raw blocking fields without replacing the coordinator's state. Repeated tasks on one
+request/page remain distinct; addresses and signed blocking IDs identify no verified owner generation. Native
+visibility is checked separately from database request visibility. On Azure, only positively verified server-role
+and effective database permissions currently admit task reads; other admin/service-tier routes remain unqualified.
+An unreadable task population retains readable coordinator observations, including an explicitly partial empty
+capture. The exact durable activity follow-up still checks only its original coordinator and cannot accept a task
+as a substitute. The app keeps the explanation brief and puts native details behind disclosure.
 
 Mapped rowstore targets can also carry an independent index-partition counter point, including page-latch and
 page-I/O waits. The reader deduplicates at most eight exact database/object/index/partition tuples; it never expands
@@ -109,7 +116,8 @@ and a five-second total budget. Stricter caller limits take precedence.
 Azure SQL admission checks native resource pressure before each header phase and stops immediately when pressure
 is high or unavailable. Page headers can still require I/O and latching: these limits do not establish a CPU/I/O
 quota or justify frequent production polling. Cold-page, managed-service and representative production-load
-qualification remain required. A deadline can still encounter the documented
+qualification remain required for the task population and targeted rechecks as well as page headers. `TOP` does not
+bound native task enumeration work. A deadline can still encounter the documented
 driver cancellation uncertainty; the reader withholds the capture and fences subsequent work.
 
 Query Store's temporary-space metric retains its documented meaning: average used 8-KiB pages, weighted by recorded

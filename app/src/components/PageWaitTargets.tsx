@@ -20,12 +20,12 @@ import { ObservationList } from "./ObservationList";
 
 /** Native metadata describes the wait target and affected request, never an unobserved latch owner. */
 export function PageWaitTargets({ evidence, report }: { evidence: PageWaitSnapshot; report: PageWaitReport }) {
-  const rows = observationRows(evidence.observations, evidence.source, (row) => pageWaitReferenceKey(row.request.key, row.resource));
+  const rows = observationRows(evidence.observations, evidence.source, (row) => pageWaitReferenceKey(row.request.key, row.resource, row.task_wait));
   return <ObservationList collapseEntries source={evidence.source} report={report}
     scope={t("ui.page_waits.scope")} entriesLabel={t("ui.page_waits.inspect")}
     time={t("ui.memory_failures.read_between", { from: evidence.observed_from, until: evidence.observed_until })}
     renderEntry={(entry) => {
-      const row = rows.get(pageWaitReferenceKey(entry.request_key, entry.resource));
+      const row = rows.get(pageWaitReferenceKey(entry.request_key, entry.resource, entry.task));
       return row ? <PageWaitCard key={entry.observation_key} row={row} entry={entry} />
         : <div className="operational-card" key={entry.observation_key}><p>{t("ui.memory_failures.missing_row")}</p></div>;
     }} />;
@@ -33,7 +33,8 @@ export function PageWaitTargets({ evidence, report }: { evidence: PageWaitSnapsh
 
 function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWaitExplanation }) {
   const target = row.resolution === "observed-at-both-bounds" && row.request.scope === "request-database" ? row.target : null;
-  const linksQualified = row.before_check?.request === "same-statement" && row.after_check?.request === "same-statement";
+  const linksQualified = [row.before_check, row.after_check].every((check) => check?.request === "same-statement"
+    && (!row.task_wait || check.wait === "original-observed"));
   return <article className="operational-card">
     <h4>{entry.title}</h4>
     <p>{entry.explanation}</p>
@@ -41,6 +42,7 @@ function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWai
       <summary>{t("ui.memory_failures.investigation")}</summary>
       <p>{entry.investigation}</p><p>{entry.verify}</p>
       <RequestMetadata row={row} />
+      {row.task_wait && <TaskWaitMetadata task={row.task_wait} />}
       <RecheckMetadata before={row.before_check} after={row.after_check} />
       <dl>
         <NativeValue label={t("ui.page_waits.resolution")} value={t(RESOLUTION[row.resolution])} />
@@ -48,7 +50,7 @@ function PageWaitCard({ row, entry }: { row: PageWaitObservation; entry: PageWai
         {linksQualified && row.statement_identity && row.plan_identity && <NativeValue label={t("ui.page_waits.plan_identity")} value={<NativeReference identity={row.plan_identity} />} />}
       </dl>
       {target && <TargetMetadata target={target} />}
-      {row.request.statement.state === "available" && <details>
+      {(!row.task_wait || linksQualified) && row.request.statement.state === "available" && <details>
         <summary>{t("ui.page_waits.original_statement")}</summary>
         <pre className="observation-statement">{row.request.statement.text}</pre>
       </details>}
@@ -115,6 +117,8 @@ function Recheck({ title, check }: { title: string; check: PageWaitRecheck | und
 function RequestMetadata({ row }: { row: PageWaitObservation }) {
   const request = row.request;
   const counters = request.request_counters;
+  const waitType = row.task_wait ? row.task_wait.wait_type : request.wait?.native_type;
+  const waitMs = row.task_wait ? row.task_wait.wait_duration_ms : request.wait?.elapsed_ms;
   return <dl>
     <NativeValue label={t("ui.page_waits.original_from")} value={<code>{row.observed_from}</code>} />
     <NativeValue label={t("ui.page_waits.original_until")} value={<code>{row.observed_until}</code>} />
@@ -127,15 +131,32 @@ function RequestMetadata({ row }: { row: PageWaitObservation }) {
     <NativeValue label={t("ui.memory_participants.application")} value={request.client?.application} />
     <NativeValue label={t("ui.page_waits.state")} value={request.state} />
     <NativeValue label={t("ui.page_waits.wait_kind")} value={t(WAIT_KIND[row.resource.kind])} />
-    <NativeValue label={t("ui.page_waits.native_wait")} value={request.wait?.native_type && <code>{request.wait.native_type}</code>} />
+    <NativeValue label={t("ui.page_waits.native_wait")} value={waitType && <code>{waitType}</code>} />
+    {row.task_wait && <NativeValue label={t("ui.page_waits.coordinator_wait")} value={request.wait?.native_type && <code>{request.wait.native_type}</code>} />}
     <NativeValue label={t("ui.page_waits.raw_resource")} value={<NativeReference identity={row.resource.native} />} />
     <NativeValue label={t("ui.page_waits.elapsed")} value={request.elapsed_ms == null ? null : t("common.duration.ms", { n: digits(request.elapsed_ms) })} />
-    <NativeValue label={t("ui.page_waits.wait_ms")} value={request.wait?.elapsed_ms == null ? null : t("common.duration.ms", { n: digits(request.wait.elapsed_ms) })} />
+    <NativeValue label={t("ui.page_waits.wait_ms")} value={waitMs == null ? null : t("common.duration.ms", { n: digits(waitMs) })} />
     <NativeValue label={t("ui.page_waits.cpu")} value={counters?.cpu_ms == null ? null : t("common.duration.ms", { n: digits(counters.cpu_ms) })} />
     <NativeValue label={t("ui.page_waits.logical_reads")} value={counters?.logical_reads == null ? null : digits(counters.logical_reads)} />
     <NativeValue label={t("ui.page_waits.physical_reads")} value={counters?.physical_reads == null ? null : digits(counters.physical_reads)} />
     <NativeValue label={t("ui.page_waits.writes")} value={counters?.writes == null ? null : digits(counters.writes)} />
   </dl>;
+}
+
+function TaskWaitMetadata({ task }: { task: NonNullable<PageWaitObservation["task_wait"]> }) {
+  return <details>
+    <summary>{t("ui.page_waits.task.details")}</summary>
+    <p>{t("ui.page_waits.task.qualification")}</p>
+    <dl>
+      <NativeValue label={t("ui.memory_participants.observed_at_label")} value={<code>{task.observed_at}</code>} />
+      <NativeValue label={t("ui.task_space.execution_context")} value={digits(String(task.execution_context_id))} />
+      <NativeValue label={t("ui.page_waits.task.address")} value={<code>{task.task_address}</code>} />
+      <NativeValue label={t("ui.page_waits.task.resource_address")} value={task.resource_address && <code>{task.resource_address}</code>} />
+      <NativeValue label={t("ui.page_waits.task.blocking_address")} value={task.blocking_task_address && <code>{task.blocking_task_address}</code>} />
+      <NativeValue label={t("ui.page_waits.task.blocking_session")} value={task.blocking_session_id == null ? null : digits(String(task.blocking_session_id))} />
+      <NativeValue label={t("ui.page_waits.task.blocking_context")} value={task.blocking_execution_context_id == null ? null : digits(String(task.blocking_execution_context_id))} />
+    </dl>
+  </details>;
 }
 
 const TARGET_KIND: Record<PageWaitTargetKind, string> = {

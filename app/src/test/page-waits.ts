@@ -43,6 +43,22 @@ export function pageEvidence(observations = [pageWait()]): PageWaitSnapshot {
   return { source: PAGE_SOURCE, observed_from: "2026-11-13T10:00:00.100000Z", observed_until: "2026-11-13T10:00:00.900000Z", observations };
 }
 
+/** Parallel tasks retain their own wait even when the coordinator reports an unrelated native wait. */
+export function pageTaskWait(context = 1): PageWaitObservation {
+  const row = pageWait();
+  row.request.state = "running";
+  row.request.wait = { native_type: "CXCONSUMER", elapsed_ms: "777", resources: null, identified_resources: [], owners: [] };
+  row.resource.native.qualifiers.source = "sys.dm_os_waiting_tasks.resource_description";
+  row.task_wait = {
+    observed_at: PAGE_FROM, session_id: 42, request_id: 0, execution_context_id: context,
+    task_address: context.toString(16).padStart(16, "0"),
+    wait_type: "PAGELATCH_EX", wait_duration_ms: "9007199254740993", resource: structuredClone(row.resource),
+    resource_address: "000000000000abcd", blocking_task_address: null,
+    blocking_session_id: -5, blocking_execution_context_id: null,
+  };
+  return row;
+}
+
 export function pageReport(observations = [pageWait()]): PageWaitReport {
   return {
     source_state: "partial", source_reason: "Only bounded coordinator waits were retained.",
@@ -50,6 +66,7 @@ export function pageReport(observations = [pageWait()]): PageWaitReport {
     limitations: ["Matching metadata at two bounds does not establish continuous page identity or a latch owner."],
     entries: observations.map((row, index) => ({
       observation_key: `opaque-backend-page-reference-${index}`, request_key: structuredClone(row.request.key), resource: structuredClone(row.resource),
+      task: row.task_wait ? { task_address: row.task_wait.task_address, execution_context_id: row.task_wait.execution_context_id } : undefined,
       title: `Affected request ${index}`, explanation: "The request waited on the reported resource; an exclusive cause or owner is not established.",
       investigation: "Correlate the original request and native metadata before a measured code change.",
       verify: "Compare the same native evidence after the tested change.",

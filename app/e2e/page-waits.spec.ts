@@ -4,8 +4,8 @@ import type { PageWaitReport } from "../src/gen/PageWaitReport";
 import type { PageWaitSnapshot } from "../src/gen/PageWaitSnapshot";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
 import type { State } from "../src/lib/store";
-import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageWait } from "../src/test/page-waits";
-import { openConnection } from "./demo";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_SOURCE, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait } from "../src/test/page-waits";
+import { openConnection, waitForReport } from "./demo";
 
 const TITLE = english["view.page_waits.title"];
 
@@ -30,11 +30,7 @@ function fixture(): { evidence: PageWaitSnapshot; report: PageWaitReport } {
 }
 
 async function inject(page: Page, evidence: PageWaitSnapshot | null, view: PageWaitReport | null, source: SourceOutcome) {
-  await expect.poll(async () => page.evaluate(async (path) => {
-    const { getState } = await import(path) as { getState: () => State };
-    const report = getState().report;
-    return report.status === "ready" && !report.scanning;
-  }, "/src/lib/store.ts")).toBe(true);
+  await waitForReport(page);
   await page.evaluate(async ({ path, evidence, view, source }) => {
     const { getState, setState } = await import(path) as { getState: () => State; setState: (patch: Partial<State>) => void };
     const state = getState();
@@ -58,6 +54,38 @@ async function inject(page: Page, evidence: PageWaitSnapshot | null, view: PageW
     setState({ report: { ...state.report, report } });
   }, { path: "/src/lib/store.ts", evidence, view, source });
 }
+
+test("parallel workers retain separate task waits and unverified owner fields behind disclosure", async ({ page }, info) => {
+  await page.setViewportSize({ width: 900, height: 900 });
+  await openConnection(page, "mssql-demo");
+  const observations = [pageTaskWait(1), pageTaskWait(2)];
+  const report = pageReport(observations);
+  report.title = TITLE;
+  await inject(page, pageEvidence([...observations].reverse()), report, { source: PAGE_SOURCE, state: "collected", reason: null });
+  await page.locator('[data-tile="health"]').click();
+  const region = page.getByRole("region", { name: TITLE, exact: true });
+  await expect(region).toBeVisible();
+  await expect(region.locator("details[open]")).toHaveCount(0);
+  await region.getByText("Inspect retained page waits", { exact: true }).click();
+  const cards = region.locator("article");
+  await expect(cards).toHaveCount(2);
+  await expect(region).not.toContainText(english["ui.memory_failures.missing_row"]);
+  const first = cards.first();
+  await first.getByText("Investigation and native evidence", { exact: true }).click();
+  await expect(first).toContainText("PAGELATCH_EX");
+  await expect(first).toContainText("CXCONSUMER");
+  await expect(first).toContainText("9007199254740993 ms");
+  const taskDetails = first.getByText(english["ui.page_waits.task.details"], { exact: true });
+  await taskDetails.click();
+  await expect(first).toContainText("0000000000000001");
+  await expect(first).not.toContainText("0000000000000002");
+  await expect(first).toContainText(english["ui.page_waits.task.qualification"]);
+  await expect(first.locator("dd", { hasText: /^-5$/ })).toBeVisible();
+  await expect(first.locator("a")).toHaveCount(0);
+  const bounds = await region.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+  expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
+  await first.screenshot({ path: info.outputPath("parallel-page-task-evidence.png") });
+});
 
 test("page waits retain the original affected request and qualified metadata in collapsed bounded cards", async ({ page }, info) => {
   await page.setViewportSize({ width: 900, height: 900 });

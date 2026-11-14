@@ -398,6 +398,7 @@ fn a_later_focused_frame_keeps_its_own_counters_and_never_manufactures_an_owner(
     request.elapsed_ms = Some("121000".into());
     request.session_counters.logical_reads = Some("99".into());
     let page = PageWaitObservation {
+        task_wait: None,
         source: "page-wait-targets".into(),
         observed_from: "2020-01-01T00:02:00Z".into(),
         observed_until: "2020-01-01T00:02:01Z".into(),

@@ -541,6 +541,16 @@ request participant checker. Scans and `TaskSpaceSource` adapt the same capture;
 completion and close proof. Capture-local task tuples provide no task generation or allocator evidence. Current
 SQL is checked request context only. The pure `views::task_space` explanation is reused by report preparation and
 the authenticated collected-evidence API; both stores keep the existing OperationalSamples schema and proof path.
+Its typed explanation distinguishes native user-object, internal-object and mixed activity, including recorded
+deallocations. Missing counters cannot establish a zero class or exclusive use; no subtraction constructs a
+footprint. The scan, archive, UI, CLI and MCP consume that same explanation.
+
+The existing page-target reader also retains parallel native task waits without rewriting their coordinator.
+Task addresses and execution-context IDs distinguish capture-local rows, not persistent generations or latch
+owners. Exact request/statement and task/wait rechecks qualify enrichment; ended tasks retain original evidence
+without acquiring later SQL. Task visibility is admitted separately from database request visibility, and denied
+task access preserves coordinator facts with partial coverage. This extended native projection remains
+cost-unqualified. Durable activity-focused lookups name only their original coordinator and reject task substitutes.
 
 `culprit-mssql::performance` reads shared native counter facts once for pressure and connection churn. Typed units and
 counter nature come from the native counter format, not its display name. Unknown formats keep raw values and have
@@ -1101,6 +1111,13 @@ worker counts, selectivity, execution modes, compiler verdicts, candidate indexe
 units and precision without parsing display labels. Native collection and normalized-plan deserialization treat
 invalid numeric evidence as unknown; a measured zero stays distinct from a missing counter. SQL Server's lightweight profiling withdraws its unrecorded timing placeholders at
 its collection boundary.
+
+Native accessed-row facts separately retain estimated rows per execution and complete actual worker totals;
+estimated fallbacks in display-oriented `rows_read` cannot establish measured access. Relational-input diagnostics
+compare serial, qualified access and output populations to distinguish accessed volume from kept-fraction errors.
+Neither count measures the entire supplied TVP or proves cached-cardinality reuse. Parallel or incomplete scope
+remains unresolved. TVPs, local variables, temporary tables and functions retain their native kind-specific advice;
+filter/spool evidence cannot generate persistent-table DDL against those inputs.
 
 Every plan and plan step carries its facts: the engine's parser records them from the native plan, and a provider that
 plugs in either fills them in or hands its native text to the built-in parser (`culprit_engine::plans::parse_plan`).

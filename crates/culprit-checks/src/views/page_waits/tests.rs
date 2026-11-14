@@ -19,6 +19,7 @@ pub(crate) fn observation(session: &str, kind: WaitResourceKind) -> PageWaitObse
         "statement":DefinitionPayload::sql("SELECT payload FROM app.orders WHERE customer=9264",Engine::Mssql)
     })).unwrap();
     let row = PageWaitObservation {
+        task_wait: None,
         source: "native page observations".into(),
         observed_from: "2026-11-13T10:00:00.1Z".into(),
         observed_until: "2026-11-13T10:00:00.9Z".into(),

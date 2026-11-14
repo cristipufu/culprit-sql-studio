@@ -20,6 +20,24 @@ impl QueryPolicy {
 
 /// Context and visibility are identical for the ordinary activity and explicit request-resource profiles.
 pub(super) fn frame_query(rows: &str, identity: IdentityDetail, policy: QueryPolicy) -> String {
+    format!("{FRAME_CLOCK}{}", frame_select(rows, identity, policy))
+}
+
+pub(super) const FRAME_CLOCK: &str =
+    "\nDECLARE /* culprit */ @at datetime2=SYSUTCDATETIME(), @native_now datetime2=SYSDATETIME();\n";
+
+/// Conditional projections share one native point clock without redeclaring batch-scoped SQL variables.
+pub(super) fn frame_select(rows: &str, identity: IdentityDetail, policy: QueryPolicy) -> String {
+    frame_select_with_context(rows, identity, policy, "")
+}
+
+/// Context columns remain present even when OUTER APPLY returns no activity rows.
+pub(super) fn frame_select_with_context(
+    rows: &str,
+    identity: IdentityDetail,
+    policy: QueryPolicy,
+    context_columns: &str,
+) -> String {
     let (identity_columns, identity_join) = match identity {
         IdentityDetail::Endpoint => {
             ("CAST(NULL AS varchar(36)) AS incarnation,CAST(NULL AS varchar(36)) AS physical_incarnation", "")
@@ -32,9 +50,7 @@ pub(super) fn frame_query(rows: &str, identity: IdentityDetail, policy: QueryPol
     let ordering = if matches!(policy, QueryPolicy::Activity) { "ORDER BY a.session_id,a.request_id" } else { "" };
     let hints = policy.hints();
     format!(
-        r#"
-DECLARE /* culprit */ @at datetime2=SYSUTCDATETIME(), @native_now datetime2=SYSDATETIME();
-SELECT TOP (@P1) /* culprit */
+        r#"SELECT TOP (@P1) /* culprit */
  CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition,
  CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(32)) AS updateability,
  CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')) AS server_version,
@@ -47,7 +63,7 @@ SELECT TOP (@P1) /* culprit */
   OR HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER PERFORMANCE STATE')=1 THEN 1 ELSE 0 END AS database_wide,
  d.database_name, CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
  CONVERT(varchar(40),@native_now,126) AS native_observed_at,
- {identity_columns}, a.*
+ {context_columns}{identity_columns}, a.*
 FROM (SELECT DB_NAME() AS database_name) d
 {identity_join}
 OUTER APPLY ({rows}) a

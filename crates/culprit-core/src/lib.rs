@@ -118,7 +118,7 @@ pub use native_log_analysis::{
 pub use operations::{
     MemoryLimit, NodeResource, NodeResources, ProcessMemory, QueryTermination, TerminationHistory, TerminationReason,
 };
-pub use page_wait_report::{PageWaitExplanation, PageWaitReport};
+pub use page_wait_report::{PageWaitExplanation, PageWaitReport, PageWaitTaskReference};
 pub use plan::*;
 pub use plan_compare::{CompareContext, Scenario, ScenarioKind};
 pub use plan_diff::{

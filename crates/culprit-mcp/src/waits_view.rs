@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 const COMPILATION_ENTRIES: usize = 5;
 const CLEANUP_ENTRIES: usize = 5;
 const CLEANUP_BOUNDARY_REFERENCES: usize = 5;
+const PARTICIPANT_ENTRIES: usize = 5;
 
 fn signal(s: &Signal) -> Value {
     json!({
@@ -104,6 +105,28 @@ pub fn report(report: &Report) -> Value {
     if let Some(activity) = activity {
         response["activity"] = activity;
     }
+    if let Some(pages) = &report.page_waits {
+        response["page_waits"] = json!({
+            "title": pages.title,
+            "summary": pages.summary,
+            "source_state": pages.source_state,
+            "source_reason": pages.source_reason,
+            "entries_retained": pages.entries.len(),
+            "entries": pages.entries.iter().take(PARTICIPANT_ENTRIES).collect::<Vec<_>>(),
+            "limitations": pages.limitations,
+        });
+    }
+    if let Some(tasks) = &report.task_space {
+        response["task_space"] = json!({
+            "title": tasks.title,
+            "summary": tasks.summary,
+            "source_state": tasks.source_state,
+            "source_reason": tasks.source_reason,
+            "entries_retained": tasks.entries.len(),
+            "entries": tasks.entries.iter().take(PARTICIPANT_ENTRIES).collect::<Vec<_>>(),
+            "limitations": tasks.limitations,
+        });
+    }
     if let Some(cleanup) = &report.cleanup {
         response["cleanup"] = json!({
             "title": cleanup.title,
@@ -169,6 +192,132 @@ pub fn sample(s: &WaitSample) -> Value {
 mod tests {
     use super::*;
     use culprit_core::{Engine, SignalScope, SignalUnit};
+
+    #[test]
+    fn participant_views_bound_entries_and_retain_task_identity_without_raw_payloads() {
+        use culprit_core::{
+            ObservedWaitResource, PageWaitExplanation, PageWaitReport, PageWaitTaskReference, SourceState,
+            TaskAllocationActivity, TaskSpaceExplanation, TaskSpaceReport, WaitResourceKind, telemetry::*,
+        };
+        let mut data: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        let key = ActivityKey {
+            session: NativeActivityIdentity { id: "42".into(), generation: "login-generation".into() },
+            request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-generation".into() }),
+            transaction: None,
+        };
+        data.page_waits = Some(PageWaitReport {
+            source_state: Some(SourceState::Partial),
+            source_reason: Some("Native task visibility is partial.".into()),
+            title: "Page waits".into(),
+            summary: "Distinct task waits on one request.".into(),
+            limitations: vec!["Task addresses do not establish an owner.".into()],
+            entries: (0..PARTICIPANT_ENTRIES + 2)
+                .map(|index| PageWaitExplanation {
+                    observation_key: format!("exact-page-proof-{index}"),
+                    request_key: key.clone(),
+                    task: Some(PageWaitTaskReference {
+                        task_address: format!("{index:016x}"),
+                        execution_context_id: index as u32,
+                    }),
+                    resource: ObservedWaitResource {
+                        kind: WaitResourceKind::MemoryPage,
+                        native: NativeIdentity::new("5:1:42"),
+                    },
+                    title: "Observed task wait".into(),
+                    explanation: "Coordinator context is separate.".into(),
+                    investigation: "Inspect qualified participants.".into(),
+                    verify: "Compare representative load.".into(),
+                })
+                .collect(),
+        });
+        data.task_space = Some(TaskSpaceReport {
+            source_state: None,
+            source_reason: Some("Source completeness is unknown.".into()),
+            title: "Temporary activity".into(),
+            summary: "Native allocation classes remain separate.".into(),
+            limitations: vec!["No allocator or footprint established.".into()],
+            entries: (0..PARTICIPANT_ENTRIES + 3)
+                .map(|index| TaskSpaceExplanation {
+                    observation_key: format!("exact-task-proof-{index}"),
+                    task: TaskSpaceIdentity {
+                        session_id: "42".into(),
+                        request_id: "0".into(),
+                        execution_context_id: index.to_string(),
+                    },
+                    activity: TaskAllocationActivity::InternalObjects,
+                    title: "Internal-object activity".into(),
+                    explanation: "No spilled operator established.".into(),
+                    investigation: "Inspect retained actual operators.".into(),
+                    verify: "Preserve native counter scope.".into(),
+                })
+                .collect(),
+        });
+        data.snapshot.operations.page_waits = Some(PageWaitSnapshot {
+            source: "private-raw-page-source-canary".into(),
+            observed_from: "2026-11-13T10:00:00Z".into(),
+            observed_until: "2026-11-13T10:00:01Z".into(),
+            observations: vec![],
+        });
+        data.snapshot.operations.task_space = Some(TaskSpaceSnapshot {
+            source: "private-raw-task-source-canary".into(),
+            observed_from: "2026-11-13T10:00:00Z".into(),
+            observed_until: "2026-11-13T10:00:01Z".into(),
+            observations: vec![],
+        });
+        let response = report(&data);
+        for (name, count) in [("page_waits", PARTICIPANT_ENTRIES + 2), ("task_space", PARTICIPANT_ENTRIES + 3)] {
+            assert_eq!(response[name]["entries_retained"], count);
+            assert_eq!(response[name]["entries"].as_array().unwrap().len(), PARTICIPANT_ENTRIES);
+            assert!(response["operations"].get(name).is_none());
+        }
+        let pages = &response["page_waits"];
+        assert_eq!(pages["source_state"], "partial");
+        assert_eq!(pages["source_reason"], "Native task visibility is partial.");
+        for (index, entry) in pages["entries"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(entry["task"]["execution_context_id"], index);
+            assert_eq!(entry["task"]["task_address"], format!("{index:016x}"));
+            assert_eq!(entry["request_key"]["request"]["generation"], "request-generation");
+            assert_eq!(entry["resource"]["native"]["id"], "5:1:42");
+        }
+        assert!(response["task_space"]["source_state"].is_null());
+        assert_eq!(response["task_space"]["entries"][0]["activity"], "internal-objects");
+        let text = serde_json::to_string(&response).unwrap();
+        assert!(!text.contains("private-raw-page-source-canary"));
+        assert!(!text.contains("private-raw-task-source-canary"));
+    }
+
+    #[test]
+    fn empty_participant_views_preserve_unknown_partial_and_unavailable_coverage() {
+        use culprit_core::{PageWaitReport, SourceState, TaskSpaceReport};
+        let mut data: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        for state in [None, Some(SourceState::Partial), Some(SourceState::Unavailable), Some(SourceState::Empty)] {
+            data.page_waits = Some(PageWaitReport {
+                source_state: state,
+                source_reason: Some("Native scope qualification.".into()),
+                title: "Page waits".into(),
+                summary: "No retained page rows.".into(),
+                limitations: vec!["Missing task visibility is not zero.".into()],
+                entries: vec![],
+            });
+            data.task_space = Some(TaskSpaceReport {
+                source_state: state,
+                source_reason: Some("Native counter qualification.".into()),
+                title: "Temporary activity".into(),
+                summary: "No retained task rows.".into(),
+                limitations: vec!["Unknown counters are not zero.".into()],
+                entries: vec![],
+            });
+            let response = report(&data);
+            for name in ["page_waits", "task_space"] {
+                assert_eq!(response[name]["source_state"], serde_json::to_value(state).unwrap());
+                assert_eq!(response[name]["entries_retained"], 0);
+                assert_eq!(response[name]["entries"], json!([]));
+                assert_eq!(response[name]["limitations"].as_array().unwrap().len(), 1);
+            }
+            assert_eq!(response["page_waits"]["source_reason"], "Native scope qualification.");
+            assert_eq!(response["task_space"]["source_reason"], "Native counter qualification.");
+        }
+    }
 
     fn compilation_report_data(entries: usize) -> Report {
         use culprit_core::{

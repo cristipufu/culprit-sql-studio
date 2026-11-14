@@ -6,18 +6,14 @@ import type { CompilationSnapshot } from "../src/gen/CompilationSnapshot";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
 import type { State } from "../src/lib/store";
 import { COMPILATION_SOURCE, compilationEvidence, compilationObservation, compilationReport } from "../src/test/compilation";
-import { openConnection } from "./demo";
+import { openConnection, waitForReport } from "./demo";
 
 const TITLE = english["view.compilation.title"];
 const EXACT_COUNT = "9007199254740993";
 const NATIVE_CONTEXT = `<script>compiled-context-executed</script>${"x".repeat(512)}`;
 
 async function inject(page: Page, evidence: CompilationSnapshot | null, view: CompilationReport | null, source: SourceOutcome) {
-  await expect.poll(async () => page.evaluate(async (path) => {
-    const { getState } = await import(path) as { getState: () => State };
-    const report = getState().report;
-    return report.status === "ready" && !report.scanning;
-  }, "/src/lib/store.ts")).toBe(true);
+  await waitForReport(page);
   await page.evaluate(async ({ path, evidence, view, source }) => {
     const { getState, setState } = await import(path) as { getState: () => State; setState: (patch: Partial<State>) => void };
     const state = getState();
@@ -113,6 +109,7 @@ test("compilation history keeps exact native identities in collapsed paged recor
 
 test("Query details show individual compilation memory without multiplying it by the compile count", async ({ page }, info) => {
   await openConnection(page, "mssql-demo");
+  await waitForReport(page);
   const memory: CompilationMemory = { average_kb: 32768, last_kb: 16384, maximum_kb: 65536 };
   await page.evaluate(async ({ path, memory }) => {
     const { getState, setState } = await import(path) as {

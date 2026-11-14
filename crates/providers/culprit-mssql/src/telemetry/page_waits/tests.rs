@@ -13,6 +13,47 @@ fn request() -> CollectionRequest {
     }
 }
 
+#[tokio::test]
+async fn unavailable_task_visibility_keeps_frozen_coordinator_rows_and_empty_scope_partial() {
+    for present in [true, false] {
+        let mut replies = if present {
+            successful_replies(vec![replace(
+                &page_wait(42, "PAGELATCH_EX", "7:1:4144"),
+                &[("task_visibility", Val::Bool(false))],
+            )])
+        } else {
+            let empty = replace(&context(), &[("task_visibility", Val::Bool(false))]);
+            vec![Ok(vec![context()]), Ok(vec![empty]), Ok(vec![context()])]
+        };
+        replies.push(Ok(vec![context()]));
+        let mut source = PageWaitSource::from_reader(reader(replies), &request()).unwrap();
+        let description = source.describe().await.unwrap();
+        let snapshot = description.observation.snapshot().unwrap();
+        assert_eq!(snapshot.records, u32::from(present));
+        assert_eq!(snapshot.sources[0].state, culprit_core::SourceState::Partial);
+        assert!(!snapshot.sources[0].complete_scope);
+        assert_eq!(snapshot.sources[0].stopped, Some(CollectionStop::SourceUnavailable));
+        let CollectionRead::Page { records, next_cursor } =
+            source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+        else {
+            panic!()
+        };
+        assert!(next_cursor.is_none());
+        assert_eq!(records.len(), usize::from(present));
+        if present {
+            let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(row), .. }) =
+                &records[0]
+            else {
+                panic!()
+            };
+            assert!(row.task_wait.is_none());
+            assert_eq!(row.resolution, PageWaitResolution::ObservedAtBothBounds);
+        }
+        assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
 fn focused_request() -> CollectionRequest {
     CollectionRequest {
         subject: CollectionSubject::Database,

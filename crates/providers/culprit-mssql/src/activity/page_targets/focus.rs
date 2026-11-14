@@ -53,7 +53,14 @@ impl<R: NativeRead> ActivityReader<R> {
             wait,
         };
         let capture = if result.permits_page_lookup() {
-            self.capture_selected_page_wait_targets(frame, initial, LookupAdmission::OriginalFocus).await?
+            // This focus is the original request/coordinator point, not permission to discover other tasks.
+            let tasks = vec![None; frame.records.len()];
+            self.capture_selected_page_wait_targets(
+                task_waits::Population { frame, tasks, limited: false, task_visibility: None },
+                initial,
+                LookupAdmission::OriginalFocus,
+            )
+            .await?
         } else {
             // Preserve the authenticated original in result. A changed or disappeared participant is not a
             // fresh page observation, and must never trigger a broad replacement population or a header read.

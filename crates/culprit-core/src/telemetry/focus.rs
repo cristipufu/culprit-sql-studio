@@ -111,6 +111,8 @@ impl ActivityWaitFocusResult {
         };
         self.is_valid()
             && page.is_valid()
+            // This focus names an original coordinator observation, not any parallel task sharing its request.
+            && page.task_wait.is_none()
             && self.source == FocusSourceState::Matched
             && bounds.contains(&page.observed_from)
             && bounds.contains(&page.observed_until)

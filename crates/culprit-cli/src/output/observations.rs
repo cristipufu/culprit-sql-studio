@@ -487,6 +487,7 @@ mod tests {
             summary: "one original waiter".into(),
             limitations: vec!["an observed waiter is not a transient latch owner".into()],
             entries: vec![culprit_core::PageWaitExplanation {
+                task: None,
                 observation_key: "native-key".into(),
                 request_key: culprit_core::telemetry::ActivityKey {
                     session: culprit_core::telemetry::NativeActivityIdentity {

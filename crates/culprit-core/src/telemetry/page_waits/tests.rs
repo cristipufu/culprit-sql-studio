@@ -1,6 +1,7 @@
 use super::*;
 use crate::Engine;
 mod index_operations;
+mod tasks;
 
 const SOURCE: &str = crate::source_id::PAGE_WAIT_TARGETS;
 
@@ -56,6 +57,7 @@ fn observation() -> PageWaitObservation {
         observed_from: "2026-11-13T10:00:00.200000Z".into(),
         observed_until: "2026-11-13T10:00:00.800000Z".into(),
         request,
+        task_wait: None,
         before_check: Some(PageWaitRecheck {
             observed_at: "2026-11-13T10:00:00.3Z".into(),
             request: PageWaitRequestState::SameStatement,

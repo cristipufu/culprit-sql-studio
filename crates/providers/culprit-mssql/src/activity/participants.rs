@@ -181,21 +181,27 @@ fn signed_integer(row: &Rec, name: &str) -> Result<Option<i32>> {
         .transpose()
 }
 
-const PARTICIPANTS: &str = r#"
-DECLARE /* culprit */ @targets xml=CAST(@P1 AS xml),@at datetime2=SYSUTCDATETIME();
-SELECT /* culprit */ a.ordinal,CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
+pub(super) const CHECK_COLUMNS: &str = r#"a.ordinal,CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
  r.session_id AS checked_session_id,CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS checked_session_generation,
  r.request_id AS checked_request_id,CONVERT(varchar(40),CAST(r.start_time AS datetime2),126) AS checked_request_generation,
  CONVERT(varchar(128),r.sql_handle,2) AS checked_sql_handle,r.statement_start_offset AS checked_begin,r.statement_end_offset AS checked_end,
  r.database_id AS checked_database_id,r.wait_type AS checked_wait_type,r.wait_resource AS checked_wait_resource,
  CONVERT(varchar(128),r.plan_handle,2) AS checked_plan_handle,CONVERT(varchar(16),r.query_hash,2) AS checked_query_hash,
- CONVERT(varchar(16),r.query_plan_hash,2) AS checked_plan_hash
+ CONVERT(varchar(16),r.query_plan_hash,2) AS checked_plan_hash"#;
+
+fn participants_sql() -> String {
+    format!(
+        r#"
+DECLARE /* culprit */ @targets xml=CAST(@P1 AS xml),@at datetime2=SYSUTCDATETIME();
+SELECT /* culprit */ {CHECK_COLUMNS}
 FROM @targets.nodes('/activity/row') t(n)
 CROSS APPLY(SELECT t.n.value('@ordinal[1]','int') AS ordinal,t.n.value('@session[1]','int') AS session_id,
  t.n.value('@request[1]','int') AS request_id) a
 LEFT JOIN sys.dm_exec_sessions s ON s.session_id=a.session_id
 LEFT JOIN sys.dm_exec_requests r ON r.session_id=a.session_id AND r.request_id=a.request_id
-OPTION(MAXDOP 1,LOOP JOIN)"#;
+OPTION(MAXDOP 1,LOOP JOIN)"#
+    )
+}
 
 impl<R: NativeRead> ActivityReader<R> {
     pub(super) async fn request_participants(
@@ -209,7 +215,7 @@ impl<R: NativeRead> ActivityReader<R> {
         let selected: BTreeSet<_> = indices.iter().copied().collect();
         let rows = self
             .io
-            .query(PARTICIPANTS, vec![Parameter::Text(selectors(frame, indices)?)], indices.len())
+            .query(&participants_sql(), vec![Parameter::Text(selectors(frame, indices)?)], indices.len())
             .await
             .map_err(ReadError::into_error)?;
         if rows.len() != indices.len() {

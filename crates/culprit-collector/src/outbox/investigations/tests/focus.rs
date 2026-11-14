@@ -399,6 +399,7 @@ fn a_valid_page_report_cannot_be_attached_to_another_native_actor_in_the_same_da
         )
         .unwrap();
     let page = PageWaitObservation {
+        task_wait: None,
         source: "page wait targets".into(),
         observed_from: "2026-11-14T08:00:10Z".into(),
         observed_until: "2026-11-14T08:00:11Z".into(),

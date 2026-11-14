@@ -4,6 +4,9 @@ use super::*;
 use crate::{ObservedWaitResource, WaitResourceKind};
 use std::collections::BTreeSet;
 
+mod tasks;
+pub use tasks::MssqlPageTaskWait;
+
 pub const MAX_PAGE_WAIT_OBSERVATIONS: usize = 64;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -266,6 +269,11 @@ pub struct PageWaitObservation {
     pub observed_until: String,
     /// The originally observed waiter. It remains historical context if later request checks fail.
     pub request: ActivityObservation,
+    /// A native task wait is distinct from the coordinator's request-level wait. Addresses identify only the
+    /// observed task slot; they do not establish a persistent task generation or an owner session incarnation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub task_wait: Option<MssqlPageTaskWait>,
     /// Later request and wait-state checks do not rewrite the originally observed participant or page address.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -294,16 +302,42 @@ pub struct PageWaitObservation {
     pub index_operations: Option<PageIndexOperations>,
 }
 
+/// Borrowed native inputs for explanation and validation, without replacing the original coordinator context.
+pub struct PageWaitObservedWait<'a> {
+    pub native_type: Option<&'a str>,
+    pub elapsed_ms: Option<&'a str>,
+    pub resource: &'a ObservedWaitResource,
+}
+
 impl PageWaitObservation {
+    pub fn observed_wait(&self) -> PageWaitObservedWait<'_> {
+        match &self.task_wait {
+            Some(task) => PageWaitObservedWait {
+                native_type: Some(&task.wait_type),
+                elapsed_ms: task.wait_duration_ms.as_deref(),
+                resource: &task.resource,
+            },
+            None => PageWaitObservedWait {
+                native_type: self.request.wait.as_ref().and_then(|wait| wait.native_type.as_deref()),
+                elapsed_ms: self.request.wait.as_ref().and_then(|wait| wait.elapsed_ms.as_deref()),
+                resource: &self.resource,
+            },
+        }
+    }
+
     /// An unresolved request from another scope remains original context, never a mapped database target.
     pub fn fits_database_capture(&self, database: &str) -> bool {
         self.request.database_context_is_consistent(database)
     }
 
     pub fn key(&self) -> Result<String> {
-        serde_json::to_vec(&(&self.request.key, &self.resource))
-            .map(|value| digest(&value))
-            .map_err(|_| CollectionStop::InvalidPage.error())
+        let bytes = match &self.task_wait {
+            Some(task) => {
+                serde_json::to_vec(&(&self.request.key, &self.resource, &task.task_address, task.execution_context_id))
+            }
+            None => serde_json::to_vec(&(&self.request.key, &self.resource)),
+        };
+        bytes.map(|value| digest(&value)).map_err(|_| CollectionStop::InvalidPage.error())
     }
 
     pub fn is_valid(&self) -> bool {
@@ -319,6 +353,11 @@ impl PageWaitObservation {
             && self.plan_identity.as_ref().is_none_or(NativeIdentity::is_valid)
             && (self.plan_identity.is_none() || self.statement_identity.is_some())
             && (self.statement_identity.is_none() || statement_checked)
+            && (self.task_wait.is_none()
+                || self.statement_identity.is_none()
+                || checks
+                    .into_iter()
+                    .all(|check| check.as_ref().is_some_and(|check| check.wait == PageWaitRelation::OriginalObserved)))
             && (self.resolution != PageWaitResolution::UnverifiedSource || self.statement_identity.is_none())
             && checks.into_iter().flatten().all(|check| check.is_valid() && bounds.contains(&check.observed_at))
             && match (&self.before_check, &self.after_check) {
@@ -330,7 +369,17 @@ impl PageWaitObservation {
             && self.resource.is_valid()
             && self.observed_address.as_ref().is_none_or(PageWaitAddress::is_valid)
             && matches!(self.resource.kind, WaitResourceKind::MemoryPage | WaitResourceKind::PageIo)
-            && self.request.wait.as_ref().is_some_and(|wait| wait.identified_resources.contains(&self.resource))
+            && match &self.task_wait {
+                Some(task) => {
+                    task.is_valid()
+                        && task.matches_request(&self.request)
+                        && task.observed_at == self.observed_from
+                        && task.resource == self.resource
+                }
+                None => {
+                    self.request.wait.as_ref().is_some_and(|wait| wait.identified_resources.contains(&self.resource))
+                }
+            }
             && (self.resolution == PageWaitResolution::ObservedAtBothBounds) == self.target.is_some()
             && self.target.as_ref().is_none_or(|target| {
                 target.is_valid()

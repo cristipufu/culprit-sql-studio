@@ -59,6 +59,7 @@ async fn authenticated_page_targets_reuse_scan_explanations_and_reference_origin
             let entry = result.report.entries.iter().find(|entry| entry.observation_key == row.key().unwrap()).unwrap();
             assert_eq!(entry.request_key, row.request.key);
             assert_eq!(entry.resource, row.resource);
+            assert_eq!(entry.task, row.task_wait.as_ref().map(culprit_core::PageWaitTaskReference::from));
         }
         for row in &rows {
             let expected = ExportedRecord::new(&source, capture.capture(), row.clone()).unwrap();
@@ -66,6 +67,150 @@ async fn authenticated_page_targets_reuse_scan_explanations_and_reference_origin
         }
         let report = serde_json::to_string(&result.report).unwrap();
         assert!(!report.contains("INSERT INTO") && !report.contains("SELECT payload"));
+    }
+}
+
+fn task_cases() -> impl Iterator<Item = (CollectionDescription, Vec<TelemetryRecord>)> {
+    page_wait_evidence_cases()
+        .into_iter()
+        .filter(|(_, rows)| observations(rows).iter().any(|row| row.task_wait.is_some()))
+}
+
+#[tokio::test]
+async fn parallel_page_workers_survive_unrelated_or_absent_coordinator_waits_without_collapsing_the_request() {
+    let (source, rows) = task_cases()
+        .find(|(_, rows)| {
+            observations(rows).iter().any(|row| row.resource.kind == culprit_core::WaitResourceKind::PageIo)
+        })
+        .unwrap();
+    let expected = observations(&rows);
+    let first = expected[0];
+    let second = expected[1];
+    assert_eq!(first.request.key, second.request.key);
+    assert_eq!(first.resource, second.resource);
+    assert_ne!(first.key().unwrap(), second.key().unwrap());
+    assert_eq!(first.request.wait.as_ref().unwrap().native_type.as_deref(), Some("CXCONSUMER"));
+    assert!(expected.iter().any(|row| row.request.wait.is_none()));
+    let fixture = Fixture::new(source, rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+    let result = collected_resources::page_waits(&capture).unwrap();
+    assert_eq!(result.report.entries.len(), expected.len());
+    assert_eq!(result.context.records.len(), expected.len());
+    let keys = result
+        .report
+        .entries
+        .iter()
+        .map(|entry| entry.observation_key.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(keys.len(), expected.len());
+    for row in expected {
+        let task = row.task_wait.as_ref().unwrap();
+        let entry = result.report.entries.iter().find(|entry| entry.observation_key == row.key().unwrap()).unwrap();
+        assert_eq!(entry.request_key, row.request.key);
+        assert_eq!(entry.task, Some(culprit_core::PageWaitTaskReference::from(task)));
+        assert_eq!(entry.resource, task.resource);
+        assert_eq!(row.observed_wait().elapsed_ms, task.wait_duration_ms.as_deref());
+        let title = if task.wait_type.starts_with("PAGEIOLATCH_") {
+            culprit_core::t!("view.page_waits.io.title")
+        } else {
+            culprit_core::t!("view.page_waits.memory.title")
+        };
+        assert_eq!(entry.title, title);
+    }
+    assert_eq!(first.task_wait.as_ref().unwrap().wait_duration_ms.as_deref(), Some("250"));
+    assert_eq!(second.task_wait.as_ref().unwrap().wait_duration_ms.as_deref(), Some("0"));
+}
+
+#[tokio::test]
+async fn native_task_owner_sentinels_and_addresses_stay_raw_without_becoming_owner_or_query_links() {
+    let (source, rows) = task_cases()
+        .find(|(_, rows)| {
+            observations(rows).iter().any(|row| row.task_wait.as_ref().unwrap().blocking_session_id == Some(-99))
+        })
+        .unwrap();
+    let expected_owners = observations(&rows)
+        .iter()
+        .map(|row| row.task_wait.as_ref().unwrap().blocking_session_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(expected_owners, [Some(-99), Some(-4), Some(-3), Some(-2), Some(0), Some(91), None].into());
+    let fixture = Fixture::new(source, rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+    let result = collected_resources::page_waits(&capture).unwrap();
+    assert_eq!(result.report.entries.len(), rows.len());
+    for original in &rows {
+        assert!(result.context.records.iter().any(|row| &row.row.record == original));
+    }
+    for entry in &result.report.entries {
+        assert_eq!(entry.request_key.session.id, "72", "the waiter does not inherit a blocking session's identity");
+    }
+    assert!(result.report.limitations.contains(&culprit_core::t!("view.page_waits.limit.ownership")));
+    let rendered = serde_json::to_string(&result.report).unwrap();
+    for private_native_field in ["blocking_session_id", "blocking_task_address", "INSERT INTO", "native-sql-"] {
+        assert!(!rendered.contains(private_native_field), "{private_native_field}");
+    }
+}
+
+#[tokio::test]
+async fn ended_and_changed_tasks_keep_original_page_and_index_points_without_current_sql_or_plan_links() {
+    let (source, rows) = task_cases()
+        .find(|(_, rows)| {
+            observations(rows).iter().any(|row| row.after_check.as_ref().unwrap().wait == PageWaitRelation::Different)
+        })
+        .unwrap();
+    let fixture = Fixture::new(source, rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+    let result = collected_resources::page_waits(&capture).unwrap();
+    assert_eq!(result.report.source_state, Some(SourceState::Partial));
+    for row in observations(&rows) {
+        assert!(row.statement_identity.is_none() && row.plan_identity.is_none());
+        assert!(row.request.statement.is_available(), "original statement context survives independently");
+        assert!(matches!(
+            row.after_check.as_ref().unwrap().wait,
+            PageWaitRelation::NoLongerObserved | PageWaitRelation::Different | PageWaitRelation::Unqualified
+        ));
+        assert_eq!(row.target.as_ref().unwrap().header.page_id, 42);
+        assert!(matches!(
+            row.index_operations,
+            Some(PageIndexOperations::Observed { relation: PageIndexOperationRelation::CheckedTarget, .. })
+        ));
+        let entry = result.report.entries.iter().find(|entry| entry.observation_key == row.key().unwrap()).unwrap();
+        assert!(entry.task.is_some());
+        assert_eq!(entry.resource, row.resource);
+        let original = rows
+            .iter()
+            .find(|record| matches!(record, TelemetryRecord::Operational(op) if op.key == row.key().unwrap()))
+            .unwrap();
+        assert!(result.context.records.iter().any(|record| &record.row.record == original));
+    }
+}
+
+#[tokio::test]
+async fn mismatched_task_request_clock_or_ended_statement_proof_cannot_be_exported_or_explained() {
+    let (source, rows) = task_cases().next().unwrap();
+    let fixture = Fixture::new(source.clone(), rows.clone()).await;
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    for field in ["session", "request", "task-address", "task-clock", "wait-kind", "ended-with-statement-link"] {
+        let mut broken = rows.clone();
+        let TelemetryRecord::Operational(record) = &mut broken[0] else { panic!() };
+        let OperationalFact::PageWait(row) = &mut record.fact else { panic!() };
+        let task = row.task_wait.as_mut().unwrap();
+        match field {
+            "session" => task.session_id = 99,
+            "request" => task.request_id = 99,
+            "task-address" => task.task_address = "0000000000000000".into(),
+            "task-clock" => task.observed_at = "2020-01-01T12:00:00.400000000Z".into(),
+            "wait-kind" => task.wait_type = "PAGEIOLATCH_SH".into(),
+            "ended-with-statement-link" => row.after_check.as_mut().unwrap().wait = PageWaitRelation::NoLongerObserved,
+            _ => unreachable!(),
+        }
+        assert!(!row.is_valid(), "{field}");
+        record.key = row.key().unwrap();
+        assert!(ExportedRecord::new(&source, capture.capture(), broken[0].clone()).is_err(), "{field}");
+        let rejected = culprit_checks::analyze(scan(&source, &broken));
+        assert!(rejected.page_waits.is_none(), "{field}");
     }
 }
 

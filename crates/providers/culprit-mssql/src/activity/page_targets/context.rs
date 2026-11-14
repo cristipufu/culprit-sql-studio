@@ -13,6 +13,8 @@ use culprit_core::{
 pub(super) struct LookupContext {
     pub authority: DatabaseContext,
     pub unavailable: Option<PageWaitResolution>,
+    /// Population visibility is not a database epoch or an absence proof. Focused coordinator reads set None.
+    pub task_visibility: Option<bool>,
 }
 impl LookupContext {
     pub(super) fn matches_initial(&self, frame: &ActivityFrame) -> bool {
@@ -69,5 +71,5 @@ fn qualify(authority: DatabaseContext, row: &crate::value::Rec) -> Result<Lookup
     } else {
         None
     };
-    Ok(LookupContext { authority, unavailable })
+    Ok(LookupContext { authority, unavailable, task_visibility: None })
 }

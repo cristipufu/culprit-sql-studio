@@ -64,12 +64,17 @@ pub(crate) async fn collect_from<R: NativeRead>(
     let snapshot = match result {
         Ok(captured) => {
             coverage.completed(&sources::PAGE_WAIT_TARGETS, captured.snapshot.observations.len());
-            // Request waits describe the coordinator only, including when the bounded read returned no rows.
-            // They cannot establish that no parallel task waited or that these participants held the latch.
+            // A bounded point population cannot establish continuous coverage or transient latch ownership.
             coverage.partial(
                 &sources::PAGE_WAIT_TARGETS,
                 culprit_core::message!("provider.mssql.page_wait_targets.partial"),
             );
+            if captured.task_visibility_unavailable() {
+                coverage.partial(
+                    &sources::PAGE_WAIT_TARGETS,
+                    culprit_core::message!("provider.mssql.page_wait_targets.task_visibility_unavailable"),
+                );
+            }
             if captured.limited {
                 coverage.partial(
                     &sources::PAGE_WAIT_TARGETS,

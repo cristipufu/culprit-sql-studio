@@ -4,7 +4,7 @@ import { HealthTab } from "../components/Health";
 import { PageWaitTargets } from "../components/PageWaitTargets";
 import type { Report } from "../gen/Report";
 import { partial } from "../test/fixtures";
-import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageWait } from "../test/page-waits";
+import { PAGE_AFTER, PAGE_BEFORE, PAGE_FROM, PAGE_UNTIL, pageEvidence, pageReport, pageTaskWait, pageWait } from "../test/page-waits";
 import { t } from "./i18n";
 import { pageWaitReferenceKey } from "./page-wait-reference";
 
@@ -33,6 +33,48 @@ test("page metadata is joined to the original exact native references instead of
   expect(html).not.toContain("5:1:43");
   expect(html).not.toContain("opaque-backend-page-reference");
   expect(html).toContain("orders_id");
+});
+
+test("parallel task references distinguish workers on one request and page without borrowing coordinator waits", () => {
+  const first = pageTaskWait(1);
+  const second = pageTaskWait(2);
+  const view = pageReport([first, second]);
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([second, first])} report={view} />);
+  expect(html).not.toContain(t("ui.memory_failures.missing_row"));
+  expect(html.match(/class="operational-card"/g)).toHaveLength(2);
+  expect(html).toContain("0000000000000001");
+  expect(html).toContain("0000000000000002");
+  expect(html).toContain("PAGELATCH_EX");
+  expect(html).toContain("CXCONSUMER");
+  expect(html).toContain("9007199254740993 ms");
+  expect(html).not.toContain("777 ms");
+  expect(html).toContain(t("ui.page_waits.task.qualification"));
+  expect(html).toContain(t("ui.memory_participants.observed_at_label"));
+  expect(html).toContain("<dd>-5</dd>");
+  expect(html).not.toContain("Open in Queries");
+});
+
+test("missing task duration does not borrow coordinator time and replaced workers cannot resolve an original reference", () => {
+  const row = pageTaskWait();
+  row.task_wait!.wait_duration_ms = null;
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
+  expect(html).not.toContain("777 ms");
+  expect(html).toContain("Not reported");
+  const replacement = pageTaskWait(2);
+  const unavailable = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([replacement])} report={pageReport([row])} />);
+  expect(unavailable).toContain(t("ui.memory_failures.missing_row"));
+  expect(unavailable).not.toContain("orders_id");
+});
+
+test("ended task waits retain native evidence while withholding unqualified SQL and plan associations", () => {
+  const row = pageTaskWait();
+  row.after_check!.wait = "no-longer-observed";
+  const html = renderToStaticMarkup(<PageWaitTargets evidence={pageEvidence([row])} report={pageReport([row])} />);
+  expect(html).toContain("PAGELATCH_EX");
+  expect(html).toContain("orders_id");
+  expect(html).not.toContain("native-statement-handle");
+  expect(html).not.toContain("native-plan-handle");
+  expect(html).not.toContain("&lt;script&gt;");
 });
 
 test("duplicate, source-mismatched and replaced native references remain unavailable instead of borrowing another request", () => {
