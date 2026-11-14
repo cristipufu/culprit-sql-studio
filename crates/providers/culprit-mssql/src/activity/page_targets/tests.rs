@@ -663,19 +663,75 @@ async fn missing_file_authority_and_null_page_headers_never_become_none_equals_n
 }
 
 #[tokio::test]
-async fn pfs_allocation_pages_and_unknown_native_formats_do_not_become_last_leaf_claims() {
+async fn allocation_page_types_remain_distinct_without_extra_reads_or_last_leaf_claims() {
     for (native_type, kind) in [
-        (11, PageWaitTargetKind::Allocation),
-        (10, PageWaitTargetKind::Allocation),
+        (8, PageWaitTargetKind::Gam),
+        (9, PageWaitTargetKind::Sgam),
+        (10, PageWaitTargetKind::Iam),
+        (11, PageWaitTargetKind::Pfs),
         (99, PageWaitTargetKind::Unclassified),
     ] {
         let changed = replace(&header(0, 4144), &[("page_type", Val::Int(native_type))]);
         let mut replies = successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
         replies[HEADER_BEFORE] = Ok(vec![changed.clone()]);
         replies[HEADER_AFTER] = Ok(vec![changed]);
-        let capture = reader(replies).capture_page_wait_targets().await.unwrap();
-        assert_eq!(capture.snapshot.observations[0].target.as_ref().unwrap().kind, kind);
+        let expected_queries = replies.len() as u32;
+        let mut reader = reader(replies);
+        let capture = reader.capture_page_wait_targets().await.unwrap();
+        let observation = &capture.snapshot.observations[0];
+        let target = observation.target.as_ref().unwrap();
+        assert_eq!(target.kind, kind);
+        assert_eq!(target.header.page_type, Some(native_type as u32));
+        assert_eq!(observation.request.wait.as_ref().unwrap().native_type.as_deref(), Some("PAGELATCH_EX"));
+        assert!(observation.index_operations.is_none(), "an allocation map does not acquire index point counters");
+        assert_eq!(reader.query_count(), expected_queries);
+        assert_eq!(
+            reader.io.calls.iter().filter(|call| call.sql.contains("OUTER APPLY sys.dm_db_page_info")).count(),
+            2
+        );
+        assert!(reader.io.calls.iter().all(|call| !call.sql.contains("'DETAILED'")));
     }
+}
+
+#[tokio::test]
+async fn completed_allocation_waits_keep_their_original_participant_and_qualified_page_mechanism() {
+    let original = page_wait(42, "PAGELATCH_UP", "7:1:4144");
+    let ended =
+        replace(&participant(0, &original), &[("checked_wait_type", Val::Null), ("checked_wait_resource", Val::Null)]);
+    let pfs = replace(&header(0, 4144), &[("page_type", Val::Int(11))]);
+    let mut replies = successful_replies(vec![original]);
+    replies[HEADER_BEFORE] = Ok(vec![pfs.clone()]);
+    replies[HEADER_AFTER] = Ok(vec![pfs]);
+    replies[CHECK_AFTER] = Ok(vec![ended]);
+    let capture = reader(replies).capture_page_wait_targets().await.unwrap();
+    let observed = &capture.snapshot.observations[0];
+    assert_eq!(observed.after_check.as_ref().unwrap().wait, PageWaitRelation::NoLongerObserved);
+    assert_eq!(observed.target.as_ref().unwrap().kind, PageWaitTargetKind::Pfs);
+    assert_eq!(observed.request.wait.as_ref().unwrap().native_type.as_deref(), Some("PAGELATCH_UP"));
+    assert!(observed.statement_identity.is_some());
+    assert!(capture.snapshot.is_valid());
+}
+
+#[tokio::test]
+async fn allocation_page_reuse_withholds_the_old_class_and_unknown_header_versions_stay_unclassified() {
+    let gam = replace(&header(0, 4144), &[("page_type", Val::Int(8))]);
+    let sgam = replace(&header(0, 4144), &[("page_type", Val::Int(9))]);
+    let mut replies = successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
+    replies[HEADER_BEFORE] = Ok(vec![gam]);
+    replies[HEADER_AFTER] = Ok(vec![sgam]);
+    let capture = reader(replies).capture_page_wait_targets().await.unwrap();
+    let observed = &capture.snapshot.observations[0];
+    assert_eq!(observed.resolution, PageWaitResolution::ChangedMetadata);
+    assert!(observed.target.is_none());
+    assert_eq!(observed.resource.native.id, "7:1:4144");
+    assert!(observed.request.wait.is_some());
+
+    let unfamiliar = replace(&header(0, 4144), &[("page_type", Val::Int(11)), ("page_header_version", Val::Int(42))]);
+    let mut replies = successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
+    replies[HEADER_BEFORE] = Ok(vec![unfamiliar.clone()]);
+    replies[HEADER_AFTER] = Ok(vec![unfamiliar]);
+    let capture = reader(replies).capture_page_wait_targets().await.unwrap();
+    assert_eq!(capture.snapshot.observations[0].target.as_ref().unwrap().kind, PageWaitTargetKind::Unclassified);
 }
 
 #[tokio::test]

@@ -211,6 +211,92 @@ fn a_completed_or_changed_short_wait_does_not_erase_its_original_participant_or_
 }
 
 #[test]
+fn allocation_page_mechanisms_roundtrip_independently_without_turning_waiters_into_owners() {
+    for (kind, native_type, serialized) in [
+        (PageWaitTargetKind::Pfs, 11, "pfs"),
+        (PageWaitTargetKind::Gam, 8, "gam"),
+        (PageWaitTargetKind::Sgam, 9, "sgam"),
+        (PageWaitTargetKind::Iam, 10, "iam"),
+    ] {
+        let mut value = observation();
+        let original = value.request.clone();
+        let target = value.target.as_mut().unwrap();
+        target.kind = kind;
+        target.header.page_type = Some(native_type);
+        target.object = None;
+        value.after_check.as_mut().unwrap().wait = PageWaitRelation::NoLongerObserved;
+        assert!(value.is_valid());
+        let encoded = serde_json::to_value(&value).unwrap();
+        assert_eq!(encoded["target"]["kind"], serialized);
+        let decoded: PageWaitObservation = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, value);
+        assert_eq!(decoded.request, original);
+        assert_eq!(decoded.target.as_ref().unwrap().header.page_type, Some(native_type));
+        assert!(matches!(
+            decoded.request.wait.as_ref().unwrap().owners.as_slice(),
+            [ActivityWaitOwner::Unknown { reason: UnknownWaitOwner::UntrackedLatch, .. }]
+        ));
+    }
+    assert!(serde_json::from_str::<PageWaitTargetKind>("\"allocation\"").is_err());
+    assert!(serde_json::from_str::<PageWaitTargetKind>("\"future-allocation-layout\"").is_err());
+}
+
+#[test]
+fn declared_page_mechanisms_cannot_contradict_the_original_native_header() {
+    for kind in [
+        PageWaitTargetKind::Pfs,
+        PageWaitTargetKind::Gam,
+        PageWaitTargetKind::Sgam,
+        PageWaitTargetKind::Iam,
+        PageWaitTargetKind::IndexBranch,
+        PageWaitTargetKind::HeapData,
+    ] {
+        let mut value = target();
+        value.kind = kind;
+        assert!(!value.is_valid(), "{kind:?} cannot describe the original type2/level0/index1 header");
+        value.kind = PageWaitTargetKind::Unclassified;
+        assert!(value.is_valid(), "withholding interpretation preserves the raw header");
+    }
+    for page_type in [None, Some(0), Some(99)] {
+        let mut value = target();
+        value.kind = PageWaitTargetKind::Pfs;
+        value.header.page_type = page_type;
+        assert!(!value.is_valid(), "{page_type:?} cannot qualify a PFS mechanism");
+    }
+    let mut value = target();
+    value.kind = PageWaitTargetKind::Gam;
+    value.header.page_type = Some(8);
+    value.header.header_version = Some(42);
+    assert!(!value.is_valid(), "an unfamiliar native header format cannot inherit known allocation semantics");
+    value.kind = PageWaitTargetKind::Unclassified;
+    assert!(value.is_valid());
+    value.header.header_version = None;
+    value.kind = PageWaitTargetKind::Gam;
+    assert!(value.is_valid(), "LIMITED can omit the version while retaining the known numeric type");
+}
+
+#[test]
+fn sql_server_header_layout_keeps_leaf_branch_and_heap_context_separate() {
+    for (page_type, level, index, kind) in [
+        (1, Some(0), "0", PageWaitTargetKind::HeapData),
+        (1, Some(0), "1", PageWaitTargetKind::IndexLeaf),
+        (2, Some(0), "2", PageWaitTargetKind::IndexLeaf),
+        (2, Some(1), "1", PageWaitTargetKind::IndexBranch),
+        (1, Some(1), "1", PageWaitTargetKind::Unclassified),
+        (2, None, "1", PageWaitTargetKind::Unclassified),
+        (2, Some(0), "-1", PageWaitTargetKind::Unclassified),
+    ] {
+        let mut value = target();
+        value.header.page_type = Some(page_type);
+        value.header.level = level;
+        value.header.index_id = Some(index.into());
+        value.kind = kind;
+        assert_eq!(classify_sql_server_page_header(&value.header), kind);
+        assert!(value.is_valid());
+    }
+}
+
+#[test]
 fn recheck_clocks_and_original_wait_relationship_cannot_be_forged_across_a_changed_request() {
     for at in ["2026-11-13T10:00:00.1Z", "2026-11-13T10:00:00.9Z", "not-a-clock"] {
         let mut value = observation();
@@ -253,10 +339,13 @@ fn native_signed_header_identifiers_remain_exact_and_catalog_absence_stays_unkno
     target.header.index_id = Some("-1".into());
     target.header.partition_id = Some(i64::MIN.to_string());
     target.header.allocation_unit_id = Some(i64::MAX.to_string());
+    assert!(!value.is_valid(), "the retained IndexLeaf label contradicts the native negative index identifier");
+    value.target.as_mut().unwrap().kind = PageWaitTargetKind::Unclassified;
     assert!(value.is_valid());
     let decoded: PageWaitObservation = serde_json::from_str(&serde_json::to_string(&value).unwrap()).unwrap();
     let header = &decoded.target.as_ref().unwrap().header;
     assert_eq!(header.object_id.as_deref(), Some("-2147483648"));
+    assert_eq!(header.index_id.as_deref(), Some("-1"));
     assert_eq!(header.partition_id.as_deref(), Some("-9223372036854775808"));
     assert_eq!(header.allocation_unit_id.as_deref(), Some("9223372036854775807"));
     assert!(decoded.target.as_ref().unwrap().object.is_none());

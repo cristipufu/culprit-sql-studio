@@ -106,24 +106,41 @@ fn io_waits_do_not_become_in_memory_latch_diagnoses_or_a_storage_cause_verdict()
     assert_eq!(report.entries[1].title, t!("view.page_waits.io.title"));
     assert!(report.entries[1].explanation.contains(&t!("view.page_waits.io.explanation")));
     assert_eq!(report.entries[1].investigation, t!("view.page_waits.investigation.io"));
-    assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.index"));
+    assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.leaf"));
 }
 
 #[test]
 fn typed_allocation_heap_and_unclassified_targets_permit_only_their_bounded_next_investigation() {
-    for (kind, message, investigation) in [
-        (PageWaitTargetKind::Allocation, "view.page_waits.kind.allocation", "view.page_waits.investigation.allocation"),
-        (PageWaitTargetKind::HeapData, "view.page_waits.kind.heap", "view.page_waits.investigation.heap"),
+    for (kind, native_type, level, index, message, investigation) in [
+        (PageWaitTargetKind::Pfs, 11, 0, "0", "view.page_waits.kind.pfs", "view.page_waits.investigation.pfs"),
+        (PageWaitTargetKind::Gam, 8, 0, "0", "view.page_waits.kind.gam", "view.page_waits.investigation.gam"),
+        (PageWaitTargetKind::Sgam, 9, 0, "0", "view.page_waits.kind.sgam", "view.page_waits.investigation.sgam"),
+        (PageWaitTargetKind::Iam, 10, 0, "0", "view.page_waits.kind.iam", "view.page_waits.investigation.iam"),
+        (PageWaitTargetKind::HeapData, 1, 0, "0", "view.page_waits.kind.heap", "view.page_waits.investigation.heap"),
         (
             PageWaitTargetKind::Unclassified,
+            99,
+            0,
+            "0",
             "view.page_waits.kind.unclassified",
             "view.page_waits.investigation.unclassified",
         ),
-        (PageWaitTargetKind::IndexBranch, "view.page_waits.kind.branch", "view.page_waits.investigation.index"),
+        (
+            PageWaitTargetKind::IndexBranch,
+            2,
+            1,
+            "1",
+            "view.page_waits.kind.branch",
+            "view.page_waits.investigation.branch",
+        ),
     ] {
         let mut row = observation("61", WaitResourceKind::MemoryPage);
-        row.target.as_mut().unwrap().kind = kind;
-        row.target.as_mut().unwrap().object = None;
+        let target = row.target.as_mut().unwrap();
+        target.kind = kind;
+        target.header.page_type = Some(native_type);
+        target.header.level = Some(level);
+        target.header.index_id = Some(index.into());
+        target.object = None;
         let report = explain(&[&row], None).unwrap();
         let entry = &report.entries[0];
         assert!(entry.explanation.contains(&culprit_core::i18n::t(message, &[])));
@@ -131,6 +148,89 @@ fn typed_allocation_heap_and_unclassified_targets_permit_only_their_bounded_next
         assert!(!entry.investigation.contains("ALTER "));
         assert!(!entry.explanation.contains("app.orders"));
     }
+}
+
+#[test]
+fn allocation_mechanisms_remain_original_waiter_evidence_after_wait_completion_or_request_disappearance() {
+    for (kind, native_type, investigation) in [
+        (PageWaitTargetKind::Pfs, 11, "view.page_waits.investigation.pfs"),
+        (PageWaitTargetKind::Gam, 8, "view.page_waits.investigation.gam"),
+        (PageWaitTargetKind::Sgam, 9, "view.page_waits.investigation.sgam"),
+        (PageWaitTargetKind::Iam, 10, "view.page_waits.investigation.iam"),
+    ] {
+        for request in [PageWaitRequestState::SameStatement, PageWaitRequestState::Missing] {
+            let mut row = observation("61", WaitResourceKind::MemoryPage);
+            let original = row.request.clone();
+            let target = row.target.as_mut().unwrap();
+            target.kind = kind;
+            target.header.page_type = Some(native_type);
+            target.object = None;
+            let recheck = row.after_check.as_mut().unwrap();
+            recheck.request = request;
+            recheck.wait = if request == PageWaitRequestState::SameStatement {
+                PageWaitRelation::NoLongerObserved
+            } else {
+                row.statement_identity = None;
+                PageWaitRelation::Unqualified
+            };
+            let report = explain(&[&row], Some(&source(SourceState::Partial))).unwrap();
+            let entry = &report.entries[0];
+            assert_eq!(entry.request_key, original.key);
+            assert_eq!(row.request, original);
+            assert_eq!(entry.investigation, culprit_core::i18n::t(investigation, &[]));
+            assert_eq!(entry.verify, t!("view.page_waits.verify.allocation"));
+            assert!(report.limitations.contains(&t!("view.page_waits.limit.ownership")));
+            assert!(report.limitations.contains(&t!("view.page_waits.limit.source_partial")));
+            let expected_recheck = if request == PageWaitRequestState::Missing {
+                t!("view.page_waits.recheck.missing")
+            } else {
+                t!("view.page_waits.recheck.no_longer_observed")
+            };
+            assert!(entry.explanation.contains(&expected_recheck));
+            assert!(!entry.investigation.contains("ALTER "));
+        }
+    }
+}
+
+#[test]
+fn page_io_on_allocation_maps_stays_a_storage_investigation_and_changed_mapping_stays_unresolved() {
+    for (kind, native_type) in [
+        (PageWaitTargetKind::Pfs, 11),
+        (PageWaitTargetKind::Gam, 8),
+        (PageWaitTargetKind::Sgam, 9),
+        (PageWaitTargetKind::Iam, 10),
+    ] {
+        let mut row = observation("61", WaitResourceKind::PageIo);
+        let target = row.target.as_mut().unwrap();
+        target.kind = kind;
+        target.header.page_type = Some(native_type);
+        let report = explain(&[&row], None).unwrap();
+        assert_eq!(report.entries[0].title, t!("view.page_waits.io.title"));
+        assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.io"));
+        assert_eq!(report.entries[0].verify, t!("view.page_waits.verify"));
+
+        row.target = None;
+        row.resolution = PageWaitResolution::ChangedMetadata;
+        row.after_check.as_mut().unwrap().wait = PageWaitRelation::NoLongerObserved;
+        let report = explain(&[&row], Some(&source(SourceState::Partial))).unwrap();
+        assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.unresolved"));
+        assert!(report.entries[0].explanation.contains(&t!("view.page_waits.unresolved.changed_metadata")));
+    }
+}
+
+#[test]
+fn a_contradictory_native_header_cannot_enter_a_mechanism_specific_explanation() {
+    let mut row = observation("61", WaitResourceKind::MemoryPage);
+    row.target.as_mut().unwrap().kind = PageWaitTargetKind::Pfs;
+    assert!(explain(&[&row], None).is_err(), "an ordinary index data page cannot acquire PFS advice");
+    let target = row.target.as_mut().unwrap();
+    target.header.page_type = Some(11);
+    target.header.header_version = Some(42);
+    assert!(explain(&[&row], None).is_err(), "a future format cannot inherit the known PFS interpretation");
+    row.target.as_mut().unwrap().kind = PageWaitTargetKind::Unclassified;
+    let report = explain(&[&row], None).unwrap();
+    assert_eq!(report.entries[0].investigation, t!("view.page_waits.investigation.unclassified"));
+    assert!(report.entries[0].explanation.contains(&t!("view.page_waits.kind.unclassified")));
 }
 
 #[test]

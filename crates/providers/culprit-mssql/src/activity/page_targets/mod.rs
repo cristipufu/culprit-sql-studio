@@ -549,32 +549,17 @@ fn object(record: &HeaderRecord) -> Option<PageWaitObject> {
     })
 }
 fn target_kind(header: &PageHeaderFacts, index_type: Option<i32>) -> PageWaitTargetKind {
-    // Native format meanings (not an elapsed/cause verdict): Microsoft SQL Server Internals, data=1/index=2,
-    // IAM=10; SQL Server engineering's DBCC PAGE example identifies PFS=11. Unknown formats stay unclassified.
+    // Native format meanings, not an elapsed/cause verdict. Allocation maps retain their separate mechanisms;
+    // neither an observed allocation page nor a rowstore leaf identifies an allocating statement or latch holder.
     // Rowstore leaf/branch labels also require sys.indexes' native clustered/nonclustered rowstore type, rather
     // than interpreting a columnstore or invisible index's page layout from its numeric index ID alone.
     // https://ptgmedia.pearsoncmg.com/images/9780735658561/samplepages/9780735658561.pdf
     // https://techcommunity.microsoft.com/blog/sqlserver/how-to-use-dbcc-page/383094
     // https://learn.microsoft.com/sql/relational-databases/system-catalog-views/sys-indexes-transact-sql
-    // LIMITED can omit page_header_version even while returning the native numeric layout fields. Preserve
-    // that absence; known type/level plus an observed rowstore catalog entry qualify those fields directly.
-    // A present unfamiliar format still cannot inherit the known layout's meaning.
-    if header.header_version.is_some_and(|version| version != 1) {
-        return PageWaitTargetKind::Unclassified;
-    }
-    match (header.page_type, header.level, header.index_id.as_deref()) {
-        (Some(10 | 11), _, _) => PageWaitTargetKind::Allocation,
-        (Some(1), Some(0), Some("0")) => PageWaitTargetKind::HeapData,
-        (Some(1 | 2), Some(0), Some(index))
-            if matches!(index_type, Some(1 | 2)) && index.parse::<i32>().is_ok_and(|id| id > 0) =>
-        {
-            PageWaitTargetKind::IndexLeaf
+    match classify_sql_server_page_header(header) {
+        PageWaitTargetKind::IndexLeaf | PageWaitTargetKind::IndexBranch if !matches!(index_type, Some(1 | 2)) => {
+            PageWaitTargetKind::Unclassified
         }
-        (Some(2), Some(level), Some(index))
-            if level > 0 && matches!(index_type, Some(1 | 2)) && index.parse::<i32>().is_ok_and(|id| id > 0) =>
-        {
-            PageWaitTargetKind::IndexBranch
-        }
-        _ => PageWaitTargetKind::Unclassified,
+        kind => kind,
     }
 }

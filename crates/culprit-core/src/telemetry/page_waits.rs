@@ -73,8 +73,39 @@ pub enum PageWaitTargetKind {
     IndexLeaf,
     IndexBranch,
     HeapData,
-    Allocation,
+    Pfs,
+    Gam,
+    Sgam,
+    Iam,
     Unclassified,
+}
+
+/// SQL Server's native numeric header layout, not a cross-provider page-type convention or proof of an owner.
+/// A provider must also observe rowstore catalog type 1/2 before publishing an index leaf/branch classification.
+/// LIMITED can omit the version while retaining numeric fields that qualify a known layout; no version is inferred.
+/// A present unfamiliar version cannot use the known layout.
+/// Native types 8/9/10/11 are demonstrated by the storage-engine author:
+/// https://www.sqlskills.com/blogs/paul/inside-the-storage-engine-using-dbcc-page-and-dbcc-ind-to-find-out-if-page-splits-ever-roll-back/
+/// Header fields and LIMITED semantics:
+/// https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-page-info-transact-sql
+pub fn classify_sql_server_page_header(header: &PageHeaderFacts) -> PageWaitTargetKind {
+    if header.header_version.is_some_and(|version| version != 1) {
+        return PageWaitTargetKind::Unclassified;
+    }
+    match (header.page_type, header.level, header.index_id.as_deref()) {
+        (Some(8), _, _) => PageWaitTargetKind::Gam,
+        (Some(9), _, _) => PageWaitTargetKind::Sgam,
+        (Some(10), _, _) => PageWaitTargetKind::Iam,
+        (Some(11), _, _) => PageWaitTargetKind::Pfs,
+        (Some(1), Some(0), Some("0")) => PageWaitTargetKind::HeapData,
+        (Some(1 | 2), Some(0), Some(index)) if index.parse::<i32>().is_ok_and(|id| id > 0) => {
+            PageWaitTargetKind::IndexLeaf
+        }
+        (Some(2), Some(level), Some(index)) if level > 0 && index.parse::<i32>().is_ok_and(|id| id > 0) => {
+            PageWaitTargetKind::IndexBranch
+        }
+        _ => PageWaitTargetKind::Unclassified,
+    }
 }
 
 /// Source-decoded coordinates of the originally observed wait. Native syntax and incarnation identities remain
@@ -216,6 +247,8 @@ impl MappedPageTarget {
         self.database.is_valid()
             && self.file.is_valid()
             && self.header.is_valid()
+            && (self.kind == PageWaitTargetKind::Unclassified
+                || self.kind == classify_sql_server_page_header(&self.header))
             && self.object.as_ref().is_none_or(|object| {
                 object.native.is_valid()
                     && identifier(&object.schema)

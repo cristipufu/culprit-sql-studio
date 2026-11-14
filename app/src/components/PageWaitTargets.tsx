@@ -142,7 +142,10 @@ const TARGET_KIND: Record<PageWaitTargetKind, string> = {
   "index-leaf": key("view.page_waits.kind.leaf"),
   "index-branch": key("view.page_waits.kind.branch"),
   "heap-data": key("view.page_waits.kind.heap"),
-  allocation: key("view.page_waits.kind.allocation"),
+  pfs: key("view.page_waits.kind.pfs"),
+  gam: key("view.page_waits.kind.gam"),
+  sgam: key("view.page_waits.kind.sgam"),
+  iam: key("view.page_waits.kind.iam"),
   unclassified: key("view.page_waits.kind.unclassified"),
 };
 const IDENTITY_BASIS: Record<PageTargetIdentityBasis, string> = {

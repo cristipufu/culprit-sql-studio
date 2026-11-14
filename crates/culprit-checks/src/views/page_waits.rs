@@ -35,12 +35,27 @@ struct ObservedPage<'a> {
     observation: &'a PageWaitObservation,
     key: String,
     wait: WaitKind,
+    investigation: Investigation,
     index: Option<IndexPoint<'a>>,
 }
 #[derive(Clone, Copy)]
 enum WaitKind {
     Memory,
     Io,
+}
+#[derive(Clone, Copy)]
+enum Investigation {
+    Unresolved,
+    Storage,
+    MemoryTarget(PageWaitTargetKind),
+}
+impl Investigation {
+    fn for_observation(observation: &PageWaitObservation, wait: WaitKind) -> Self {
+        let Some(target) = &observation.target else {
+            return Self::Unresolved;
+        };
+        if matches!(wait, WaitKind::Io) { Self::Storage } else { Self::MemoryTarget(target.kind) }
+    }
 }
 enum IndexPoint<'a> {
     Measured { waits: &'a str, milliseconds: &'a str, relation: PageIndexOperationRelation },
@@ -83,7 +98,8 @@ fn validate<'a>(
                 _ => return Err(invalid()),
             };
             let index = observation.index_operations.as_ref().map(|point| index_point(point, wait));
-            Ok(ObservedPage { observation, key, wait, index })
+            let investigation = Investigation::for_observation(observation, wait);
+            Ok(ObservedPage { observation, key, wait, investigation, index })
         })
         .collect()
 }
@@ -139,7 +155,7 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
     if let Some(point) = &case.index {
         render_index_point(&mut details, point, case.wait);
     }
-    let investigation = culprit_core::i18n::t(investigation_message(&case), &[]);
+    let investigation = culprit_core::i18n::t(investigation_message(case.investigation), &[]);
     PageWaitExplanation {
         observation_key: case.key,
         request_key: observation.request.key.clone(),
@@ -147,7 +163,12 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
         title,
         explanation: details.join(" "),
         investigation,
-        verify: t!("view.page_waits.verify"),
+        verify: match case.investigation {
+            Investigation::MemoryTarget(
+                PageWaitTargetKind::Pfs | PageWaitTargetKind::Gam | PageWaitTargetKind::Sgam | PageWaitTargetKind::Iam,
+            ) => t!("view.page_waits.verify.allocation"),
+            _ => t!("view.page_waits.verify"),
+        },
     }
 }
 
@@ -217,7 +238,10 @@ fn kind_message(kind: PageWaitTargetKind) -> &'static str {
         PageWaitTargetKind::IndexLeaf => key!("view.page_waits.kind.leaf"),
         PageWaitTargetKind::IndexBranch => key!("view.page_waits.kind.branch"),
         PageWaitTargetKind::HeapData => key!("view.page_waits.kind.heap"),
-        PageWaitTargetKind::Allocation => key!("view.page_waits.kind.allocation"),
+        PageWaitTargetKind::Pfs => key!("view.page_waits.kind.pfs"),
+        PageWaitTargetKind::Gam => key!("view.page_waits.kind.gam"),
+        PageWaitTargetKind::Sgam => key!("view.page_waits.kind.sgam"),
+        PageWaitTargetKind::Iam => key!("view.page_waits.kind.iam"),
         PageWaitTargetKind::Unclassified => key!("view.page_waits.kind.unclassified"),
     }
 }
@@ -251,18 +275,20 @@ fn recheck_message(check: Option<&PageWaitRecheck>) -> &'static str {
         },
     }
 }
-fn investigation_message(case: &ObservedPage<'_>) -> &'static str {
-    let Some(target) = &case.observation.target else {
-        return key!("view.page_waits.investigation.unresolved");
-    };
-    if matches!(case.wait, WaitKind::Io) {
-        return key!("view.page_waits.investigation.io");
-    }
-    match target.kind {
-        PageWaitTargetKind::IndexLeaf | PageWaitTargetKind::IndexBranch => key!("view.page_waits.investigation.index"),
-        PageWaitTargetKind::HeapData => key!("view.page_waits.investigation.heap"),
-        PageWaitTargetKind::Allocation => key!("view.page_waits.investigation.allocation"),
-        PageWaitTargetKind::Unclassified => key!("view.page_waits.investigation.unclassified"),
+fn investigation_message(investigation: Investigation) -> &'static str {
+    match investigation {
+        Investigation::Unresolved => key!("view.page_waits.investigation.unresolved"),
+        Investigation::Storage => key!("view.page_waits.investigation.io"),
+        Investigation::MemoryTarget(kind) => match kind {
+            PageWaitTargetKind::IndexLeaf => key!("view.page_waits.investigation.leaf"),
+            PageWaitTargetKind::IndexBranch => key!("view.page_waits.investigation.branch"),
+            PageWaitTargetKind::HeapData => key!("view.page_waits.investigation.heap"),
+            PageWaitTargetKind::Pfs => key!("view.page_waits.investigation.pfs"),
+            PageWaitTargetKind::Gam => key!("view.page_waits.investigation.gam"),
+            PageWaitTargetKind::Sgam => key!("view.page_waits.investigation.sgam"),
+            PageWaitTargetKind::Iam => key!("view.page_waits.investigation.iam"),
+            PageWaitTargetKind::Unclassified => key!("view.page_waits.investigation.unclassified"),
+        },
     }
 }
 fn invalid() -> Error {
