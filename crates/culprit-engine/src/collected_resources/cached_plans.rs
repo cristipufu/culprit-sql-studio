@@ -94,9 +94,7 @@ fn explain(
         culprit_core::insights::annotate(plan);
         // A captured definition has no current schema, indexes or settings. Keep explanatory advice, without
         // making an old optimizer request into an executable change against an unobserved current database.
-        for insight in plan.insights.as_mut().into_iter().flat_map(|insights| &mut insights.items) {
-            insight.fix_sql = None;
-        }
+        crate::archived_advice::withhold_plan_sql(plan);
         plan.raw = None;
         plan.statement = None;
         if plan.kind != PlanKind::Actual {

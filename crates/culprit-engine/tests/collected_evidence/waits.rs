@@ -395,8 +395,11 @@ async fn exact_plan_definition_references_isolate_waits_even_with_identical_sql_
     let queries = &analysis.workload.as_ref().unwrap().queries;
     assert_eq!(queries.len(), 2);
     let by_plan = |id: &str| queries.iter().find(|query| query.plan_id.as_deref() == Some(id)).unwrap();
-    assert_eq!(by_plan("first-native-plan").measured_wait_ms(WaitClass::Lock), Some(60000.0));
-    assert_eq!(by_plan("second-native-plan").measured_wait_ms(WaitClass::Lock), Some(0.0));
+    assert_eq!(
+        by_plan(references[0].definition_id.as_deref().unwrap()).measured_wait_ms(WaitClass::Lock),
+        Some(60000.0)
+    );
+    assert_eq!(by_plan(references[1].definition_id.as_deref().unwrap()).measured_wait_ms(WaitClass::Lock), Some(0.0));
     assert!(!has_limit(&analysis, CollectedAnalysisLimit::WaitWithoutRuntime));
 }
 

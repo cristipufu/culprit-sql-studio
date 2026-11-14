@@ -131,7 +131,7 @@ pub(crate) async fn collect(
             mean_time_ms: mean,
             first_seen: row.text("first"),
             last_seen: row.text("last"),
-            is_forced: false,
+            is_forced: None,
             min_time_ms: None,
             max_time_ms: row.number("max_ms").filter(|n| *n >= 0.0),
             stddev_time_ms: None,

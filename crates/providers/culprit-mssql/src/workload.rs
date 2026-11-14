@@ -44,7 +44,7 @@ struct PlanAgg {
     sum_sq_us: f64,
     first_seen: Option<String>,
     last_seen: Option<String>,
-    forced: bool,
+    forced: Option<bool>,
     runtime_costs: Option<crate::query_store::runtime::ExecutionCosts>,
 }
 

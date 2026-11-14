@@ -3148,7 +3148,7 @@ fn a_single_recovered_plan_verifies_against_the_retained_baseline() {
         s.taken_at = "2026-10-11T12:43:47Z".into();
         s.workload.as_mut().unwrap().window_start = Some("2026-10-11T08:10:00Z".into());
         s.workload.as_mut().unwrap().window_end = Some(s.taken_at.clone());
-        query(&mut s, "8").plans[0].is_forced = forced;
+        query(&mut s, "8").plans[0].is_forced = Some(forced);
         let verify = |after: &culprit_core::Report| {
             culprit_core::compare_reports(&before, after, std::slice::from_ref(&finding.id)).findings[0].status
         };

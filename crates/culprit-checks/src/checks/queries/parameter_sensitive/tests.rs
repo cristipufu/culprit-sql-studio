@@ -106,7 +106,7 @@ fn overlapping_missing_and_disjoint_plan_dates_never_establish_parameter_selecte
 #[test]
 fn native_forcing_and_compilation_cost_do_not_make_the_faster_observed_plan_a_safe_remedy() {
     let mut query = query();
-    query.plans[0].is_forced = true;
+    query.plans[0].is_forced = Some(true);
     query.costs = Some(culprit_core::QueryCosts { plan_ms: Some(132.0), plans: Some(4.0), ..Default::default() });
     let finding = observation(query);
     assert!(finding.fix.as_ref().unwrap().sql.is_none());

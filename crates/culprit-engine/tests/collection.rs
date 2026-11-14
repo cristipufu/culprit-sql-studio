@@ -238,6 +238,7 @@ fn definition(stream: TelemetryStream) -> TelemetryRecord {
 fn measurement(id: usize) -> TelemetryRecord {
     TelemetryRecord::QueryRuntime(RuntimeMeasurement {
         key: NativeMeasurementKey {
+            cohort: None,
             native: NativeIdentity::new(id.to_string())
                 .qualified("plan_id", "9007199254740993")
                 .qualified("replica_group_id", "17")

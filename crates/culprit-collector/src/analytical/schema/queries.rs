@@ -5,6 +5,7 @@ use ScalarType::*;
 const KEY: &[Field] = &[
     Field::required("NativeRowId", "/record/data/key/native/id", String),
     Field::required("NativeDimensions", "/record/data/key/native/qualifiers", JsonContainer),
+    Field::optional("NativeCohort", "/record/data/key/cohort", JsonContainer),
     Field::required("NativeReferences", "/record/data/key/references", JsonContainer),
     Field::optional("QueryDefinitionId", "/record/data/key/references/query/definition_id", String),
     Field::optional("PlanDefinitionId", "/record/data/key/references/plan/definition_id", String),

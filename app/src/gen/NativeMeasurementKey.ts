@@ -2,4 +2,10 @@
 import type { NativeIdentity } from "./NativeIdentity";
 import type { StatementReferences } from "./StatementReferences";
 
-export type NativeMeasurementKey = { native: NativeIdentity, references: StatementReferences, };
+export type NativeMeasurementKey = { native: NativeIdentity, references: StatementReferences, 
+/**
+ * Source-owned comparison population inside this exact observation. Some asserts disjoint fragments and
+ * preserves outcome, replica, reset and context distinctions independently of plan and native row identity.
+ * None authorizes no aggregation beyond the complete native references and qualifiers.
+ */
+cohort: NativeIdentity | null, };

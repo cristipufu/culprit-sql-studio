@@ -1,6 +1,9 @@
 use super::*;
-use culprit_core::{Plan, QueryStat, Spread, collected_analysis::CollectedQueryInput, telemetry::*};
-use std::collections::BTreeMap;
+use culprit_core::{
+    Plan, PlanHistory, PlanHistoryKind, PlanVariant, QueryStat, Spread, collected_analysis::CollectedQueryInput,
+    telemetry::*,
+};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) const MAX_EXACT_COUNT: u64 = 9_007_199_254_740_992;
 
@@ -86,7 +89,7 @@ pub(super) fn project(
     definitions: &validation::Definitions<'_>,
     limitations: &mut Vec<CollectedAnalysisLimitation>,
 ) -> Result<(Vec<QueryStat>, Vec<CollectedQueryInput>, bool)> {
-    let mut groups = BTreeMap::<String, NativeGroup<'_>>::new();
+    let mut groups = BTreeMap::<String, BTreeMap<String, NativeGroup<'_>>>::new();
     let mut partial = !capture.is_read_complete();
     for record in capture.records() {
         let TelemetryRecord::QueryRuntime(runtime) = &record.row().record else { continue };
@@ -113,6 +116,8 @@ pub(super) fn project(
         let key = group_key(capture, &runtime.key)?;
         groups
             .entry(key)
+            .or_default()
+            .entry(plan_key(capture, &runtime.key.references)?)
             .or_insert_with(|| NativeGroup {
                 rows: vec![],
                 query,
@@ -124,14 +129,21 @@ pub(super) fn project(
     }
     let mut queries = BTreeMap::new();
     let mut inputs = vec![];
-    for (id, group) in groups {
-        match query(capture, &id, &group, limitations)? {
+    let mut runtime_plans = BTreeSet::new();
+    for (id, plans) in groups {
+        let groups = plans.values().collect::<Vec<_>>();
+        match query(capture, &id, &groups, limitations)? {
             Some(query) => {
                 inputs.push(CollectedQueryInput {
                     query_id: id.clone(),
-                    references: group.references,
-                    native_rows: group.rows.iter().map(|(_, row)| row.key.native.clone()).collect(),
+                    references: common_references(&groups)?,
+                    measurements: groups.iter().flat_map(|group| &group.rows).map(|(_, row)| row.key.clone()).collect(),
                 });
+                for (plan, group) in &plans {
+                    if group.rows.iter().any(|(_, row)| exact_count(&row.executions).is_some_and(|count| count > 0)) {
+                        runtime_plans.insert((id.clone(), plan.clone()));
+                    }
+                }
                 queries.insert(id, query);
             }
             None => partial = true,
@@ -145,7 +157,7 @@ pub(super) fn project(
             continue;
         }
         let key = group_key(capture, &wait.key)?;
-        if !queries.contains_key(&key) {
+        if !runtime_plans.contains(&(key.clone(), plan_key(capture, &wait.key.references)?)) {
             limitations.push(limit(record.row().record_id.clone(), CollectedAnalysisLimit::WaitWithoutRuntime));
             wait_joins_complete = false;
             partial = true;
@@ -161,15 +173,139 @@ pub(super) fn project(
 }
 
 fn group_key(capture: &EvidenceCapture, key: &NativeMeasurementKey) -> Result<String> {
-    capture.source().scoped_id("collected-query-group-v1", &(&key.references, &key.native.qualifiers))
+    let interval = &capture.source().query_history().ok_or_else(invalid)?.interval;
+    match &key.cohort {
+        Some(cohort) => {
+            capture.source().scoped_id("collected-query-cohort-v1", &(interval, &key.references.query, cohort))
+        }
+        None => {
+            capture.source().scoped_id("collected-query-group-v2", &(interval, &key.references, &key.native.qualifiers))
+        }
+    }
 }
+
+fn plan_key(capture: &EvidenceCapture, references: &StatementReferences) -> Result<String> {
+    capture.source().scoped_id("collected-runtime-plan-v1", references)
+}
+
+fn common_references(groups: &[&NativeGroup<'_>]) -> Result<StatementReferences> {
+    let Some(first) = groups.first() else { return Err(invalid()) };
+    if groups.iter().any(|group| group.references.query != first.references.query) {
+        return Err(invalid());
+    }
+    Ok(StatementReferences {
+        query: first.references.query.clone(),
+        plan: (groups.len() == 1).then(|| first.references.plan.clone()).flatten(),
+    })
+}
+
+struct RuntimeSummary {
+    stats: culprit_core::PeriodStats,
+    cpu: Option<f64>,
+    rows: Option<f64>,
+    first: Option<String>,
+    last: Option<String>,
+    stddev: Option<f64>,
+}
+
+type RuntimeRow<'a> = (&'a ExportedRecord, &'a RuntimeMeasurement);
 
 fn query(
     capture: &EvidenceCapture,
     id: &str,
-    group: &NativeGroup<'_>,
+    groups: &[&NativeGroup<'_>],
     limitations: &mut Vec<CollectedAnalysisLimitation>,
 ) -> Result<Option<QueryStat>> {
+    let Some(first) = groups.first() else { return Err(invalid()) };
+    let fragments = groups.iter().flat_map(|group| group.rows.iter().copied()).collect::<Vec<_>>();
+    let Some(total) = aggregate(capture, id, &fragments, limitations)? else { return Ok(None) };
+    let mut variants = Vec::new();
+    let mut captured: Option<(f64, String, Option<Plan>)> = None;
+    for group in groups {
+        let Some(definition) = group.plan else { continue };
+        let Some(part) = aggregate(capture, &definition.id, &group.rows, limitations)? else { continue };
+        let parsed = plan(Some(definition), capture.source().target.engine(), limitations)?;
+        variants.push(PlanVariant {
+            id: definition.id.clone(),
+            executions: part.stats.executions,
+            total_time_ms: part.stats.total_ms,
+            mean_time_ms: part.stats.mean_ms,
+            first_seen: part.first,
+            last_seen: part.last,
+            // Definitions do not capture a typed forcing observation. Missing source evidence is not false.
+            is_forced: None,
+            min_time_ms: part.stats.min_ms,
+            max_time_ms: part.stats.max_ms,
+            stddev_time_ms: part.stddev,
+            compiled: parsed.as_ref().and_then(|plan| plan.facts().compiled_parameters.clone()),
+            cpu_time_ms: part.cpu,
+            logical_reads: None,
+        });
+        if captured.as_ref().is_none_or(|(time, id, _)| {
+            part.stats.total_ms > *time || part.stats.total_ms == *time && definition.id < *id
+        }) {
+            captured = Some((part.stats.total_ms, definition.id.clone(), parsed));
+        }
+    }
+    variants
+        .sort_by(|left, right| right.total_time_ms.total_cmp(&left.total_time_ms).then_with(|| left.id.cmp(&right.id)));
+    let (plan_id, plan) = captured.map(|(_, id, plan)| (Some(id), plan)).unwrap_or_default();
+    let history = (!variants.is_empty()).then(|| PlanHistory {
+        source: capture.source().source.clone(),
+        kind: PlanHistoryKind::Workload,
+        note: culprit_core::t!("engine.collected_analysis.plan_population"),
+        captured_plan_id: plan_id.clone(),
+        captured_plan: None,
+        source_message: None,
+        note_message: Some(culprit_core::message!("engine.collected_analysis.plan_population")),
+    });
+    let DefinitionPayload::Available { text, .. } = &first.query.sql else { return Err(invalid()) };
+    let temporary_work = runtime_temporary_space(fragments.iter().map(|(_, row)| *row), &capture.source().source);
+    if temporary_work.is_none()
+        && fragments.iter().any(|(_, row)| row.metric(&RuntimeMetricKey::TemporaryStorage).is_some())
+    {
+        limitations.push(limit(Some(id.into()), CollectedAnalysisLimit::MetricNotProjected));
+    }
+    Ok(Some(QueryStat {
+        id: id.into(),
+        text: text.clone(),
+        query_hash: None,
+        parameters: None,
+        object_name: None,
+        executions: total.stats.executions,
+        total_time_ms: total.stats.total_ms,
+        mean_time_ms: total.stats.mean_ms,
+        max_time_ms: total.stats.max_ms,
+        stddev_time_ms: total.stddev,
+        cpu_time_ms: total.cpu,
+        rows: total.rows,
+        logical_reads: None,
+        physical_reads: None,
+        temporary_work,
+        first_seen: total.first,
+        last_seen: total.last,
+        plans: variants,
+        plan,
+        waits: vec![],
+        waits_coverage: None,
+        trend: None,
+        spread: Some(Spread { min_ms: total.stats.min_ms, ..Default::default() }),
+        costs: None,
+        rows_affected: None,
+        plan_id,
+        plan_history: history,
+        variant_family: first.query.variant_family.clone(),
+        requests: None,
+        resolved_write_target: None,
+    }))
+}
+
+fn aggregate(
+    capture: &EvidenceCapture,
+    id: &str,
+    fragments: &[RuntimeRow<'_>],
+    limitations: &mut Vec<CollectedAnalysisLimitation>,
+) -> Result<Option<RuntimeSummary>> {
     let interval = &capture.source().query_history().ok_or_else(invalid)?.interval;
     let mut stats = culprit_core::PeriodStats::default();
     let mut executions = 0u64;
@@ -177,7 +313,7 @@ fn query(
     let (mut first, mut last) = (None, None);
     let (mut has_first, mut has_last, mut has_min, mut has_max) = (true, true, true, true);
     let mut stddev = None;
-    for (export, row) in &group.rows {
+    for (export, row) in fragments {
         let Some(count) = exact_count(&row.executions)
             .and_then(|count| executions.checked_add(count))
             .filter(|total| *total <= MAX_EXACT_COUNT)
@@ -239,51 +375,25 @@ fn query(
     }
     // The native standard deviation does not declare population/sample conventions. Multiple fragments therefore
     // preserve their individual spread in the native inputs instead of inventing a pooled variance.
-    if group.rows.len() > 1 {
+    if fragments.len() > 1 {
         if stddev.is_some() {
             limitations.push(limit(Some(id.into()), CollectedAnalysisLimit::MetricNotProjected));
         }
         stddev = None;
     }
-    let plan = plan(group.plan, capture.source().target.engine(), limitations)?;
-    let DefinitionPayload::Available { text, .. } = &group.query.sql else { return Err(invalid()) };
-    let temporary_work = runtime_temporary_space(group.rows.iter().map(|(_, row)| *row), &capture.source().source);
-    if temporary_work.is_none()
-        && group.rows.iter().any(|(_, row)| row.metric(&RuntimeMetricKey::TemporaryStorage).is_some())
-    {
-        limitations.push(limit(Some(id.into()), CollectedAnalysisLimit::MetricNotProjected));
+    if !has_min {
+        stats.min_ms = None;
     }
-    Ok(Some(QueryStat {
-        id: id.into(),
-        text: text.clone(),
-        query_hash: None,
-        parameters: None,
-        object_name: None,
-        executions: stats.executions,
-        total_time_ms: stats.total_ms,
-        mean_time_ms: stats.mean_ms,
-        max_time_ms: has_max.then_some(stats.max_ms).flatten(),
-        stddev_time_ms: stddev,
-        cpu_time_ms: cpu,
+    if !has_max {
+        stats.max_ms = None;
+    }
+    Ok(Some(RuntimeSummary {
+        stats,
+        cpu,
         rows,
-        logical_reads: None,
-        physical_reads: None,
-        temporary_work,
-        first_seen: has_first.then_some(first).flatten(),
-        last_seen: has_last.then_some(last).flatten(),
-        plans: vec![],
-        plan,
-        waits: vec![],
-        waits_coverage: None,
-        trend: None,
-        spread: has_min.then(|| Spread { min_ms: stats.min_ms, ..Default::default() }),
-        costs: None,
-        rows_affected: None,
-        plan_id: group.plan.map(|plan| plan.identity.plan_id.clone()),
-        plan_history: None,
-        variant_family: group.query.variant_family.clone(),
-        requests: None,
-        resolved_write_target: None,
+        first: has_first.then_some(first).flatten(),
+        last: has_last.then_some(last).flatten(),
+        stddev,
     }))
 }
 
@@ -330,8 +440,7 @@ fn plan(
 ) -> Result<Option<Plan>> {
     let Some(definition) = definition else { return Ok(None) };
     if let DefinitionPayload::Available { text, .. } = &definition.plan
-        && let Ok(mut plan) = crate::plans::parse_plan(text)
-        && plan.engine == engine
+        && let Ok(mut plan) = crate::plans::parse_native_plan(text, engine)
     {
         plan.facts_mut().constants_redacted = true;
         return Ok(Some(plan));

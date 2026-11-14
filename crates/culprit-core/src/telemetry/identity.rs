@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 19;
+pub const EXPORT_FORMAT_VERSION: u32 = 20;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -364,6 +364,7 @@ mod tests {
     fn wait(source: &CollectionDescription) -> TelemetryRecord {
         TelemetryRecord::QueryWaits(WaitMeasurement {
             key: NativeMeasurementKey {
+                cohort: None,
                 native: crate::telemetry::NativeIdentity::new("1")
                     .qualified("plan_id", "3")
                     .qualified("replica_group_id", "1")

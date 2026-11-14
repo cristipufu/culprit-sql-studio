@@ -1,6 +1,17 @@
 use super::*;
 use crate::{query_store::tests::summary_row, resources::test_support::replace, value::Val};
 
+#[test]
+fn forcing_requires_an_observed_native_boolean_and_never_defaults_missing_to_false() {
+    assert_eq!(PlanSummary::decode(&summary_row()).unwrap().forced, Some(false));
+    assert_eq!(
+        PlanSummary::decode(&replace(&summary_row(), &[("is_forced", Val::Int(1))])).unwrap().forced,
+        Some(true)
+    );
+    assert_eq!(PlanSummary::decode(&replace(&summary_row(), &[("is_forced", Val::Null)])).unwrap().forced, None);
+    assert!(PlanSummary::decode(&replace(&summary_row(), &[("is_forced", Val::Int(2))])).is_err());
+}
+
 fn costs(row: &Rec) -> ExecutionCosts {
     PlanSummary::decode(row).unwrap().costs
 }

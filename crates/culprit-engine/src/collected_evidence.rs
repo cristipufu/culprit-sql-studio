@@ -25,7 +25,7 @@ pub fn analyze(capture: &EvidenceCapture) -> Result<CollectedQueryAnalysis> {
     if let Some(provenance) = &mut report.provenance {
         provenance.origin = culprit_core::AnalysisOrigin::ArchivedTelemetry;
     }
-    apply_executable_fix_policy(&mut report.findings, &mut limitations);
+    apply_executable_fix_policy(&mut report.findings, report.snapshot.workload.as_mut(), &mut limitations);
     Ok(CollectedQueryAnalysis {
         context: CollectedAnalysisContext { evidence: crate::collected_context::from_capture(capture), query_inputs },
         workload: report.snapshot.workload,
@@ -182,6 +182,7 @@ pub(super) fn limit(record_id: Option<String>, reason: CollectedAnalysisLimit) -
 
 fn apply_executable_fix_policy(
     findings: &mut [culprit_core::Finding],
+    workload: Option<&mut Workload>,
     limitations: &mut Vec<CollectedAnalysisLimitation>,
 ) {
     let prerequisites_missing = limitations.iter().any(|limitation| {
@@ -205,7 +206,24 @@ fn apply_executable_fix_policy(
                 .push(limit(Some(finding.id.clone()), CollectedAnalysisLimit::ExecutableFixPrerequisitesUnknown));
         }
     }
+    for query in workload.into_iter().flat_map(|workload| &mut workload.queries) {
+        let mut changed = false;
+        for plan in query
+            .plan
+            .iter_mut()
+            .chain(query.plan_history.iter_mut().filter_map(|history| history.captured_plan.as_mut()))
+        {
+            changed |= crate::archived_advice::withhold_plan_sql(plan);
+        }
+        if changed {
+            limitations.push(limit(Some(query.id.clone()), CollectedAnalysisLimit::ExecutableFixPrerequisitesUnknown));
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "collected_evidence/advice_tests.rs"]
+mod advice_tests;
 
 pub(super) fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()

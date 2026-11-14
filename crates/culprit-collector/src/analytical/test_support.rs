@@ -14,6 +14,10 @@ pub use investigations::{InvestigationFixture, investigation_fixture};
 
 mod queries;
 pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};
+mod query_cohorts;
+pub use query_cohorts::{
+    QueryCohortCase, assert_query_cohort_capture, query_cohort_evidence, query_cohort_evidence_cases,
+};
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
 mod observations;
@@ -449,7 +453,11 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
         plan: None,
     };
     let runtime = TelemetryRecord::QueryRuntime(RuntimeMeasurement {
-        key: NativeMeasurementKey { native: NativeIdentity::new("runtime-1"), references: references.clone() },
+        key: NativeMeasurementKey {
+            cohort: None,
+            native: NativeIdentity::new("runtime-1"),
+            references: references.clone(),
+        },
         executions: "9007199254740993".into(),
         metrics: vec![
             RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, 1.25),
@@ -463,7 +471,7 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
         last_execution_at: None,
     });
     let waits = TelemetryRecord::QueryWaits(WaitMeasurement {
-        key: NativeMeasurementKey { native: NativeIdentity::new("wait-1"), references },
+        key: NativeMeasurementKey { cohort: None, native: NativeIdentity::new("wait-1"), references },
         category: "native-io".into(),
         unit: RuntimeMetricUnit::Microseconds,
         total: MeasurementValue::Real(1.25),

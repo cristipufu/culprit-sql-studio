@@ -68,6 +68,7 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
         TelemetryStream::DiagnosticCheckpoints => vec![],
         TelemetryStream::QueryRuntime => vec![TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: NativeMeasurementKey {
+                cohort: None,
                 native: NativeIdentity::new("1")
                     .qualified("plan_id", identity.plan_id.clone())
                     .qualified("replica_group_id", "1")

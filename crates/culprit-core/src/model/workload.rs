@@ -1257,7 +1257,8 @@ pub struct PlanVariant {
     pub mean_time_ms: f64,
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
-    pub is_forced: bool,
+    /// Native forcing state when the source established it; an absent observation is not false.
+    pub is_forced: Option<bool>,
     pub min_time_ms: Option<f64>,
     pub max_time_ms: Option<f64>,
     pub stddev_time_ms: Option<f64>,

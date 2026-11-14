@@ -8,6 +8,42 @@ const FAMILIES: &[EvidenceFamily] = &[
 ];
 
 #[tokio::test]
+async fn explicit_native_cohorts_preserve_every_definition_fragment_and_population_boundary() {
+    for (case, source, records) in test_support::query_cohort_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.reply_families(FAMILIES, 1);
+        let capture = fixture
+            .reader()
+            .read_capture(&fixture.range, FAMILIES, EvidenceReadBudget { page_rows: 1, ..budget() }, None)
+            .await
+            .unwrap();
+        test_support::assert_query_cohort_capture(&capture, &source, &records);
+        assert_eq!(capture.metrics().pages as usize, records.len(), "{case:?}");
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+    }
+}
+
+#[tokio::test]
+async fn changing_or_removing_a_native_cohort_cannot_pass_the_original_row_receipt() {
+    for family in [EvidenceFamily::QueryRuntime, EvidenceFamily::QueryWaits] {
+        let (source, records) = test_support::query_cohort_evidence(test_support::QueryCohortCase::PlanVariation);
+        let fixture = Fixture::new(source, records).await;
+        let schema = fixture.catalog.get(family.stream()).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "NativeCohort").unwrap();
+        let original = fixture.rows_for(family);
+        let mut cohort: Value = serde_json::from_str(original[0][column].as_str().unwrap()).unwrap();
+        cohort["qualifiers"]["replica_group_id"] = json!("1");
+        for changed in [json!(serde_json::to_string(&cohort).unwrap()), Value::Null] {
+            let mut rows = original.clone();
+            rows[0][column] = changed;
+            fixture.replies(vec![rows]);
+            let error = fixture.reader().read_capture(&fixture.range, &[family], budget(), None).await.unwrap_err();
+            assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+        }
+    }
+}
+
+#[tokio::test]
 async fn native_variant_metadata_round_trips_without_requiring_or_synthesizing_parent_runtime() {
     let (source, records) = test_support::query_variant_evidence();
     let fixture = Fixture::new(source.clone(), records.clone()).await;

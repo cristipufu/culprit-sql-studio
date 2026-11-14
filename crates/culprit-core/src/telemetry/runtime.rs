@@ -1,5 +1,7 @@
 //! Interval aggregates carry their actual units. Missing measurements remain absent.
 use super::*;
+#[cfg(test)]
+mod cohort_tests;
 
 pub const MAX_STATEMENT_METRICS: usize = 64;
 
@@ -130,10 +132,16 @@ impl RuntimeMetric {
 pub struct NativeMeasurementKey {
     pub native: NativeIdentity,
     pub references: StatementReferences,
+    /// Source-owned comparison population inside this exact observation. Some asserts disjoint fragments and
+    /// preserves outcome, replica, reset and context distinctions independently of plan and native row identity.
+    /// None authorizes no aggregation beyond the complete native references and qualifiers.
+    pub cohort: Option<NativeIdentity>,
 }
 impl NativeMeasurementKey {
     pub fn is_valid(&self) -> bool {
-        self.native.is_valid() && self.references.is_valid()
+        self.native.is_valid()
+            && self.references.is_valid()
+            && self.cohort.as_ref().is_none_or(NativeIdentity::is_valid)
     }
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]

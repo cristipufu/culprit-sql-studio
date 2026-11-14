@@ -5,6 +5,7 @@ import { LastActualRun, PlanSourceToggle, type PlanSource } from "../components/
 import { evidencePresentation, measuresRuns, statementMetrics } from "../lib/engines";
 import { QueryTrend, Sparkline } from "../components/Trends";
 import { RuntimeSpread } from "../components/RuntimeSpread";
+import { PlanForcingStatus } from "../components/PlanForcingStatus";
 import { QueryCostsPanel } from "../components/BeyondTime";
 import { DocdbWork } from "../components/DocdbWork";
 import { Sql } from "../components/Sql";
@@ -436,7 +437,7 @@ function PlanHistory({ query, planId, onOpen }: { query: QueryStat; planId: stri
               <td>
                 <b style={query.plan_history?.kind === "cache" ? { display: "block" } : undefined}>{t("ui.queries.plan_name", { id: v.id })}</b>
                 {i === 0 && <span className="tag" style={{ marginLeft: query.plan_history?.kind === "cache" ? 0 : 6 }}>{query.plan_history?.kind === "cache" ? t("ui.queries.most_retained_time") : t("ui.queries.most_time")}</span>}
-                {v.is_forced && <span className="tag medium" style={{ marginLeft: 6 }}>{t("ui.queries.forced")}</span>}
+                <PlanForcingStatus isForced={v.is_forced} />
               </td>
               <td className={`r ${query.plan_history?.kind !== "cache" && query.plans.length > 1 && v.mean_time_ms > best * 2 ? "slow" : ""}`}>{duration(v.mean_time_ms)}</td>
               <td className="r">{count(v.executions)}</td>
@@ -570,7 +571,7 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
               <span className="v-name">
                 {t("ui.queries.plan_name", { id: v.id })}
                 {i === 0 && <span className="tag" style={{ marginLeft: 6 }}>{cachedHistory ? t("ui.queries.most_retained_time") : t("ui.queries.most_time")}</span>}
-                {v.is_forced && <span className="tag medium" style={{ marginLeft: 6 }}>{t("ui.queries.forced")}</span>}
+                <PlanForcingStatus isForced={v.is_forced} />
               </span>
               <span className="v-stats">
                 {withElements(t("ui.queries.variant_stats", { duration: slot(0), n: v.executions, runs: count(v.executions) }), [

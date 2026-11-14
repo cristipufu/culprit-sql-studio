@@ -76,13 +76,11 @@ pub(crate) const SQL_SERVER_PAGE_BYTES: u32 = 8192;
 
 pub(crate) fn record(row: &Rec, stream: TelemetryStream, references: StatementReferences) -> Result<TelemetryRecord> {
     let outcome: u8 = integer(row, "execution_type")?.try_into().map_err(|_| malformed())?;
-    let key = NativeMeasurementKey {
-        native: NativeIdentity::new(integer(row, "row_id")?.to_string())
-            .qualified("plan_id", integer(row, "plan_id")?.to_string())
-            .qualified("replica_group_id", integer(row, "replica_group_id")?.to_string())
-            .qualified("execution_type", outcome.to_string()),
-        references,
-    };
+    let native = NativeIdentity::new(integer(row, "row_id")?.to_string())
+        .qualified("plan_id", integer(row, "plan_id")?.to_string())
+        .qualified("replica_group_id", integer(row, "replica_group_id")?.to_string())
+        .qualified("execution_type", outcome.to_string());
+    let key = NativeMeasurementKey { cohort: Some(cohort(&native)), native, references };
     Ok(match stream {
         TelemetryStream::QueryRuntime => TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key,
@@ -103,6 +101,16 @@ pub(crate) fn record(row: &Rec, stream: TelemetryStream, references: StatementRe
         _ => return Err(malformed()),
     })
 }
+
+/// Within the captured interval and exact native query incarnation, only the plan dimension is combinable.
+/// Outcome, replica and any additional native dimensions remain independent execution populations.
+fn cohort(native: &NativeIdentity) -> NativeIdentity {
+    let mut cohort = native.clone();
+    cohort.id = "query-store-execution-population".into();
+    cohort.qualifiers.remove("plan_id");
+    cohort
+}
+
 fn runtime_metrics(row: &Rec) -> Result<Vec<RuntimeMetric>> {
     use RuntimeMetricKey as Key;
     use RuntimeMetricUnit as Unit;
@@ -144,5 +152,60 @@ mod tests {
         assert!(integer(&Rec::default(), "counter").is_err());
         assert!(integer(&Rec::of(&[("counter", Val::Float(1.0))]), "counter").is_err());
         assert!(number(&Rec::of(&[("counter", Val::Float(f64::NAN))]), "counter").is_err());
+    }
+
+    #[test]
+    fn cohorts_preserve_every_native_dimension_except_the_explicit_plan() {
+        let native = NativeIdentity::new("runtime-fragment-17")
+            .qualified("plan_id", "42")
+            .qualified("replica_group_id", "7")
+            .qualified("execution_type", "0")
+            .qualified("future-native-dimension", "preserved");
+        let mut expected = native.qualifiers.clone();
+        expected.remove("plan_id");
+        assert_eq!(cohort(&native).qualifiers, expected);
+        let mut another_plan = native.clone();
+        another_plan.id = "another-fragment".into();
+        another_plan.qualifiers.insert("plan_id".into(), "43".into());
+        assert_eq!(cohort(&native), cohort(&another_plan));
+        for dimension in ["replica_group_id", "execution_type", "future-native-dimension"] {
+            let mut changed = native.clone();
+            changed.qualifiers.insert(dimension.into(), "changed".into());
+            assert_ne!(cohort(&native), cohort(&changed));
+        }
+        assert_eq!(native.qualifiers["plan_id"], "42");
+    }
+
+    #[test]
+    fn runtime_and_wait_rows_declare_the_same_population_without_rewriting_raw_keys() {
+        let TelemetryRecord::QueryRuntime(runtime) = record(
+            &super::super::tests::runtime_row(1000),
+            TelemetryStream::QueryRuntime,
+            StatementReferences::default(),
+        )
+        .unwrap() else {
+            panic!("runtime")
+        };
+        let row = Rec::of(&[
+            ("row_id", Val::Int(19)),
+            ("plan_id", Val::Int(4)),
+            ("replica_group_id", Val::Int(7)),
+            ("execution_type", Val::Int(3)),
+            ("wait_category", Val::Int(3)),
+            ("total_query_wait_time_ms", Val::Int(100)),
+            ("avg_query_wait_time_ms", Val::Float(25.0)),
+            ("min_query_wait_time_ms", Val::Int(10)),
+            ("max_query_wait_time_ms", Val::Int(50)),
+        ]);
+        let TelemetryRecord::QueryWaits(wait) =
+            record(&row, TelemetryStream::QueryWaits, StatementReferences::default()).unwrap()
+        else {
+            panic!("wait")
+        };
+        assert_eq!(runtime.key.cohort, wait.key.cohort);
+        assert_ne!(runtime.key.native.id, wait.key.native.id);
+        assert_eq!(runtime.key.native.qualifiers, wait.key.native.qualifiers);
+        assert_eq!(runtime.key.native.qualifiers["plan_id"], "4");
+        assert!(!runtime.key.cohort.unwrap().qualifiers.contains_key("plan_id"));
     }
 }

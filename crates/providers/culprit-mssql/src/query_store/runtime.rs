@@ -71,7 +71,7 @@ pub(crate) struct PlanSummary {
     pub costs: ExecutionCosts,
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
-    pub forced: bool,
+    pub forced: Option<bool>,
 }
 impl PlanSummary {
     pub(crate) fn decode(row: &Rec) -> Result<Self> {
@@ -91,7 +91,7 @@ impl PlanSummary {
             costs,
             first_seen: timestamp(row, "first_seen")?,
             last_seen: timestamp(row, "last_seen")?,
-            forced: row.bool("is_forced"),
+            forced: crate::read::optional_boolean(row, "is_forced")?,
         })
     }
 }

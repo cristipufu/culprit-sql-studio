@@ -797,6 +797,7 @@ mod tests {
     #[test]
     fn wait_categories_are_part_of_native_record_identity() {
         let key = NativeMeasurementKey {
+            cohort: None,
             native: crate::telemetry::NativeIdentity::new("1")
                 .qualified("plan_id", "2")
                 .qualified("replica_group_id", "3")

@@ -1,9 +1,7 @@
 //! Offline query analysis retains its authenticated native input; it is not a newly collected database snapshot.
 use crate::{
     AnalysisProvenance, CheckAssessment, Finding, LockedCheck, Workload,
-    telemetry::{
-        CaptureIdentity, CollectionDescription, ExportedRecord, NativeIdentity, StatementReferences, TelemetryStream,
-    },
+    telemetry::{CaptureIdentity, CollectionDescription, ExportedRecord, StatementReferences, TelemetryStream},
 };
 use serde::Serialize;
 use ts_rs::TS;
@@ -73,7 +71,7 @@ pub struct CollectedEvidenceContext {
 pub struct CollectedQueryInput {
     pub query_id: String,
     pub references: StatementReferences,
-    pub native_rows: Vec<NativeIdentity>,
+    pub measurements: Vec<crate::telemetry::NativeMeasurementKey>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]

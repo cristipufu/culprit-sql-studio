@@ -43,6 +43,7 @@ fn measurement_key(values: &Map<String, Value>) -> Result<Value> {
     Ok(json!({
         "native": {"id": text(values, "NativeRowId")?, "qualifiers": field(values, "NativeDimensions")?},
         "references": field(values, "NativeReferences")?,
+        "cohort": field(values, "NativeCohort")?,
     }))
 }
 

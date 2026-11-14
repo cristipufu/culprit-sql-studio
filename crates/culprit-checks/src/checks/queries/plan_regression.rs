@@ -66,7 +66,7 @@ pub(super) fn replaced_plan(q: &QueryStat) -> Option<(&PlanVariant, &PlanVariant
         .iter()
         .enumerate()
         .any(|(i, (first, last))| i != latest_at && *first <= latest_last && latest_first <= *last);
-    if overlaps || latest.is_forced {
+    if overlaps || latest.is_forced != Some(false) {
         return None;
     }
     let best = usable
@@ -75,7 +75,7 @@ pub(super) fn replaced_plan(q: &QueryStat) -> Option<(&PlanVariant, &PlanVariant
         .filter(|(p, (_, last))| *last < latest_first && p.executions >= BASELINE_MIN_RUNS)
         .map(|(p, _)| *p)
         .min_by(|a, b| a.mean_time_ms.total_cmp(&b.mean_time_ms))?;
-    (!best.is_forced
+    (best.is_forced == Some(false)
         && latest.mean_time_ms >= best.mean_time_ms * 2.0
         && latest.mean_time_ms - best.mean_time_ms >= 5.0
         && does_more_work(best, latest) != Some(false))
@@ -347,6 +347,20 @@ mod tests {
         q.trend = None;
         w.total_time_ms = w.queries.iter().map(|q| q.total_time_ms).sum();
         s
+    }
+
+    #[test]
+    fn unforced_advice_requires_native_false_for_both_observed_plans() {
+        let baseline = replaced();
+        let query = baseline.workload.as_ref().unwrap().queries.iter().find(|query| query.id == "8").unwrap();
+        assert!(replaced_plan(query).is_some());
+        for index in 0..query.plans.len() {
+            for unknown_or_forced in [None, Some(true)] {
+                let mut changed = query.clone();
+                changed.plans[index].is_forced = unknown_or_forced;
+                assert!(replaced_plan(&changed).is_none());
+            }
+        }
     }
 
     // Another finding tells the plan change from its facts: of this query, or naming it among several.

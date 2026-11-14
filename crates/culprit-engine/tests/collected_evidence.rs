@@ -4,10 +4,12 @@ use culprit_core::{
 use culprit_engine::collected_evidence;
 
 mod cached_plans;
+mod cohorts;
 mod fixture;
 mod memory_failures;
 mod native_failures;
 mod page_waits;
+mod plan_groups;
 mod request_memory;
 mod runtime_distributions;
 mod session_memory;
@@ -75,6 +77,7 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
         }
         records.push(TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: NativeMeasurementKey {
+                cohort: None,
                 native: NativeIdentity::new(format!("recorded-{}", query.id)).qualified("execution_type", "0"),
                 references: StatementReferences {
                     query: Some(NativeDefinitionReference { native: identity.native(), definition_id: Some(id) }),
@@ -353,7 +356,13 @@ async fn interval_shape_and_a_recorded_plan_version_do_not_invent_source_or_curr
     );
     assert!(analysis.context.evidence.records.iter().any(|record| matches!(&record.row.record,
         TelemetryRecord::PlanDefinition(plan) if plan.engine_version.as_deref() == Some("18.1"))));
-    assert!(analysis.context.query_inputs.iter().any(|input| input.native_rows[0].qualifiers["execution_type"] == "3"));
+    assert!(
+        analysis
+            .context
+            .query_inputs
+            .iter()
+            .any(|input| input.measurements[0].native.qualifiers["execution_type"] == "3")
+    );
     assert!(analysis.workload.as_ref().unwrap().queries.iter().all(|query| query.logical_reads.is_none()));
     assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MetricNotProjected));
 }
@@ -378,12 +387,18 @@ async fn fragments_are_execution_weighted_and_different_outcomes_stay_separate()
     let workload = analysis.workload.as_ref().unwrap();
     assert_eq!(workload.queries.len(), 2);
     assert_eq!(workload.query_count, 1.0);
-    let input = analysis.context.query_inputs.iter().find(|input| input.native_rows.len() == 2).unwrap();
+    let input = analysis.context.query_inputs.iter().find(|input| input.measurements.len() == 2).unwrap();
     let query = workload.queries.iter().find(|query| query.id == input.query_id).unwrap();
     assert_eq!(query.executions, 10.0);
     assert_eq!(query.total_time_ms, 9100.0);
     assert_eq!(query.mean_time_ms, 910.0);
-    assert!(analysis.context.query_inputs.iter().any(|input| input.native_rows[0].qualifiers["execution_type"] == "3"));
+    assert!(
+        analysis
+            .context
+            .query_inputs
+            .iter()
+            .any(|input| input.measurements[0].native.qualifiers["execution_type"] == "3")
+    );
 }
 
 #[tokio::test]

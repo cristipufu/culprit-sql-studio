@@ -2,7 +2,11 @@ use super::*;
 
 fn row(executions: &str, average: Option<f64>) -> RuntimeMeasurement {
     RuntimeMeasurement {
-        key: NativeMeasurementKey { native: NativeIdentity::new("native-row"), references: Default::default() },
+        key: NativeMeasurementKey {
+            cohort: None,
+            native: NativeIdentity::new("native-row"),
+            references: Default::default(),
+        },
         executions: executions.into(),
         metrics: average
             .map(|average| {

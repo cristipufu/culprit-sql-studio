@@ -158,7 +158,7 @@ async fn native_epochs_and_outcomes_are_separate_populations_without_reset_or_ra
             .collect::<Vec<_>>();
         amounts.sort_by(f64::total_cmp);
         assert_eq!(amounts, vec![2.5, 5.0]);
-        assert!(analysis.context.query_inputs.iter().all(|input| input.native_rows.len() == 1));
+        assert!(analysis.context.query_inputs.iter().all(|input| input.measurements.len() == 1));
         assert_eq!(analysis.context.evidence.source, source);
         assert!(analysis.workload.as_ref().unwrap().counter_set.is_none());
         assert!(analysis.workload.as_ref().unwrap().history_inputs.is_empty());

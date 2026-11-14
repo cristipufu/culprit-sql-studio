@@ -215,7 +215,7 @@ fn plan_observation(finding: &mut Finding, query: &QueryStat, faster: &PlanVaria
     for plan in [faster, slower] {
         append_compilation_context(finding, plan, query);
     }
-    if query.workload_plans().iter().any(|plan| plan.is_forced) {
+    if query.workload_plans().iter().any(|plan| plan.is_forced == Some(true)) {
         finding.caveats.push(t!("check.parameter_sensitive.caveat.forcing"));
     }
 }

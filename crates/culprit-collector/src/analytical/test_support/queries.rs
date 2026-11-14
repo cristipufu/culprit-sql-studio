@@ -75,6 +75,7 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
         duration.standard_deviation = Some(0.5);
         records.push(TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: NativeMeasurementKey {
+                cohort: None,
                 native: NativeIdentity::new(format!("native-runtime-{outcome}"))
                     .qualified("execution_type", outcome)
                     .qualified("native-stats-generation", "7"),
@@ -100,6 +101,7 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
     }
     records.push(TelemetryRecord::QueryWaits(WaitMeasurement {
         key: NativeMeasurementKey {
+            cohort: None,
             native: NativeIdentity::new("native-waits-1").qualified("execution_type", "0"),
             references,
         },

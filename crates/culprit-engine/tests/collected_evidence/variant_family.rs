@@ -52,7 +52,7 @@ async fn authenticated_native_family_survives_analysis_with_scoped_ids_without_a
     let executions = runtime.executions.parse::<f64>().unwrap();
     let total = runtime.metric(&RuntimeMetricKey::Duration).unwrap().average * executions;
     let references = runtime.key.references.clone();
-    let native_row = runtime.key.native.clone();
+    let measurement = runtime.key.clone();
     let fixture = Fixture::new(source.clone(), records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
@@ -63,7 +63,7 @@ async fn authenticated_native_family_survives_analysis_with_scoped_ids_without_a
     assert_eq!(input.query_id, query.id);
     assert_eq!(input.references, references);
     assert_eq!(input.references.query.as_ref().unwrap().definition_id.as_deref(), Some(definition_id.as_str()));
-    assert_eq!(input.native_rows, [native_row]);
+    assert_eq!(input.measurements, [measurement]);
     assert_ne!(query.id, definition_id, "query groups retain their own authenticated scope");
     assert_ne!(query.id, expected_family.variant.query_id, "public query groups cannot become numeric/native aliases");
     assert_eq!(query.variant_family.as_ref(), Some(&expected_family));

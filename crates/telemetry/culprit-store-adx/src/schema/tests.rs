@@ -86,6 +86,7 @@ fn runtime_projection_covers_the_native_contract_and_preserves_counts_units_and_
     use culprit_core::telemetry::{NativeMeasurementKey, RuntimeMeasurement};
     let native = RuntimeMeasurement {
         key: NativeMeasurementKey {
+            cohort: None,
             native: NativeIdentity::new("1")
                 .qualified("plan_id", "2")
                 .qualified("replica_group_id", "3")
@@ -171,6 +172,7 @@ fn wait_totals_keep_exact_milliseconds_and_are_not_confused_with_average_waits()
     use culprit_core::telemetry::{NativeMeasurementKey, WaitMeasurement};
     let native = WaitMeasurement {
         key: NativeMeasurementKey {
+            cohort: None,
             native: NativeIdentity::new("1")
                 .qualified("plan_id", "2")
                 .qualified("replica_group_id", "3")

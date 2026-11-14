@@ -3,6 +3,8 @@ pub mod activity_monitor;
 pub mod agent;
 mod analysis;
 
+#[cfg(feature = "collector")]
+mod archived_advice;
 pub mod catalog;
 pub mod changes;
 pub mod cloud;

@@ -6,6 +6,7 @@ fn reference(id: &str) -> NativeDefinitionReference {
 fn runtime() -> RuntimeMeasurement {
     RuntimeMeasurement {
         key: NativeMeasurementKey {
+            cohort: None,
             native: NativeIdentity::new("native-row"),
             references: StatementReferences { query: Some(reference("query")), plan: None },
         },

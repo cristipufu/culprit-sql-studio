@@ -250,7 +250,7 @@ pub fn query(report: &Report, id: &str) -> Result<Value> {
                 "stddev_ms": ms(p.stddev_time_ms),
                 "compiled_for": p.compiled,
                 "last_seen": p.last_seen,
-                "forced": p.is_forced.then_some(true),
+                "forced": p.is_forced,
             }))
             .collect::<Vec<_>>()
     );
@@ -839,6 +839,34 @@ pub fn cloud(s: &culprit_core::CloudSignals) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_forcing_distinguishes_native_false_true_and_unknown() {
+        let mut report: Report =
+            serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        let id = report
+            .snapshot
+            .workload
+            .as_ref()
+            .unwrap()
+            .queries
+            .iter()
+            .find(|query| !query.plans.is_empty())
+            .unwrap()
+            .id
+            .clone();
+        for state in [None, Some(false), Some(true)] {
+            let workload = report.snapshot.workload.as_mut().unwrap();
+            let selected = workload.queries.iter_mut().find(|query| query.id == id).unwrap();
+            for plan in &mut selected.plans {
+                plan.is_forced = state;
+            }
+            let value = query(&report, &id).unwrap();
+            let variants = value["query"]["plan_variants"].as_array().unwrap();
+            assert!(!variants.is_empty());
+            assert!(variants.iter().all(|plan| plan["forced"] == json!(state)));
+        }
+    }
 
     #[test]
     fn clipping_collapses_whitespace_and_marks_the_cut() {

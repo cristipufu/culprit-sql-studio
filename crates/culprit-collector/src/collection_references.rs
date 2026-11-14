@@ -217,6 +217,7 @@ mod tests {
     fn measurement(query: &QueryDefinition, plan: Option<NativeDefinitionReference>) -> TelemetryRecord {
         TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: NativeMeasurementKey {
+                cohort: None,
                 native: NativeIdentity::new("row"),
                 references: StatementReferences { query: Some(reference(query)), plan },
             },
