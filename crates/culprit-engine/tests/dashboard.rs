@@ -86,7 +86,7 @@ async fn a_live_refresh_preserves_the_selected_report_and_ranks_its_new_session_
     for session in live.sessions.iter_mut().filter(|s| s.blocked_by.is_some()) {
         session.wait_ms = Some(31_000.0);
     }
-    live.blocking = culprit_core::blocking::analyze(Engine::Postgres, &live.sessions, &[]);
+    live.blocking = culprit_core::blocking::analyze(Engine::Postgres, &live.sessions, &[], &[]);
     let f = fixture("success", Ok(live));
     let before = dashboard();
     let result = f.ws.dashboard_live("replayed", before.clone()).await.unwrap();

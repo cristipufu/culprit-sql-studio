@@ -3,8 +3,8 @@ use super::metadata::Metadata;
 use super::*;
 use culprit_core::{Engine, Session, telemetry::*};
 use std::collections::{BTreeMap, BTreeSet};
-const MAX_BLOCKING_LOOKUPS: usize = 64;
-const MAX_BLOCKING_DEPTH: usize = 8;
+mod blocking;
+pub(crate) use blocking::{ActivityScope, BlockingReadOptions, blockers, unqualified_owner_ids};
 pub struct ActivityRecord {
     pub facts: Option<ActivityObservation>,
     row: Row,
@@ -43,16 +43,28 @@ pub(crate) fn query(version: u32, limit: usize) -> String {
     query_layout(version >= 140_000, "'client backend'", "", limit)
 }
 pub fn query_layout(query_id: bool, backend_types: &str, extra_columns: &str, limit: usize) -> String {
+    metadata_query(
+        query_id,
+        extra_columns,
+        &format!(
+            "SELECT * FROM pg_catalog.pg_stat_activity WHERE pid<>pg_catalog.pg_backend_pid()
+             AND datid=(SELECT oid FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database())
+             AND backend_type IN ({backend_types})"
+        ),
+        limit,
+        "",
+    )
+}
+fn metadata_query(query_id: bool, extra_columns: &str, selection: &str, limit: usize, ctes: &str) -> String {
     let query_id = if query_id { "a.query_id::text" } else { "NULL::text" };
     format!(
-        "WITH stamp AS MATERIALIZED (SELECT pg_catalog.clock_timestamp() AS at)
+        "WITH {ctes}stamp AS MATERIALIZED (SELECT pg_catalog.clock_timestamp() AS at)
         SELECT {} AS observed_at,a.pid::text AS pid,{} AS backend_start,{} AS query_start,{} AS transaction_start,
         a.datid::text AS database_oid,a.datname AS database,a.usename AS username,a.application_name,
         coalesce(a.client_hostname,pg_catalog.host(a.client_addr)) AS host,coalesce(a.state,a.backend_type) AS state,
         a.wait_event_type,a.wait_event,{} AS elapsed_ms,{} AS transaction_ms,{} AS idle_ms,
         {query_id} AS query_id{extra_columns}
-        FROM stamp LEFT JOIN LATERAL (SELECT * FROM pg_catalog.pg_stat_activity
-            WHERE pid<>pg_catalog.pg_backend_pid() AND backend_type IN ({backend_types}) LIMIT {limit}) a ON true",
+        FROM stamp LEFT JOIN LATERAL ({selection} LIMIT {limit}) a ON true",
         iso("stamp.at"),
         iso("a.backend_start"),
         iso("a.query_start"),
@@ -153,7 +165,15 @@ pub async fn observe_rows<R: QueryRead>(
     database_oid: &str,
     budget: &CollectionBudget,
 ) -> Result<ActivityFrame> {
-    let rows = reader.query(sql, budget.max_snapshot_rows as usize + 1).await?;
+    observe_limited(reader, sql, database_oid, budget.max_snapshot_rows as usize).await
+}
+async fn observe_limited<R: QueryRead>(
+    reader: &mut R,
+    sql: &str,
+    database_oid: &str,
+    limit: usize,
+) -> Result<ActivityFrame> {
+    let rows = reader.query(sql, limit + 1).await?;
     let at = text(rows.first().ok_or_else(invalid)?, "observed_at")?;
     let mut records = vec![];
     for row in rows {
@@ -164,7 +184,7 @@ pub async fn observe_rows<R: QueryRead>(
             records.push(decode(row, database_oid)?);
         }
     }
-    if records.len() > budget.max_snapshot_rows as usize {
+    if records.len() > limit {
         return Err(CollectionStop::RowLimit.error());
     }
     ActivityEvidence::validate(&records.iter().filter_map(|row| row.facts.clone()).collect::<Vec<_>>())?;
@@ -181,134 +201,6 @@ fn selector(record: &ActivityRecord) -> Result<String> {
         .transpose()?
         .unwrap_or_else(|| "NULL::timestamptz".into());
     Ok(format!("({pid},'{started}'::timestamptz,{query_start})"))
-}
-#[derive(Clone, Copy)]
-pub(crate) enum ActivityScope {
-    Visible,
-    CurrentDatabase,
-}
-pub(crate) struct BlockingReadOptions {
-    pub minimum_request_age_ms: u32,
-    pub scope: ActivityScope,
-    pub wait_start_available: bool,
-}
-pub(crate) async fn blockers<R: QueryRead>(
-    reader: &mut R,
-    frame: &mut ActivityFrame,
-    options: BlockingReadOptions,
-) -> Result<()> {
-    let by_pid = frame
-        .records
-        .iter()
-        .enumerate()
-        .map(|(index, row)| Ok((text(&row.row, "pid")?.parse::<u32>().map_err(|_| invalid())?, index)))
-        .collect::<Result<BTreeMap<_, _>>>()?;
-    let mut pending = frame
-        .records
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| {
-            row.row.text("wait_event_type").as_deref() == Some("Lock")
-                && row.facts.as_ref().is_some_and(|facts| {
-                    (matches!(options.scope, ActivityScope::Visible)
-                        || facts.scope != ActivityScopeBasis::OtherDatabase)
-                        && facts
-                            .elapsed_ms
-                            .as_ref()
-                            .and_then(|value| value.parse::<u64>().ok())
-                            .is_some_and(|value| value >= options.minimum_request_age_ms.into())
-                })
-        })
-        .map(|(index, _)| index)
-        .collect::<BTreeSet<_>>();
-    let mut visited = BTreeSet::new();
-    for _ in 0..MAX_BLOCKING_DEPTH {
-        if pending.is_empty() {
-            break;
-        }
-        if pending.len() + visited.len() > MAX_BLOCKING_LOOKUPS {
-            return Err(CollectionStop::RowLimit.error());
-        }
-        let targets =
-            pending.iter().map(|index| selector(&frame.records[*index])).collect::<Result<Vec<_>>>()?.join(",");
-        let sql = format!(
-            "WITH targets(pid,backend_start,query_start) AS (VALUES {targets}) SELECT a.pid::text AS pid,pg_catalog.array_to_json(pg_catalog.pg_blocking_pids(a.pid))::text AS owners FROM targets t JOIN pg_catalog.pg_stat_activity a ON a.pid=t.pid AND a.backend_start=t.backend_start AND a.query_start IS NOT DISTINCT FROM t.query_start WHERE a.wait_event_type='Lock'"
-        );
-        let rows = reader.query(&sql, pending.len()).await?;
-        visited.append(&mut pending);
-        for row in rows {
-            let pid = integer(&row, "pid")? as u32;
-            let index = *by_pid.get(&pid).ok_or_else(invalid)?;
-            let owners: Vec<u32> = serde_json::from_str(&text(&row, "owners")?).map_err(|_| invalid())?;
-            if owners.len() > 64 {
-                return Err(CollectionStop::RowLimit.error());
-            }
-            let mut waits = vec![];
-            for owner in owners {
-                if owner == 0 {
-                    waits.push(ActivityWaitOwner::Transaction {
-                        native_id: "0".into(),
-                        owner: TransactionWaitOwner::Prepared,
-                    });
-                    continue;
-                }
-                let record = by_pid.get(&owner).map(|index| &frame.records[*index]);
-                let generation =
-                    record.and_then(|row| row.facts.as_ref()).map(|row| row.key.session.generation.clone());
-                waits.push(ActivityWaitOwner::Session { id: owner.to_string(), generation });
-                if let Some(owner_index) = by_pid.get(&owner).filter(|index| !visited.contains(index))
-                    && frame.records[*owner_index].row.text("wait_event_type").as_deref() == Some("Lock")
-                    && frame.records[*owner_index].facts.is_some()
-                {
-                    pending.insert(*owner_index);
-                }
-            }
-            if let Some(wait) = frame.records[index].facts.as_mut().and_then(|facts| facts.wait.as_mut()) {
-                wait.owners = waits;
-            }
-        }
-    }
-    if !pending.is_empty() {
-        return Err(CollectionStop::RowLimit.error());
-    }
-    if visited.is_empty() || !options.wait_start_available {
-        return Ok(());
-    }
-    let lock_targets =
-        visited.iter().map(|index| selector(&frame.records[*index])).collect::<Result<Vec<_>>>()?.join(",");
-    // One global lock snapshot per troubled poll, never one scan per waiter. Healthy polls do not read pg_locks.
-    let sql=format!("WITH targets(pid,backend_start,query_start) AS (VALUES {lock_targets}),
-        current_waiters AS MATERIALIZED (SELECT a.pid FROM targets t JOIN pg_catalog.pg_stat_activity a ON a.pid=t.pid AND a.backend_start=t.backend_start AND a.query_start IS NOT DISTINCT FROM t.query_start WHERE a.wait_event_type='Lock'),
-        waits AS MATERIALIZED (SELECT w.pid,w.waitstart,w.mode,w.locktype,w.relation,w.database FROM pg_catalog.pg_locks w WHERE NOT w.granted AND w.pid IN (SELECT pid FROM current_waiters)),
-        stamp AS (SELECT pg_catalog.clock_timestamp() AS at)
-        SELECT w.pid::text AS pid,CASE WHEN stamp.at>=w.waitstart THEN floor(extract(epoch FROM stamp.at-w.waitstart)*1000)::text END AS elapsed_ms,
-        w.mode,w.locktype,n.nspname||'.'||o.relname AS object,CASE WHEN c.relkind IN ('i','I') THEN c.relname END AS index_name
-        FROM waits w CROSS JOIN stamp
-        LEFT JOIN pg_catalog.pg_class c ON c.oid=w.relation AND (w.database=0 OR w.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()))
-        LEFT JOIN pg_catalog.pg_index ix ON ix.indexrelid=c.oid LEFT JOIN pg_catalog.pg_class o ON o.oid=coalesce(ix.indrelid,c.oid)
-        LEFT JOIN pg_catalog.pg_namespace n ON n.oid=o.relnamespace");
-    for index in &visited {
-        if let Some(wait) = frame.records[*index].facts.as_mut().and_then(|facts| facts.wait.as_mut()) {
-            wait.resources = Some(vec![]);
-        }
-    }
-    for row in reader.query(&sql, visited.len()).await? {
-        let pid = integer(&row, "pid")? as u32;
-        let index = *by_pid.get(&pid).ok_or_else(invalid)?;
-        let resource = culprit_core::LockWait {
-            session: pid.to_string(),
-            mode: row.text("mode"),
-            resource: row.text("locktype"),
-            object: row.text("object"),
-            index: row.text("index_name"),
-        };
-        if let Some(wait) = frame.records[index].facts.as_mut().and_then(|facts| facts.wait.as_mut()) {
-            wait.elapsed_ms = optional_counter(&row, "elapsed_ms")?;
-            wait.resources.as_mut().ok_or_else(invalid)?.push(resource.clone());
-        }
-        frame.locks.push(resource);
-    }
-    Ok(())
 }
 pub(crate) async fn enrich<R: QueryRead>(
     reader: &mut R,

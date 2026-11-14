@@ -39,7 +39,9 @@ impl ObservationReader for ActivityReader {
             activity::BlockingReadOptions {
                 minimum_request_age_ms: policy.blocked_after_ms,
                 scope: activity::ActivityScope::CurrentDatabase,
-                wait_start_available: true,
+                version: meta.version,
+                database_oid: &meta.database_oid,
+                max_snapshot_rows: request.budget.max_snapshot_rows as usize,
             },
         )
         .await?;
@@ -67,7 +69,7 @@ impl ObservationReader for ActivityReader {
                 policy: policy.clone(),
                 native_rows,
                 qualifying: selected.conditions.len() as u32,
-                uncertain: 0,
+                uncertain: selected.uncertain.len() as u32,
                 observations: observations.len() as u32,
                 blocking_edges: selected.blocking.len() as u32,
                 details,

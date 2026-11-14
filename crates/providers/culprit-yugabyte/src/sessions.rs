@@ -144,7 +144,7 @@ async fn read_live(observed: &mut ReadSession, environment: Environment) -> Resu
     }
     notes.sort();
     notes.dedup();
-    let blocking = culprit_core::blocking::analyze(Engine::Yugabyte, &sessions, &waits);
+    let blocking = culprit_core::blocking::analyze(Engine::Yugabyte, &sessions, &waits, &[]);
     Ok(LiveState {
         taken_at: p.now,
         sessions,

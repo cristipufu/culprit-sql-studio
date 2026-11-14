@@ -390,7 +390,9 @@ impl Provider for PostgresProvider {
                 crate::native::activity::BlockingReadOptions {
                     minimum_request_age_ms: 0,
                     scope: crate::native::activity::ActivityScope::Visible,
-                    wait_start_available: meta.version >= 140_000,
+                    version: meta.version,
+                    database_oid: &meta.database_oid,
+                    max_snapshot_rows: budget.max_snapshot_rows as usize,
                 },
             )
             .await?;
@@ -416,7 +418,12 @@ impl Provider for PostgresProvider {
                 }
             }
             waits.sort_by(|a, b| b.tasks.unwrap_or(0.0).total_cmp(&a.tasks.unwrap_or(0.0)));
-            let blocking = culprit_core::blocking::analyze(Engine::Postgres, &sessions, &frame.locks);
+            let blocking = culprit_core::blocking::analyze(
+                Engine::Postgres,
+                &sessions,
+                &frame.locks,
+                &crate::native::activity::unqualified_owner_ids(&frame),
+            );
             Ok(LiveState {
                 notes: Vec::new(),
                 taken_at: now,

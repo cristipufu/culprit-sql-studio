@@ -393,7 +393,7 @@ impl Provider for MysqlProvider {
         }) {
             notes.push(unresolved_metadata_lock());
         }
-        let blocking = culprit_core::blocking::analyze(Engine::Mysql, &sessions, &locks);
+        let blocking = culprit_core::blocking::analyze(Engine::Mysql, &sessions, &locks, &[]);
         Ok(LiveState {
             notes,
             taken_at: now,

@@ -877,7 +877,7 @@ fn session(id: &str, state: &str) -> Session {
 }
 
 fn live(sessions: Vec<Session>, chains: bool) -> LiveState {
-    let blocking = chains.then(|| culprit_core::blocking::analyze(Engine::Postgres, &sessions, &[])).flatten();
+    let blocking = chains.then(|| culprit_core::blocking::analyze(Engine::Postgres, &sessions, &[], &[])).flatten();
     LiveState {
         notes: Vec::new(),
         taken_at: "2026-10-11T12:00:00Z".into(),

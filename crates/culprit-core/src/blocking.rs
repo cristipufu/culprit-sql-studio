@@ -84,8 +84,14 @@ pub struct Blocking {
 }
 
 /// The blocking chains in `sessions`, with lock details from `locks` where the engine provided them. `None` when
-/// nobody waits on anybody.
-pub fn analyze(engine: Engine, sessions: &[Session], locks: &[LockWait]) -> Option<Blocking> {
+/// nobody waits on anybody. Known-unqualified owner IDs retain their topology and waiter facts, but their captured
+/// session context cannot explain the head of a chain (for example, a PID whose native generation changed).
+pub fn analyze(
+    engine: Engine,
+    sessions: &[Session],
+    locks: &[LockWait],
+    unqualified_owner_ids: &[String],
+) -> Option<Blocking> {
     let by_id: HashMap<&str, &Session> = sessions.iter().map(|s| (s.id.as_str(), s)).collect();
     let lock_of: HashMap<&str, &LockWait> = locks.iter().map(|l| (l.session.as_str(), l)).collect();
     let wait_of: HashMap<&str, &str> =
@@ -123,7 +129,8 @@ pub fn analyze(engine: Engine, sessions: &[Session], locks: &[LockWait]) -> Opti
         .map(|head| {
             let mut seen = BTreeSet::new();
             let tree = node(head, &children, &lock_of, &wait_of, &mut seen, true);
-            chain(engine, head, by_id.get(head).copied(), tree, &by_id, &lock_of)
+            let context = by_id.get(head).copied().filter(|_| !unqualified_owner_ids.iter().any(|id| id == head));
+            chain(engine, head, context, tree, &by_id, &lock_of)
         })
         .filter(|c| c.waiters > 0)
         .collect();
@@ -433,18 +440,18 @@ mod tests {
         head.command = Some("Query".into());
         head.sql = Some("select sleep(40)".into());
         let waiter = session("115", "suspended", Some("114"));
-        let b = analyze(Engine::Mysql, &[head.clone(), waiter.clone()], &[lock("115")]).unwrap();
+        let b = analyze(Engine::Mysql, &[head.clone(), waiter.clone()], &[lock("115")], &[]).unwrap();
         assert!(b.chains[0].headline.contains("running a SELECT statement"), "{}", b.chains[0].headline);
         // SQL Server's command is already the verb.
         head.command = Some("UPDATE".into());
         head.sql = None;
-        let b = analyze(Engine::Mssql, &[head, waiter], &[lock("115")]).unwrap();
+        let b = analyze(Engine::Mssql, &[head, waiter], &[lock("115")], &[]).unwrap();
         assert!(b.chains[0].headline.contains("running an UPDATE statement"), "{}", b.chains[0].headline);
     }
 
     #[test]
     fn nobody_waiting_is_no_blocking() {
-        assert!(analyze(Engine::Mssql, &[session("51", "running", None)], &[]).is_none());
+        assert!(analyze(Engine::Mssql, &[session("51", "running", None)], &[], &[]).is_none());
     }
 
     #[test]
@@ -456,7 +463,7 @@ mod tests {
             session("70", "suspended", Some("57")),
             session("80", "running", None),
         ];
-        let b = analyze(Engine::Mssql, &sessions, &[lock("61"), lock("70")]).unwrap();
+        let b = analyze(Engine::Mssql, &sessions, &[lock("61"), lock("70")], &[]).unwrap();
         assert_eq!(b.chains.len(), 1);
         let c = &b.chains[0];
         assert_eq!((c.head.as_str(), c.head_kind, c.waiters), ("57", HeadKind::IdleInTransaction, 3));
@@ -471,7 +478,7 @@ mod tests {
 
     #[test]
     fn a_blocker_this_login_cannot_see() {
-        let b = analyze(Engine::Postgres, &[session("61", "active", Some("99"))], &[]).unwrap();
+        let b = analyze(Engine::Postgres, &[session("61", "active", Some("99"))], &[], &[]).unwrap();
         assert_eq!(b.chains[0].head_kind, HeadKind::Unknown);
         assert!(b.chains[0].headline.contains("can't see"));
     }
@@ -482,10 +489,47 @@ mod tests {
             Engine::Mssql,
             &[session("61", "suspended", Some("62")), session("62", "suspended", Some("61"))],
             &[],
+            &[],
         )
         .unwrap();
         assert_eq!(b.chains.len(), 1);
         assert_eq!(b.chains[0].waiters, 1);
+    }
+
+    #[test]
+    fn an_unqualified_owner_who_is_also_waiting_keeps_every_topology_edge() {
+        let mut intermediate = session("20", "active", Some("30"));
+        intermediate.command = Some("DELETE".into());
+        intermediate.sql = Some("DELETE FROM private_old_request".into());
+        let sessions = [session("10", "active", Some("20")), intermediate, session("30", "idle", None)];
+        let locks = [lock("10"), lock("20")];
+        let known = analyze(Engine::Postgres, &sessions, &locks, &[]).unwrap();
+        let qualified = analyze(Engine::Postgres, &sessions, &locks, &["20".into()]).unwrap();
+        assert_eq!(qualified, known, "an intermediate context cannot erase its positive waiter edge");
+        assert_eq!(qualified.waiting, 2);
+        assert_eq!(qualified.chains.len(), 1);
+        assert_eq!(qualified.chains[0].tree.children[0].session, "20");
+        assert_eq!(qualified.chains[0].tree.children[0].children[0].session, "10");
+    }
+
+    #[test]
+    fn an_unqualified_cycle_head_keeps_topology_but_cannot_supply_old_sql_or_timing_context() {
+        let mut old = session("10", "active", Some("20"));
+        old.command = Some("DELETE".into());
+        old.sql = Some("DELETE FROM private_old_request".into());
+        let sessions = [old, session("20", "active", Some("10"))];
+        let locks = [lock("10"), lock("20")];
+        let known = analyze(Engine::Postgres, &sessions, &locks, &[]).unwrap();
+        let qualified = analyze(Engine::Postgres, &sessions, &locks, &["10".into()]).unwrap();
+        assert_eq!(qualified.waiting, known.waiting);
+        assert_eq!(qualified.chains.len(), known.chains.len());
+        let chain = &qualified.chains[0];
+        assert_eq!(chain.tree, known.chains[0].tree);
+        assert_eq!(chain.longest_wait_ms, known.chains[0].longest_wait_ms, "waiter observations survive");
+        assert_eq!(chain.head_kind, HeadKind::Unknown);
+        assert!(chain.head_ms.is_none() && chain.transaction_ms.is_none());
+        assert!(!chain.headline.contains("DELETE") && !chain.headline.contains("private_old_request"));
+        assert_ne!(chain.headline, known.chains[0].headline);
     }
 
     #[test]
@@ -554,14 +598,14 @@ mod tests {
                         sessions.push(s);
                     }
                     let locks = if wait == "PAGELATCH" { vec![] } else { vec![lock("60")] };
-                    let c = &analyze(engine, &sessions, &locks).unwrap().chains[0];
+                    let c = &analyze(engine, &sessions, &locks, &[]).unwrap().chains[0];
                     out.push(format!(
                         "\n{engine:?} {state} {elapsed:?} {waiters} {wait}\n{}\n{}",
                         c.headline, c.advice
                     ));
                 }
             }
-            let c = &analyze(engine, &[session("61", "active", Some("99"))], &[]).unwrap().chains[0];
+            let c = &analyze(engine, &[session("61", "active", Some("99"))], &[], &[]).unwrap().chains[0];
             out.push(format!("\n{engine:?} unseen\n{}\n{}", c.headline, c.advice));
         }
         let got = out.join("\n");

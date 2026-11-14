@@ -154,7 +154,7 @@ mod tests {
         let mut live = live();
         live.sessions = vec![session("51", Some("52")), session("52", None)];
         live.notes.push("Other lock owners are not visible.".into());
-        live.blocking = culprit_core::blocking::analyze(culprit_core::Engine::Mssql, &live.sessions, &[]);
+        live.blocking = culprit_core::blocking::analyze(culprit_core::Engine::Mssql, &live.sessions, &[], &[]);
         let response = blocking(&live);
         assert_eq!(response["waiting"], 1);
         assert_eq!(response["chains"].as_array().unwrap().len(), 1);

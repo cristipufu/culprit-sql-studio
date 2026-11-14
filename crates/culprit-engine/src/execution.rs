@@ -382,7 +382,7 @@ impl Execution<'_> {
                         Vec::new()
                     }
                 };
-                live.blocking = culprit_core::blocking::analyze(info.engine, &live.sessions, &locks);
+                live.blocking = culprit_core::blocking::analyze(info.engine, &live.sessions, &locks, &[]);
             }
             if info.environment.is_production() {
                 live.session_actions = Vec::new();

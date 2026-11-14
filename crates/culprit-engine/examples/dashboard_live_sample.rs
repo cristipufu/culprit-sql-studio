@@ -53,7 +53,7 @@ fn main() {
             }
             let relevant: Vec<_> =
                 captured_locks.iter().filter(|l| !ended.contains(&l.session.as_str())).cloned().collect();
-            live.blocking = culprit_core::blocking::analyze(engine, &live.sessions, &relevant);
+            live.blocking = culprit_core::blocking::analyze(engine, &live.sessions, &relevant, &[]);
             let mut remaining: Vec<_> = live.sessions.iter().map(|s| &s.id).collect();
             remaining.sort();
             let key = serde_json::to_string(&remaining).unwrap();
