@@ -113,3 +113,134 @@ fn a_native_function_is_not_a_dropped_table_when_the_call_stops_running() {
     mark_table_indexes(&mut plan.root, &tables, true);
     assert_eq!(plan.root.facts().table_missing.as_deref(), Some("dbo.input_rows"));
 }
+
+fn access_plan(estimated_output: f64, actual_output: f64, estimated_access: f64, actual_access: f64) -> Plan {
+    let input = RelationalInput { kind: Kind::TableValuedParameter, provenance: Provenance::NativeParameterMetadata };
+    let mut plan = input_plan(Some(input), estimated_output, actual_output);
+    plan.root.facts_mut().access_rows =
+        crate::plan_facts::PlanAccessRows::new(Some(estimated_access), Some(actual_access));
+    plan
+}
+
+#[test]
+fn tvp_selectivity_discrepancy_is_distinct_from_access_volume_or_a_cached_input_size_claim() {
+    let plan = access_plan(100.0, 10_000.0, 10_000.0, 10_000.0);
+    let concern = estimate_concern(&plan);
+    assert!(concern.detail.contains(&t!("insight.relational_input.selectivity")));
+    assert!(concern.detail.contains(&t!("insight.relational_input.access_counts", estimated = "10K", actual = "10K")));
+    assert!(concern.fix.starts_with(&t!("insight.relational_input.investigate_selectivity")));
+    assert!(concern.fix.contains(&t!("insight.misestimate.fix.tvp", table = "@input")));
+    assert_eq!(concern.verify, t!("insight.relational_input.verify"));
+    assert!(concern.fix_sql.is_none());
+
+    let volume = estimate_concern(&access_plan(100.0, 10_000.0, 100.0, 10_000.0));
+    assert!(volume.detail.contains(&t!("insight.relational_input.access_volume")));
+    assert!(volume.fix.starts_with(&t!("insight.relational_input.investigate_volume")));
+    let both = estimate_concern(&access_plan(1.0, 10_000.0, 100.0, 10_000.0));
+    assert!(both.detail.contains(&t!("insight.relational_input.access_and_selectivity")));
+}
+
+#[test]
+fn convenience_rows_read_missing_actuals_partial_workers_or_invalid_counts_do_not_gain_access_provenance() {
+    for missing in [
+        "legacy-only",
+        "estimated-only",
+        "actual-only",
+        "no-executions",
+        "zero-executions",
+        "fractional-executions",
+        "parallel",
+        "invalid",
+        "inconsistent-output",
+    ] {
+        let mut plan = access_plan(100.0, 10_000.0, 10_000.0, 10_000.0);
+        let node = &mut plan.root;
+        match missing {
+            "legacy-only" => {
+                node.facts_mut().access_rows = None;
+                node.rows_read = Some(10_000.0);
+            }
+            "estimated-only" => node.facts_mut().access_rows.as_mut().unwrap().actual_total = None,
+            "actual-only" => node.facts_mut().access_rows.as_mut().unwrap().estimated_per_execution = None,
+            "no-executions" => node.act_executions = None,
+            "zero-executions" => node.act_executions = Some(0.0),
+            "fractional-executions" => node.act_executions = Some(0.5),
+            "parallel" => node.facts_mut().parallel_threads = Some(2),
+            "invalid" => node.facts_mut().access_rows.as_mut().unwrap().actual_total = Some(f64::INFINITY),
+            "inconsistent-output" => node.facts_mut().access_rows.as_mut().unwrap().actual_total = Some(100.0),
+            _ => unreachable!(),
+        }
+        assert!(super::super::relational_inputs::AccessComparison::from_node(node).is_none(), "{missing}");
+        if missing != "zero-executions" {
+            let concern = estimate_concern(&plan);
+            assert!(!concern.detail.contains(&t!("insight.relational_input.selectivity")), "{missing}");
+        }
+    }
+}
+
+#[test]
+fn repeated_serial_access_totals_and_aggregated_final_output_keep_their_original_scopes() {
+    let mut input = access_plan(1.0, 10_000.0, 10_000.0, 1_000_000.0).root;
+    input.act_executions = Some(100.0);
+    let mut aggregate = measured(0, "Stream Aggregate", NodeKind::Aggregate, 1.0, 1.0, 1.0);
+    aggregate.children = vec![input];
+    let concern = estimate_concern(&actual(Engine::Mssql, aggregate, 400.0));
+    assert_eq!(concern.nodes, vec![1]);
+    let million = format::count(1_000_000.0);
+    assert!(concern.detail.contains(&t!(
+        "insight.relational_input.access_counts",
+        estimated = &million,
+        actual = &million
+    )));
+    assert!(concern.detail.contains(&t!("insight.relational_input.selectivity")));
+    assert!(concern.detail.contains("statement's final result"));
+}
+
+#[test]
+fn healthy_large_filtered_or_unmeasured_tvp_inputs_do_not_create_a_cardinality_diagnosis() {
+    let healthy = access_plan(1_000_000.0, 1_000_000.0, 1_000_000.0, 1_000_000.0);
+    let filtered = access_plan(100.0, 100.0, 10_000.0, 10_000.0);
+    let mut estimated = access_plan(100.0, 10_000.0, 10_000.0, 10_000.0);
+    estimated.kind = PlanKind::Estimated;
+    estimated.root.act_rows = None;
+    estimated.root.act_executions = None;
+    for plan in [healthy, filtered, estimated] {
+        assert!(
+            !insights(&plan).iter().any(|insight| matches!(insight.rule.as_str(), "misestimate" | "table-variable"))
+        );
+    }
+    let mut limited = access_plan(10_000.0, 10.0, 10_000.0, 10.0);
+    let mut top = measured(0, "Top", NodeKind::Other, 10.0, 10.0, 1.0);
+    top.children = vec![limited.root];
+    limited.root = top;
+    assert!(!insights(&limited).iter().any(|insight| insight.rule == "misestimate"));
+}
+
+#[test]
+fn relational_input_filter_and_spool_evidence_never_produce_direct_table_ddl() {
+    for input in [
+        RelationalInput { kind: Kind::TableValuedParameter, provenance: Provenance::NativeParameterMetadata },
+        RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration },
+        RelationalInput { kind: Kind::TemporaryTable, provenance: Provenance::NativePlan },
+        RelationalInput { kind: Kind::TableValuedFunction, provenance: Provenance::NativePlan },
+        RelationalInput { kind: Kind::Unknown, provenance: Provenance::Unresolved },
+    ] {
+        let mut plan = input_plan(Some(input), 100.0, 100.0);
+        plan.root.rows_read = Some(100_000.0);
+        plan.root.predicate = Some("[value]=(42)".into());
+        let filtered =
+            insights(&plan).into_iter().find(|insight| insight.rule == "scan-filter").expect("observed selective scan");
+        assert!(filtered.fix_sql.is_none());
+        assert_eq!(filtered.fix, statistics::relational_input_advice(input.kind, "@input"));
+        let mut spool = measured(0, "Index Spool", NodeKind::Spool, 100.0, 100.0, 1.0);
+        spool.detail = Some("Eager Spool".into());
+        spool.seek_predicate = Some("[value]=(42)".into());
+        spool.children = vec![plan.root];
+        let concern = insights(&actual(Engine::Mssql, spool, 400.0))
+            .into_iter()
+            .find(|insight| insight.rule == "eager-spool")
+            .unwrap();
+        assert!(concern.fix_sql.is_none());
+        assert_eq!(concern.fix, statistics::relational_input_advice(input.kind, "@input"));
+    }
+}

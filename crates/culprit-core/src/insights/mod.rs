@@ -27,6 +27,7 @@ mod memory;
 mod parallelism;
 mod predicates;
 mod query;
+mod relational_inputs;
 mod server;
 mod statistics;
 #[cfg(test)]

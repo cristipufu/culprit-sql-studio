@@ -331,7 +331,13 @@ pub(super) fn scan_filter(cx: &Cx) -> Vec<Draft> {
                 d.fix_sql = index_sql(cx.engine(), &table, &cols, &[], n.facts().table_kind.as_deref());
             }
         }
-        d.verify = t!("insight.scan_filter.verify", table = table_leaf(&table));
+        if let Some(input) = relational_input_kind(n) {
+            d.fix = statistics::relational_input_advice(input, &leaf);
+            d.fix_sql = None;
+            d.verify = t!("insight.relational_input.verify");
+        } else {
+            d.verify = t!("insight.scan_filter.verify", table = table_leaf(&table));
+        }
         out.push(d);
     }
     out
@@ -413,11 +419,36 @@ pub(super) fn eager_spool(cx: &Cx) -> Vec<Draft> {
         };
         d.fix = if keys.is_empty() { t!("insight.eager_spool.fix_computed") } else { t!("insight.eager_spool.fix") };
         // Nothing to create on a table the plan doesn't name.
-        d.fix_sql = table.and_then(|table| index_sql(Engine::Mssql, &table, &keys, &include, None));
-        d.verify = t!("insight.eager_spool.verify");
+        if let Some(input) = relational_input_for_target(n, table.as_deref()) {
+            d.fix = statistics::relational_input_advice(input, &leaf);
+            d.verify = t!("insight.relational_input.verify");
+        } else {
+            d.fix_sql = table.and_then(|table| index_sql(Engine::Mssql, &table, &keys, &include, None));
+            d.verify = t!("insight.eager_spool.verify");
+        }
         out.push(d);
     }
     out
+}
+
+fn relational_input_for_target(
+    node: &PlanNode,
+    object: Option<&str>,
+) -> Option<crate::plan_facts::RelationalInputKind> {
+    let object = object?;
+    let mut nodes = Vec::new();
+    node.walk(&mut nodes);
+    let kinds = nodes
+        .into_iter()
+        .filter(|node| node.object.as_deref() == Some(object))
+        .map(relational_input_kind)
+        .collect::<Vec<_>>();
+    let input = kinds.iter().find_map(|kind| *kind)?;
+    Some(if kinds.iter().all(|kind| *kind == Some(input)) {
+        input
+    } else {
+        crate::plan_facts::RelationalInputKind::Unknown
+    })
 }
 
 /// SQLite built a throwaway index for this statement (`AUTOMATIC COVERING INDEX ON t(x)`): by its own account no index

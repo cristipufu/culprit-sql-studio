@@ -69,6 +69,7 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
                 || wrapped_column(&cond, cx.engine()).is_some();
             let cols: Vec<String> = if on_expression { Vec::new() } else { filter_columns(&cond) };
             let input = relational_input_kind(n);
+            let access = input.and_then(|_| relational_inputs::AccessComparison::from_node(n));
             let mut detail = vec![if let Some(input) = input {
                 t!("insight.misestimate.detail.relational_input", kind = input_key(input))
             } else if !consumers {
@@ -78,6 +79,9 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
             } else {
                 t!("insight.misestimate.detail.planned")
             }];
+            if let Some(access) = &access {
+                detail.push(access.detail());
+            }
             if input.is_none() && cols.len() >= 2 {
                 detail.push(t!("insight.misestimate.detail.correlated", columns = format::list(&cols)));
             } else if input.is_none() && on_expression {
@@ -139,8 +143,11 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
                 (None, _, None) => (t!("insight.misestimate.fix.below"), None),
             };
             d.fix = fix;
+            if let Some(access) = &access {
+                d.fix = format!("{} {}", access.investigation(), d.fix);
+            }
             d.fix_sql = sql;
-            d.verify = t!("insight.misestimate.verify");
+            d.verify = if input.is_some() { t!("insight.relational_input.verify") } else { t!("insight.misestimate.verify") };
             d
         })
         .collect()
@@ -195,7 +202,7 @@ fn input_key(kind: crate::plan_facts::RelationalInputKind) -> &'static str {
     }
 }
 
-fn relational_input_advice(kind: crate::plan_facts::RelationalInputKind, table: &str) -> String {
+pub(super) fn relational_input_advice(kind: crate::plan_facts::RelationalInputKind, table: &str) -> String {
     use crate::plan_facts::RelationalInputKind::*;
     match kind {
         TableValuedParameter => t!("insight.misestimate.fix.tvp", table = table),

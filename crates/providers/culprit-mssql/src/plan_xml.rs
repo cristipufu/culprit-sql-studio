@@ -470,8 +470,14 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
         exchange_spill: child(relop, "Warnings").and_then(|w| child(w, "ExchangeSpillDetails")).map(|_| true),
         ..Default::default()
     };
-    let Counters { rows: act_rows, executions: act_executions, elapsed_ms: act_time_ms, rows_read, mut runtime } =
-        child(relop, "RunTimeInformation").map(|rt| runtime_counters(rt, &mut props, &mut facts)).unwrap_or_default();
+    let Counters {
+        rows: act_rows,
+        executions: act_executions,
+        elapsed_ms: act_time_ms,
+        rows_read,
+        actual_rows_read,
+        mut runtime,
+    } = child(relop, "RunTimeInformation").map(|rt| runtime_counters(rt, &mut props, &mut facts)).unwrap_or_default();
     // Sort/hash/exchange spill details say how many pages went to tempdb.
     let spilled: f64 = child(relop, "Warnings")
         .map(|w| {
@@ -488,6 +494,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
         collect_relops(o, &mut child_ops);
     }
     let estimated_read = relop.attribute("EstimatedRowsRead").and_then(|v| v.parse::<f64>().ok());
+    facts.access_rows = culprit_core::plan_facts::PlanAccessRows::new(estimated_read, actual_rows_read);
 
     let mut node = PlanNode {
         facts,
@@ -670,6 +677,7 @@ struct Counters {
     executions: Option<f64>,
     elapsed_ms: Option<f64>,
     rows_read: Option<f64>,
+    actual_rows_read: Option<f64>,
     runtime: Option<NodeRuntime>,
 }
 
@@ -679,6 +687,8 @@ fn runtime_counters(rt: Node, props: &mut Properties, facts: &mut culprit_core::
     let mut executions = 0.0;
     // Where SQL Server counted it: a measured 0 (an empty table, a seek that found nothing) is a count, not a gap.
     let mut rows_read: Option<f64> = None;
+    let mut access_complete = true;
+    let mut native_threads = std::collections::BTreeSet::new();
     let (mut rebinds, mut rewinds): (Option<f64>, Option<f64>) = (None, None);
     let mut threads_run = 0.0;
     let mut elapsed: Option<f64> = None;
@@ -706,7 +716,20 @@ fn runtime_counters(rt: Node, props: &mut Properties, facts: &mut culprit_core::
         if thread_executions > 0.0 && thread.attribute("Thread").is_some_and(|t| t != "0") {
             threads_run += 1.0;
         }
-        add(&mut rows_read, opt(thread, "ActualRowsRead"));
+        let read = opt(thread, "ActualRowsRead");
+        let valid_count = |value: f64| value.is_finite() && value >= 0.0;
+        let native_executions = opt(thread, "ActualExecutions").filter(|value| valid_count(*value));
+        let native_rows = opt(thread, "ActualRows").filter(|value| valid_count(*value));
+        access_complete &= thread
+            .attribute("Thread")
+            .and_then(|value| value.parse::<u32>().ok())
+            .is_some_and(|id| native_threads.insert(id))
+            && native_executions.is_some()
+            && native_rows.is_some()
+            && read.is_none_or(valid_count)
+            && (native_executions == Some(0.0) || read.is_some())
+            && (native_executions != Some(0.0) || native_rows == Some(0.0) && read.is_none_or(|value| value == 0.0));
+        add(&mut rows_read, read);
         // Spools: a rebind runs the input again, a rewind replays the rows the spool already holds.
         add(&mut rebinds, opt(thread, "ActualRebinds"));
         add(&mut rewinds, opt(thread, "ActualRewinds"));
@@ -755,6 +778,7 @@ fn runtime_counters(rt: Node, props: &mut Properties, facts: &mut culprit_core::
         executions: Some(executions),
         elapsed_ms: elapsed,
         rows_read,
+        actual_rows_read: rows_read.filter(|value| access_complete && value.is_finite() && *value >= 0.0),
         runtime: (!runtime.is_empty()).then_some(runtime),
     }
 }

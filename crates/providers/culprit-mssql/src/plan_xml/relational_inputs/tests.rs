@@ -19,6 +19,82 @@ fn input(xml: &str) -> Option<RelationalInput> {
     crate::plan_xml::parse_statement(xml, Some("0xA")).unwrap().root.facts.relational_input
 }
 
+fn access_plan(estimated: Option<&str>, threads: &str) -> culprit_core::Plan {
+    let estimated = estimated.map(|value| format!(r#" EstimatedRowsRead="{value}""#)).unwrap_or_default();
+    let xml = document(&format!(
+        r#"<StmtSimple StatementText="SELECT * FROM @rows" QueryHash="0xA" StatementSubTreeCost="10"><QueryPlan>
+        <RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="100"{estimated} EstimatedTotalSubtreeCost="10">
+        <RunTimeInformation>{threads}</RunTimeInformation><TableScan><Object Table="[@rows]" /></TableScan>
+        </RelOp></QueryPlan></StmtSimple>"#
+    ));
+    crate::plan_xml::parse_statement(&xml, Some("0xA")).unwrap()
+}
+
+#[test]
+fn native_actual_access_and_estimated_access_are_recorded_separately_without_promoting_fallbacks() {
+    let plan = access_plan(
+        Some("10000"),
+        r#"<RunTimeCountersPerThread Thread="0" ActualRows="100" ActualExecutions="1" ActualRowsRead="20000" />"#,
+    );
+    let rows = plan.root.facts.access_rows.unwrap();
+    assert_eq!(rows.estimated_per_execution, Some(10_000.0));
+    assert_eq!(rows.actual_total, Some(20_000.0));
+    assert_eq!(plan.root.act_rows, Some(100.0));
+
+    let fallback =
+        access_plan(Some("10000"), r#"<RunTimeCountersPerThread Thread="0" ActualRows="100" ActualExecutions="2" />"#);
+    assert_eq!(fallback.root.rows_read, Some(20_000.0), "the legacy convenience value remains an estimated fallback");
+    assert_eq!(fallback.root.facts.access_rows.unwrap().estimated_per_execution, Some(10_000.0));
+    assert_eq!(fallback.root.facts.access_rows.unwrap().actual_total, None);
+    let actual_only = access_plan(
+        None,
+        r#"<RunTimeCountersPerThread Thread="0" ActualRows="0" ActualExecutions="1" ActualRowsRead="0" />"#,
+    );
+    assert_eq!(actual_only.root.facts.access_rows.unwrap().estimated_per_execution, None);
+    assert_eq!(actual_only.root.facts.access_rows.unwrap().actual_total, Some(0.0));
+}
+
+#[test]
+fn actual_access_provenance_requires_all_active_native_workers_and_keeps_worker_scope() {
+    let coordinator = r#"<RunTimeCountersPerThread Thread="0" ActualRows="0" ActualExecutions="0" />"#;
+    let first =
+        r#"<RunTimeCountersPerThread Thread="1" ActualRows="100" ActualExecutions="1" ActualRowsRead="1000" />"#;
+    let second =
+        r#"<RunTimeCountersPerThread Thread="2" ActualRows="200" ActualExecutions="1" ActualRowsRead="2000" />"#;
+    let plan = access_plan(Some("1000"), &format!("{coordinator}{first}{second}"));
+    assert_eq!(plan.root.facts.access_rows.unwrap().actual_total, Some(3000.0));
+    assert_eq!(plan.root.act_rows, Some(300.0));
+    assert_eq!(plan.root.facts.parallel_threads, Some(2));
+    let partial =
+        access_plan(Some("1000"), &format!("{coordinator}{first}{}", second.replace(" ActualRowsRead=\"2000\"", "")));
+    assert_eq!(partial.root.rows_read, Some(1000.0));
+    assert_eq!(
+        partial.root.facts.access_rows.unwrap().actual_total,
+        None,
+        "a partial worker sum is not a qualified actual total"
+    );
+    let duplicate = access_plan(Some("1000"), &format!("{first}{first}"));
+    assert_eq!(duplicate.root.facts.access_rows.unwrap().actual_total, None);
+}
+
+#[test]
+fn missing_or_invalid_execution_and_access_counters_cannot_become_actual_access_evidence() {
+    for counters in [
+        r#"Thread="0" ActualRows="100" ActualRowsRead="1000""#,
+        r#"Thread="0" ActualRows="100" ActualExecutions="0" ActualRowsRead="1000""#,
+        r#"Thread="0" ActualRows="100" ActualExecutions="-1" ActualRowsRead="1000""#,
+        r#"Thread="0" ActualRows="100" ActualExecutions="1" ActualRowsRead="-1""#,
+        r#"Thread="0" ActualRows="100" ActualExecutions="1" ActualRowsRead="NaN""#,
+        r#"Thread="0" ActualRows="100" ActualExecutions="1" ActualRowsRead="inf""#,
+        r#"ActualRows="100" ActualExecutions="1" ActualRowsRead="1000""#,
+    ] {
+        let plan = access_plan(Some("1000"), &format!("<RunTimeCountersPerThread {counters} />"));
+        assert_eq!(plan.root.facts.access_rows.unwrap().actual_total, None, "{counters}");
+    }
+    let estimated = access_plan(Some("1000"), "");
+    assert_eq!(estimated.root.facts.access_rows.unwrap().actual_total, None);
+}
+
 #[test]
 fn variable_reference_and_parameter_data_type_do_not_distinguish_tvp_from_typed_local() {
     let xml = document(&statement(

@@ -55,6 +55,10 @@
               "est_executions": 1.0,
               "est_rows": 1.00024,
               "facts": {
+                "access_rows": {
+                  "actual_total": null,
+                  "estimated_per_execution": 1.00024
+                },
                 "columns_without_statistics": [],
                 "conditions": [],
                 "conversions": [],
@@ -388,6 +392,10 @@
               "est_executions": 1.0,
               "est_rows": 1.0008,
               "facts": {
+                "access_rows": {
+                  "actual_total": null,
+                  "estimated_per_execution": 200000.0
+                },
                 "columns_without_statistics": [],
                 "conditions": [],
                 "conversions": [],
