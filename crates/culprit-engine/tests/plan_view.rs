@@ -52,8 +52,14 @@ async fn workspace_plan_endpoints_project_the_selected_variant_and_execution_sta
     // Deliberately stale input: all endpoints must replace it with their own context.
     case.plan.view.as_mut().unwrap().cost_note = Some("obsolete".into());
     let reader = PlanReader(case.plan.clone());
-    let ws = culprit_engine::Workspace::open_in(&home)
-        .with_provider(Engine::Mssql, std::sync::Arc::new(move |_| Ok(Box::new(reader.clone()))));
+    let ws = culprit_engine::Workspace::open_in(&home).with_provider(
+        Engine::Mssql,
+        culprit_engine::ProviderRegistration::new(
+            std::sync::Arc::new(move |_| Ok(Box::new(reader.clone()))),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(culprit_engine::NewConnection {
         name: "replayed".into(),
         input: "mssql://reader@replay.invalid/culprit_demo".into(),

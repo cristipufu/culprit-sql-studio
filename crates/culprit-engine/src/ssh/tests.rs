@@ -53,6 +53,108 @@ fn manager(mode: &'static str, marker: Option<PathBuf>) -> Manager {
     Manager { factory: fixture(mode, marker), ..Manager::default() }
 }
 
+#[derive(Default)]
+struct ListingCredentials(AtomicUsize);
+impl ListingCredentials {
+    fn touched(&self) -> Error {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Error::internal("metadata listing must not acquire credentials")
+    }
+}
+impl culprit_auth::SecretStore for ListingCredentials {
+    fn get(&self, _: &str) -> Result<Option<String>> {
+        Err(self.touched())
+    }
+    fn set(&self, _: &str, _: &str) -> Result<()> {
+        Err(self.touched())
+    }
+    fn delete(&self, _: &str) -> Result<()> {
+        Err(self.touched())
+    }
+    fn forget(&self, _: &str) {
+        let _ = self.touched();
+    }
+}
+#[async_trait::async_trait]
+impl culprit_auth::DatabaseTokenProvider for ListingCredentials {
+    fn auth_kind(&self) -> culprit_core::AuthKind {
+        culprit_core::AuthKind::Entra
+    }
+    async fn database_token(
+        &self,
+        _: culprit_auth::DatabaseTokenRequest<'_>,
+    ) -> Result<culprit_auth::DatabaseCredential> {
+        Err(self.touched())
+    }
+}
+#[async_trait::async_trait]
+impl culprit_auth::DatabaseAuthentication for ListingCredentials {
+    fn auth_kind(&self) -> culprit_core::AuthKind {
+        culprit_core::AuthKind::Entra
+    }
+    async fn credential(
+        &self,
+        _: &ConnectionSpec,
+        _: &dyn culprit_auth::SecretStore,
+    ) -> Result<culprit_auth::DatabaseCredential> {
+        Err(self.touched())
+    }
+}
+
+#[test]
+fn static_recipe_listing_never_touches_saved_secrets_tokens_ssh_or_the_provider_factory() {
+    use culprit_core::AuthKind;
+    let directory = tempfile::tempdir().unwrap();
+    let factories = Arc::new(AtomicUsize::new(0));
+    let factory_calls = factories.clone();
+    let registration = crate::ProviderRegistration::new(
+        Arc::new(move |_| {
+            factory_calls.fetch_add(1, Ordering::SeqCst);
+            Err(Error::internal("listing must not construct the provider"))
+        }),
+        vec![],
+    )
+    .unwrap();
+    let workspace = crate::Workspace::open_in(directory.path()).with_provider(Engine::Postgres, registration);
+    workspace
+        .add_connection(crate::NewConnection {
+            name: "catalog".into(),
+            input: "postgres://reader@fixture.internal/shop".into(),
+            auth: Some(AuthKind::None),
+            ..Default::default()
+        })
+        .unwrap();
+    let credentials = Arc::new(ListingCredentials::default());
+    let mut workspace = workspace
+        .with_secrets(credentials.clone())
+        .with_authentication_provider(credentials.clone())
+        .with_database_tokens(credentials.clone());
+    let ssh_calls = Arc::new(AtomicUsize::new(0));
+    let ssh_observed = ssh_calls.clone();
+    workspace.ssh = Manager {
+        factory: Arc::new(move |_, _| {
+            ssh_observed.fetch_add(1, Ordering::SeqCst);
+            Err(Error::internal("listing must not construct SSH commands"))
+        }),
+        ..Manager::default()
+    };
+    for auth in [AuthKind::None, AuthKind::Password, AuthKind::Entra, AuthKind::AwsIam] {
+        let mut stored = workspace.store.get("catalog").unwrap();
+        stored.auth = auth;
+        stored.ssh = Some(ssh("blocked-bastion"));
+        stored.options.insert("sslrootcert".into(), "private-unavailable-certificate.pem".into());
+        workspace.store.put("catalog", stored).unwrap();
+        let before = std::fs::read(workspace.paths.connections_file()).unwrap();
+        assert!(workspace.telemetry_recipes("catalog").unwrap().is_empty());
+        assert_eq!(std::fs::read(workspace.paths.connections_file()).unwrap(), before);
+    }
+    assert_eq!(credentials.0.load(Ordering::SeqCst), 0);
+    assert_eq!(factories.load(Ordering::SeqCst), 0);
+    assert_eq!(ssh_calls.load(Ordering::SeqCst), 0);
+    assert!(workspace.ssh.routes.lock().unwrap().is_empty());
+    assert!(!workspace.source_gate.is_closed());
+}
+
 #[test]
 fn child_fixture() {
     use std::io::{Read, Write};
@@ -356,14 +458,18 @@ async fn testing_a_draft_uses_saved_credentials_and_preserves_the_saved_route() 
     let observed = seen.clone();
     let ws = ws.with_provider(
         Engine::Postgres,
-        Arc::new(move |spec| {
-            assert_eq!(spec.host, "db.internal");
-            assert_eq!(spec.password.as_deref(), Some("private-db-password"));
-            assert_eq!(spec.ssh.as_ref().unwrap().destination, "test-bastion");
-            assert!(spec.transport.is_some());
-            observed.fetch_add(1, Ordering::SeqCst);
-            Err(Error::new(ErrorCode::ConnectionFailed, "test provider refused the probe"))
-        }),
+        crate::ProviderRegistration::new(
+            Arc::new(move |spec| {
+                assert_eq!(spec.host, "db.internal");
+                assert_eq!(spec.password.as_deref(), Some("private-db-password"));
+                assert_eq!(spec.ssh.as_ref().unwrap().destination, "test-bastion");
+                assert!(spec.transport.is_some());
+                observed.fetch_add(1, Ordering::SeqCst);
+                Err(Error::new(ErrorCode::ConnectionFailed, "test provider refused the probe"))
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     let before = std::fs::read(temp.0.join("connections.toml")).unwrap();
     assert!(ws.test_ssh("draft", Some(ssh("test-bastion"))).await.is_err());

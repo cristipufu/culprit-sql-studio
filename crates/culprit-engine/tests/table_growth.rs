@@ -65,8 +65,14 @@ async fn each_scan_keeps_the_sizes_a_scan_a_day_before_read() {
     let home = std::env::temp_dir().join(format!("culprit-table-growth-{}", std::process::id()));
     let size = Arc::new(AtomicU64::new(2_331));
     let replay = size.clone();
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Mssql, Arc::new(move |_| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Mssql,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "shop".into(),
         input: "mssql://reader@replay.invalid:1433/culprit_demo".into(),

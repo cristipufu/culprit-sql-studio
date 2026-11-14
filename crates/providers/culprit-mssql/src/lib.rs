@@ -115,12 +115,14 @@ impl MssqlProvider {
     }
 }
 
+/// Static declarations from the same source registrations that construct native telemetry readers.
+/// This does not construct a provider, resolve credentials or establish runtime availability or work cost.
+pub fn telemetry_recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
+    telemetry::recipes()
+}
+
 #[async_trait]
 impl Provider for MssqlProvider {
-    fn telemetry_recipes(&self) -> Vec<culprit_core::telemetry::RecipeDescriptor> {
-        telemetry::recipes()
-    }
-
     async fn telemetry_resources(
         &self,
         request: &culprit_core::telemetry::ResourceDiscoveryRequest,

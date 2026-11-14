@@ -3,6 +3,7 @@ mod activity;
 #[cfg(test)]
 mod native_tests;
 mod operational;
+mod recipes;
 use crate::native::{
     self,
     metadata::{self, Metadata},
@@ -11,6 +12,7 @@ use crate::native::{
 use culprit_core::{Engine, Error, ErrorCode, Result, telemetry::*};
 use culprit_postgres::wire::{Connector, NativeRead, ReadSession, Row, catalog};
 use culprit_read::{ReadBatch, SnapshotReader, SnapshotRecheck, SnapshotRecord, SnapshotScope, SnapshotSource};
+pub(crate) use recipes::{declarations, open as source};
 #[derive(Clone, Copy)]
 enum Recipe {
     Statements,
@@ -78,34 +80,11 @@ impl Recipe {
         }
     }
 }
-pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
-    request.validate()?;
-    request.subject.require_database()?;
-    if request.collection() == TelemetryCollection::Activity {
-        return activity::source(connector, request);
-    }
-    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::Operational) {
-        return operational::source(connector, request);
-    }
-    let recipe = match request.collection() {
-        TelemetryCollection::Snapshot(dataset) => match dataset {
-            SnapshotDataset::StatementCounters => Recipe::Statements,
-            SnapshotDataset::StatementDefinitions => Recipe::Definitions,
-            SnapshotDataset::RetainedPlans => Recipe::Plans,
-            SnapshotDataset::Settings => Recipe::Schema(schema::Kind::Settings),
-            SnapshotDataset::Tables => Recipe::Schema(schema::Kind::Tables),
-            SnapshotDataset::Indexes => Recipe::Schema(schema::Kind::Indexes),
-            SnapshotDataset::Columns => Recipe::Schema(schema::Kind::Catalog(catalog::Kind::Columns)),
-            SnapshotDataset::ForeignKeys => Recipe::Schema(schema::Kind::Catalog(catalog::Kind::ForeignKeys)),
-            SnapshotDataset::CheckConstraints => Recipe::Schema(schema::Kind::Catalog(catalog::Kind::Checks)),
-            SnapshotDataset::Objects => Recipe::Schema(schema::Kind::Catalog(catalog::Kind::Objects)),
-            SnapshotDataset::Triggers => Recipe::Schema(schema::Kind::Catalog(catalog::Kind::Triggers)),
-            SnapshotDataset::Partitions => Recipe::Schema(schema::Kind::Catalog(catalog::Kind::Partitions)),
-            SnapshotDataset::Statistics => Recipe::Schema(schema::Kind::Catalog(catalog::Kind::Statistics)),
-            _ => return Err(unsupported()),
-        },
-        _ => return Err(unsupported()),
-    };
+fn snapshot_source(
+    connector: Connector,
+    request: &CollectionRequest,
+    recipe: Recipe,
+) -> Result<Box<dyn TelemetrySource>> {
     Ok(Box::new(SnapshotSource::new(
         Reader {
             host: connector.host.clone(),
@@ -119,9 +98,6 @@ pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Resul
         },
         request,
     )?))
-}
-fn unsupported() -> Error {
-    Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported"))
 }
 struct Reader {
     io: ReadSession,

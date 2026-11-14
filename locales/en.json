@@ -3829,6 +3829,7 @@
   "engine.query_log.statements": "{n, plural, one {{count} statement} other {{count} statements}}",
   "engine.query_log.stopped": "Reading the query log stopped: {why}",
   "engine.query_log.the_log": "the log",
+  "engine.registry.invalid_recipes": "The provider's telemetry catalog is invalid",
   "engine.registry.unknown_engine_hint": "Use a postgres://, mssql://, mysql:// or sqlite:// URL, or pass --engine",
   "engine.registry.unsupported": "This build of Culprit has no {engine} support",
   "engine.reporting.digest_nothing": "Name a connection or pass --report <file>",

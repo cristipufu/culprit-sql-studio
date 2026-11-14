@@ -165,8 +165,14 @@ fn replica() -> Snapshot {
 #[tokio::test]
 async fn scan_keeps_provider_counters_before_history_and_does_not_invent_a_runtime_collectors_version() {
     let home = home("collection");
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(ReplicaReplay) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_| Ok(Box::new(ReplicaReplay) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "replayed".into(),
         input: "postgres://reader@replay.invalid:5432/demo".into(),

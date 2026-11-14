@@ -114,11 +114,27 @@ fn unregistered_datasets_or_subjects_return_unsupported_without_a_native_connect
 #[test]
 fn specialized_descriptors_take_their_envelopes_from_native_profile_owners() {
     let page = declarations().into_iter().find(|descriptor| descriptor.id == "mssql.page-wait-targets").unwrap();
-    assert_eq!(page.budget, crate::page_waits::bounded_budget(&CollectionBudget::default()));
+    assert_eq!(page.budget, crate::page_waits::bounded_budget(&CollectionBudget::upper_limits()));
     let activity = declarations().into_iter().find(|descriptor| descriptor.id == "mssql.activity").unwrap();
-    assert_eq!(activity.budget, activity::bounded_budget(&CollectionBudget::default()));
+    assert_eq!(activity.budget, activity::bounded_budget(&CollectionBudget::upper_limits()));
     let oom = declarations().into_iter().find(|descriptor| descriptor.id == "mssql.memory-failures").unwrap();
     assert_eq!(oom.budget.max_queries, 8, "six native phases and two named snapshot-clock calls");
+}
+
+#[test]
+fn caller_defaults_do_not_silently_cap_an_explicit_larger_history_capture() {
+    let recipe = REGISTRATIONS.iter().find(|recipe| recipe.id == "mssql.query-history").unwrap();
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: selection(recipe.selector),
+        budget: CollectionBudget::upper_limits(),
+    };
+    assert!(request.validate().is_ok());
+    assert!(request.budget.max_snapshot_rows > CollectionBudget::default().max_snapshot_rows);
+    assert_eq!(recipe.bounded_request(&request).budget, request.budget);
+    let source =
+        open(Arc::new(Pool::new(tiberius::Config::new(), None)), &request, "fixture.invalid".into(), 1433).unwrap();
+    assert_eq!(source.query_count(), 0);
 }
 
 #[test]

@@ -4,6 +4,7 @@ mod events;
 pub(crate) mod native_failures;
 #[cfg(test)]
 mod native_tests;
+mod recipes;
 mod resources;
 mod runtime_distributions;
 mod session_memory;
@@ -131,49 +132,19 @@ impl Recipe {
     }
 }
 pub(crate) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
-    request.validate()?;
-    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::RuntimeDistributions) {
-        return runtime_distributions::source(connector, request);
-    }
-    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures) {
-        return native_failures::source(connector, request);
-    }
-    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::SessionMemory) {
-        return session_memory::source(connector, request);
-    }
+    recipes::open(connector, request)
+}
+
+pub(crate) fn recipes() -> Vec<RecipeDescriptor> {
+    recipes::declarations()
+}
+
+fn snapshot_source(
+    connector: Arc<Connector>,
+    request: &CollectionRequest,
+    recipe: Recipe,
+) -> Result<Box<dyn TelemetrySource>> {
     request.subject.require_database()?;
-    if request.collection() == TelemetryCollection::Activity {
-        return activity::source(connector, request);
-    }
-    if request.collection() == TelemetryCollection::DeadlockHistory {
-        return events::source(connector, request);
-    }
-    let recipe = match request.collection() {
-        TelemetryCollection::Snapshot(SnapshotDataset::Settings) => Recipe::Settings,
-        TelemetryCollection::Snapshot(SnapshotDataset::Replication) => Recipe::Replication,
-        TelemetryCollection::Snapshot(SnapshotDataset::StatementCounters) => Recipe::Statements,
-        TelemetryCollection::Snapshot(SnapshotDataset::StatementDefinitions) => Recipe::Definitions,
-        TelemetryCollection::Snapshot(SnapshotDataset::Cleanup) => {
-            Recipe::Operational(native::operational::Kind::Transactions)
-        }
-        TelemetryCollection::Snapshot(SnapshotDataset::Operational) => {
-            Recipe::Operational(native::operational::Kind::Status)
-        }
-        TelemetryCollection::Snapshot(dataset) => match dataset {
-            SnapshotDataset::Tables => Recipe::Catalog(native::catalog::Kind::Tables),
-            SnapshotDataset::Indexes => Recipe::Catalog(native::catalog::Kind::Indexes),
-            SnapshotDataset::Columns => Recipe::Catalog(native::catalog::Kind::Columns),
-            SnapshotDataset::ForeignKeys => Recipe::Catalog(native::catalog::Kind::ForeignKeys),
-            SnapshotDataset::CheckConstraints => Recipe::Catalog(native::catalog::Kind::Checks),
-            SnapshotDataset::Objects => Recipe::Catalog(native::catalog::Kind::Objects),
-            SnapshotDataset::Triggers => Recipe::Catalog(native::catalog::Kind::Triggers),
-            SnapshotDataset::Partitions => Recipe::Catalog(native::catalog::Kind::Partitions),
-            SnapshotDataset::Statistics => Recipe::Catalog(native::catalog::Kind::Statistics),
-            SnapshotDataset::Sequences => Recipe::Catalog(native::catalog::Kind::Sequences),
-            _ => return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported"))),
-        },
-        _ => return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported"))),
-    };
     crate::probe::database_of(&connector)?;
     let reader = MysqlSnapshotReader {
         io: ReadSession::new(connector.clone(), request.budget.clone(), Scope::Server),

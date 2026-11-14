@@ -590,10 +590,14 @@ impl TestDirectory {
     fn workspace(&self, state: Arc<State>) -> Workspace {
         let ws = Workspace::open_in(self.0.path().join("workspace")).with_provider(
             Engine::Postgres,
-            Arc::new(move |_| {
-                state.factories.fetch_add(1, Ordering::SeqCst);
-                Ok(Box::new(TestProvider(state.clone())))
-            }),
+            culprit_engine::ProviderRegistration::new(
+                Arc::new(move |_| {
+                    state.factories.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(TestProvider(state.clone())))
+                }),
+                Vec::new(),
+            )
+            .unwrap(),
         );
         ws.add_connection(NewConnection {
             name: "pilot".into(),
@@ -942,10 +946,14 @@ async fn standalone_unconfirmed_work_blocks_native_reads_after_workspace_restart
     let provider_state = state.clone();
     let restarted = Workspace::open_in(dir.0.path().join("workspace")).with_provider(
         Engine::Postgres,
-        Arc::new(move |_| {
-            provider_state.factories.fetch_add(1, Ordering::SeqCst);
-            Ok(Box::new(TestProvider(provider_state.clone())))
-        }),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| {
+                provider_state.factories.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(TestProvider(provider_state.clone())))
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     let attempt = restarted
         .collect_once("pilot", request(), &dir.0.path().join("after-restart"), &CollectionCancellation::default())
@@ -1123,10 +1131,14 @@ async fn unconfirmed_native_work_remains_blocked_after_outbox_and_workspace_rest
     let provider_state = new_state.clone();
     let restarted = Workspace::open_in(dir.0.path().join("workspace")).with_provider(
         Engine::Postgres,
-        Arc::new(move |_| {
-            provider_state.factories.fetch_add(1, Ordering::SeqCst);
-            Ok(Box::new(TestProvider(provider_state.clone())))
-        }),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| {
+                provider_state.factories.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(TestProvider(provider_state.clone())))
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     let error = restarted
         .collect_into_outbox("pilot", request(), &mut outbox, &CollectionCancellation::default())

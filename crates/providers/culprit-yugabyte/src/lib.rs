@@ -31,6 +31,11 @@ use culprit_core::{
 use culprit_postgres::wire::NativeRead;
 use culprit_postgres::wire::{Connector, SqlExecutor};
 
+/// Native source declarations share the dispatch catalog; live availability and work-cost qualification remain separate.
+pub fn telemetry_recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
+    telemetry::declarations()
+}
+
 pub fn component_version() -> culprit_core::ComponentVersion {
     culprit_core::ComponentVersion::package(
         "culprit-yugabyte",

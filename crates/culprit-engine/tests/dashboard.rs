@@ -69,7 +69,10 @@ fn fixture(tag: &str, response: Result<LiveState>) -> Fixture {
     let home = std::env::temp_dir().join(format!("culprit-dashboard-{tag}-{}", std::process::id()));
     let reads = Arc::new(AtomicUsize::new(0));
     let reader = Reader { reads: reads.clone(), response };
-    let ws = Workspace::open_in(&home).with_provider(Engine::Postgres, Arc::new(move |_| Ok(Box::new(reader.clone()))));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(Arc::new(move |_| Ok(Box::new(reader.clone()))), Vec::new()).unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "replayed".into(),
         input: "postgres://reader@replay.invalid/demo".into(),

@@ -85,10 +85,14 @@ async fn a_connection_saved_without_a_password_never_sends_one_left_under_its_na
     let seen = sent.clone();
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
-        Arc::new(move |spec: &ConnectionSpec| {
-            seen.lock().unwrap().push(spec.password.clone());
-            Ok(Box::new(Sessions(Engine::Postgres, Arc::default())) as Box<dyn Provider>)
-        }),
+        crate::ProviderRegistration::new(
+            Arc::new(move |spec: &ConnectionSpec| {
+                seen.lock().unwrap().push(spec.password.clone());
+                Ok(Box::new(Sessions(Engine::Postgres, Arc::default())) as Box<dyn Provider>)
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     ws.add_connection(NewConnection {
         name: "shop".into(),
@@ -221,7 +225,11 @@ async fn sessions_are_never_interrupted_on_production() {
     let recorded = calls.clone();
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Postgres,
-        Arc::new(move |_| Ok(Box::new(Sessions(Engine::Postgres, recorded.clone())) as Box<dyn Provider>)),
+        crate::ProviderRegistration::new(
+            Arc::new(move |_| Ok(Box::new(Sessions(Engine::Postgres, recorded.clone())) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     for (name, environment) in [("shop-dev", Environment::Development), ("shop-prod", Environment::Production)] {
         ws.add_connection(NewConnection {
@@ -260,7 +268,11 @@ async fn native_sessions_keep_complete_identity_for_progress_and_actions() {
     let recorded = calls.clone();
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Yugabyte,
-        Arc::new(move |_| Ok(Box::new(Sessions(Engine::Yugabyte, recorded.clone())) as Box<dyn Provider>)),
+        crate::ProviderRegistration::new(
+            Arc::new(move |_| Ok(Box::new(Sessions(Engine::Yugabyte, recorded.clone())) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     for (name, environment) in [("yb-dev", Environment::Development), ("yb-prod", Environment::Production)] {
         ws.add_connection(NewConnection {

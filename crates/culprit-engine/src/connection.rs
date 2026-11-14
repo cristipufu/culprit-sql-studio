@@ -10,7 +10,7 @@ use culprit_core::{
 
 use crate::{
     ConnectionInfo, ConnectionSettings, DiscoveredDatabase, DiscoveryResult, ImportCandidate, ImportSource,
-    NewConnection, ParsedConnection, ProviderFactory, connstr, discover, import, query_log, registry, reports,
+    NewConnection, ParsedConnection, ProviderRegistration, connstr, discover, import, query_log, registry, reports,
     secrets::SecretStore,
     store::{self, Paths, Store, StoredConnection},
 };
@@ -27,7 +27,7 @@ pub(crate) struct Connections<'a> {
     pub connection_tokens:
         &'a std::collections::BTreeMap<String, std::sync::Arc<dyn culprit_auth::DatabaseTokenProvider>>,
     pub database_tokens: Option<&'a dyn culprit_auth::DatabaseTokenProvider>,
-    pub providers: &'a [(Engine, ProviderFactory)],
+    pub providers: &'a [(Engine, ProviderRegistration)],
     pub ssh: &'a crate::ssh::Manager,
     pub source_gate: &'a culprit_read::admission::SourceGate,
 }
@@ -41,10 +41,19 @@ impl Connections<'_> {
     }
 
     fn open_provider(&self, spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {
-        match self.providers.iter().find(|(e, _)| Some(*e) == spec.engine) {
-            Some((_, factory)) => factory(spec),
-            None => registry::provider(spec),
+        self.selected_registration(registry::engine(spec)?).and_then(|registration| registration.open(spec))
+    }
+
+    fn selected_registration(&self, engine: Engine) -> Result<ProviderRegistration> {
+        match self.providers.iter().find(|(selected, _)| *selected == engine) {
+            Some((_, registration)) => Ok(registration.clone()),
+            None => registry::registration(engine),
         }
+    }
+
+    pub(crate) fn telemetry_recipes(&self, name: &str) -> Result<Vec<culprit_core::telemetry::RecipeDescriptor>> {
+        let engine = self.store.get(name)?.engine;
+        Ok(self.selected_registration(engine)?.telemetry_recipes().to_vec())
     }
 
     pub(crate) fn connections(&self) -> Result<Vec<ConnectionInfo>> {

@@ -99,10 +99,14 @@ fn workspace(home: &std::path::Path, state: &Arc<State>) -> Workspace {
     let state = state.clone();
     Workspace::open_in(home).with_provider(
         Engine::Postgres,
-        Arc::new(move |_| {
-            state.factories.fetch_add(1, Ordering::Relaxed);
-            Ok(Box::new(FixtureProvider(state.clone())))
-        }),
+        crate::ProviderRegistration::new(
+            Arc::new(move |_| {
+                state.factories.fetch_add(1, Ordering::Relaxed);
+                Ok(Box::new(FixtureProvider(state.clone())))
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
     )
 }
 fn configured(home: &std::path::Path, state: &Arc<State>) -> Workspace {

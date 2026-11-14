@@ -14,6 +14,7 @@ use culprit_read::{
 use std::{path::PathBuf, time::Duration};
 
 const METADATA_BUDGET: Duration = Duration::from_millis(250);
+pub(crate) mod recipes;
 
 pub(crate) fn source(
     reader: FileReader,
@@ -22,24 +23,9 @@ pub(crate) fn source(
 ) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
     request.subject.require_database()?;
-    let TelemetryCollection::Snapshot(dataset) = request.collection() else {
-        return Err(unsupported());
-    };
-    if !matches!(
-        dataset,
-        SnapshotDataset::Settings
-            | SnapshotDataset::Operational
-            | SnapshotDataset::Tables
-            | SnapshotDataset::Indexes
-            | SnapshotDataset::Columns
-            | SnapshotDataset::ForeignKeys
-            | SnapshotDataset::Objects
-            | SnapshotDataset::Triggers
-            | SnapshotDataset::Statistics
-            | SnapshotDataset::Sequences
-    ) {
-        return Err(unsupported());
-    }
+    let recipe = recipes::select(request).ok_or_else(unsupported)?;
+    let dataset = recipe.dataset;
+    let request = recipe.bounded_request(request);
     Ok(Box::new(SnapshotSource::new(
         Reader {
             reader,
@@ -51,7 +37,7 @@ pub(crate) fn source(
             observed_until: String::new(),
             scope: None,
         },
-        request,
+        &request,
     )?))
 }
 fn unsupported() -> Error {

@@ -183,19 +183,36 @@ impl Default for CollectionBudget {
 }
 
 impl CollectionBudget {
+    /// The validated protocol ceiling, not a suggested collection profile or a production cost qualification.
+    /// Provider-owned limits clamp this envelope; an actual read still intersects its caller's budget.
+    pub const fn upper_limits() -> Self {
+        Self {
+            page_rows: 10_000,
+            max_snapshot_rows: 100_000,
+            page_bytes: 8 * 1024 * 1024,
+            total_bytes: 1024 * 1024 * 1024,
+            max_sql_bytes: 4 * 1024 * 1024,
+            max_plan_bytes: 4 * 1024 * 1024,
+            max_pages: 10_000,
+            max_queries: 100_000,
+            statement_timeout_ms: 60_000,
+            total_timeout_ms: 900_000,
+        }
+    }
     pub fn validate(&self) -> Result<()> {
-        if !(1..=100_000).contains(&self.max_snapshot_rows)
-            || !(1..=10_000).contains(&self.page_rows)
-            || !(1024..=8 * 1024 * 1024).contains(&self.page_bytes)
+        let upper = Self::upper_limits();
+        if !(1..=upper.max_snapshot_rows).contains(&self.max_snapshot_rows)
+            || !(1..=upper.page_rows).contains(&self.page_rows)
+            || !(1024..=upper.page_bytes).contains(&self.page_bytes)
             || self.total_bytes < self.page_bytes
-            || self.total_bytes > 1024 * 1024 * 1024
-            || !(1024..=4 * 1024 * 1024).contains(&self.max_sql_bytes)
-            || !(1024..=4 * 1024 * 1024).contains(&self.max_plan_bytes)
-            || !(1..=10_000).contains(&self.max_pages)
-            || !(1..=100_000).contains(&self.max_queries)
-            || !(1..=60_000).contains(&self.statement_timeout_ms)
+            || self.total_bytes > upper.total_bytes
+            || !(1024..=upper.max_sql_bytes).contains(&self.max_sql_bytes)
+            || !(1024..=upper.max_plan_bytes).contains(&self.max_plan_bytes)
+            || !(1..=upper.max_pages).contains(&self.max_pages)
+            || !(1..=upper.max_queries).contains(&self.max_queries)
+            || !(1..=upper.statement_timeout_ms).contains(&self.statement_timeout_ms)
             || self.total_timeout_ms < self.statement_timeout_ms
-            || self.total_timeout_ms > 900_000
+            || self.total_timeout_ms > upper.total_timeout_ms
         {
             return Err(Error::invalid(t!("collection.invalid_budget")));
         }

@@ -55,6 +55,12 @@ pub fn component_version() -> culprit_core::ComponentVersion {
     )
 }
 
+/// Static declarations from the same source registrations used for native MySQL/MariaDB telemetry dispatch.
+/// Listing never constructs a provider or establishes native product, permission or production cost availability.
+pub fn telemetry_recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
+    telemetry::recipes()
+}
+
 pub struct MysqlProvider {
     connector: Arc<Connector>,
     spec: ConnectionSpec,

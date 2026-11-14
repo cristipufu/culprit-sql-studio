@@ -284,6 +284,19 @@ episode counts only for a checkpoint matching the exact sealed native input, sep
 Outbox admission still precedes native work. This loop does not implement fleet fairness, shared-pool budgets,
 pressure suppression or remote delivery. The source has no knowledge of polling cadence or incident persistence.
 
+The selected `ProviderRegistration` binds one native factory to its source-owned telemetry recipe catalog.
+`Workspace::with_provider(engine, registration)` replaces both together; an empty runtime catalog is undeclared
+support and never inherits built-in recipes. `Workspace::telemetry_recipes(connection)` reads saved engine metadata
+only: it does not construct a provider, resolve credentials, attach SSH or issue native reads. The engine registry
+selects built-in registrations behind their Cargo features. Every built-in provider's public static catalog comes
+from the same registrations that dispatch its native readers; shared-resource discovery also uses those registrations
+where supported.
+The shared Core validator bounds catalogs and rejects invalid descriptors, duplicate IDs and overlapping
+selector/subject ownership. Collector-derived diagnostics cannot be advertised as a native recipe. A declaration
+establishes neither native permissions nor production work-cost qualification. Descriptors apply source-owned clamps
+to the validated protocol ceiling; actual requests intersect that envelope with their caller's limits. Caller defaults
+remain defaults, so a catalog cannot silently turn a 500-row default into a hard ceiling for larger valid requests.
+
 The package layout distinguishes independent extension roles:
 
 | Directory | Role | Examples |

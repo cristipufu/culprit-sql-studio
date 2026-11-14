@@ -39,6 +39,7 @@ pub mod plans;
 mod private_fs;
 mod process;
 mod program;
+mod provider_registration;
 mod query_log;
 pub mod reading;
 pub mod registry;
@@ -71,6 +72,7 @@ pub use import::{ImportCandidate, ImportSource};
 pub use marks::Mark;
 pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
+pub use provider_registration::ProviderRegistration;
 pub use reports::ReportSummary;
 use secrets::SecretStore;
 pub use share::{export_diff, export_plan};
@@ -92,7 +94,7 @@ pub struct Workspace {
     connection_tokens: std::collections::BTreeMap<String, Arc<dyn culprit_auth::DatabaseTokenProvider>>,
     database_tokens: Option<Arc<dyn culprit_auth::DatabaseTokenProvider>>,
     extra_checks: Vec<Arc<dyn Check>>,
-    providers: Vec<(Engine, ProviderFactory)>,
+    providers: Vec<(Engine, ProviderRegistration)>,
     ssh: ssh::Manager,
     previews: tokio::sync::Semaphore,
     source_gate: culprit_read::admission::SourceGate,
@@ -232,11 +234,17 @@ impl Workspace {
         self
     }
 
-    /// Use `factory` instead of the built-in provider for `engine` (a wrapped driver, a remote collector, a test double).
-    pub fn with_provider(mut self, engine: Engine, factory: ProviderFactory) -> Workspace {
+    /// Select a provider's native factory and static recipe catalog together. Overrides never inherit built-in declarations.
+    pub fn with_provider(mut self, engine: Engine, registration: ProviderRegistration) -> Workspace {
         self.providers.retain(|(e, _)| *e != engine);
-        self.providers.push((engine, factory));
+        self.providers.push((engine, registration));
         self
+    }
+
+    /// List the selected provider's validated declarations from saved metadata only, without resolving credentials,
+    /// opening an SSH route, invoking a provider factory or making native requests. Empty means undeclared support.
+    pub fn telemetry_recipes(&self, name: &str) -> Result<Vec<culprit_core::telemetry::RecipeDescriptor>> {
+        self.connection_service().telemetry_recipes(name)
     }
 
     /// Plug in a check from outside Culprit. It runs, ranks and locks exactly like a built-in check.

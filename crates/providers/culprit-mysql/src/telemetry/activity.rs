@@ -7,13 +7,18 @@ const MAX_BASELINE_ROWS: u32 = 500;
 // PREPARE and EXECUTE each consume one native phase: seven owned setup phases, five metadata phases at
 // each bound, one consumer read and two phases for the selected-database frame.
 const MAX_BASELINE_QUERIES: u32 = 20;
+pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    let mut budget = requested.clone();
+    budget.max_snapshot_rows = budget.max_snapshot_rows.min(MAX_BASELINE_ROWS);
+    budget.page_rows = budget.page_rows.min(MAX_BASELINE_ROWS);
+    budget.max_queries = budget.max_queries.min(MAX_BASELINE_QUERIES);
+    budget.statement_timeout_ms = budget.statement_timeout_ms.min(1_000);
+    budget.total_timeout_ms = budget.total_timeout_ms.min(5_000);
+    budget
+}
 fn bounded_request(request: &CollectionRequest) -> CollectionRequest {
     let mut request = request.clone();
-    request.budget.max_snapshot_rows = request.budget.max_snapshot_rows.min(MAX_BASELINE_ROWS);
-    request.budget.page_rows = request.budget.page_rows.min(MAX_BASELINE_ROWS);
-    request.budget.max_queries = request.budget.max_queries.min(MAX_BASELINE_QUERIES);
-    request.budget.statement_timeout_ms = request.budget.statement_timeout_ms.min(1_000);
-    request.budget.total_timeout_ms = request.budget.total_timeout_ms.min(5_000);
+    request.budget = bounded_budget(&request.budget);
     request
 }
 struct ActivityReader<R = ReadSession> {

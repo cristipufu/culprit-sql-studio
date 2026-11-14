@@ -1,6 +1,24 @@
 //! Source providers own one registration catalog. Common scheduling never interprets engine identity as support.
 use super::*;
 
+pub const MAX_TELEMETRY_RECIPES: usize = 128;
+
+/// A selected provider declares one bounded, unambiguous native source per selector and subject.
+/// Empty means undeclared support and never authorizes a source from another provider's catalog.
+pub fn recipe_catalog_is_valid(recipes: &[RecipeDescriptor]) -> bool {
+    let mut ids = std::collections::BTreeSet::new();
+    recipes.len() <= MAX_TELEMETRY_RECIPES
+        && recipes.iter().enumerate().all(|(index, recipe)| {
+            recipe.is_valid()
+                && !matches!(recipe.selector, RecipeSelector::Collection(TelemetryCollection::Diagnostics))
+                && ids.insert(&recipe.id)
+                && recipes[..index].iter().all(|before| {
+                    before.selector != recipe.selector
+                        || before.subjects.iter().all(|subject| !recipe.subjects.contains(subject))
+                })
+        })
+}
+
 impl CollectionBudget {
     /// Native profile envelopes and caller limits both apply; intersect every independently enforced dimension.
     pub fn intersection(&self, other: &Self) -> Self {

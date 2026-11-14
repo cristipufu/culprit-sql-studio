@@ -2,6 +2,7 @@
 mod activity;
 #[cfg(test)]
 mod native_tests;
+mod recipes;
 use crate::{
     connect::Connector,
     native::{
@@ -13,6 +14,7 @@ use crate::{
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 use culprit_read::{ReadBatch, SnapshotReader, SnapshotRecheck, SnapshotRecord, SnapshotScope, SnapshotSource};
+pub(crate) use recipes::{declarations, open as source};
 #[derive(Clone, Copy)]
 enum Recipe {
     Statements,
@@ -249,50 +251,6 @@ impl Recipe {
         }
     }
 }
-pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
-    request.validate()?;
-    if let CollectionSubject::Shared { resource } = &request.subject {
-        if resource.engine != culprit_core::Engine::Postgres
-            || resource.kind != SharedResourceKind::Instance
-            || request.collection() != TelemetryCollection::Snapshot(SnapshotDataset::Operational)
-        {
-            return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
-        }
-        return snapshot_source(connector, request, Recipe::InstanceOperational);
-    }
-    if request.collection() == TelemetryCollection::Activity {
-        return activity::source(connector, request);
-    }
-    let recipe = match request.collection() {
-        TelemetryCollection::Snapshot(SnapshotDataset::StatementCounters) => Recipe::Statements,
-        TelemetryCollection::Snapshot(SnapshotDataset::StatementDefinitions) => Recipe::Definitions,
-        TelemetryCollection::Snapshot(SnapshotDataset::Operational) => Recipe::Operational,
-        TelemetryCollection::Snapshot(SnapshotDataset::Settings) => Recipe::Settings,
-        TelemetryCollection::Snapshot(SnapshotDataset::Tables) => Recipe::Tables,
-        TelemetryCollection::Snapshot(SnapshotDataset::Indexes) => Recipe::Indexes,
-        TelemetryCollection::Snapshot(SnapshotDataset::Replication) => Recipe::Replication,
-        TelemetryCollection::Snapshot(SnapshotDataset::Sequences) => Recipe::Sequences,
-        TelemetryCollection::Snapshot(SnapshotDataset::Cleanup) => Recipe::Cleanup,
-        TelemetryCollection::Snapshot(SnapshotDataset::Columns) => Recipe::Catalog(native::catalog::Kind::Columns),
-        TelemetryCollection::Snapshot(SnapshotDataset::ForeignKeys) => {
-            Recipe::Catalog(native::catalog::Kind::ForeignKeys)
-        }
-        TelemetryCollection::Snapshot(SnapshotDataset::CheckConstraints) => {
-            Recipe::Catalog(native::catalog::Kind::Checks)
-        }
-        TelemetryCollection::Snapshot(SnapshotDataset::Objects) => Recipe::Catalog(native::catalog::Kind::Objects),
-        TelemetryCollection::Snapshot(SnapshotDataset::Triggers) => Recipe::Catalog(native::catalog::Kind::Triggers),
-        TelemetryCollection::Snapshot(SnapshotDataset::Partitions) => {
-            Recipe::Catalog(native::catalog::Kind::Partitions)
-        }
-        TelemetryCollection::Snapshot(SnapshotDataset::Statistics) => {
-            Recipe::Catalog(native::catalog::Kind::Statistics)
-        }
-        _ => return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported"))),
-    };
-    snapshot_source(connector, request, recipe)
-}
-
 pub(crate) async fn resources(
     connector: Connector,
     request: &ResourceDiscoveryRequest,
@@ -307,11 +265,9 @@ pub(crate) async fn resources(
     let result = async {
         let metadata = metadata::read(&mut reader, &host, port).await?;
         let instance = native::instance::read(&mut reader, metadata.version).await?;
-        let resources = vec![CollectionResource {
-            identity: instance.identity,
-            observed_at: instance.observed_at,
-            collections: vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)],
-        }];
+        let collections = recipes::collections_for(&instance.identity);
+        let resources =
+            vec![CollectionResource { identity: instance.identity, observed_at: instance.observed_at, collections }];
         request.validate_result(&resources)?;
         Ok(resources)
     }

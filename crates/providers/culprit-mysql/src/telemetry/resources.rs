@@ -1,7 +1,7 @@
 //! A hosting instance is discovered once; each native source declares the profiles it actually supports.
 use crate::{
     connect::{Connector, Scope},
-    native::{error_log, instance, session_memory},
+    native::instance,
     read::{OwnedRead, ReadSession, confirmed_result},
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
@@ -39,17 +39,7 @@ async fn discover_from<R: OwnedRead>(
 
 async fn identify<R: OwnedRead>(reader: &mut R) -> Result<(instance::Identity, Vec<TelemetryCollection>, String)> {
     let platform = instance::platform(reader).await?;
-    let mut collections = Vec::new();
-    if error_log::availability(platform.flavor, &platform.version, platform.performance_schema)
-        == error_log::Availability::Available
-    {
-        collections.push(TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures));
-    }
-    if session_memory::availability(platform.flavor, &platform.version, platform.performance_schema)
-        == session_memory::Availability::Available
-    {
-        collections.push(TelemetryCollection::Snapshot(SnapshotDataset::SessionMemory));
-    }
+    let collections = super::recipes::instance_collections(&platform);
     if collections.is_empty() {
         return Err(unsupported());
     }

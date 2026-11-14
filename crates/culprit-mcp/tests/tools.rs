@@ -84,8 +84,14 @@ fn fixture(tag: &str) -> Fixture {
     let dir = std::env::temp_dir().join(format!("culprit-mcp-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let replay = Arc::new(report());
-    let ws = Workspace::open_in(&dir)
-        .with_provider(Engine::Mssql, Arc::new(move |_| Ok(Box::new(Replay { report: replay.clone() }))));
+    let ws = Workspace::open_in(&dir).with_provider(
+        Engine::Mssql,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| Ok(Box::new(Replay { report: replay.clone() }))),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     // No secret of any kind: `AuthKind::None` keeps every code path away from the OS keychain, and the names can't
     // collide with a real saved connection's keychain entry.
     for name in ["replay-demo", "replay-hidden"] {

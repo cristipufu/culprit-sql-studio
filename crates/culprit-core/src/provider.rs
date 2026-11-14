@@ -94,13 +94,6 @@ pub enum ExplainMode {
 pub trait Provider: Send + Sync {
     fn engine(&self) -> Engine;
 
-    /// Source-owned registration metadata, without connecting or discovering credentials. The same registrations
-    /// dispatch native sources. An empty catalog is undeclared support; declarations establish neither runtime
-    /// availability nor production work-cost qualification.
-    fn telemetry_recipes(&self) -> Vec<crate::telemetry::RecipeDescriptor> {
-        Vec::new()
-    }
-
     /// Native work across this provider's sessions must be settled before another observation starts.
     /// Implementations that retain workers override this state; an uncertain cancellation must never be hidden in
     /// a successful snapshot or collector note. A closed socket alone does not prove native shutdown.

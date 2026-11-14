@@ -20,13 +20,47 @@ fn temp_home(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!("culprit-plugin-{tag}-{}", std::process::id()))
 }
 
+#[test]
+fn a_runtime_provider_lists_its_own_recipes_without_a_compiled_provider_or_factory_call() {
+    use culprit_core::telemetry::*;
+    let root = tempfile::tempdir().unwrap();
+    let declaration = RecipeDescriptor {
+        id: "external.focused-page".into(),
+        version: 1,
+        purpose: RecipePurpose::Investigation,
+        selector: RecipeSelector::FocusedPageWait,
+        subjects: vec![RecipeSubject::Database],
+        budget: CollectionBudget::default(),
+        cost: RecipeCostQualification::Unqualified,
+    };
+    let registration = culprit_engine::ProviderRegistration::new(
+        Arc::new(|_| panic!("static declarations must not construct the runtime provider")),
+        vec![declaration.clone()],
+    )
+    .unwrap();
+    let workspace = Workspace::open_in(root.path()).with_provider(Engine::Postgres, registration);
+    workspace
+        .add_connection(NewConnection {
+            name: "external".into(),
+            input: "postgres://reader@unreachable.invalid/catalog".into(),
+            auth: Some(AuthKind::None),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(workspace.telemetry_recipes("external").unwrap(), vec![declaration]);
+}
+
 #[cfg(feature = "yugabyte")]
 #[tokio::test]
 async fn retained_native_plans_open_offline_without_borrowing_current_catalog_or_measurements() {
     let home = temp_home("native-cache");
     let ws = Workspace::open_in(&home).with_provider(
         Engine::Yugabyte,
-        Arc::new(|_| Err(Error::internal("Opening this saved plan must not resolve a database provider"))),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_| Err(Error::internal("Opening this saved plan must not resolve a database provider"))),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     ws.add_connection(NewConnection {
         name: "native-cache".into(),
@@ -247,8 +281,14 @@ impl Provider for NativeText {
 #[tokio::test]
 async fn a_plugin_hands_the_engines_plan_text_to_the_built_in_parser() {
     let home = temp_home("native-text");
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(NativeText) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_| Ok(Box::new(NativeText) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "wrapped".into(),
         input: "postgres://reader@replay.invalid:5432/demo".into(),
@@ -285,8 +325,11 @@ fn plugged_in_checks_reach_listing_and_offline_analysis() {
 #[tokio::test]
 async fn testing_an_unsaved_connection_uses_its_provider_without_persisting_it() {
     let home = temp_home("test-connection");
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)), Vec::new())
+            .unwrap(),
+    );
     let new = NewConnection {
         name: "unsaved".into(),
         input: "postgres://reader@replay.invalid:5432/demo".into(),
@@ -303,7 +346,14 @@ async fn testing_an_unsaved_connection_uses_its_provider_without_persisting_it()
 async fn a_plugged_in_provider_serves_a_full_scan() {
     let home = temp_home("provider");
     let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)))
+        .with_provider(
+            Engine::Postgres,
+            culprit_engine::ProviderRegistration::new(
+                Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)),
+                Vec::new(),
+            )
+            .unwrap(),
+        )
         .with_check(Arc::new(Marker));
     ws.add_connection(NewConnection {
         name: "replayed".into(),
@@ -328,8 +378,14 @@ async fn a_plugged_in_provider_serves_a_full_scan() {
 #[tokio::test]
 async fn a_plan_opened_from_a_report_reads_with_the_reports_catalog() {
     let home = temp_home("plan");
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "replayed".into(),
         input: "postgres://reader@replay.invalid:5432/demo".into(),
@@ -355,8 +411,14 @@ async fn a_plan_opened_from_a_report_reads_with_the_reports_catalog() {
 #[tokio::test]
 async fn advice_and_fetched_plans_follow_the_selected_report_not_the_latest_pointer() {
     let home = temp_home("selected-report");
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "replayed".into(),
         input: "postgres://reader@replay.invalid:5432/demo".into(),
@@ -404,8 +466,11 @@ async fn reads_run_freely_and_production_writes_need_confirmation() {
         "An external provider must opt into short-budget previews, never fall back to long-running execution"
     );
     let home = temp_home("run");
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(Arc::new(|_| Ok(Box::new(Replay) as Box<dyn Provider>)), Vec::new())
+            .unwrap(),
+    );
     for (name, environment) in [("prod", Environment::Production), ("dev", Environment::Development)] {
         ws.add_connection(NewConnection {
             name: name.into(),
@@ -459,8 +524,14 @@ async fn reads_run_freely_and_production_writes_need_confirmation() {
 #[tokio::test]
 async fn verify_index_compares_baseline_and_hypothetical_plans_and_validates_ddl() {
     let home = temp_home("verify-index");
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "replayed".into(),
         input: "postgres://reader@replay.invalid:5432/demo".into(),

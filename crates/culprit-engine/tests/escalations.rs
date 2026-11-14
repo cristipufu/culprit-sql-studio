@@ -73,8 +73,14 @@ async fn each_scan_compares_escalations_with_the_scan_before() {
     let home = temp_home("scans");
     let count = Arc::new(AtomicU32::new(2));
     let replay = count.clone();
-    let ws = Workspace::open_in(&home)
-        .with_provider(Engine::Mssql, Arc::new(move |_| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&home).with_provider(
+        Engine::Mssql,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| Ok(Box::new(Replay(replay.clone())) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     ws.add_connection(NewConnection {
         name: "shop".into(),
         input: "mssql://reader@replay.invalid:1433/culprit_demo".into(),

@@ -127,8 +127,14 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
         _ => format!("{}://reader@fixture.invalid/sample", serde_json::to_value(engine).unwrap().as_str().unwrap()),
     };
     let root = tempfile::TempDir::with_prefix("culprit-native-pipeline-").unwrap();
-    let workspace = Workspace::open_in(root.path().join("workspace"))
-        .with_provider(engine, Arc::new(move |_| culprit_engine::registry::provider(&spec)));
+    let workspace = Workspace::open_in(root.path().join("workspace")).with_provider(
+        engine,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| culprit_engine::registry::provider(&spec)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     workspace
         .add_connection(NewConnection {
             name: "native".into(),

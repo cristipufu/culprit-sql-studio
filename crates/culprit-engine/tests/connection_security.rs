@@ -117,11 +117,15 @@ async fn draft_tests_use_saved_secrets_and_never_persist_even_when_the_provider_
     let home = home();
     let ws = Workspace::open_in(&home).with_secrets(Arc::new(Memory::default())).with_provider(
         Engine::Mysql,
-        Arc::new(|spec| {
-            assert_eq!(spec.password.as_deref(), Some("saved-secret"));
-            assert_eq!(spec.option("ssl-mode"), Some("DISABLED"));
-            Err(Error::new(ErrorCode::ConnectionFailed, "test connection refused"))
-        }),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(|spec| {
+                assert_eq!(spec.password.as_deref(), Some("saved-secret"));
+                assert_eq!(spec.option("ssl-mode"), Some("DISABLED"));
+                Err(Error::new(ErrorCode::ConnectionFailed, "test connection refused"))
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     ws.add_connection(NewConnection {
         name: "imported".into(),
@@ -150,11 +154,15 @@ async fn new_connections_test_and_save_the_same_explicit_override() {
     let observed = released.clone();
     let ws = Workspace::open_in(&home).with_secrets(Arc::new(Memory::default())).with_provider(
         Engine::Postgres,
-        Arc::new(move |spec| {
-            assert_eq!(spec.option("sslmode"), Some("disable"));
-            assert_eq!(spec.password.as_deref(), Some("draft-secret"));
-            Ok(Box::new(Probe { engine: Engine::Postgres, started: None, released: observed.clone() }))
-        }),
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |spec| {
+                assert_eq!(spec.option("sslmode"), Some("disable"));
+                assert_eq!(spec.password.as_deref(), Some("draft-secret"));
+                Ok(Box::new(Probe { engine: Engine::Postgres, started: None, released: observed.clone() }))
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
     );
     let new = NewConnection {
         name: "new".into(),
@@ -180,12 +188,22 @@ async fn cancellation_releases_the_draft_provider_without_saving() {
     let released = Arc::new(AtomicUsize::new(0));
     let signal = started.clone();
     let drops = released.clone();
-    let ws = Arc::new(Workspace::open_in(&home).with_secrets(Arc::new(Memory::default())).with_provider(
-        Engine::Postgres,
-        Arc::new(move |_| {
-            Ok(Box::new(Probe { engine: Engine::Postgres, started: Some(signal.clone()), released: drops.clone() }))
-        }),
-    ));
+    let ws = Arc::new(
+        Workspace::open_in(&home).with_secrets(Arc::new(Memory::default())).with_provider(
+            Engine::Postgres,
+            culprit_engine::ProviderRegistration::new(
+                Arc::new(move |_| {
+                    Ok(Box::new(Probe {
+                        engine: Engine::Postgres,
+                        started: Some(signal.clone()),
+                        released: drops.clone(),
+                    }))
+                }),
+                Vec::new(),
+            )
+            .unwrap(),
+        ),
+    );
     ws.add_connection(NewConnection {
         name: "saved".into(),
         input: "postgres://reader@db.example/orders".into(),

@@ -1,6 +1,9 @@
 //! Maps an engine to its provider. New engines plug in here behind a cargo feature.
 
+use crate::ProviderRegistration;
 use culprit_core::{ConnectionSpec, Engine, Error, ErrorCode, Provider, Result, Source, t};
+#[cfg(any(feature = "mssql", feature = "postgres", feature = "yugabyte", feature = "mysql", feature = "sqlite"))]
+use std::sync::Arc;
 
 /// Every source a scan reads on `engine`, as its provider declares them (`<provider>/src/sources.rs`); empty for an
 /// engine this build has no provider for.
@@ -22,20 +25,43 @@ pub fn sources(engine: Engine) -> &'static [Source] {
 }
 
 pub fn provider(spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {
-    let engine = spec.engine.ok_or_else(|| {
+    registration(engine(spec)?)?.open(spec)
+}
+
+pub(crate) fn engine(spec: &ConnectionSpec) -> Result<Engine> {
+    spec.engine.ok_or_else(|| {
         Error::invalid(t!("engine.connection.unknown_engine")).with_hint(t!("engine.registry.unknown_engine_hint"))
-    })?;
+    })
+}
+
+/// Static source declarations and native construction are selected together; no factory runs while listing.
+pub fn registration(engine: Engine) -> Result<ProviderRegistration> {
     match engine {
         #[cfg(feature = "mssql")]
-        Engine::Mssql => Ok(Box::new(culprit_mssql::MssqlProvider::new(spec)?)),
+        Engine::Mssql => ProviderRegistration::new(
+            Arc::new(|spec| Ok(Box::new(culprit_mssql::MssqlProvider::new(spec)?))),
+            culprit_mssql::telemetry_recipes(),
+        ),
         #[cfg(feature = "postgres")]
-        Engine::Postgres => Ok(Box::new(culprit_postgres::PostgresProvider::new(spec)?)),
+        Engine::Postgres => ProviderRegistration::new(
+            Arc::new(|spec| Ok(Box::new(culprit_postgres::PostgresProvider::new(spec)?))),
+            culprit_postgres::telemetry_recipes(),
+        ),
         #[cfg(feature = "yugabyte")]
-        Engine::Yugabyte => Ok(Box::new(culprit_yugabyte::YugabyteProvider::new(spec)?)),
+        Engine::Yugabyte => ProviderRegistration::new(
+            Arc::new(|spec| Ok(Box::new(culprit_yugabyte::YugabyteProvider::new(spec)?))),
+            culprit_yugabyte::telemetry_recipes(),
+        ),
         #[cfg(feature = "mysql")]
-        Engine::Mysql => Ok(Box::new(culprit_mysql::MysqlProvider::new(spec)?)),
+        Engine::Mysql => ProviderRegistration::new(
+            Arc::new(|spec| Ok(Box::new(culprit_mysql::MysqlProvider::new(spec)?))),
+            culprit_mysql::telemetry_recipes(),
+        ),
         #[cfg(feature = "sqlite")]
-        Engine::Sqlite => Ok(Box::new(culprit_sqlite::SqliteProvider::new(spec)?)),
+        Engine::Sqlite => ProviderRegistration::new(
+            Arc::new(|spec| Ok(Box::new(culprit_sqlite::SqliteProvider::new(spec)?))),
+            culprit_sqlite::telemetry_recipes(),
+        ),
         #[allow(unreachable_patterns)]
         other => Err(Error::new(ErrorCode::Unsupported, t!("engine.registry.unsupported", engine = other.label()))),
     }
@@ -44,6 +70,51 @@ pub fn provider(spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtins_declare_only_the_selected_feature_gated_provider_catalog() {
+        for engine in Engine::ALL {
+            match registration(engine) {
+                Ok(registration) => {
+                    assert!(!sources(engine).is_empty());
+                    assert!(culprit_core::telemetry::recipe_catalog_is_valid(registration.telemetry_recipes()));
+                    #[cfg(feature = "mssql")]
+                    if engine == Engine::Mssql {
+                        assert_eq!(registration.telemetry_recipes(), culprit_mssql::telemetry_recipes());
+                        assert!(!registration.telemetry_recipes().is_empty());
+                    }
+                    assert!(
+                        !registration.telemetry_recipes().is_empty(),
+                        "{engine:?} hides implemented native sources"
+                    );
+                }
+                Err(error) => {
+                    assert!(sources(engine).is_empty());
+                    assert_eq!(error.code, ErrorCode::Unsupported);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_builtin_registration_uses_its_own_native_dispatch_catalog() {
+        type Catalog = fn() -> Vec<culprit_core::telemetry::RecipeDescriptor>;
+        let catalogs: &[(Engine, Catalog)] = &[
+            #[cfg(feature = "mssql")]
+            (Engine::Mssql, culprit_mssql::telemetry_recipes),
+            #[cfg(feature = "postgres")]
+            (Engine::Postgres, culprit_postgres::telemetry_recipes),
+            #[cfg(feature = "yugabyte")]
+            (Engine::Yugabyte, culprit_yugabyte::telemetry_recipes),
+            #[cfg(feature = "mysql")]
+            (Engine::Mysql, culprit_mysql::telemetry_recipes),
+            #[cfg(feature = "sqlite")]
+            (Engine::Sqlite, culprit_sqlite::telemetry_recipes),
+        ];
+        for &(engine, catalog) in catalogs {
+            assert_eq!(registration(engine).unwrap().telemetry_recipes(), catalog(), "{engine:?}");
+        }
+    }
 
     #[test]
     fn unresolved_forwarding_never_falls_back_to_a_direct_builtin_provider() {

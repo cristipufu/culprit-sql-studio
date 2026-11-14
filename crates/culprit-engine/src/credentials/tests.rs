@@ -47,11 +47,15 @@ async fn workspace_uses_the_same_credential_interface_for_entra_and_iam_without_
         let observed = captured.clone();
         let workspace = Workspace::open_in(directory.path()).with_database_tokens(tokens.clone()).with_provider(
             Engine::Postgres,
-            Arc::new(move |spec| {
-                assert!(!serde_json::to_string(spec).unwrap().contains("owned-token-canary"));
-                *observed.lock().unwrap() = Some((spec.token.clone(), spec.user.clone()));
-                Err(Error::internal("owned provider boundary"))
-            }),
+            crate::ProviderRegistration::new(
+                Arc::new(move |spec| {
+                    assert!(!serde_json::to_string(spec).unwrap().contains("owned-token-canary"));
+                    *observed.lock().unwrap() = Some((spec.token.clone(), spec.user.clone()));
+                    Err(Error::internal("owned provider boundary"))
+                }),
+                Vec::new(),
+            )
+            .unwrap(),
         );
         workspace
             .add_connection(NewConnection {
@@ -140,11 +144,15 @@ async fn authentication_plugins_own_credential_acquisition_and_the_entire_intera
         .with_sign_in_handler(Arc::new(|_| {}))
         .with_provider(
             Engine::Postgres,
-            Arc::new(|spec| {
-                assert_eq!(spec.token.as_deref(), Some("plugin-token"));
-                assert_eq!(spec.user.as_deref(), Some("plugin-user"));
-                Err(Error::internal("owned provider boundary"))
-            }),
+            crate::ProviderRegistration::new(
+                Arc::new(|spec| {
+                    assert_eq!(spec.token.as_deref(), Some("plugin-token"));
+                    assert_eq!(spec.user.as_deref(), Some("plugin-user"));
+                    Err(Error::internal("owned provider boundary"))
+                }),
+                Vec::new(),
+            )
+            .unwrap(),
         );
     workspace
         .add_connection(NewConnection {

@@ -159,8 +159,14 @@ fn workspace(tag: &str, types: &[&str], reject_read: bool) -> (Workspace, Parser
         calls: Arc::new(Mutex::new(Vec::new())),
     };
     let replay = provider.clone();
-    let ws = Workspace::open_in(&dir)
-        .with_provider(Engine::Mssql, Arc::new(move |_| Ok(Box::new(replay.clone()) as Box<dyn Provider>)));
+    let ws = Workspace::open_in(&dir).with_provider(
+        Engine::Mssql,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| Ok(Box::new(replay.clone()) as Box<dyn Provider>)),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
     (ws, provider, dir)
 }
 

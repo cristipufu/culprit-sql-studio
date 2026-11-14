@@ -83,8 +83,85 @@ fn intersection_preserves_both_native_envelope_and_stricter_callers_in_every_dim
         total_timeout_ms: 900_000,
     };
     assert!(high.validate().is_ok());
+    assert_eq!(CollectionBudget::upper_limits(), high);
     assert_eq!(native.intersection(&high), native);
     let mut invalid = strict;
     invalid.max_queries = 0;
     assert!(native.intersection(&invalid).validate().is_err(), "intersection never repairs a forbidden caller limit");
+}
+
+#[test]
+fn every_protocol_budget_ceiling_is_enforced_independently_of_caller_defaults() {
+    let upper = CollectionBudget::upper_limits();
+    assert!(upper.validate().is_ok());
+    assert_eq!(upper.intersection(&CollectionBudget::default()), CollectionBudget::default());
+    for field in [
+        "page_rows",
+        "max_snapshot_rows",
+        "page_bytes",
+        "total_bytes",
+        "max_sql_bytes",
+        "max_plan_bytes",
+        "max_pages",
+        "max_queries",
+        "statement_timeout_ms",
+        "total_timeout_ms",
+    ] {
+        let mut outside = upper.clone();
+        match field {
+            "page_rows" => outside.page_rows += 1,
+            "max_snapshot_rows" => outside.max_snapshot_rows += 1,
+            "page_bytes" => outside.page_bytes += 1,
+            "total_bytes" => outside.total_bytes += 1,
+            "max_sql_bytes" => outside.max_sql_bytes += 1,
+            "max_plan_bytes" => outside.max_plan_bytes += 1,
+            "max_pages" => outside.max_pages += 1,
+            "max_queries" => outside.max_queries += 1,
+            "statement_timeout_ms" => outside.statement_timeout_ms += 1,
+            "total_timeout_ms" => outside.total_timeout_ms += 1,
+            _ => unreachable!(),
+        }
+        assert!(outside.validate().is_err(), "{field}");
+    }
+}
+
+#[test]
+fn catalogs_accept_undeclared_support_and_distinct_native_subjects_without_inventing_availability() {
+    assert!(recipe_catalog_is_valid(&[]));
+    let database = descriptor();
+    let mut instance = descriptor();
+    instance.id = "source.instance-baseline".into();
+    instance.subjects = vec![RecipeSubject::Shared(SharedResourceKind::Instance)];
+    assert!(recipe_catalog_is_valid(&[database, instance]));
+}
+
+#[test]
+fn catalog_ids_and_selector_subject_ownership_must_be_unambiguous() {
+    let first = descriptor();
+    let mut duplicate_id = descriptor();
+    duplicate_id.selector = RecipeSelector::FocusedPageWait;
+    assert!(!recipe_catalog_is_valid(&[first.clone(), duplicate_id]));
+    let mut overlap = descriptor();
+    overlap.id = "source.another-baseline".into();
+    overlap.subjects.push(RecipeSubject::Shared(SharedResourceKind::Instance));
+    assert!(!recipe_catalog_is_valid(&[first.clone(), overlap]));
+    let mut invalid = first.clone();
+    invalid.budget.total_timeout_ms = 0;
+    assert!(!recipe_catalog_is_valid(&[invalid]));
+    let oversized = (0..=MAX_TELEMETRY_RECIPES)
+        .map(|index| {
+            let mut recipe = first.clone();
+            recipe.id = format!("source.recipe-{index}");
+            recipe
+        })
+        .collect::<Vec<_>>();
+    assert!(!recipe_catalog_is_valid(&oversized));
+}
+
+#[test]
+fn a_native_provider_catalog_cannot_claim_the_collectors_derived_diagnostic_source() {
+    let mut derived = descriptor();
+    derived.selector = RecipeSelector::Collection(TelemetryCollection::Diagnostics);
+    assert!(derived.is_valid(), "the descriptor is well formed, but its ownership is not native");
+    assert!(!recipe_catalog_is_valid(&[derived]));
 }

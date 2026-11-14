@@ -44,6 +44,11 @@ pub use workload::{leading_keyword, plannable};
 
 const CURSOR: &str = "culprit_cursor";
 
+/// Native source declarations share the dispatch catalog; live availability and work-cost qualification remain separate.
+pub fn telemetry_recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
+    telemetry::declarations()
+}
+
 /// Identity of this crate's collector and native-plan parser, including a build revision when supplied.
 pub fn component_version() -> culprit_core::ComponentVersion {
     culprit_core::ComponentVersion::package(

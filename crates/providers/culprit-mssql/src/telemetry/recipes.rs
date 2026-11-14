@@ -55,7 +55,7 @@ impl Registration {
         }
     }
     fn native_budget(&self) -> CollectionBudget {
-        (self.budget)(&CollectionBudget::default())
+        (self.budget)(&CollectionBudget::upper_limits())
     }
     fn accepts(&self, request: &CollectionRequest) -> bool {
         self.selector.matches(request) && self.subjects.iter().any(|subject| subject.accepts(&request.subject))

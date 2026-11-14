@@ -25,6 +25,11 @@ use rusqlite::Connection;
 
 pub use plan::plan_from_rows;
 
+/// Static declarations from the same registrations used for bounded native file capture. No file is opened.
+pub fn telemetry_recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
+    telemetry::recipes::declarations()
+}
+
 /// Identity of this crate's collector and native-plan parser, including a build revision when supplied.
 pub fn component_version() -> culprit_core::ComponentVersion {
     culprit_core::ComponentVersion::package(
