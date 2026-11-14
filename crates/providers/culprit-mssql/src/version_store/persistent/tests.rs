@@ -83,3 +83,48 @@ async fn failures_unknown_sizes_or_malformed_values_never_turn_into_a_zero_or_he
         FakeRead::new(vec![Ok(vec![layout(5, 12, 1, 1)]), Ok(vec![Rec::of(&[("adr", Val::Int(1))])]), Ok(vec![])]);
     assert!(read(&mut empty).await.is_err(), "enabled ADR with no native observation is unknown, not zero");
 }
+
+#[tokio::test]
+async fn documented_cleanup_skip_mechanisms_keep_distinct_native_counts_and_column_availability() {
+    let original = row();
+    let mut fields = original.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    fields.extend([
+        ("pvs_off_row_page_skipped_oldest_active_xdesid", Val::Int(9_007_199_254_740_993)),
+        ("pvs_off_row_page_skipped_min_useful_xts", Val::Int(0)),
+        ("pvs_off_row_page_skipped_oldest_snapshot", Val::Int(7)),
+        ("pvs_off_row_page_skipped_oldest_aborted_xdesid", Val::Null),
+        ("pvs_off_row_page_skipped_transaction_not_cleaned", Val::Int(99)),
+    ]);
+    let native = Rec::of(&fields);
+    let mut io = reader(native.clone());
+    let sample = read(&mut io).await.unwrap().unwrap();
+    assert_eq!(sample.pages_skipped_for_oldest_active_transaction.as_deref(), Some("9007199254740993"));
+    assert_eq!(sample.pages_skipped_for_long_snapshot_scan.as_deref(), Some("0"));
+    assert_eq!(sample.pages_skipped_for_online_index_rebuild.as_deref(), Some("7"));
+    assert_eq!(sample.pages_skipped_for_oldest_aborted_transaction, None);
+    assert_eq!(sample.pages_skipped_for_aborted_transactions.as_deref(), Some("99"));
+    assert!(sample.available_columns.iter().any(|name| name == "pvs_off_row_page_skipped_oldest_aborted_xdesid"));
+    assert_eq!(io.calls.len(), 3, "the existing SELECT * supplies all four fields without an extra query");
+
+    let absent = Rec::of(
+        &fields
+            .into_iter()
+            .filter(|(name, _)| *name != "pvs_off_row_page_skipped_oldest_aborted_xdesid")
+            .collect::<Vec<_>>(),
+    );
+    let absent = read(&mut reader(absent)).await.unwrap().unwrap();
+    assert_eq!(absent.pages_skipped_for_oldest_aborted_transaction, None);
+    assert!(!absent.available_columns.iter().any(|name| name == "pvs_off_row_page_skipped_oldest_aborted_xdesid"));
+    assert_ne!(absent, sample, "missing columns and native NULL are not interchangeable");
+
+    for name in [
+        "pvs_off_row_page_skipped_oldest_active_xdesid",
+        "pvs_off_row_page_skipped_min_useful_xts",
+        "pvs_off_row_page_skipped_oldest_snapshot",
+        "pvs_off_row_page_skipped_oldest_aborted_xdesid",
+    ] {
+        for invalid in [Val::Int(-1), Val::Float(1.5)] {
+            assert!(read(&mut reader(replace(&native, &[(name, invalid)]))).await.is_err());
+        }
+    }
+}

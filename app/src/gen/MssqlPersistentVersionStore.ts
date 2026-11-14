@@ -13,4 +13,12 @@ off_row_kibibytes: string | null, online_index_kibibytes: string | null, aborted
 /**
  * Native integer sequence timestamps, not clock times or elapsed durations.
  */
-minimum_transaction_timestamp: string | null, online_index_minimum_timestamp: string | null, secondary_low_water_mark: string | null, off_row_cleanup: MssqlVersionCleanupSweep, aborted_cleanup: MssqlVersionCleanupSweep, pages_skipped_for_secondaries: string | null, pages_skipped_for_aborted_transactions: string | null, };
+minimum_transaction_timestamp: string | null, online_index_minimum_timestamp: string | null, secondary_low_water_mark: string | null, off_row_cleanup: MssqlVersionCleanupSweep, aborted_cleanup: MssqlVersionCleanupSweep, pages_skipped_for_secondaries: string | null, 
+/**
+ * Native minimum-threshold cleanup context; this is not evidence that aborted transactions retain PVS.
+ */
+pages_skipped_for_aborted_transactions: string | null, pages_skipped_for_oldest_active_transaction: string | null, pages_skipped_for_long_snapshot_scan: string | null, 
+/**
+ * The native column is named `pvs_off_row_page_skipped_oldest_snapshot`.
+ */
+pages_skipped_for_online_index_rebuild: string | null, pages_skipped_for_oldest_aborted_transaction: string | null, };

@@ -107,6 +107,40 @@ fn native_backend_generations_remain_opaque_while_observation_times_require_utc_
 }
 
 #[test]
+fn database_capture_qualification_requires_an_exact_explicit_database_label() {
+    let mut row = slot("holder", Some(1), None);
+    row.scope = MeasurementScope::Database;
+    for label in [None, Some(""), Some("another-database"), Some("Selected-Database")] {
+        row.database = label.map(str::to_string);
+        assert!(row.is_valid(), "raw native context can remain valid independently of capture qualification");
+        assert!(!row.fits_database_capture("selected-database"));
+    }
+    row.database = Some("selected-database".into());
+    assert!(row.fits_database_capture("selected-database"));
+}
+
+#[test]
+fn only_database_or_server_horizons_fit_a_database_capture_and_server_labels_remain_context() {
+    let mut row = slot("global-holder", Some(1), None);
+    row.database = Some("another-database".into());
+    let original = row.clone();
+    assert!(row.fits_database_capture("selected-database"));
+    assert_eq!(row, original);
+    for scope in [
+        MeasurementScope::Node,
+        MeasurementScope::Pool,
+        MeasurementScope::Session,
+        MeasurementScope::Cluster,
+        MeasurementScope::File,
+        MeasurementScope::Unknown,
+    ] {
+        row.scope = scope;
+        row.database = Some("selected-database".into());
+        assert!(!row.fits_database_capture("selected-database"), "{scope:?}");
+    }
+}
+
+#[test]
 fn empty_sources_preserve_database_qualification_without_claiming_shared_catalog_or_recovery_completeness() {
     let mut empty = snapshot(vec![]);
     empty.sources[0].state = SourceState::Empty;

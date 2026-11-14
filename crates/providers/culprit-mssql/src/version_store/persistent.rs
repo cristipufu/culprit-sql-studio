@@ -89,6 +89,10 @@ fn decode(row: &Rec) -> Result<MssqlPersistentVersionStore> {
         aborted_cleanup: cleanup(row, "aborted_version_cleaner_start_time", "aborted_version_cleaner_end_time")?,
         pages_skipped_for_secondaries: counter(row, "pvs_off_row_page_skipped_low_water_mark")?,
         pages_skipped_for_aborted_transactions: counter(row, "pvs_off_row_page_skipped_transaction_not_cleaned")?,
+        pages_skipped_for_oldest_active_transaction: counter(row, "pvs_off_row_page_skipped_oldest_active_xdesid")?,
+        pages_skipped_for_long_snapshot_scan: counter(row, "pvs_off_row_page_skipped_min_useful_xts")?,
+        pages_skipped_for_online_index_rebuild: counter(row, "pvs_off_row_page_skipped_oldest_snapshot")?,
+        pages_skipped_for_oldest_aborted_transaction: counter(row, "pvs_off_row_page_skipped_oldest_aborted_xdesid")?,
     })
 }
 pub(crate) fn observation(sample: MssqlPersistentVersionStore) -> OperationalObservation {

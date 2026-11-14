@@ -105,6 +105,19 @@ fn valid_time(at: &str) -> bool {
     at.len() <= 64 && canonical_time(at).is_ok()
 }
 impl RetentionObservation {
+    /// Admit a native holder into a database capture without promoting another scope to database ownership.
+    /// Database-scoped holders require an explicit exact label. Server-scoped horizons may affect the selected
+    /// database globally; their optional database label remains context rather than an exclusive owner.
+    pub fn fits_database_capture(&self, database: &str) -> bool {
+        match self.scope {
+            MeasurementScope::Database => {
+                self.database.as_deref().is_some_and(|name| !name.is_empty() && name == database)
+            }
+            MeasurementScope::Server => true,
+            _ => false,
+        }
+    }
+
     pub fn key(&self) -> Result<String> {
         serde_json::to_vec(&self.identity).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
     }
