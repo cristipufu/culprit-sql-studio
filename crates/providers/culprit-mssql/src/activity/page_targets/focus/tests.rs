@@ -7,9 +7,8 @@ use crate::{
 
 pub(crate) fn focus(row: &Rec) -> ActivityWaitFocus {
     let original = crate::activity::rows::record(row).unwrap().unwrap().facts;
-    let context =
-        ActivityContext::decode(row, "fixture.invalid", 1433, super::super::super::IdentityDetail::AzureDatabase)
-            .unwrap();
+    let authority = crate::activity::database_context::test_azure_authority(row).unwrap();
+    let context = authority.capture_context().unwrap();
     let capture = CaptureIdentity {
         observation_id: "original-page-wait".into(),
         revision: Some(CaptureRevision {
@@ -19,6 +18,8 @@ pub(crate) fn focus(row: &Rec) -> ActivityWaitFocus {
         }),
     };
     ActivityWaitFocus {
+        partition: authority.source_partition().unwrap(),
+        database_writable: context.writable,
         parent: DiagnosticEvidenceRef {
             batch_id: batch_id(&capture.observation_id, TelemetryStream::ActivityObservations).unwrap(),
             capture,
@@ -66,6 +67,40 @@ async fn focus_uses_only_the_original_native_request_and_retains_baseline_contex
 }
 
 #[tokio::test]
+async fn focused_work_rejects_a_changed_role_on_the_same_member_and_process_before_request_or_sql_reads() {
+    let original = focus(&page_wait(42, "PAGELATCH_EX", "7:1:4144"));
+    let changed = replace(&context(), &[("updateability", Val::Text("READ_ONLY".into()))]);
+    let authority = crate::activity::database_context::test_azure_authority(&changed).unwrap();
+    assert_eq!(
+        authority.source_partition().unwrap(),
+        original.partition,
+        "role is deliberately excluded the member/epoch key"
+    );
+    let mut owner = reader(vec![Ok(vec![changed])]);
+    let error = owner.capture_focused_page_wait_targets(&original).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+    assert_eq!(owner.query_count(), 1);
+    assert_eq!(owner.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn unknown_original_or_current_role_never_authorizes_focused_request_sql_or_page_reads() {
+    let mut original = focus(&page_wait(42, "PAGELATCH_EX", "7:1:4144"));
+    original.database_writable = None;
+    let mut owner = reader(vec![]);
+    let error = owner.capture_focused_page_wait_targets(&original).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceUnavailable);
+    assert_eq!(owner.query_count(), 0);
+    original.database_writable = Some(true);
+    let unknown = replace(&context(), &[("updateability", Val::Null)]);
+    let mut owner = reader(vec![Ok(vec![unknown])]);
+    let error = owner.capture_focused_page_wait_targets(&original).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceUnavailable);
+    assert_eq!(owner.query_count(), 1);
+    assert_eq!(owner.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
 async fn boxed_baseline_native_recovery_epoch_is_accepted_by_the_same_focused_reader() {
     let original = page_wait(42, "PAGELATCH_EX", "7:1:4144");
     let local = replace(&original, &[("edition", Val::Int(3))]);
@@ -75,14 +110,13 @@ async fn boxed_baseline_native_recovery_epoch_is_accepted_by_the_same_focused_re
     let mut authority_reader =
         reader(vec![Ok(vec![platform.clone()]), Ok(vec![ticks.clone()]), Ok(vec![authority_row.clone()])]);
     authority_reader.options.identity = crate::activity::IdentityDetail::Endpoint;
-    let authority = crate::activity::database_context::DatabaseContext::initial(&mut authority_reader)
-        .await
-        .unwrap()
-        .capture_context()
-        .unwrap();
+    let native_authority =
+        crate::activity::database_context::DatabaseContext::initial(&mut authority_reader).await.unwrap();
+    let authority = native_authority.capture_context().unwrap();
     let mut focus = focus(&original);
     focus.target = authority.database.into();
     focus.epoch = authority.epoch.unwrap();
+    focus.partition = native_authority.source_partition().unwrap();
     let mut supplied = successful_replies(vec![local]);
     supplied.remove(6).unwrap();
     supplied.remove(3).unwrap();

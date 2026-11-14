@@ -141,6 +141,7 @@ impl Provider for SqliteProvider {
     }
 
     async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot> {
+        options.require_default_workload_population()?;
         let (connection, environment) = (connection.to_string(), self.spec.environment);
         let mut snapshot = self
             .reader

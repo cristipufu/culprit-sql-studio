@@ -33,9 +33,6 @@ const START_TIME_SQL: &str = "SELECT CONVERT(varchar(19), DATEADD(minute, DATEDI
 
 const QUERY_STORE_SQL: &str = crate::query_store::catalog_sql::OPTIONS;
 
-/// Query Store states in which its views can be read.
-const QUERY_STORE_READABLE: &[&str] = &["READ_WRITE", "READ_ONLY"];
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueryStoreState {
     pub(crate) actual: String,
@@ -45,7 +42,7 @@ pub(crate) struct QueryStoreState {
 
 impl QueryStoreState {
     pub(crate) fn readable(&self) -> bool {
-        QUERY_STORE_READABLE.contains(&self.actual.as_str())
+        crate::query_store::mode::ReadMode::from_native(&self.actual).is_some()
     }
 
     pub(crate) fn unavailable_message(&self) -> culprit_core::i18n::Message {
@@ -295,5 +292,23 @@ mod tests {
     fn principal_names_cannot_break_out_of_the_grant() {
         assert_eq!(bracket("app]; DROP LOGIN sa; --"), "[app]]; DROP LOGIN sa; --]");
         assert_eq!(format!("GRANT SHOWPLAN TO {};", bracket("reader")), "GRANT SHOWPLAN TO [reader];");
+    }
+
+    #[test]
+    fn native_secondary_capture_uses_query_store_instead_of_falling_back_to_the_local_cache() {
+        let mut source = probe(ENGINE_EDITION_AZURE_SQL_DATABASE, false);
+        source.query_store = Some(QueryStoreState { actual: "READ_CAPTURE_SECONDARY".into(), options: Rec::default() });
+        assert!(source.query_store_readable());
+        let (available, missing) = expected_capabilities(&source);
+        assert!(available.contains(&Capability::QueryStore));
+        assert!(!available.contains(&Capability::PlanCache));
+        assert!(!missing.iter().any(|missing| missing.capability == Capability::QueryStore));
+
+        source.query_store.as_mut().unwrap().actual = "FUTURE_MODE".into();
+        assert!(!source.query_store_readable());
+        let (available, missing) = expected_capabilities(&source);
+        assert!(!available.contains(&Capability::QueryStore));
+        assert!(available.contains(&Capability::PlanCache));
+        assert!(missing.iter().any(|missing| missing.capability == Capability::QueryStore));
     }
 }

@@ -292,10 +292,16 @@ pub(crate) fn measured_writes(snapshot: &Snapshot, schema: &str, table: &str) ->
 pub(crate) fn is_unused(snapshot: &Snapshot, i: &IndexStat) -> bool {
     let is_candidate = !i.is_primary_key && !i.is_unique && !i.is_clustered && !i.is_disabled && !is_partition_copy(i);
     is_candidate
+        && index_usage_covers_all_read_members(snapshot)
         && i.reads == Some(0.0)
         && i.size_bytes.unwrap_or(0.0) >= 64.0 * 1024.0
         && !too_new(snapshot, i)
         && watched_long_enough(snapshot)
+}
+
+/// Local zero or low counts cannot establish that other read-serving members do not use an index.
+pub(crate) fn index_usage_covers_all_read_members(snapshot: &Snapshot) -> bool {
+    snapshot.operations.index_usage_scope == Some(culprit_core::operations::IndexUsageScope::AllReadMembers)
 }
 
 /// Days an index, and the counters watching it, must have existed before no reads says anything about it.

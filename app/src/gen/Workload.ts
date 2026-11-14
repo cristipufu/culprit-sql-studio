@@ -2,11 +2,21 @@
 import type { BaselineReference } from "./BaselineReference";
 import type { CounterSet } from "./CounterSet";
 import type { Message } from "./Message";
+import type { NativeIdentity } from "./NativeIdentity";
 import type { QueryStat } from "./QueryStat";
+import type { RuntimePopulationCatalog } from "./RuntimePopulationCatalog";
 import type { Timeline } from "./Timeline";
 import type { WorkloadKind } from "./WorkloadKind";
 
 export type Workload = { 
+/**
+ * The actual source-native execution population behind these statistics. None establishes no physical owner.
+ */
+population?: NativeIdentity, 
+/**
+ * Source-observed alternatives remain available even when another statistics source supplied a fallback.
+ */
+population_catalog?: RuntimePopulationCatalog, 
 /**
  * The source's stable name, retained for counter identity and compatibility. Display uses `source_name()`.
  */

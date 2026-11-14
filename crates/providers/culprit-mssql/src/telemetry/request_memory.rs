@@ -51,6 +51,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for MemoryObservationReader<
             })
             .collect::<Result<Vec<_>>>()?;
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: captured.context.database.clone().into(),
             source: sources::CURRENT_REQUEST_MEMORY.name.into(),
             continuity: SourceContinuity::Unverified,

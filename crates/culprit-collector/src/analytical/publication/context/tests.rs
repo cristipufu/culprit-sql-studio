@@ -40,6 +40,8 @@ fn focused_source() -> CollectionDescription {
     let row = ExportedRecord::new(&baseline, &capture, TelemetryRecord::from(original.clone())).unwrap();
     let parent = DiagnosticEvidenceRef::from_export(&baseline, &digest(b"original private manifest"), &row, 0).unwrap();
     let focus = ActivityWaitFocus {
+        database_writable: None,
+        partition: culprit_core::telemetry::SourcePartition::Target,
         parent,
         target: baseline.target.clone(),
         source: baseline.source.clone(),
@@ -59,6 +61,7 @@ fn focused_source() -> CollectionDescription {
     };
     assert!(result.is_valid());
     CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: baseline.target,
         source: culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
         continuity: SourceContinuity::Unverified,
@@ -131,16 +134,20 @@ fn diagnostic_analysis_time_remains_typed_context_and_never_becomes_a_native_obs
         analyzed_at: "2020-01-01T12:30:00Z".into(),
         records: 0,
         checkpoint_records: 1,
+        scope_bindings: Default::default(),
     };
     assert!(description.is_valid());
     manifest.source.observation = SourceObservation::Diagnostics(description.clone());
     let public = observation(&manifest.source.observation).unwrap();
     assert_eq!(public["kind"], "diagnostic-context");
-    assert_eq!(public["data"], serde_json::to_value(&description).unwrap());
+    let mut expected = serde_json::to_value(&description).unwrap();
+    expected.as_object_mut().unwrap().remove("scope_bindings");
+    expected["scope_keys"] = serde_json::json!([]);
+    assert_eq!(public["data"], expected);
     // Context projection is pure; no native records or committed range are manufactured for this test.
     let context = envelope::capture_context(&manifest, &digest(b"recovery manifest")).unwrap();
     assert_eq!(context["range_kind"], "focused");
-    assert_eq!(context["diagnostic"], serde_json::to_value(description).unwrap());
+    assert_eq!(context["diagnostic"], expected);
     for field in ["observed_at", "observed_from", "observed_until", "interval_from", "interval_until"] {
         assert!(context.get(field).is_none(), "{field}");
     }

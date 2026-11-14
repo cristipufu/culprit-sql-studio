@@ -122,6 +122,8 @@ fn statement_and_sampling_semantics_cover_every_engine_and_round_trip() {
 #[test]
 fn how_often_never_extrapolates_a_short_window() {
     let w = |hours: f64, windowed: bool| Workload {
+        population: None,
+        population_catalog: None,
         source_label: None,
         source_message: None,
         counter_set: None,

@@ -16,6 +16,7 @@ async fn runtime_waits_and_display_use_one_bound_native_population_without_a_sec
         Ok(vec![open_row("2020-01-01T06:00:00Z", 0.0)]),
         Ok(vec![super::super::tests::summary_row()]),
         Ok(vec![Rec::of(&[
+            ("replica_group_id", Val::Null),
             ("wait_category", Val::Int(3)),
             ("wait_category_desc", Val::Text("Lock".into())),
             ("wait_ms", Val::Int(40)),

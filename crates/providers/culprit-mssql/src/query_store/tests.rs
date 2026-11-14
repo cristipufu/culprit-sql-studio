@@ -7,6 +7,7 @@ use crate::{
 use culprit_core::telemetry::*;
 pub(crate) fn summary_row() -> Rec {
     Rec::of(&[
+        ("replica_group_id", Val::Null),
         ("query_id", Val::Int(3)),
         ("context_settings_id", Val::Int(5)),
         ("object_id", Val::Int(0)),
@@ -67,12 +68,15 @@ async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_c
     let mut reader = Reader::new(FakeRead::new(vec![
         Ok(vec![Rec::of(&[
             ("tempdb", Val::Int(0)),
+            ("replicas", Val::Int(1)),
+            ("actual_state_desc", Val::Text("READ_CAPTURE_SECONDARY".into())),
             ("log_bytes", Val::Int(0)),
             ("waits", Val::Int(1)),
             ("variants", Val::Int(1)),
         ])]),
+        Ok(vec![super::replicas::tests::row(7, 2, None)]),
         Ok(vec![super::window_sql::tests::row()]),
-        Ok(vec![summary_row()]),
+        Ok(vec![replace(&summary_row(), &[("replica_group_id", Val::Int(7))])]),
     ]));
     let summary = reader.summary(60).await.unwrap().remove(0);
     let records = [runtime_row(1000), runtime_row(3000)]
@@ -89,6 +93,7 @@ async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_c
     assert_eq!(summary.moments.duration_us, duration);
     assert_eq!(runtime::milliseconds(duration), 4.0);
     assert_eq!(summary.moments.executions, 2);
+    assert_eq!(summary.population, super::replicas::Population::ReplicaGroup(7));
     assert_eq!(summary.moments.tempdb_pages, None);
     assert_eq!(summary.first_seen.as_deref(), Some("2020-01-01T06:00:00.153333300Z"));
     let exact = 9_007_199_254_740_993i64;
@@ -178,6 +183,8 @@ async fn source_budget_and_cancellation_errors_are_not_retried_as_schema_fallbac
     let mut reader = Reader::new(FakeRead::new(vec![
         Ok(vec![Rec::of(&[
             ("tempdb", Val::Int(1)),
+            ("replicas", Val::Int(0)),
+            ("actual_state_desc", Val::Text("READ_WRITE".into())),
             ("log_bytes", Val::Int(0)),
             ("waits", Val::Int(1)),
             ("variants", Val::Int(1)),
@@ -197,6 +204,7 @@ async fn source_budget_and_cancellation_errors_are_not_retried_as_schema_fallbac
 #[test]
 fn negative_native_wait_totals_are_rejected_instead_of_wrapping_into_a_large_measurement() {
     let row = Rec::of(&[
+        ("replica_group_id", Val::Null),
         ("wait_category", Val::Int(3)),
         ("wait_category_desc", Val::Text("Lock".into())),
         ("wait_ms", Val::Int(-1)),

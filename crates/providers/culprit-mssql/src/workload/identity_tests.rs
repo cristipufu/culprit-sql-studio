@@ -33,6 +33,8 @@ pub(super) fn runtime_replies(summary: Vec<Rec>) -> Vec<ReadResult<Vec<Rec>>> {
     vec![
         Ok(vec![Rec::of(&[
             ("tempdb", Val::Int(0)),
+            ("replicas", Val::Int(0)),
+            ("actual_state_desc", Val::Text("READ_WRITE".into())),
             ("log_bytes", Val::Int(0)),
             ("waits", Val::Int(0)),
             ("variants", Val::Int(1)),
@@ -235,6 +237,8 @@ async fn terminal_definition_failure_preserves_shutdown_and_forbids_followup() {
 fn with_log_capability(mut replies: Vec<ReadResult<Vec<Rec>>>) -> Vec<ReadResult<Vec<Rec>>> {
     replies[0] = Ok(vec![Rec::of(&[
         ("tempdb", Val::Int(0)),
+        ("replicas", Val::Int(0)),
+        ("actual_state_desc", Val::Text("READ_WRITE".into())),
         ("log_bytes", Val::Int(1)),
         ("waits", Val::Int(0)),
         ("variants", Val::Int(1)),

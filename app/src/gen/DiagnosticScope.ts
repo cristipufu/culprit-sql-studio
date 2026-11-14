@@ -2,8 +2,9 @@
 import type { ActivityPopulation } from "./ActivityPopulation";
 import type { CollectionTarget } from "./CollectionTarget";
 import type { MeasurementScope } from "./MeasurementScope";
+import type { SourcePartition } from "./SourcePartition";
 
-export type DiagnosticScope = { target: CollectionTarget, source: string, population: ActivityPopulation, measurement_scope: MeasurementScope, 
+export type DiagnosticScope = { target: CollectionTarget, partition: SourcePartition, source: string, population: ActivityPopulation, measurement_scope: MeasurementScope, 
 /**
  * A verified native generation, never a collector epoch or a fabricated uptime identity.
  */

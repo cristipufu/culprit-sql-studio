@@ -11,7 +11,7 @@ SELECT /* culprit */ database_name, CONVERT(varchar(36), logical_database_guid) 
  CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(32)) AS updateability
 FROM sys.dm_user_db_resource_governance WHERE database_id = DB_ID() AND database_name = DB_NAME()
 OPTION (MAXDOP 1)"#;
-pub(crate) const REPLICAS: &str = "SELECT TOP (101) /* culprit */ replica_group_id FROM sys.query_store_replicas ORDER BY replica_group_id OPTION (MAXDOP 1)";
+pub(crate) const REPLICAS: &str = "SELECT TOP (101) /* culprit */ replica_group_id,role_type,replica_name FROM sys.query_store_replicas ORDER BY replica_group_id,role_type,replica_name OPTION (MAXDOP 1)";
 pub(crate) const MAX_PLAN: &str =
     "SELECT TOP (1) /* culprit */ plan_id FROM sys.query_store_plan ORDER BY plan_id DESC OPTION (MAXDOP 1)";
 macro_rules! query_identity_columns {

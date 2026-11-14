@@ -6,6 +6,7 @@ use culprit_core::{Result, telemetry::*};
 pub(crate) use native::{Kind, Layout, read_kind};
 
 pub(crate) struct Collected {
+    plan_scope: culprit_core::QueryStoreScope,
     parts: Vec<(Kind, Result<Option<Vec<TuningFact>>>)>,
 }
 pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Collected {
@@ -24,7 +25,7 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Collected {
         }
         parts.push((kind, result));
     }
-    Collected { parts }
+    Collected { plan_scope: layout.map(|layout| layout.plan_scope()).unwrap_or_default(), parts }
 }
 
 /// "[a],[b] ASC" → ["a", "b"]: a column list as SQL Server writes it, brackets and sort order dropped.

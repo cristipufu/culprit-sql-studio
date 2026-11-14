@@ -71,6 +71,7 @@ pub(crate) fn capture(
     rollback?;
     Ok(Captured {
         description: CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: identity.database.clone().into(),
             source: source_name(dataset).into(),
             continuity: SourceContinuity::Unverified,

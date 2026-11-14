@@ -276,6 +276,8 @@ pub(crate) async fn read(
     let head = rows.first();
     coverage.delivered(culprit_core::Capability::PgStatStatements);
     Some(Workload {
+        population: None,
+        population_catalog: None,
         source: format!(
             "{}{}",
             if probe.cluster {

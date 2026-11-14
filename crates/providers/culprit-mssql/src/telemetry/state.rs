@@ -169,6 +169,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             }
         }
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target,
             source: if shared {
                 if dataset == SnapshotDataset::MemoryFailures {

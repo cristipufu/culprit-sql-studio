@@ -259,6 +259,10 @@ impl ResetMarker {
 pub struct MeasurementContext {
     pub database: DatabaseIdentity,
     pub source: MeasurementSource,
+    /// The source-native execution population. It is independent of endpoints and display role names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub population: Option<crate::telemetry::NativeIdentity>,
     pub scope: MeasurementScope,
     pub period: MeasurementPeriod,
     pub reset: ResetMarker,
@@ -340,7 +344,7 @@ impl MeasurementContext {
                 }
             }
         }
-        Self { database: identity, source, scope, period, reset }
+        Self { database: identity, source, population: workload.population.clone(), scope, period, reset }
     }
 
     pub fn series_comparison(&self, other: &Self) -> Comparison {
@@ -351,6 +355,12 @@ impl MeasurementContext {
         }
         if self.source != other.source {
             return Comparison::Incompatible(DifferentSource);
+        }
+        if self.population.as_ref().is_some_and(|population| !population.is_valid())
+            || other.population.as_ref().is_some_and(|population| !population.is_valid())
+            || self.population != other.population
+        {
+            return Comparison::Incompatible(DifferentScope);
         }
         if self.scope != other.scope || self.scope == MeasurementScope::Unknown {
             return Comparison::Incompatible(DifferentScope);
@@ -633,9 +643,30 @@ mod tests {
         MeasurementContext {
             database: database("db.example"),
             source: MeasurementSource::Workload(WorkloadKind::StatementStats),
+            population: None,
             scope: MeasurementScope::Database,
             period: MeasurementPeriod::Cumulative { observed_at: at.into(), hours: Some(24.0) },
             reset,
+        }
+    }
+    #[test]
+    fn execution_populations_cannot_verify_or_subtract_each_other() {
+        let mut first = context("2026-11-01T12:00:00Z", ResetMarker::At("2026-10-30T00:00:00Z".into()));
+        first.population = Some(crate::telemetry::NativeIdentity::new("17"));
+        let mut later = first.clone();
+        later.period = MeasurementPeriod::Cumulative { observed_at: "2026-11-01T13:00:00Z".into(), hours: Some(25.0) };
+        assert_eq!(first.counter_transition(&later), CounterTransition::Continued);
+        assert!(first.report_comparison(&later).allows_comparison());
+        for population in
+            [None, Some(crate::telemetry::NativeIdentity::new("18")), Some(crate::telemetry::NativeIdentity::new(""))]
+        {
+            later.population = population;
+            assert_eq!(first.series_comparison(&later), Comparison::Incompatible(ComparisonReason::DifferentScope));
+            assert!(!first.report_comparison(&later).allows_comparison());
+            assert_eq!(
+                first.counter_transition(&later),
+                CounterTransition::Incompatible(ComparisonReason::DifferentScope)
+            );
         }
     }
     #[test]

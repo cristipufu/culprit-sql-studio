@@ -2,6 +2,7 @@ use super::*;
 
 fn description(records: u32, complete: bool) -> ActivitySnapshotDescription {
     ActivitySnapshotDescription {
+        database_writable: None,
         epoch: Some("native-process-epoch".into()),
         observed_from: "2020-01-01T06:00:00Z".into(),
         at: "2020-01-01T06:00:00.100000Z".into(),

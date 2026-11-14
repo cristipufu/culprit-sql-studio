@@ -2,12 +2,18 @@
 import type { AutomaticTuningOption } from "./AutomaticTuningOption";
 import type { ForcedPlan } from "./ForcedPlan";
 import type { QueryHint } from "./QueryHint";
+import type { QueryStoreScope } from "./QueryStoreScope";
 import type { TuningRecommendation } from "./TuningRecommendation";
 
 /**
  * SQL Server's own tuning state from Query Store and automatic tuning.
  */
-export type TuningAdvice = { automatic_tuning: Array<AutomaticTuningOption>, recommendations: Array<TuningRecommendation>, 
+export type TuningAdvice = { 
+/**
+ * Native runtime population of recommendations and global plan-forcing facts. A database target, primary role,
+ * or matching query ID alone does not qualify this relation. Query hints retain their own independent scope.
+ */
+plan_scope: QueryStoreScope, automatic_tuning: Array<AutomaticTuningOption>, recommendations: Array<TuningRecommendation>, 
 /**
  * Plans forced in Query Store, with how often forcing failed.
  */

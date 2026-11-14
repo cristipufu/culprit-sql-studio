@@ -122,6 +122,7 @@ impl<R: NativeRead> TelemetrySource for EventSource<R> {
         let at = canonical_time(&text(server.first().ok_or_else(invalid_data)?, "observed_at")?)?;
         let (from, until) = self.request.bounds()?;
         let value = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: database.into(),
             source: culprit_core::source_id::DEADLOCKS.into(),
             observation: SourceObservation::RetainedEvents(EventHistoryDescription {

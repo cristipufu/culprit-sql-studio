@@ -17,6 +17,9 @@ mod native_tests;
 #[path = "workload/parameter_tests.rs"]
 mod parameter_tests;
 #[cfg(test)]
+#[path = "workload/replica_tests.rs"]
+mod replica_tests;
+#[cfg(test)]
 #[path = "workload/variant_native_tests.rs"]
 mod variant_native_tests;
 #[cfg(test)]
@@ -228,6 +231,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
     reader: &mut crate::query_store::Reader<R>,
     options: &SnapshotOptions,
 ) -> culprit_core::Result<WorkloadResult> {
+    reader.select_population(options.workload_population.as_ref())?;
     let window_minutes = options.window_in_minutes();
     let rows = reader.summary(window_minutes).await?;
     let window = reader.window(window_minutes).await?;
@@ -419,6 +423,10 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         );
     }
     verify_runtime_window(reader, &mut coverage).await?;
+    if reader.accepts_local_capture() == Some(false) {
+        coverage
+            .partial(&crate::sources::QUERY_STORE, culprit_core::message!("provider.mssql.query_store.history_only"));
+    }
     let window = reader.window(window_minutes).await?;
     let window_hours = window.hours;
     let window_end = window.end.clone();
@@ -426,9 +434,21 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         timeline.end = window_end.clone().ok_or_else(crate::read::invalid_data)?;
     }
 
+    let population = reader.selected_population();
+    let population_catalog = reader.population_catalog().cloned();
+    let source_message = population.as_ref().and_then(|selected| {
+        population_catalog
+            .as_ref()?
+            .populations
+            .iter()
+            .find(|population| &population.identity == selected)
+            .map(|population| population.label.clone())
+    });
     let workload = Workload {
+        population,
+        population_catalog,
         source_label: None,
-        source_message: None,
+        source_message,
         counter_set: None,
         history_inputs: Vec::new(),
         source: "Query Store".into(),
@@ -722,6 +742,8 @@ pub(crate) async fn from_plan_cache(
         })
         .sum();
     let workload = Workload {
+        population: None,
+        population_catalog: None,
         source_label: None,
         source_message: None,
         counter_set: None,

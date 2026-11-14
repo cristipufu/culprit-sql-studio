@@ -1,5 +1,5 @@
 //! Source identity is separate from payload availability and redacted representation.
-use super::{CollectionDescription, digest, valid_digest};
+use super::{CollectionDescription, CollectionStop, digest, valid_digest};
 use crate::{Engine, Result};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -21,6 +21,9 @@ impl NativeQueryIdentity {
         super::NativeIdentity { id: self.query_id.clone(), qualifiers: self.qualifiers.clone() }
     }
     pub fn definition_id(&self, source: &CollectionDescription) -> Result<String> {
+        if !source.is_partition_qualified() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
         source.scoped_id("query-definition-v2", self)
     }
     pub fn is_valid(&self) -> bool {
@@ -40,6 +43,9 @@ impl NativePlanIdentity {
         super::NativeIdentity { id: self.plan_id.clone(), qualifiers: self.qualifiers.clone() }
     }
     pub fn definition_id(&self, source: &CollectionDescription) -> Result<String> {
+        if !source.is_partition_qualified() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
         source.scoped_id("plan-definition-v2", self)
     }
     pub fn is_valid(&self) -> bool {

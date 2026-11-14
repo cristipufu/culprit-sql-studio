@@ -35,6 +35,7 @@ fn scenario() -> Scenario {
     // These are source-owned fixture facts. Core validates their relations/accounting; only the selected source's
     // verifier can authenticate this artifact and decide whether its native work qualifies the recipe.
     let cost_source = CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         target: baseline.0.target.clone(),
         source: "fixture-native-cost".into(),
         continuity: SourceContinuity::Unverified,
@@ -403,6 +404,7 @@ fn completed_result(scenario: &Scenario) -> ActivityWaitFocusResult {
 fn result_source(result: ActivityWaitFocusResult) -> CollectionDescription {
     let source = "native-page-targets".to_owned();
     CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         target: result.focus.target.clone(),
         source: source.clone(),
         continuity: SourceContinuity::Unverified,

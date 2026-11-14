@@ -7,6 +7,7 @@ use crate::{
     value::Rec,
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
+mod process;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct DatabaseContext {
@@ -21,6 +22,8 @@ pub(crate) struct DatabaseContext {
     pub instance: Option<instance::Context>,
     pub database_wide: bool,
     pub qualification_error: Option<ErrorCode>,
+    process: Option<process::ProcessEpoch>,
+    connection_generation: Option<u64>,
 }
 impl DatabaseContext {
     pub(crate) async fn initial<R: NativeRead>(reader: &mut ActivityReader<R>) -> Result<Self> {
@@ -34,6 +37,7 @@ impl DatabaseContext {
             && self.activity.major == frame.major
             && self.activity.database.database == frame.database.database
             && self.activity.writable == frame.writable
+            && self.activity.replica_id == frame.replica_id
             && frame.epoch.as_ref().is_none_or(|epoch| self.activity.epoch.as_ref() == Some(epoch))
     }
     pub(crate) fn same_source(&self, other: &Self) -> bool {
@@ -49,15 +53,19 @@ impl DatabaseContext {
             && self.database_guid == other.database_guid
             && self.recovery_fork_guid == other.recovery_fork_guid
             && self.instance == other.instance
+            && self.process == other.process
+            && self.connection_generation == other.connection_generation
     }
     pub(crate) fn is_qualified(&self) -> bool {
-        self.native_identity().is_ok()
+        self.qualification_error.is_none() && self.activity.writable.is_some() && self.native_identity().is_ok()
     }
     pub(crate) fn native_identity(&self) -> Result<NativeIdentity> {
         let identity = if self.activity.edition == 5 {
             NativeIdentity::new(self.activity.database.incarnation.as_ref().ok_or_else(invalid_data)?)
                 .qualified("kind", "azure-sql-logical-database")
                 .qualified("physical_database_guid", self.physical_database.as_ref().ok_or_else(invalid_data)?)
+                .qualified("replica_id", self.activity.replica_id.as_ref().ok_or_else(invalid_data)?)
+                .qualified("process_epoch", self.process.as_ref().ok_or_else(invalid_data)?.key()?)
         } else {
             let mut identity = NativeIdentity::new(self.database_id.to_string())
                 .qualified("kind", "sql-server-local-database-recovery-epoch")
@@ -78,19 +86,38 @@ impl DatabaseContext {
     }
     pub(crate) fn capture_context(&self) -> Result<ActivityContext> {
         let mut context = self.activity.clone();
-        if context.edition != 5 {
+        if self.is_qualified() {
             // database_guid can be duplicated by copying/attaching a database. Preserve it in the local
             // authority token; DatabaseIdentity::incarnation would instead promote it to a global namespace.
-            context.epoch = if self.is_qualified() {
-                let identity = self.native_identity()?;
-                Some(digest(&serde_json::to_vec(&identity).map_err(|_| invalid_data())?))
-            } else {
-                None
-            };
-        } else if !self.is_qualified() {
+            let identity = self.native_identity()?;
+            context.epoch = Some(digest(&serde_json::to_vec(&identity).map_err(|_| invalid_data())?));
+        } else {
             context.epoch = None;
         }
         Ok(context)
+    }
+
+    pub(crate) fn source_instance(&self) -> Option<SharedResourceIdentity> {
+        if self.activity.edition != 5 {
+            return self.instance.as_ref().map(|instance| instance.identity.clone());
+        }
+        let identity = SharedResourceIdentity {
+            engine: culprit_core::Engine::Mssql,
+            kind: SharedResourceKind::Node,
+            namespace: NativeIdentity::new(self.activity.database.incarnation.as_ref()?)
+                .qualified("kind", "azure-sql-logical-database"),
+            native: NativeIdentity::new(self.activity.replica_id.as_ref()?)
+                .qualified("kind", "azure-sql-hyperscale-replica"),
+        };
+        identity.is_valid().then_some(identity)
+    }
+
+    pub(crate) fn source_partition(&self) -> Result<SourcePartition> {
+        Ok(SourcePartition::InstanceLocal { member: self.source_instance(), epoch: self.capture_context()?.epoch })
+    }
+
+    pub(crate) fn connection_changed(&self, other: &Self) -> bool {
+        self.connection_generation != other.connection_generation
     }
 }
 
@@ -108,6 +135,7 @@ pub(super) async fn read_initial<R: NativeRead>(
         return read(reader, IdentityDetail::AzureDatabase, None, None, detail).await;
     }
     let platform = instance::observe(&mut reader.io).await?;
+    let connection_generation = reader.io.connection_generation();
     if platform.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE && !platform.supports_instance() {
         return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
     }
@@ -117,7 +145,13 @@ pub(super) async fn read_initial<R: NativeRead>(
         Err(error) => (None, Some(error.code)),
     };
     let identity = if platform.edition == 5 { IdentityDetail::AzureDatabase } else { IdentityDetail::Endpoint };
-    let result = read(reader, identity, instance, error, detail).await?;
+    let mut result = read(reader, identity, instance, error, detail).await?;
+    if connection_generation != reader.io.connection_generation() {
+        // A completed optional authority error may release its socket. The later actor baseline still has
+        // value, but instance facts from the earlier owner cannot qualify the new connection.
+        result.0.instance = None;
+        result.0.qualification_error = Some(ErrorCode::ConnectionFailed);
+    }
     if result.0.activity.edition != platform.edition
         || result.0.activity.major != platform.major
         || platform.observed_at > result.0.activity.at
@@ -150,11 +184,25 @@ async fn read<R: NativeRead>(
         .await
         .map_err(ReadError::into_error)?;
     let [row] = rows.as_slice() else { return Err(invalid_data()) };
-    let (activity, database_wide) = ActivityContext::observed(row, &reader.host, reader.port, identity)?;
+    let mut context = decode(row, &reader.host, reader.port, identity, instance, qualification_error)?;
+    context.connection_generation = reader.io.connection_generation();
+    Ok((context, rows.into_iter().next().ok_or_else(invalid_data)?))
+}
+
+fn decode(
+    row: &Rec,
+    host: &str,
+    port: u16,
+    identity: IdentityDetail,
+    instance: Option<instance::Context>,
+    qualification_error: Option<ErrorCode>,
+) -> Result<DatabaseContext> {
+    let (activity, database_wide) = ActivityContext::observed(row, host, port, identity)?;
     let database_id = u32::try_from(integer(row, "selected_database_id")?).map_err(|_| invalid_data())?;
     if !(1..=i16::MAX as u32).contains(&database_id) {
         return Err(invalid_data());
     }
+    let process = process::ProcessEpoch::decode(row)?;
     let context = DatabaseContext {
         activity,
         database_id,
@@ -171,9 +219,17 @@ async fn read<R: NativeRead>(
         instance,
         database_wide,
         qualification_error,
+        process,
+        connection_generation: None,
     };
-    Ok((context, rows.into_iter().next().ok_or_else(invalid_data)?))
+    Ok(context)
 }
+
+#[cfg(test)]
+pub(crate) fn test_azure_authority(row: &Rec) -> Result<DatabaseContext> {
+    decode(&crate::activity::tests::authority(row), "fixture.invalid", 1433, IdentityDetail::AzureDatabase, None, None)
+}
+
 fn query(identity: IdentityDetail, detail: ContextDetail) -> String {
     // recovery_status is documented only for boxed SQL Server/MI. Native product selection happens before
     // this SQL is constructed; an Azure database never parses an unsupported catalog reference.
@@ -195,11 +251,14 @@ fn query(identity: IdentityDetail, detail: ContextDetail) -> String {
         r#"SELECT CAST(NULL AS int) AS session_id,
  sd.database_id AS selected_database_id,CONVERT(varchar(40),CAST(sd.create_date AS datetime2),126) AS database_created_without_offset,
  CONVERT(varchar(36),df.file_guid) AS database_file_guid,CONVERT(varchar(30),df.create_lsn) AS database_file_create_lsn,
- {recovery}{page}
+ {recovery},{process_columns}{page}
  FROM sys.databases sd LEFT JOIN sys.database_files df ON df.file_id=1 AND df.type=0
- {join} WHERE sd.database_id=DB_ID()"#
+ {join} WHERE sd.database_id=DB_ID()"#,
+        process_columns =
+            if identity == IdentityDetail::AzureDatabase { process::COLUMNS } else { process::UNAVAILABLE_COLUMNS }
     );
-    sql::frame_query(&rows, identity, sql::QueryPolicy::SerialMetadata)
+    let query = sql::frame_query(&rows, identity, sql::QueryPolicy::SerialMetadata);
+    if identity == IdentityDetail::AzureDatabase { format!("{}{query}", process::AZURE_READ) } else { query }
 }
 
 #[cfg(test)]

@@ -109,6 +109,7 @@ mod tests {
     }
     fn source() -> CollectionDescription {
         CollectionDescription {
+            partition: crate::telemetry::SourcePartition::Target,
             target: crate::DatabaseIdentity::server(crate::Engine::Postgres, "fixture", "fixture.invalid", 5432, None)
                 .into(),
             source: "native-resources".into(),

@@ -27,6 +27,7 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
     window_end: Option<&str>,
     query_ids: &[String],
 ) -> culprit_core::Result<Option<(Timeline, HashMap<String, QueryTrend>)>> {
+    let population = reader.population().await?;
     let interval = match reader.read_rows(INTERVAL_SQL).await {
         Ok(rows) => {
             rows.first().and_then(|row| row.f64("minutes")).map(|minutes| minutes.max(1.0) as u32).unwrap_or(60)
@@ -36,7 +37,7 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
     };
     let minutes = bucket_minutes(history_hours.min(f64::from(window_minutes) / 60.0), interval);
     let totals: Vec<(i64, f64, f64)> = reader
-        .window_rows(&totals_sql(minutes), window_minutes)
+        .window_rows(&totals_sql(minutes, population), window_minutes)
         .await?
         .iter()
         .filter_map(|r| Some((r.f64("bucket")? as i64, r.f64_or_zero("total_ms"), r.f64_or_zero("executions"))))
@@ -65,7 +66,7 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
         .map(|id| (id.clone(), QueryTrend { time_ms: vec![Some(0.0); len], executions: vec![Some(0.0); len] }))
         .collect();
     if ids != "NULL" {
-        for r in reader.window_rows(&per_query_sql(minutes, &ids), window_minutes).await? {
+        for r in reader.window_rows(&per_query_sql(minutes, &ids, population), window_minutes).await? {
             let Some(bucket) = r.f64("bucket").map(|b| b as i64) else { continue };
             let Some(trend) = trends.get_mut(&r.string("query_id")) else { continue };
             if bucket < first || bucket > last {

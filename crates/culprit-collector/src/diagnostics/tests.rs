@@ -1,4 +1,5 @@
 use super::*;
+mod partitions;
 mod planning;
 mod recovery;
 mod transition;
@@ -190,6 +191,8 @@ impl Harness {
         let TelemetryRecord::Activity(original) = &row.row.record else { panic!() };
         let native = input.source.observation.activity().unwrap();
         let focus = ActivityWaitFocus {
+            database_writable: None,
+            partition: culprit_core::telemetry::SourcePartition::Target,
             parent: row.reference.clone(),
             target: input.source.target.clone(),
             source: input.source.source.clone(),
@@ -265,6 +268,7 @@ fn missing(focus: ActivityWaitFocus, second: u32) -> Frame {
     let source = "focused-native-pages".to_owned();
     Frame {
         source: CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: focus.target.clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,

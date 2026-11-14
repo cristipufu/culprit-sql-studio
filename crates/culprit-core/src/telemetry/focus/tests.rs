@@ -21,6 +21,8 @@ fn focus() -> ActivityWaitFocus {
         }),
     };
     ActivityWaitFocus {
+        database_writable: None,
+        partition: crate::telemetry::SourcePartition::Target,
         parent: DiagnosticEvidenceRef {
             batch_id: batch_id(&capture.observation_id, TelemetryStream::ActivityObservations).unwrap(),
             capture,

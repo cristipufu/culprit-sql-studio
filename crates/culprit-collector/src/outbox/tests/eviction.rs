@@ -80,6 +80,7 @@ pub(super) async fn activity(
     let mut source = source();
     source.source = "live_requests".into();
     source.observation = SourceObservation::Activity(ActivitySnapshotDescription {
+        database_writable: None,
         population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
         epoch: Some("native-activity-epoch".into()),
         observed_from: at.into(),

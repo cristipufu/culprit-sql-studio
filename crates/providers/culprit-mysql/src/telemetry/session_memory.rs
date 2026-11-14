@@ -36,6 +36,7 @@ impl<R: OwnedRead> ObservationReader for Reader<R> {
         let source_coverage = captured.source_coverage();
         let snapshot = captured.snapshot;
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: CollectionTarget::Shared(snapshot.resource),
             source: "mysql-session-memory".into(),
             continuity: SourceContinuity::Unverified,

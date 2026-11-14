@@ -15,7 +15,14 @@ pub(crate) fn row() -> Rec {
 }
 
 pub(crate) fn layout_row() -> Rec {
-    Rec::of(&[("tempdb", Val::Int(0)), ("log_bytes", Val::Int(0)), ("waits", Val::Int(1)), ("variants", Val::Int(1))])
+    Rec::of(&[
+        ("tempdb", Val::Int(0)),
+        ("log_bytes", Val::Int(0)),
+        ("waits", Val::Int(1)),
+        ("variants", Val::Int(1)),
+        ("replicas", Val::Int(0)),
+        ("actual_state_desc", Val::Text("READ_WRITE".into())),
+    ])
 }
 
 pub(crate) fn open_row(clock: &str, elapsed_seconds: f64) -> Rec {

@@ -98,6 +98,11 @@ pub(crate) fn window_minutes(window: Option<u32>, window_days: Option<u32>) -> O
     window.or_else(|| window_days.map(|days| days.max(1).saturating_mul(culprit_core::MINUTES_PER_DAY)))
 }
 
+fn parse_workload_population(value: &str) -> std::result::Result<culprit_core::telemetry::NativeIdentity, String> {
+    let identity = culprit_core::telemetry::NativeIdentity::new(value);
+    if identity.is_valid() { Ok(identity) } else { Err(t!("cli.scan.workload_population_invalid")) }
+}
+
 /// `6h`, `90m`, `2d`, or a bare number of hours.
 pub(crate) fn parse_hours(text: &str) -> Result<f64, String> {
     let text = text.trim();
@@ -243,6 +248,8 @@ struct ScanArgs {
     /// Store keeps history in intervals (often an hour), so the window starts at the interval its edge falls in.
     #[arg(long, value_parser = parse_window_arg, conflicts_with = "window_days", value_name = "DURATION")]
     window: Option<u32>,
+    #[arg(long, value_parser = parse_workload_population, value_name = "ID", help = t!("cli.scan.workload_population"))]
+    workload_population: Option<culprit_core::telemetry::NativeIdentity>,
     /// How many of the heaviest queries to keep.
     #[arg(long, default_value_t = 60)]
     top: u32,
@@ -279,6 +286,7 @@ impl ScanArgs {
     fn snapshot_options(&self) -> SnapshotOptions {
         let window = window_minutes(self.window, Some(self.window_days)).unwrap_or_default();
         SnapshotOptions {
+            workload_population: self.workload_population.clone(),
             top_queries: self.top,
             plans: self.plans,
             collect_shared_resources: self.collect_shared_resources,
@@ -699,6 +707,45 @@ mod tests {
         assert_eq!(window_minutes(scan.window, Some(scan.window_days)), Some(2 * culprit_core::MINUTES_PER_DAY));
         let scan = scan_args(&[]).expect("defaults parse");
         assert_eq!(window_minutes(scan.window, Some(scan.window_days)), Some(7 * culprit_core::MINUTES_PER_DAY));
+    }
+
+    #[test]
+    fn scan_workload_population_preserves_the_exact_source_id_and_other_scan_options() {
+        use culprit_core::telemetry::NativeIdentity;
+        assert!(scan_args(&[]).unwrap().snapshot_options().workload_population.is_none());
+        let scan =
+            scan_args(&["--workload-population", "7", "--window", "6h", "--top", "20", "--plans", "3", "--full"])
+                .unwrap();
+        let options = scan.snapshot_options();
+        assert_eq!(options.workload_population, Some(NativeIdentity::new("7")));
+        assert_eq!(options.window_minutes, 360);
+        assert_eq!(options.top_queries, 20);
+        assert_eq!(options.plans, 3);
+        assert!(scan.full);
+        for id in ["0007", "native-group-7"] {
+            assert_eq!(
+                scan_args(&["--workload-population", id]).unwrap().snapshot_options().workload_population,
+                Some(NativeIdentity::new(id)),
+                "only the source can interpret its exact IDs"
+            );
+        }
+    }
+
+    #[test]
+    fn workload_population_rejects_invalid_arguments_and_never_changes_cached_report_commands() {
+        for args in [
+            vec!["--workload-population"],
+            vec!["--workload-population", ""],
+            vec!["--workload-population", "bad\nidentity"],
+            vec!["--workload-population", "7", "--workload-population", "1"],
+        ] {
+            assert!(scan_args(&args).is_err(), "{args:?}");
+        }
+        assert!(scan_args(&["--workload-population", &"x".repeat(4097)]).is_err());
+        for command in ["dashboard", "waits", "top", "findings"] {
+            assert!(Cli::try_parse_from(["culprit", command, "shop", "--workload-population", "7"]).is_err());
+        }
+        assert!(Cli::try_parse_from(["culprit", "findings", "shop", "--report", "exact-report.json"]).is_ok());
     }
     #[test]
     fn scan_shared_resource_reads_require_an_explicit_flag_and_preserve_other_options() {

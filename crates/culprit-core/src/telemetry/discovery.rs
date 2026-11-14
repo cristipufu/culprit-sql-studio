@@ -37,6 +37,7 @@ impl IntervalDiscoveryRequest {
 #[ts(export)]
 pub struct IntervalDiscoveryPage {
     pub database: DatabaseIdentity,
+    pub partition: SourcePartition,
     pub source: String,
     /// Fixed at the first page; intervals closing during pagination belong to a subsequent discovery.
     pub observed_at: String,
@@ -47,7 +48,10 @@ pub struct IntervalDiscoveryPage {
 }
 impl IntervalDiscoveryPage {
     pub fn matches_request(&self, request: &IntervalDiscoveryRequest) -> bool {
-        if request.validate().is_err() || self.database.database.is_empty() {
+        if request.validate().is_err()
+            || !self.partition.is_valid_for(&CollectionTarget::Database(self.database.clone()))
+            || !self.partition.is_qualified()
+        {
             return false;
         }
         let Ok((from, until)) = request.bounds() else { return false };
@@ -115,6 +119,7 @@ mod tests {
     }
     fn page() -> IntervalDiscoveryPage {
         IntervalDiscoveryPage {
+            partition: crate::telemetry::SourcePartition::Target,
             database: DatabaseIdentity::server(crate::Engine::Mssql, "db", "fixture.invalid", 1433, None),
             source: crate::source_id::QUERY_STORE.into(),
             observed_at: "2026-11-10T08:01:00Z".into(),

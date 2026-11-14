@@ -53,6 +53,7 @@ fn snapshot(observations: Vec<MssqlOutOfMemoryObservation>) -> MemoryFailureSnap
 
 fn source(records: u32) -> CollectionDescription {
     CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         target: CollectionTarget::Shared(resource(SharedResourceKind::Instance)),
         source: crate::source_id::MEMORY_FAILURES.into(),
         continuity: SourceContinuity::Unverified,

@@ -106,6 +106,8 @@ async fn retained_parent(path: &Path) -> (Outbox, ActivityWaitFocus, Arc<AtomicU
     let focus = ActivityWaitFocus {
         parent: row.reference.clone(),
         target: input.source.target.clone(),
+        partition: input.source.partition.clone(),
+        database_writable: snapshot.database_writable,
         source: input.source.source.clone(),
         epoch: snapshot.epoch.clone().unwrap(),
         original_observed_at: snapshot.at.clone(),

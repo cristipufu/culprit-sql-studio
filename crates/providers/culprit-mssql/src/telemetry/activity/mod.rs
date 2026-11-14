@@ -95,11 +95,12 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
     reader: &mut ActivityReader<R>,
 ) -> Result<(CollectionDescription, Vec<ActivityObservation>)> {
     let before = AuthorityRead::admit(DatabaseContext::initial(reader).await)?;
-    if let Some(context) = &before.context {
-        crate::read::require_primary(context.activity.writable)?;
-    }
     let mut baseline = reader.observe_baseline().await?;
-    crate::read::require_primary(baseline.frame.context.writable)?;
+    // Activity DMVs describe the member actually connected, including documented readable replicas. This
+    // eligibility is source-specific: no cache/history/memory/resource primary gate is changed here.
+    if !matches!(baseline.frame.context.edition, 2 | 3 | 4 | 5 | 8) || baseline.frame.context.major < 11 {
+        return Err(culprit_core::Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+    }
     let after = AuthorityRead::admit(match &before.context {
         Some(context) => DatabaseContext::recheck(reader, context).await,
         None => DatabaseContext::initial(reader).await,
@@ -108,6 +109,11 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
         if !context.matches_frame(&baseline.frame.context) {
             return Err(CollectionStop::SourceChanged.error());
         }
+    }
+    if let (Some(before), Some(after)) = (&before.context, &after.context)
+        && before.connection_changed(after)
+    {
+        return Err(CollectionStop::SourceChanged.error());
     }
     let qualified = match (&before.context, &after.context) {
         (Some(before), Some(after)) if before.is_qualified() && after.is_qualified() => {
@@ -142,9 +148,13 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
         context.epoch = None;
     }
     let at = baseline.frame.context.at;
+    let database_writable = baseline.frame.context.writable;
+    let member = before.context.as_ref().and_then(DatabaseContext::source_instance);
+    let partition = SourcePartition::InstanceLocal { member, epoch: context.epoch.clone() };
     let observations = export_observations(baseline.frame.records);
     let activity = ActivitySnapshotDescription {
         epoch: context.epoch,
+        database_writable,
         observed_from,
         observed_until,
         at,
@@ -159,6 +169,7 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
     }
     let description = CollectionDescription {
         target: context.database.into(),
+        partition,
         source: culprit_core::source_id::SESSIONS.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(activity),

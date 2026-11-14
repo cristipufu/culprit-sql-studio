@@ -896,6 +896,19 @@ fn scenarios() -> Vec<(&'static str, String)> {
     let mut out: Vec<(&'static str, String)> = Vec::new();
     let mut add = |name: &'static str, s: Snapshot, id: &str| out.push((name, said(&worded(&s, id))));
 
+    title_scenarios(&mut add);
+    idle_scenarios(&mut add);
+    lead_scenarios(&mut add);
+    summary_scenarios(&mut add);
+    wait_scenarios(&mut add);
+    maintenance_scenarios(&mut add);
+    write_scenarios(&mut add);
+    fix_scenarios(&mut add);
+    metric_scenarios(&mut add);
+    out
+}
+
+fn title_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // Titles.
     add("title/share", postgres_demo(), "-3722457391793582113");
     add(
@@ -945,7 +958,9 @@ fn scenarios() -> Vec<(&'static str, String)> {
     add("title/many-per-row-pages", postgres_demo(), "5308963031944094559");
     add("title/many-per-row-rows-examined", mysql_demo(), "19bd4ff468839ea3");
     add("title/many-per-row-pages-stopped", stopped(postgres_demo(), "5308963031944094559"), "5308963031944094559");
+}
 
+fn idle_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // Where a statement's time goes when it isn't work.
     add("idle/sleep", postgres_demo(), SLEEP_ID);
     let mut s = postgres_demo();
@@ -1031,7 +1046,9 @@ fn scenarios() -> Vec<(&'static str, String)> {
     q.spread.as_mut().unwrap().lock_ms = None;
     (q.waits, q.cpu_time_ms) = (vec![], Some(0.02 * q.total_time_ms));
     add("idle/little-cpu-over-totals", s, MYSQL_LOOKUP);
+}
 
+fn lead_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // What explains the time, after its share.
     add("lead/step-share-examined", mysql_demo(), "c7b5ac9bb4bcecfe");
     add("lead/uncosted-temporary", mysql_demo(), "04cd7be9c366fadc");
@@ -1114,7 +1131,9 @@ fn scenarios() -> Vec<(&'static str, String)> {
         },
         INSERT_ID,
     );
+}
 
+fn summary_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // The summary's first sentence.
     add("summary/recent-entry", with_scans(INSERT_ID, 2_000.0, 1_000.0), INSERT_ID);
     add("summary/scans-beside-totals", with_scans(INSERT_ID, 100.0, 1_000.0), INSERT_ID);
@@ -1133,7 +1152,9 @@ fn scenarios() -> Vec<(&'static str, String)> {
     (q.first_seen, q.last_seen) = (Some("2026-10-11T07:44:33Z".into()), Some("2026-10-11T07:47:52Z".into()));
     add("summary/burst-counted", s, "7");
     add("summary/slow-log", slow_log(mysql_demo()), "c7b5ac9bb4bcecfe");
+}
 
+fn wait_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // The wait that takes most of its time.
     for (name, category, wait_type, share) in [
         ("wait/storage", "IO", "Buffer IO", 0.85),
@@ -1173,7 +1194,9 @@ fn scenarios() -> Vec<(&'static str, String)> {
     add("wait/storage-finds-nothing-unique-filtered", s.clone(), "7");
     s.indexes.iter_mut().find(|i| i.name == "ix_customers_email").unwrap().filter = None;
     add("wait/storage-finds-nothing-unique", s, "7");
+}
 
+fn maintenance_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // Triggers, statistics maintenance.
     add("triggers/one-update", with_triggers(postgres_demo(), &["trg_audit_row:IUD"]), UPDATE_ID);
     add("triggers/many-update", with_triggers(postgres_demo(), &["trg_b:U", "trg_a:IUD", "trg_c:I"]), UPDATE_ID);
@@ -1199,7 +1222,9 @@ fn scenarios() -> Vec<(&'static str, String)> {
     (w.total_time_ms, w.total_executions) = (q.total_time_ms, q.executions);
     w.queries = vec![q];
     add("summary/statistics-maintenance", s, "statistics-maintenance");
+}
 
+fn write_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // Writes: what a run costs, and the levers.
     let nothing = "INSERT INTO products (sku, name) VALUES ($1, $2) ON CONFLICT DO NOTHING";
     let insert = "INSERT INTO products (sku, name) VALUES ($1, $2)";
@@ -1284,7 +1309,9 @@ fn scenarios() -> Vec<(&'static str, String)> {
     let mut s = heavy_insert(insert, Some(6_000.0));
     query_mut(&mut s, INSERT_ID).costs.as_mut().unwrap().log_share = Some(0.3);
     add("write/per-row-without-share", s, INSERT_ID);
+}
 
+fn fix_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // Fixes for a statement's kind, its runs or its plan.
     add("fix/key-lookups", point_lookup(20_000.0, 40.0), "7");
     for (name, engine, id, costs) in [
@@ -1363,14 +1390,14 @@ fn scenarios() -> Vec<(&'static str, String)> {
     let mut s = mssql_demo();
     query_mut(&mut s, "7").text = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED".into();
     add("fix/session-windowed", s, "7");
+}
 
+fn metric_scenarios(add: &mut impl FnMut(&'static str, Snapshot, &str)) {
     // Metrics.
     let mut s = point_lookup_with(|q| q.rows = Some(3.0));
     add("metric/rows-in-runs", s.clone(), "7");
     query_mut(&mut s, "7").cpu_time_ms = None;
     add("metric/no-cpu", s, "7");
-
-    out
 }
 
 /// Fixes and verify steps worded on their own: for a scan's step, a pool's statement, what to measure, and each thing a

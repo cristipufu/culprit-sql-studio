@@ -81,6 +81,7 @@ impl Files {
         let reservation = self.reserve(&input.connection, &request)?;
         let identity = reservation.entry.identity.clone();
         let source = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: input.source.target.clone(),
             source: DIAGNOSTICS_SOURCE.into(),
             continuity: SourceContinuity::Unverified,
@@ -91,6 +92,14 @@ impl Files {
                 analyzed_at: update.analyzed_at.clone(),
                 records: update.revisions.len() as u32,
                 checkpoint_records: parts.len() as u32,
+                scope_bindings: update
+                    .checkpoint
+                    .episodes
+                    .iter()
+                    .map(|episode| &episode.scope)
+                    .chain(update.revisions.iter().map(|revision| &revision.episode.scope))
+                    .map(|scope| Ok((scope.key()?, scope.clone())))
+                    .collect::<Result<_>>()?,
             }),
         };
         let key = update.checkpoint.key()?;

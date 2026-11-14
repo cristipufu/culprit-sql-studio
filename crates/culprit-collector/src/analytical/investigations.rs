@@ -8,6 +8,30 @@ pub(super) const CONTEXT_FIELD: Field =
     Field::optional("InvestigationContext", "/_culprit/investigation", ScalarType::JsonContainer);
 
 #[derive(Serialize)]
+struct DiagnosticContext<'a> {
+    controller_version: u32,
+    parent: &'a DiagnosticCaptureRef,
+    step_id: &'a str,
+    analyzed_at: &'a str,
+    records: u32,
+    checkpoint_records: u32,
+    scope_keys: Vec<&'a str>,
+}
+
+pub(super) fn diagnostic_context(value: &DiagnosticCaptureDescription) -> Result<Value> {
+    serde_json::to_value(DiagnosticContext {
+        controller_version: value.controller_version,
+        parent: &value.parent,
+        step_id: &value.step_id,
+        analyzed_at: &value.analyzed_at,
+        records: value.records,
+        checkpoint_records: value.checkpoint_records,
+        scope_keys: value.scope_bindings.keys().map(String::as_str).collect(),
+    })
+    .map_err(|_| DeliveryProblem::Integrity.error())
+}
+
+#[derive(Serialize)]
 struct PublicLineage<'a> {
     intent_key: &'a str,
     episode_id: &'a str,

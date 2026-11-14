@@ -23,10 +23,12 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
         }),
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: backend.database.lock().unwrap().clone().into(),
         source: "query_store".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            population_catalog: None,
             waits: None,
             interval: interval(10),
             dimensions: [("replica_group_id".into(), vec!["0".into()])].into(),

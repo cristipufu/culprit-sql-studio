@@ -28,6 +28,7 @@ impl RecipeCostReceipt {
             && self.recipe_version > 0
             && self.scope.is_valid()
             && self.scope.native_epoch.is_some()
+            && self.scope.partition.is_qualified()
             && qualification_component_is_valid(&self.component)
             && self.tested_budget.validate().is_ok()
             && self.evidence.is_valid()
@@ -182,6 +183,7 @@ impl DiagnosticInvestigationIntent {
             && self.budget == self.qualification.tested_budget
             && self.qualification.scope.source == self.focus.source
             && self.qualification.scope.native_epoch.as_deref() == Some(self.focus.epoch.as_str())
+            && self.qualification.scope.partition == self.focus.partition
             && self.qualification.scope.target.telemetry_id().ok() == self.focus.target.telemetry_id().ok()
     }
 

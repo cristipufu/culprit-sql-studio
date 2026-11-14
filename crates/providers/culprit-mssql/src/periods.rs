@@ -21,13 +21,14 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
     else {
         return Ok(None);
     };
+    let population = reader.population().await?;
     let mut data = PeriodData {
         source: TimelineSource::QueryStore,
         baseline: baseline.clone(),
         recent: recent.clone(),
         ..Default::default()
     };
-    for r in reader.read_rows(&totals_sql(&b0, &r0, &r1)).await? {
+    for r in reader.read_rows(&totals_sql(&b0, &r0, &r1, population)).await? {
         let stats = PeriodStats::new(r.f64_or_zero("executions"), r.f64_or_zero("total_ms"));
         let snapped =
             Period { start: r.str("period_start").unwrap_or_default(), end: r.str("period_end").unwrap_or_default() };
@@ -54,7 +55,7 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
     data.baseline_coverage = if wanted > 0.0 { (covered / wanted).clamp(0.0, 1.0) } else { 0.0 };
 
     let mut queries: BTreeMap<String, QueryPeriods> = BTreeMap::new();
-    for r in reader.read_rows(&per_plan_sql(&b0, &r0, &r1)).await? {
+    for r in reader.read_rows(&per_plan_sql(&b0, &r0, &r1, population)).await? {
         let query_id = r.string("query_id");
         let mut stats = PeriodStats::new(r.f64_or_zero("executions"), r.f64_or_zero("total_ms"));
         stats.min_ms = r.f64("min_ms");
@@ -91,6 +92,7 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
         }
     }
     data.queries = queries.into_values().collect();
+    reader.verify_population().await?;
     Ok(Some(data))
 }
 

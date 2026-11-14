@@ -56,6 +56,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for TaskSpaceReader<R> {
             StateSourceCoverage::observed(sources::TASK_SPACE.name.into(), records.len() as u32, complete);
         coverage.error_code = captured.context_error_code;
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: captured.context.database.clone().into(),
             source: sources::TASK_SPACE.name.into(),
             continuity: SourceContinuity::Unverified,

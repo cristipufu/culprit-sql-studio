@@ -38,8 +38,19 @@ impl Reports<'_> {
     /// The newest saved report, or the newest one scanned with a window of `window_minutes` when given, read the way a
     /// scan taken now would read the same data ([`crate::Workspace::analyze_file`]).
     pub(crate) fn latest_report(&self, name: &str, window_minutes: Option<u32>) -> Result<Option<Report>> {
+        self.latest_population_report(name, window_minutes, None)
+    }
+
+    pub(crate) fn latest_population_report(
+        &self,
+        name: &str,
+        window_minutes: Option<u32>,
+        population: Option<&culprit_core::telemetry::NativeIdentity>,
+    ) -> Result<Option<Report>> {
         let dir = self.paths.reports_dir(name);
-        let Some(summary) = reports::latest_summary(&dir, window_minutes) else { return Ok(None) };
+        let Some(summary) = reports::latest_selected_summary(&dir, window_minutes, population)? else {
+            return Ok(None);
+        };
         let mut input = reports::load_analysis_input(&dir.join(format!("{}.json", summary.id)))?;
         reports::rebase_on_scans(&dir, &mut input.snapshot);
         Ok(Some(self.reread(input)))
@@ -85,7 +96,10 @@ impl Reports<'_> {
             Ok(input)
         };
         let history = match (name, report) {
-            (Some(name), None) => reports::list(&self.paths.reports_dir(name))?,
+            (Some(name), None) => reports::list(&self.paths.reports_dir(name))?
+                .into_iter()
+                .filter(|summary| summary.workload_population.is_none())
+                .collect(),
             _ => Vec::new(),
         };
         let mut current = match (report, name) {
@@ -99,16 +113,15 @@ impl Reports<'_> {
                     .with_hint(t!("engine.reporting.digest_nothing_hint")));
             }
         };
-        // A scan without an earlier one to compare lock escalations with (a scheduled job keeps no scans) compares
-        // them with the baseline's counts. When `--since` is explicitly supplied, always compare against that baseline.
+        // Explicit comparisons replace any implicit saved-scan baseline.
         let unbased = current.snapshot.escalations_before.is_none();
         // A previous digest is the baseline a scheduled job keeps: it holds finding ids and titles, no statement text.
         if let Some(path) = since
             && let Some(previous) = read_digest(path)?
         {
-            // A digest keeps only the database's redacted location, which never equals the report's real one.
-            let redacted = culprit_core::redact::redact_snapshot(&current.snapshot);
-            current.snapshot.escalations_before = culprit_core::EscalationBaseline::from_digest(&previous, &redacted);
+            // A digest has table totals but no per-index native owner/reset proof. It cannot establish recent
+            // escalations, and an explicit digest must not silently borrow an unrelated saved-scan baseline.
+            current.snapshot.escalations_before = None;
             let current = recheck(current);
             return Ok(with_details(&current, culprit_checks::digest_since(&current, &previous, top, top_queries)));
         }
@@ -256,3 +269,6 @@ pub(crate) fn dashboard_report(report: &Report) -> culprit_core::Dashboard {
 pub(crate) fn explain_waits(snapshot: &culprit_core::Snapshot) -> Option<culprit_core::WaitsReport> {
     culprit_checks::waits::explain(snapshot)
 }
+
+#[cfg(test)]
+mod tests;

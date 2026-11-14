@@ -200,12 +200,11 @@ fn escalated_tables(snapshot: &Snapshot) -> Vec<EscalatedTable<'_>> {
                         },
                     },
                 );
-            let name = format!("{schema}.{table}");
             // How many since the earlier scan, when there is one to compare with and the counts compare.
             // A zero delta over only a fraction of the selected window (for example, a scan taken a minute or a few
             // hours ago before selecting 1h, 6h, 24h, 7d or 30d) does not establish that nothing escalated in the window.
             let new = before.and_then(|b| {
-                let n = b.since(&name, counts.escalations)?;
+                let n = b.since(snapshot, &schema, &table)?;
                 if n == 0.0
                     && b.reference.as_ref().and_then(|r| r.id.as_ref()).is_some()
                     && let Some(minutes) = snapshot.options.as_ref().map(|o| o.window_in_minutes())
@@ -262,16 +261,14 @@ fn escalated_tables(snapshot: &Snapshot) -> Vec<EscalatedTable<'_>> {
                 Some(_) => Severity::High,
                 None => since_start_severity(first_scan_rate, ESCALATIONS_HIGH_PER_DAY, ESCALATIONS_MEDIUM_PER_DAY),
             };
-            // A digest's counts cover exactly the time since that digest, however long ago: Friday's, on a Monday.
             let out_of_window = new.is_some_and(|(b, _)| {
-                !b.is_from_digest()
-                    && !days_between(&b.taken_at, &snapshot.taken_at).is_some_and(|d| {
-                        d >= 0.0
-                            && snapshot
-                                .options
-                                .as_ref()
-                                .is_none_or(|o| d * 1440.0 <= f64::from(o.window_in_minutes()) * 1.25)
-                    })
+                !days_between(&b.taken_at, &snapshot.taken_at).is_some_and(|d| {
+                    d >= 0.0
+                        && snapshot
+                            .options
+                            .as_ref()
+                            .is_none_or(|o| d * 1440.0 <= f64::from(o.window_in_minutes()) * 1.25)
+                })
             });
             let informational = !historical && (out_of_window || (new.is_none() && severity == Severity::Low));
             if informational {
@@ -324,7 +321,6 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
     let name = format!("{schema}.{table}");
     let mut f = finding("lock-escalations", &name, Category::Indexes, subject(SubjectKind::Table, &name));
     let started = t.reset.as_ref().and_then(|reset| reset.at());
-    let server_started_on = snapshot.server.started_at.as_deref().map(crate::queries::when_phrase);
     let azure = snapshot.server.on(culprit_core::Platform::AzureSqlDatabase);
     let since_start = match started {
         Some(at) => t!("check.lock_escalations.since_started", date = format::friendly_date(at, &snapshot.taken_at)),
@@ -354,12 +350,7 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
                 count = format::count(n),
                 when = crate::queries::when_phrase(&b.taken_at)
             ));
-            summary.push(if b.restarted {
-                match server_started_on.as_deref() {
-                    Some(on) => t!("check.lock_escalations.summary.restarted_on", on = on),
-                    None => t!("check.lock_escalations.summary.restarted"),
-                }
-            } else if n < t.escalations {
+            summary.push(if n < t.escalations {
                 t!("check.lock_escalations.summary.counted_in_all", total = &total, since = &since_start)
             } else {
                 t!("check.lock_escalations.summary.all_after", total = &total, since = &since_start)

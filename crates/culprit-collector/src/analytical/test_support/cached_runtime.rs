@@ -45,6 +45,7 @@ pub fn cached_runtime_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
             });
             let (manifest, _) = fixture();
             let source = CollectionDescription {
+                partition: culprit_core::telemetry::SourcePartition::Target,
                 target: manifest.source.target,
                 source: "statement-runtime-cache".into(),
                 continuity: SourceContinuity::Unverified,

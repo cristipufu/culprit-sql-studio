@@ -75,7 +75,10 @@ async fn observe(
         sizes_before: None,
         sources: vec![],
         identity: None,
-        operations: Default::default(),
+        operations: culprit_core::operations::OperationalStats {
+            index_usage_scope: Some(culprit_core::operations::IndexUsageScope::ConnectedMember),
+            ..Default::default()
+        },
     };
     catalog::details(session, &mut snapshot, &mut coverage).await;
     crate::index_usage::read(session, &probe, &mut snapshot, &mut coverage).await;

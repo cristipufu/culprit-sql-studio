@@ -11,6 +11,11 @@ pub use plan::PageWaitFocusPlan;
 pub struct ActivityWaitFocus {
     pub parent: DiagnosticEvidenceRef,
     pub target: CollectionTarget,
+    pub partition: SourcePartition,
+    /// Observed database updateability at the parent point, not routing intent, permission or member identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database_writable: Option<bool>,
     pub source: String,
     pub epoch: String,
     /// The original native observation clock, distinct from a later lookup's bounds.
@@ -34,11 +39,13 @@ impl ActivityWaitFocus {
             && *reference == self.parent
             && *original == self.original
             && self.target.telemetry_id().ok() == source.target.telemetry_id().ok()
+            && self.partition == source.partition
             && self.source == source.source
             && source.captured_range().is_ok_and(|range| range.scope_id == self.parent.source_scope_id)
             && source.observation.activity().is_some_and(|snapshot| {
                 snapshot.is_valid()
                     && snapshot.epoch.as_deref() == Some(self.epoch.as_str())
+                    && snapshot.database_writable == self.database_writable
                     && snapshot.at == self.original_observed_at
             })
     }
@@ -47,7 +54,12 @@ impl ActivityWaitFocus {
         self.parent.is_valid()
             && self.parent.stream == TelemetryStream::ActivityObservations
             && matches!(&self.parent.native_key, NativeRecordIdentity::Activity(key) if *key == self.original.key)
-            && self.target.is_valid()
+            && self.partition.is_valid_for(&self.target)
+            && self.partition.is_qualified()
+            && match &self.partition {
+                SourcePartition::Target => true,
+                SourcePartition::InstanceLocal { epoch, .. } => epoch.as_deref() == Some(self.epoch.as_str()),
+            }
             && self.target.database().is_some()
             && valid_key(&self.source)
             && valid_key(&self.epoch)

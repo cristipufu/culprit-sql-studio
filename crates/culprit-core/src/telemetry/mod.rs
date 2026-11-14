@@ -59,6 +59,7 @@ mod runtime;
 mod runtime_distributions;
 mod session_memory;
 mod settings;
+mod source_partition;
 mod state;
 mod statement_counters;
 mod statistics;
@@ -123,6 +124,7 @@ pub use runtime::*;
 pub use runtime_distributions::*;
 pub use session_memory::*;
 pub use settings::*;
+pub use source_partition::*;
 pub use state::*;
 pub use statement_counters::*;
 pub use statistics::*;
@@ -475,6 +477,7 @@ impl TelemetryRecord {
                         && row.target == source.target
                         && row.input == description.parent
                         && row.controller_version == description.controller_version
+                        && row.episodes.iter().all(|episode| description.accepts_scope(&episode.scope))
                 }
                 _ => false,
             },
@@ -491,6 +494,7 @@ impl TelemetryRecord {
                         accepted
                             && revision.controller_version == description.controller_version
                             && revision.episode.scope.target.telemetry_id()? == source.target.telemetry_id()?
+                            && description.accepts_scope(&revision.episode.scope)
                     }
                     (SourceObservation::Diagnostics(_), _) | (_, OperationalFact::DiagnosticRevision(_)) => false,
                     _ => accepted,

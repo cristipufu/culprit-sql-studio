@@ -69,6 +69,9 @@ fn unread(
     since: &str,
     wider: bool,
 ) -> Option<(Severity, String, Option<String>)> {
+    if !index_usage_covers_all_read_members(snapshot) {
+        return Some((Severity::Low, t!("view.index_notes.incomplete_read_members"), None));
+    }
     let fk = backs_foreign_key(snapshot, i);
     if unused.iter().any(|u| std::ptr::eq(*u, i)) {
         let text = match fk {

@@ -4,8 +4,13 @@ import type { CollectionTarget } from "./CollectionTarget";
 import type { DiagnosticEvidenceRef } from "./DiagnosticEvidenceRef";
 import type { NativeIdentity } from "./NativeIdentity";
 import type { ObservedWaitResource } from "./ObservedWaitResource";
+import type { SourcePartition } from "./SourcePartition";
 
-export type ActivityWaitFocus = { parent: DiagnosticEvidenceRef, target: CollectionTarget, source: string, epoch: string, 
+export type ActivityWaitFocus = { parent: DiagnosticEvidenceRef, target: CollectionTarget, partition: SourcePartition, 
+/**
+ * Observed database updateability at the parent point, not routing intent, permission or member identity.
+ */
+database_writable?: boolean, source: string, epoch: string, 
 /**
  * The original native observation clock, distinct from a later lookup's bounds.
  */

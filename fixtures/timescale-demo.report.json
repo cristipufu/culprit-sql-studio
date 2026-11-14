@@ -31,8 +31,8 @@
     },
     {
       "check": "overlapping-index",
-      "reason": null,
-      "status": "assessed",
+      "reason": "At least a week of comparable index-usage counters is needed to assess absence of reads.",
+      "status": "insufficient-evidence",
       "title": "Overlapping indexes"
     },
     {
@@ -648,7 +648,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 5,
+    "format": 6,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -778,6 +778,7 @@
           "subject": "WAL archive (whole server)"
         }
       ],
+      "index_usage_scope": "all-read-members",
       "log_failures": [],
       "multixacts": [
         {

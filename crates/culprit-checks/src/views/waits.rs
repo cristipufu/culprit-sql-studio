@@ -217,7 +217,8 @@ fn activity(snapshot: &Snapshot) -> Option<ActivityReport> {
 fn waits_capture_note(snapshot: &Snapshot) -> String {
     let totals = t!("view.waits.query_store.totals");
     let state = snapshot.setting("query_store_options.actual_state_desc").map(|s| s.value.to_ascii_uppercase());
-    let on = state.as_deref().is_some_and(|s| s == "READ_WRITE" || s == "READ_ONLY");
+    let mode = state.as_deref().and_then(culprit_core::engines::QueryStoreReadMode::from_native);
+    let on = mode.is_some();
     let azure = snapshot.server.platform().is_some_and(|p| p.is_azure_sql());
     let major: u32 = snapshot.server.version.split('.').next().and_then(|v| v.parse().ok()).unwrap_or(0);
     let sentences = if !azure && major > 0 && major < 14 {
@@ -231,6 +232,8 @@ fn waits_capture_note(snapshot: &Snapshot) -> String {
         .is_some_and(|s| s.value.eq_ignore_ascii_case("ON"))
     {
         vec![t!("view.waits.query_store.no_waits"), totals]
+    } else if mode == Some(culprit_core::engines::QueryStoreReadMode::ReadCaptureSecondary) {
+        vec![totals, t!("common.query_store.primary_configuration")]
     } else {
         let sql = "ALTER DATABASE CURRENT SET QUERY_STORE (WAIT_STATS_CAPTURE_MODE = ON);";
         vec![t!("view.waits.query_store.not_capturing"), totals, t!("view.waits.query_store.turn_on", sql = sql)]
@@ -765,6 +768,15 @@ mod tests {
         set(&mut s, "query_store_options.wait_stats_capture_mode_desc", "OFF");
         let note = |s: &Snapshot| explain(s).unwrap().notes.join(" ");
         assert!(note(&s).contains("WAIT_STATS_CAPTURE_MODE = ON"));
+        set(&mut s, "query_store_options.actual_state_desc", "READ_CAPTURE_SECONDARY");
+        set(&mut s, "query_store_options.wait_stats_capture_mode_desc", "ON");
+        assert!(
+            !note(&s).contains("ALTER DATABASE"),
+            "a valid secondary mode must not be treated as Query Store being off"
+        );
+        set(&mut s, "query_store_options.wait_stats_capture_mode_desc", "OFF");
+        assert!(!note(&s).contains("ALTER DATABASE"));
+        assert!(note(&s).contains(&t!("common.query_store.primary_configuration")));
         set(&mut s, "query_store_options.actual_state_desc", "OFF");
         assert!(note(&s).contains("Query Store is off"), "{}", note(&s));
         s.server.version = "13.0.6300.2".into();

@@ -1,6 +1,7 @@
 use super::*;
 use crate::{read::ReadResult, value::Val};
 use std::collections::VecDeque;
+mod replicas;
 
 struct Call {
     sql: String,
@@ -60,6 +61,7 @@ pub(crate) fn metadata(id: i64) -> Rec {
         ("database_name", Val::Text("shop".into())),
         ("incarnation", Val::Text("logical-guid".into())),
         ("physical_incarnation", Val::Text("physical-guid".into())),
+        ("replica_id", Val::Text("91487244-730d-4b83-8e49-d482241c7288".into())),
         ("updateability", Val::Text("READ_WRITE".into())),
         ("observed_at", Val::Text("2020-01-01T06:00:00Z".into())),
         ("native_observed_at", Val::Text("2020-01-01T08:00:00".into())),
@@ -103,15 +105,27 @@ pub(crate) fn metadata(id: i64) -> Rec {
 }
 
 #[tokio::test]
-async fn native_replica_facts_remain_readable_but_background_activity_requires_the_primary() {
+async fn native_readable_replica_baselines_keep_their_actual_member_epoch_and_role_without_primary_inference() {
     let readonly = replace(&metadata(42), &[("updateability", Val::Text("READ_ONLY".into()))]);
     let context = ActivityContext::decode(&readonly, "fixture.invalid", 1433, IdentityDetail::Endpoint).unwrap();
     assert_eq!(context.writable, Some(false));
-    let mut reader =
-        reader(vec![Ok(vec![authority(&readonly)])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-    let error = crate::telemetry::activity::capture(&mut reader).await.err().unwrap();
-    assert_eq!(error.code, ErrorCode::Unsupported);
-    assert_eq!(reader.query_count(), 1);
+    let mut reader = reader(
+        vec![Ok(vec![authority(&readonly)]), Ok(vec![readonly.clone()]), Ok(vec![authority(&readonly)])],
+        ActivityScope::CurrentDatabase,
+        IdentityDetail::AzureDatabase,
+    );
+    let (description, observations) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+    assert_eq!(observations.len(), 1);
+    let native = description.observation.activity().unwrap();
+    assert_eq!(native.database_writable, Some(false));
+    assert!(native.coverage.complete_scope);
+    let SourcePartition::InstanceLocal { member: Some(member), epoch: Some(epoch) } = &description.partition else {
+        panic!()
+    };
+    assert_eq!(member.native.id, "91487244-730d-4b83-8e49-d482241c7288");
+    assert_eq!(Some(epoch), native.epoch.as_ref());
+    assert_eq!(reader.query_count(), 3);
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
 fn healthy(id: i64) -> Rec {
     replace(
@@ -171,7 +185,7 @@ fn xml_parameter(call: &Call) -> &str {
     }
 }
 
-fn authority(row: &Rec) -> Rec {
+pub(crate) fn authority(row: &Rec) -> Rec {
     let mut columns: Vec<_> = row.columns().map(|(name, value)| (name, value.clone())).collect();
     columns.extend([
         ("selected_database_id", Val::Int(7)),
@@ -181,6 +195,7 @@ fn authority(row: &Rec) -> Rec {
         ("database_guid", Val::Null),
         ("recovery_fork_guid", Val::Null),
     ]);
+    columns.extend(crate::activity::database_context::tests::epoch_fields(true));
     Rec::of(&columns)
 }
 fn baseline_reader(rows: Vec<Rec>) -> ActivityReader<FakeRead> {

@@ -427,6 +427,7 @@ mod tests {
             reference: None,
             // What an identified scan of shop's pg_stat_statements at `at` records, counting since Oct 1.
             measurement: Some(culprit_core::MeasurementContext {
+                population: None,
                 database: culprit_core::DatabaseIdentity::server(Engine::Postgres, "shop", "127.0.0.1", 5432, None),
                 source: culprit_core::MeasurementSource::Workload(culprit_core::WorkloadKind::StatementStats),
                 scope: culprit_core::MeasurementScope::Database,

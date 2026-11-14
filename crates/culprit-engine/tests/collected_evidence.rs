@@ -26,10 +26,12 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
     let scan: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
     let workload = scan.workload.as_ref().unwrap();
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: scan.database_identity().into(),
         source: culprit_core::source_id::QUERY_STORE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            population_catalog: None,
             waits: None,
             interval: TelemetryInterval {
                 native_id: "recorded-interval".into(),

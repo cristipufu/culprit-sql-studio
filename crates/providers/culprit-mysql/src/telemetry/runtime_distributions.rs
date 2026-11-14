@@ -163,6 +163,7 @@ impl<R: OwnedRead> ObservationReader for Reader<R> {
             })
             .collect::<Result<Vec<_>>>()?;
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: before.database.clone().into(),
             source: "mysql-runtime-distributions".into(),
             continuity: SourceContinuity::Unverified,

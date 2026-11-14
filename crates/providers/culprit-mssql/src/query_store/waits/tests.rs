@@ -3,7 +3,13 @@ use crate::value::Val;
 use culprit_core::telemetry::{MeasurementValue, StatementReferences, TelemetryRecord, TelemetryStream};
 
 fn summary(id: u8, name: &str, milliseconds: u64) -> Summary {
-    Summary { plan_id: None, category_id: id, category: name.into(), total_ms: milliseconds }
+    Summary {
+        population: super::super::replicas::Population::Unpartitioned,
+        plan_id: None,
+        category_id: id,
+        category: name.into(),
+        total_ms: milliseconds,
+    }
 }
 
 #[test]
@@ -114,6 +120,7 @@ fn unknown_raw_categories_survive_export_while_invalid_native_id_and_time_are_re
     assert_eq!(wait.total, MeasurementValue::Integer("40".into()));
     for id in [-1, 256] {
         let row = Rec::of(&[
+            ("replica_group_id", Val::Null),
             ("wait_category", Val::Int(id)),
             ("wait_category_desc", Val::Text("Lock".into())),
             ("wait_ms", Val::Int(10)),

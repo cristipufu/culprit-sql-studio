@@ -153,7 +153,7 @@ impl<R: NativeRead> ActivityReader<R> {
 }
 
 fn same_owner(initial: &ActivityContext, current: &ActivityContext) -> bool {
-    initial.database == current.database && initial.epoch == current.epoch && initial.writable == current.writable
+    initial.same_source(current)
 }
 fn native_time(row: &Rec, name: &str) -> Result<Option<String>> {
     optional_text(row, name)?.map(|value| crate::sql_time::native_time(&value)).transpose()

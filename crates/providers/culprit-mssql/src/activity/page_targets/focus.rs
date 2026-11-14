@@ -19,10 +19,18 @@ impl<R: NativeRead> ActivityReader<R> {
         {
             return Err(invalid_data());
         }
+        if focus.database_writable.is_none() {
+            return Err(CollectionStop::SourceUnavailable.error());
+        }
         let initial = context::initial(self).await?;
         let current = initial.capture_context()?;
+        if current.writable.is_none() {
+            return Err(CollectionStop::SourceUnavailable.error());
+        }
         if current.database != *focus.target.database().ok_or_else(invalid_data)?
             || current.epoch.as_deref() != Some(focus.epoch.as_str())
+            || initial.authority.source_partition()? != focus.partition
+            || current.writable != focus.database_writable
             || !chronological(&[&canonical_time(&focus.original_observed_at)?, &current.at])
         {
             return Err(CollectionStop::SourceChanged.error());

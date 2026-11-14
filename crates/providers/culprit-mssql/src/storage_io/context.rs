@@ -17,14 +17,9 @@ impl NativeContext {
         let context = Self {
             engine_edition: optional_integer(row, "engine_edition")?,
             database_edition: optional_text(row, "database_edition")?,
-            replica_id: optional_text(row, "replica_id")?,
+            replica_id: crate::replica::id(row, "replica_id")?,
             updateability: optional_text(row, "updateability")?,
         };
-        // The query converts ReplicaID to uniqueidentifier before serialization. Refuse malformed fixture/driver
-        // values as well, so a nonempty arbitrary string cannot authorize the special database_id=0 source.
-        if context.replica_id.as_deref().is_some_and(|value| !native_guid(value)) {
-            return Err(invalid_data());
-        }
         Ok(context)
     }
 
@@ -77,12 +72,4 @@ impl NativeContext {
         }
         Ok(context)
     }
-}
-
-fn native_guid(value: &str) -> bool {
-    value.len() == 36
-        && value.bytes().enumerate().all(|(index, byte)| {
-            if matches!(index, 8 | 13 | 18 | 23) { byte == b'-' } else { byte.is_ascii_hexdigit() }
-        })
-        && value.bytes().any(|byte| byte != b'0' && byte != b'-')
 }

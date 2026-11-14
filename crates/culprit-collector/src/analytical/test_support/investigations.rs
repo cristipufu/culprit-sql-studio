@@ -56,6 +56,7 @@ pub fn investigation_fixture() -> InvestigationFixture {
     let episode = update.checkpoint.episodes[0].clone();
     let focus = update.focuses[0].1.clone();
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: baseline_source.target.clone(),
         source: "fixture-native-cost".into(),
         continuity: SourceContinuity::Unverified,

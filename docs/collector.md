@@ -656,6 +656,14 @@ native coverage; successful persistence establishes retrieval, not database heal
 epoch remains absent and prevents absence-based episode resolution or a focused lookup. Before/after source checks qualify
 the frozen point observation; they do not prove continuous identity or atomicity between those bounds.
 
+Each source also declares its `SourcePartition`: its own target namespace or a native connected member and
+generation. A read-only routing preference is not member identity. Qualified local members keep independent heads,
+episodes and focused-work ownership; a restart cannot silently continue the previous generation. Unidentified local
+points remain partial raw evidence and do not create durable episodes that could never be safely merged or resolved.
+Diagnostics retain private scope bindings for every referenced episode, including older generations; public
+analytical projections expose only opaque scope keys. See [SQL Server replica coverage](providers/mssql.md#read-only-replicas)
+for the current native identity gates and remaining source restrictions.
+
 Baseline sources preserve stricter caller budgets and cap retained rows at 500, statement time at one second and
 total native time at five seconds. Their native phase ceilings are seven for SQL Server, four for PostgreSQL,
 twenty for MySQL/MariaDB and eight for YugabyteDB. Setup and prepared-statement phases count toward those limits;
@@ -829,7 +837,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **22**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **23**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 [pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats

@@ -1,5 +1,5 @@
 //! SQL Server counts lock escalations over metadata-cache lifetime and keeps no time for each. Scans compare
-//! observed increases with earlier scans; scheduled digests compare with earlier digests.
+//! observed increases require earlier per-index native ownership/reset proof. Digests retain raw context, not that proof.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,12 +18,25 @@ fn temp_home(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!("culprit-escalations-{tag}-{}", std::process::id()))
 }
 
-/// The demo with `escalations` counted on one index of shop.orders.
+/// A controlled single-index native population built on the demo; ordinary native fixture points stay unchanged.
 fn demo(escalations: u32) -> Snapshot {
+    use culprit_core::telemetry::{NativeIdentity, SharedResourceIdentity, SharedResourceKind};
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mssql-demo.json");
     let mut s: Snapshot = serde_json::from_slice(&std::fs::read(path).expect("fixture")).expect("snapshot");
-    let orders = s.indexes.iter_mut().find(|i| i.schema == "shop" && i.table == "orders").expect("an orders index");
-    orders.contention = Some(IndexContention { lock_escalations: f64::from(escalations), ..Default::default() });
+    let mut orders =
+        s.indexes.iter().find(|i| i.schema == "shop" && i.table == "orders").expect("an orders index").clone();
+    orders.contention = Some(IndexContention {
+        source_owner: Some(SharedResourceIdentity {
+            engine: Engine::Mssql,
+            kind: SharedResourceKind::Node,
+            namespace: NativeIdentity::new("controlled-native-cluster"),
+            native: NativeIdentity::new("controlled-native-member"),
+        }),
+        reset: culprit_core::ResetMarker::Generation("controlled-native-index-generation".into()),
+        lock_escalations: f64::from(escalations),
+        ..Default::default()
+    });
+    s.indexes = vec![orders];
     // Server uptime does not establish the metadata counters' epoch.
     let started = chrono::Utc::now() - chrono::Duration::hours(12);
     s.server.started_at = Some(started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
@@ -66,6 +79,16 @@ impl Provider for Replay {
 
 fn escalation(report: &Report) -> &culprit_core::Finding {
     report.findings.iter().find(|f| f.id == ID).expect("the escalation finding")
+}
+
+fn assert_raw_escalation_context(digest: &Digest, count: u32) {
+    let finding = digest.findings.iter().find(|finding| finding.id == ID).expect("raw escalation context");
+    assert_eq!(finding.count, Some(f64::from(count)));
+    assert_eq!(finding.count_since, None);
+    assert_eq!(finding.severity, Severity::Low);
+    assert_eq!(finding.actionability, culprit_core::Actionability::Information);
+    assert!(digest.top.iter().all(|finding| finding.id != ID));
+    assert!(digest.since.as_ref().is_none_or(|since| since.again.iter().all(|finding| finding.id != ID)));
 }
 
 #[tokio::test]
@@ -115,7 +138,7 @@ async fn each_scan_compares_escalations_with_the_scan_before() {
 }
 
 #[test]
-fn a_scheduled_digest_compares_escalations_with_the_previous_digest() {
+fn a_scheduled_digest_keeps_raw_escalations_without_reconstructing_native_counter_proof_from_totals() {
     let home = temp_home("digest");
     std::fs::create_dir_all(&home).unwrap();
     let ws = Workspace::open_in(&home);
@@ -131,49 +154,26 @@ fn a_scheduled_digest_compares_escalations_with_the_previous_digest() {
         write(name, serde_json::to_vec(&s).unwrap())
     };
     let started = "2026-10-11T12:13:03Z";
-    let finding = |d: &Digest| d.findings.iter().find(|f| f.id == ID).cloned().expect("the escalation in the digest");
-
-    // A job keeps no scans: the first digest cannot grade an unknown native epoch; subsequent digests compare counts.
+    let finding = |d: &Digest| d.findings.iter().find(|f| f.id == ID).cloned().expect("raw escalation context");
     let first = ws.digest(None, Some(&report("a.json", "2026-10-12T06:00:00Z", 2, started)), None, 10, 5).unwrap();
     assert_eq!(first.server_started_at.as_deref(), Some(started));
-    assert_eq!(finding(&first).severity, Severity::Low);
-    assert_eq!(finding(&first).actionability, culprit_core::Actionability::Information);
-    assert!(first.top.iter().all(|f| f.id != ID), "an unknown reset time cannot establish a high rate");
     let first_path = write("first.json", serde_json::to_vec(&first).unwrap());
-
-    let same =
-        ws.digest(None, Some(&report("b.json", "2026-10-12T12:00:00Z", 2, started)), Some(&first_path), 10, 5).unwrap();
-    assert_eq!(finding(&same).severity, Severity::Low);
-    assert!(
-        finding(&same).title.ends_with(", no observed increase since Oct 12, 06:00 UTC"),
-        "{}",
-        finding(&same).title
-    );
-    assert!(same.since.as_ref().unwrap().again.is_empty());
-    let same_path = write("same.json", serde_json::to_vec(&same).unwrap());
-
-    let grew =
-        ws.digest(None, Some(&report("c.json", "2026-10-12T18:00:00Z", 5, started)), Some(&same_path), 10, 5).unwrap();
-    assert_eq!(finding(&grew).severity, Severity::High);
-    assert!(finding(&grew).title.contains("3 times since Oct 12, 12:00 UTC"), "{}", finding(&grew).title);
-    let since = grew.since.as_ref().unwrap();
-    assert_eq!(since.again.iter().map(|f| f.count_since).collect::<Vec<_>>(), [Some(3.0)]);
-    // Low to High is the count growing, which `again` already says.
-    assert!(since.worse.iter().all(|f| f.id != ID));
-
-    // The server restarted in between: the one counted since is new, though the count is lower.
-    let restarted = ws
-        .digest(
-            None,
-            Some(&report("d.json", "2026-10-13T06:00:00Z", 1, "2026-10-13T01:00:00Z")),
-            Some(&same_path),
-            10,
-            5,
-        )
-        .unwrap();
-    assert_eq!(finding(&restarted).severity, Severity::High);
-    assert!(finding(&restarted).title.contains("once since Oct 12, 12:00 UTC"), "{}", finding(&restarted).title);
-    let _ = std::fs::remove_dir_all(home);
+    for (name, at, count, probe_started) in [
+        ("unchanged", "2026-10-12T12:00:00Z", 2, started),
+        ("increased", "2026-10-12T18:00:00Z", 5, started),
+        ("probe-restarted", "2026-10-13T06:00:00Z", 1, "2026-10-13T01:00:00Z"),
+    ] {
+        let current = ws.digest(None, Some(&report(name, at, count, probe_started)), Some(&first_path), 10, 5).unwrap();
+        let context = finding(&current);
+        assert_eq!(context.count, Some(f64::from(count)), "{name}");
+        assert_eq!(context.severity, Severity::Low, "{name}");
+        assert_eq!(context.actionability, culprit_core::Actionability::Information, "{name}");
+        assert!(!context.title.contains("no observed increase"), "{name}");
+        assert!(!context.title.contains("since Oct 12"), "{name}");
+        assert!(current.since.as_ref().unwrap().again.iter().all(|row| row.id != ID), "{name}");
+        assert!(current.top.iter().all(|row| row.id != ID), "{name}");
+    }
+    std::fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn selecting_any_timespan_window_after_a_recent_scan_keeps_escalations_in_that_w
 }
 
 #[test]
-fn daily_ci_digest_compares_across_growing_query_store_and_cron_jitter() {
+fn daily_ci_digest_compares_workload_windows_without_inventing_escalation_counter_continuity() {
     let home = temp_home("daily-ci");
     std::fs::create_dir_all(&home).unwrap();
     let ws = Workspace::open_in(&home);
@@ -309,9 +309,9 @@ fn daily_ci_digest_compares_across_growing_query_store_and_cron_jitter() {
     let day2_snap_path = write("day2-snap.json", serde_json::to_vec(&day2_snap).unwrap());
     let day2_digest = ws.digest(None, Some(&day2_snap_path), Some(&day1_digest_path), 10, 5).unwrap();
     assert!(day2_digest.since.is_some(), "growing Query Store window (24h -> 48h) must allow digest comparison");
-    assert!(day2_digest.top.iter().any(|f| f.id == ID && f.title.contains("4 times since Oct 22, 06:00 UTC")));
+    assert_raw_escalation_context(&day2_digest, 6);
 
-    // Cron jitter on a 24h window: 24h 05m between Day 1 and Day 2 must still be NeedsAttention.
+    // Cron jitter does not prevent workload comparison, and does not establish missing index-counter authority.
     let mut day1_24h = day1_snap.clone();
     day1_24h.options = Some(SnapshotOptions::default().with_window_minutes(24 * 60));
     day1_24h.bind_identity(day1_24h.database_identity());
@@ -328,15 +328,13 @@ fn daily_ci_digest_compares_across_growing_query_store_and_cron_jitter() {
     day2_24h.bind_identity(day2_24h.database_identity());
     let day2_24h_path = write("day2-24h.json", serde_json::to_vec(&day2_24h).unwrap());
     let day2_24h_digest = ws.digest(None, Some(&day2_24h_path), Some(&day1_24h_digest_path), 10, 5).unwrap();
-    assert!(
-        day2_24h_digest.top.iter().any(|f| f.id == ID),
-        "24h digest with 5m cron jitter must keep new escalations in top"
-    );
+    assert!(day2_24h_digest.since.is_some());
+    assert_raw_escalation_context(&day2_24h_digest, 6);
 
     let _ = std::fs::remove_dir_all(home);
 }
 
-/// A scheduled job's two-day scan of a real server: the report names the host, and a digest keeps only its hash.
+/// A controlled two-day capture with a saved host identity: the digest keeps only the host's hash.
 fn server_scan(taken_at: &str, escalations: u32) -> Snapshot {
     let end = chrono::DateTime::parse_from_rfc3339(taken_at).expect("a time");
     let start = end - chrono::Duration::hours(48);
@@ -358,7 +356,7 @@ fn server_scan(taken_at: &str, escalations: u32) -> Snapshot {
 }
 
 #[test]
-fn a_digest_of_a_real_server_compares_escalations_with_the_redacted_digest_before_it() {
+fn a_redacted_digest_identity_never_supplies_the_missing_per_index_counter_proof() {
     let home = temp_home("real-server");
     std::fs::create_dir_all(&home).unwrap();
     let ws = Workspace::open_in(&home);
@@ -377,31 +375,20 @@ fn a_digest_of_a_real_server_compares_escalations_with_the_redacted_digest_befor
     assert!(matches!(&kept.location, DatabaseLocation::Server { host, .. } if host.starts_with("redacted-")));
     let first_path = write("first.json", serde_json::to_vec(&first).unwrap());
 
-    // None since: history, out of the digest's list of problems, and still counted for the next comparison.
+    // Equal raw totals do not establish that this interval was quiet.
     let same = ws.digest(None, Some(&scan("b.json", "2026-10-22T06:00:00Z", 2)), Some(&first_path), 10, 5).unwrap();
-    assert_eq!(finding(&same).severity, Severity::Low);
-    assert_eq!(finding(&same).actionability, culprit_core::Actionability::History);
-    assert!(
-        finding(&same).title.ends_with(", no observed increase since Oct 21, 06:00 UTC"),
-        "{}",
-        finding(&same).title
-    );
-    assert!(same.since.as_ref().unwrap().again.is_empty());
-    assert!(same.top.iter().all(|f| f.id != ID));
-    assert_eq!(finding(&same).count, Some(2.0));
+    assert_raw_escalation_context(&same, 2);
+    assert!(!finding(&same).title.contains("no observed increase"));
     let same_path = write("same.json", serde_json::to_vec(&same).unwrap());
 
-    // Three more than the digest before, not five: a day of history doesn't lose the count.
+    // A larger total also cannot establish how many events belong to this interval or member.
     let grew = ws.digest(None, Some(&scan("c.json", "2026-10-23T06:00:00Z", 5)), Some(&same_path), 10, 5).unwrap();
-    assert_eq!(finding(&grew).severity, Severity::High);
-    assert_eq!(finding(&grew).actionability, culprit_core::Actionability::NeedsAttention);
-    assert!(finding(&grew).title.contains("3 times since Oct 22, 06:00 UTC"), "{}", finding(&grew).title);
-    assert_eq!(grew.since.as_ref().unwrap().again.iter().map(|f| f.count_since).collect::<Vec<_>>(), [Some(3.0)]);
+    assert_raw_escalation_context(&grew, 5);
     let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
-fn a_digest_after_a_weekend_reports_the_escalations_over_it() {
+fn a_weekend_digest_does_not_assign_undated_counter_totals_to_the_weekend() {
     let home = temp_home("weekend");
     std::fs::create_dir_all(&home).unwrap();
     let ws = Workspace::open_in(&home);
@@ -413,22 +400,16 @@ fn a_digest_after_a_weekend_reports_the_escalations_over_it() {
     let scan = |name: &str, taken_at: &str, escalations: u32| {
         write(name, serde_json::to_vec(&server_scan(taken_at, escalations)).unwrap())
     };
-    let finding = |d: &Digest| d.findings.iter().find(|f| f.id == ID).cloned().expect("the escalation in the digest");
 
     let friday = ws.digest(None, Some(&scan("fri.json", "2026-10-23T06:00:00Z", 2)), None, 10, 5).unwrap();
     let friday_path = write("friday.json", serde_json::to_vec(&friday).unwrap());
 
-    // 72 hours later, past the two-day window: the counts still cover exactly the time since Friday's digest.
+    // A 72-hour interval changes neither the missing native proof nor the original positive counter point.
     let grew = ws.digest(None, Some(&scan("mon.json", "2026-10-26T06:00:00Z", 5)), Some(&friday_path), 10, 5).unwrap();
-    assert_eq!(finding(&grew).severity, Severity::High);
-    assert_eq!(finding(&grew).actionability, culprit_core::Actionability::NeedsAttention);
-    assert!(finding(&grew).title.contains("3 times since Oct 23, 06:00 UTC"), "{}", finding(&grew).title);
-    assert_eq!(grew.since.as_ref().unwrap().again.iter().map(|f| f.count_since).collect::<Vec<_>>(), [Some(3.0)]);
-    assert!(grew.top.iter().any(|f| f.id == ID));
+    assert_raw_escalation_context(&grew, 5);
 
     let same = ws.digest(None, Some(&scan("mon2.json", "2026-10-26T06:00:00Z", 2)), Some(&friday_path), 10, 5).unwrap();
-    assert_eq!(finding(&same).severity, Severity::Low);
-    assert_eq!(finding(&same).actionability, culprit_core::Actionability::History);
+    assert_raw_escalation_context(&same, 2);
     let _ = std::fs::remove_dir_all(home);
 }
 

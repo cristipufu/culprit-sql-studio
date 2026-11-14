@@ -11,7 +11,8 @@ pub fn diagnostic_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryR
         Some("private-diagnostic-instance".into()),
     );
     server.incarnation = Some("private-diagnostic-incarnation".into());
-    [
+    let target = CollectionTarget::Database(server.clone());
+    let mut cases = [
         server.into(),
         DatabaseIdentity::file("private-diagnostic-file", "/private/diagnostics/fixture.sqlite".into()).into(),
         CollectionTarget::Shared(SharedResourceIdentity {
@@ -24,15 +25,59 @@ pub fn diagnostic_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryR
     ]
     .into_iter()
     .map(diagnostic_evidence)
-    .collect()
+    .collect::<Vec<_>>();
+    let local = |epoch: &str| SourcePartition::InstanceLocal {
+        member: Some(SharedResourceIdentity {
+            engine: Engine::Mssql,
+            kind: SharedResourceKind::Node,
+            namespace: NativeIdentity::new("private-diagnostic-compute-namespace"),
+            native: NativeIdentity::new("private-diagnostic-member"),
+        }),
+        epoch: Some(epoch.into()),
+    };
+    let (mut older, mut records) = diagnostic_evidence_partition(target.clone(), local("private-older-epoch"));
+    let (newer, new_records) = diagnostic_evidence_partition(target, local("private-newer-epoch"));
+    let SourceObservation::Diagnostics(old) = &mut older.observation else { unreachable!() };
+    let SourceObservation::Diagnostics(new) = newer.observation else { unreachable!() };
+    old.scope_bindings.extend(new.scope_bindings);
+    old.records += new.records;
+    for record in new_records {
+        match record {
+            TelemetryRecord::Operational(_) => records.push(record),
+            TelemetryRecord::DiagnosticCheckpoint(part) => {
+                let Some(TelemetryRecord::DiagnosticCheckpoint(existing)) =
+                    records.iter_mut().find(|row| matches!(row, TelemetryRecord::DiagnosticCheckpoint(_)))
+                else {
+                    unreachable!()
+                };
+                existing.episodes.extend(part.episodes);
+                existing.id = existing.expected_id().unwrap();
+                assert!(existing.is_valid());
+            }
+            _ => unreachable!(),
+        }
+    }
+    cases.push((older, records));
+    cases
 }
 
 fn diagnostic_evidence(target: CollectionTarget) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    diagnostic_evidence_partition(target, SourcePartition::Target)
+}
+
+fn diagnostic_evidence_partition(
+    target: CollectionTarget,
+    partition: SourcePartition,
+) -> (CollectionDescription, Vec<TelemetryRecord>) {
     let (mut baseline, _) = activity_evidence_cases().remove(0);
     baseline.target = target;
+    baseline.partition = partition;
     let SourceObservation::Activity(frame) = &mut baseline.observation else { unreachable!() };
     frame.observations = 1;
     frame.native_rows = 1;
+    if matches!(&baseline.partition, SourcePartition::InstanceLocal { .. }) {
+        frame.epoch = baseline.partition.native_epoch().map(str::to_owned);
+    }
     frame.scope =
         if baseline.target.database().is_some() { MeasurementScope::Database } else { MeasurementScope::Server };
     frame.coverage =
@@ -41,7 +86,10 @@ fn diagnostic_evidence(target: CollectionTarget) -> (CollectionDescription, Vec<
     let mut observation =
         activity_observation(DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
     observation.database = baseline.target.database().map(|database| database.database.clone());
-    let native_capture = fixture().0.capture;
+    let mut native_capture = fixture().0.capture;
+    if matches!(&baseline.partition, SourcePartition::InstanceLocal { .. }) {
+        native_capture.observation_id = baseline.captured_range().unwrap().scope_id;
+    }
     let original = ExportedRecord::new(&baseline, &native_capture, TelemetryRecord::from(observation.clone())).unwrap();
     let reference =
         DiagnosticEvidenceRef::from_export(&baseline, &digest(b"original-private-manifest"), &original, 0).unwrap();
@@ -70,6 +118,7 @@ fn diagnostic_evidence(target: CollectionTarget) -> (CollectionDescription, Vec<
     };
     checkpoint.id = checkpoint.expected_id().unwrap();
     assert!(checkpoint.is_valid());
+    let scope_bindings = [(revision.episode.scope.key().unwrap(), revision.episode.scope.clone())].into();
     let row = TelemetryRecord::Operational(OperationalObservation {
         source: DIAGNOSTICS_SOURCE.into(),
         key: revision.id.clone(),
@@ -77,6 +126,7 @@ fn diagnostic_evidence(target: CollectionTarget) -> (CollectionDescription, Vec<
     });
     assert!(row.is_valid());
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: baseline.target,
         source: DIAGNOSTICS_SOURCE.into(),
         continuity: SourceContinuity::Unverified,
@@ -87,6 +137,7 @@ fn diagnostic_evidence(target: CollectionTarget) -> (CollectionDescription, Vec<
             analyzed_at: analyzed_at.into(),
             records: 1,
             checkpoint_records: 1,
+            scope_bindings,
         }),
     };
     (source, vec![row, TelemetryRecord::DiagnosticCheckpoint(checkpoint)])

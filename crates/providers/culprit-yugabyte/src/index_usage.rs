@@ -6,6 +6,8 @@ use crate::{
 };
 use culprit_core::{Capability, Coverage, Pressure, Result, Snapshot, SourceState, t};
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+mod tests;
 
 type Epochs = BTreeMap<String, Option<String>>;
 async fn epochs(session: &mut impl NoticeRead, probe: &Probe) -> Result<Epochs> {
@@ -36,6 +38,8 @@ pub(crate) async fn read(
     snapshot: &mut Snapshot,
     coverage: &mut Coverage,
 ) {
+    // A previous successful global read cannot authorize absence after a later incomplete observation.
+    snapshot.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::ConnectedMember);
     if !probe.global {
         coverage.recorded_message(
             &sources::INDEX_USAGE,
@@ -49,6 +53,7 @@ pub(crate) async fn read(
         );
         return;
     }
+    snapshot.operations.index_usage_scope = None;
     let notices = session.notices();
     let inventory = global::nodes_from(session).await;
     if let Err(error) = &inventory {
@@ -130,6 +135,8 @@ pub(crate) async fn read(
             None,
         );
     } else {
+        // This proves today's contributors. A member removed since these counters began can have unseen reads.
+        snapshot.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::ObservedMembers);
         coverage.delivered(Capability::IndexUsage);
     }
     let common_reset = reset.filter(|at| epochs.values().all(|value| value.as_deref() == Some(*at)));

@@ -167,6 +167,37 @@ page size. Cumulative statement totals are current point facts with reset eviden
 unknown resets never authorize a delta. Destination schemas preserve these contracts without provider-specific field
 interpretation. Provider extensions that retain native engine structures remain explicitly named.
 
+`CollectionDescription.partition` separates a source-owned target namespace from an instance-local observation.
+The provider supplies a native member and process/counter generation; routing intent, replica role and observation
+time establish neither. Latest local heads include the member, while exact native identities include its generation.
+An unknown local member retains partial capture-scoped points, without stable definition/history identities,
+latest-head replacement or durable incident continuity. Another member's baseline cannot revise an existing episode.
+Focused follow-up binds both the original partition and native database updateability, including changes of role
+without a process restart. Diagnostic manifests privately bind every original episode scope; both analytical stores
+publish opaque scope references and restore them only from that authenticated manifest before receipt verification.
+
+Execution populations are separate from connected compute. `RuntimePopulationCatalog` carries source-owned native
+alternatives and display messages; `NativeRuntimePopulationCatalog` retains the same facts without display labels.
+`Workload.population` enters `MeasurementContext` before trends, differences or disappearance checks. Explicit scan
+selectors own separate report-cache pointers. No common consumer decodes a group ID or chooses one by its label.
+
+Snapshot index advice carries a separate `OperationalStats.index_usage_scope`. `AllReadMembers` establishes the
+read-serving population throughout the counters' recorded period; `ConnectedMember` and `ObservedMembers` preserve
+local or current-inventory observations without authorizing historical absence. Unused-index, usage-based overlap,
+advisor cleanup and native drop-index remedies share that gate. Catalog-proven duplication remains independent.
+Current node inventory, old node epochs and a replica caveat cannot establish historical coverage.
+
+Index contention and escalation comparisons retain the counter reader's native `source_owner` and known reset.
+Per-index membership, ownership, generation and nonshrinking counters must match before table deltas are summed.
+A separately pooled probe's uptime qualifies none of these facts. A digest without the retained native points
+cannot reconstruct a delta from table totals. Raw positive counts remain context when that proof is missing.
+
+`QueryStoreScope` separately binds plan-tuning facts to their runtime population. Unknown scope cannot supply
+another group's impact, quiet-history or plan-forcing explanation. Plan mutation SQL also requires a known writable
+management mode and includes the exact native group when scoped. Native database-wide index recommendations do
+not borrow one group's workload costs or bypass the read-member cleanup gate. Native tuning observations retain
+their scope in raw keys and both warehouses' physical receipt proofs; typed SDK tuning readback remains unfinished.
+
 A source can explicitly declare a plan-independent runtime cohort. The source owns which native dimensions
 establish comparable populations; common analysis never strips native qualifiers to guess them. Exact query
 references, cohorts and capture intervals bound plan comparison, and every original measurement key remains
@@ -853,6 +884,8 @@ differences for retained input and collection. Loading restores the full report.
 in memory across these snapshots. Report lists read small summary sidecars, without deserializing plans and retained
 evidence. Culprit reads only what the current version writes: a snapshot records its format (`SNAPSHOT_FORMAT`), and one
 in another format is refused, never half-read with missing fields filled in.
+Snapshot format **6** carries the explicit index-usage population and per-index ownership proofs; collector export
+format **23** carries replica partitions and scoped native tuning facts. Both require fresh state, without migration.
 
 Consumers request only what they need. `latest_snapshot` and scan-to-scan comparisons read the prepared snapshot
 directly, skipping derived views and retained evidence. Analysis readers reconstruct retained input and collection

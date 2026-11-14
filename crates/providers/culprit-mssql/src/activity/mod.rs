@@ -44,6 +44,7 @@ pub(crate) struct ActivityContext {
     pub epoch: Option<String>,
     pub at: String,
     pub writable: Option<bool>,
+    pub replica_id: Option<String>,
 }
 impl ActivityContext {
     fn decode(row: &Rec, host: &str, port: u16, identity: IdentityDetail) -> Result<Self> {
@@ -74,16 +75,18 @@ impl ActivityContext {
         }
         let database_wide = crate::read::boolean(row, "database_wide")?;
         let mut database = DatabaseIdentity::server(Engine::Mssql, &text(row, "database_name")?, host, port, None);
+        let replica_id = crate::replica::id(row, "replica_id")?;
         let epoch = if identity == IdentityDetail::AzureDatabase {
             database.incarnation = Some(text(row, "incarnation")?);
             Some(digest(
-                format!(
-                    "{}|{}|{}|activity-v6",
+                &serde_json::to_vec(&(
+                    "mssql-activity-v7",
                     text(row, "physical_incarnation")?,
                     text(row, "server_version")?,
-                    integer(row, "compatibility_level")?
-                )
-                .as_bytes(),
+                    integer(row, "compatibility_level")?,
+                    &replica_id,
+                ))
+                .map_err(|_| invalid_data())?,
             ))
         } else {
             None
@@ -96,6 +99,7 @@ impl ActivityContext {
                 epoch,
                 at: canonical_time(&text(row, "observed_at")?)?,
                 writable: crate::read::database_writable(row)?,
+                replica_id,
             },
             database_wide,
         ))
@@ -106,6 +110,7 @@ impl ActivityContext {
             && self.database == other.database
             && self.epoch == other.epoch
             && self.writable == other.writable
+            && self.replica_id == other.replica_id
     }
 }
 

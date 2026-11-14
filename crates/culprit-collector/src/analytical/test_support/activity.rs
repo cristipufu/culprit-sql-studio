@@ -131,10 +131,12 @@ pub fn activity_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRec
 
 fn frame(native_rows: u32, epoch: Option<String>, coverage: StateSourceCoverage) -> CollectionDescription {
     let description = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(Engine::Mssql, "db", "fixture.invalid", 1433, None).into(),
         source: culprit_core::source_id::SESSIONS.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            database_writable: None,
             epoch,
             observed_from: "2020-01-01T12:00:00.000000000Z".into(),
             at: "2020-01-01T12:00:00.000100000Z".into(),

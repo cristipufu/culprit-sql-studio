@@ -50,6 +50,7 @@ impl SnapshotReader for Reader {
     async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
         self.called("describe");
         Ok(CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: DatabaseIdentity::server(Engine::Postgres, "fixture", "fixture.invalid", 5432, None).into(),
             source: "scripted-native-source".into(),
             continuity: SourceContinuity::Unverified,

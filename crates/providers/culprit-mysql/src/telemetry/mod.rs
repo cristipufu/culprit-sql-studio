@@ -207,6 +207,7 @@ impl SnapshotReader for MysqlSnapshotReader {
             self.layout = Some(layout);
         }
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: meta.connection.database.clone().into(),
             source: format!("mysql-{}", self.declared[0].source()),
             continuity: SourceContinuity::Unverified,

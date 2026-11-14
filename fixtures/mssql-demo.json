@@ -1,5 +1,6 @@
 {
   "operations": {
+    "index_usage_scope": "all-read-members",
     "log_failures": [],
     "spaces": [],
     "counters": [],
@@ -60,7 +61,7 @@
       "reason": null
     }
   ],
-  "format": 5,
+  "format": 6,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",
@@ -91,6 +92,12 @@
     "missing": []
   },
   "workload": {
+    "population_catalog": {
+      "source": "query_store",
+      "partitioned": false,
+      "requires_selection": false,
+      "populations": []
+    },
     "source": "Query Store",
     "kind": "query-store",
     "windowed": true,

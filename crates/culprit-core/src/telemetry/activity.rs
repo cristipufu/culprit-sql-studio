@@ -374,6 +374,10 @@ pub enum ActivityPopulation {
 #[ts(export)]
 pub struct ActivitySnapshotDescription {
     pub epoch: Option<String>,
+    /// Observed connected database updateability, not login/session permissions or requested routing intent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database_writable: Option<bool>,
     pub observed_from: String,
     pub observed_until: String,
     pub at: String,

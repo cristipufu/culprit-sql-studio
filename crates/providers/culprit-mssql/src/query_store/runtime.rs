@@ -64,6 +64,7 @@ impl Moments {
 }
 #[derive(Clone, Debug)]
 pub(crate) struct PlanSummary {
+    pub population: super::replicas::Population,
     pub identity: NativeQueryIdentity,
     pub plan_identity: NativePlanIdentity,
     pub plan_id: String,
@@ -84,6 +85,7 @@ impl PlanSummary {
         let moments = Moments::decode(row)?;
         let costs = ExecutionCosts::decode(row, moments.executions)?;
         Ok(Self {
+            population: super::replicas::Population::from_row(row)?,
             identity,
             plan_identity,
             plan_id: integer(row, "plan_id")?.to_string(),
@@ -181,8 +183,14 @@ impl ExecutionCosts {
     }
 }
 
-pub(crate) fn summary_sql(with_tempdb: bool, with_log: bool) -> String {
+pub(crate) fn summary_sql(with_tempdb: bool, with_log: bool, population: super::replicas::Population) -> String {
     let relation = relation(with_tempdb);
+    // The global plan flag does not establish forcing on this particular replica group. Its native forcing
+    // locations are an independent catalog; keep them unknown without issuing another source read.
+    let forcing = match population {
+        super::replicas::Population::Unpartitioned => "MAX(CAST(p.is_forced_plan AS int))",
+        super::replicas::Population::ReplicaGroup(_) => "CAST(NULL AS int)",
+    };
     let (log, log_complete) = if with_log {
         (
             "CASE WHEN COUNT_BIG(CASE WHEN rs.count_executions>0 AND rs.avg_log_bytes_used IS NULL THEN 1 END)=0 THEN SUM(CASE WHEN rs.count_executions>0 THEN rs.avg_log_bytes_used*rs.count_executions ELSE 0 END) END",
@@ -193,7 +201,7 @@ pub(crate) fn summary_sql(with_tempdb: bool, with_log: bool) -> String {
     };
     format!(
         r#"{window_declaration}{relation}
-SELECT /* culprit */ {identity},{plan_identity}, rs.plan_id,SUM(rs.count_executions) AS executions,
+SELECT /* culprit */ {identity},{plan_identity}, {population_projection},rs.plan_id,SUM(rs.count_executions) AS executions,
  SUM(rs.culprit_duration_us) AS duration_us, SUM(rs.culprit_cpu_us) AS cpu_us,
  MAX(rs.max_duration) AS max_us,MIN(rs.min_duration) AS min_us,
  SUM(rs.culprit_logical_reads) AS logical_reads,SUM(rs.culprit_physical_reads) AS physical_reads,
@@ -206,20 +214,23 @@ SELECT /* culprit */ {identity},{plan_identity}, rs.plan_id,SUM(rs.count_executi
  {log} AS log_bytes,{log_complete} AS log_complete,
  CONVERT(varchar(40),MIN(rs.first_execution_time),127) AS first_seen,
  CONVERT(varchar(40),MAX(rs.last_execution_time),127) AS last_seen,
- MAX(CAST(p.is_forced_plan AS int)) AS is_forced
+ {forcing} AS is_forced
 FROM culprit_runtime rs
 JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id=rs.runtime_stats_interval_id
 JOIN sys.query_store_plan p ON p.plan_id=rs.plan_id
 JOIN sys.query_store_query q ON q.query_id=p.query_id
 JOIN sys.query_store_query_text t ON t.query_text_id=q.query_text_id
-WHERE {window_membership} AND {workload}
+WHERE {window_membership} AND {population} AND {workload}
 GROUP BY p.query_id,rs.plan_id,q.context_settings_id,q.object_id,q.query_hash,q.initial_compile_start_time,
- p.plan_id,p.query_plan_hash,p.initial_compile_start_time OPTION(MAXDOP 1)"#,
+ p.plan_id,p.query_plan_hash,p.initial_compile_start_time{population_group} OPTION(MAXDOP 1)"#,
         identity = super::catalog_sql::query_identity_columns!("p.query_id"),
         plan_identity = super::catalog_sql::plan_identity_columns!("p", ""),
         workload = crate::statement_origin::application_candidates_sql("t.query_sql_text"),
         window_declaration = super::window_sql::DECLARATION,
         window_membership = super::window_sql::MEMBERSHIP,
+        population = population.predicate("rs"),
+        population_projection = population.projection("rs"),
+        population_group = population.group_by("rs"),
     )
 }
 
@@ -235,5 +246,6 @@ pub(crate) const LAYOUT: &str = concat!(
  "#,
     super::variants_sql::readable!(),
     r#" AS variants,
- CASE WHEN OBJECT_ID(N'sys.query_store_wait_stats') IS NOT NULL AND EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.database_query_store_options') AND name=N'wait_stats_capture_mode_desc') THEN 1 ELSE 0 END AS waits"#
+ CASE WHEN OBJECT_ID(N'sys.query_store_wait_stats') IS NOT NULL AND EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.database_query_store_options') AND name=N'wait_stats_capture_mode_desc') THEN 1 ELSE 0 END AS waits,
+ o.actual_state_desc FROM sys.database_query_store_options o"#
 );

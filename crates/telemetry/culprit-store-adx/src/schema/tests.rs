@@ -401,3 +401,43 @@ fn settings_keep_configured_active_and_absent_default_values_separate() {
     assert!(projected["NativeIsDefault"].is_null());
     assert_eq!(projected["DefaultSource"], "unknown");
 }
+
+#[tokio::test]
+async fn raw_tuning_plan_scopes_roundtrip_and_cannot_change_under_existing_receipts() {
+    use culprit_collector::{
+        analytical::{envelope::Envelope, test_support},
+        delivery::recovery::reopen,
+    };
+    use culprit_core::telemetry::{DeliveryProblem, ExportedRecord, TelemetryStream};
+    let catalog = crate::catalog::SchemaCatalog::new().unwrap();
+    let schema = catalog.get(TelemetryStream::TuningObservations).unwrap();
+    let (source, records) = test_support::tuning_scope_evidence();
+    let recovery = test_support::Recovery::capture("adx:test", catalog.digest(), source, records.clone(), 2);
+    let range = reopen(&recovery, &recovery.manifest.range_id).await.unwrap();
+    let batch = &range.manifest().batches[0];
+    let envelope = Envelope::committed(&range, &batch.batch_id).unwrap();
+    let mut native_keys = std::collections::BTreeSet::new();
+    for (index, record) in records.into_iter().enumerate() {
+        let row = ExportedRecord::new(&range.manifest().source, &range.manifest().capture, record).unwrap();
+        assert!(native_keys.insert(row.record_id.clone()), "scope changes cannot merge native plan references");
+        let input = envelope.input(index + 1, &row).unwrap();
+        let values = schema.project(&input).unwrap();
+        let encoded: Value = serde_json::from_slice(&schema.encode(&values).unwrap()).unwrap();
+        let returned = crate::test_support::returned(schema, &encoded);
+        test_support::assert_tuning_scope_projection(&row, &schema.logical_values(&returned).unwrap());
+        let expected = projection::digest(&values).unwrap();
+        assert_eq!(schema.returned_digest(&returned).unwrap(), expected);
+        let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+        let mut changed = returned;
+        let mut details: Value = serde_json::from_str(changed[column].as_str().unwrap()).unwrap();
+        details["plan_scope"] = json!({"kind":"replica-group","id":"99"});
+        changed[column] = json!(details.to_string());
+        assert_ne!(schema.returned_digest(&changed).unwrap(), expected);
+        let mut forged = row;
+        test_support::change_tuning_plan_scope(&mut forged);
+        assert_eq!(
+            envelope.input(index + 1, &forged).unwrap_err().detail,
+            Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity))
+        );
+    }
+}

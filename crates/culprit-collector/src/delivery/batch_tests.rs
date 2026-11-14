@@ -121,6 +121,7 @@ pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
         revision: Some(CaptureRevision { outbox_id: "outbox".into(), owner_epoch: "1".into(), sequence: "1".into() }),
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
@@ -132,6 +133,7 @@ pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
         source: "activity".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            database_writable: None,
             population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
             epoch: Some("native-epoch".into()),
             observed_from: "2020-01-01T06:00:00Z".into(),
@@ -163,6 +165,7 @@ fn empty_query_history(root: &Path) -> PreparedRange {
         budget: Default::default(),
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
@@ -174,6 +177,7 @@ fn empty_query_history(root: &Path) -> PreparedRange {
         source: "query-store".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            population_catalog: None,
             interval: TelemetryInterval {
                 native_id: "1".into(),
                 from: "2020-01-01T06:00:00Z".into(),
@@ -218,6 +222,7 @@ pub(super) fn empty_diagnostics_for_version(
         budget: Default::default(),
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
@@ -235,6 +240,7 @@ pub(super) fn empty_diagnostics_for_version(
             analyzed_at: "2020-01-01T06:03:00Z".into(),
             records: 0,
             checkpoint_records: 1,
+            scope_bindings: Default::default(),
         }),
     };
     let mut part = DiagnosticCheckpointPart {

@@ -47,8 +47,8 @@
     },
     {
       "check": "overlapping-index",
-      "reason": null,
-      "status": "assessed",
+      "reason": "At least a week of comparable index-usage counters is needed to assess absence of reads.",
+      "status": "insufficient-evidence",
       "title": "Overlapping indexes"
     },
     {
@@ -2094,7 +2094,7 @@
         "kind": "table",
         "name": "shop.support_tickets"
       },
-      "summary": "SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 5 times since its indexes were loaded into memory. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. The counters’ reset time is unknown, so the total does not establish a rate. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to support_tickets. A read can escalate too: an ordinary read under read committed usually releases row locks as it advances, but prefetching key lookups can retain locks until the statement ends. Locking hints (HOLDLOCK, UPDLOCK), REPEATABLE READ and SERIALIZABLE can retain them until the transaction ends. Reading many rows can acquire enough locks for an escalation attempt. The likeliest is a read from support_tickets, which returns about 973 rows a run on average: its plan prefetches its key lookups, which keeps their row locks until the statement ends.",
+      "summary": "SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 5 times since its indexes were loaded into memory. It keeps no time for each, and Culprit has no comparable earlier scan, so they may be old. Only scans of the same verified database member and counter period can be compared. The counters’ reset time is unknown, so the total does not establish a rate. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to support_tickets. A read can escalate too: an ordinary read under read committed usually releases row locks as it advances, but prefetching key lookups can retain locks until the statement ends. Locking hints (HOLDLOCK, UPDLOCK), REPEATABLE READ and SERIALIZABLE can retain them until the transaction ends. Reading many rows can acquire enough locks for an escalation attempt. The likeliest is a read from support_tickets, which returns about 973 rows a run on average: its plan prefetches its key lookups, which keeps their row locks until the statement ends.",
       "title": "Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory",
       "verification_basis": "counter-change",
       "verify": [
@@ -3448,7 +3448,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 5,
+    "format": 6,
     "histograms": null,
     "id": "20261011T121347.162Z",
     "identity": {
@@ -4126,6 +4126,7 @@
     "operations": {
       "cluster": null,
       "counters": [],
+      "index_usage_scope": "all-read-members",
       "log_failures": [],
       "multixacts": [],
       "sequences": [],
@@ -5772,6 +5773,12 @@
       "kind": "query-store",
       "log": null,
       "min_logged_ms": null,
+      "population_catalog": {
+        "partitioned": false,
+        "populations": [],
+        "requires_selection": false,
+        "source": "query_store"
+      },
       "queries": [
         {
           "costs": {

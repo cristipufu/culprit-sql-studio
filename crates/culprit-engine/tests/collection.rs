@@ -158,10 +158,12 @@ impl Drop for ActiveRead {
 
 fn description() -> CollectionDescription {
     CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: DatabaseIdentity::server(Engine::Postgres, "sample", "fixture.invalid", 5432, None).into(),
         source: "fixture-statistics".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {
+                population_catalog: None,
                 waits: None,
                 interval: TelemetryInterval {
                     native_id: "123".into(),
@@ -1210,6 +1212,7 @@ fn resource_record(at: &str) -> TelemetryRecord {
 fn resource_description(scenario: Scenario) -> CollectionDescription {
     use culprit_core::telemetry::*;
     CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: description().target,
         source: "fixture-resource-statistics".into(),
         continuity: SourceContinuity::Unverified,
@@ -1369,10 +1372,12 @@ fn activity_description(scenario: Scenario, step: usize) -> CollectionDescriptio
     use culprit_core::telemetry::*;
     let count = activity_rows(scenario, step).len() as u32;
     CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: description().target,
         source: "activity-fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            database_writable: None,
             epoch: Some("native-epoch-1".into()),
             observed_from: format!("2020-01-01T06:{step:02}:00Z"),
             observed_until: format!("2020-01-01T06:{step:02}:00Z"),

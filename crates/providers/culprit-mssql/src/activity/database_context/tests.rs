@@ -17,7 +17,18 @@ pub(crate) fn row(edition: i64) -> Rec {
         ("database_guid", if edition == 5 { Val::Null } else { Val::Text("native-database-guid".into()) }),
         ("recovery_fork_guid", if edition == 5 { Val::Null } else { Val::Text("native-recovery-fork".into()) }),
     ]);
+    values.extend(epoch_fields(edition == 5));
     replace(&Rec::of(&values), &[("session_id", Val::Null), ("edition", Val::Int(edition))])
+}
+
+pub(crate) fn epoch_fields(visible: bool) -> Vec<(&'static str, Val)> {
+    vec![
+        ("local_process_id", if visible { Val::Int(11) } else { Val::Null }),
+        ("local_started_ticks", if visible { Val::Int(100) } else { Val::Null }),
+        ("local_now_ticks", if visible { Val::Int(1000) } else { Val::Null }),
+        ("local_started_without_offset", if visible { Val::Text("2020-01-01T04:00:00".into()) } else { Val::Null }),
+        ("local_epoch_visible", Val::Bool(visible)),
+    ]
 }
 fn reader(replies: Vec<crate::read::ReadResult<Vec<Rec>>>, identity: IdentityDetail) -> ActivityReader<FakeRead> {
     ActivityReader::new(
@@ -51,7 +62,7 @@ async fn boxed_authority_reuses_single_native_platform_and_process_projection_wi
 }
 
 #[tokio::test]
-async fn azure_platform_never_reads_instance_ticks_or_the_unsupported_recovery_catalog() {
+async fn azure_context_reads_its_bounded_guarded_process_epoch_without_the_boxed_recovery_catalog() {
     let platform =
         replace(&metadata(), &[("edition", Val::Int(5)), ("machine_name", Val::Null), ("process_id", Val::Null)]);
     let mut reader = reader(vec![Ok(vec![platform]), Ok(vec![row(5)]), Ok(vec![row(5)])], IdentityDetail::Endpoint);
@@ -61,14 +72,48 @@ async fn azure_platform_never_reads_instance_ticks_or_the_unsupported_recovery_c
     let final_context = DatabaseContext::recheck(&mut reader, &initial).await.unwrap();
     assert!(initial.same_source(&final_context));
     assert_eq!(reader.query_count(), 3, "two initial phases and one known-Azure recheck");
-    assert!(
-        reader
-            .io
-            .calls
-            .iter()
-            .all(|call| !call.sql.contains("sys.database_recovery_status") && !call.sql.contains("sys.dm_os_sys_info"))
-    );
+    assert!(reader.io.calls.iter().all(|call| !call.sql.contains("sys.database_recovery_status")));
     assert!(reader.io.calls[1].sql.contains("sys.dm_user_db_resource_governance"));
+    assert!(reader.io.calls[1].sql.contains("FROM sys.dm_os_sys_info OPTION(MAXDOP 1)"));
+    assert!(reader.io.calls[1].sql.contains("IS_SRVROLEMEMBER('##MS_ServerStateReader##')=1"));
+    assert!(reader.io.calls[1].sql.contains("ERROR_NUMBER() NOT IN(229,297,300) THROW"));
+    assert_eq!(initial.source_instance().unwrap().native.id, "91487244-730d-4b83-8e49-d482241c7288");
+}
+
+#[tokio::test]
+async fn missing_or_masked_azure_member_process_and_role_facts_do_not_gain_authority_from_equal_unknowns() {
+    for changes in [
+        vec![("replica_id", Val::Null)],
+        epoch_fields(false),
+        vec![("local_process_id", Val::Null)],
+        vec![("updateability", Val::Null)],
+    ] {
+        let unqualified = replace(&row(5), &changes);
+        let mut owner =
+            reader(vec![Ok(vec![unqualified.clone()]), Ok(vec![unqualified])], IdentityDetail::AzureDatabase);
+        let before = DatabaseContext::initial(&mut owner).await.unwrap();
+        let after = DatabaseContext::recheck(&mut owner, &before).await.unwrap();
+        assert!(!before.is_qualified());
+        assert!(!before.same_source(&after));
+        assert!(before.capture_context().unwrap().epoch.is_none());
+        assert!(!before.source_partition().unwrap().is_qualified());
+        assert_eq!(owner.query_count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn current_tick_progress_does_not_change_the_native_process_epoch_but_regressed_ticks_are_invalid() {
+    let before_row = row(5);
+    let after_row = replace(&before_row, &[("local_now_ticks", Val::Int(2_000))]);
+    let mut owner = reader(vec![Ok(vec![before_row]), Ok(vec![after_row])], IdentityDetail::AzureDatabase);
+    let before = DatabaseContext::initial(&mut owner).await.unwrap();
+    let after = DatabaseContext::recheck(&mut owner, &before).await.unwrap();
+    assert!(before.same_source(&after));
+    assert_eq!(before.capture_context().unwrap().epoch, after.capture_context().unwrap().epoch);
+    let invalid = replace(&row(5), &[("local_now_ticks", Val::Int(99))]);
+    let mut owner = reader(vec![Ok(vec![invalid])], IdentityDetail::AzureDatabase);
+    let error = DatabaseContext::initial(&mut owner).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
 }
 
 #[tokio::test]

@@ -3,6 +3,11 @@ import type { DatabaseIdentity } from "./DatabaseIdentity";
 import type { MeasurementPeriod } from "./MeasurementPeriod";
 import type { MeasurementScope } from "./MeasurementScope";
 import type { MeasurementSource } from "./MeasurementSource";
+import type { NativeIdentity } from "./NativeIdentity";
 import type { ResetMarker } from "./ResetMarker";
 
-export type MeasurementContext = { database: DatabaseIdentity, source: MeasurementSource, scope: MeasurementScope, period: MeasurementPeriod, reset: ResetMarker, };
+export type MeasurementContext = { database: DatabaseIdentity, source: MeasurementSource, 
+/**
+ * The source-native execution population. It is independent of endpoints and display role names.
+ */
+population?: NativeIdentity, scope: MeasurementScope, period: MeasurementPeriod, reset: ResetMarker, };

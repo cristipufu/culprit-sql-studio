@@ -459,6 +459,16 @@ impl Workspace {
         self.report_service().latest_report(name, window_minutes)
     }
 
+    /// Read the saved report for one exact requested execution population, independently of the default scan cache.
+    pub fn latest_population_report(
+        &self,
+        name: &str,
+        window_minutes: Option<u32>,
+        population: Option<&culprit_core::telemetry::NativeIdentity>,
+    ) -> Result<Option<Report>> {
+        self.report_service().latest_population_report(name, window_minutes, population)
+    }
+
     /// The newest saved snapshot for `name`, without re-parsing execution plans or re-running the check pipeline.
     pub fn latest_snapshot(&self, name: &str) -> Result<Option<culprit_core::Snapshot>> {
         self.report_service().latest_snapshot(name)

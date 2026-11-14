@@ -11,6 +11,7 @@ pub(crate) fn layout_row() -> Rec {
         ("recommendations", Val::Int(1)),
         ("query_store", Val::Int(1)),
         ("forcing_type", Val::Int(1)),
+        ("runtime_replica", Val::Int(1)),
         ("hints", Val::Int(1)),
         ("hint_replica", Val::Int(1)),
         ("hint_source", Val::Int(1)),
@@ -34,7 +35,7 @@ pub(crate) fn forced_row() -> Rec {
         ("forcing", Val::Text("MANUAL".into())),
     ])
 }
-fn recommendation_row() -> Rec {
+pub(crate) fn recommendation_row() -> Rec {
     let mut columns: Vec<(&str, Val)> = [
         "reason",
         "state_reason",
@@ -82,6 +83,7 @@ fn layout() -> Layout {
         recommendations: true,
         query_store: true,
         forcing_type: true,
+        runtime_replica: true,
         hints: true,
         hint_replica: true,
         hint_source: true,
@@ -166,7 +168,7 @@ async fn hints_keep_replica_identity_and_hide_oversized_payloads_before_fetching
     let TuningFact::QueryHint(value) = &facts[0] else { panic!("hint") };
     assert_eq!(value.failures, "9007199254740993");
     assert_eq!(value.native_source, Some(-1), "unknown native enum codes remain facts");
-    assert_eq!(value.scope, culprit_core::QueryStoreHintScope::ReplicaGroup { id: "1".into() });
+    assert_eq!(value.scope, culprit_core::QueryStoreScope::ReplicaGroup { id: "1".into() });
     assert!(matches!(&value.hint,DefinitionPayload::Available{text,..} if text==hint));
     let mut redacted = facts[0].clone();
     redacted.redact(culprit_core::Engine::Mssql);
@@ -188,24 +190,21 @@ async fn hints_keep_replica_identity_and_hide_oversized_payloads_before_fetching
         .await
         .unwrap()
         .unwrap();
-    assert!(
-        matches!(&facts[0],TuningFact::QueryHint(value) if value.scope==culprit_core::QueryStoreHintScope::Unknown)
-    );
+    assert!(matches!(&facts[0],TuningFact::QueryHint(value) if value.scope==culprit_core::QueryStoreScope::Unknown));
     let mut local_layout = layout();
     local_layout.hint_replica = false;
+    local_layout.runtime_replica = false;
     let facts = read_kind(&mut FakeRead::new(vec![Ok(vec![null_scope.clone()])]), Kind::Hints, &local_layout, 3)
         .await
         .unwrap()
         .unwrap();
-    assert!(matches!(&facts[0],TuningFact::QueryHint(value) if value.scope==culprit_core::QueryStoreHintScope::Local));
+    assert!(matches!(&facts[0],TuningFact::QueryHint(value) if value.scope==culprit_core::QueryStoreScope::Local));
     local_layout.metadata_visible = false;
     let facts = read_kind(&mut FakeRead::new(vec![Ok(vec![null_scope])]), Kind::Hints, &local_layout, 3)
         .await
         .unwrap()
         .unwrap();
-    assert!(
-        matches!(&facts[0],TuningFact::QueryHint(value) if value.scope==culprit_core::QueryStoreHintScope::Unknown)
-    );
+    assert!(matches!(&facts[0],TuningFact::QueryHint(value) if value.scope==culprit_core::QueryStoreScope::Unknown));
 }
 
 #[tokio::test]
@@ -244,4 +243,40 @@ async fn application_tuning_keeps_successful_siblings_and_discards_all_results_i
             .filter(|outcome| outcome.source != crate::sources::TUNING.name)
             .all(|outcome| outcome.state == culprit_core::SourceState::Unavailable)
     );
+}
+
+#[tokio::test]
+async fn application_plan_scope_requires_visible_positively_unpartitioned_native_layout() {
+    use culprit_core::QueryStoreScope;
+    for (metadata, partitioned, expected) in [
+        (true, false, QueryStoreScope::Local),
+        (true, true, QueryStoreScope::Unknown),
+        (false, false, QueryStoreScope::Unknown),
+        (false, true, QueryStoreScope::Unknown),
+    ] {
+        let mut reader = FakeRead::new(vec![
+            Ok(vec![replace(
+                &layout_row(),
+                &[("metadata_visibility", Val::Bool(metadata)), ("runtime_replica", Val::Int(i64::from(partitioned)))],
+            )]),
+            Ok(vec![]),
+            Ok(vec![recommendation_row()]),
+            Ok(vec![forced_row()]),
+            Ok(vec![]),
+        ]);
+        let collected = super::super::read(&mut reader).await;
+        let advice = collected
+            .finish(&mut culprit_core::Coverage::default(), "fixture grant", SourceShutdown::Quiescent, true)
+            .unwrap();
+        assert_eq!(advice.plan_scope, expected);
+        assert_eq!(advice.recommendations.len(), 1);
+        assert_eq!(advice.forced_plans.len(), 1, "unknown scope must not erase independently measured facts");
+        assert_eq!(reader.calls.len(), 5, "scope qualification shares the existing native layout read");
+    }
+    let mut absent = layout();
+    absent.query_store = false;
+    absent.runtime_replica = false;
+    assert_eq!(absent.plan_scope(), QueryStoreScope::Unknown);
+    assert!(LAYOUT.contains("sys.query_store_runtime_stats"));
+    assert!(!forced_plans_sql(true).contains("query_store_plan_forcing_locations"));
 }

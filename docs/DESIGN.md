@@ -113,6 +113,13 @@ Per engine: SQL Server attributes every Query Store wait category to queries; My
 
 Health colors are assessments, never thresholds on an isolated ratio or size. CPU use is measured utilization of the selected database's limit, where available; the scheduling share of waits is historical context. Resource samples and dated events follow the selected window. A source that holds only an hour, or only cumulative totals, states that coverage explicitly. Historical counters are grouped separately, and missing measurements are unavailable. Compiles come from this database's Query Store entries: lifetime compilation totals stay separate from selected-window runtime unless the entry began inside the window. Cloud measurements use the same selected period and distinguish observed limits from proven query delays. Query, table, storage, replication and health warning colors follow the report's evidence assessments.
 
+Replica-local observations stay separate from database-wide claims. Zero local index reads cannot authorize an
+unused-index or disable/drop recommendation; coverage must include every read-serving member throughout the
+counter period. Recent index lock/escalation counts require matching native counter ownership and reset evidence,
+not server uptime from another connection. Without that proof, retain the observed totals as context and explain
+the missing comparison. Tuning facts may use query costs and offer plan-change SQL only within their proven native
+population and management route. Current topology and matching query IDs do not supply that proof.
+
 Planner cost constants stay visible as settings; a default alone supplies no measured reason to change one. A saved statistics warning describes the plan's compilation, not current statistics: index seek keys do not prove that each column has a histogram or that a refresh is needed. Frequent empty calls can be polling or request-driven checks, and statement counts do not reveal transaction boundaries. Advice names these possibilities and asks for the evidence needed to choose a change.
 
 Cleanup and row-version retention appear in Health as a short explanation with source qualifications. Native records

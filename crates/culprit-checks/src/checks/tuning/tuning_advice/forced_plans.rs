@@ -222,16 +222,13 @@ pub(super) fn forced_scan_finding(snapshot: &Snapshot, forced: ForcedScan<'_>) -
     f.last_seen = q.last_seen.clone();
     f.fix = Some(Fix {
         summary: t!("check.tuning_advice.forced_scan.fix", index = index),
-        sql: Some(format!("EXEC sp_query_store_unforce_plan @query_id = {}, @plan_id = {};", p.query_id, p.plan_id)),
+        sql: plan_command(snapshot, PlanCommand::Unforce, &p.query_id, &p.plan_id),
         cost: None,
     });
-    f.verify = vec![
-        t!("check.tuning_advice.forced_scan.verify", query = &p.query_id, index = index),
-        t!(
-            "check.tuning_advice.forced_scan.verify_force_again",
-            sql = format!("EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};", p.query_id, p.plan_id)
-        ),
-    ];
+    f.verify = vec![t!("check.tuning_advice.forced_scan.verify", query = &p.query_id, index = index)];
+    if let Some(sql) = plan_command(snapshot, PlanCommand::Force, &p.query_id, &p.plan_id) {
+        f.verify.push(t!("check.tuning_advice.forced_scan.verify_force_again", sql = sql));
+    }
     f
 }
 
@@ -339,17 +336,15 @@ pub(super) fn forced_plans_finding(snapshot: &Snapshot, plans: ForcedPlans<'_>) 
     f.informational();
     f.fix = Some(Fix {
         summary: t!("check.tuning_advice.forced_plans.fix"),
-        sql: Some(
+        sql: can_change_plan(snapshot).then(|| {
             std::iter::once("-- One at a time, comparing the query's duration before and after".to_string())
-                .chain(kept.iter().take(FORCED_LISTED).map(|p| {
-                    format!(
-                        "-- EXEC sp_query_store_unforce_plan @query_id = {}, @plan_id = {};",
-                        p.plan.query_id, p.plan.plan_id
-                    )
+                .chain(kept.iter().take(FORCED_LISTED).filter_map(|p| {
+                    plan_command(snapshot, PlanCommand::Unforce, &p.plan.query_id, &p.plan.plan_id)
+                        .map(|sql| format!("-- {sql}"))
                 }))
                 .collect::<Vec<_>>()
-                .join("\n"),
-        ),
+                .join("\n")
+        }),
         cost: None,
     });
     f.verify = vec![t!("check.tuning_advice.forced_plans.verify")];

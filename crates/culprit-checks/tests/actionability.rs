@@ -26,6 +26,21 @@ fn snapshot(engine: Engine) -> Snapshot {
     s
 }
 
+/// Explicit native proof for the counters this test supplies; ordinary saved fixture points remain unqualified.
+fn native_contention() -> IndexContention {
+    use culprit_core::telemetry::{NativeIdentity, SharedResourceIdentity, SharedResourceKind};
+    IndexContention {
+        source_owner: Some(SharedResourceIdentity {
+            engine: Engine::Mssql,
+            kind: SharedResourceKind::Node,
+            namespace: NativeIdentity::new("controlled-native-cluster"),
+            native: NativeIdentity::new("controlled-native-member"),
+        }),
+        reset: culprit_core::ResetMarker::Generation("controlled-native-index-generation".into()),
+        ..Default::default()
+    }
+}
+
 struct Probe(Finding);
 impl Check for Probe {
     fn info(&self) -> CheckInfo {
@@ -120,7 +135,7 @@ fn timed_lock_counters_distinguish_current_history_missing_and_reset() {
         i.contention = None;
     }
     s.indexes[0].contention =
-        Some(IndexContention { row_lock_waits: 1.0, row_lock_wait_ms: 13_000.0, ..Default::default() });
+        Some(IndexContention { row_lock_waits: 1.0, row_lock_wait_ms: 13_000.0, ..native_contention() });
     let mut old = s.clone();
     old.taken_at = "2026-10-18T10:00:00Z".into();
     let classify =
@@ -148,10 +163,13 @@ fn timed_lock_counters_distinguish_current_history_missing_and_reset() {
     assert!(s.contention_before.as_ref().unwrap().since(&s.indexes[0]).is_none());
     assert_eq!(classify(s.clone()).actionability, Actionability::Information);
     old.server.started_at = None;
-    assert!(culprit_core::ContentionBaseline::from_scan(&old, &s).is_none());
+    assert!(culprit_core::ContentionBaseline::from_scan(&old, &s).is_some());
     old.server.started_at = Some("2026-10-18T09:00:00Z".into());
+    assert!(culprit_core::ContentionBaseline::from_scan(&old, &s).is_some());
+    old.indexes[0].contention.as_mut().unwrap().source_owner = None;
     assert!(culprit_core::ContentionBaseline::from_scan(&old, &s).is_none());
-    old.server.started_at = s.server.started_at.clone();
+    old.indexes[0].contention.as_mut().unwrap().source_owner =
+        s.indexes[0].contention.as_ref().unwrap().source_owner.clone();
     old.taken_at = "2026-10-18T13:00:00Z".into();
     assert!(culprit_core::ContentionBaseline::from_scan(&old, &s).is_none());
 }
@@ -161,7 +179,7 @@ fn a_known_index_reset_prevents_comparison_even_when_its_counts_grew() {
     let mut current = snapshot(Engine::Mssql);
     let reset = culprit_core::ResetMarker::At("2026-10-18T10:00:00Z".into());
     current.indexes[0].contention =
-        Some(IndexContention { reset, row_lock_waits: 100.0, row_lock_wait_ms: 100_000.0, ..Default::default() });
+        Some(IndexContention { reset, row_lock_waits: 100.0, row_lock_wait_ms: 100_000.0, ..native_contention() });
     let mut previous = current.clone();
     previous.taken_at = "2026-10-18T10:30:00Z".into();
     let counters = previous.indexes[0].contention.as_mut().unwrap();
@@ -176,18 +194,24 @@ fn a_known_index_reset_prevents_comparison_even_when_its_counts_grew() {
 }
 
 #[test]
-fn missing_escalation_counters_are_unknown_and_measured_zero_is_comparable() {
+fn missing_or_unowned_escalation_counters_are_unknown_and_native_qualified_zero_is_comparable() {
     let mut current = snapshot(Engine::Mssql);
-    for index in &mut current.indexes {
-        index.contention = None;
-    }
+    current.indexes.truncate(1);
     current.indexes[0].contention = Some(IndexContention::default());
     let mut previous = current.clone();
     previous.taken_at = "2026-10-18T10:00:00Z".into();
+    assert!(culprit_core::EscalationBaseline::from_scan(&previous, &current).is_none());
+    current.indexes[0].contention = Some(native_contention());
+    previous.indexes[0].contention = Some(native_contention());
     let baseline = culprit_core::EscalationBaseline::from_scan(&previous, &current).unwrap();
     let index = &current.indexes[0];
-    assert_eq!(baseline.since(&format!("{}.{}", index.schema, index.table), 2.0), Some(2.0));
-    assert_eq!(baseline.since("missing.table", 2.0), None);
+    let (schema, table) = (index.schema.clone(), index.table.clone());
+    assert_eq!(baseline.since(&current, &schema, &table), Some(0.0));
+    current.indexes[0].contention.as_mut().unwrap().lock_escalations = 2.0;
+    assert_eq!(baseline.since(&current, &schema, &table), Some(2.0));
+    assert_eq!(baseline.since(&current, "missing", "table"), None);
+    current.indexes[0].contention = None;
+    assert_eq!(baseline.since(&current, &schema, &table), None);
 }
 
 #[test]

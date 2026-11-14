@@ -92,6 +92,10 @@ pub struct ReportSummary {
     pub headline: String,
     /// The scan's window in minutes; `None` for a scan taken without options.
     pub window_minutes: Option<u32>,
+    /// Exact requested source population. Automatic source selection remains in the default cache namespace.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workload_population: Option<culprit_core::telemetry::NativeIdentity>,
     /// The server as the scan saw it ("MariaDB 11.8.9"), so a list of connections can tell MariaDB from MySQL.
     pub product: Option<String>,
     /// Why the scan has no query history ("Query Store is OFF on this database."); `None` when it has one.
@@ -145,6 +149,21 @@ fn summary_path(dir: &Path, window_minutes: Option<u32>) -> PathBuf {
     }
 }
 
+fn selected_summary_path(
+    dir: &Path,
+    window_minutes: Option<u32>,
+    population: Option<&culprit_core::telemetry::NativeIdentity>,
+) -> Result<PathBuf> {
+    let Some(population) = population else { return Ok(summary_path(dir, window_minutes)) };
+    if !population.is_valid() {
+        return Err(culprit_core::telemetry::CollectionStop::InvalidPage.error());
+    }
+    let encoded = serde_json::to_vec(population).map_err(|error| Error::internal(error.to_string()))?;
+    let key = culprit_core::telemetry::digest(&encoded);
+    let window = window_minutes.map(window_label).unwrap_or_else(|| "any".into());
+    Ok(dir.join(format!("latest-{window}-population-{key}.json")))
+}
+
 fn summary_of(report: &Report) -> ReportSummary {
     ReportSummary {
         format: report.snapshot.format,
@@ -153,6 +172,7 @@ fn summary_of(report: &Report) -> ReportSummary {
         opportunities: report.summary.opportunities,
         headline: report.summary.headline.clone(),
         window_minutes: report.snapshot.options.as_ref().map(|o| o.window_in_minutes()),
+        workload_population: report.snapshot.options.as_ref().and_then(|options| options.workload_population.clone()),
         product: Some(report.snapshot.server.product.clone()),
         no_workload: report.snapshot.no_workload_reason(),
         takeaway: report.summary.takeaway.clone(),
@@ -163,6 +183,11 @@ fn summary_of(report: &Report) -> ReportSummary {
 }
 
 pub fn save(dir: &Path, report: &Report) -> Result<()> {
+    let summary = summary_of(report);
+    let population = summary.workload_population.as_ref();
+    let any_path = selected_summary_path(dir, None, population)?;
+    let window_path =
+        summary.window_minutes.map(|minutes| selected_summary_path(dir, Some(minutes), population)).transpose()?;
     private_fs::create_dir(dir).map_err(|e| Error::internal(format!("{}: {e}", dir.display())))?;
     let path = dir.join(format!("{}.json", report.snapshot.id));
     let json = storage::encode(report).map_err(|e| Error::internal(e.to_string()))?;
@@ -172,16 +197,15 @@ pub fn save(dir: &Path, report: &Report) -> Result<()> {
         let json = serde_json::to_vec(&counters).map_err(|e| Error::internal(e.to_string()))?;
         write_atomic(&counters_path(dir, &report.snapshot.id), &json)?;
     }
-    let summary = summary_of(report);
     let json = serde_json::to_vec_pretty(&summary.for_storage()).map_err(|e| Error::internal(e.to_string()))?;
     write_atomic(&dir.join(format!("{}.summary.json", report.snapshot.id)), &json)?;
-    if latest_summary(dir, None).is_none_or(|old| may_replace_latest(&old, &summary)) {
-        write_atomic(&summary_path(dir, None), &json)?;
+    if latest_selected_summary(dir, None, population)?.is_none_or(|old| may_replace_latest(&old, &summary)) {
+        write_atomic(&any_path, &json)?;
     }
-    if let Some(minutes) = summary.window_minutes
-        && latest_summary(dir, Some(minutes)).is_none_or(|old| may_replace_latest(&old, &summary))
+    if let Some((minutes, path)) = summary.window_minutes.zip(window_path)
+        && latest_selected_summary(dir, Some(minutes), population)?.is_none_or(|old| may_replace_latest(&old, &summary))
     {
-        write_atomic(&summary_path(dir, Some(minutes)), &json)?;
+        write_atomic(&path, &json)?;
     }
     Ok(())
 }
@@ -276,7 +300,7 @@ pub fn rebase_on_scans(dir: &Path, snapshot: &mut culprit_core::Snapshot) {
 
 /// Compare lock escalations, index lock contention and operational counters against saved scans in `dir`.
 /// For any selected workload window (1h, 6h, 24h, 7d, 30d or custom), walks backward through compatible scans of the
-/// same continuous server uptime inside that window so a scan taken a minute or a few hours ago does not hide
+/// same native counter generations inside that window so a scan taken a minute or a few hours ago does not hide
 /// escalations or waits that happened earlier in the window. Writes nothing.
 pub(crate) fn apply_counter_baselines(
     dir: &Path,
@@ -323,30 +347,31 @@ pub(crate) fn apply_counter_baselines(
         candidates.push(previous);
     }
 
+    // Operational counters keep their own source/reset contract. Missing index-counter authority must not erase
+    // their independent comparison with the closest saved scan.
+    if let Some(previous) = candidates.first() {
+        culprit_core::operations::compare(previous, snapshot);
+    }
+
     let mut chosen: Option<&culprit_core::Snapshot> = None;
     let mut zero_escalation_cover: Option<&culprit_core::Snapshot> = None;
     let mut zero_contention_cover: Option<&culprit_core::Snapshot> = None;
-    let current_escalations = culprit_core::escalations_by_table(snapshot);
     for candidate in &candidates {
         let has_baseline = culprit_core::EscalationBaseline::from_scan(candidate, snapshot).is_some()
             || culprit_core::ContentionBaseline::from_scan(candidate, snapshot).is_some();
         if chosen.is_none() {
-            // A reset or unknown start in the closest matching scan cannot be bypassed by an older counter.
-            if !has_baseline && candidate.server.started_at.is_none() {
+            // Missing native owner/reset proof in the closest matching scan cannot be bypassed by an older one.
+            if !has_baseline {
                 snapshot.escalations_before = None;
                 snapshot.contention_before = None;
                 return;
             }
             chosen = Some(candidate);
-            if culprit_core::EscalationBaseline::from_scan(candidate, snapshot).is_some_and(|b| b.restarted) {
-                break;
-            }
             continue;
         }
-        let same_uptime = culprit_core::EscalationBaseline::from_scan(candidate, snapshot)
-            .is_some_and(|b| !b.restarted)
+        let same_generation = culprit_core::EscalationBaseline::from_scan(candidate, snapshot).is_some()
             || culprit_core::ContentionBaseline::from_scan(candidate, snapshot).is_some();
-        if !same_uptime {
+        if !same_generation {
             break;
         }
         let age_secs = trends::epoch(&candidate.taken_at).zip(now).map(|(at, now)| now - at);
@@ -355,12 +380,18 @@ pub(crate) fn apply_counter_baselines(
             continue;
         }
         // When the oldest scan inside the window covers only a fraction of it (for example, a scan 1 minute ago before
-        // selecting 1h or 6h), an older scan from the same uptime with identical counter totals proves no escalations
-        // or lock waits happened across the entire selected window.
+        // selecting 1h or 6h), an older scan with the same native owner/generations and unchanged per-index counters
+        // can extend that proof. Table sums alone cannot establish it.
         let chosen_age =
             chosen.and_then(|c| trends::epoch(&c.taken_at).zip(now)).map(|(at, now)| now - at).unwrap_or(0.0);
         if chosen_age < min_cover_secs {
-            if culprit_core::escalations_by_table(candidate) == current_escalations {
+            if culprit_core::EscalationBaseline::from_scan(candidate, snapshot).is_some_and(|baseline| {
+                snapshot
+                    .indexes
+                    .iter()
+                    .filter(|index| index.contention.is_some())
+                    .all(|index| baseline.since(snapshot, &index.schema, &index.table) == Some(0.0))
+            }) {
                 zero_escalation_cover = Some(candidate);
             }
             if culprit_core::ContentionBaseline::from_scan(candidate, snapshot).is_some_and(|b| {
@@ -379,7 +410,6 @@ pub(crate) fn apply_counter_baselines(
     if let Some(previous) = chosen {
         snapshot.escalations_before =
             culprit_core::EscalationBaseline::from_scan(zero_escalation_cover.unwrap_or(previous), snapshot);
-        culprit_core::operations::compare(previous, snapshot);
         snapshot.contention_before =
             culprit_core::ContentionBaseline::from_scan(zero_contention_cover.unwrap_or(previous), snapshot);
     }
@@ -461,6 +491,15 @@ pub(crate) fn id_epoch(id: &str) -> Option<f64> {
 
 pub fn latest_summary(dir: &Path, window_minutes: Option<u32>) -> Option<ReportSummary> {
     read_summary(&summary_path(dir, window_minutes))
+}
+
+pub(crate) fn latest_selected_summary(
+    dir: &Path,
+    window_minutes: Option<u32>,
+    population: Option<&culprit_core::telemetry::NativeIdentity>,
+) -> Result<Option<ReportSummary>> {
+    Ok(read_summary(&selected_summary_path(dir, window_minutes, population)?)
+        .filter(|summary| summary.workload_population.as_ref() == population))
 }
 
 /// A summary this version wrote, of a report it reads; `None` for one another version left behind.
@@ -804,6 +843,35 @@ mod tests {
         report
     }
 
+    #[test]
+    fn requested_populations_own_separate_latest_reports() {
+        use culprit_core::telemetry::NativeIdentity;
+        let dir = std::env::temp_dir().join(format!("culprit-population-cache-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let default = fixture_report("20261101T100000.000Z", 60);
+        save(&dir, &default).unwrap();
+        let first = NativeIdentity::new("17");
+        let second = NativeIdentity::new("18");
+        for (id, population) in [("20261101T110000.000Z", &first), ("20261101T120000.000Z", &second)] {
+            let mut report = fixture_report(id, 60);
+            report.snapshot.options.as_mut().unwrap().workload_population = Some(population.clone());
+            report.snapshot.workload.as_mut().unwrap().population = Some(population.clone());
+            save(&dir, &report).unwrap();
+            assert_eq!(latest_selected_summary(&dir, Some(60), Some(population)).unwrap().unwrap().id, id);
+        }
+        assert_eq!(latest_summary(&dir, None).unwrap().id, default.snapshot.id);
+        assert_eq!(latest_summary(&dir, Some(60)).unwrap().id, default.snapshot.id);
+        assert_eq!(latest_selected_summary(&dir, Some(60), Some(&first)).unwrap().unwrap().id, "20261101T110000.000Z");
+        assert!(latest_selected_summary(&dir, Some(360), Some(&first)).unwrap().is_none());
+        assert!(
+            latest_selected_summary(&dir, Some(60), Some(&first.clone().qualified("context", "other")))
+                .unwrap()
+                .is_none()
+        );
+        assert!(latest_selected_summary(&dir, None, Some(&NativeIdentity::new(""))).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     /// A connection scanned by another version keeps that version's files: its reports aren't read, so they are passed
     /// over as if absent (opening the connection scans; a digest has no scan before it), never an error.
     #[test]
@@ -864,6 +932,13 @@ mod tests {
             r.snapshot.taken_at = at.into();
             r.snapshot.server.started_at = Some("2026-10-01T00:00:00Z".into());
             r.snapshot.indexes[0].contention = Some(culprit_core::IndexContention {
+                source_owner: Some(culprit_core::telemetry::SharedResourceIdentity {
+                    engine: culprit_core::Engine::Mssql,
+                    kind: culprit_core::telemetry::SharedResourceKind::Node,
+                    namespace: culprit_core::telemetry::NativeIdentity::new("controlled-native-cluster"),
+                    native: culprit_core::telemetry::NativeIdentity::new("controlled-native-member"),
+                }),
+                reset: culprit_core::ResetMarker::Generation("controlled-native-index-generation".into()),
                 row_lock_waits: 1.0,
                 row_lock_wait_ms: 13_000.0,
                 ..Default::default()
@@ -894,9 +969,9 @@ mod tests {
         assert_eq!(current.contention_before.as_ref().unwrap().taken_at, old.snapshot.taken_at);
         assert_eq!(current.contention_before.as_ref().unwrap().since(&current.indexes[0]).unwrap().waits, 0.0);
         assert_eq!(contents(), original);
-        // The nearest matching scan has an unknown start: do not leap over it to resurrect old counters.
+        // A matching probe uptime cannot let the nearest point's unknown counter generation borrow an older one.
         let mut unknown = make("20261018T113000", "2026-10-18T11:30:00Z");
-        unknown.snapshot.server.started_at = None;
+        unknown.snapshot.indexes[0].contention.as_mut().unwrap().reset = culprit_core::ResetMarker::Unknown;
         save(&dir, &unknown).unwrap();
         rebase_on_scans(&dir, &mut current);
         assert!(current.contention_before.is_none());

@@ -375,7 +375,13 @@ fn complete_settings_and_catalogs_are_assessed_without_overriding_the_report() {
     assert!(matches!(assess(&[Requirement::Settings], &s), CheckEvidence::Available));
     crate::record(&mut s, "settings", SourceState::Partial, Some("Some settings were not visible"));
     assert!(!matches!(assess(&[Requirement::Settings], &s), CheckEvidence::Available));
-    let report = culprit_checks::analyze(snapshot());
+    let mut complete = snapshot();
+    // An overlap assessment also needs a week of usage from every member that serves reads.
+    complete.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::AllReadMembers);
+    complete.server.started_at = Some("2026-10-01T12:00:00Z".into());
+    complete.taken_at = "2026-10-11T12:00:00Z".into();
+    complete.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
+    let report = culprit_checks::analyze(complete);
     for check in ["duplicate-index", "unindexed-fk", "overlapping-index"] {
         assert!(report.assessments.iter().find(|a| a.check == check).unwrap().reason.is_none(), "{check}");
     }

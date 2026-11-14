@@ -72,6 +72,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
     let w = s.workload.as_ref()?;
     // Timeline evidence joins the engine's recommendation before that recommendation joins a sensitivity finding.
     if matches!(policy, Policy::PlanStory) {
+        crate::tuning::plan_workload(s)?;
         for (into, rec) in findings
             .iter()
             .enumerate()
@@ -230,5 +231,57 @@ mod tests {
             assert_eq!(target.metrics[0].unit, Unit::Count);
             assert_eq!(target.metrics[1].label, "Lignes par exécution");
         });
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    use culprit_core::{QueryRef, QueryStoreScope, RuntimePopulationCatalog, TuningAdvice};
+
+    #[test]
+    fn a_native_recommendation_does_not_absorb_another_population_timeline_or_heavy_query() {
+        let mut snapshot: Snapshot =
+            serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+        snapshot.workload.as_mut().unwrap().population_catalog = Some(RuntimePopulationCatalog {
+            source: culprit_core::source_id::QUERY_STORE.into(),
+            partitioned: false,
+            requires_selection: false,
+            populations: Vec::new(),
+        });
+        snapshot.tuning = Some(TuningAdvice { plan_scope: QueryStoreScope::Local, ..Default::default() });
+        let query = &snapshot.queries()[0];
+        let mut native = support::finding(
+            "tuning-advice",
+            "force",
+            culprit_core::Category::Queries,
+            support::subject(SubjectKind::Query, &query.id),
+        );
+        native.queries = vec![QueryRef { id: query.id.clone(), plan_node: None, note: None }];
+        native.facts.recommended_plan =
+            Some(culprit_core::FindingPlanRecommendation { plan: "8".into(), cpu_saved_share: Some(0.8) });
+        native.impact.db_time_share = Some(0.9);
+        native.severity = Severity::Medium;
+        let mut timeline = native.clone();
+        timeline.id = "regression:original".into();
+        timeline.check = "regression".into();
+        timeline.facts.recommended_plan = None;
+        let mut heavy = timeline.clone();
+        heavy.id = "heavy-query:original".into();
+        heavy.check = "heavy-query".into();
+        heavy.impact.db_time_share = Some(0.1);
+        let stories = vec![native.clone(), timeline];
+        let causes = vec![native, heavy];
+        for (scope, should_join) in [(QueryStoreScope::Unknown, false), (QueryStoreScope::Local, true)] {
+            snapshot.tuning.as_mut().unwrap().plan_scope = scope;
+            let mut findings = stories.clone();
+            let trace = Rule(Policy::PlanStory).refine_traced(&snapshot, &mut findings);
+            assert_eq!(!trace.is_empty(), should_join);
+            // An independent measured regression can legitimately explain the heavy query. Keep it out of this
+            // second assertion, which exercises whether the native recommendation itself may explain that cost.
+            let mut findings = causes.clone();
+            super::super::coverage::Rule(super::super::coverage::Policy::Heavy).refine(&snapshot, &mut findings);
+            assert_eq!(findings.iter().any(|finding| finding.check == "heavy-query"), !should_join);
+        }
     }
 }

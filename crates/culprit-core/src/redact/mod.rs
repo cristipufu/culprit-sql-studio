@@ -88,6 +88,9 @@ fn redact_native_qualifiers(identity: &mut crate::telemetry::NativeIdentity) {
 
 pub fn redact_measurement(measurement: &mut crate::MeasurementContext) {
     redact_identity(&mut measurement.database);
+    if let Some(population) = &mut measurement.population {
+        redact_native_identity(population);
+    }
     if let crate::MeasurementSource::Named(source) = &mut measurement.source {
         *source = redact_scope(source);
     }
@@ -167,6 +170,9 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     let mut s = snapshot.clone();
     if let Some(identity) = &mut s.identity {
         redact_identity(identity);
+    }
+    if let Some(population) = s.options.as_mut().and_then(|options| options.workload_population.as_mut()) {
+        redact_native_identity(population);
     }
     for note in &mut s.notes {
         note.message_source = None;
@@ -293,6 +299,9 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         }
     }
     for index in &mut s.indexes {
+        if let Some(owner) = index.contention.as_mut().and_then(|counters| counters.source_owner.as_mut()) {
+            redact_resource_identity(owner);
+        }
         if index.filter_facts.is_none()
             && let Some(filter) = &index.filter
         {
@@ -323,6 +332,19 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     for column in &mut s.columns {
         column.default = column.default.as_deref().map(|sql| redact_sql(sql, engine));
     }
+    for point in s.contention_before.iter_mut().flat_map(|baseline| baseline.indexes.values_mut()) {
+        if let Some(owner) = &mut point.source_owner {
+            redact_resource_identity(owner);
+        }
+    }
+    for point in s
+        .escalations_before
+        .iter_mut()
+        .flat_map(|baseline| baseline.tables.values_mut())
+        .flat_map(|indexes| indexes.values_mut())
+    {
+        redact_resource_identity(&mut point.source_owner);
+    }
     for reference in s
         .escalations_before
         .iter_mut()
@@ -339,6 +361,14 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         redact_measurement(measurement);
     }
     if let Some(w) = &mut s.workload {
+        if let Some(population) = &mut w.population {
+            redact_native_identity(population);
+        }
+        // Partitioned catalog history can contain endpoints and replica names. An empty, positively unpartitioned
+        // catalog has no private population data and retains the native proof used by independent plan advice.
+        if !w.population_catalog.as_ref().is_some_and(|catalog| catalog.is_valid() && !catalog.partitioned) {
+            w.population_catalog = None;
+        }
         w.source = redact_scope(&w.source);
         w.source_label = None;
         w.source_message = None;

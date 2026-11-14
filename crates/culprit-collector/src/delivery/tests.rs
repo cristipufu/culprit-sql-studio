@@ -19,6 +19,7 @@ fn prepared_database(root: &std::path::Path, sequence: u64, database: &str) -> P
         budget: CollectionBudget::default(),
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             database,

@@ -72,6 +72,8 @@ async fn a_retained_native_baseline_survives_work_ending_before_its_focused_look
                         .unwrap()
                         .clone();
                     selected = Some(ActivityWaitFocus {
+                        partition: captured.description.partition.clone(),
+                        database_writable: activity.database_writable,
                         parent,
                         target: captured.description.target.clone(),
                         source: captured.description.source.clone(),

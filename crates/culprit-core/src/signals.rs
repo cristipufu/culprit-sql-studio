@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Digest, Plan, QueryStat, Snapshot, t};
+use crate::{Plan, QueryStat, Snapshot, t};
 
 /// Exact compile totals for one retained Query Store entry. Query Store does not timestamp every compilation, so
 /// totals can be compared with windowed runs only when the entry's first compile falls inside that window.
@@ -423,6 +423,11 @@ impl Replica {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct IndexContention {
+    /// The native compute member that owns these counters. A database, endpoint or a separate probe cannot
+    /// establish this identity. Missing ownership preserves the point, but cannot establish a cross-scan delta.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_owner: Option<crate::telemetry::SharedResourceIdentity>,
     /// The native metadata-cache reset epoch. Server uptime does not establish this window.
     pub reset: crate::ResetMarker,
     pub row_lock_waits: f64,
@@ -453,12 +458,91 @@ impl IndexContention {
     pub fn lock_waits(&self) -> f64 {
         self.row_lock_waits + self.page_lock_waits
     }
+
+    fn has_counter_owner(&self, engine: crate::Engine, observed_at: &str) -> bool {
+        known_index_counter_owner(self.source_owner.as_ref(), &self.reset)
+            && index_reset_at_or_before(&self.reset, observed_at)
+            && self.source_owner.as_ref().is_some_and(|owner| owner.engine == engine)
+    }
+
+    fn same_counter_generation(&self, other: &Self) -> bool {
+        same_index_counter_generation(
+            self.source_owner.as_ref(),
+            &self.reset,
+            other.source_owner.as_ref(),
+            &other.reset,
+        )
+    }
+
+    fn valid_lock_counts(&self) -> bool {
+        [self.row_lock_waits, self.row_lock_wait_ms, self.page_lock_waits, self.page_lock_wait_ms]
+            .into_iter()
+            .all(|count| valid_counter_delta(0.0, count))
+            && self.lock_waits().is_finite()
+            && self.lock_wait_ms().is_finite()
+    }
+}
+
+/// A reset marker is useful for subtraction only alongside the member that owns that native counter population.
+fn known_index_counter_owner(
+    owner: Option<&crate::telemetry::SharedResourceIdentity>,
+    reset: &crate::ResetMarker,
+) -> bool {
+    let Some(owner) = owner else { return false };
+    owner.is_valid()
+        && matches!(
+            owner.kind,
+            crate::telemetry::SharedResourceKind::Instance | crate::telemetry::SharedResourceKind::Node
+        )
+        && match reset {
+            crate::ResetMarker::At(at) => at.len() <= 64 && chrono::DateTime::parse_from_rfc3339(at).is_ok(),
+            crate::ResetMarker::Generation(generation) => {
+                !generation.trim().is_empty() && crate::telemetry::NativeIdentity::new(generation).is_valid()
+            }
+            crate::ResetMarker::Unknown => false,
+        }
+}
+
+fn same_index_counter_generation(
+    before_owner: Option<&crate::telemetry::SharedResourceIdentity>,
+    before_reset: &crate::ResetMarker,
+    after_owner: Option<&crate::telemetry::SharedResourceIdentity>,
+    after_reset: &crate::ResetMarker,
+) -> bool {
+    known_index_counter_owner(before_owner, before_reset)
+        && known_index_counter_owner(after_owner, after_reset)
+        && before_owner == after_owner
+        && before_reset == after_reset
+}
+
+fn index_reset_at_or_before(reset: &crate::ResetMarker, observed_at: &str) -> bool {
+    let Some(observed_at) = crate::format::epoch_seconds(observed_at) else { return false };
+    match reset {
+        crate::ResetMarker::At(at) => crate::format::epoch_seconds(at).is_some_and(|at| at <= observed_at),
+        crate::ResetMarker::Generation(_) => true,
+        crate::ResetMarker::Unknown => false,
+    }
+}
+
+fn valid_counter_delta(before: f64, after: f64) -> bool {
+    before.is_finite() && before >= 0.0 && after.is_finite() && after >= before
+}
+
+fn contention_indexes(snapshot: &Snapshot) -> Option<BTreeMap<String, &crate::IndexStat>> {
+    let mut indexes = BTreeMap::new();
+    for index in &snapshot.indexes {
+        if indexes.insert(ContentionBaseline::key(index), index).is_some() {
+            return None;
+        }
+    }
+    Some(indexes)
 }
 
 /// Timed row and page lock waits kept by one index.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct IndexLockCounts {
+    pub source_owner: Option<crate::telemetry::SharedResourceIdentity>,
     pub reset: crate::ResetMarker,
     pub waits: f64,
     pub wait_ms: f64,
@@ -484,18 +568,32 @@ impl ContentionBaseline {
     pub fn from_scan(previous: &Snapshot, current: &Snapshot) -> Option<Self> {
         if crate::format::epoch_seconds(&previous.taken_at)? > crate::format::epoch_seconds(&current.taken_at)?
             || !previous.same_database(current)
-            || restarted(previous.server.started_at.as_deref()?, current.server.started_at.as_deref()?)?
         {
             return None;
         }
-        let indexes: BTreeMap<_, _> = previous
-            .indexes
-            .iter()
-            .filter_map(|i| {
+        let before = contention_indexes(previous)?;
+        let after = contention_indexes(current)?;
+        let indexes: BTreeMap<_, _> = before
+            .into_iter()
+            .filter_map(|(key, i)| {
                 let c = i.contention.as_ref()?;
+                let now = after.get(&key)?.contention.as_ref()?;
+                if !c.has_counter_owner(previous.server.engine, &previous.taken_at)
+                    || !now.has_counter_owner(current.server.engine, &current.taken_at)
+                    || !c.same_counter_generation(now)
+                    || !c.valid_lock_counts()
+                    || !now.valid_lock_counts()
+                {
+                    return None;
+                }
                 Some((
-                    Self::key(i),
-                    IndexLockCounts { reset: c.reset.clone(), waits: c.lock_waits(), wait_ms: c.lock_wait_ms() },
+                    key,
+                    IndexLockCounts {
+                        source_owner: c.source_owner.clone(),
+                        reset: c.reset.clone(),
+                        waits: c.lock_waits(),
+                        wait_ms: c.lock_wait_ms(),
+                    },
                 ))
             })
             .collect();
@@ -509,12 +607,21 @@ impl ContentionBaseline {
     pub fn since(&self, index: &crate::IndexStat) -> Option<IndexLockCounts> {
         let then = self.indexes.get(&Self::key(index))?;
         let now = index.contention.as_ref()?;
-        (now.reset == then.reset && now.lock_waits() >= then.waits && now.lock_wait_ms() >= then.wait_ms).then(|| {
-            IndexLockCounts {
-                reset: now.reset.clone(),
-                waits: now.lock_waits() - then.waits,
-                wait_ms: now.lock_wait_ms() - then.wait_ms,
-            }
+        (index_reset_at_or_before(&then.reset, &self.taken_at)
+            && now.valid_lock_counts()
+            && same_index_counter_generation(
+                then.source_owner.as_ref(),
+                &then.reset,
+                now.source_owner.as_ref(),
+                &now.reset,
+            )
+            && valid_counter_delta(then.waits, now.lock_waits())
+            && valid_counter_delta(then.wait_ms, now.lock_wait_ms()))
+        .then(|| IndexLockCounts {
+            source_owner: now.source_owner.clone(),
+            reset: now.reset.clone(),
+            waits: now.lock_waits() - then.waits,
+            wait_ms: now.lock_wait_ms() - then.wait_ms,
         })
     }
 }
@@ -525,14 +632,21 @@ impl ContentionBaseline {
 pub struct EscalationBaseline {
     /// When the earlier scan was taken (UTC, ISO 8601).
     pub taken_at: String,
-    /// Escalations it counted per table (`schema.table`); a missing table has no comparable baseline. Empty when the server
-    /// restarted after it: every escalation counted now came later.
-    pub tables: BTreeMap<String, f64>,
-    /// The server restarted between the earlier scan and this one, which started the counts again from zero.
-    pub restarted: bool,
+    /// Per-index points grouped by the exact serialized (schema, table) pair. Every index in the table must keep
+    /// the same native owner, counter generation and membership before its table delta can be established.
+    pub tables: BTreeMap<String, BTreeMap<String, IndexEscalationCounts>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reference: Option<crate::ScanReference>,
+}
+
+/// One index's escalation counter and the native ownership and reset proof retained with its point.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct IndexEscalationCounts {
+    pub source_owner: crate::telemetry::SharedResourceIdentity,
+    pub reset: crate::ResetMarker,
+    pub count: f64,
 }
 
 /// How big each table's data was at an earlier scan, to tell how fast it grows.
@@ -677,69 +791,113 @@ impl CountBaseline {
 const SAME_START_SECONDS: f64 = 120.0;
 
 impl EscalationBaseline {
-    /// What `previous`, an earlier scan of the same database, counted, to compare `current` with. `None` when it can't
-    /// tell: either scan doesn't know when the server started, or `previous` has no lock counters.
+    /// Retain only table populations whose per-index native owners, generations and membership agree with `current`.
+    /// A separately observed server start or a digest's table sum cannot establish these native counter lifetimes.
     pub fn from_scan(previous: &Snapshot, current: &Snapshot) -> Option<EscalationBaseline> {
         if !previous.same_database(current)
             || crate::format::epoch_seconds(&previous.taken_at)? > crate::format::epoch_seconds(&current.taken_at)?
         {
             return None;
         }
-        if !previous.indexes.iter().any(|i| i.contention.is_some()) {
-            return None;
-        }
-        let restarted = restarted(previous.server.started_at.as_deref()?, current.server.started_at.as_deref()?)?;
-        Some(EscalationBaseline {
+        let after = escalation_tables(current);
+        let tables = escalation_tables(previous)
+            .into_iter()
+            .filter(|(table, before)| after.get(table).is_some_and(|after| escalation_delta(before, after).is_some()))
+            .collect::<BTreeMap<_, _>>();
+        (!tables.is_empty()).then(|| EscalationBaseline {
             reference: Some(crate::ScanReference::of(previous)),
             taken_at: previous.taken_at.clone(),
-            tables: if restarted { BTreeMap::new() } else { escalations_by_table(previous) },
-            restarted,
+            tables,
         })
     }
 
-    /// The same from a previous digest, which keeps each lock-escalations finding's count: what a scheduled job keeps
-    /// between runs instead of the scans. `None` for a digest that doesn't say when the server started.
-    pub fn from_digest(previous: &Digest, current: &Snapshot) -> Option<EscalationBaseline> {
-        if !previous.comparison(current).allows_comparison()
-            || crate::format::epoch_seconds(&previous.taken_at)? > crate::format::epoch_seconds(&current.taken_at)?
+    /// Revalidate every current index point before summing its observed increase. Missing counters, an index added
+    /// or removed, a changed member/reset, or shrinking counters leave the table delta unknown.
+    pub fn since(&self, current: &Snapshot, schema: &str, table: &str) -> Option<f64> {
+        if crate::format::epoch_seconds(&self.taken_at)? > crate::format::epoch_seconds(&current.taken_at)? {
+            return None;
+        }
+        let key = escalation_table_key(schema, table);
+        let before = self.tables.get(&key)?;
+        if before.values().any(|point| !index_reset_at_or_before(&point.reset, &self.taken_at)) {
+            return None;
+        }
+        escalation_delta(before, &escalation_table(current, &key)?)
+    }
+}
+
+fn escalation_table_key(schema: &str, table: &str) -> String {
+    serde_json::to_string(&(schema, table)).expect("two table name strings")
+}
+
+fn escalation_tables(snapshot: &Snapshot) -> BTreeMap<String, BTreeMap<String, IndexEscalationCounts>> {
+    let mut tables: BTreeMap<String, Vec<&crate::IndexStat>> = BTreeMap::new();
+    for index in &snapshot.indexes {
+        tables.entry(escalation_table_key(&index.schema, &index.table)).or_default().push(index);
+    }
+    tables
+        .into_iter()
+        .filter_map(|(key, indexes)| {
+            Some((key, escalation_points(snapshot.server.engine, &snapshot.taken_at, indexes.into_iter())?))
+        })
+        .collect()
+}
+
+fn escalation_table(snapshot: &Snapshot, key: &str) -> Option<BTreeMap<String, IndexEscalationCounts>> {
+    escalation_points(
+        snapshot.server.engine,
+        &snapshot.taken_at,
+        snapshot.indexes.iter().filter(|index| escalation_table_key(&index.schema, &index.table) == key),
+    )
+}
+
+fn escalation_points<'a>(
+    engine: crate::Engine,
+    observed_at: &str,
+    indexes: impl Iterator<Item = &'a crate::IndexStat>,
+) -> Option<BTreeMap<String, IndexEscalationCounts>> {
+    let mut points = BTreeMap::new();
+    let mut owner = None;
+    for index in indexes {
+        let counters = index.contention.as_ref()?;
+        if !counters.has_counter_owner(engine, observed_at) || !valid_counter_delta(0.0, counters.lock_escalations) {
+            return None;
+        }
+        let source_owner = counters.source_owner.as_ref()?;
+        if owner.is_some_and(|owner| owner != source_owner) {
+            return None;
+        }
+        owner = Some(source_owner);
+        let point = IndexEscalationCounts {
+            source_owner: source_owner.clone(),
+            reset: counters.reset.clone(),
+            count: counters.lock_escalations,
+        };
+        if points.insert(index.name.clone(), point).is_some() {
+            return None;
+        }
+    }
+    (!points.is_empty()).then_some(points)
+}
+
+fn escalation_delta(
+    before: &BTreeMap<String, IndexEscalationCounts>,
+    after: &BTreeMap<String, IndexEscalationCounts>,
+) -> Option<f64> {
+    if before.is_empty() || before.len() != after.len() {
+        return None;
+    }
+    let mut total = 0.0;
+    for (index, then) in before {
+        let now = after.get(index)?;
+        if !same_index_counter_generation(Some(&then.source_owner), &then.reset, Some(&now.source_owner), &now.reset)
+            || !valid_counter_delta(then.count, now.count)
         {
             return None;
         }
-        let restarted = restarted(previous.server_started_at.as_deref()?, current.server.started_at.as_deref()?)?;
-        let tables = if restarted {
-            BTreeMap::new()
-        } else {
-            previous
-                .findings
-                .iter()
-                .filter_map(|f| Some((f.id.strip_prefix("lock-escalations:")?.to_string(), f.count?)))
-                .collect()
-        };
-        Some(EscalationBaseline {
-            taken_at: previous.taken_at.clone(),
-            tables,
-            restarted,
-            reference: Some(crate::ScanReference {
-                id: None,
-                taken_at: previous.taken_at.clone(),
-                database: previous.identity.clone(),
-            }),
-        })
+        total += now.count - then.count;
     }
-
-    /// Whether a previous digest supplied this baseline, not a saved scan: a digest has no scan id to point at.
-    pub fn is_from_digest(&self) -> bool {
-        self.reference.as_ref().is_some_and(|r| r.id.is_none())
-    }
-
-    /// Observed increase on `table` (`schema.table`) since the earlier scan.
-    /// `None` for a count lower than then without a restart: the table's indexes were reloaded into memory, or one of
-    /// them (or a partition) was rebuilt or dropped and took its own count with it. The rest may all be old, so it
-    /// can't say how many are new.
-    pub fn since(&self, table: &str, now: f64) -> Option<f64> {
-        let then = if self.restarted { 0.0 } else { *self.tables.get(table)? };
-        (now >= then).then_some(now - then)
-    }
+    total.is_finite().then_some(total)
 }
 
 /// Whether the server started again between two readings of its start time; `None` when either doesn't parse.
@@ -929,6 +1087,10 @@ impl TableStorage {
         self.partition_bounds().iter().any(|b| b.eq_ignore_ascii_case("default"))
     }
 }
+
+#[cfg(test)]
+#[path = "signals/contention_tests.rs"]
+mod contention_tests;
 
 #[cfg(test)]
 mod merge_tests {

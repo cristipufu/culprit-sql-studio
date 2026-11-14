@@ -16,9 +16,26 @@ fn clear_notes(notes: &mut Vec<String>, messages: &Option<Vec<crate::i18n::Messa
     }
 }
 
+/// Native index-usage population, independent of the connected member's current role or uptime.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum IndexUsageScope {
+    /// Every member serving reads throughout the recorded counter period contributed qualified usage counters.
+    AllReadMembers,
+    /// Qualified counters from the members in the current native inventory. Historical membership is unknown.
+    ObservedMembers,
+    /// Usage is local to the connected native member; other readers remain unobserved.
+    ConnectedMember,
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default)]
 #[ts(export)]
 pub struct OperationalStats {
+    /// None means that the native usage population was not established.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub index_usage_scope: Option<IndexUsageScope>,
     pub log_failures: Vec<LoggedFailure>,
     pub spaces: Vec<SpaceUsage>,
     pub counters: Vec<OperationalCounter>,
@@ -103,6 +120,9 @@ impl OperationalStats {
     pub fn counters_only(&self) -> impl Serialize + '_ {
         #[derive(Serialize, TS)]
         struct Counters<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            #[ts(optional)]
+            index_usage_scope: Option<IndexUsageScope>,
             log_failures: &'a [LoggedFailure],
             spaces: &'a [SpaceUsage],
             counters: &'a [OperationalCounter],
@@ -112,6 +132,7 @@ impl OperationalStats {
             cluster: &'a Option<ClusterHealth>,
         }
         let Self {
+            index_usage_scope,
             log_failures,
             spaces,
             counters,
@@ -130,7 +151,16 @@ impl OperationalStats {
             cleanup: _,
             node_resources: _,
         } = self;
-        Counters { log_failures, spaces, counters, sequences, multixacts, sqlite, cluster }
+        Counters {
+            index_usage_scope: *index_usage_scope,
+            log_failures,
+            spaces,
+            counters,
+            sequences,
+            multixacts,
+            sqlite,
+            cluster,
+        }
     }
 }
 
@@ -383,6 +413,26 @@ impl SequenceCapacity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn index_usage_population_survives_full_and_counter_only_serialization_without_qualifying_unknown() {
+        for scope in [
+            None,
+            Some(IndexUsageScope::ConnectedMember),
+            Some(IndexUsageScope::ObservedMembers),
+            Some(IndexUsageScope::AllReadMembers),
+        ] {
+            let operations = OperationalStats { index_usage_scope: scope, ..Default::default() };
+            let full = serde_json::to_value(&operations).unwrap();
+            let counters = serde_json::to_value(operations.counters_only()).unwrap();
+            assert_eq!(full.get("index_usage_scope"), counters.get("index_usage_scope"));
+            assert_eq!(full.get("index_usage_scope").is_some(), scope.is_some());
+            let restored: OperationalStats = serde_json::from_value(full).unwrap();
+            assert_eq!(restored.index_usage_scope, scope);
+        }
+        assert_eq!(OperationalStats::default().index_usage_scope, None);
+    }
+
     #[test]
     fn decimal38_and_descending_steps_keep_their_exact_remaining_range() {
         let mut s = SequenceCapacity {

@@ -2,6 +2,7 @@ use super::*;
 use crate::{DatabaseIdentity, Engine, MeasurementScope, ObservedWaitResource};
 
 mod investigations;
+mod partitions;
 mod planning;
 
 fn actor() -> ActivityObservation {
@@ -48,11 +49,13 @@ fn frame(
 ) -> (CollectionDescription, DiagnosticCaptureRef, Vec<(DiagnosticEvidenceRef, ActivityObservation)>) {
     let at = format!("2020-01-01T00:{:02}:00Z", sequence);
     let source = CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         target: DatabaseIdentity::server(Engine::Mssql, "app", "fixture.invalid", 1433, Some("native-db".into()))
             .into(),
         source: "native-activity".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            database_writable: None,
             epoch: Some("native-epoch".into()),
             observed_from: at.clone(),
             observed_until: at.clone(),

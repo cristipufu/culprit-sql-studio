@@ -48,6 +48,7 @@ pub fn statement_work_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
         };
         (
             CollectionDescription {
+                partition: culprit_core::telemetry::SourcePartition::Target,
                 target: culprit_core::DatabaseIdentity::server(engine, "db", "fixture.invalid", 5432, None).into(),
                 source: "statement-counter-capture".into(),
                 continuity: SourceContinuity::Unverified,

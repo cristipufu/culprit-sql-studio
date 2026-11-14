@@ -81,6 +81,7 @@ fn empty_range(contract: crate::delivery::contract::Contract, epoch: u64) -> cra
         }),
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",

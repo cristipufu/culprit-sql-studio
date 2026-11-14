@@ -329,6 +329,8 @@ pub fn workload(
     Collected {
         lock_ms: runs.iter().filter_map(|r| r.lock_ms).reduce(|a, b| a + b),
         workload: Workload {
+            population: None,
+            population_catalog: None,
             source_label: None,
             source_message: None,
             counter_set: None,

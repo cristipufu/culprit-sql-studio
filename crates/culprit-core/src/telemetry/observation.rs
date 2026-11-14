@@ -137,6 +137,10 @@ impl TelemetryRange {
 #[ts(export)]
 pub struct QueryHistoryDescription {
     pub interval: TelemetryInterval,
+    /// Native execution groups available at capture time, independent of the connected physical compute member.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub population_catalog: Option<crate::NativeRuntimePopulationCatalog>,
     /// Source-owned native wait meaning frozen with this capture. None establishes neither a vocabulary nor zero waits.
     pub waits: Option<QueryWaitSemantics>,
     /// Dimensions required on every native measurement, with the admissible values observed by the source.
@@ -150,6 +154,7 @@ const MAX_DIMENSION_VALUES: usize = 100;
 impl QueryHistoryDescription {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.interval.native_id)
+            && self.population_catalog.as_ref().is_none_or(crate::NativeRuntimePopulationCatalog::is_valid)
             && self.waits.as_ref().is_none_or(QueryWaitSemantics::is_valid)
             && self.dimensions.len() <= MAX_NATIVE_QUALIFIERS
             && super::native_identity::native_properties_valid(&self.native_properties)
@@ -245,8 +250,14 @@ pub struct DiagnosticCaptureDescription {
     pub analyzed_at: String,
     pub records: u32,
     pub checkpoint_records: u32,
+    /// Private recovery bindings for every native scope referenced by this update, including older epochs.
+    /// Warehouse projections expose only these keys; exact native identities remain authenticated here.
+    pub scope_bindings: std::collections::BTreeMap<String, DiagnosticScope>,
 }
 impl DiagnosticCaptureDescription {
+    pub fn accepts_scope(&self, scope: &DiagnosticScope) -> bool {
+        scope.key().is_ok_and(|key| self.scope_bindings.get(&key) == Some(scope))
+    }
     pub fn is_valid(&self) -> bool {
         self.controller_version > 0
             && self.parent.is_valid()
@@ -255,6 +266,8 @@ impl DiagnosticCaptureDescription {
             && self.records <= MAX_DIAGNOSTIC_EPISODES as u32
             && self.checkpoint_records > 0
             && self.checkpoint_records <= MAX_DIAGNOSTIC_EPISODES as u32
+            && self.scope_bindings.len() <= MAX_DIAGNOSTIC_EPISODES
+            && self.scope_bindings.iter().all(|(key, scope)| scope.key().is_ok_and(|expected| &expected == key))
     }
     pub fn work_key(&self) -> Result<String> {
         serde_json::to_vec(&(&self.parent, self.controller_version, &self.step_id))
@@ -378,20 +391,25 @@ impl SourceObservation {
 #[ts(export)]
 pub struct CollectionDescription {
     pub target: CollectionTarget,
+    pub partition: SourcePartition,
     pub source: String,
     pub observation: SourceObservation,
     pub continuity: SourceContinuity,
 }
 impl CollectionDescription {
     pub fn accepts_measurement(&self, key: &NativeMeasurementKey) -> bool {
-        self.query_history().is_some_and(|history| {
-            history.dimensions.iter().all(|(dimension, allowed)| {
-                key.native.qualifiers.get(dimension).is_some_and(|value| allowed.contains(value))
+        self.is_partition_qualified()
+            && self.query_history().is_some_and(|history| {
+                history.dimensions.iter().all(|(dimension, allowed)| {
+                    key.native.qualifiers.get(dimension).is_some_and(|value| allowed.contains(value))
+                })
             })
-        })
     }
 
     pub fn completed(&self, completion: SourceCompletion) -> Result<Option<Self>> {
+        if !self.partition_is_consistent() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
         match completion {
             SourceCompletion::Changed => Ok(None),
             SourceCompletion::Verified if !matches!(self.observation, SourceObservation::PagedSnapshot(_)) => {
@@ -406,6 +424,9 @@ impl CollectionDescription {
                 }
                 let mut completed = self.clone();
                 completed.observation = SourceObservation::Snapshot(snapshot);
+                if !completed.partition_is_consistent() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
                 Ok(Some(completed))
             }
             SourceCompletion::Verified => Err(CollectionStop::InvalidPage.error()),
@@ -418,7 +439,7 @@ impl CollectionDescription {
         }
     }
     pub fn matches_request(&self, request: &CollectionRequest) -> bool {
-        if self.source.is_empty() || !self.target.is_valid() || !request.subject.accepts(&self.target) {
+        if self.source.is_empty() || !self.partition_is_consistent() || !request.subject.accepts(&self.target) {
             return false;
         }
         if let (SourceObservation::Activity(snapshot), CollectionSelection::Activity) =
@@ -441,6 +462,7 @@ impl CollectionDescription {
                 && result.is_valid()
                 && &result.focus == focus.as_ref()
                 && self.target == focus.target
+                && self.partition == focus.partition
                 && snapshot.dataset == SnapshotDataset::PageWaitTargets
                 && snapshot.records <= request.budget.max_snapshot_rows
                 && snapshot.observed_from == result.observed_from

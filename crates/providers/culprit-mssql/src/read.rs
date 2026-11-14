@@ -80,6 +80,10 @@ struct ReadQuery {
 pub(crate) trait NativeRead: Send {
     async fn query(&mut self, sql: &str, parameters: Vec<Parameter>, row_limit: usize) -> ReadResult<Vec<Rec>>;
     fn queries(&self) -> u32;
+    /// Reader-local transport ownership only. It is not a server, replica or native counter generation.
+    fn connection_generation(&self) -> Option<u64> {
+        None
+    }
     fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         None
     }
@@ -121,6 +125,7 @@ pub(crate) struct ReadSession {
     cancellation_confirmed: bool,
     metrics: crate::read_metrics::Metrics,
     streaming: Option<StreamingRead>,
+    connection_generation: u64,
 }
 struct StreamingRead {
     _owner: tokio::sync::oneshot::Sender<()>,
@@ -147,6 +152,7 @@ impl ReadSession {
             cancellation_confirmed: true,
             metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
             streaming: None,
+            connection_generation: 0,
         }
     }
 
@@ -272,11 +278,17 @@ impl ReadSession {
     async fn acquire(&mut self, timeout: Duration) -> ReadResult<MsClient> {
         // A dropped acquire may have reached login/session setup. Without a returned driver there is no
         // acknowledgement channel, so close/admission must retain the uncertainty instead of starting replacement work.
+        let generation =
+            self.connection_generation.checked_add(1).ok_or(ReadError::Stopped(CollectionStop::QueryLimit))?;
         self.acquiring = true;
         let result = tokio::time::timeout(timeout, self.pool.get()).await;
         self.acquiring = false;
         match result {
-            Ok(result) => result.map_err(ReadError::Source),
+            Ok(Ok(client)) => {
+                self.connection_generation = generation;
+                Ok(client)
+            }
+            Ok(Err(error)) => Err(ReadError::Source(error)),
             Err(_) => {
                 self.cancellation_confirmed = false;
                 self.pool.mark_uncertain();
@@ -338,6 +350,9 @@ impl NativeRead for ReadSession {
     }
     fn queries(&self) -> u32 {
         self.queries()
+    }
+    fn connection_generation(&self) -> Option<u64> {
+        Some(self.connection_generation)
     }
     fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         self.read_metrics()

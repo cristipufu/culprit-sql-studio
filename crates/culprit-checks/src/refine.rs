@@ -69,13 +69,13 @@ pub(crate) fn rules() -> Vec<Arc<dyn Refine>> {
 /// establishing their cause, and native spill warnings establish resource work without measuring its delay. An
 /// optimizer guess, estimated index benefit or forced-plan inventory also cannot explain a heavy query away.
 /// Native plan recommendations retain their independently evidenced regression or forced-plan scan.
-fn does_not_explain_elapsed_time(f: &Finding) -> bool {
+fn does_not_explain_elapsed_time(s: &Snapshot, f: &Finding) -> bool {
     f.facts.runtime_variation.is_some()
         || f.facts.cause == Some(FindingCause::Spill)
         || matches!(f.check.as_str(), "missing-histogram" | "stale-stats")
         || (f.check == "tuning-advice"
-            && f.facts.recommended_plan.is_none()
-            && f.facts.cause != Some(FindingCause::ForcedPlanScan))
+            && (crate::tuning::plan_workload(s).is_none()
+                || (f.facts.recommended_plan.is_none() && f.facts.cause != Some(FindingCause::ForcedPlanScan))))
 }
 
 /// SQL Server writes names in plans and DMVs with the database in front (`[shop_db].[dbo].[orders].[email]`). In
@@ -345,11 +345,11 @@ mod tests {
         // the total passes half of either.
         assert!((a + b) / 3.0 >= a.min(b) * 0.5, "{a} {b}");
         assert_eq!(left(about("hot-rows", "shop.orders", &ids, (a + b) / 3.0)).len(), 2);
-        // SQL Server's plan to force stands on the regression it measured.
+        // A native-looking recommendation without matching population evidence cannot explain these runs.
         let mut force = about("tuning-advice", "opaque-force", &ids[..1], a);
         force.facts.recommended_plan =
             Some(culprit_core::FindingPlanRecommendation { plan: "42".into(), cpu_saved_share: None });
-        assert_eq!(left(force), vec![format!("heavy-query:{}", ids[1])]);
+        assert_eq!(left(force).len(), 2);
     }
 
     // Native temporary totals do not establish that a particular sort created a large returned result.

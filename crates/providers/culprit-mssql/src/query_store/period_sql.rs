@@ -18,7 +18,7 @@ SELECT @r0 = ISNULL((SELECT MAX(start_time) FROM sys.query_store_runtime_stats_i
     )
 }
 
-fn intervals_cte(b0: &str, r0: &str, r1: &str) -> String {
+fn intervals_cte(b0: &str, r0: &str, r1: &str, population: super::replicas::Population) -> String {
     format!(
         r#"{snap}
 DECLARE @r1 datetimeoffset = {r1};
@@ -31,15 +31,16 @@ DECLARE @r1 datetimeoffset = {r1};
   JOIN sys.query_store_plan p ON p.plan_id = rs.plan_id
   JOIN sys.query_store_query q ON q.query_id = p.query_id
   JOIN sys.query_store_query_text t ON t.query_text_id = q.query_text_id
-  WHERE i.start_time >= @b0 AND i.start_time < @r1 AND {workload}
+  WHERE i.start_time >= @b0 AND i.start_time < @r1 AND {population} AND {workload}
 )"#,
         snap = snapped(b0, r0),
         relation = crate::query_store::runtime::relation(false).trim_end(),
+        population = population.predicate("rs"),
         workload = crate::statement_origin::application_candidates_sql("t.query_sql_text"),
     )
 }
 
-pub(crate) fn per_plan_sql(b0: &str, r0: &str, r1: &str) -> String {
+pub(crate) fn per_plan_sql(b0: &str, r0: &str, r1: &str, population: super::replicas::Population) -> String {
     format!(
         r#"{cte},
 agg AS (
@@ -51,19 +52,19 @@ top_q AS (SELECT TOP ({MAX_QUERIES}) query_id FROM agg GROUP BY query_id ORDER B
 SELECT a.query_id, a.plan_id, a.recent, a.executions, a.total_ms, a.min_ms, a.max_ms, {first} AS first_start
 FROM agg a JOIN top_q t ON t.query_id = a.query_id
 "#,
-        cte = intervals_cte(b0, r0, r1),
+        cte = intervals_cte(b0, r0, r1, population),
         first = utc_offset_iso("a.first_start"),
     )
 }
 
-pub(crate) fn totals_sql(b0: &str, r0: &str, r1: &str) -> String {
+pub(crate) fn totals_sql(b0: &str, r0: &str, r1: &str, population: super::replicas::Population) -> String {
     format!(
         r#"{cte}
 SELECT recent, SUM(n) AS executions, SUM(total_us) / 1000.0 AS total_ms,
        {start} AS period_start, {end} AS period_end
 FROM s GROUP BY recent
 "#,
-        cte = intervals_cte(b0, r0, r1),
+        cte = intervals_cte(b0, r0, r1, population),
         start = utc_offset_iso("MIN(start_time)"),
         end = utc_offset_iso("MAX(end_time)"),
     )

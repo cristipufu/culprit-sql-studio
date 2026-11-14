@@ -2,7 +2,7 @@
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Value, json};
 
-pub const PREPARATION_VERSION: u32 = 3;
+pub const PREPARATION_VERSION: u32 = 4;
 const MAX_PREVIEW_BYTES: usize = 1024;
 const MAX_INLINE_DETAIL_BYTES: usize = 128 * 1024;
 
@@ -64,14 +64,10 @@ fn fact(input: &mut Value, key: &str) -> Result<()> {
 }
 fn operational(input: &mut Value, row: &OperationalObservation) -> Result<()> {
     if let OperationalFact::DiagnosticRevision(revision) = &row.fact {
-        // The authenticated recovery manifest owns private target authority. Warehouse rows retain its hashes
-        // and exact evidence references, not a second copy of endpoint/file/native identity details.
-        input
-            .pointer_mut("/record/data/fact/data/episode/scope")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(invalid)?
-            .remove("target")
-            .ok_or_else(invalid)?;
+        // The authenticated recovery description owns every original native scope. This opaque reference also
+        // preserves older replica epochs without duplicating private database or compute-member identity.
+        *input.pointer_mut("/record/data/fact/data/episode/scope").ok_or_else(invalid)? =
+            json!({"key": revision.episode.scope.key()?});
         if let Some(investigation) = &revision.investigation {
             *input.pointer_mut("/record/data/fact/data/investigation").ok_or_else(invalid)? =
                 super::investigations::event(investigation)?;

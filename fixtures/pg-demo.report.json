@@ -43,8 +43,8 @@
     },
     {
       "check": "overlapping-index",
-      "reason": null,
-      "status": "assessed",
+      "reason": "At least a week of comparable index-usage counters is needed to assess absence of reads.",
+      "status": "insufficient-evidence",
       "title": "Overlapping indexes"
     },
     {
@@ -2364,7 +2364,7 @@
         "table": "order_items"
       }
     ],
-    "format": 5,
+    "format": 6,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {
@@ -2789,6 +2789,7 @@
     "operations": {
       "cluster": null,
       "counters": [],
+      "index_usage_scope": "all-read-members",
       "log_failures": [],
       "multixacts": [],
       "sequences": [],

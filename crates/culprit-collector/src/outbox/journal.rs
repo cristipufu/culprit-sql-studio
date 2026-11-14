@@ -285,8 +285,10 @@ impl Journal {
             ],
         )
         .map_err(storage)?;
-        tx.execute("INSERT INTO range_heads VALUES(?1,?2) ON CONFLICT(range_key) DO UPDATE SET observation_id=excluded.observation_id",
-            params![range_key(&range)?,capture.identity.observation_id]).map_err(storage)?;
+        if validated.manifest.description.as_ref().is_some_and(CollectionDescription::is_partition_qualified) {
+            tx.execute("INSERT INTO range_heads VALUES(?1,?2) ON CONFLICT(range_key) DO UPDATE SET observation_id=excluded.observation_id",
+                params![range_key(&range)?,capture.identity.observation_id]).map_err(storage)?;
+        }
         super::investigations::journal::prepare_commit(&tx, capture, validated)?;
         Ok(tx)
     }

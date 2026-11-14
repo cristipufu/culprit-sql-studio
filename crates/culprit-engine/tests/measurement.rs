@@ -38,6 +38,20 @@ fn build(s: &mut Snapshot, history: &[Counters]) {
     trends::from_scans(s, None, history);
 }
 
+fn native_contention() -> IndexContention {
+    use culprit_core::telemetry::{NativeIdentity, SharedResourceIdentity, SharedResourceKind};
+    IndexContention {
+        source_owner: Some(SharedResourceIdentity {
+            engine: Engine::Postgres,
+            kind: SharedResourceKind::Node,
+            namespace: NativeIdentity::new("controlled-native-cluster"),
+            native: NativeIdentity::new("controlled-native-member"),
+        }),
+        reset: culprit_core::ResetMarker::Generation("controlled-native-index-generation".into()),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn cumulative_history_never_blends_same_named_databases_on_different_endpoints() {
     let old = snapshot("first.example", "2026-10-10T00:00:00Z", 100.0, 10.0);
@@ -107,7 +121,8 @@ fn invalid_scope_cannot_enter_database_findings_or_cumulative_trends() {
 #[test]
 fn every_counter_baseline_checks_database_identity_itself() {
     let mut old = snapshot("first.example", "2026-10-10T00:00:00Z", 100.0, 10.0);
-    old.indexes[0].contention = Some(IndexContention::default());
+    old.indexes.truncate(1);
+    old.indexes[0].contention = Some(native_contention());
     old.settings.push(culprit_core::Setting {
         name: "counter".into(),
         value: "2".into(),
@@ -115,6 +130,7 @@ fn every_counter_baseline_checks_database_identity_itself() {
         scope: "database".into(),
     });
     let mut same = snapshot("first.example", "2026-10-11T00:00:00Z", 200.0, 20.0);
+    same.indexes = old.indexes.clone();
     same.settings.push(culprit_core::Setting {
         name: "counter".into(),
         value: "4".into(),
@@ -230,10 +246,12 @@ fn every_selected_window_retains_actual_source_coverage() {
 fn persisted_growth_and_reread_baselines_skip_another_endpoint() {
     let dir = std::env::temp_dir().join(format!("culprit-measurement-baselines-{}", std::process::id()));
     let mut old = snapshot("first.example", "2026-10-09T00:00:00Z", 100.0, 10.0);
-    old.indexes[0].contention = Some(IndexContention::default());
+    old.indexes.truncate(1);
+    old.indexes[0].contention = Some(native_contention());
+    let indexes = old.indexes.clone();
     culprit_engine::reports::save(&dir, &culprit_checks::analyze(old)).unwrap();
     let mut current = snapshot("second.example", "2026-10-11T00:00:00Z", 200.0, 20.0);
-    current.indexes[0].contention = Some(IndexContention::default());
+    current.indexes = indexes;
     assert!(history::growth_baseline(&dir, &current).is_none());
     culprit_engine::reports::rebase_on_scans(&dir, &mut current);
     assert!(current.contention_before.is_none());

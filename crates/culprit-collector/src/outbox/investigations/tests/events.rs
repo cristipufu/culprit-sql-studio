@@ -78,6 +78,7 @@ impl Harness {
         let identity = reservation.entry.identity.clone();
         let source = "focused-native-pages".to_owned();
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: self.intent.focus.target.clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,

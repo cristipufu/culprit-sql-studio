@@ -98,6 +98,7 @@ impl Provider for YugabyteProvider {
         .await
     }
     async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot> {
+        options.require_default_workload_population()?;
         collect::snapshot(self, connection, options).await
     }
     async fn explain(&self, sql: &str, mode: ExplainMode) -> Result<Plan> {

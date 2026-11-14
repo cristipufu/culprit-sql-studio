@@ -3,4 +3,8 @@ import type { ActivityPopulation } from "./ActivityPopulation";
 import type { MeasurementScope } from "./MeasurementScope";
 import type { StateSourceCoverage } from "./StateSourceCoverage";
 
-export type ActivitySnapshotDescription = { epoch: string | null, observed_from: string, observed_until: string, at: string, scope: MeasurementScope, population: ActivityPopulation, native_rows: number, observations: number, coverage: StateSourceCoverage, };
+export type ActivitySnapshotDescription = { epoch: string | null, 
+/**
+ * Observed connected database updateability, not login/session permissions or requested routing intent.
+ */
+database_writable?: boolean, observed_from: string, observed_until: string, at: string, scope: MeasurementScope, population: ActivityPopulation, native_rows: number, observations: number, coverage: StateSourceCoverage, };

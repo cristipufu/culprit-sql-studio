@@ -35,6 +35,7 @@ impl DiagnosticEpisode {
             || scope.target.telemetry_id()? != self.scope.target.telemetry_id()?
             || scope.population != self.scope.population
             || scope.measurement_scope != self.scope.measurement_scope
+            || scope.partition != self.scope.partition
             || !ObservationBounds::new(&self.first_seen_at, &self.last_seen_at)
                 .is_some_and(|bounds| bounds.contains(&native.at))
         {
@@ -44,6 +45,7 @@ impl DiagnosticEpisode {
             return Ok(PageWaitFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
         };
         if self.scope.native_epoch.is_none()
+            || !scope.partition.is_qualified()
             || statement_identity.is_none()
             || original.scope != ActivityScopeBasis::RequestDatabase
             || original.wait.as_ref().and_then(|wait| wait.native_type.as_ref()).is_none()
@@ -53,6 +55,8 @@ impl DiagnosticEpisode {
         let focus = ActivityWaitFocus {
             parent: reference.clone(),
             target: source.target.clone(),
+            partition: source.partition.clone(),
+            database_writable: native.database_writable,
             source: source.source.clone(),
             epoch: epoch.clone(),
             original_observed_at: native.at.clone(),

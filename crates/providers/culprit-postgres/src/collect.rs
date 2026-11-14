@@ -207,7 +207,10 @@ pub async fn snapshot(
         contention_before: None,
         evictions_before: None,
         sizes_before: None,
-        operations: Default::default(),
+        operations: culprit_core::operations::OperationalStats {
+            index_usage_scope: Some(culprit_core::operations::IndexUsageScope::ConnectedMember),
+            ..Default::default()
+        },
     };
     snapshot.bind_identity(culprit_core::DatabaseIdentity::server(
         Engine::Postgres,

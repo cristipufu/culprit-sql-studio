@@ -249,3 +249,26 @@ pub(super) fn connection_security() -> crate::ConnectionSecuritySpec {
         hostname_option: Some("hostNameInCertificate".into()),
     }
 }
+/// Query Store being readable does not establish that the connected member records new local executions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueryStoreReadMode {
+    ReadOnly,
+    ReadWrite,
+    ReadCaptureSecondary,
+}
+
+impl QueryStoreReadMode {
+    pub fn from_native(value: &str) -> Option<Self> {
+        match value {
+            "READ_ONLY" => Some(Self::ReadOnly),
+            "READ_WRITE" => Some(Self::ReadWrite),
+            "READ_CAPTURE_SECONDARY" => Some(Self::ReadCaptureSecondary),
+            _ => None,
+        }
+    }
+
+    /// Native permission to capture is separate from capture policy, retention and population coverage.
+    pub fn accepts_local_capture(self) -> bool {
+        matches!(self, Self::ReadWrite | Self::ReadCaptureSecondary)
+    }
+}

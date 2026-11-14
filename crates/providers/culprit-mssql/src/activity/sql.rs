@@ -53,6 +53,7 @@ pub(super) fn frame_select_with_context(
         r#"SELECT TOP (@P1) /* culprit */
  CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition,
  CAST(DATABASEPROPERTYEX(DB_NAME(),'Updateability') AS nvarchar(32)) AS updateability,
+ {replica_id} AS replica_id,
  CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')) AS server_version,
  (SELECT compatibility_level FROM sys.databases WHERE database_id=DB_ID()) AS compatibility_level,
  CAST(PARSENAME(CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')),4) AS int) AS major,
@@ -67,7 +68,8 @@ pub(super) fn frame_select_with_context(
 FROM (SELECT DB_NAME() AS database_name) d
 {identity_join}
 OUTER APPLY ({rows}) a
-{ordering} {hints}"#
+{ordering} {hints}"#,
+        replica_id = crate::replica::ID_EXPRESSION
     )
 }
 

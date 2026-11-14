@@ -207,6 +207,7 @@ fn source(engine: Engine, dataset: SnapshotDataset, count: usize, state: SourceS
     database.engine = engine;
     let name = "native-object-definitions".to_owned();
     CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target,
         source: "object-definition-capture".into(),
         continuity: SourceContinuity::Unverified,

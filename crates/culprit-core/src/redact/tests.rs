@@ -497,6 +497,49 @@ fn shared_snapshots_scrub_catalog_literals_and_all_retained_endpoint_references(
 }
 
 #[test]
+fn population_selection_remains_correlated_without_sharing_native_replica_metadata() {
+    use crate::{RuntimePopulation, RuntimePopulationCatalog, SnapshotOptions, telemetry::NativeIdentity};
+    let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
+    let selected = NativeIdentity::new("private-group-canary");
+    snapshot.options = Some(SnapshotOptions { workload_population: Some(selected.clone()), ..Default::default() });
+    let workload = snapshot.workload.as_mut().unwrap();
+    workload.population = Some(selected.clone());
+    workload.population_catalog = Some(RuntimePopulationCatalog {
+        source: "fixture-statistics".into(),
+        partitioned: true,
+        requires_selection: false,
+        populations: vec![RuntimePopulation {
+            identity: selected,
+            label: crate::i18n::Message::from("private-replica-canary"),
+            native_properties: [("native-name".into(), "private-endpoint-canary".into())].into(),
+        }],
+    });
+    let shared = redact_snapshot(&snapshot);
+    let encoded = serde_json::to_string(&shared).unwrap();
+    assert!(
+        !encoded.contains("private-group-canary")
+            && !encoded.contains("private-replica-canary")
+            && !encoded.contains("private-endpoint-canary")
+    );
+    assert_eq!(shared.options.as_ref().unwrap().workload_population, shared.workload.as_ref().unwrap().population);
+    let mut measurement = snapshot.workload_measurement().unwrap();
+    redact_measurement(&mut measurement);
+    assert_eq!(measurement.population, shared.workload.as_ref().unwrap().population);
+    assert_eq!(serde_json::to_value(&shared).unwrap(), serde_json::to_value(redact_snapshot(&shared)).unwrap());
+}
+
+#[test]
+fn sharing_preserves_safe_native_unpartitioned_proof_without_inventing_it() {
+    let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+    let catalog = snapshot.workload.as_ref().unwrap().population_catalog.clone().unwrap();
+    assert!(catalog.is_valid() && !catalog.partitioned && catalog.populations.is_empty());
+    let shared = redact_snapshot(&snapshot);
+    assert_eq!(shared.workload.as_ref().unwrap().population_catalog, Some(catalog));
+    snapshot.workload.as_mut().unwrap().population_catalog = None;
+    assert!(redact_snapshot(&snapshot).workload.as_ref().unwrap().population_catalog.is_none());
+}
+
+#[test]
 fn plan_facts_and_plugin_fix_sql_share_the_same_redaction_boundary() {
     let mut report: crate::Report =
         serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.report.json")).unwrap();

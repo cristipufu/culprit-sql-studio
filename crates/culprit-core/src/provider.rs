@@ -10,6 +10,11 @@ use crate::plan::Plan;
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct SnapshotOptions {
+    /// An exact execution population offered by the selected native workload source. This selects statistics,
+    /// not a physical replica route, and does not enable an optional collector or weaken production admission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workload_population: Option<crate::telemetry::NativeIdentity>,
     /// How far back to read workload history where the engine keeps it (Query Store), in minutes: `--window 6h` is
     /// 360, the default week 10080.
     pub window_minutes: u32,
@@ -50,6 +55,7 @@ pub struct SnapshotOptions {
 impl Default for SnapshotOptions {
     fn default() -> Self {
         SnapshotOptions {
+            workload_population: None,
             window_minutes: 7 * crate::MINUTES_PER_DAY,
             top_queries: 60,
             plans: 25,
@@ -65,6 +71,14 @@ impl Default for SnapshotOptions {
 }
 
 impl SnapshotOptions {
+    /// Sources with no execution-population selection must reject an explicit selector before starting native work.
+    pub fn require_default_workload_population(&self) -> Result<()> {
+        if self.workload_population.is_some() {
+            return Err(Error::new(ErrorCode::Unsupported, crate::t!("model.workload.population_unavailable")));
+        }
+        Ok(())
+    }
+
     /// The history window in minutes, a minute at least.
     pub fn window_in_minutes(&self) -> u32 {
         self.window_minutes.max(1)

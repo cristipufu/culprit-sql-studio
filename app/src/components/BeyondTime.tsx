@@ -484,13 +484,11 @@ const CHURN = ["new-connections", "session-length", "sessions-abandoned", "poole
 /** The metric the lock-escalations check counts new escalations under, when an earlier scan is there to compare with. */
 const ESCALATIONS_SINCE = key("check.lock_escalations.metric.since_previous");
 
-/** SQL Server counts escalations from when it started, with no time for each: what the counts cover, and how many came since the scan before. */
-function escalationsSince(startedAt: string | null, previousScan: string | undefined, finding: Finding): string {
-  const counted = startedAt
-    ? t("ui.beyond_time.escalations.since_start", { started: when(startedAt).short })
-    : t("ui.beyond_time.escalations.since_load");
+/** Native metadata-cache totals have no per-event timestamps. Only a backend-qualified comparison supplies a delta. */
+function escalationsSince(previousScan: string | undefined, finding: Finding): string {
+  const counted = t("ui.beyond_time.escalations.since_load");
   const since = finding.metrics.find((m) => m.key === ESCALATIONS_SINCE)?.value;
-  if (since === undefined || !previousScan) return `${counted} ${t("ui.beyond_time.escalations.next_scan")}`;
+  if (since === undefined || !previousScan) return `${counted} ${t("ui.beyond_time.escalations.unqualified_comparison")}`;
   const at = when(previousScan).short;
   return since > 0
     ? `${counted} ${t("ui.beyond_time.escalations.since_previous", { count: count(since), at })}`
@@ -564,7 +562,7 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
           </div>
           <p className="beyond-foot">
             {t("ui.beyond_time.escalations.explain")}{" "}
-            {escalationsSince(snapshot.server.started_at, snapshot.escalations_before?.taken_at, finding)}
+            {escalationsSince(snapshot.escalations_before?.taken_at, finding)}
           </p>
         </section>
       );

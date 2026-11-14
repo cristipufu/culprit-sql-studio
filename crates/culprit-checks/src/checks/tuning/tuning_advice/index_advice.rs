@@ -459,6 +459,9 @@ const NOTHING_READS: f64 = 100.0;
 /// The statements the scan captured that compare every key of a recommended index with a value (`tenant_id = @p0 AND
 /// is_deleted = 0`): those the index would find rows for by its keys. Not monitoring or session statements.
 fn statements_filtering_on<'a>(snapshot: &'a Snapshot, ix: &RecommendedIndex) -> Vec<&'a QueryStat> {
+    if unpartitioned_workload(snapshot).is_none() {
+        return Vec::new();
+    }
     let value = |v: &str| (v.len() > 1 && v.starts_with('@')) || crate::indexes::is_literal(v) || v.starts_with("n'");
     let mut found: Vec<&QueryStat> = queries_touching(snapshot, &ix.schema, &ix.table)
         .into_iter()
@@ -482,7 +485,7 @@ struct HeavyReader<'a> {
 /// an index on its keys finds its rows directly (the share kept is far under `INDEX_KEEPS_AT_MOST`). What the runs
 /// measured outweighs Azure's estimate.
 fn heavy_reader<'a>(snapshot: &Snapshot, statements: &[&'a QueryStat]) -> Option<HeavyReader<'a>> {
-    let workload = snapshot.workload.as_ref()?;
+    let workload = unpartitioned_workload(snapshot)?;
     statements.iter().find_map(|&q| {
         // A heavy query's share as every surface states it (`Workload::statement_share`).
         let share = workload.statement_share(q);
@@ -617,6 +620,7 @@ pub struct DropIndex<'s> {
     r: &'s TuningRecommendation,
     ix: &'s RecommendedIndex,
     existing: &'s IndexStat,
+    all_read_members: bool,
 }
 
 pub(super) fn drop_index_advice<'s>(
@@ -634,11 +638,11 @@ pub(super) fn drop_index_advice<'s>(
     if is_unused(snapshot, existing) || redundant_indexes(snapshot).iter().any(|(a, _)| std::ptr::eq(*a, existing)) {
         return None;
     }
-    Some(DropIndex { r, ix, existing })
+    Some(DropIndex { r, ix, existing, all_read_members: crate::indexes::index_usage_covers_all_read_members(snapshot) })
 }
 
 pub(super) fn drop_index_finding(snapshot: &Snapshot, d: DropIndex<'_>) -> Finding {
-    let DropIndex { r, ix, existing } = d;
+    let DropIndex { r, ix, existing, all_read_members } = d;
     let table_name = format!("{}.{}", ix.schema, ix.table);
     let mut f = finding(
         "tuning-advice",
@@ -669,15 +673,21 @@ pub(super) fn drop_index_finding(snapshot: &Snapshot, d: DropIndex<'_>) -> Findi
     if let Some(reads) = existing.reads {
         f.metrics.push(Metric::said(culprit_core::key!("common.metric.reads"), reads, Unit::Count));
     }
-    let target = qualified(Engine::Mssql, &existing.schema, &existing.table);
-    f.fix = Some(Fix {
-        summary: t!("check.tuning_advice.drop.fix"),
-        sql: Some(format!("ALTER INDEX {} ON {target} DISABLE;", quote(Engine::Mssql, &existing.name))),
-        cost: None,
-    });
+    if all_read_members {
+        let target = qualified(Engine::Mssql, &existing.schema, &existing.table);
+        f.fix = Some(Fix {
+            summary: t!("check.tuning_advice.drop.fix"),
+            sql: Some(format!("ALTER INDEX {} ON {target} DISABLE;", quote(Engine::Mssql, &existing.name))),
+            cost: None,
+        });
+        f.verify = vec![t!("check.tuning_advice.drop.verify", table = &ix.table)];
+    } else {
+        f.informational();
+        f.fix = Some(Fix { summary: t!("check.tuning_advice.drop.scope.fix"), sql: None, cost: None });
+        f.verify = vec![t!("check.tuning_advice.drop.scope.verify")];
+    }
     if let Some(definition) = &existing.definition {
         f.caveats.push(t!("check.tuning_advice.drop.caveat.definition", definition = definition));
     }
-    f.verify = vec![t!("check.tuning_advice.drop.verify", table = &ix.table)];
     f
 }

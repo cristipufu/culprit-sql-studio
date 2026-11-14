@@ -18,7 +18,7 @@ use std::{
 };
 
 async fn qualify_runtime_plan(client: &mut crate::conn::MsClient, window: &super::super::window_sql::FrozenWindow) {
-    let sql = super::super::runtime::summary_sql(false, true);
+    let sql = super::super::runtime::summary_sql(false, true, crate::query_store::replicas::Population::Unpartitioned);
     batch(client, "SET STATISTICS XML ON").await;
     let mut query = tiberius::Query::new(&sql);
     let Parameter::Text(scope) = window.parameter() else { panic!("native interval scope") };

@@ -184,7 +184,7 @@ impl Family {
                 let Some(facts) = crate::query_store::tuning::read_kind(reader, kind, layout, limit).await? else {
                     return Ok(ReadOutcome::NotApplicable);
                 };
-                let complete_scope=!facts.iter().any(|fact|matches!(fact,TuningFact::QueryHint(value) if value.scope==culprit_core::QueryStoreHintScope::Unknown));
+                let complete_scope = kind.has_complete_attribution(&layout.plan_scope(), &facts);
                 let values = facts
                     .into_iter()
                     .map(|fact| TelemetryRecord::Tuning(TuningObservation { source: kind.source().name.into(), fact }))
@@ -303,3 +303,6 @@ fn counter_sets(source: &str, counters: Vec<NativeCounterSet>) -> Result<Vec<Tel
         .map(|counters| OperationalObservation::from_counters(source, counters).map(TelemetryRecord::Operational))
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

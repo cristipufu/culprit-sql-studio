@@ -9,7 +9,10 @@ impl Collected {
         shutdown: SourceShutdown,
         query_store_readable: bool,
     ) -> Option<TuningAdvice> {
-        let mut advice = TuningAdvice::default();
+        let mut advice = TuningAdvice {
+            plan_scope: if shutdown == SourceShutdown::Quiescent { self.plan_scope } else { Default::default() },
+            ..Default::default()
+        };
         let mut successful = 0;
         let mut failed = 0;
         let mut partial = false;
@@ -32,9 +35,10 @@ impl Collected {
                 Ok(Some(facts)) => {
                     successful += 1;
                     let facts = coverage.read_rows(kind.source(), Ok(facts)).unwrap_or_default();
-                    if facts
-                        .iter()
-                        .any(|fact| matches!(fact,TuningFact::QueryHint(value) if !value.hint.is_available() || value.scope==culprit_core::QueryStoreHintScope::Unknown))
+                    if !kind.has_complete_attribution(&advice.plan_scope, &facts)
+                        || facts
+                            .iter()
+                            .any(|fact| matches!(fact,TuningFact::QueryHint(value) if !value.hint.is_available()))
                     {
                         coverage.partial(kind.source(), culprit_core::message!("provider.mssql.tuning.partial"));
                         partial = true;

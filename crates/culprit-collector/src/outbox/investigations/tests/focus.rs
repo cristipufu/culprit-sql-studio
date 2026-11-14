@@ -24,6 +24,8 @@ fn focus_at(input: &DiagnosticInput, ordinal: usize) -> ActivityWaitFocus {
     let TelemetryRecord::Activity(original) = &row.row.record else { panic!() };
     let native = input.source.observation.activity().unwrap();
     ActivityWaitFocus {
+        database_writable: None,
+        partition: culprit_core::telemetry::SourcePartition::Target,
         parent: row.reference.clone(),
         target: input.source.target.clone(),
         source: input.source.source.clone(),
@@ -142,6 +144,7 @@ async fn complete_recovery_range_preserves_owner_without_claiming_incomplete_nat
         wait: PageWaitRelation::Unqualified,
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: result.focus.target.clone(),
         source: "focused-page-state".into(),
         continuity: SourceContinuity::Unverified,
@@ -424,6 +427,7 @@ fn a_valid_page_report_cannot_be_attached_to_another_native_actor_in_the_same_da
     };
     assert!(result.accepts_observation(&page));
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: input.source.target.clone(),
         source: "focused-page-state".into(),
         continuity: SourceContinuity::Unverified,
@@ -524,6 +528,7 @@ async fn parent_pin_survives_checkpoint_eviction_race_and_transfers_until_result
         wait: PageWaitRelation::Unqualified,
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: input.source.target.clone(),
         source: "focused-page-state".into(),
         continuity: SourceContinuity::Unverified,

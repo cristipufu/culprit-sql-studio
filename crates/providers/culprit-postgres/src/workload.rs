@@ -160,6 +160,8 @@ async fn collect_with_base(
 
     Ok(Some(CollectedWorkload {
         workload: Workload {
+            population: None,
+            population_catalog: None,
             source_label: None,
             source_message: None,
             counter_set: None,

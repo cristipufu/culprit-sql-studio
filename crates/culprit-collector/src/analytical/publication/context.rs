@@ -12,7 +12,7 @@ enum PublicObservation<'a> {
     Activity(&'a ActivitySnapshotDescription),
     Snapshot(&'a StateSnapshotDescription),
     FocusedPageWaitContext { snapshot: &'a StateSnapshotDescription, result: Box<FocusResult<'a>> },
-    DiagnosticContext(&'a DiagnosticCaptureDescription),
+    DiagnosticContext(Value),
 }
 #[derive(Serialize)]
 struct FocusResult<'a> {
@@ -60,7 +60,9 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
                 wait: result.wait,
             }),
         },
-        SourceObservation::Diagnostics(value) => PublicObservation::DiagnosticContext(value),
+        SourceObservation::Diagnostics(value) => {
+            PublicObservation::DiagnosticContext(super::super::investigations::diagnostic_context(value)?)
+        }
         SourceObservation::PagedSnapshot(_) => return Err(DeliveryProblem::Integrity.error()),
     };
     serde_json::to_value(projected).map_err(|_| DeliveryProblem::Integrity.error())

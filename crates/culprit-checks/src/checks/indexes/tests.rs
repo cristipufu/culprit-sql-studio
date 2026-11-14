@@ -1,4 +1,5 @@
 use super::*;
+mod usage_scope;
 
 #[test]
 fn hiding_filter_literals_preserves_equality_and_statement_coverage() {
@@ -263,7 +264,7 @@ fn foreign_key_column_type_mismatch_is_flagged_without_false_positives_on_aliase
     );
 }
 #[test]
-fn yugabyte_absence_needs_complete_cluster_counters_and_their_own_reset_dates() {
+fn yugabyte_absence_needs_historical_member_coverage_and_native_reset_dates() {
     let mut s: Snapshot = serde_json::from_str(include_str!("../../../../../fixtures/yugabyte-demo.json")).unwrap();
     let index = s.indexes.iter().find(|i| !i.is_primary_key).unwrap().clone();
     s.indexes = vec![index];
@@ -274,8 +275,11 @@ fn yugabyte_absence_needs_complete_cluster_counters_and_their_own_reset_dates() 
     let usage = s.sources.iter_mut().find(|o| o.source == culprit_core::source_id::DOCDB_INDEX_USAGE).unwrap();
     usage.state = culprit_core::SourceState::Collected;
     usage.reason = None;
+    s.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::ObservedMembers);
     assert!(unused_index(&s).is_empty(), "complete totals with unknown reset dates cannot establish a week");
     s.indexes[0].counters_since = Some("2026-10-15T00:00:00Z".into());
+    assert!(unused_index(&s).is_empty(), "old counters on current members cannot exclude reads on a departed member");
+    s.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::AllReadMembers);
     assert_eq!(unused_index(&s).len(), 1, "every node has now watched at least a week");
     assert_eq!(crate::support::counter_days(&s), None, "independent epochs do not supply a common rate denominator");
     s.sources.iter_mut().find(|o| o.source == culprit_core::source_id::DOCDB_INDEX_USAGE).unwrap().state =

@@ -90,6 +90,7 @@ impl CapturedInvestigation {
         };
         assert!(result.accepts_observation(&page));
         let source = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: intent.focus.target.clone(),
             source: "focused-pages".into(),
             continuity: SourceContinuity::Unverified,
@@ -162,6 +163,7 @@ impl CapturedInvestigation {
         };
         checkpoint.id = checkpoint.expected_id().unwrap();
         let source = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: self.intent.focus.target.clone(),
             source: DIAGNOSTICS_SOURCE.into(),
             continuity: SourceContinuity::Unverified,
@@ -172,6 +174,7 @@ impl CapturedInvestigation {
                 analyzed_at: at.into(),
                 records: 1,
                 checkpoint_records: 1,
+                scope_bindings: [(revision.episode.scope.key().unwrap(), revision.episode.scope.clone())].into(),
             }),
         };
         let mut capture = self.native.capture.clone();

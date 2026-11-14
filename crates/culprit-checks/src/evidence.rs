@@ -292,13 +292,8 @@ impl Requirement<'_> {
                 }
             }
             Self::ForeignKeys => Available,
-            Self::IndexHistory
-                if s.server.engine == culprit_core::Engine::Yugabyte
-                    && !s
-                        .source_outcome(source_id::DOCDB_INDEX_USAGE)
-                        .is_some_and(|o| matches!(o.state, SourceState::Collected | SourceState::Empty)) =>
-            {
-                insufficient(t!("evidence.index_usage_cluster"))
+            Self::IndexHistory if !crate::indexes::index_usage_covers_all_read_members(s) => {
+                insufficient(t!("evidence.index_usage_scope"))
             }
             Self::IndexHistory if !crate::indexes::watched_long_enough(s) => {
                 insufficient(t!("evidence.index_usage_week"))

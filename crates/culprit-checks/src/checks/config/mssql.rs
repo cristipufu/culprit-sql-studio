@@ -107,8 +107,9 @@ fn settings(snapshot: &Snapshot) -> Vec<Case<'_>> {
 
 fn health(snapshot: &Snapshot) -> Vec<Case<'_>> {
     let mut out = Vec::new();
-    let qs_on = value(snapshot, &["query_store_options.actual_state_desc"])
-        .is_some_and(|v| matches!(v.to_ascii_uppercase().as_str(), "READ_WRITE" | "READ_ONLY"));
+    let mode = value(snapshot, &["query_store_options.actual_state_desc"])
+        .and_then(|value| culprit_core::engines::QueryStoreReadMode::from_native(&value.to_ascii_uppercase()));
+    let qs_on = mode.is_some();
 
     // With size-based cleanup on AUTO, Query Store trims its oldest data at 90% full (down to about 80%) and never
     // fills: nearly full is how it runs, not a warning.
@@ -122,8 +123,7 @@ fn health(snapshot: &Snapshot) -> Vec<Case<'_>> {
         )
         && max > 0.0
         && used / max >= 0.9
-        && value(snapshot, &["query_store_options.actual_state_desc"])
-            .is_some_and(|v| v.eq_ignore_ascii_case("READ_WRITE"))
+        && mode == Some(culprit_core::engines::QueryStoreReadMode::ReadWrite)
     {
         out.push(Case::QueryStoreSize { used, max });
     }
@@ -178,7 +178,12 @@ fn health(snapshot: &Snapshot) -> Vec<Case<'_>> {
 
 pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
     let db = quote(Engine::Mssql, &snapshot.server.database);
-    match case {
+    let primary_configuration =
+        matches!(&case, Case::QueryStoreSize { .. } | Case::QueryStoreCapture { .. } | Case::QueryStoreWaits)
+            && value(snapshot, &["query_store_options.actual_state_desc"])
+                .and_then(culprit_core::engines::QueryStoreReadMode::from_native)
+                == Some(culprit_core::engines::QueryStoreReadMode::ReadCaptureSecondary);
+    let mut finding = match case {
         Case::QueryStoreOff => setting_finding(
             "query-store",
             Severity::Medium,
@@ -371,7 +376,14 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
             ));
             f
         }
+    };
+    if primary_configuration {
+        if let Some(fix) = &mut finding.fix {
+            fix.sql = None;
+        }
+        finding.caveats.push(t!("common.query_store.primary_configuration"));
     }
+    finding
 }
 
 /// Whether nothing in this database can run in parallel: its own MAXDOP is 1, or it defers (0) to a server MAXDOP of

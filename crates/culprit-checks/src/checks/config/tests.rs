@@ -205,6 +205,27 @@ fn query_store_read_only_says_why() {
     assert!(f.fix.unwrap().sql.unwrap().contains("QUERY_CAPTURE_MODE = AUTO"));
 }
 
+#[test]
+fn secondary_capture_is_readable_without_borrowing_primary_store_capacity() {
+    let mut snapshot = fixture("mssql-demo.json");
+    set(&mut snapshot, "query_store_options.actual_state_desc", "READ_CAPTURE_SECONDARY");
+    set(&mut snapshot, "query_store_options.readonly_reason", "8");
+    set(&mut snapshot, "query_store_options.size_based_cleanup_mode_desc", "OFF");
+    set(&mut snapshot, "query_store_options.current_storage_size_mb", "1000");
+    set(&mut snapshot, "query_store_options.max_storage_size_mb", "1000");
+    set(&mut snapshot, "query_store_options.query_capture_mode_desc", "ALL");
+    let findings = mssql::check(&snapshot);
+    assert!(found(&findings, "config:query-store").is_none());
+    assert!(found(&findings, "config:query-store-size").is_none());
+    assert!(found(&findings, "config:query-store-capture").is_some());
+    let capture = found(&findings, "config:query-store-capture").unwrap();
+    assert!(capture.fix.as_ref().unwrap().sql.is_none());
+    assert!(capture.caveats.contains(&t!("common.query_store.primary_configuration")));
+    set(&mut snapshot, "query_store_options.wait_stats_capture_mode_desc", "OFF");
+    let findings = mssql::check(&snapshot);
+    assert!(found(&findings, "config:query-store-waits").unwrap().fix.as_ref().unwrap().sql.is_none());
+}
+
 // C7: managed services refuse ALTER SYSTEM and SET GLOBAL; the advice names their control instead.
 #[test]
 fn settings_on_managed_services_name_the_platform_control() {

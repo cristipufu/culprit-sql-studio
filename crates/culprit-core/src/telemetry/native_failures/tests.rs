@@ -115,6 +115,7 @@ fn default_telemetry_export_omits_free_form_messages_before_authenticating_the_n
         fact: OperationalFact::MysqlErrorLog(Box::new(native.clone())),
     });
     let source = CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         source: "native-server-diagnostics".into(),
         target: CollectionTarget::Shared(resource()),
         continuity: SourceContinuity::Unverified,

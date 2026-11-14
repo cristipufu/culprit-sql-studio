@@ -37,6 +37,7 @@ fn advice_about_a_query_that_stopped_running_is_marked_inactive() {
     w.queries[0].last_seen = Some("2026-10-11T08:00:00Z".into());
     let quiet = s.clone();
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![TuningRecommendation {
             name: "PR_1".into(),
             kind: "FORCE_LAST_GOOD_PLAN".into(),
@@ -84,6 +85,7 @@ fn a_burst_inside_the_window_is_not_a_query_that_stopped() {
     w.queries[0].executions = 3_000.0;
     w.queries[0].trend = None;
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![TuningRecommendation {
             name: "PR_1".into(),
             kind: "FORCE_LAST_GOOD_PLAN".into(),
@@ -351,6 +353,7 @@ fn a_query_that_runs_in_bursts_is_not_taken_for_one_that_stopped() {
         trend.time_ms = trend.executions.clone();
         w.queries[0].last_seen = Some(last_seen.into());
         s.tuning = Some(TuningAdvice {
+            plan_scope: culprit_core::QueryStoreScope::Local,
             recommendations: vec![TuningRecommendation {
                 name: "PR_1".into(),
                 kind: "FORCE_LAST_GOOD_PLAN".into(),
@@ -375,6 +378,7 @@ fn a_query_that_runs_in_bursts_is_not_taken_for_one_that_stopped() {
 fn advice_for_a_query_outside_the_window_that_has_not_run_for_days_is_marked_inactive() {
     let mut s = snapshot();
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![TuningRecommendation {
             name: "PR_9".into(),
             kind: "FORCE_LAST_GOOD_PLAN".into(),

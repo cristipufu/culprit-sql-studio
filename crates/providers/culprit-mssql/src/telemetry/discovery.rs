@@ -76,7 +76,7 @@ async fn read<R: NativeRead>(
     description::ensure_supported(reader).await?;
     crate::resources::admit_resources(reader).await.map_err(ReadError::into_error)?;
     description::settings(reader).await?;
-    let (database, physical) = description::identity(reader, host, port).await?;
+    let (database, physical) = description::query_history_identity(reader, host, port).await?;
     let (now, metadata_from) = intervals::clock(reader).await?;
     let cursor = Cursor::read(request, &database, &physical, &now)?;
     let observed_at = cursor.as_ref().map_or_else(|| now.clone(), |cursor| cursor.observed_at.clone());
@@ -101,6 +101,7 @@ async fn read<R: NativeRead>(
     };
     let page = IntervalDiscoveryPage {
         database,
+        partition: SourcePartition::Target,
         source: culprit_core::source_id::QUERY_STORE.into(),
         observed_at,
         metadata_from,
@@ -110,7 +111,7 @@ async fn read<R: NativeRead>(
     if !page.matches_request(request) {
         return Err(invalid_data());
     }
-    let (after_database, after_physical) = description::identity(reader, host, port).await?;
+    let (after_database, after_physical) = description::query_history_identity(reader, host, port).await?;
     if page.database != after_database || physical != after_physical {
         return Err(CollectionStop::SourceChanged.error());
     }

@@ -2,7 +2,9 @@
 pub(crate) mod catalog_sql;
 pub(crate) mod decode;
 pub(crate) mod intervals;
+pub(crate) mod mode;
 pub(crate) mod reader;
+pub(crate) mod replicas;
 pub(crate) mod runtime;
 pub(crate) use reader::Reader;
 pub(crate) mod definitions;

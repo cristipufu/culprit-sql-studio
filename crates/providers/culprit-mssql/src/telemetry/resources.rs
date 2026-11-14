@@ -221,6 +221,7 @@ impl<R: NativeRead, S: ResourceScope + Sync> TelemetrySource for ResourceSource<
         let window = self.window()?;
         let inventory = self.scope.inventory(&mut self.session, &window).await?;
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target,
             source: self.scope.source().into(),
             observation: SourceObservation::RetainedSamples(inventory.history.clone()),

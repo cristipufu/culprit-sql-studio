@@ -12,7 +12,11 @@ use culprit_core::Check;
 use crate::support::*;
 
 mod query_family;
+mod scope;
 mod tuning_advice;
+
+use scope::{PlanCommand, plan_command};
+pub(crate) use scope::{can_change_plan, plan_workload, unpartitioned_workload};
 
 pub use query_family::*;
 pub use tuning_advice::*;

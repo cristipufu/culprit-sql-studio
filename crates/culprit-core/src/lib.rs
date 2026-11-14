@@ -54,6 +54,7 @@ pub mod refinement;
 pub mod retained_failure_report;
 pub mod runtime_distribution;
 pub mod runtime_distribution_report;
+pub mod runtime_population;
 pub mod signals;
 pub mod sql;
 pub mod statement_work_report;
@@ -141,10 +142,11 @@ pub use refinement::{FixWithholdingBasis, HistoryBasis, PresentationAspect, Refi
 pub use retained_failure_report::{RetainedFailureExplanation, RetainedFailureReport};
 pub use runtime_distribution::*;
 pub use runtime_distribution_report::*;
+pub use runtime_population::*;
 pub use signals::{
     ColumnHistogram, ConstraintIssue, ConstraintKind, ContentionBaseline, CountBaseline, EscalationBaseline, FileIo,
-    FileKind, FileScope, FileWriteOperation, IndexContention, IndexLockCounts, QueryCosts, Replica, ReplicaCondition,
-    ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
+    FileKind, FileScope, FileWriteOperation, IndexContention, IndexEscalationCounts, IndexLockCounts, QueryCosts,
+    Replica, ReplicaCondition, ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_work_report::{StatementWorkEntry, StatementWorkReport};

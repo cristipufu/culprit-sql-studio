@@ -33,14 +33,20 @@ pub(super) fn record(
                 Decoded::Unavailable(reason) => return Ok(Decoded::Unavailable(reason)),
             };
             if stream == TelemetryStream::OperationalSamples && text(values, "FactKind")? == "diagnostic-revision" {
-                let scope = details.pointer_mut("/episode/scope").and_then(Value::as_object_mut).ok_or_else(invalid)?;
-                if scope.contains_key("target") {
+                let scope = details.pointer_mut("/episode/scope").ok_or_else(invalid)?;
+                let reference = scope.as_object().ok_or_else(invalid)?;
+                if reference.len() != 1 {
                     return Err(invalid());
                 }
-                scope.insert(
-                    "target".into(),
-                    serde_json::to_value(&range.manifest().source.target).map_err(|_| invalid())?,
-                );
+                let key = reference.get("key").and_then(Value::as_str).ok_or_else(invalid)?;
+                let SourceObservation::Diagnostics(description) = &range.manifest().source.observation else {
+                    return Err(invalid());
+                };
+                let original = description.scope_bindings.get(key).ok_or_else(invalid)?;
+                if original.key().map_err(|_| invalid())? != key {
+                    return Err(invalid());
+                }
+                *scope = serde_json::to_value(original).map_err(|_| invalid())?;
             }
             fact_record(stream, values, *details)?
         }

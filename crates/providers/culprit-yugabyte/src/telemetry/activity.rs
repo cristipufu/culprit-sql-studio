@@ -103,10 +103,12 @@ async fn capture<R: culprit_postgres::wire::NoticeRead>(
         coverage.stopped = Some(CollectionStop::SourceUnavailable);
     }
     let description = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: before.database.clone().into(),
         source,
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            database_writable: None,
             epoch: Some(digest(
                 format!(
                     "{}|{}|{}|ysql-activity-v1",

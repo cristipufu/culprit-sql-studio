@@ -47,6 +47,7 @@ impl FleetBackend for Backend {
         admission.window.check_start()?;
         *self.discoveries.lock().unwrap() += 1;
         let page = IntervalDiscoveryPage {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             database: self.database.lock().unwrap().clone(),
             source: "query_store".into(),
             observed_at: "2026-11-10T12:00:00Z".into(),
@@ -74,6 +75,7 @@ impl FleetBackend for Backend {
             let observation = match &request.selection {
                 CollectionSelection::QueryHistory { from, .. } => {
                     SourceObservation::QueryHistory(QueryHistoryDescription {
+                        population_catalog: None,
                         waits: None,
                         interval: if work::parse_time(from).unwrap().hour() == 10 {
                             interval(10)
@@ -133,6 +135,7 @@ impl FleetBackend for Backend {
                 finished_at: Some("2026-11-10T12:00:01Z".into()),
                 request,
                 description: Some(CollectionDescription {
+                    partition: culprit_core::telemetry::SourcePartition::Target,
                     target,
                     source: "query_store".into(),
                     continuity: SourceContinuity::Unverified,

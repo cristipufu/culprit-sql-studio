@@ -15,6 +15,7 @@ const LAYOUT: &str = r#"SELECT
  CASE WHEN OBJECT_ID(N'sys.query_store_plan') IS NOT NULL THEN 1 ELSE 0 END AS query_store,
  CASE WHEN OBJECT_ID(N'sys.query_store_query_hints') IS NOT NULL THEN 1 ELSE 0 END AS hints,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_plan') AND name=N'plan_forcing_type_desc') THEN 1 ELSE 0 END AS forcing_type,
+ CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'replica_group_id') THEN 1 ELSE 0 END AS runtime_replica,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_query_hints') AND name=N'replica_group_id') THEN 1 ELSE 0 END AS hint_replica,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_query_hints') AND name=N'source') THEN 1 ELSE 0 END AS hint_source"#;
 const PAYLOAD_NATIVE_BYTES: i64 = 256 * 1024;
@@ -28,6 +29,11 @@ pub(crate) enum Kind {
 }
 impl Kind {
     pub const ALL: [Self; 4] = [Self::Options, Self::Recommendations, Self::ForcedPlans, Self::Hints];
+    pub fn has_complete_attribution(self, scope: &culprit_core::QueryStoreScope, facts: &[TuningFact]) -> bool {
+        let plan_scoped = matches!(self, Self::Recommendations | Self::ForcedPlans);
+        (!plan_scoped || scope.is_valid() && *scope != culprit_core::QueryStoreScope::Unknown)
+            && facts.iter().all(TuningFact::attribution_is_complete)
+    }
     pub fn source(self) -> &'static Source {
         use crate::sources;
         match self {
@@ -45,6 +51,7 @@ pub(crate) struct Layout {
     recommendations: bool,
     query_store: bool,
     forcing_type: bool,
+    runtime_replica: bool,
     hints: bool,
     hint_replica: bool,
     hint_source: bool,
@@ -66,10 +73,19 @@ impl Layout {
             recommendations: flag("recommendations")?,
             query_store: flag("query_store")?,
             forcing_type: flag("forcing_type")?,
+            runtime_replica: flag("runtime_replica")?,
             hints: flag("hints")?,
             hint_replica: flag("hint_replica")?,
             hint_source: flag("hint_source")?,
         })
+    }
+    pub fn plan_scope(&self) -> culprit_core::QueryStoreScope {
+        if self.metadata_visible && self.query_store && !self.runtime_replica {
+            culprit_core::QueryStoreScope::Local
+        } else {
+            // The global is_forced_plan flag does not identify a replica group. No forcing-location read is implied.
+            culprit_core::QueryStoreScope::Unknown
+        }
     }
     pub fn available(&self, kind: Kind) -> Result<bool> {
         let supported = match kind {
@@ -184,8 +200,9 @@ fn decode(row: &Rec, kind: Kind, layout: &Layout) -> Result<TuningFact> {
             actual: text(row, "actual_state_desc")?,
             reason: optional_text(row, "reason_desc")?,
         }),
-        Kind::Recommendations => TuningFact::Recommendation(Box::new(recommendation(row)?)),
+        Kind::Recommendations => TuningFact::Recommendation(Box::new(recommendation(row, layout)?)),
         Kind::ForcedPlans => TuningFact::ForcedPlan(NativeForcedPlan {
+            plan_scope: layout.plan_scope(),
             query_id: integer(row, "query_id")?.to_string(),
             plan_id: integer(row, "plan_id")?.to_string(),
             failures: integer(row, "force_failure_count")?.to_string(),
@@ -210,21 +227,22 @@ fn decode(row: &Rec, kind: Kind, layout: &Layout) -> Result<TuningFact> {
         }),
     })
 }
-fn hint_scope(row: &Rec, layout: &Layout) -> Result<culprit_core::QueryStoreHintScope> {
-    use culprit_core::QueryStoreHintScope;
+fn hint_scope(row: &Rec, layout: &Layout) -> Result<culprit_core::QueryStoreScope> {
+    use culprit_core::QueryStoreScope;
     Ok(match (layout.hint_replica, optional_integer(row, "replica_group_id")?) {
-        (true, Some(id)) => QueryStoreHintScope::ReplicaGroup { id: id.to_string() },
+        (true, Some(id)) => QueryStoreScope::ReplicaGroup { id: id.to_string() },
         (false, Some(_)) => return Err(invalid_data()),
-        (false, _) if layout.metadata_visible => QueryStoreHintScope::Local,
-        _ => QueryStoreHintScope::Unknown,
+        (false, _) if layout.plan_scope() == QueryStoreScope::Local => QueryStoreScope::Local,
+        _ => QueryStoreScope::Unknown,
     })
 }
-fn recommendation(row: &Rec) -> Result<NativeTuningRecommendation> {
+fn recommendation(row: &Rec, layout: &Layout) -> Result<NativeTuningRecommendation> {
     let kind = text(row, "type")?;
     let script = optional_text(row, "script")?;
     let index =
         kind.to_ascii_lowercase().contains("index").then(|| super::recommended_index(row, script.as_deref())).flatten();
     Ok(NativeTuningRecommendation {
+        plan_scope: layout.plan_scope(),
         name: text(row, "name")?,
         kind,
         reason: optional_text(row, "reason")?,

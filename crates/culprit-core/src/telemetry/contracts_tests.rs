@@ -65,6 +65,7 @@ fn native_identity_is_canonical_but_its_qualifiers_are_not_interpreted() {
 #[test]
 fn source_dimensions_are_explicit_and_do_not_require_replica_groups() {
     let mut history = QueryHistoryDescription {
+        population_catalog: None,
         waits: None,
         interval: TelemetryInterval {
             native_id: "interval".into(),
@@ -77,6 +78,7 @@ fn source_dimensions_are_explicit_and_do_not_require_replica_groups() {
     assert!(history.is_valid());
     history.dimensions.insert("node".into(), vec!["primary".into(), "secondary".into()]);
     let source = CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         target: crate::DatabaseIdentity::server(crate::Engine::Postgres, "sample", "fixture.invalid", 5432, None)
             .into(),
         source: "fixture".into(),
@@ -95,11 +97,13 @@ fn source_dimensions_are_explicit_and_do_not_require_replica_groups() {
 #[test]
 fn query_only_records_get_stable_native_ids_but_unresolved_queries_do_not() {
     let source = CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         target: crate::DatabaseIdentity::server(crate::Engine::Postgres, "sample", "fixture.invalid", 5432, None)
             .into(),
         source: "fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            population_catalog: None,
             waits: None,
             interval: TelemetryInterval {
                 native_id: "1".into(),

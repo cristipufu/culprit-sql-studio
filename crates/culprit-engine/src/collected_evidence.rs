@@ -53,6 +53,8 @@ fn workload(
     };
     let hours = validation::hours(&history.interval.from, &history.interval.until)?;
     Ok(Some(Workload {
+        population: None,
+        population_catalog: None,
         source: capture.source().source.clone(),
         kind: None,
         windowed: true,

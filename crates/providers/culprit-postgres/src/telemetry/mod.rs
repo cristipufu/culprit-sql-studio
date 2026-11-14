@@ -335,6 +335,7 @@ impl SnapshotReader for PostgresSnapshotReader {
             return Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source")));
         }
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target,
             source: self.recipe.name().into(),
             continuity: SourceContinuity::Unverified,

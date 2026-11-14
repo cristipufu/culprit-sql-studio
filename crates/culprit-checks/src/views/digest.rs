@@ -11,7 +11,7 @@ use culprit_core::{
 pub fn digest(report: &Report, previous: Option<&Report>, top: usize, top_queries: usize) -> Digest {
     let baseline = previous.filter(|p| p.snapshot.report_comparison(&report.snapshot).allows_comparison()).map(|p| {
         let findings = p.findings.iter().filter(|f| !f.inactive).map(|f| item(f, None)).collect::<Vec<_>>();
-        (p.snapshot.taken_at.clone(), findings)
+        (culprit_core::ScanReference::of(&p.snapshot), findings)
     });
     build(report, baseline, top, top_queries)
 }
@@ -19,23 +19,34 @@ pub fn digest(report: &Report, previous: Option<&Report>, top: usize, top_querie
 /// The same, compared with a previous digest instead of a report: what a scheduled job keeps between runs, since a
 /// digest holds no statement text or parameter values and a report does.
 pub fn digest_since(report: &Report, previous: &Digest, top: usize, top_queries: usize) -> Digest {
-    let baseline = previous
-        .comparison(&report.snapshot)
-        .allows_comparison()
-        .then(|| (previous.taken_at.clone(), previous.findings.clone()));
+    let baseline = previous.comparison(&report.snapshot).allows_comparison().then(|| {
+        (
+            culprit_core::ScanReference {
+                id: None,
+                taken_at: previous.taken_at.clone(),
+                database: previous.identity.clone(),
+            },
+            previous.findings.clone(),
+        )
+    });
     build(report, baseline, top, top_queries)
 }
 
-fn build(report: &Report, baseline: Option<(String, Vec<DigestFinding>)>, top: usize, top_queries: usize) -> Digest {
-    let previous_at = baseline.as_ref().map(|(at, _)| at.clone());
+fn build(
+    report: &Report,
+    baseline: Option<(culprit_core::ScanReference, Vec<DigestFinding>)>,
+    top: usize,
+    top_queries: usize,
+) -> Digest {
+    let previous_at = baseline.as_ref().map(|(reference, _)| reference.taken_at.clone());
     let board = crate::dashboard(report);
     let day = report.snapshot.workload.as_ref().and_then(day_over_day);
     let active: Vec<&Finding> = report.findings.iter().filter(|f| f.is_actionable()).collect();
     let count = |s: Severity| active.iter().filter(|f| f.severity == s).count() as u32;
-    let since = baseline.map(|(taken_at, before)| {
+    let since = baseline.map(|(reference, before)| {
         let was = |id: &str| before.iter().find(|f| f.id == id);
         DigestChanges {
-            taken_at,
+            taken_at: reference.taken_at.clone(),
             new: active
                 .iter()
                 .filter(|f| {
@@ -56,7 +67,7 @@ fn build(report: &Report, baseline: Option<(String, Vec<DigestFinding>)>, top: u
                 .take(top)
                 .cloned()
                 .collect(),
-            // A count since startup turns a finding High when it grew and Low when it didn't: `again` says that.
+            // Native-qualified event increases are reported separately in `again`.
             worse: active
                 .iter()
                 .filter(|f| event_count(f).is_none())
@@ -70,7 +81,8 @@ fn build(report: &Report, baseline: Option<(String, Vec<DigestFinding>)>, top: u
             again: active
                 .iter()
                 .filter_map(|f| {
-                    let since = counted_since(event_count(f)?, was(&f.id)?.count?);
+                    was(&f.id)?;
+                    let since = event_count_since(report, f, &reference)?;
                     (since > 0.0).then(|| DigestFinding { count_since: Some(since), ..item(f, None) })
                 })
                 .take(top)
@@ -227,7 +239,7 @@ fn index_advice(report: &Report, active: &[&Finding], top: usize) -> DigestIndex
                 source: "azure".into(),
                 reason: format!("Azure SQL Database's automatic tuning recommends it{score}."),
                 db_time_share: None,
-                sql: r.script.clone(),
+                sql: f.fix.as_ref().and_then(|fix| fix.sql.clone()),
                 finding: Some(f.id.clone()),
             });
         } else if r.kind.eq_ignore_ascii_case("DropIndex") {
@@ -449,8 +461,7 @@ fn environment_name(environment: Environment) -> &'static str {
     }
 }
 
-/// What a finding counts since startup, for the findings that count events: a later digest tells from it whether
-/// they happened again.
+/// The original retained total, independent of whether its native population can be compared across captures.
 fn event_count(f: &Finding) -> Option<f64> {
     let metric = match f.check.as_str() {
         "lock-escalations" => crate::signals::ESCALATIONS_METRIC,
@@ -459,10 +470,28 @@ fn event_count(f: &Finding) -> Option<f64> {
     f.metrics.iter().find(|m| m.is(metric)).map(|m| m.value)
 }
 
-/// How many happened between two scans of a count since startup. A count lower than before was reset after the
-/// earlier scan (a restart, an index reloaded into memory), so all of it is new.
-fn counted_since(now: f64, before: f64) -> f64 {
-    if now >= before { now - before } else { now }
+/// Reuse the native per-index comparison only for the exact prior scan selected by this digest. A digest has no
+/// native counter proof or scan id, and cannot replace that authority with its table total or server uptime.
+fn event_count_since(report: &Report, finding: &Finding, previous: &culprit_core::ScanReference) -> Option<f64> {
+    if finding.check != "lock-escalations" || previous.id.is_none() || previous.database.is_none() {
+        return None;
+    }
+    let baseline = report.snapshot.escalations_before.as_ref()?;
+    if baseline.reference.as_ref()? != previous {
+        return None;
+    }
+    let tables = report
+        .snapshot
+        .indexes
+        .iter()
+        .filter(|index| format!("{}.{}", index.schema, index.table) == finding.subject.name)
+        .map(|index| (index.schema.as_str(), index.table.as_str()))
+        .collect::<std::collections::BTreeSet<_>>();
+    if tables.len() != 1 {
+        return None;
+    }
+    let (schema, table) = tables.first()?;
+    baseline.since(&report.snapshot, schema, table)
 }
 
 fn item(f: &Finding, was: Option<Severity>) -> DigestFinding {
@@ -632,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn a_digest_says_when_a_count_since_startup_grew() {
+    fn raw_escalation_totals_do_not_prove_growth_reset_or_a_quiet_interval() {
         let again = |now: f64, before: f64| {
             let mut previous = with_escalations(report(), before);
             previous.snapshot.taken_at = "2026-10-10T06:00:00Z".into();
@@ -643,22 +672,56 @@ mod tests {
             assert_eq!(from_digest.since, d.since);
             d.since.expect("changes").again.iter().map(|f| f.count_since).collect::<Vec<_>>()
         };
-        assert_eq!(again(7.0, 4.0), [Some(3.0)]);
+        assert!(again(7.0, 4.0).is_empty());
         assert!(again(7.0, 7.0).is_empty());
-        // The counters were reset after the previous scan: every escalation counted now is new.
-        assert_eq!(again(2.0, 10.0), [Some(2.0)]);
+        // Shrinking counts do not establish a native reset or make the smaller total recent.
+        assert!(again(2.0, 10.0).is_empty());
         // A finding without a count since startup never shows here.
         assert!(digest(&report(), Some(&report()), 10, 5).since.expect("changes").again.is_empty());
     }
 
-    // The count is found by what the metric is, whatever language the earlier report was said in.
+    fn with_native_escalations(mut report: Report, count: f64) -> Report {
+        use culprit_core::telemetry::{NativeIdentity, SharedResourceIdentity, SharedResourceKind};
+        let mut index = report.snapshot.indexes[0].clone();
+        index.schema = "dbo".into();
+        index.table = "orders".into();
+        index.contention = Some(culprit_core::IndexContention {
+            source_owner: Some(SharedResourceIdentity {
+                engine: culprit_core::Engine::Mssql,
+                kind: SharedResourceKind::Node,
+                namespace: NativeIdentity::new("controlled-native-cluster"),
+                native: NativeIdentity::new("controlled-native-member"),
+            }),
+            reset: culprit_core::ResetMarker::Generation("controlled-native-index-generation".into()),
+            lock_escalations: count,
+            ..Default::default()
+        });
+        report.snapshot.indexes = vec![index];
+        with_escalations(report, count)
+    }
+
+    // Native identities and metrics establish the comparison independently of localized wording.
     #[test]
-    fn a_count_since_startup_is_read_in_a_report_said_in_another_language() {
-        let mut previous = culprit_core::i18n::scope("fr", || with_escalations(report(), 4.0));
-        assert_ne!(previous.findings.last().unwrap().metrics[0].label, "Escalations since SQL Server started");
+    fn native_event_deltas_require_the_exact_selected_parent_and_survive_localized_metrics() {
+        let english_label = culprit_core::i18n::scope("en", || {
+            with_native_escalations(report(), 4.0).findings.last().unwrap().metrics[0].label.clone()
+        });
+        let mut previous = culprit_core::i18n::scope("fr", || with_native_escalations(report(), 4.0));
+        assert_ne!(previous.findings.last().unwrap().metrics[0].label, english_label);
         previous.snapshot.taken_at = "2026-10-10T06:00:00Z".into();
-        let d = digest(&with_escalations(report(), 7.0), Some(&previous), 10, 5);
+        let mut current = with_native_escalations(report(), 7.0);
+        current.snapshot.escalations_before =
+            culprit_core::EscalationBaseline::from_scan(&previous.snapshot, &current.snapshot);
+        let d = digest(&current, Some(&previous), 10, 5);
         assert_eq!(d.since.expect("changes").again.iter().map(|f| f.count_since).collect::<Vec<_>>(), [Some(3.0)]);
+        // A digest retains the total, but not the native points/scan identity. It cannot borrow this saved baseline.
+        let prior_digest = digest(&previous, None, 10, 5);
+        assert!(digest_since(&current, &prior_digest, 10, 5).since.unwrap().again.is_empty());
+        let mut another_parent = previous.clone();
+        another_parent.snapshot.id = "another-scan-at-the-same-clock".into();
+        assert!(digest(&current, Some(&another_parent), 10, 5).since.unwrap().again.is_empty());
+        current.snapshot.indexes[0].contention.as_mut().unwrap().source_owner = None;
+        assert!(digest(&current, Some(&previous), 10, 5).since.unwrap().again.is_empty());
     }
 
     #[test]
@@ -735,13 +798,23 @@ mod tests {
         q.mean_time_ms = 100.0;
         q.first_seen = None;
         q.last_seen = None;
-        let d = digest(&crate::analyze(s), None, 10, 5).index_advice.expect("advice");
+        let mut report = crate::analyze(s);
+        let d = digest(&report, None, 10, 5).index_advice.expect("advice");
         let azure = d.create.iter().find(|c| c.source == "azure").expect("Azure's recommendation");
         assert_eq!(azure.table, "shop.orders");
         assert_eq!(azure.keys, ["channel", "created_at"]);
         assert!(azure.reason.contains("64 out of 100"), "{}", azure.reason);
         assert!(azure.sql.as_deref().is_some_and(|q| q.starts_with("CREATE NONCLUSTERED INDEX [nci_1]")));
         assert_eq!(azure.finding.as_deref(), Some("tuning-advice:create-index:shop.orders(channel,created_at)"));
+        // A caller may withhold executable advice after analysis, for example for archived schema evidence. The
+        // digest must honor that final permission even while the original native script remains inspectable.
+        let finding =
+            report.findings.iter_mut().find(|finding| Some(finding.id.as_str()) == azure.finding.as_deref()).unwrap();
+        finding.fix.as_mut().unwrap().sql = None;
+        assert!(report.snapshot.tuning.as_ref().unwrap().recommendations[0].script.is_some());
+        let reduced = digest(&report, None, 10, 5).index_advice.unwrap();
+        let native = reduced.create.iter().find(|entry| entry.source == "azure").unwrap();
+        assert!(native.sql.is_none(), "raw native scripts cannot restore withheld executable advice");
     }
 
     fn deadlock(at: &str, pattern: &str, objects: &[&str]) -> culprit_core::Deadlock {

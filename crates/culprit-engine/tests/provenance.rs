@@ -199,6 +199,7 @@ async fn scan_keeps_provider_counters_before_history_and_does_not_invent_a_runti
 
 #[test]
 fn lock_and_growth_baselines_keep_exact_source_ids_and_legacy_dates_do_not_borrow_the_current_endpoint() {
+    use culprit_core::telemetry::{NativeIdentity, SharedResourceIdentity, SharedResourceKind};
     let mut previous = snapshot();
     previous.id = "20261010T000000.123Z".into();
     previous.taken_at = "2026-10-10T00:00:00Z".into();
@@ -210,8 +211,19 @@ fn lock_and_growth_baselines_keep_exact_source_ids_and_legacy_dates_do_not_borro
         1433,
         None,
     ));
-    previous.indexes[0].contention =
-        Some(IndexContention { row_lock_waits: 2.0, row_lock_wait_ms: 4.0, ..Default::default() });
+    previous.indexes.truncate(1);
+    previous.indexes[0].contention = Some(IndexContention {
+        source_owner: Some(SharedResourceIdentity {
+            engine: Engine::Mssql,
+            kind: SharedResourceKind::Node,
+            namespace: NativeIdentity::new("controlled-native-cluster"),
+            native: NativeIdentity::new("controlled-native-member"),
+        }),
+        reset: culprit_core::ResetMarker::Generation("controlled-native-index-generation".into()),
+        row_lock_waits: 2.0,
+        row_lock_wait_ms: 4.0,
+        ..Default::default()
+    });
     let mut current = previous.clone();
     current.id = "20261012T000000.456Z".into();
     current.taken_at = "2026-10-12T00:00:00Z".into();

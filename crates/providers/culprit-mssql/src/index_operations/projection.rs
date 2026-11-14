@@ -98,6 +98,7 @@ fn contention(rows: &[&MssqlIndexOperations]) -> Result<Option<IndexContention>>
     ] = counts;
     let option = rows.first().and_then(|row| row.optimize_for_sequential_key);
     Ok(Some(IndexContention {
+        source_owner: None,
         reset: culprit_core::ResetMarker::Unknown,
         row_lock_waits,
         row_lock_wait_ms,

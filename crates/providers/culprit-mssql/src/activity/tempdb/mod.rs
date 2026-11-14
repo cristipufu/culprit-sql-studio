@@ -175,11 +175,7 @@ impl<R: NativeRead> ActivityReader<R> {
 }
 
 fn same_source(before: &ActivityContext, after: &ActivityContext) -> bool {
-    before.database == after.database
-        && before.epoch == after.epoch
-        && before.edition == after.edition
-        && before.major == after.major
-        && before.writable == after.writable
+    before.same_source(after)
 }
 
 fn same_statement(before: &ActivityRecord, after: &ActivityRecord) -> bool {

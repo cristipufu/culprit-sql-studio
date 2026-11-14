@@ -19,17 +19,33 @@ async fn diagnostic_revisions_keep_private_targets_out_of_warehouse_rows_and_res
         test_support::assert_diagnostic_capture(&captured, &source, &records);
         assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
 
-        let mut injected = fixture.rows[0].clone();
-        let mut changed = native;
-        changed["episode"]["scope"]["target"] = serde_json::to_value(&source.target).unwrap();
-        injected[details] = json!(serde_json::to_string(&changed).unwrap());
-        fixture.replies(vec![vec![injected]]);
-        let error = fixture
-            .reader
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
-            .await
-            .unwrap_err();
-        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
-        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        assert_eq!(native["episode"]["scope"].as_object().unwrap().len(), 1);
+        assert!(native["episode"]["scope"]["key"].is_string());
+        let published = serde_json::to_string(&fixture.publication).unwrap();
+        assert!(!published.contains("private-diagnostic"));
+        for field in ["target", "partition", "key"] {
+            let mut injected = fixture.rows[0].clone();
+            let mut changed = native.clone();
+            changed["episode"]["scope"][field] = match field {
+                "target" => serde_json::to_value(&source.target).unwrap(),
+                "partition" => json!({"kind":"instance-local","member":null,"epoch":null}),
+                "key" => json!(digest(b"unbound native scope")),
+                _ => unreachable!(),
+            };
+            injected[details] = json!(serde_json::to_string(&changed).unwrap());
+            fixture.replies(vec![vec![injected]]);
+            let error = fixture
+                .reader
+                .read_capture(
+                    &fixture.range,
+                    &[EvidenceFamily::OperationalSamples],
+                    EvidenceReadBudget::default(),
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{field}");
+            assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        }
     }
 }

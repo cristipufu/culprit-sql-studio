@@ -76,6 +76,7 @@ fn focused_capture(intent: &DiagnosticInvestigationIntent) -> test_support::Reco
         wait: PageWaitRelation::Unqualified,
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: intent.focus.target.clone(),
         source: culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
         continuity: SourceContinuity::Unverified,
@@ -170,7 +171,7 @@ fn diagnostic_investigation_events_publish_safe_receipts_without_private_intents
             "outcome": event.outcome,
         });
         let mut expected = original.clone();
-        expected["data"]["fact"]["data"]["episode"]["scope"].as_object_mut().unwrap().remove("target");
+        expected["data"]["fact"]["data"]["episode"]["scope"] = json!({"key": episode.scope.key().unwrap()});
         expected["data"]["fact"]["data"]["investigation"] = public_event.clone();
         assert_eq!(prepared["record"], expected);
         assert_eq!(prepared["record"]["data"]["fact"]["data"]["investigation"], public_event);

@@ -174,6 +174,7 @@ impl RangeManifest {
             || !bounded_id(&revision.outbox_id)
             || self.batches.len() != self.source.observation.collection().streams().len()
             || !self.source.observation.covers_request()
+            || !self.source.partition_is_consistent()
         {
             return Err(DeliveryProblem::Integrity.error());
         }

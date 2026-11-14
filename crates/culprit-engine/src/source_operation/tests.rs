@@ -48,6 +48,7 @@ impl Provider for FixtureProvider {
             "2026-11-10T06:00:00Z"
         };
         Ok(culprit_core::telemetry::IntervalDiscoveryPage {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             database: culprit_core::DatabaseIdentity::server(Engine::Postgres, "db", "fixture.invalid", 5432, None),
             source: "native-history".into(),
             observed_at: "2026-11-10T08:01:00Z".into(),

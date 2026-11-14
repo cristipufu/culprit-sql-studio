@@ -29,6 +29,7 @@ mod tests {
     }
     fn snapshot(records: u32, complete: bool) -> ActivitySnapshotDescription {
         ActivitySnapshotDescription {
+            database_writable: None,
             epoch: Some("native".into()),
             observed_from: "2026-11-14T08:00:00Z".into(),
             observed_until: "2026-11-14T08:00:01Z".into(),

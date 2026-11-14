@@ -196,7 +196,7 @@ fn heavy_causes(s: &Snapshot, findings: &[Finding]) -> BTreeMap<String, Vec<(usi
         !matches!(
             f.check.as_str(),
             "heavy-query" | "unused-index" | "duplicate-index" | "memory-grant" | "network-wait" | "unstable-query"
-        ) && !does_not_explain_elapsed_time(f)
+        ) && !does_not_explain_elapsed_time(s, f)
     }) {
         let Some(share) = f.impact.db_time_share else {
             continue;

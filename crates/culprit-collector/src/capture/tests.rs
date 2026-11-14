@@ -23,6 +23,7 @@ impl TelemetrySource for Source {
     async fn describe(&mut self) -> Result<CollectionDescription> {
         self.0.entered.notify_one();
         Ok(CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: culprit_core::DatabaseIdentity::server(
                 culprit_core::Engine::Mssql,
                 "fixture",

@@ -67,6 +67,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
             _ => (self.reader.capture_page_wait_targets().await?, None),
         };
         let task_visibility_unavailable = captured.task_visibility_unavailable();
+        let partition = captured.source_partition()?;
         let records = captured
             .snapshot
             .observations
@@ -100,6 +101,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
             None => SourceObservation::Snapshot(snapshot),
         };
         let description = CollectionDescription {
+            partition,
             target: captured.context.database.into(),
             source: sources::PAGE_WAIT_TARGETS.name.into(),
             continuity: SourceContinuity::Unverified,

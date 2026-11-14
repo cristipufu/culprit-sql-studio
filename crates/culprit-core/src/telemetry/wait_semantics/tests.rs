@@ -63,6 +63,7 @@ fn enabled_capture_requires_a_dictionary_but_never_establishes_read_completeness
         assert!(evidence.is_valid());
     }
     let mut source = QueryHistoryDescription {
+        population_catalog: None,
         interval: TelemetryInterval {
             native_id: "interval".into(),
             from: "2020-01-01T06:00:00Z".into(),

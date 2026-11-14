@@ -83,10 +83,12 @@ async fn capture<R: crate::read::QueryRead>(
         coverage.stopped.get_or_insert(CollectionStop::SourceUnavailable);
     }
     let description = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: before.connection.database.clone().into(),
         source: native::activity::SOURCE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            database_writable: None,
             epoch: Some(digest(
                 format!(
                     "{}|{}|{}|{}",

@@ -20,10 +20,12 @@ fn source() -> CollectionDescription {
         culprit_core::DatabaseIdentity::server(culprit_core::Engine::Mssql, "fixture", "fixture.invalid", 1433, None);
     database.incarnation = Some("native-fixture-guid".into());
     CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: database.into(),
         source: "query_store".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {
+                population_catalog: None,
                 waits: None,
                 interval: TelemetryInterval {
                     native_id: "8".into(),

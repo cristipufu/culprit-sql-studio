@@ -15,8 +15,9 @@ pub(in crate::fleet) struct RouteBinding {
 
 impl RouteBinding {
     pub fn matches_scope(&self, scope: &DiagnosticScope) -> bool {
-        DiagnosticScope::from_source(&self.source)
-            .is_ok_and(|current| current.native_epoch.is_some() && current.key().ok() == scope.key().ok())
+        DiagnosticScope::from_source(&self.source).is_ok_and(|current| {
+            current.native_epoch.is_some() && current.partition.is_qualified() && current.key().ok() == scope.key().ok()
+        })
     }
 }
 
@@ -32,6 +33,7 @@ impl RouteBindings {
     pub fn observe(&mut self, target: &str, source: &CollectionDescription, revision: &str) -> Result<()> {
         let scope = DiagnosticScope::from_source(source)?;
         if scope.native_epoch.is_none()
+            || !scope.partition.is_qualified()
             || revision.is_empty()
             || revision.len() > 256
             || revision.chars().any(char::is_control)

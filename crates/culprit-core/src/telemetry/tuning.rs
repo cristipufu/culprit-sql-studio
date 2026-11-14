@@ -21,6 +21,8 @@ impl TuningPlanStatistics {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct NativeTuningRecommendation {
+    /// Scope of query/plan references only. This does not establish the authority of a database-wide index recommendation.
+    pub plan_scope: crate::QueryStoreScope,
     pub name: String,
     pub kind: String,
     pub reason: Option<String>,
@@ -47,6 +49,7 @@ pub struct NativeTuningRecommendation {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct NativeForcedPlan {
+    pub plan_scope: crate::QueryStoreScope,
     pub query_id: String,
     pub plan_id: String,
     pub failures: String,
@@ -61,7 +64,7 @@ pub struct NativeForcedPlan {
 pub struct NativeQueryHint {
     pub hint_id: String,
     pub query_id: String,
-    pub scope: crate::QueryStoreHintScope,
+    pub scope: crate::QueryStoreScope,
     pub hint: DefinitionPayload,
     pub failures: String,
     pub last_failure_reason: Option<String>,
@@ -83,14 +86,20 @@ impl TuningFact {
     pub fn key(&self) -> String {
         match self {
             Self::AutomaticOption(v) => format!("option:{}", v.name),
-            Self::Recommendation(v) => format!("recommendation:{}", v.name),
-            Self::ForcedPlan(v) => format!("forced:{}:{}", v.query_id, v.plan_id),
-            Self::QueryHint(v) => match &v.scope {
-                crate::QueryStoreHintScope::Local => format!("hint:{}:local", v.hint_id),
-                crate::QueryStoreHintScope::ReplicaGroup { id } => format!("hint:{}:replica:{id}", v.hint_id),
-                crate::QueryStoreHintScope::Unknown => format!("hint:{}:unknown", v.hint_id),
-            },
+            Self::Recommendation(v) => scoped_key(&format!("recommendation:{}", v.name), &v.plan_scope),
+            Self::ForcedPlan(v) => scoped_key(&format!("forced:{}:{}", v.query_id, v.plan_id), &v.plan_scope),
+            Self::QueryHint(v) => scoped_key(&format!("hint:{}", v.hint_id), &v.scope),
         }
+    }
+    /// Native positive facts remain valid when their plan attribution is unknown; that cannot establish complete scope.
+    pub fn attribution_is_complete(&self) -> bool {
+        let scope = match self {
+            Self::AutomaticOption(_) => return true,
+            Self::Recommendation(value) => &value.plan_scope,
+            Self::ForcedPlan(value) => &value.plan_scope,
+            Self::QueryHint(value) => &value.scope,
+        };
+        scope.is_valid() && *scope != crate::QueryStoreScope::Unknown
     }
     pub fn redact(&mut self, engine: crate::Engine) {
         let payload = match self {
@@ -116,7 +125,8 @@ impl TuningFact {
                 [&v.name, &v.desired, &v.actual].into_iter().all(|v| valid_key(v)) && optional_text(&v.reason)
             }
             Self::Recommendation(v) => {
-                [&v.name, &v.kind].into_iter().all(|v| !v.is_empty() && v.len() <= 16 * 1024)
+                v.plan_scope.is_valid()
+                    && [&v.name, &v.kind].into_iter().all(|v| !v.is_empty() && v.len() <= 16 * 1024)
                     && [&v.reason, &v.state, &v.state_reason].into_iter().all(optional_text)
                     && v.score.is_none_or(|v| v <= 100)
                     && v.query_id.as_deref().is_none_or(valid_counter)
@@ -138,7 +148,8 @@ impl TuningFact {
                     })
             }
             Self::ForcedPlan(v) => {
-                [&v.query_id, &v.plan_id, &v.failures].into_iter().all(|v| valid_counter(v))
+                v.plan_scope.is_valid()
+                    && [&v.query_id, &v.plan_id, &v.failures].into_iter().all(|v| valid_counter(v))
                     && optional_text(&v.last_failure_reason)
                     && optional_text(&v.forcing)
                     && instant(&v.last_execution_at)
@@ -146,16 +157,21 @@ impl TuningFact {
             }
             Self::QueryHint(v) => {
                 [&v.hint_id, &v.query_id, &v.failures].into_iter().all(|v| valid_counter(v))
-                    && match &v.scope {
-                        crate::QueryStoreHintScope::ReplicaGroup { id } => valid_counter(id),
-                        _ => true,
-                    }
+                    && v.scope.is_valid()
                     && v.hint.is_valid()
                     && optional_text(&v.last_failure_reason)
                     && optional_text(&v.native_source_name)
                     && valid_reset(&v.reset)
             }
         }
+    }
+}
+
+fn scoped_key(key: &str, scope: &crate::QueryStoreScope) -> String {
+    match scope {
+        crate::QueryStoreScope::Local => format!("{key}:local"),
+        crate::QueryStoreScope::ReplicaGroup { id } => format!("{key}:replica:{id}"),
+        crate::QueryStoreScope::Unknown => format!("{key}:unknown"),
     }
 }
 
@@ -179,7 +195,7 @@ mod tests {
         TuningFact::QueryHint(NativeQueryHint {
             hint_id: "1".into(),
             query_id: "3".into(),
-            scope: crate::QueryStoreHintScope::ReplicaGroup { id: "1".into() },
+            scope: crate::QueryStoreScope::ReplicaGroup { id: "1".into() },
             hint: DefinitionPayload::Available {
                 sha256: digest(text.as_bytes()),
                 text,
@@ -194,6 +210,7 @@ mod tests {
     }
     fn source() -> CollectionDescription {
         CollectionDescription {
+            partition: crate::telemetry::SourcePartition::Target,
             target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "fixture", "fixture.invalid", 1433, None)
                 .into(),
             source: "tuning-state".into(),
@@ -222,12 +239,45 @@ mod tests {
         let TelemetryRecord::Tuning(TuningObservation { fact: TuningFact::QueryHint(value), .. }) = &mut second else {
             panic!("hint")
         };
-        value.scope = crate::QueryStoreHintScope::ReplicaGroup { id: "2".into() };
+        value.scope = crate::QueryStoreScope::ReplicaGroup { id: "2".into() };
         assert_ne!(exported.record_id, ExportedRecord::new(&source, &capture, second).unwrap().record_id);
         let SourceObservation::Snapshot(snapshot) = &mut source.observation else { panic!("snapshot") };
         snapshot.dataset = SnapshotDataset::Settings;
         assert!(ExportedRecord::new(&source, &capture, row).is_err());
     }
+    #[test]
+    fn forced_plan_scopes_preserve_unknowns_and_cannot_share_a_native_key() {
+        let mut keys = std::collections::BTreeSet::new();
+        for scope in [
+            crate::QueryStoreScope::Local,
+            crate::QueryStoreScope::ReplicaGroup { id: "7".into() },
+            crate::QueryStoreScope::ReplicaGroup { id: "8".into() },
+            crate::QueryStoreScope::Unknown,
+        ] {
+            let fact = TuningFact::ForcedPlan(NativeForcedPlan {
+                plan_scope: scope.clone(),
+                query_id: "3".into(),
+                plan_id: "9".into(),
+                failures: "9007199254740993".into(),
+                last_failure_reason: None,
+                last_execution_at: None,
+                forcing: None,
+                reset: crate::ResetMarker::Unknown,
+            });
+            assert!(fact.is_valid());
+            assert_eq!(fact.attribution_is_complete(), scope != crate::QueryStoreScope::Unknown);
+            assert!(keys.insert(fact.key()));
+            let encoded = serde_json::to_value(&fact).unwrap();
+            assert_eq!(encoded["data"]["plan_scope"], serde_json::to_value(scope).unwrap());
+            assert_eq!(encoded["data"]["failures"], "9007199254740993");
+            let mut invalid = fact;
+            let TuningFact::ForcedPlan(value) = &mut invalid else { unreachable!() };
+            value.plan_scope = crate::QueryStoreScope::ReplicaGroup { id: "7; EXEC other".into() };
+            assert!(!invalid.is_valid());
+            assert!(!invalid.attribution_is_complete());
+        }
+    }
+
     #[test]
     fn malformed_counts_and_missing_native_keys_are_rejected() {
         for field in ["failures", "hint_id", "query_id"] {

@@ -207,6 +207,7 @@ impl Provider for MysqlProvider {
     }
 
     async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot> {
+        options.require_default_workload_population()?;
         collect::snapshot(&self.connector, &self.spec, connection, options).await
     }
 

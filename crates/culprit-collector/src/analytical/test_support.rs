@@ -9,6 +9,10 @@ mod activity;
 pub use activity::{activity_evidence_cases, activity_observation, assert_activity_capture};
 mod diagnostics;
 pub use diagnostics::{assert_diagnostic_capture, diagnostic_evidence_cases};
+mod source_partitions;
+pub use source_partitions::{
+    assert_replica_activity_capture, replica_activity_evidence_cases, replicated_history_evidence_cases,
+};
 mod investigations;
 pub use investigations::{InvestigationFixture, investigation_fixture};
 
@@ -18,6 +22,8 @@ mod query_cohorts;
 pub use query_cohorts::{
     QueryCohortCase, assert_query_cohort_capture, query_cohort_evidence, query_cohort_evidence_cases,
 };
+mod tuning;
+pub use tuning::{assert_tuning_scope_projection, change_tuning_plan_scope, tuning_scope_evidence};
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
 mod cleanup;
@@ -124,6 +130,7 @@ fn assert_redacted_definition_payloads(record: &TelemetryRecord) {
 
 pub fn fixture() -> (RangeManifest, ExportedRecord) {
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",

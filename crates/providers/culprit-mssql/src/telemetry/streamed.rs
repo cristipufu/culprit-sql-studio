@@ -82,6 +82,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
         self.physical = Some(physical);
         Ok(CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: database.into(),
             source: D::NAME.into(),
             continuity: SourceContinuity::Unverified,

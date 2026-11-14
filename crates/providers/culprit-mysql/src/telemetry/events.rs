@@ -76,6 +76,7 @@ impl ObservationReader for Reader {
             return Err(CollectionStop::SourceChanged.error());
         }
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: meta.connection.database.clone().into(),
             source: "innodb-latest-deadlock".into(),
             continuity: SourceContinuity::Unverified,

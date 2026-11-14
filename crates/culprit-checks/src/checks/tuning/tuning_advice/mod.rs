@@ -34,7 +34,20 @@ check!(
 );
 
 /// What SQL Server's own tuning state establishes, one finding each.
-pub enum TuningCase<'s> {
+pub struct TuningCase<'s> {
+    finding: TuningFinding<'s>,
+    permission: TuningPermission,
+}
+
+#[derive(Clone, Copy)]
+enum TuningPermission {
+    Native,
+    UnknownPlanScope,
+    PrimaryConnectionRequired,
+}
+
+/// Advice authority is selected with the native facts, before wording a finding.
+enum TuningFinding<'s> {
     /// Azure SQL's recommendation to create an index nothing else has.
     CreateIndex(CreateIndex<'s>),
     /// Azure SQL's recommendation to drop an index nothing else flags.
@@ -82,7 +95,7 @@ pub struct ForcingFails<'s> {
 /// A day or more between `last` and the end of the scan's data, as (seconds, `last`).
 pub(super) fn quiet_since<'a>(snapshot: &Snapshot, last: Option<&'a str>) -> Option<(f64, &'a str)> {
     let last = last?;
-    let end = snapshot.workload.as_ref()?.window_end.as_deref().and_then(parse_epoch_seconds)?;
+    let end = plan_workload(snapshot)?.window_end.as_deref().and_then(parse_epoch_seconds)?;
     let silence = end - parse_epoch_seconds(last)?;
     (silence >= 86_400.0).then_some((silence, last))
 }
@@ -101,21 +114,22 @@ pub(super) fn waiting_plan_fix(r: &TuningRecommendation) -> bool {
 fn tuning_cases(snapshot: &Snapshot) -> Vec<TuningCase<'_>> {
     let Some(tuning) = &snapshot.tuning else { return Vec::new() };
     let mut out = Vec::new();
+    let workload = plan_workload(snapshot);
 
     for r in tuning.recommendations.iter().filter(|r| waiting(r)) {
         let Some(index) = &r.index else { continue };
         if r.kind.eq_ignore_ascii_case("CreateIndex") {
-            out.extend(create_index_advice(snapshot, r, index).map(TuningCase::CreateIndex));
+            out.extend(create_index_advice(snapshot, r, index).map(TuningFinding::CreateIndex));
         } else if r.kind.eq_ignore_ascii_case("DropIndex") {
-            out.extend(drop_index_advice(snapshot, r, index).map(TuningCase::DropIndex));
+            out.extend(drop_index_advice(snapshot, r, index).map(TuningFinding::DropIndex));
         }
     }
 
     for r in tuning.recommendations.iter().filter(|r| waiting(r)) {
         let (Some(query_id), Some(plan_id)) = (&r.query_id, &r.recommended_plan_id) else { continue };
-        let query = snapshot.workload.as_ref().and_then(|w| w.query(query_id));
+        let query = workload.and_then(|w| w.query(query_id));
         let impact = query.and_then(|q| query_impact(snapshot, &[q]));
-        out.push(TuningCase::ForcePlan(ForcePlan {
+        out.push(TuningFinding::ForcePlan(ForcePlan {
             r,
             query_id,
             plan_id,
@@ -138,8 +152,8 @@ fn tuning_cases(snapshot: &Snapshot) -> Vec<TuningCase<'_>> {
     }
 
     for p in tuning.forced_plans.iter().filter(|p| p.failures > 0.0) {
-        let query = snapshot.workload.as_ref().and_then(|w| w.query(&p.query_id));
-        out.push(TuningCase::ForcingFails(ForcingFails {
+        let query = workload.and_then(|w| w.query(&p.query_id));
+        out.push(TuningFinding::ForcingFails(ForcingFails {
             plan: p,
             query,
             hint: p.last_failure_reason.as_deref().and_then(FailureHint::of),
@@ -151,7 +165,7 @@ fn tuning_cases(snapshot: &Snapshot) -> Vec<TuningCase<'_>> {
     // Forced plans that apply: SQL Server runs each as it is, also after an index is added or the data grows.
     let mut kept: Vec<Forced<'_>> = Vec::new();
     for p in tuning.forced_plans.iter().filter(|p| p.failures <= 0.0) {
-        let q = snapshot.workload.as_ref().and_then(|w| w.query(&p.query_id));
+        let q = workload.and_then(|w| w.query(&p.query_id));
         let applied = tuning.recommendations.iter().find(|r| {
             r.query_id.as_deref() == Some(p.query_id.as_str())
                 && r.recommended_plan_id.as_deref() == Some(p.plan_id.as_str())
@@ -165,7 +179,9 @@ fn tuning_cases(snapshot: &Snapshot) -> Vec<TuningCase<'_>> {
             false => Forcing::Unknown,
         };
         match q.and_then(|q| forced_plans::seekable_scan(snapshot, q, &p.plan_id).map(|scan| (q, scan))) {
-            Some((q, scan)) => out.push(TuningCase::ForcedScan(ForcedScan::of(snapshot, p, q, how, forced_at, scan))),
+            Some((q, scan)) => {
+                out.push(TuningFinding::ForcedScan(ForcedScan::of(snapshot, p, q, how, forced_at, scan)))
+            }
             None => kept.push(Forced {
                 plan: p,
                 query: q,
@@ -182,11 +198,11 @@ fn tuning_cases(snapshot: &Snapshot) -> Vec<TuningCase<'_>> {
         // Automatic plan correction keeps checking the plans it forced and unforces one that turns out slower, while
         // it is on; a plan forced by hand (or once it's off) stays forced until someone unforces it.
         let correcting = crate::tuning::automatic_plan_correction(snapshot) == Some(true);
-        out.push(TuningCase::ForcedPlans(ForcedPlans { kept, correcting }));
+        out.push(TuningFinding::ForcedPlans(ForcedPlans { kept, correcting }));
     }
 
     for h in tuning.hints.iter().filter(|h| h.failures > 0.0) {
-        out.push(TuningCase::HintFails(h));
+        out.push(TuningFinding::HintFails(h));
     }
 
     if let Some(plan) = tuning.automatic_tuning.iter().find(|o| o.name.eq_ignore_ascii_case("FORCE_LAST_GOOD_PLAN")) {
@@ -194,26 +210,62 @@ fn tuning_cases(snapshot: &Snapshot) -> Vec<TuningCase<'_>> {
         let actual_on = plan.actual.eq_ignore_ascii_case("ON");
         let waiting_fixes = tuning.recommendations.iter().filter(|r| waiting_plan_fix(r)).count();
         if desired_on && !actual_on {
-            out.push(TuningCase::CorrectionNotRunning(plan));
+            out.push(TuningFinding::CorrectionNotRunning(plan));
         } else if !actual_on && waiting_fixes > 0 {
-            out.push(TuningCase::CorrectionOff(waiting_fixes));
+            out.push(TuningFinding::CorrectionOff(waiting_fixes));
         }
     }
-    out
+    out.into_iter()
+        .map(|finding| {
+            let plan_fact = matches!(
+                &finding,
+                TuningFinding::ForcePlan(_)
+                    | TuningFinding::ForcingFails(_)
+                    | TuningFinding::ForcedScan(_)
+                    | TuningFinding::ForcedPlans(_)
+            );
+            let configuration =
+                matches!(&finding, TuningFinding::CorrectionNotRunning(_) | TuningFinding::CorrectionOff(_));
+            let permission = if plan_fact && workload.is_none() {
+                TuningPermission::UnknownPlanScope
+            } else if (plan_fact || configuration) && !can_change_plan(snapshot) {
+                TuningPermission::PrimaryConnectionRequired
+            } else {
+                TuningPermission::Native
+            };
+            TuningCase { finding, permission }
+        })
+        .collect()
 }
 
 fn tuning_finding(snapshot: &Snapshot, case: TuningCase<'_>) -> Finding {
-    match case {
-        TuningCase::CreateIndex(c) => create_index_finding(snapshot, c),
-        TuningCase::DropIndex(d) => drop_index_finding(snapshot, d),
-        TuningCase::ForcePlan(p) => force_plan_finding(snapshot, p),
-        TuningCase::ForcingFails(p) => forcing_fails_finding(snapshot, p),
-        TuningCase::ForcedScan(scan) => forced_scan_finding(snapshot, scan),
-        TuningCase::ForcedPlans(plans) => forced_plans_finding(snapshot, plans),
-        TuningCase::HintFails(h) => hint_fails_finding(h),
-        TuningCase::CorrectionNotRunning(plan) => correction_not_running_finding(snapshot, plan),
-        TuningCase::CorrectionOff(waiting) => correction_off_finding(snapshot, waiting),
+    let mut finding = match case.finding {
+        TuningFinding::CreateIndex(c) => create_index_finding(snapshot, c),
+        TuningFinding::DropIndex(d) => drop_index_finding(snapshot, d),
+        TuningFinding::ForcePlan(p) => force_plan_finding(snapshot, p),
+        TuningFinding::ForcingFails(p) => forcing_fails_finding(snapshot, p),
+        TuningFinding::ForcedScan(scan) => forced_scan_finding(snapshot, scan),
+        TuningFinding::ForcedPlans(plans) => forced_plans_finding(snapshot, plans),
+        TuningFinding::HintFails(h) => hint_fails_finding(h),
+        TuningFinding::CorrectionNotRunning(plan) => correction_not_running_finding(snapshot, plan),
+        TuningFinding::CorrectionOff(waiting) => correction_off_finding(snapshot, waiting),
+    };
+    match case.permission {
+        TuningPermission::UnknownPlanScope => {
+            finding.caveats.push(t!("check.tuning_advice.plan_scope.unqualified"));
+            finding.fix =
+                Some(Fix { summary: t!("check.tuning_advice.plan_scope.investigation"), sql: None, cost: None });
+            finding.verify = vec![t!("check.tuning_advice.plan_scope.verify")];
+        }
+        TuningPermission::PrimaryConnectionRequired => {
+            if let Some(fix) = &mut finding.fix {
+                fix.sql = None;
+            }
+            finding.caveats.push(t!("common.query_store.primary_configuration"));
+        }
+        TuningPermission::Native => {}
     }
+    finding
 }
 
 /// A query's handle, or "query 123" for one that isn't among the window's statements.
@@ -238,7 +290,7 @@ fn gone_caveat(f: &mut Finding, query_id: &str, (silence, last): (f64, &str)) {
     );
 }
 
-fn force_plan_finding(_snapshot: &Snapshot, p: ForcePlan<'_>) -> Finding {
+fn force_plan_finding(snapshot: &Snapshot, p: ForcePlan<'_>) -> Finding {
     let ForcePlan { r, query_id, plan_id, query, .. } = p;
     let mut f = finding(
         "tuning-advice",
@@ -303,22 +355,22 @@ fn force_plan_finding(_snapshot: &Snapshot, p: ForcePlan<'_>) -> Finding {
     };
     f.fix = Some(Fix {
         summary: [t!("check.tuning_advice.force.fix"), automatic].join(" "),
-        sql: Some(r.script.clone().unwrap_or_else(|| {
-            format!("EXEC sp_query_store_force_plan @query_id = {query_id}, @plan_id = {plan_id};")
-        })),
+        sql: plan_command(snapshot, PlanCommand::Force, query_id, plan_id).map(|command| {
+            match &snapshot.tuning.as_ref().expect("qualified tuning").plan_scope {
+                culprit_core::QueryStoreScope::Local => r.script.clone().unwrap_or(command),
+                _ => command,
+            }
+        }),
         cost: None,
     });
-    f.verify = vec![
-        t!("check.tuning_advice.force.verify", query = query_id, plan = plan_id),
-        t!(
-            "check.tuning_advice.force.verify_undo",
-            sql = format!("EXEC sp_query_store_unforce_plan @query_id = {query_id}, @plan_id = {plan_id};")
-        ),
-    ];
+    f.verify = vec![t!("check.tuning_advice.force.verify", query = query_id, plan = plan_id)];
+    if let Some(sql) = plan_command(snapshot, PlanCommand::Unforce, query_id, plan_id) {
+        f.verify.push(t!("check.tuning_advice.force.verify_undo", sql = sql));
+    }
     f
 }
 
-fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Finding {
+fn forcing_fails_finding(snapshot: &Snapshot, failing: ForcingFails<'_>) -> Finding {
     let p = failing.plan;
     let mut f = finding(
         "tuning-advice",
@@ -365,7 +417,7 @@ fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Fin
     }
     f.fix = Some(Fix {
         summary: t!("check.tuning_advice.forcing_fails.fix"),
-        sql: Some(format!("EXEC sp_query_store_unforce_plan @query_id = {}, @plan_id = {};", p.query_id, p.plan_id)),
+        sql: plan_command(snapshot, PlanCommand::Unforce, &p.query_id, &p.plan_id),
         cost: None,
     });
     f.verify = vec![t!("check.tuning_advice.forcing_fails.verify", plan = &p.plan_id)];
@@ -374,9 +426,9 @@ fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Fin
 
 fn hint_fails_finding(h: &QueryHint) -> Finding {
     let subject_id = match &h.scope {
-        culprit_core::QueryStoreHintScope::ReplicaGroup { id } => format!("hint-failing:{}:replica:{id}", h.query_id),
-        culprit_core::QueryStoreHintScope::Local => format!("hint-failing:{}", h.query_id),
-        culprit_core::QueryStoreHintScope::Unknown => format!("hint-failing:{}:unknown:{}", h.query_id, h.hint_id),
+        culprit_core::QueryStoreScope::ReplicaGroup { id } => format!("hint-failing:{}:replica:{id}", h.query_id),
+        culprit_core::QueryStoreScope::Local => format!("hint-failing:{}", h.query_id),
+        culprit_core::QueryStoreScope::Unknown => format!("hint-failing:{}:unknown:{}", h.query_id, h.hint_id),
     };
     let mut f =
         finding("tuning-advice", &subject_id, Category::Queries, subject(SubjectKind::Query, h.query_id.to_string()));
@@ -403,26 +455,24 @@ fn hint_fails_finding(h: &QueryHint) -> Finding {
     f.fix = Some(Fix {
         summary: t!("check.tuning_advice.hint_fails.fix"),
         sql: match &h.scope {
-            culprit_core::QueryStoreHintScope::ReplicaGroup { id } => Some(format!(
+            culprit_core::QueryStoreScope::ReplicaGroup { id } => Some(format!(
                 "EXEC sys.sp_query_store_clear_hints @query_id = {}, @replica_group_id = {id};",
                 h.query_id
             )),
-            culprit_core::QueryStoreHintScope::Local => {
+            culprit_core::QueryStoreScope::Local => {
                 Some(format!("EXEC sys.sp_query_store_clear_hints @query_id = {};", h.query_id))
             }
-            culprit_core::QueryStoreHintScope::Unknown => None,
+            culprit_core::QueryStoreScope::Unknown => None,
         },
         cost: None,
     });
     f.verify = vec![t!("check.tuning_advice.hint_fails.verify")];
     match &h.scope {
-        culprit_core::QueryStoreHintScope::ReplicaGroup { id } => {
+        culprit_core::QueryStoreScope::ReplicaGroup { id } => {
             f.caveats.push(t!("check.tuning_advice.hint_fails.replica", group = id))
         }
-        culprit_core::QueryStoreHintScope::Unknown => {
-            f.caveats.push(t!("check.tuning_advice.hint_fails.unknown_scope"))
-        }
-        culprit_core::QueryStoreHintScope::Local => {}
+        culprit_core::QueryStoreScope::Unknown => f.caveats.push(t!("check.tuning_advice.hint_fails.unknown_scope")),
+        culprit_core::QueryStoreScope::Local => {}
     }
     f
 }

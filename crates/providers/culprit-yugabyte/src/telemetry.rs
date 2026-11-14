@@ -127,6 +127,7 @@ impl SnapshotReader for Reader {
         }
         self.notices = self.io.notices();
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: meta.database.clone().into(),
             source: format!("ysql-{}-{}", self.recipe.source(), meta.node),
             continuity: SourceContinuity::Unverified,

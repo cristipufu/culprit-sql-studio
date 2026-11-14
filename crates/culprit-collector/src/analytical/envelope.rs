@@ -133,7 +133,9 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
             context["observed_from"] = json!(snapshot.observed_from);
             context["observed_until"] = json!(snapshot.observed_until);
         }
-        SourceObservation::Diagnostics(description) => context["diagnostic"] = json!(description),
+        SourceObservation::Diagnostics(description) => {
+            context["diagnostic"] = super::investigations::diagnostic_context(description)?
+        }
         SourceObservation::QueryHistory(_) => (),
         SourceObservation::PagedSnapshot(_) => return Err(invalid()),
     }

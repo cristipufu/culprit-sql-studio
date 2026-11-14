@@ -357,6 +357,8 @@ impl Aggregator {
             })
             .collect();
         Workload {
+            population: None,
+            population_catalog: None,
             source_label: None,
             source_message: None,
             counter_set: None,

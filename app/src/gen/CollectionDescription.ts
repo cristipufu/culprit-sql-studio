@@ -2,5 +2,6 @@
 import type { CollectionTarget } from "./CollectionTarget";
 import type { SourceContinuity } from "./SourceContinuity";
 import type { SourceObservation } from "./SourceObservation";
+import type { SourcePartition } from "./SourcePartition";
 
-export type CollectionDescription = { target: CollectionTarget, source: string, observation: SourceObservation, continuity: SourceContinuity, };
+export type CollectionDescription = { target: CollectionTarget, partition: SourcePartition, source: string, observation: SourceObservation, continuity: SourceContinuity, };

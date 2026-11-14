@@ -39,6 +39,14 @@ pub enum WorkloadKind {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct Workload {
+    /// The actual source-native execution population behind these statistics. None establishes no physical owner.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub population: Option<crate::telemetry::NativeIdentity>,
+    /// Source-observed alternatives remain available even when another statistics source supplied a fallback.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub population_catalog: Option<crate::RuntimePopulationCatalog>,
     /// The source's stable name, retained for counter identity and compatibility. Display uses `source_name()`.
     pub source: String,
     /// The same, typed: see [`Workload::kind`]. `None` when the provider doesn't say (a plugin's): its source is then

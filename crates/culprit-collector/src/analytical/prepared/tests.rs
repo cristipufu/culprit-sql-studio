@@ -28,22 +28,25 @@ fn resource_projection_distinguishes_subject_usage_from_shared_context_without_c
     assert!(prepared["record"]["data"]["metrics"][0].get("describes_subject").is_none());
 }
 #[test]
-fn diagnostic_details_omit_only_the_private_target_while_native_recovery_evidence_stays_exact() {
+fn diagnostic_details_reference_private_scopes_while_native_recovery_evidence_stays_exact() {
     for (source, records) in crate::analytical::test_support::diagnostic_evidence_cases() {
         let record = &records[0];
         let original = serde_json::to_value(record).unwrap();
         let original_bytes = serde_json::to_vec(record).unwrap();
         let prepared = input(record);
         let mut public_record = original.clone();
-        public_record["data"]["fact"]["data"]["episode"]["scope"].as_object_mut().unwrap().remove("target");
+        let scope: DiagnosticScope =
+            serde_json::from_value(original["data"]["fact"]["data"]["episode"]["scope"].clone()).unwrap();
+        let reference = json!({"key": scope.key().unwrap()});
+        public_record["data"]["fact"]["data"]["episode"]["scope"] = reference.clone();
         assert_eq!(prepared["record"], public_record);
         assert_eq!(serde_json::to_vec(record).unwrap(), original_bytes);
         let projected = wire(schema::facts::operational(&[]).unwrap(), &prepared);
         let details: Value = serde_json::from_str(projected["Details"].as_str().unwrap()).unwrap();
         let mut expected = original["data"]["fact"]["data"].clone();
         assert_eq!(expected["episode"]["scope"]["target"], serde_json::to_value(&source.target).unwrap());
-        expected["episode"]["scope"].as_object_mut().unwrap().remove("target");
-        assert_eq!(details, expected, "only the duplicated private target leaves warehouse Details");
+        expected["episode"]["scope"] = reference;
+        assert_eq!(details, expected, "warehouse Details retain only the exact private scope reference");
         let encoded = serde_json::to_string(&prepared).unwrap();
         assert!(!encoded.contains("private-diagnostic"));
         assert!(!encoded.contains("/private/diagnostics"));
@@ -164,7 +167,7 @@ fn catalog_expressions_and_tuning_bodies_are_references_with_their_native_metada
     let hint = NativeQueryHint {
         hint_id: "1".into(),
         query_id: "7".into(),
-        scope: culprit_core::QueryStoreHintScope::Local,
+        scope: culprit_core::QueryStoreScope::Local,
         hint: DefinitionPayload::sql(&"x".repeat(200_000), culprit_core::Engine::Mssql),
         failures: "9007199254740993".into(),
         last_failure_reason: None,

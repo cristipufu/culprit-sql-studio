@@ -60,8 +60,7 @@ FROM sys.dm_io_virtual_file_stats(0, NULL) vfs WHERE vfs.database_id = 0"
     format!(
         "DECLARE @engine_edition int = CONVERT(int, SERVERPROPERTY('EngineEdition'));
 DECLARE @database_edition nvarchar(64) = CONVERT(nvarchar(64), DATABASEPROPERTYEX(DB_NAME(), 'Edition'));
-DECLARE @replica_id nvarchar(36) = CONVERT(nvarchar(36), TRY_CONVERT(uniqueidentifier,
-  CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'ReplicaID'))));
+DECLARE @replica_id nvarchar(36) = {replica_id};
 DECLARE @updateability nvarchar(60) = CONVERT(nvarchar(60), DATABASEPROPERTYEX(DB_NAME(), 'Updateability'));
 IF @engine_edition = 5 AND (@database_edition = N'Hyperscale' OR @replica_id IS NOT NULL)
 BEGIN
@@ -70,7 +69,8 @@ END
 ELSE
 BEGIN
 {current}{tempdb} OPTION(MAXDOP 1);
-END"
+END",
+        replica_id = crate::replica::ID_EXPRESSION,
     )
 }
 

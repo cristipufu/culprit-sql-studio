@@ -6,8 +6,8 @@ use crate::{
     value::Rec,
 };
 use culprit_core::{
-    Result,
-    telemetry::{CollectionBudget, CollectionStop, SourceShutdown},
+    Result, RuntimePopulationCatalog,
+    telemetry::{CollectionBudget, CollectionStop, NativeIdentity, SourceShutdown},
 };
 use std::sync::Arc;
 const MAX_RESULT_ROWS: usize = 10_000;
@@ -19,6 +19,8 @@ pub(crate) struct Reader<R = ReadSession> {
     layout: Option<RuntimeLayout>,
     window: Option<super::window_sql::FrozenWindow>,
     stopped: Option<culprit_core::Error>,
+    requested_population: Option<NativeIdentity>,
+    population_catalog: Option<RuntimePopulationCatalog>,
 }
 #[derive(Clone, Copy)]
 struct RuntimeLayout {
@@ -26,6 +28,8 @@ struct RuntimeLayout {
     log_bytes: bool,
     waits: bool,
     variants: super::variants_sql::Availability,
+    population: super::replicas::Population,
+    mode: super::mode::ReadMode,
 }
 impl Reader {
     pub(crate) fn open(pool: Arc<Pool>) -> Self {
@@ -39,7 +43,32 @@ impl Reader {
 }
 impl<R: NativeRead> Reader<R> {
     pub(crate) fn new(io: R) -> Self {
-        Self { io, layout: None, window: None, stopped: None }
+        Self { io, layout: None, window: None, stopped: None, requested_population: None, population_catalog: None }
+    }
+    pub(crate) fn select_population(&mut self, requested: Option<&NativeIdentity>) -> Result<()> {
+        self.admit()?;
+        if (self.layout.is_some() || self.population_catalog.is_some())
+            && self.requested_population.as_ref() != requested
+        {
+            return Err(invalid_data());
+        }
+        if let Some(requested) = requested {
+            super::replicas::requested_group(requested)?;
+        }
+        self.requested_population = requested.cloned();
+        Ok(())
+    }
+    pub(crate) fn population_catalog(&self) -> Option<&RuntimePopulationCatalog> {
+        self.population_catalog.as_ref()
+    }
+    pub(crate) fn selected_population(&self) -> Option<NativeIdentity> {
+        self.layout.and_then(|layout| layout.population.identity())
+    }
+    pub(crate) fn accepts_local_capture(&self) -> Option<bool> {
+        self.layout.map(|layout| layout.mode.accepts_local_capture())
+    }
+    pub(crate) async fn population(&mut self) -> Result<super::replicas::Population> {
+        Ok(self.runtime_layout().await?.population)
     }
     fn admit(&self) -> Result<()> {
         if let Some(error) = &self.stopped {
@@ -87,20 +116,7 @@ impl<R: NativeRead> Reader<R> {
         if let Some(window) = &self.window {
             return if window.matches_request(window_minutes) { Ok(window.clone()) } else { Err(invalid_data()) };
         }
-        let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
-        let [row] = rows.as_slice() else { return Err(invalid_data()) };
-        let tempdb = match integer(row, "tempdb")? {
-            0 => false,
-            1 => true,
-            _ => return Err(invalid_data()),
-        };
-        let log_bytes = match integer(row, "log_bytes")? {
-            0 => false,
-            1 => true,
-            _ => return Err(invalid_data()),
-        };
-        let variants = super::variants_sql::Availability::decode(row, "variants")?;
-        let layout = RuntimeLayout { tempdb, log_bytes, waits: super::window_sql::waits_supported(row)?, variants };
+        let layout = self.runtime_layout().await?;
         let rows = self
             .read(
                 &super::window_sql::metadata_sql(layout.waits, false),
@@ -119,9 +135,74 @@ impl<R: NativeRead> Reader<R> {
         if !window.retained {
             return Err(self.source_changed());
         }
-        self.layout = Some(layout);
         self.window = Some(window.clone());
         Ok(window)
+    }
+    async fn runtime_layout(&mut self) -> Result<RuntimeLayout> {
+        self.admit()?;
+        if let Some(layout) = self.layout {
+            return Ok(layout);
+        }
+        let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
+        let [row] = rows.as_slice() else { return Err(invalid_data()) };
+        let tempdb = match integer(row, "tempdb")? {
+            0 => false,
+            1 => true,
+            _ => return Err(invalid_data()),
+        };
+        let log_bytes = match integer(row, "log_bytes")? {
+            0 => false,
+            1 => true,
+            _ => return Err(invalid_data()),
+        };
+        let variants = super::variants_sql::Availability::decode(row, "variants")?;
+        let mode =
+            super::mode::ReadMode::from_native(&crate::read::text(row, "actual_state_desc")?).ok_or_else(|| {
+                culprit_core::Error::new(
+                    culprit_core::ErrorCode::Unsupported,
+                    culprit_core::t!("collection.query_store_unavailable"),
+                )
+            })?;
+        let waits = super::window_sql::waits_supported(row)?;
+        let population = match integer(row, "replicas")? {
+            0 => {
+                if mode == super::mode::ReadMode::ReadCaptureSecondary {
+                    let error = culprit_core::Error::new(
+                        culprit_core::ErrorCode::Unsupported,
+                        culprit_core::t!("provider.mssql.query_store.population_unavailable"),
+                    );
+                    self.stopped = Some(error.clone());
+                    return Err(error);
+                }
+                self.population_catalog = Some(super::replicas::unpartitioned_catalog());
+                if self.requested_population.is_some() {
+                    let error = culprit_core::Error::new(
+                        culprit_core::ErrorCode::Unsupported,
+                        culprit_core::t!("provider.mssql.query_store.population_missing"),
+                    );
+                    self.stopped = Some(error.clone());
+                    return Err(error);
+                }
+                super::replicas::Population::Unpartitioned
+            }
+            1 => {
+                let rows =
+                    self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
+                let catalog = super::replicas::Catalog::decode(&rows).map_err(|_| self.source_changed())?;
+                self.population_catalog = Some(catalog.population_catalog()?);
+                match catalog.select(self.requested_population.as_ref()) {
+                    Ok(population) => population,
+                    Err(error) => {
+                        self.stopped = Some(error.clone());
+                        return Err(error);
+                    }
+                }
+            }
+            _ => return Err(invalid_data()),
+        };
+        let layout = RuntimeLayout { tempdb, log_bytes, waits, variants, population, mode };
+        self.layout = Some(layout);
+        Ok(layout)
     }
     pub(crate) async fn verify_window(&mut self) -> Result<super::window_sql::WindowVerification> {
         let mut window = self.window.as_ref().ok_or_else(invalid_data)?.clone();
@@ -134,16 +215,43 @@ impl<R: NativeRead> Reader<R> {
             window.invalidate_endpoint();
         }
         self.window = Some(window);
+        result.as_ref().map_err(Clone::clone)?;
+        if self.window.as_ref().is_some_and(|window| !window.retained) {
+            return result;
+        }
+        self.verify_population().await?;
         result
+    }
+    pub(crate) async fn verify_population(&mut self) -> Result<()> {
+        self.admit()?;
+        let layout = self.layout.ok_or_else(invalid_data)?;
+        if let super::replicas::Population::ReplicaGroup(_) = layout.population {
+            let rows = self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
+            let current = super::replicas::Catalog::decode(&rows).map_err(|_| self.source_changed())?;
+            if current.select(layout.population.identity().as_ref()).ok() != Some(layout.population) {
+                return Err(self.source_changed());
+            }
+        }
+        Ok(())
     }
     pub(crate) async fn summary(&mut self, window_minutes: u32) -> Result<Vec<PlanSummary>> {
         let window = self.window(window_minutes).await?;
         let layout = self.layout.ok_or_else(invalid_data)?;
         let result = self
-            .read(&runtime::summary_sql(layout.tempdb, layout.log_bytes), vec![window.parameter()], MAX_RESULT_ROWS)
+            .read(
+                &runtime::summary_sql(layout.tempdb, layout.log_bytes, layout.population),
+                vec![window.parameter()],
+                MAX_RESULT_ROWS,
+            )
             .await?
             .iter()
-            .map(PlanSummary::decode)
+            .map(|row| {
+                let summary = PlanSummary::decode(row)?;
+                if summary.population != layout.population {
+                    return Err(self.source_changed());
+                }
+                Ok(summary)
+            })
             .collect();
         if let Err(error) = &result {
             self.observe_failure(error);
@@ -169,10 +277,17 @@ impl<R: NativeRead> Reader<R> {
         if let Some(ids) = plan_ids {
             parameters.push(ids_parameter(ids)?);
         }
-        self.read(&super::waits::summary_sql(plan_ids.is_some()), parameters, MAX_RESULT_ROWS)
+        let population = self.population().await?;
+        self.read(&super::waits::summary_sql(plan_ids.is_some(), population), parameters, MAX_RESULT_ROWS)
             .await?
             .iter()
-            .map(|row| super::waits::Summary::decode(row, plan_ids.is_some()))
+            .map(|row| {
+                let summary = super::waits::Summary::decode(row, plan_ids.is_some())?;
+                if summary.population != population {
+                    return Err(self.source_changed());
+                }
+                Ok(summary)
+            })
             .collect()
     }
     pub(crate) async fn definitions(
@@ -253,5 +368,7 @@ pub(crate) fn ids_parameter(ids: &[String]) -> Result<Parameter> {
     Ok(Parameter::Text(xml))
 }
 
+#[cfg(test)]
+mod replica_tests;
 #[cfg(test)]
 mod tests;

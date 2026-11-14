@@ -19,6 +19,7 @@ mod tests;
 mod timescale;
 mod yugabyte;
 
+pub use mssql::QueryStoreReadMode;
 pub use presentation::{EvidencePresentation, StatisticsFreshness};
 pub use products::{DatabaseProduct, ProductFacts, ProductSpec};
 pub use yugabyte::session_target as ysql_session_target;

@@ -14,6 +14,39 @@ culprit conn add shop --env staging --url 'Server=tcp:db.example.com,1433;Databa
 
 Passwords stay in the OS keychain. Agent permissions and production confirmations apply separately to each saved connection.
 
+### Read-only replicas
+
+Save a separate route with `ApplicationIntent=ReadOnly` and the appropriate existing login or named credential
+profile. Intent requests routing; it does not identify the member reached, prove that every HA replica was visited,
+or prevent writes by itself. Reconnecting can reach another member. A SQL session's application name does not
+identify an HTTP endpoint such as `GET odata/QueueItems` without application-provided correlation.
+
+| Evidence | Scope and current support |
+|---|---|
+| Query Store history | Shared database history, with native replica groups kept separate. `READ_CAPTURE_SECONDARY` permits capture; `READ_ONLY` only establishes readability. Raw telemetry retains every native group and outcome in the selected interval. |
+| A scan's Query Store workload | One exact native group, selected with `scan --workload-population <ID>`. A sole observed group can be selected automatically. Multiple groups require a selection rather than blended averages. `--full` exposes the observed catalog when a workload or cache fallback is available. |
+| Activity baseline | The connected member's requests and waits. Hyperscale qualification requires native database/replica identity and a positively readable process epoch. Missing identity preserves partial raw observations; it cannot establish incident continuity, recovery or focused follow-up authority. |
+| Other detailed telemetry | Existing source-specific primary restrictions remain in place until each reader's replica semantics and production cost are qualified. |
+
+The SDK exposes the same `SnapshotOptions.workload_population` selector and a separate saved-report cache through
+`Workspace::latest_population_report`. Population selection is not a replica routing option. The desktop picker,
+automatic analysis of every group, and multi-group period comparisons are not implemented yet. A failed Query Store
+and cache read cannot currently carry its catalog through `Workload`.
+
+Query Store's replica catalog contains observed role history, not a current physical-member inventory. Group-specific
+plan forcing stays unknown unless its native forcing location was read. Supported Azure SQL configurations, including
+Hyperscale, can capture secondary history centrally; verify the actual native state and coverage. See Microsoft's
+[read-scale monitoring](https://learn.microsoft.com/azure/azure-sql/database/read-scale-out#monitor-and-troubleshoot-read-only-replicas)
+and [secondary Query Store](https://learn.microsoft.com/sql/relational-databases/performance/query-store-for-secondary-replicas)
+documentation. These collection changes still require live load qualification; local mock tests do not establish production overhead.
+
+Local index counters never establish that an index is unused across replicas. Usage-based disable/drop advice needs
+verified coverage of every read-serving member throughout the recorded period. Native counts remain visible when
+that coverage is missing. Likewise, recent lock/escalation deltas require the index counter reader's own member and
+reset proof; probe uptime or increasing table totals are insufficient. The current native SQL Server reader cannot
+establish that metadata-cache reset proof, so these observations remain context. Tuning recommendations keep their
+native scope and cannot inherit a selected secondary group's costs or emit unqualified plan-change SQL.
+
 ## Permissions and setup
 
 Culprit checks the login's permissions and Query Store state before collection. SQL Server 2022 monitoring views require `VIEW SERVER PERFORMANCE STATE`; older SQL Server versions use `VIEW SERVER STATE`. Azure SQL Database uses database-scoped monitoring permissions such as `VIEW DATABASE STATE`. Individual sources can require additional access.

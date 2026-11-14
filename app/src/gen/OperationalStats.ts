@@ -4,6 +4,7 @@ import type { CleanupSnapshot } from "./CleanupSnapshot";
 import type { ClusterHealth } from "./ClusterHealth";
 import type { CompilationSnapshot } from "./CompilationSnapshot";
 import type { FreezeAge } from "./FreezeAge";
+import type { IndexUsageScope } from "./IndexUsageScope";
 import type { LoggedFailure } from "./LoggedFailure";
 import type { MemoryFailureSnapshot } from "./MemoryFailureSnapshot";
 import type { NativeFailureSnapshot } from "./NativeFailureSnapshot";
@@ -17,4 +18,8 @@ import type { SqliteFileHealth } from "./SqliteFileHealth";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, task_space?: TaskSpaceSnapshot, query_compilation?: CompilationSnapshot, cleanup?: Array<CleanupSnapshot>, node_resources?: NodeResources, };
+export type OperationalStats = { 
+/**
+ * None means that the native usage population was not established.
+ */
+index_usage_scope?: IndexUsageScope, log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, task_space?: TaskSpaceSnapshot, query_compilation?: CompilationSnapshot, cleanup?: Array<CleanupSnapshot>, node_resources?: NodeResources, };

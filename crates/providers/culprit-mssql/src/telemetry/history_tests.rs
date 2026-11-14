@@ -83,10 +83,51 @@ pub(super) fn description_rows() -> Vec<crate::read::ReadResult<Vec<Rec>>> {
             ("starts", Val::Text("2020-01-01T06:00:00Z".into())),
             ("ends", Val::Text("2020-01-01T07:00:00Z".into())),
         ])]),
-        Ok(vec![Rec::of(&[("replica_group_id", Val::Int(1))])]),
+        Ok(vec![crate::query_store::replicas::tests::row(1, 1, None)]),
         Ok(vec![Rec::of(&[("plan_id", Val::Int(0))])]),
     ]
 }
+
+#[tokio::test]
+async fn readable_secondary_exports_exact_native_history_without_claiming_local_capture_when_read_only() {
+    for (mode, permitted) in [("READ_CAPTURE_SECONDARY", "true"), ("READ_ONLY", "false")] {
+        let mut replies = description_rows();
+        let Ok(options) = &mut replies[2] else { unreachable!() };
+        options[0] = replace(&options[0], &[("actual_state_desc", Val::Text(mode.into()))]);
+        let Ok(identity) = &mut replies[3] else { unreachable!() };
+        identity[0] = replace(&identity[0], &[("updateability", Val::Text("READ_ONLY".into()))]);
+        replies[5] = Ok(vec![crate::query_store::replicas::tests::row(7, 2, None)]);
+        replies[6] = Ok(vec![Rec::of(&[("plan_id", Val::Int(4))])]);
+        replies.extend([Ok(vec![pressure()]), Ok(vec![crate::query_store::tests::runtime_row(3000)])]);
+        let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+        assert_eq!(source.query_count(), 0);
+        let description = source.describe().await.unwrap();
+        assert_eq!(description.partition, SourcePartition::Target);
+        let history = description.query_history().unwrap();
+        assert_eq!(history.native_properties["actual_state"], mode);
+        assert_eq!(history.native_properties["local_capture_permitted"], permitted);
+        assert_eq!(history.dimensions["replica_group_id"], ["7"]);
+        let catalog = history.population_catalog.as_ref().unwrap();
+        let groups: serde_json::Value =
+            serde_json::from_str(&catalog.populations[0].native_properties["role_history"]).unwrap();
+        assert_eq!(groups[0]["role_type"], 2);
+        assert!(groups[0]["replica_name"].is_null());
+        let CollectionRead::Page { records, next_cursor: None } =
+            source.read_page(TelemetryStream::QueryRuntime, None).await.unwrap()
+        else {
+            panic!("retained native history")
+        };
+        let TelemetryRecord::QueryRuntime(runtime) = &records[0] else { panic!("native runtime") };
+        assert_eq!(runtime.key.native.qualifiers["replica_group_id"], "7");
+        assert_eq!(runtime.key.native.qualifiers["execution_type"], "3");
+        assert_eq!(runtime.executions, "1");
+        assert_eq!(runtime.metric(&RuntimeMetricKey::Duration).unwrap().average, 3000.0);
+        assert_eq!(source.query_count(), 9, "same bounded description plus one pressure/page read");
+        assert!(source.finish().await.is_err(), "unread waits/definitions cannot produce complete history");
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
 #[tokio::test]
 async fn query_history_never_verifies_unread_streams_and_closed_sources_cannot_reopen() {
     let mut source =

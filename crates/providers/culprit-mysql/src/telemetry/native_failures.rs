@@ -36,6 +36,7 @@ impl<R: OwnedRead> ObservationReader for Reader<R> {
         let captured = native_failures::capture(&mut self.io, limit, Some(resource)).await?;
         let source_name = sources::NATIVE_FAILURES.name;
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: CollectionTarget::Shared(captured.context.instance.resource.clone()),
             source: "mysql-error-log".into(),
             continuity: SourceContinuity::Unverified,

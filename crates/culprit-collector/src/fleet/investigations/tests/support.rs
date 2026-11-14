@@ -356,6 +356,7 @@ fn focused_frame(focus: ActivityWaitFocus, request: PageWaitRequestState) -> Fra
     assert!(result.is_valid());
     Frame {
         source: CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: result.focus.target.clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,

@@ -7,6 +7,7 @@ pub(super) fn source() -> CollectionDescription {
     database.engine = culprit_core::Engine::Postgres;
     manifest.source.source = "native-history-fixture".into();
     manifest.source.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
+        population_catalog: None,
         waits: None,
         interval: TelemetryInterval {
             native_id: "native-period".into(),

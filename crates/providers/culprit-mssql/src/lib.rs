@@ -46,6 +46,7 @@ mod read;
 mod read_metrics;
 mod recorded;
 mod relational_inputs;
+mod replica;
 mod replication;
 mod request_memory;
 mod resource_counters;

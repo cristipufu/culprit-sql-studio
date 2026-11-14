@@ -45,6 +45,7 @@ fn baseline(files: &mut Files, rows: Vec<ActivityObservation>, complete: bool, s
     let identity = reservation.entry.identity.clone();
     files.journal.source_work(&reservation.entry, SourceWorkState::Active).unwrap();
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
@@ -56,6 +57,7 @@ fn baseline(files: &mut Files, rows: Vec<ActivityObservation>, complete: bool, s
         source: "activity".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            database_writable: None,
             population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
             epoch: Some("native-epoch".into()),
             observed_from: format!("2026-11-14T08:00:{second:02}Z"),

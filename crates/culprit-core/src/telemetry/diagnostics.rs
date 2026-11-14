@@ -98,11 +98,12 @@ impl DiagnosticEvidenceRef {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct DiagnosticScope {
     pub target: CollectionTarget,
+    pub partition: SourcePartition,
     pub source: String,
     pub population: ActivityPopulation,
     pub measurement_scope: crate::MeasurementScope,
@@ -111,24 +112,40 @@ pub struct DiagnosticScope {
 }
 impl DiagnosticScope {
     pub fn is_valid(&self) -> bool {
-        self.target.is_valid() && valid_key(&self.source) && self.native_epoch.as_deref().is_none_or(valid_key)
+        self.partition.is_valid_for(&self.target)
+            && valid_key(&self.source)
+            && self.native_epoch.as_deref().is_none_or(valid_key)
+            && match &self.partition {
+                SourcePartition::Target => true,
+                SourcePartition::InstanceLocal { epoch, .. } => epoch == &self.native_epoch,
+            }
     }
     pub fn key(&self) -> Result<String> {
         if !self.is_valid() {
             return Err(invalid());
         }
-        digest_value(&(
-            self.target.telemetry_id()?,
-            &self.source,
-            &self.native_epoch,
-            self.population,
-            self.measurement_scope,
-        ))
+        let native =
+            (self.target.telemetry_id()?, &self.source, &self.native_epoch, self.population, self.measurement_scope);
+        match &self.partition {
+            SourcePartition::Target => digest_value(&native),
+            partition => digest_value(&(partition, native)),
+        }
+    }
+    pub fn same_member(&self, other: &Self) -> bool {
+        self.is_valid()
+            && other.is_valid()
+            && self.target.telemetry_id().ok() == other.target.telemetry_id().ok()
+            && self.source == other.source
+            && self.partition.same_member(&other.partition)
     }
     pub fn from_source(source: &CollectionDescription) -> Result<Self> {
+        if !source.partition_is_consistent() {
+            return Err(invalid());
+        }
         let frame = source.observation.activity().filter(|frame| frame.is_valid()).ok_or_else(invalid)?;
         let value = Self {
             target: source.target.clone(),
+            partition: source.partition.clone(),
             source: source.source.clone(),
             native_epoch: frame.epoch.clone(),
             population: frame.population,
@@ -353,7 +370,9 @@ impl DiagnosticEpisode {
                 .is_none_or(|report| report.is_valid() && matches!(self.signal, DiagnosticSignal::PageWait { .. }))
             && match (&self.lifecycle, &self.recovery) {
                 (DiagnosticLifecycle::Resolved, Some(proof)) => {
-                    proof.qualifies(&self.first) && self.scope.native_epoch.is_some()
+                    proof.qualifies(&self.first)
+                        && self.scope.native_epoch.is_some()
+                        && self.scope.partition.is_qualified()
                 }
                 (DiagnosticLifecycle::Active | DiagnosticLifecycle::Uncertain, None) => true,
                 _ => false,
@@ -402,6 +421,7 @@ impl DiagnosticEpisode {
                     && *resource == focus.resource)
             && self.scope.source == focus.source
             && self.scope.native_epoch.as_deref() == Some(focus.epoch.as_str())
+            && self.scope.partition == focus.partition
             && self.scope.target.telemetry_id().ok() == focus.target.telemetry_id().ok()
             && self.first.source_scope_id == focus.parent.source_scope_id
             && ObservationBounds::new(&self.first_seen_at, &self.last_seen_at)
@@ -606,6 +626,7 @@ pub fn diagnostic_baseline_can_resolve(
 ) -> bool {
     scope.is_valid()
         && scope.native_epoch.is_some()
+        && scope.partition.is_qualified()
         && complete_scope
         && matches!(source_state, SourceState::Collected | SourceState::Empty)
 }

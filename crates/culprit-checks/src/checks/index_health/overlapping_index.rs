@@ -20,7 +20,7 @@ check!(
     decide = overlapping_indexes,
     render = overlapping_index_finding,
     case<'s> = OverlappingIndex<'s>,
-    evidence = &[Evidence::IndexCatalog],
+    evidence = &[Evidence::IndexCatalog, Evidence::IndexHistory],
 );
 
 /// Indexes that compete for the same leading column, as (rarely read, well used). The well-used one must hold every key
@@ -31,7 +31,8 @@ check!(
 /// whole rows, which is what the narrow index spares its queries.
 pub(crate) fn overlapping_pairs(snapshot: &Snapshot) -> Vec<(&IndexStat, &IndexStat)> {
     // "Barely read" is a claim about a week of counters, the same as "unused": under it, reads say nothing yet.
-    if !crate::indexes::watched_long_enough(snapshot) {
+    if !crate::indexes::index_usage_covers_all_read_members(snapshot) || !crate::indexes::watched_long_enough(snapshot)
+    {
         return Vec::new();
     }
     // By table and name: MySQL and SQL Server index names are unique only within a table.

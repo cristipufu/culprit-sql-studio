@@ -324,13 +324,14 @@ fn query_hint_failures_keep_replica_scopes_and_clear_the_observed_replica() {
         .map(|group| QueryHint {
             query_id: "7".into(),
             hint_id: group.into(),
-            scope: culprit_core::QueryStoreHintScope::ReplicaGroup { id: group.into() },
+            scope: culprit_core::QueryStoreScope::ReplicaGroup { id: group.into() },
             hint: "OPTION(MAXDOP 1)".into(),
             failures: 3.0,
             last_failure_reason: None,
         })
         .collect();
-    let findings = advice(&tuned(TuningAdvice { hints, ..Default::default() }));
+    let findings =
+        advice(&tuned(TuningAdvice { plan_scope: culprit_core::QueryStoreScope::Local, hints, ..Default::default() }));
     let hints: Vec<_> = findings.iter().filter(|finding| finding.id.contains("hint-failing:")).collect();
     assert_eq!(hints.len(), 2);
     assert_ne!(hints[0].id, hints[1].id);
@@ -353,12 +354,13 @@ fn unknown_hint_scope_preserves_the_failure_without_issuing_a_fix_against_the_lo
     let hints = vec![QueryHint {
         hint_id: "3".into(),
         query_id: "7".into(),
-        scope: culprit_core::QueryStoreHintScope::Unknown,
+        scope: culprit_core::QueryStoreScope::Unknown,
         hint: "OPTION(MAXDOP 1)".into(),
         failures: 3.0,
         last_failure_reason: None,
     }];
-    let findings = advice(&tuned(TuningAdvice { hints, ..Default::default() }));
+    let findings =
+        advice(&tuned(TuningAdvice { plan_scope: culprit_core::QueryStoreScope::Local, hints, ..Default::default() }));
     let hint = findings.iter().find(|finding| finding.id.contains("hint-failing:")).unwrap();
     assert!(hint.fix.as_ref().unwrap().sql.is_none());
     assert_eq!(hint.caveats.len(), 1);
@@ -378,6 +380,7 @@ description: Plan-forcing and index recommendations from automatic tuning, force
     (seven.estimated_gain, seven.valid_since) = (Some(0.73), Some("2026-10-09T10:00:00Z".into()));
     seven.script = Some("exec sp_query_store_force_plan @query_id = 7, @plan_id = 815".into());
     let s = tuned(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         automatic_tuning: correction("OFF", "OFF", None),
         recommendations: vec![seven.clone()],
         ..Default::default()
@@ -412,6 +415,7 @@ verify: Re-scan: recommendations move from Active to Verifying and then Success.
     let mut gone = force("123456", "12", None);
     (gone.error_prone, gone.last_execution) = (true, Some("2026-10-08T06:00:00Z".into()));
     let s = tuned(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         automatic_tuning: correction("ON", "ON", None),
         recommendations: vec![gone, force("9", "9", Some("3"))],
         ..Default::default()
@@ -447,6 +451,7 @@ verify: If it gets worse, undo with EXEC sp_query_store_unforce_plan @query_id =
     let mut all = Vec::new();
     for (desired, reason) in [("ON", Some("QUERY_STORE_OFF")), ("ON", None), ("OFF", None)] {
         let s = tuned(TuningAdvice {
+            plan_scope: culprit_core::QueryStoreScope::Local,
             automatic_tuning: correction(desired, "OFF", reason),
             recommendations: vec![force("123456", "12", None), force("123457", "13", None)],
             ..Default::default()
@@ -493,6 +498,7 @@ fn forced_plans_and_hints_that_stopped_applying_say_why() {
         forcing: None,
     };
     let s = tuned(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         forced_plans: vec![
             failing("7", 34.0, Some("NO_INDEX"), None),
             failing("9", 150.0, None, None),
@@ -504,7 +510,7 @@ fn forced_plans_and_hints_that_stopped_applying_say_why() {
             QueryHint {
                 query_id: "7".into(),
                 hint_id: "7".into(),
-                scope: culprit_core::QueryStoreHintScope::Local,
+                scope: culprit_core::QueryStoreScope::Local,
                 hint: " OPTION (MAXDOP 1) ".into(),
                 failures: 3.0,
                 last_failure_reason: Some("QUERY_HINT_ERROR".into()),
@@ -512,7 +518,7 @@ fn forced_plans_and_hints_that_stopped_applying_say_why() {
             QueryHint {
                 query_id: "9".into(),
                 hint_id: "9".into(),
-                scope: culprit_core::QueryStoreHintScope::Local,
+                scope: culprit_core::QueryStoreScope::Local,
                 hint: "OPTION (RECOMPILE)".into(),
                 failures: 1.0,
                 last_failure_reason: None,
@@ -626,6 +632,7 @@ fn forced_plans_are_listed_with_who_forced_them() {
     let mut all = Vec::new();
     for (forced_plans, recommendations, on) in cases {
         let s = tuned(TuningAdvice {
+            plan_scope: culprit_core::QueryStoreScope::Local,
             automatic_tuning: on.map(|on| correction(on, on, None)).unwrap_or_default(),
             recommendations,
             forced_plans,
@@ -760,6 +767,7 @@ fn a_forced_plan_that_scans_past_an_index_says_so() {
     let mut applied = force("9", "9", Some("3"));
     (applied.state, applied.applied_at) = (Some("Verifying".into()), Some("2026-10-03T08:00:00Z".into()));
     let mut s = tuned(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![applied],
         forced_plans: vec![ForcedPlan {
             query_id: "9".into(),
@@ -862,7 +870,7 @@ fn recommend(table: &str, columns: &[&str], include: &[&str], score: f64) -> Tun
 }
 
 fn recommended(recommendations: Vec<TuningRecommendation>) -> Snapshot {
-    tuned(TuningAdvice { recommendations, ..Default::default() })
+    tuned(TuningAdvice { plan_scope: culprit_core::QueryStoreScope::Local, recommendations, ..Default::default() })
 }
 
 /// A statement on support_tickets like query 10, as `id`, with `text`, its runs and time.
@@ -899,6 +907,8 @@ fn azure_index_recommendations_say_what_they_would_add() {
         drop,
         drop_why,
     ]);
+    // This positive word fixture explicitly supplies complete native read-member coverage.
+    s.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::AllReadMembers);
     let priority = s.indexes.iter_mut().find(|i| i.name == "ix_support_tickets_priority").unwrap();
     priority.definition =
         Some("CREATE INDEX [ix_support_tickets_priority] ON [shop].[support_tickets] ([priority])".into());
@@ -980,6 +990,7 @@ fn azure_index_recommendations_are_weighed_against_the_indexes_there() {
     filtered.filter = Some("([status]='open')".into());
     s.indexes.push(filtered);
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![
             recommend("support_tickets", &["priority", "customer_id"], &["subject"], 2.0),
             recommend("support_tickets", &["customer_id", "priority"], &["subject", "status"], 40.0),

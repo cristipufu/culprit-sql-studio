@@ -230,6 +230,7 @@ fn a_plan_regression_says_what_changed_in_english() {
     gone.tables.retain(|t| t.name != "orders");
     let mut automatic = running();
     automatic.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         automatic_tuning: vec![culprit_core::AutomaticTuningOption {
             name: "FORCE_LAST_GOOD_PLAN".into(),
             desired: "ON".into(),
@@ -336,6 +337,7 @@ fn a_regression_says_when_and_how_much_in_english() {
     );
     let mut automatic = stretched(4.0);
     automatic.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         automatic_tuning: vec![culprit_core::AutomaticTuningOption {
             name: "FORCE_LAST_GOOD_PLAN".into(),
             desired: "ON".into(),
@@ -441,6 +443,7 @@ verify: Re-scan after the fix: this query's trend in Queries should drop back to
 
 fn recommend(query: &str, good: &str, bad: &str) -> TuningAdvice {
     TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![TuningRecommendation {
             name: "PR_1".into(),
             kind: "FORCE_LAST_GOOD_PLAN".into(),
@@ -2540,6 +2543,7 @@ fn recorded_runtime_variation_words_preserve_populations_and_keep_causes_unresol
         plan.compiled = Some(format!("@P1 = ({})", plan.id));
     }
     costly.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         automatic_tuning: vec![culprit_core::AutomaticTuningOption {
             name: "FORCE_LAST_GOOD_PLAN".into(),
             desired: "ON".into(),
@@ -2973,6 +2977,7 @@ fn ysql_unstable_writes_describe_key_share_locks_and_cumulative_spreads() {
 fn forced_scan(kept: f64, include: &[&str], created_at_latest: Option<&str>) -> Option<Finding> {
     let mut s = snapshot("mssql-demo.json");
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![TuningRecommendation {
             name: "PR_9".into(),
             kind: "FORCE_LAST_GOOD_PLAN".into(),

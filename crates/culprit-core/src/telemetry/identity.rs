@@ -1,14 +1,14 @@
 //! Export identity excludes delivery attempts, redaction, endpoint aliases and observation timestamps.
 use super::{
-    CaptureIdentity, CollectionDescription, NativeRecordIdentity, SourceObservation, TelemetryRecord, TelemetryStream,
-    valid_key,
+    CaptureIdentity, CollectionDescription, NativeRecordIdentity, SourceObservation, SourcePartition, TelemetryRecord,
+    TelemetryStream, valid_key,
 };
 use crate::{DatabaseIdentity, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 22;
+pub const EXPORT_FORMAT_VERSION: u32 = 23;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -29,30 +29,64 @@ pub fn valid_digest(value: &str) -> bool {
 impl CollectionDescription {
     /// Stable grouping for the latest complete observation set. Captured scopes retain native generations.
     pub fn logical_source_id(&self) -> Result<String> {
-        target_scoped_id("logical-source-v1", &self.target, &self.source, &())
+        if !self.partition.is_valid_for(&self.target) {
+            return Err(super::CollectionStop::InvalidPage.error());
+        }
+        match &self.partition {
+            SourcePartition::Target => target_scoped_id("logical-source-v1", &self.target, &self.source, &()),
+            SourcePartition::InstanceLocal { member, .. } => {
+                target_scoped_id("logical-source-v1", &self.target, &self.source, &("instance-local", member))
+            }
+        }
     }
     pub fn scoped_id(&self, domain: &str, identity: &impl Serialize) -> Result<String> {
+        if !self.partition.is_valid_for(&self.target) {
+            return Err(super::CollectionStop::InvalidPage.error());
+        }
         match &self.observation {
-            SourceObservation::Activity(snapshot) => target_scoped_id(
-                domain,
-                &self.target,
-                &self.source,
-                &(&snapshot.epoch, snapshot.population, snapshot.scope, identity),
-            ),
+            SourceObservation::Activity(snapshot) => {
+                source_scoped_id(domain, self, &(&snapshot.epoch, snapshot.population, snapshot.scope, identity))
+            }
             SourceObservation::FocusedPageWait { result, .. } => {
-                target_scoped_id(domain, &self.target, &self.source, &(result.focus.key()?, identity))
+                source_scoped_id(domain, self, &(result.focus.key()?, identity))
             }
             SourceObservation::Diagnostics(description) => {
-                target_scoped_id(domain, &self.target, &self.source, &(description.work_key()?, identity))
+                source_scoped_id(domain, self, &(description.work_key()?, identity))
             }
-            _ => target_scoped_id(domain, &self.target, &self.source, identity),
+            _ => source_scoped_id(domain, self, identity),
+        }
+    }
+
+    fn point_record_id(&self, domain: &str, capture: &CaptureIdentity, identity: &impl Serialize) -> Result<String> {
+        if self.is_partition_qualified() {
+            self.scoped_id(domain, identity)
+        } else {
+            self.scoped_id(domain, &(capture, identity))
         }
     }
     pub fn captured_range(&self) -> Result<super::CapturedRange> {
+        if !self.partition_is_consistent() {
+            return Err(super::CollectionStop::InvalidPage.error());
+        }
         Ok(super::CapturedRange {
             scope_id: self.scoped_id("outbox-source-v1", &())?,
             range: self.observation.range()?.canonical()?,
         })
+    }
+}
+fn source_scoped_id(domain: &str, source: &CollectionDescription, identity: &impl Serialize) -> Result<String> {
+    partition_scoped_id(domain, &source.target, &source.source, &source.partition, identity)
+}
+fn partition_scoped_id(
+    domain: &str,
+    target: &super::CollectionTarget,
+    source: &str,
+    partition: &SourcePartition,
+    identity: &impl Serialize,
+) -> Result<String> {
+    match partition {
+        SourcePartition::Target => target_scoped_id(domain, target, source, identity),
+        partition => target_scoped_id(domain, target, source, &(partition, identity)),
     }
 }
 impl super::CapturedRange {
@@ -60,15 +94,15 @@ impl super::CapturedRange {
     pub fn native_interval(
         database: &DatabaseIdentity,
         source: &str,
+        partition: &SourcePartition,
         interval: &super::TelemetryInterval,
     ) -> Result<Self> {
+        let target = super::CollectionTarget::Database(database.clone());
+        if !partition.is_valid_for(&target) || !partition.is_qualified() {
+            return Err(super::CollectionStop::InvalidPage.error());
+        }
         Ok(Self {
-            scope_id: target_scoped_id(
-                "outbox-source-v1",
-                &super::CollectionTarget::Database(database.clone()),
-                source,
-                &(),
-            )?,
+            scope_id: partition_scoped_id("outbox-source-v1", &target, source, partition, &())?,
             range: super::TelemetryRange::NativeInterval { interval: interval.clone() }.canonical()?,
         })
     }
@@ -125,6 +159,20 @@ impl ExportedRecord {
     }
 
     pub fn new(source: &CollectionDescription, capture: &CaptureIdentity, record: TelemetryRecord) -> Result<Self> {
+        if !source.partition_is_consistent()
+            || !source.is_partition_qualified()
+                && matches!(
+                    record,
+                    TelemetryRecord::QueryDefinition(_)
+                        | TelemetryRecord::PlanDefinition(_)
+                        | TelemetryRecord::QueryRuntime(_)
+                        | TelemetryRecord::QueryWaits(_)
+                        | TelemetryRecord::ResourceSample(_)
+                        | TelemetryRecord::Deadlock(_)
+                )
+        {
+            return Err(super::CollectionStop::InvalidPage.error());
+        }
         let record = record.for_export(source)?;
         let interval = source
             .query_history()
@@ -154,37 +202,46 @@ impl ExportedRecord {
             TelemetryRecord::ResourceSample(row) => {
                 Some(source.scoped_id("resource-sample-v1", &(&row.at, &row.replica_id))?)
             }
-            TelemetryRecord::Activity(row) => {
-                Some(source.scoped_id("activity-observation-v1", &(&capture.observation_id, &row.key))?)
-            }
+            TelemetryRecord::Activity(row) => Some(source.point_record_id(
+                "activity-observation-v1",
+                capture,
+                &(&capture.observation_id, &row.key),
+            )?),
             TelemetryRecord::Deadlock(row) => {
                 Some(source.scoped_id("deadlock-event-v1", &(&row.position, row.graph_ordinal))?)
             }
-            TelemetryRecord::DiagnosticCheckpoint(row) => {
-                Some(source.scoped_id("diagnostic-checkpoint-v1", &(&capture.observation_id, &row.id))?)
-            }
-            TelemetryRecord::Operational(row) => {
-                Some(source.scoped_id("state-observation-v1", &(&capture.observation_id, &row.source, &row.key))?)
-            }
-            TelemetryRecord::WaitCounter(row) => {
-                Some(source.scoped_id(
-                    "wait-counter-observation-v1",
-                    &(&capture.observation_id, &row.source, &row.wait_type),
-                )?)
-            }
-            TelemetryRecord::Replication(row) => Some(
-                source
-                    .scoped_id("replication-observation-v1", &(&capture.observation_id, &row.source, row.fact.key()))?,
-            ),
-            TelemetryRecord::Setting(row) => Some(source.scoped_id(
+            TelemetryRecord::DiagnosticCheckpoint(row) => Some(source.point_record_id(
+                "diagnostic-checkpoint-v1",
+                capture,
+                &(&capture.observation_id, &row.id),
+            )?),
+            TelemetryRecord::Operational(row) => Some(source.point_record_id(
+                "state-observation-v1",
+                capture,
+                &(&capture.observation_id, &row.source, &row.key),
+            )?),
+            TelemetryRecord::WaitCounter(row) => Some(source.point_record_id(
+                "wait-counter-observation-v1",
+                capture,
+                &(&capture.observation_id, &row.source, &row.wait_type),
+            )?),
+            TelemetryRecord::Replication(row) => Some(source.point_record_id(
+                "replication-observation-v1",
+                capture,
+                &(&capture.observation_id, &row.source, row.fact.key()),
+            )?),
+            TelemetryRecord::Setting(row) => Some(source.point_record_id(
                 "setting-observation-v1",
+                capture,
                 &(&capture.observation_id, &row.source, &row.namespace, &row.name),
             )?),
-            TelemetryRecord::Tuning(row) => Some(
-                source.scoped_id("tuning-observation-v1", &(&capture.observation_id, &row.source, row.fact.key()))?,
-            ),
+            TelemetryRecord::Tuning(row) => Some(source.point_record_id(
+                "tuning-observation-v1",
+                capture,
+                &(&capture.observation_id, &row.source, row.fact.key()),
+            )?),
             TelemetryRecord::ObjectDefinition(row) => {
-                Some(source.scoped_id("object-definition-v1", &(&row.source, &row.key, &row.version))?)
+                Some(source.point_record_id("object-definition-v1", capture, &(&row.source, &row.key, &row.version))?)
             }
             TelemetryRecord::QueryRuntime(_) | TelemetryRecord::QueryWaits(_) => None,
         };
@@ -322,9 +379,11 @@ mod tests {
         let mut database = DatabaseIdentity::server(crate::Engine::Mssql, "sample", "original.invalid", 1433, None);
         database.incarnation = Some("native-database-guid".into());
         CollectionDescription {
+            partition: crate::telemetry::SourcePartition::Target,
             target: database.into(),
             source: "query_store".into(),
             observation: crate::telemetry::SourceObservation::QueryHistory(crate::telemetry::QueryHistoryDescription {
+                population_catalog: None,
                 waits: None,
                 interval: TelemetryInterval {
                     native_id: "7".into(),

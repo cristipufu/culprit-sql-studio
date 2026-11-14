@@ -18,6 +18,7 @@ const DISCOVERY_PAGE_ROWS: u32 = 8;
 pub(super) struct Scan {
     request: IntervalDiscoveryRequest,
     source: Option<String>,
+    partition: Option<SourcePartition>,
     observed_at: Option<String>,
     pending: VecDeque<TelemetryInterval>,
     discovered: bool,
@@ -48,6 +49,7 @@ pub(super) async fn step(
                 budget: job.schedule.budget.clone(),
             },
             source: None,
+            partition: None,
             observed_at: None,
             pending: VecDeque::new(),
             discovered: false,
@@ -65,10 +67,11 @@ pub(super) async fn step(
     let interval = scan.pending.front().ok_or_else(state_failed)?.clone();
     let database = checkpoint.target.as_ref().and_then(CollectionTarget::database).ok_or_else(state_failed)?;
     let source = scan.source.as_ref().ok_or_else(state_failed)?.clone();
+    let partition = scan.partition.as_ref().ok_or_else(state_failed)?.clone();
     let cutoff = parse_time(scan.observed_at.as_deref().ok_or_else(state_failed)?)?
         - TimeDelta::seconds(i64::from(policy.reconcile_seconds));
     let captured = if parse_time(&interval.until)? < cutoff {
-        match storage.captured(&CapturedRange::native_interval(database, &source, &interval)?).await {
+        match storage.captured(&CapturedRange::native_interval(database, &source, &partition, &interval)?).await {
             Ok(captured) => captured,
             Err(error) => return work::failure(job, FleetWork::SkipCommitted, error, None),
         }
@@ -92,6 +95,7 @@ pub(super) async fn step(
     if let Some(description) = &manifest.description {
         checkpoint.pin_target(&description.target)?;
         if description.source != source
+            || description.partition != partition
             || !description.matches_request(&request)
             || description.query_history().is_none_or(|history| history.interval.native_id != interval.native_id)
         {
@@ -118,6 +122,7 @@ impl Scan {
             if !self.pending.is_empty()
                 || self.request.cursor.is_some()
                 || self.source.is_some()
+                || self.partition.is_some()
                 || self.observed_at.is_some()
             {
                 return Err(state_failed());
@@ -126,6 +131,7 @@ impl Scan {
             let page = IntervalDiscoveryPage {
                 database: database.ok_or_else(state_failed)?.clone(),
                 source: self.source.clone().ok_or_else(state_failed)?,
+                partition: self.partition.clone().ok_or_else(state_failed)?,
                 observed_at: self.observed_at.clone().ok_or_else(state_failed)?,
                 metadata_from: None,
                 intervals: self.pending.iter().cloned().collect(),
@@ -154,6 +160,7 @@ async fn discover(
     };
     if !page.matches_request(&scan.request)
         || scan.source.as_ref().is_some_and(|source| source != &page.source)
+        || scan.partition.as_ref().is_some_and(|partition| partition != &page.partition)
         || scan.observed_at.as_ref().is_some_and(|at| at != &page.observed_at)
     {
         return work::failure(job, FleetWork::DiscoverIntervals, CollectionStop::InvalidPage.error(), None);
@@ -161,6 +168,7 @@ async fn discover(
     checkpoint.pin_target(&CollectionTarget::Database(page.database.clone()))?;
     let scan = checkpoint.history.as_mut().ok_or_else(state_failed)?;
     scan.source = Some(page.source);
+    scan.partition = Some(page.partition);
     scan.observed_at = Some(page.observed_at);
     scan.pending = page.intervals.into();
     scan.request.cursor = page.next_cursor;

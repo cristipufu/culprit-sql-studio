@@ -35,6 +35,9 @@ pub(crate) struct PageWaitCapture {
 }
 pub(crate) struct PageWaitGuard(context::LookupContext);
 impl PageWaitCapture {
+    pub(crate) fn source_partition(&self) -> Result<SourcePartition> {
+        self.guard.0.authority.source_partition()
+    }
     pub(crate) fn task_visibility_unavailable(&self) -> bool {
         self.guard.0.task_visibility == Some(false)
     }

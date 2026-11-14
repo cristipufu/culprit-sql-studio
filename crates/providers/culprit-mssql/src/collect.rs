@@ -170,11 +170,13 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
     let mut part = WorkloadPart::default();
     let dmv = probe.can_read_dmvs();
     query_store_account(&mut part.outcome, probe);
+    let mut population_catalog = None;
 
     if probe.query_store_readable() {
         let grant = || probe.grant_hint();
         let mut reader = crate::query_store::Reader::open(provider.pool.clone());
         let result = workload::from_query_store(&mut reader, options).await;
+        population_catalog = reader.population_catalog().cloned();
         let result = if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
             Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error())
         } else {
@@ -202,7 +204,7 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
     let mut client = ReadSession::application(provider.pool.clone());
     let plan_cache = workload::from_plan_cache(&mut client, options).await;
     let plan_cache = client.finish(plan_cache).await;
-    if let Some(result) = part.outcome.read(
+    if let Some(mut result) = part.outcome.read(
         &sources::PLAN_CACHE,
         plan_cache.map_err(|error| {
             if error.code == culprit_core::ErrorCode::PermissionDenied {
@@ -212,6 +214,7 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
             }
         }),
     ) {
+        result.workload.population_catalog = population_catalog;
         part.accept(&sources::PLAN_CACHE, Capability::PlanCache, result);
     }
     part
@@ -486,7 +489,11 @@ pub(crate) async fn snapshot(
         contention_before: None,
         evictions_before: None,
         sizes_before: None,
-        operations: culprit_core::operations::OperationalStats { cleanup: misc_part.cleanup, ..Default::default() },
+        operations: culprit_core::operations::OperationalStats {
+            index_usage_scope: Some(culprit_core::operations::IndexUsageScope::ConnectedMember),
+            cleanup: misc_part.cleanup,
+            ..Default::default()
+        },
     };
     let mut client = ReadSession::application(provider.pool.clone());
     signals::collect(

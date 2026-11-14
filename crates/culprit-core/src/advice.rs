@@ -41,6 +41,9 @@ pub struct PlanCacheUse {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct TuningAdvice {
+    /// Native runtime population of recommendations and global plan-forcing facts. A database target, primary role,
+    /// or matching query ID alone does not qualify this relation. Query hints retain their own independent scope.
+    pub plan_scope: QueryStoreScope,
     pub automatic_tuning: Vec<AutomaticTuningOption>,
     pub recommendations: Vec<TuningRecommendation>,
     /// Plans forced in Query Store, with how often forcing failed.
@@ -117,7 +120,7 @@ pub struct ForcedPlan {
 pub struct QueryHint {
     pub hint_id: String,
     pub query_id: String,
-    pub scope: QueryStoreHintScope,
+    pub scope: QueryStoreScope,
     pub hint: String,
     pub failures: f64,
     pub last_failure_reason: Option<String>,
@@ -126,14 +129,23 @@ pub struct QueryHint {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[ts(export)]
-pub enum QueryStoreHintScope {
-    /// The known native layout predates replica-scoped hints.
+pub enum QueryStoreScope {
+    /// The source positively established an unpartitioned native Query Store layout.
     Local,
     ReplicaGroup {
         id: String,
     },
     #[default]
     Unknown,
+}
+
+impl QueryStoreScope {
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Local | Self::Unknown => true,
+            Self::ReplicaGroup { id } => id.parse::<u64>().is_ok_and(|value| value.to_string() == *id),
+        }
+    }
 }
 
 /// The index advisor's plan for a database, built from one report: indexes to add, indexes to clean up, and tables
@@ -277,4 +289,27 @@ pub struct TableAdvice {
     pub sql: Option<String>,
     pub queries: Vec<AdviceQuery>,
     pub finding_id: Option<String>,
+}
+
+#[cfg(test)]
+mod query_store_scope_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_is_the_default_plan_authority_and_shared_hint_wire_scope_is_explicit() {
+        assert_eq!(TuningAdvice::default().plan_scope, QueryStoreScope::Unknown);
+        assert_eq!(QueryHint::default().scope, QueryStoreScope::Unknown);
+        let scope = QueryStoreScope::ReplicaGroup { id: "7".into() };
+        assert_eq!(serde_json::to_value(&scope).unwrap(), serde_json::json!({ "kind": "replica-group", "id": "7" }));
+        assert!(scope.is_valid());
+    }
+
+    #[test]
+    fn native_scope_ids_cannot_turn_into_unqualified_or_executable_fragments() {
+        for id in ["", "-1", "07", "+7", "7; EXEC other", "18446744073709551616"] {
+            assert!(!QueryStoreScope::ReplicaGroup { id: id.into() }.is_valid());
+        }
+        assert!(QueryStoreScope::Local.is_valid());
+        assert!(QueryStoreScope::Unknown.is_valid());
+    }
 }

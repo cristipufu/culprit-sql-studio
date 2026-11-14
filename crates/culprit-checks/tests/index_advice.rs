@@ -205,6 +205,7 @@ fn a_plan_forced_by_hand_says_what_automatic_plan_correction_does() {
         let mut s = snapshot("mssql-demo.json");
         let query = s.workload.as_ref().unwrap().queries[0].id.clone();
         s.tuning = Some(TuningAdvice {
+            plan_scope: culprit_core::QueryStoreScope::Local,
             automatic_tuning: vec![AutomaticTuningOption {
                 name: "FORCE_LAST_GOOD_PLAN".into(),
                 desired: actual.into(),
@@ -243,6 +244,7 @@ fn sql_server_tuning_advice_and_forced_plan_failures() {
     let mut s = snapshot("mssql-demo.json");
     let query = s.workload.as_ref().unwrap().queries[0].id.clone();
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         automatic_tuning: vec![AutomaticTuningOption {
             name: "FORCE_LAST_GOOD_PLAN".into(),
             desired: "OFF".into(),
@@ -286,6 +288,7 @@ fn sql_server_tuning_advice_and_forced_plan_failures() {
 fn forced_plans_are_listed_and_one_that_scans_past_a_newer_index_stands_out() {
     let mut s = snapshot("mssql-demo.json");
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![TuningRecommendation {
             name: "PR_9".into(),
             kind: "FORCE_LAST_GOOD_PLAN".into(),
@@ -422,6 +425,7 @@ fn node_mut(node: &mut PlanNode, id: u32) -> Option<&mut PlanNode> {
 fn a_scan_of_a_small_filtered_index_is_not_a_read_of_the_whole_table() {
     let mut s = snapshot("mssql-demo.json");
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         forced_plans: vec![ForcedPlan {
             query_id: "9".into(),
             plan_id: "9".into(),
@@ -475,6 +479,7 @@ fn azure_index_recommendations_are_findings_unless_another_finding_has_them() {
         ..Default::default()
     };
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![
             recommend("CreateIndex", "order_items", "nci_wi_order_items_1", &["order_id"]),
             recommend("CreateIndex", "orders", "nci_wi_orders_2", &["customer_id"]),
@@ -489,6 +494,7 @@ fn azure_index_recommendations_are_findings_unless_another_finding_has_them() {
         ],
         ..Default::default()
     });
+    s.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::AllReadMembers);
     let report = analyze(s);
     let ids: Vec<&str> = report.findings.iter().filter(|f| f.check == "tuning-advice").map(|f| f.id.as_str()).collect();
 
@@ -1116,6 +1122,7 @@ fn azure_index_recommendations_are_weighed_against_the_indexes_there() {
         }
     };
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![
             recommend("nci_1", &["priority", "customer_id"], &["subject"], 2.0),
             recommend("nci_2", &["customer_id", "priority"], &["subject", "status"], 40.0),
@@ -1198,6 +1205,7 @@ fn azure_index_recommendations_are_weighed_against_the_indexes_there() {
 /// The demo with Azure's recommendation of an index on `table` (`columns`, including `include`), scored `score`.
 fn recommended(s: &mut Snapshot, table: &str, columns: &[&str], include: &[&str], score: f64) {
     s.tuning = Some(TuningAdvice {
+        plan_scope: culprit_core::QueryStoreScope::Local,
         recommendations: vec![TuningRecommendation {
             name: "IR_low".into(),
             kind: "CreateIndex".into(),

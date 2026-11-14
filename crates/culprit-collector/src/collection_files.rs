@@ -352,6 +352,7 @@ mod tests {
             .unwrap();
             files
                 .describe(CollectionDescription {
+                    partition: culprit_core::telemetry::SourcePartition::Target,
                     target: culprit_core::DatabaseIdentity::server(
                         culprit_core::Engine::Mssql,
                         "sample",
@@ -451,6 +452,7 @@ mod tests {
             let mut files = ObservationFiles::create(&directory, request, capture, None).unwrap();
             files
                 .describe(CollectionDescription {
+                    partition: culprit_core::telemetry::SourcePartition::Target,
                     target: culprit_core::DatabaseIdentity::server(
                         culprit_core::Engine::Mssql,
                         "db",
@@ -510,6 +512,7 @@ mod tests {
         }
         files
             .describe(CollectionDescription {
+                partition: culprit_core::telemetry::SourcePartition::Target,
                 target: culprit_core::DatabaseIdentity::server(
                     culprit_core::Engine::Mssql,
                     "sample",
@@ -521,6 +524,7 @@ mod tests {
                 source: "query-store".into(),
                 observation: culprit_core::telemetry::SourceObservation::QueryHistory(
                     culprit_core::telemetry::QueryHistoryDescription {
+                        population_catalog: None,
                         waits: None,
                         interval: culprit_core::telemetry::TelemetryInterval {
                             native_id: "1".into(),

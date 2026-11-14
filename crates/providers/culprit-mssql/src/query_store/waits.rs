@@ -76,6 +76,7 @@ pub(crate) const RELATION: &str =
     "WITH culprit_waits AS (SELECT /* culprit */ w.* FROM sys.query_store_wait_stats w)\n";
 #[derive(Clone, Debug)]
 pub(crate) struct Summary {
+    pub population: super::replicas::Population,
     pub plan_id: Option<String>,
     pub category_id: u8,
     pub category: String,
@@ -84,6 +85,7 @@ pub(crate) struct Summary {
 impl Summary {
     pub(crate) fn decode(row: &Rec, by_plan: bool) -> Result<Self> {
         Ok(Self {
+            population: super::replicas::Population::from_row(row)?,
             plan_id: if by_plan { Some(integer(row, "plan_id")?.to_string()) } else { None },
             category_id: integer(row, "wait_category")?.try_into().map_err(|_| invalid_data())?,
             category: text(row, "wait_category_desc")?,
@@ -91,7 +93,7 @@ impl Summary {
         })
     }
 }
-pub(crate) fn summary_sql(by_plan: bool) -> String {
+pub(crate) fn summary_sql(by_plan: bool, population: super::replicas::Population) -> String {
     let declaration = if by_plan { "DECLARE /* culprit */ @ids xml=CONVERT(xml,@P2);\n" } else { "" };
     let plan = if by_plan { "ws.plan_id," } else { "" };
     let selected = if by_plan {
@@ -100,17 +102,20 @@ pub(crate) fn summary_sql(by_plan: bool) -> String {
         ""
     };
     format!(
-        r#"{window_declaration}{declaration}{RELATION}SELECT /* culprit */ {plan} ws.wait_category,ws.wait_category_desc,SUM(ws.total_query_wait_time_ms) AS wait_ms
+        r#"{window_declaration}{declaration}{RELATION}SELECT /* culprit */ {population_projection},{plan} ws.wait_category,ws.wait_category_desc,SUM(ws.total_query_wait_time_ms) AS wait_ms
 FROM culprit_waits ws
 JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id=ws.runtime_stats_interval_id
 JOIN sys.query_store_plan p ON p.plan_id=ws.plan_id
 JOIN sys.query_store_query q ON q.query_id=p.query_id
 JOIN sys.query_store_query_text t ON t.query_text_id=q.query_text_id
-WHERE {window_membership} AND {workload}{selected}
-GROUP BY {plan} ws.wait_category,ws.wait_category_desc OPTION(MAXDOP 1)"#,
+WHERE {window_membership} AND {population} AND {workload}{selected}
+GROUP BY {plan} ws.wait_category,ws.wait_category_desc{population_group} OPTION(MAXDOP 1)"#,
         workload = crate::statement_origin::application_candidates_sql("t.query_sql_text"),
         window_declaration = super::window_sql::DECLARATION,
         window_membership = super::window_sql::MEMBERSHIP,
+        population = population.predicate("ws"),
+        population_projection = population.projection("ws"),
+        population_group = population.group_by("ws"),
     )
 }
 

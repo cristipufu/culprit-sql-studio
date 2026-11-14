@@ -31,6 +31,7 @@ impl SnapshotReader for OperationalReader {
     async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
         let meta = metadata::read(&mut self.io, &self.host, self.port).await?;
         let description = CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: meta.database.clone().into(),
             source: format!("ysql-operational-{}", meta.node),
             continuity: SourceContinuity::Unverified,

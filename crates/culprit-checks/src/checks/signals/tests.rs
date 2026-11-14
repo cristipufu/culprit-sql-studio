@@ -308,10 +308,18 @@ fn escalating(escalations: f64, attempts: f64, lock_wait_ms: f64) -> IndexConten
 /// These synthetic counters explicitly declare a reset 12 hours before the scan. Real SQL Server metadata-cache
 /// counters have an unknown epoch; server uptime never establishes their lifetime.
 fn escalations_on(table: &str, mut first: IndexContention, mut second: IndexContention) -> Snapshot {
+    use culprit_core::telemetry::{NativeIdentity, SharedResourceIdentity, SharedResourceKind};
     let mut s = snapshot_with(Engine::Mssql);
     s.server.started_at = Some("2026-10-11T00:13:03Z".into());
     first.reset = culprit_core::ResetMarker::At("2026-10-11T00:13:03Z".into());
     second.reset = first.reset.clone();
+    first.source_owner = Some(SharedResourceIdentity {
+        engine: Engine::Mssql,
+        kind: SharedResourceKind::Node,
+        namespace: NativeIdentity::new("controlled-native-cluster"),
+        native: NativeIdentity::new("controlled-native-member"),
+    });
+    second.source_owner = first.source_owner.clone();
     s.indexes.iter_mut().for_each(|i| i.contention = None);
     let mut a = s.indexes[0].clone();
     a.schema = "dbo".into();
@@ -429,7 +437,7 @@ fn a_single_lock_escalation_is_high() {
     assert_eq!(f[0].severity, Severity::High);
 }
 
-/// `s` with the counts of an earlier scan of it, taken at 06:00 on the day it was taken.
+/// `s` with explicit per-index counter points from 06:00, never an ambiguous table total assigned to one index.
 fn with_earlier_scan(mut s: Snapshot, counts: &[(&str, f64)], started_at: Option<&str>) -> Snapshot {
     let mut earlier = s.clone();
     earlier.taken_at = "2026-10-11T06:00:00Z".into();
@@ -439,8 +447,12 @@ fn with_earlier_scan(mut s: Snapshot, counts: &[(&str, f64)], started_at: Option
     for i in earlier.indexes.iter_mut().filter_map(|i| i.contention.as_mut()) {
         i.lock_escalations = 0.0;
     }
-    for (table, n) in counts {
-        let i = earlier.indexes.iter_mut().find(|i| i.table == *table && i.contention.is_some()).expect("table");
+    for (index, n) in counts {
+        let i = earlier
+            .indexes
+            .iter_mut()
+            .find(|i| i.schema == "dbo" && i.name == *index && i.contention.is_some())
+            .expect("native index point");
         i.contention.as_mut().unwrap().lock_escalations = *n;
     }
     s.escalations_before = culprit_core::EscalationBaseline::from_scan(&earlier, &s);
@@ -473,11 +485,13 @@ fn escalations_without_an_earlier_scan_require_their_own_reset_epoch_for_a_rate(
     assert!(f.is_actionable());
     assert!(
         f.summary.contains(
-            "2 times since these counters were reset, on Oct 8 at 00:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old"
+            "2 times since these counters were reset, on Oct 8 at 00:13 UTC. It keeps no time for each, and Culprit has no comparable earlier scan, so they may be old."
         ),
         "{}",
         f.summary
     );
+    assert!(f.summary.contains("Only scans of the same verified database member and counter period can be compared."));
+    assert!(!f.summary.contains("the next scan compares"));
 }
 
 // The false flag: one escalation since a start six months ago was High on a first scan. Without an earlier scan
@@ -506,7 +520,13 @@ fn one_escalation_in_six_months_is_low_history_on_a_first_scan() {
 #[test]
 fn escalations_since_the_previous_scan_are_high_and_counted() {
     let s = escalations_on("orders", escalating(3.0, 0.0, 0.0), escalating(2.0, 0.0, 0.0));
-    let f = &LockEscalationsCheck.run(&with_earlier_scan(s, &[("orders", 4.0)], None))[0];
+    // A table sum of 4 is insufficient when it masks an individual index shrinking 4→3.
+    let ambiguous = with_earlier_scan(s.clone(), &[("pk_orders", 4.0)], None);
+    assert!(ambiguous.escalations_before.is_none());
+    // The actual controlled native points 2,2→3,2 establish exactly one new escalation.
+    let s = with_earlier_scan(s, &[("pk_orders", 2.0), ("ix_orders_created_at", 2.0)], None);
+    assert_eq!(s.escalations_before.as_ref().unwrap().since(&s, "dbo", "orders"), Some(1.0));
+    let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::High);
     assert_eq!(f.title, "Row locks on orders escalated to a table lock once since Oct 11, 06:00 UTC");
     assert!(
@@ -527,7 +547,7 @@ fn escalations_since_the_previous_scan_are_high_and_counted() {
 #[test]
 fn a_count_that_fell_without_a_restart_is_not_new_escalations() {
     let s = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
-    let s = with_earlier_scan(s, &[("orders", 5.0)], None);
+    let s = with_earlier_scan(s, &[("pk_orders", 5.0)], None);
     let f = &LockEscalationsCheck.run(&s)[0];
     assert!(!f.title.contains("since Oct 11, 06:00"), "{}", f.title);
     assert!(f.summary.contains("since these counters were reset"), "{}", f.summary);
@@ -542,7 +562,7 @@ fn escalations_with_none_since_the_previous_scan_are_low_history() {
     q.text = "UPDATE TOP (1000) dbo.orders SET archived = 1 WHERE archived = 0".into();
     q.plan = None;
     q.rows = Some(q.executions * 900.0);
-    let f = &LockEscalationsCheck.run(&with_earlier_scan(s, &[("orders", 2.0)], None))[0];
+    let f = &LockEscalationsCheck.run(&with_earlier_scan(s, &[("pk_orders", 2.0)], None))[0];
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(
         f.title,
@@ -578,7 +598,7 @@ fn all_timespan_windows_require_baseline_to_cover_the_window_before_silencing_es
         (7 * 1440, "2026-10-30T19:00:00Z", "2026-10-24T12:00:00Z"),
         (30 * 1440, "2026-10-28T12:00:00Z", "2026-10-01T12:00:00Z"),
     ] {
-        let mut s = with_earlier_scan(base.clone(), &[("orders", 40.0)], None);
+        let mut s = with_earlier_scan(base.clone(), &[("pk_orders", 40.0)], None);
         s.options = Some(culprit_core::SnapshotOptions::default().with_window_minutes(window_minutes));
 
         // A baseline covering only a fraction of the selected window must never silence escalations into History.
@@ -598,20 +618,19 @@ fn all_timespan_windows_require_baseline_to_cover_the_window_before_silencing_es
 }
 
 #[test]
-fn after_a_restart_every_escalation_counted_is_new() {
+fn a_probe_restart_cannot_reinterpret_shrinking_native_escalation_totals_as_new() {
     let mut s = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
     s.server.started_at = Some("2026-10-11T12:13:03Z".into());
-    // The earlier scan counted more, before the server restarted at 12:13 and started the count again.
-    let s = with_earlier_scan(s, &[("orders", 9.0)], Some("2026-10-01T00:00:00Z"));
-    assert!(s.escalations_before.as_ref().unwrap().restarted);
+    // A separate pooled probe changed its start time. It cannot date these metadata-cache counters or explain
+    // why this index's total shrank.
+    let s = with_earlier_scan(s, &[("pk_orders", 9.0)], Some("2026-10-01T00:00:00Z"));
+    assert!(s.escalations_before.is_none());
     let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::High);
-    assert_eq!(f.title, "Row locks on orders escalated to a table lock 2 times since Oct 11, 06:00 UTC");
+    assert!(f.title.contains("2 times since these counters were reset"), "{}", f.title);
+    assert!(!f.summary.contains("restarted"), "{}", f.summary);
     assert!(
-        f.summary
-            .contains("SQL Server restarted since then (on Oct 11 at 12:13 UTC), and these are all it counted since."),
-        "{}",
-        f.summary
+        f.metrics.iter().all(|metric| !metric.is(culprit_core::key!("check.lock_escalations.metric.since_previous")))
     );
 }
 

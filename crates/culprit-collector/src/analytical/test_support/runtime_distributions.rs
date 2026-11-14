@@ -104,6 +104,7 @@ fn frame(
 ) -> (CollectionDescription, Vec<TelemetryRecord>) {
     (
         CollectionDescription {
+            partition: culprit_core::telemetry::SourcePartition::Target,
             target: culprit_core::DatabaseIdentity::server(engine, "db", "fixture.invalid", 3306, None).into(),
             source: "runtime-populations".into(),
             continuity: SourceContinuity::Unverified,

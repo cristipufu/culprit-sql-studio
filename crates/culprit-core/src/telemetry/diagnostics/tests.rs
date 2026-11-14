@@ -36,6 +36,7 @@ fn page_signal(reference: &DiagnosticEvidenceRef, resource: &str) -> DiagnosticS
 fn episode() -> DiagnosticEpisode {
     DiagnosticEpisode::start(
         DiagnosticScope {
+            partition: crate::telemetry::SourcePartition::Target,
             target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "db", "fixture.invalid", 1433, None).into(),
             source: "activity".into(),
             native_epoch: Some("native-start".into()),
@@ -234,6 +235,8 @@ fn focused_episode() -> (DiagnosticEpisode, ActivityWaitFocus) {
         resources: None,
     });
     let focus = ActivityWaitFocus {
+        database_writable: None,
+        partition: crate::telemetry::SourcePartition::Target,
         parent: episode.first.clone(),
         target: episode.scope.target.clone(),
         source: episode.scope.source.clone(),
@@ -287,6 +290,7 @@ fn only_matched_exact_focused_missing_can_resolve_a_participant_without_complete
         wait: PageWaitRelation::Unqualified,
     };
     let source = CollectionDescription {
+        partition: crate::telemetry::SourcePartition::Target,
         target: episode.scope.target.clone(),
         source: "focused-page".into(),
         continuity: SourceContinuity::Unverified,

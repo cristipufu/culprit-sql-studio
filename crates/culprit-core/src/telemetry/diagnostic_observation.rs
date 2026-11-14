@@ -65,7 +65,8 @@ pub fn observe_diagnostic_activity(
         .collect::<BTreeMap<_, _>>();
     let mut by_signal = BTreeMap::new();
     for episode in episodes.values() {
-        if episode.lifecycle != DiagnosticLifecycle::Resolved
+        if scope.partition.is_qualified()
+            && episode.lifecycle != DiagnosticLifecycle::Resolved
             && episode.scope.key()? == scope_key
             && by_signal.insert(episode.signal.key()?, episode.id.clone()).is_some()
         {
@@ -83,6 +84,11 @@ pub fn observe_diagnostic_activity(
         row.verify(source, input)?;
         if !native_keys.insert(row.observation.key.clone()) {
             return Err(invalid());
+        }
+        // Without an actual native member/generation, these are private capture-local points only. Keeping one
+        // unresolvable durable episode per poll would exhaust the working set without establishing continuity.
+        if !scope.partition.is_qualified() {
+            continue;
         }
         for signal in signals(
             row.observation,
@@ -119,7 +125,13 @@ pub fn observe_diagnostic_activity(
     }
     let can_resolve = diagnostic_baseline_can_resolve(&scope, native.coverage.state, native.coverage.complete_scope);
     for episode in episodes.values_mut() {
-        if observed.contains(&episode.id) || episode.lifecycle == DiagnosticLifecycle::Resolved {
+        if !scope.partition.is_qualified()
+            || observed.contains(&episode.id)
+            || episode.lifecycle == DiagnosticLifecycle::Resolved
+        {
+            continue;
+        }
+        if !episode.scope.same_member(&scope) {
             continue;
         }
         let before = episode.clone();

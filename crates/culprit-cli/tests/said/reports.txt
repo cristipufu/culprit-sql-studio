@@ -60,7 +60,7 @@ Information and history (5)
  28  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
 
-Check coverage: 6 assessed without a finding; 27 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 5 assessed without a finding; 28 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mssql-demo`.
 
@@ -306,7 +306,7 @@ Information and history (3)
  17  ○  A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping
        heavy-query:-8886085649470066503
 
-Check coverage: 8 assessed without a finding; 24 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 7 assessed without a finding; 25 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor pg-demo`.
 
@@ -516,7 +516,7 @@ Information and history (1)
  14  ○  A read from orders: Recorded internal temporary-table work
        temp-spill:04cd7be9c366fadc
 
-Check coverage: 4 assessed without a finding; 20 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 3 assessed without a finding; 21 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mysql-demo`.
 

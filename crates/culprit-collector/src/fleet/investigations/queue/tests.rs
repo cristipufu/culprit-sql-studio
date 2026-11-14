@@ -374,6 +374,7 @@ fn numerically_equal_cost_accounting_cannot_replace_the_original_immutable_inten
         wait: PageWaitRelation::Unqualified,
     };
     let source = CollectionDescription {
+        partition: culprit_core::telemetry::SourcePartition::Target,
         target: intent.focus.target.clone(),
         source: "focused-page-state".into(),
         continuity: SourceContinuity::Unverified,

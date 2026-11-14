@@ -118,6 +118,7 @@ mod paging_tests {
     use super::*;
     fn source() -> CollectionDescription {
         CollectionDescription {
+            partition: crate::telemetry::SourcePartition::Target,
             target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "sample", "fixture.invalid", 1433, None)
                 .into(),
             source: "native-paged-state".into(),
