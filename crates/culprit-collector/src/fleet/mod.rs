@@ -31,6 +31,8 @@ pub struct FleetSourceAdmission {
 pub struct FleetCaptureOutcome {
     pub result: Result<CollectionManifest>,
     pub source_work: SourceWorkState,
+    /// Allocation belongs to the owner, independently of authentication, native description or capture success.
+    pub attempt: Option<DiagnosticAttemptReceipt>,
 }
 
 #[async_trait]

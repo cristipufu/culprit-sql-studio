@@ -2,7 +2,10 @@
 use crate::collection_files::ObservationFiles;
 use culprit_core::{
     Result,
-    telemetry::{CaptureIdentity, CollectionManifest, CollectionRequest, CollectionStop, ReadWorkMetrics},
+    telemetry::{
+        CaptureIdentity, CollectionManifest, CollectionRequest, CollectionStop, DiagnosticInvestigationLineage,
+        ReadWorkMetrics,
+    },
 };
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
@@ -12,10 +15,16 @@ pub(super) struct ObservationWriter {
     files: Arc<Mutex<Option<ObservationFiles>>>,
 }
 impl ObservationWriter {
-    pub async fn create(directory: PathBuf, request: CollectionRequest, capture: CaptureIdentity) -> Result<Self> {
-        let files = tokio::task::spawn_blocking(move || ObservationFiles::create(&directory, request, capture))
-            .await
-            .map_err(|_| CollectionStop::StorageFailed.error())??;
+    pub async fn create(
+        directory: PathBuf,
+        request: CollectionRequest,
+        capture: CaptureIdentity,
+        investigation: Option<DiagnosticInvestigationLineage>,
+    ) -> Result<Self> {
+        let files =
+            tokio::task::spawn_blocking(move || ObservationFiles::create(&directory, request, capture, investigation))
+                .await
+                .map_err(|_| CollectionStop::StorageFailed.error())??;
         Ok(Self { files: Arc::new(Mutex::new(Some(files))) })
     }
     pub async fn apply<T: Send + 'static>(
@@ -70,6 +79,7 @@ mod tests {
             directory.path().join("capture"),
             request,
             culprit_read::admission::observation_identity().unwrap(),
+            None,
         )
         .await
         .unwrap();

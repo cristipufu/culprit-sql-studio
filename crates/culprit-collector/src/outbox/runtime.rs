@@ -194,6 +194,21 @@ impl Outbox {
     pub fn recovery_store_id(&self) -> Option<&str> {
         self.recovery_store_id.as_deref()
     }
+    /// Read the exact allocated manifest without granting native rights or acknowledging diagnostic work.
+    /// A missing initial file is the only successful result without a manifest digest.
+    pub async fn attempt_receipt(
+        &self,
+        identity: &CaptureIdentity,
+        investigation: Option<&DiagnosticInvestigationLineage>,
+    ) -> Result<DiagnosticAttemptReceipt> {
+        self.files
+            .run(|| {
+                let identity = identity.clone();
+                let investigation = investigation.cloned();
+                move |files| files.attempt_receipt(&identity, investigation.as_ref())
+            })
+            .await
+    }
     pub fn delivery(&self) -> OutboxDelivery {
         OutboxDelivery { files: self.files.clone(), recovery_store_id: self.recovery_store_id.clone() }
     }

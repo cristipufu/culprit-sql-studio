@@ -4,10 +4,15 @@ import type { CollectedFile } from "./CollectedFile";
 import type { CollectionDescription } from "./CollectionDescription";
 import type { CollectionRequest } from "./CollectionRequest";
 import type { CollectionStatus } from "./CollectionStatus";
+import type { DiagnosticInvestigationLineage } from "./DiagnosticInvestigationLineage";
 import type { ReadWorkMetrics } from "./ReadWorkMetrics";
 import type { ReferenceCoverage } from "./ReferenceCoverage";
 
-export type CollectionManifest = { format_version: number, capture: CaptureIdentity, started_at: string, finished_at: string | null, request: CollectionRequest, description: CollectionDescription | null, 
+export type CollectionManifest = { format_version: number, capture: CaptureIdentity, started_at: string, finished_at: string | null, request: CollectionRequest, 
+/**
+ * Admitted owner provenance, written before credentials or native source description are requested.
+ */
+investigation?: DiagnosticInvestigationLineage, description: CollectionDescription | null, 
 /**
  * Complete means the declared native streams finished. Reads are reconcilable observations, not an atomic
  * snapshot; unavailable definition payloads and unverified continuity still limit analytical use.

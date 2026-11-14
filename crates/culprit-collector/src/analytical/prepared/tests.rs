@@ -1,6 +1,8 @@
 use super::*;
 use crate::analytical::{catalog::LogicalCatalog, schema};
 
+mod investigations;
+
 fn input(record: &TelemetryRecord) -> Value {
     let mut input = json!({"record":record});
     let target = crate::analytical::test_support::fixture().0.source.target;

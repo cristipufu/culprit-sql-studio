@@ -10,7 +10,8 @@ use culprit_collector::{
 use culprit_core::{
     Result,
     telemetry::{
-        CollectionManifest, CollectionRequest, CollectionSelection, CollectionStop, TelemetryRecord, TelemetrySource,
+        CollectionManifest, CollectionRequest, CollectionSelection, CollectionStop, DiagnosticAttemptReceipt,
+        DiagnosticInvestigationLineage, TelemetryRecord, TelemetrySource,
     },
 };
 use culprit_read::admission::SourceAdmission;
@@ -181,6 +182,7 @@ impl Workspace {
             return FleetCaptureOutcome {
                 result: Err(error),
                 source_work: culprit_core::telemetry::SourceWorkState::NotStarted,
+                attempt: None,
             };
         }
         self.collect_into_outbox_with_admission(name, request, outbox, cancellation, Some(admitted)).await
@@ -195,8 +197,16 @@ impl Workspace {
     ) -> FleetCaptureOutcome {
         use culprit_core::telemetry::SourceWorkState;
         let mut source_work = SourceWorkState::NotStarted;
+        let mut attempt = None;
         let result = async {
             request.validate()?;
+            let investigation = admitted
+                .and_then(|admitted| admitted.investigation.as_ref())
+                .map(DiagnosticInvestigationLineage::from_intent)
+                .transpose()?;
+            if investigation.as_ref().is_some_and(|owner| !owner.matches_request(&request)) {
+                return Err(CollectionStop::InvalidPage.error());
+            }
             if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
                 let (source, row) = outbox.diagnostic_evidence(&focus.parent).await?;
                 let TelemetryRecord::Activity(original) = &row.record else {
@@ -211,6 +221,7 @@ impl Workspace {
             let mut lease = outbox.reserve(name, &request).await?;
             let directory = lease.directory().to_owned();
             let identity = lease.identity().clone();
+            attempt = Some(DiagnosticAttemptReceipt { capture: identity.clone(), manifest_sha256: None });
             let source = AuthenticatedSource {
                 workspace: self,
                 name,
@@ -232,11 +243,16 @@ impl Workspace {
             // cannot prove an older journal debt quiet, and another operation cannot race this receipt.
             source_work =
                 if self.source_gate.is_closed() { SourceWorkState::Unconfirmed } else { SourceWorkState::Quiescent };
-            self.settle_collection(&admission).await?;
-            lease.finish().await?;
+            let settlement = self.settle_collection(&admission).await;
+            let finished = lease.finish().await;
+            // Even failed collection/storage leaves an allocated identity. Only the exact existing manifest can
+            // add its digest; an invalid artifact must not erase that identity or native shutdown uncertainty.
+            attempt = Some(outbox.attempt_receipt(&identity, investigation.as_ref()).await?);
+            settlement?;
+            finished?;
             result
         }
         .await;
-        FleetCaptureOutcome { result, source_work }
+        FleetCaptureOutcome { result, source_work, attempt }
     }
 }

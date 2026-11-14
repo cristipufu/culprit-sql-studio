@@ -16,6 +16,8 @@ use culprit_core::telemetry::*;
 use std::{path::Path, sync::atomic::Ordering};
 use tokio::time::Instant;
 
+mod provenance;
+
 struct Runtime {
     fixture: Harness,
     investigations: Investigations,
@@ -25,6 +27,10 @@ struct Runtime {
 impl Runtime {
     async fn new() -> Self {
         let fixture = Harness::new(1).await;
+        Self::from_fixture(fixture).await
+    }
+
+    async fn from_fixture(fixture: Harness) -> Self {
         let mut scheduler = Scheduler::new(&fixture.inventory, "one").unwrap();
         let started = Instant::now();
         let state = scheduler.initial_state(started.elapsed(), chrono::Utc::now()).unwrap();
@@ -227,11 +233,12 @@ async fn admitted_missing_focus_keeps_lineage_and_original_after_terminal_retire
     assert_eq!(focused.focus, intent.focus);
     assert_eq!(focused.request, PageWaitRequestState::Missing);
     assert_eq!(focused.wait, PageWaitRelation::Unqualified);
-    assert_eq!(focused.lineage.as_ref().unwrap().reconstruct(&focused.focus).unwrap(), intent);
     let Outcome::FocusedComplete { result: capture } = &result.outcome else {
         panic!("a sealed native result is distinct from completed analysis")
     };
     let capture = capture.clone();
+    let manifest = runtime.fixture.outbox.verify(&capture.capture.observation_id).await.unwrap();
+    assert_eq!(manifest.investigation_intent().unwrap(), Some(intent.clone()));
     let input = runtime
         .fixture
         .outbox
@@ -299,8 +306,11 @@ async fn admitted_missing_focus_keeps_lineage_and_original_after_terminal_retire
     assert_eq!(replayed, vec![original.1]);
     let restored =
         reopened.diagnostic_input(&capture.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap();
-    let SourceObservation::FocusedPageWait { result, .. } = restored.source.observation else { panic!() };
-    assert_eq!(result.lineage.as_ref().unwrap().reconstruct(&result.focus).unwrap(), intent);
+    assert!(matches!(restored.source.observation, SourceObservation::FocusedPageWait { .. }));
+    assert_eq!(
+        reopened.verify(&capture.capture.observation_id).await.unwrap().investigation_intent().unwrap(),
+        Some(intent.clone())
+    );
     let journal = crate::fleet::FleetJournal::open(&directory.path().join("fleet"), &inventory, "one").await.unwrap();
     assert!(journal.focused_intents().await.unwrap().is_empty());
     assert!(journal.focused_stage(&intent.episode_stage_key().unwrap()).await.unwrap().is_none());
@@ -479,6 +489,8 @@ async fn quiet_failed_and_withheld_attempts_can_retire_after_analysis_becomes_te
         } else {
             DiagnosticAnalysisIssue::SourceChanged
         });
+        assert!(current.investigation_event.is_some(), "every settled attempt has immutable owner history");
+        expected.investigation_event = current.investigation_event.clone();
         assert_eq!(
             current, expected,
             "settled retry changes analysis state without rewriting native lifecycle, scope or evidence"

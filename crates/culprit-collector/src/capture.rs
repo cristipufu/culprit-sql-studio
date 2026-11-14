@@ -4,9 +4,9 @@ use crate::outbox::CaptureLease;
 use culprit_core::{
     Error, Result,
     telemetry::{
-        CaptureIdentity, CollectionBudget, CollectionManifest, CollectionRead, CollectionRequest, CollectionSelection,
-        CollectionStatus, CollectionStop, DiagnosticInvestigationIntent, DiagnosticInvestigationLineage,
-        SourceObservation, SourceShutdown, TelemetrySource, TelemetryStream,
+        CaptureIdentity, CollectionBudget, CollectionManifest, CollectionRead, CollectionRequest, CollectionStatus,
+        CollectionStop, DiagnosticInvestigationIntent, DiagnosticInvestigationLineage, SourceShutdown, TelemetrySource,
+        TelemetryStream,
     },
 };
 use culprit_read::admission::SourceGate;
@@ -111,15 +111,12 @@ pub async fn collect(
     lease: Option<&mut CaptureLease<'_>>,
 ) -> Result<CollectionManifest> {
     request.validate()?;
-    if let Some(intent) = factory.investigation_intent()
-        && (!intent.is_valid()
-            || request.budget != intent.budget
-            || !matches!(&request.selection, CollectionSelection::FocusedPageWait { focus } if focus.as_ref() == &intent.focus))
-    {
+    let investigation = factory.investigation_intent().map(DiagnosticInvestigationLineage::from_intent).transpose()?;
+    if investigation.as_ref().is_some_and(|lineage| !lineage.matches_request(&request)) {
         return Err(CollectionStop::InvalidPage.error());
     }
     let window = factory.admission_window();
-    let files = ObservationWriter::create(output.to_owned(), request.clone(), capture).await?;
+    let files = ObservationWriter::create(output.to_owned(), request.clone(), capture, investigation).await?;
     collect_prepared(admission, factory, request, files, cancellation, lease, window).await
 }
 
@@ -168,7 +165,7 @@ async fn collect_prepared(
             biased;
             _=cancellation.cancelled()=>Err(CollectionStop::Cancelled.error()),
             _=tokio::time::sleep_until(deadline)=>Err(CollectionStop::TimedOut.error()),
-            result=observe(source.as_mut(),&files,&request,factory.investigation_intent())=>result,
+            result=observe(source.as_mut(),&files,&request)=>result,
         },
     };
     let mut shutdown =
@@ -208,23 +205,8 @@ async fn observe(
     source: &mut dyn TelemetrySource,
     files: &ObservationWriter,
     request: &CollectionRequest,
-    intent: Option<&DiagnosticInvestigationIntent>,
 ) -> Result<Option<Error>> {
-    let mut description = source.describe().await?;
-    if let SourceObservation::FocusedPageWait { result, .. } = &mut description.observation {
-        // The provider describes native observations. The capture owner attaches its immutable admitted policy.
-        if result.lineage.is_some() {
-            return Err(CollectionStop::InvalidPage.error());
-        }
-        if let Some(intent) = intent {
-            if result.focus != intent.focus {
-                return Err(CollectionStop::InvalidPage.error());
-            }
-            result.lineage = Some(DiagnosticInvestigationLineage::from_intent(intent)?);
-        }
-    } else if intent.is_some() {
-        return Err(CollectionStop::InvalidPage.error());
-    }
+    let description = source.describe().await?;
     files.apply(move |files| files.describe(description)).await?;
     let mut failure = None;
     for (index, stream) in request.collection().source_streams().iter().copied().enumerate() {

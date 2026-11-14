@@ -34,6 +34,7 @@ pub fn published_ranges() -> Result<LogicalSchema> {
             Field::optional("ObservedFrom", "/_culprit/observed_from", Timestamp),
             Field::optional("ObservedUntil", "/_culprit/observed_until", Timestamp),
             Field::required("SourceDescription", "/source", JsonContainer),
+            super::super::investigations::CONTEXT_FIELD,
             Field::optional("ReadMetrics", "/read_metrics", JsonContainer),
             Field::required("Batches", "/batches", JsonContainer),
         ],

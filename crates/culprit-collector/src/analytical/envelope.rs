@@ -25,6 +25,7 @@ pub const COMMON: &[Field] = &[
     Field::required("RangeKind", "/_culprit/range_kind", String),
     Field::optional("FocusKey", "/_culprit/focus_key", String),
     Field::optional("DiagnosticContext", "/_culprit/diagnostic", JsonContainer),
+    super::investigations::CONTEXT_FIELD,
     Field::optional("Dataset", "/_culprit/dataset", String),
     Field::required("SourceContinuity", "/_culprit/continuity", String),
     Field::required("PayloadObject", "/_culprit/payload_object", String),
@@ -102,6 +103,9 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         "continuity": source.continuity,
         "collected_from": manifest.collected_from, "collected_until": manifest.collected_until
     });
+    if let Some(investigation) = &manifest.investigation {
+        context["investigation"] = super::investigations::lineage(investigation)?;
+    }
     match captured.range {
         TelemetryRange::NativeInterval { interval } => {
             context["range_kind"] = json!("native-interval");

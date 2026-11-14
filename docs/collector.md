@@ -625,8 +625,16 @@ an owed investigation; the same observer preserves their original recovery proof
 The capture owner reports `not-started`, `quiescent` or `unconfirmed` separately from its result. Metadata-only retries
 cannot clear older uncertainty. The scheduler retires a completed question after exact analysis consumption;
 when recovery is configured, its archived result and analysis acknowledgement must also be verified. Cached evidence
-does not count as analysis acknowledgement. Completed captures retain admission lineage, with a separate public
-projection that omits private source targets, original SQL and qualification SQL.
+does not count as analysis acknowledgement.
+
+The owner writes admission lineage into the capture manifest before authentication or source description. An allocated
+attempt retains its capture identity even when authentication, collection or storage fails; its manifest digest is
+included when those exact bytes are available. Admission and attempt outcomes append immutable diagnostic revisions
+through the existing outbox and recovery path. Checkpoints keep only the latest event digest. Failed native captures
+remain incomplete and are not published as complete evidence; their diagnostic history can still be archived.
+An unconfirmed shutdown keeps its source debt and scheduler obligation. The warehouse projection retains safe
+identifiers, outcomes and recovery references while omitting private source targets, original SQL and qualification SQL.
+`InvestigationContext` is included in analytical rows and `CulpritPublishedRangesV1`, including successful empty captures.
 
 Built-in recipe costs remain unqualified, so this protocol does not enable automatic extra production reads.
 Saving an episode or declaring a recipe does not establish a completed root-cause investigation or measured source

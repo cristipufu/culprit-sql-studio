@@ -17,40 +17,11 @@ enum PublicObservation<'a> {
 #[derive(Serialize)]
 struct FocusResult<'a> {
     focus: Focus<'a>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    lineage: Option<FocusLineage<'a>>,
     observed_from: &'a str,
     observed_until: &'a str,
     source: FocusSourceState,
     request: PageWaitRequestState,
     wait: PageWaitRelation,
-}
-#[derive(Serialize)]
-struct FocusLineage<'a> {
-    intent_key: &'a str,
-    episode_id: &'a str,
-    episode_revision: &'a str,
-    recipe_id: &'a str,
-    recipe_version: u32,
-    budget: &'a CollectionBudget,
-    component: &'a culprit_core::ComponentVersion,
-    qualification_key: String,
-    cost_evidence: &'a DiagnosticEvidenceRef,
-}
-impl<'a> FocusLineage<'a> {
-    fn new(value: &'a DiagnosticInvestigationLineage) -> Result<Self> {
-        Ok(Self {
-            intent_key: &value.intent_key,
-            episode_id: &value.episode_id,
-            episode_revision: &value.episode_revision,
-            recipe_id: &value.recipe_id,
-            recipe_version: value.recipe_version,
-            budget: &value.budget,
-            component: &value.qualification.component,
-            qualification_key: value.qualification.key()?,
-            cost_evidence: &value.qualification.evidence,
-        })
-    }
 }
 #[derive(Serialize)]
 struct Focus<'a> {
@@ -82,7 +53,6 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
                     statement_identity: &result.focus.statement_identity,
                     resource: &result.focus.resource,
                 },
-                lineage: result.lineage.as_ref().map(FocusLineage::new).transpose()?,
                 observed_from: &result.observed_from,
                 observed_until: &result.observed_until,
                 source: result.source,

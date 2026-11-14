@@ -259,6 +259,7 @@ fn retained_parent(
         started_at: activity.observed_from.clone(),
         finished_at: Some(activity.observed_until.clone()),
         request: capture.request.clone(),
+        investigation: None,
         description: Some(capture.description.clone()),
         status: CollectionStatus::Complete,
         source_queries: capture.queries,

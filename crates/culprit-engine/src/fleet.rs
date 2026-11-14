@@ -61,7 +61,7 @@ impl FleetBackend for Workspace {
     ) -> FleetCaptureOutcome {
         let validation = admission.window.check_start().and_then(|()| self.validate_target(connection));
         if let Err(error) = validation {
-            return FleetCaptureOutcome { result: Err(error), source_work: SourceWorkState::NotStarted };
+            return FleetCaptureOutcome { result: Err(error), source_work: SourceWorkState::NotStarted, attempt: None };
         }
         self.collect_into_outbox_admitted(connection, request, outbox, cancellation, &admission).await
     }

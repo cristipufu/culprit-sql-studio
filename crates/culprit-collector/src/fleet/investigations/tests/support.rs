@@ -37,10 +37,11 @@ struct Factory {
     intent: Option<DiagnosticInvestigationIntent>,
     calls: Arc<NativeCalls>,
     failure: Option<CollectionStop>,
+    auth_failure: bool,
 }
 impl Factory {
     fn manual(frame: Frame) -> Self {
-        Self { frame, admission: None, intent: None, calls: Arc::default(), failure: None }
+        Self { frame, admission: None, intent: None, calls: Arc::default(), failure: None, auth_failure: false }
     }
 }
 struct Reader {
@@ -59,6 +60,12 @@ impl SourceFactory for Factory {
     }
     async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
         self.calls.opened.fetch_add(1, Ordering::SeqCst);
+        if self.auth_failure {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::AuthFailed,
+                "fixture authentication rejected",
+            ));
+        }
         Ok(Box::new(FrozenSource::new(
             Reader { frame: self.frame.clone(), queries: 0, calls: self.calls.clone(), failure: self.failure },
             request,
@@ -88,7 +95,11 @@ impl ObservationReader for Reader {
     }
     async fn close(&mut self) -> SourceShutdown {
         self.calls.closed.fetch_add(1, Ordering::SeqCst);
-        SourceShutdown::Quiescent
+        if self.failure == Some(CollectionStop::CancellationUnconfirmed) {
+            SourceShutdown::Unconfirmed
+        } else {
+            SourceShutdown::Quiescent
+        }
     }
 }
 
@@ -106,6 +117,7 @@ pub(in crate::fleet::investigations) struct Backend {
     pub(in crate::fleet::investigations) activity: Frame,
     pub(in crate::fleet::investigations) focus_request: PageWaitRequestState,
     pub(in crate::fleet::investigations) focus_failure: Option<CollectionStop>,
+    pub(in crate::fleet::investigations) focus_auth_failure: bool,
     pub(in crate::fleet::investigations) calls: Arc<NativeCalls>,
 }
 #[async_trait::async_trait]
@@ -169,6 +181,7 @@ impl FleetBackend for Backend {
     ) -> FleetCaptureOutcome {
         let gate = SourceGate::default();
         let mut source_work = SourceWorkState::NotStarted;
+        let mut attempt = None;
         let result = async {
             assert_eq!(connection, "saved-source");
             admission.window.check_start()?;
@@ -196,18 +209,24 @@ impl FleetBackend for Backend {
                 failure: matches!(request.selection, CollectionSelection::FocusedPageWait { .. })
                     .then_some(self.focus_failure)
                     .flatten(),
+                auth_failure: matches!(request.selection, CollectionSelection::FocusedPageWait { .. })
+                    && self.focus_auth_failure,
             };
             let mut lease = outbox.reserve(connection, &request).await?;
             let capture = lease.identity().clone();
+            attempt = Some(DiagnosticAttemptReceipt { capture: capture.clone(), manifest_sha256: None });
+            let owner = factory.intent.as_ref().map(DiagnosticInvestigationLineage::from_intent).transpose()?;
             let directory = lease.directory().to_owned();
-            let captured = collect(&gate, &factory, request, &directory, capture, cancellation, Some(&mut lease)).await;
+            let captured =
+                collect(&gate, &factory, request, &directory, capture.clone(), cancellation, Some(&mut lease)).await;
             source_work = if gate.is_closed() { SourceWorkState::Unconfirmed } else { SourceWorkState::Quiescent };
-            let manifest = captured?;
-            lease.finish().await?;
-            Ok(manifest)
+            let finished = lease.finish().await;
+            attempt = Some(outbox.attempt_receipt(&capture, owner.as_ref()).await?);
+            finished?;
+            captured
         }
         .await;
-        FleetCaptureOutcome { result, source_work }
+        FleetCaptureOutcome { result, source_work, attempt }
     }
 }
 
@@ -299,6 +318,7 @@ impl Harness {
                 activity,
                 focus_request: PageWaitRequestState::Missing,
                 focus_failure: None,
+                focus_auth_failure: false,
                 calls: Arc::default(),
             },
         }
@@ -327,7 +347,6 @@ fn focused_frame(focus: ActivityWaitFocus, request: PageWaitRequestState) -> Fra
     let source = "fixture-focused-pages".to_owned();
     let result = ActivityWaitFocusResult {
         focus,
-        lineage: None,
         observed_from: from.clone(),
         observed_until: until.clone(),
         source: FocusSourceState::Matched,

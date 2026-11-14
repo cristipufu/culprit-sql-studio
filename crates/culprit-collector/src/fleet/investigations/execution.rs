@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     capture::CollectionCancellation,
-    diagnostics::{resolve_evidence, set_analysis},
+    diagnostics::{record_investigation, resolve_evidence},
     fleet::{
         FleetBackend, FleetJournal,
         admission::AdmittedBackend,
@@ -50,12 +50,12 @@ impl Investigations {
                 .await
                 {
                     Ok(Some(_)) => {
-                        set_analysis(
+                        record_attempt(
                             storage.outbox,
-                            &intent.focus.parent,
-                            &intent.episode_id,
-                            DiagnosticAnalysisStatus::Deferred,
-                            Some(issue.clone()),
+                            &intent,
+                            None,
+                            SourceWorkState::NotStarted,
+                            DiagnosticInvestigationOutcome::Stopped { issue: issue.clone() },
                         )
                         .await?
                     }
@@ -71,12 +71,12 @@ impl Investigations {
                 return failed(job, CollectionStop::Cancelled.error(), None, SourceWorkState::NotStarted);
             }
         };
-        set_analysis(
+        record_attempt(
             storage.outbox,
-            &intent.focus.parent,
-            &intent.episode_id,
-            DiagnosticAnalysisStatus::Collecting,
+            &intent,
             None,
+            SourceWorkState::NotStarted,
+            DiagnosticInvestigationOutcome::Admitted,
         )
         .await?;
         let request = CollectionRequest {
@@ -97,9 +97,23 @@ impl Investigations {
         {
             Ok(manifest) => manifest,
             Err(error) => {
-                let result = failed(job, error, None, admitted.source_work())?;
-                defer_native_retry(storage.outbox, &intent, &result).await?;
-                return Ok(result);
+                let source_work = admitted.source_work();
+                let attempt = admitted.attempt()?;
+                let issue = stopped_issue(
+                    CollectionStop::from_error(&error),
+                    Some(error.code),
+                    error.detail == Some(culprit_core::ErrorDetail::Outbox(OutboxProblem::Capacity)),
+                );
+                // Persist the owner receipt before failure classification can stop the fleet for uncertain closure.
+                record_attempt(
+                    storage.outbox,
+                    &intent,
+                    attempt.clone(),
+                    source_work,
+                    DiagnosticInvestigationOutcome::Stopped { issue },
+                )
+                .await?;
+                return failed(job, error, attempt.map(|attempt| attempt.capture), source_work);
             }
         };
         if manifest.request != request
@@ -114,7 +128,7 @@ impl Investigations {
                 .await?;
             if input.parent.capture != manifest.capture
                 || manifest.description.as_ref() != Some(&input.source)
-                || !super::queue::result_matches_intent(&input.source, &ready.intent)?
+                || !super::queue::result_matches_intent(&input.source, manifest.investigation.as_ref(), &ready.intent)?
             {
                 return Err(DeliveryProblem::Integrity.error());
             }
@@ -122,15 +136,36 @@ impl Investigations {
         } else {
             None
         };
-        let attempt = Some(manifest.capture.clone());
+        let attempt = admitted.attempt()?.ok_or_else(|| DeliveryProblem::Integrity.error())?;
         let mut completed = work::completed_for(job.into(), manifest, None, false)?;
         completed.outcome = match result {
-            Some(result) => Outcome::FocusedComplete { result },
-            None => retry(completed.outcome, attempt, admitted.source_work())?,
+            Some(result) => {
+                record_attempt(
+                    storage.outbox,
+                    &intent,
+                    Some(attempt),
+                    admitted.source_work(),
+                    DiagnosticInvestigationOutcome::Captured { capture: result.clone() },
+                )
+                .await?;
+                Outcome::FocusedComplete { result }
+            }
+            None => {
+                let CollectionStatus::Incomplete(stopped) = completed.event.status else {
+                    return Err(CollectionStop::InvalidPage.error());
+                };
+                let issue = stopped_issue(stopped, completed.event.error_code, completed.pause_all);
+                record_attempt(
+                    storage.outbox,
+                    &intent,
+                    Some(attempt.clone()),
+                    admitted.source_work(),
+                    DiagnosticInvestigationOutcome::Stopped { issue },
+                )
+                .await?;
+                retry(completed.outcome, Some(attempt.capture), admitted.source_work())?
+            }
         };
-        if matches!(completed.outcome, Outcome::FocusedRetry { .. }) {
-            defer_native_retry(storage.outbox, &intent, &completed).await?;
-        }
         Ok(completed)
     }
 
@@ -247,29 +282,38 @@ impl Investigations {
     }
 }
 
-async fn defer_native_retry(
+async fn record_attempt(
     outbox: &mut crate::outbox::Outbox,
     intent: &DiagnosticInvestigationIntent,
-    result: &WorkResult,
+    attempt: Option<DiagnosticAttemptReceipt>,
+    source_work: SourceWorkState,
+    outcome: DiagnosticInvestigationOutcome,
 ) -> Result<()> {
-    let CollectionStatus::Incomplete(stopped) = result.event.status else {
-        return Err(CollectionStop::InvalidPage.error());
+    let (status, issue) = match &outcome {
+        DiagnosticInvestigationOutcome::Stopped { issue } => (DiagnosticAnalysisStatus::Deferred, Some(issue.clone())),
+        _ => (DiagnosticAnalysisStatus::Collecting, None),
     };
-    let issue = if result.pause_all {
-        DiagnosticAnalysisIssue::Capacity
-    } else {
-        match stopped {
-            CollectionStop::SourceChanged => DiagnosticAnalysisIssue::SourceChanged,
-            CollectionStop::Cancelled => DiagnosticAnalysisIssue::Interrupted,
-            CollectionStop::PageLimit
-            | CollectionStop::QueryLimit
-            | CollectionStop::ByteLimit
-            | CollectionStop::RowLimit => DiagnosticAnalysisIssue::BudgetExhausted,
-            _ => DiagnosticAnalysisIssue::SourceUnavailable { code: result.event.error_code, stopped: Some(stopped) },
-        }
-    };
-    set_analysis(outbox, &intent.focus.parent, &intent.episode_id, DiagnosticAnalysisStatus::Deferred, Some(issue))
-        .await
+    let event = DiagnosticInvestigationEvent { intent: Box::new(intent.clone()), attempt, source_work, outcome };
+    record_investigation(outbox, event, status, issue).await
+}
+
+fn stopped_issue(
+    stopped: CollectionStop,
+    code: Option<culprit_core::ErrorCode>,
+    capacity: bool,
+) -> DiagnosticAnalysisIssue {
+    if capacity {
+        return DiagnosticAnalysisIssue::Capacity;
+    }
+    match stopped {
+        CollectionStop::SourceChanged => DiagnosticAnalysisIssue::SourceChanged,
+        CollectionStop::Cancelled => DiagnosticAnalysisIssue::Interrupted,
+        CollectionStop::PageLimit
+        | CollectionStop::QueryLimit
+        | CollectionStop::ByteLimit
+        | CollectionStop::RowLimit => DiagnosticAnalysisIssue::BudgetExhausted,
+        _ => DiagnosticAnalysisIssue::SourceUnavailable { code, stopped: Some(stopped) },
+    }
 }
 
 pub(super) fn evidence_unavailable(error: &culprit_core::Error) -> bool {
@@ -298,6 +342,7 @@ fn failed(
     source_work: SourceWorkState,
 ) -> Result<WorkResult> {
     let mut result = work::failure_for(job.into(), FleetWork::Capture, error, None, Some(source_work))?;
+    result.event.capture = attempt.clone();
     result.outcome = retry(result.outcome, attempt, source_work)?;
     Ok(result)
 }

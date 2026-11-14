@@ -1945,7 +1945,11 @@ async fn fleet_owner_receipt_after_restart_never_calls_an_older_durable_native_d
     )
     .await;
     assert_eq!(original.source_work, SourceWorkState::Unconfirmed);
+    let original_attempt = original.attempt.unwrap();
+    assert!(original_attempt.is_valid());
+    assert!(original_attempt.manifest_sha256.is_some());
     let original = original.result.unwrap();
+    assert_eq!(original_attempt.capture, original.capture);
     assert_eq!(original.status, CollectionStatus::Incomplete(CollectionStop::CancellationUnconfirmed));
     let previous_debt = workspace.collection_admission_status().await.unwrap();
     assert!(previous_debt.source_quiescence_required);
@@ -1987,6 +1991,7 @@ async fn fleet_owner_receipt_after_restart_never_calls_an_older_durable_native_d
         SourceWorkState::NotStarted,
         "a new gate is no closure proof for an older owner's durable debt"
     );
+    assert!(outcome.attempt.is_none(), "an old source debt must reject the new operation before allocation");
     assert_eq!(CollectionStop::from_error(&outcome.result.unwrap_err()), CollectionStop::CancellationUnconfirmed);
     assert_eq!(fresh.factories.load(Ordering::SeqCst), 0);
     assert_eq!(fresh.polls.load(Ordering::SeqCst), 0);
@@ -2032,6 +2037,8 @@ async fn fleet_owner_receipt_retains_confirmed_close_and_partial_native_evidence
     )
     .await;
     assert_eq!(outcome.source_work, SourceWorkState::Quiescent, "native closure is independent of the capture result");
+    let receipt = outcome.attempt.unwrap();
+    assert!(receipt.is_valid());
     assert_eq!(outcome.result.unwrap_err().code, ErrorCode::QueryFailed);
     assert!(state.closed.load(Ordering::SeqCst));
     assert!(!state.active.load(Ordering::SeqCst));
@@ -2039,11 +2046,13 @@ async fn fleet_owner_receipt_retains_confirmed_close_and_partial_native_evidence
     let status = outbox.status(10, None).await.unwrap();
     assert_eq!((status.captures, status.source_debts, status.ready), (1, 0, 0));
     let entry = &status.entries[0];
+    assert_eq!(receipt.capture, entry.capture);
     assert_eq!(entry.source_work, SourceWorkState::Quiescent);
     assert_eq!(entry.state, OutboxCaptureState::Incomplete);
     let capture_directory = outbox_path.join("captures").join(&entry.capture.observation_id);
-    let manifest: CollectionManifest =
-        serde_json::from_slice(&std::fs::read(capture_directory.join("manifest.json")).unwrap()).unwrap();
+    let bytes = std::fs::read(capture_directory.join("manifest.json")).unwrap();
+    assert_eq!(receipt.manifest_sha256, Some(culprit_core::telemetry::digest(&bytes)));
+    let manifest: CollectionManifest = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(manifest.capture, entry.capture);
     assert!(matches!(manifest.status, CollectionStatus::Incomplete(_)));
     assert!(!manifest.references.complete, "a retained prefix must not become complete workload evidence");

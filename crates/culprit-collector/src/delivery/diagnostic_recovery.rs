@@ -294,6 +294,35 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         return Err(invalid());
     }
     let mut manifests = BTreeMap::new();
+    for revision in &references.diagnostic_revisions {
+        let Some(event) = &revision.investigation else { continue };
+        let DiagnosticInvestigationOutcome::Captured { capture } = &event.outcome else { continue };
+        let range_id = range_id_for(&manifest.contract, &capture.capture)?;
+        if !manifests.contains_key(&range_id) {
+            if manifests.len() >= MAX_DIAGNOSTIC_EPISODES {
+                return Err(DeliveryProblem::Capacity.error());
+            }
+            // Receipt membership alone cannot authenticate retained native payloads. Read to verified EOF before
+            // an immutable owner event may claim this result, including a valid zero-row focused result.
+            let recovered = load_diagnostic_input(store, &range_id).await?;
+            manifests.insert(range_id.clone(), recovered.range().manifest().clone());
+        }
+        let native = manifests.get(&range_id).ok_or_else(invalid)?;
+        if capture_reference(native)? != *capture
+            || native.source.target.telemetry_id()? != manifest.source.target.telemetry_id()?
+        {
+            return Err(invalid());
+        }
+        let SourceObservation::FocusedPageWait { result, .. } = &native.source.observation else {
+            return Err(invalid());
+        };
+        if !result.is_valid()
+            || result.focus != event.intent.focus
+            || native.investigation.as_ref().is_none_or(|owner| !owner.matches_intent(&result.focus, &event.intent))
+        {
+            return Err(invalid());
+        }
+    }
     let mut exact_refs = BTreeMap::new();
     for revision in &references.diagnostic_revisions {
         for reference in revision
@@ -451,3 +480,6 @@ async fn read_rows(
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()
 }
+
+#[cfg(test)]
+mod tests;

@@ -25,17 +25,26 @@ impl ValidatedCapture {
 }
 
 pub(super) fn manifest(directory: &Path) -> Result<(CollectionManifest, Vec<u8>)> {
+    manifest_if_present(directory)?.ok_or_else(integrity)
+}
+
+pub(super) fn manifest_if_present(directory: &Path) -> Result<Option<(CollectionManifest, Vec<u8>)>> {
+    let input = match durable_fs::regular_file(&directory.join("manifest.json")) {
+        Ok(input) => input,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(integrity()),
+    };
     let mut bytes = Vec::new();
-    durable_fs::regular_file(&directory.join("manifest.json"))
-        .map_err(|_| integrity())?
-        .take(MANIFEST_LIMIT as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(storage)?;
+    input.take(MANIFEST_LIMIT as u64 + 1).read_to_end(&mut bytes).map_err(storage)?;
     if bytes.len() > MANIFEST_LIMIT {
         return Err(integrity());
     }
-    let manifest: CollectionManifest = serde_json::from_slice(&bytes).map_err(|_| integrity())?;
-    Ok((manifest, bytes))
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| integrity())?;
+    let manifest: CollectionManifest = serde_json::from_value(value.clone()).map_err(|_| integrity())?;
+    if serde_json::to_value(&manifest).map_err(|_| integrity())? != value {
+        return Err(integrity());
+    }
+    Ok(Some((manifest, bytes)))
 }
 
 pub(super) fn validate(directory: &Path, capture: &Capture, destination: Option<&Path>) -> Result<ValidatedCapture> {
@@ -71,6 +80,7 @@ pub(super) fn validate(directory: &Path, capture: &Capture, destination: Option<
         return Err(integrity());
     }
     manifest.request.validate().map_err(|_| integrity())?;
+    manifest.investigation_intent().map_err(|_| integrity())?;
     if manifest.read_metrics.as_ref().is_some_and(|metrics| !metrics.is_valid()) {
         return Err(integrity());
     }

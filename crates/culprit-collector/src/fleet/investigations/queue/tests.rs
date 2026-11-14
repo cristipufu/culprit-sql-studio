@@ -367,14 +367,13 @@ fn numerically_equal_cost_accounting_cannot_replace_the_original_immutable_inten
     assert_ne!(intent.key().unwrap(), changed.key().unwrap());
     let result = ActivityWaitFocusResult {
         focus: intent.focus.clone(),
-        lineage: Some(DiagnosticInvestigationLineage::from_intent(&intent).unwrap()),
         observed_from: "2020-01-01T12:00:01Z".into(),
         observed_until: "2020-01-01T12:00:02Z".into(),
         source: FocusSourceState::Matched,
         request: PageWaitRequestState::Missing,
         wait: PageWaitRelation::Unqualified,
     };
-    let mut source = CollectionDescription {
+    let source = CollectionDescription {
         target: intent.focus.target.clone(),
         source: "focused-page-state".into(),
         continuity: SourceContinuity::Unverified,
@@ -389,11 +388,11 @@ fn numerically_equal_cost_accounting_cannot_replace_the_original_immutable_inten
             result: Box::new(result),
         },
     };
-    assert!(result_matches_intent(&source, &intent).unwrap());
-    let SourceObservation::FocusedPageWait { result, .. } = &mut source.observation else { panic!() };
-    result.lineage = Some(DiagnosticInvestigationLineage::from_intent(&changed).unwrap());
-    assert!(result.is_valid(), "the other lineage is independently valid");
-    assert!(!result_matches_intent(&source, &intent).unwrap());
+    let lineage = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
+    assert!(result_matches_intent(&source, Some(&lineage), &intent).unwrap());
+    let lineage = DiagnosticInvestigationLineage::from_intent(&changed).unwrap();
+    assert!(lineage.reconstruct(&changed.focus).is_ok(), "the other lineage is independently valid");
+    assert!(!result_matches_intent(&source, Some(&lineage), &intent).unwrap());
 }
 
 #[tokio::test]

@@ -343,7 +343,6 @@ fn focus_frame(
             sources: vec![StateSourceCoverage::observed("page-wait-targets".into(), pages.len() as u32, false)],
         },
         result: Box::new(ActivityWaitFocusResult {
-            lineage: None,
             focus,
             observed_from: "2020-01-01T00:02:00Z".into(),
             observed_until: "2020-01-01T00:02:02Z".into(),

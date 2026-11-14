@@ -1,3 +1,4 @@
+mod events;
 mod focus;
 mod retirement;
 use super::*;
@@ -66,7 +67,7 @@ fn baseline(files: &mut Files, rows: Vec<ActivityObservation>, complete: bool, s
             coverage: StateSourceCoverage::observed("activity".into(), rows.len() as u32, complete),
         }),
     };
-    let mut writer = ObservationFiles::create(&reservation.directory, request, identity.clone()).unwrap();
+    let mut writer = ObservationFiles::create(&reservation.directory, request, identity.clone(), None).unwrap();
     writer.describe(source).unwrap();
     writer.begin_page(0).unwrap();
     assert!(writer.write_page(0, &rows.into_iter().map(TelemetryRecord::from).collect::<Vec<_>>()).unwrap().is_none());
@@ -119,6 +120,7 @@ fn update(
                 controller_version: 1,
                 episode,
                 previous_revision,
+                investigation: None,
                 inputs,
                 analyzed_at: at.clone(),
             };

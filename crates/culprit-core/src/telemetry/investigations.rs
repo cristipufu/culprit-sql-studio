@@ -68,8 +68,8 @@ pub struct DiagnosticInvestigationIntent {
     pub qualification: RecipeCostReceipt,
 }
 
-/// Durable provenance for a completed attempt. The focused result already owns its exact original question;
-/// this stores the remaining intent fields once so retirement cannot erase recipe, budget or approval history.
+/// Owner-written provenance retained before source authentication or description. The request already owns its
+/// exact original question; this stores the remaining fields once so failure cannot erase admitted recipe history.
 /// It records structural provenance, never permission to dispatch or a replacement for the source's verifier.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -97,7 +97,7 @@ impl DiagnosticInvestigationLineage {
         })
     }
 
-    /// Reconstruct the exact retired intent using only the focused result's original question and this provenance.
+    /// Reconstruct the exact retired intent using only the request's original question and this provenance.
     /// Parent/cost artifact authentication and selected-source authority remain separate caller-owned checks.
     pub fn reconstruct(&self, focus: &ActivityWaitFocus) -> Result<DiagnosticInvestigationIntent> {
         if !valid_digest(&self.intent_key) {
@@ -118,8 +118,26 @@ impl DiagnosticInvestigationLineage {
         Ok(intent)
     }
 
-    pub fn matches_focus(&self, focus: &ActivityWaitFocus) -> bool {
-        self.reconstruct(focus).is_ok()
+    /// Match immutable provenance, including the exact native accounting encoding, to the original question.
+    pub fn matches_intent(&self, focus: &ActivityWaitFocus, intent: &DiagnosticInvestigationIntent) -> bool {
+        intent.key().is_ok_and(|expected| self.intent_key == expected && self.reconstruct(focus).is_ok())
+    }
+
+    /// Match admitted owner metadata before any source exists. This grants no source or native authority.
+    pub fn matches_request(&self, request: &CollectionRequest) -> bool {
+        self.intent_for_request(request).is_ok()
+    }
+
+    pub(super) fn intent_for_request(&self, request: &CollectionRequest) -> Result<DiagnosticInvestigationIntent> {
+        request.validate()?;
+        let CollectionSelection::FocusedPageWait { focus } = &request.selection else {
+            return Err(invalid());
+        };
+        let intent = self.reconstruct(focus)?;
+        if intent.budget != request.budget || !request.subject.accepts(&intent.focus.target) {
+            return Err(invalid());
+        }
+        Ok(intent)
     }
 }
 

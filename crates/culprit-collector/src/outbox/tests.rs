@@ -1,5 +1,6 @@
 use super::*;
 use crate::collection_files::ObservationFiles;
+mod attempts;
 mod delivery_worker;
 mod eviction;
 mod restored_diagnostics;
@@ -141,7 +142,7 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
     }
 }
 async fn sealed(lease: &mut CaptureLease<'_>) -> CollectionManifest {
-    let mut files = ObservationFiles::create(lease.directory(), request(), lease.identity().clone()).unwrap();
+    let mut files = ObservationFiles::create(lease.directory(), request(), lease.identity().clone(), None).unwrap();
     lease.source_started().await.unwrap();
     files.describe(source()).unwrap();
     for (index, stream) in request().collection().streams().iter().copied().enumerate() {

@@ -46,6 +46,9 @@ struct Boundaries {
     authenticated: AtomicU32,
     hold_authentication: std::sync::atomic::AtomicBool,
     active_authentication: std::sync::atomic::AtomicBool,
+    authentication_failure: std::sync::atomic::AtomicBool,
+    unconfirmed_shutdown: std::sync::atomic::AtomicBool,
+    obstruct_manifest_on_close: Mutex<Option<std::path::PathBuf>>,
     entered: Notify,
     release: Notify,
     requests: Mutex<Vec<SavedRoute>>,
@@ -71,6 +74,9 @@ impl DatabaseAuthentication for Credentials {
         self.0.entered.notify_one();
         if self.0.hold_authentication.load(Ordering::SeqCst) {
             self.0.release.notified().await;
+        }
+        if self.0.authentication_failure.load(Ordering::SeqCst) {
+            return Err(Error::new(ErrorCode::PermissionDenied, "fixture authentication rejected"));
         }
         self.0.authenticated.fetch_add(1, Ordering::SeqCst);
         Ok(DatabaseCredential { token: Zeroizing::new("admission-fixture-private-token".into()), username: None })
@@ -141,7 +147,17 @@ impl TelemetrySource for SourceProbe {
     }
     async fn close(&mut self) -> SourceShutdown {
         self.0.closes.fetch_add(1, Ordering::SeqCst);
-        SourceShutdown::Quiescent
+        if let Some(captures) = self.0.obstruct_manifest_on_close.lock().unwrap().as_ref() {
+            let capture = std::fs::read_dir(captures).unwrap().next().unwrap().unwrap().path();
+            let manifest = capture.join("manifest.json");
+            std::fs::remove_file(&manifest).unwrap();
+            std::fs::create_dir(&manifest).unwrap();
+        }
+        if self.0.unconfirmed_shutdown.load(Ordering::SeqCst) {
+            SourceShutdown::Unconfirmed
+        } else {
+            SourceShutdown::Quiescent
+        }
     }
 }
 fn unused() -> Error {
@@ -343,6 +359,9 @@ async fn capture_controller_cancels_late_authentication_without_telemetry_or_nat
             SourceWorkState::Quiescent,
             "the returning controller proved that no native source remained active"
         );
+        assert!(
+            outcome.attempt.as_ref().is_some_and(|receipt| receipt.is_valid() && receipt.manifest_sha256.is_some())
+        );
         outcome.result.unwrap()
     };
     assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::TimedOut));
@@ -363,6 +382,7 @@ async fn capture_controller_cancels_late_authentication_without_telemetry_or_nat
         )
         .await;
     assert_eq!(expired.source_work, SourceWorkState::NotStarted);
+    assert!(expired.attempt.is_none(), "an expired dispatch must not invent an allocated attempt");
     assert_eq!(CollectionStop::from_error(&expired.result.unwrap_err()), CollectionStop::TimedOut);
     let status = outbox.status(10, None).await.unwrap();
     assert_eq!((status.captures, status.source_debts, status.unconfirmed_sources), (1, 0, 0));
@@ -386,6 +406,10 @@ async fn an_unchanged_admitted_route_can_reach_the_source_and_settle_its_confirm
         )
         .await;
     assert_eq!(outcome.source_work, SourceWorkState::Quiescent);
+    let receipt = outcome.attempt.unwrap();
+    assert!(receipt.is_valid());
+    assert!(receipt.manifest_sha256.is_some(), "describe failed after the initial manifest was durably written");
+    assert_eq!(outbox.attempt_receipt(&receipt.capture, None).await.unwrap(), receipt);
     let error = outcome.result.unwrap_err();
     assert_eq!(error.code, ErrorCode::Unsupported, "the fixture's native describe boundary must actually run");
     assert_eq!(state.authentication.load(Ordering::SeqCst), 1);
@@ -397,4 +421,69 @@ async fn an_unchanged_admitted_route_can_reach_the_source_and_settle_its_confirm
     assert_eq!(state.secret_accesses.load(Ordering::SeqCst), 0);
     assert!(!workspace.collection_admission_status().await.unwrap().source_quiescence_required);
     assert!(!workspace.source_gate.is_closed());
+}
+
+#[tokio::test]
+async fn rejected_authentication_retains_allocated_manifest_before_native_description() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = Arc::new(Boundaries::default());
+    state.authentication_failure.store(true, Ordering::SeqCst);
+    let workspace = configured(directory.path(), &state);
+    let path = directory.path().join("outbox");
+    let mut outbox = Outbox::create(&path, OutboxLimits::default()).unwrap();
+    let outcome = workspace
+        .collect_into_outbox_admitted(
+            "pilot",
+            baseline_request(),
+            &mut outbox,
+            &CollectionCancellation::default(),
+            &admitted(&workspace),
+        )
+        .await;
+    assert_eq!(outcome.source_work, SourceWorkState::Quiescent);
+    assert_eq!(outcome.result.unwrap_err().code, ErrorCode::PermissionDenied);
+    let receipt = outcome.attempt.unwrap();
+    assert!(receipt.is_valid());
+    let bytes =
+        std::fs::read(path.join("captures").join(&receipt.capture.observation_id).join("manifest.json")).unwrap();
+    assert_eq!(receipt.manifest_sha256, Some(digest(&bytes)));
+    let manifest: CollectionManifest = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(manifest.capture, receipt.capture);
+    assert!(manifest.description.is_none());
+    assert!(matches!(manifest.status, CollectionStatus::Incomplete(_)));
+    assert_eq!(manifest.source_queries, 0);
+    assert_eq!(state.authentication.load(Ordering::SeqCst), 1);
+    assert_no_source(&state);
+    assert!(!workspace.collection_admission_status().await.unwrap().source_quiescence_required);
+}
+
+#[tokio::test]
+async fn invalid_manifest_receipt_cannot_erase_allocated_identity_or_unconfirmed_shutdown() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = Arc::new(Boundaries::default());
+    state.unconfirmed_shutdown.store(true, Ordering::SeqCst);
+    let path = directory.path().join("outbox");
+    *state.obstruct_manifest_on_close.lock().unwrap() = Some(path.join("captures"));
+    let workspace = configured(directory.path(), &state);
+    let mut outbox = Outbox::create(&path, OutboxLimits::default()).unwrap();
+    let outcome = workspace
+        .collect_into_outbox_admitted(
+            "pilot",
+            baseline_request(),
+            &mut outbox,
+            &CollectionCancellation::default(),
+            &admitted(&workspace),
+        )
+        .await;
+    assert_eq!(outcome.source_work, SourceWorkState::Unconfirmed);
+    let receipt = outcome.attempt.unwrap();
+    assert!(receipt.is_valid());
+    assert!(receipt.manifest_sha256.is_none(), "an invalid existing artifact cannot acquire an attested digest");
+    assert_eq!(outcome.result.unwrap_err().detail, Some(ErrorDetail::Outbox(OutboxProblem::Integrity)));
+    let status = outbox.status(10, None).await.unwrap();
+    assert_eq!((status.captures, status.source_debts, status.ready), (1, 1, 0));
+    assert_eq!(status.entries[0].capture, receipt.capture);
+    assert_eq!(status.entries[0].source_work, SourceWorkState::Unconfirmed);
+    assert!(workspace.source_gate.is_closed());
+    assert!(workspace.collection_admission_status().await.unwrap().source_quiescence_required);
 }

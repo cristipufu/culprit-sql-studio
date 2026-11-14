@@ -48,7 +48,7 @@ fn prepared_database(root: &std::path::Path, sequence: u64, database: &str) -> P
         }),
     };
     let directory = root.join(&capture.observation_id);
-    let mut writer = ObservationFiles::create(&directory, request, capture).unwrap();
+    let mut writer = ObservationFiles::create(&directory, request, capture, None).unwrap();
     writer.describe(source).unwrap();
     let row = TelemetryRecord::ResourceSample(ResourceMeasurement {
         at: "2020-01-01T06:00:15Z".into(),

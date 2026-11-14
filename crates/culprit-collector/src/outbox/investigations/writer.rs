@@ -109,7 +109,7 @@ impl Files {
                 ],
             )
             .map_err(storage)?;
-        let mut files = ObservationFiles::create(&reservation.directory, request, identity.clone())?;
+        let mut files = ObservationFiles::create(&reservation.directory, request, identity.clone(), None)?;
         files.describe(source)?;
         let records = update
             .revisions
@@ -177,6 +177,9 @@ impl Files {
             }
         }
         for revision in &update.revisions {
+            if let Some(event) = &revision.investigation {
+                self.validate_investigation_event(event)?;
+            }
             if revision.previous_revision.is_none()
                 && (revision.episode.scope != DiagnosticScope::from_source(&current.source)?
                     || !current.rows.iter().any(|row| row.reference == revision.episode.first))
@@ -264,6 +267,34 @@ impl Files {
                         return Err(integrity());
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_investigation_event(&mut self, event: &DiagnosticInvestigationEvent) -> Result<()> {
+        self.verify_focus_parent(&event.intent.focus)?;
+        if let Some(attempt) = &event.attempt {
+            let owner = DiagnosticInvestigationLineage::from_intent(&event.intent)?;
+            if attempt.manifest_sha256.is_some() {
+                if self.attempt_receipt(&attempt.capture, Some(&owner))? != *attempt {
+                    return Err(integrity());
+                }
+            } else {
+                // An allocation-only receipt preserves storage failure history without attesting damaged bytes.
+                let capture = self.journal.capture(&attempt.capture.observation_id)?;
+                if capture.identity != attempt.capture || !owner.matches_request(&capture.request) {
+                    return Err(integrity());
+                }
+            }
+        }
+        if let DiagnosticInvestigationOutcome::Captured { capture } = &event.outcome {
+            let input = self.diagnostic_input(&capture.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
+            if input.parent != *capture
+                || !matches!(&input.source.observation, SourceObservation::FocusedPageWait { result, .. }
+                    if result.focus == event.intent.focus)
+            {
+                return Err(integrity());
             }
         }
         Ok(())

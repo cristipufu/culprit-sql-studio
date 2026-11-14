@@ -30,6 +30,7 @@ mod grants;
 mod identity;
 mod index_operations;
 mod indexes;
+mod investigation_events;
 mod investigations;
 mod io;
 mod memory_failures;
@@ -92,6 +93,7 @@ pub use grants::*;
 pub use identity::*;
 pub use index_operations::*;
 pub use indexes::*;
+pub use investigation_events::*;
 pub use investigations::*;
 pub use io::*;
 pub use memory_failures::*;
@@ -731,6 +733,10 @@ pub struct CollectionManifest {
     pub started_at: String,
     pub finished_at: Option<String>,
     pub request: CollectionRequest,
+    /// Admitted owner provenance, written before credentials or native source description are requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub investigation: Option<DiagnosticInvestigationLineage>,
     pub description: Option<CollectionDescription>,
     /// Complete means the declared native streams finished. Reads are reconcilable observations, not an atomic
     /// snapshot; unavailable definition payloads and unverified continuity still limit analytical use.
@@ -740,6 +746,23 @@ pub struct CollectionManifest {
     pub directory_synced: bool,
     pub files: Vec<CollectedFile>,
     pub references: ReferenceCoverage,
+}
+
+impl CollectionManifest {
+    /// Recover owner provenance independently of native availability or completion. Structural validity never
+    /// substitutes for independently authenticated parent/cost evidence or the selected source's authority.
+    pub fn investigation_intent(&self) -> Result<Option<DiagnosticInvestigationIntent>> {
+        self.investigation
+            .as_ref()
+            .map(|lineage| {
+                let intent = lineage.intent_for_request(&self.request)?;
+                if self.description.as_ref().is_some_and(|source| !source.matches_request(&self.request)) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                Ok(intent)
+            })
+            .transpose()
+    }
 }
 
 #[cfg(test)]

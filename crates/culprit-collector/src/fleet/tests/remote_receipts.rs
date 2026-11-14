@@ -62,6 +62,7 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
     PreparedRange {
         manifest: Arc::new(RangeManifest {
             capture_manifest_sha256: culprit_core::telemetry::digest(b"fixture-manifest"),
+            investigation: None,
             contract,
             range_id,
             capture,

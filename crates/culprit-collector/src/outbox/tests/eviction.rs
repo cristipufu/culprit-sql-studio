@@ -90,7 +90,7 @@ pub(super) async fn activity(
         observations: u32::from(observation.is_some()),
         coverage: StateSourceCoverage::collected("live_requests".into(), u32::from(observation.is_some())),
     });
-    let mut files = ObservationFiles::create(lease.directory(), request, lease.identity().clone()).unwrap();
+    let mut files = ObservationFiles::create(lease.directory(), request, lease.identity().clone(), None).unwrap();
     lease.source_started().await.unwrap();
     files.describe(source).unwrap();
     if let Some(observation) = observation {

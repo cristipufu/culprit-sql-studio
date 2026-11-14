@@ -91,16 +91,11 @@ pub enum FocusSourceState {
     Unverified,
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct ActivityWaitFocusResult {
     pub focus: ActivityWaitFocus,
-    /// Automatic attempts retain their admitted intent after canonical scheduler payload retirement.
-    /// Manual focused captures have no automatic admission lineage.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub lineage: Option<DiagnosticInvestigationLineage>,
     pub observed_from: String,
     pub observed_until: String,
     pub source: FocusSourceState,
@@ -128,7 +123,6 @@ impl ActivityWaitFocusResult {
 
     pub fn is_valid(&self) -> bool {
         self.focus.is_valid()
-            && self.lineage.as_ref().is_none_or(|lineage| lineage.matches_focus(&self.focus))
             && ObservationBounds::new(&self.observed_from, &self.observed_until).is_some()
             && (self.source != FocusSourceState::Matched
                 || ObservationBounds::new(&self.focus.original_observed_at, &self.observed_from).is_some())

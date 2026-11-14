@@ -32,6 +32,7 @@ impl FleetBackend for Backend {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let result = if self.manifest_unconfirmed {
             Ok(CollectionManifest {
+                investigation: None,
                 format_version: EXPORT_FORMAT_VERSION,
                 capture: CaptureIdentity { observation_id: "unconfirmed-fixture".into(), revision: None },
                 started_at: "2020-01-01T12:00:00Z".into(),
@@ -50,7 +51,7 @@ impl FleetBackend for Backend {
         } else {
             Err(CollectionStop::Pressure.error())
         };
-        FleetCaptureOutcome { result, source_work: self.source_work }
+        FleetCaptureOutcome { result, source_work: self.source_work, attempt: None }
     }
 }
 fn request() -> CollectionRequest {

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 17;
+pub const EXPORT_FORMAT_VERSION: u32 = 18;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {

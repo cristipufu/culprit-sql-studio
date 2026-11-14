@@ -144,7 +144,7 @@ pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
         }),
     };
     let path = root.join("capture");
-    let mut writer = ObservationFiles::create(&path, request, capture).unwrap();
+    let mut writer = ObservationFiles::create(&path, request, capture, None).unwrap();
     writer.describe(source).unwrap();
     for index in 0..writer.manifest.files.len() {
         assert!(writer.write_page(index, &[]).unwrap().is_none());
@@ -189,7 +189,7 @@ fn empty_query_history(root: &Path) -> PreparedRange {
         revision: Some(CaptureRevision { outbox_id: "outbox".into(), owner_epoch: "1".into(), sequence: "1".into() }),
     };
     let path = root.join("history");
-    let mut writer = ObservationFiles::create(&path, request, capture).unwrap();
+    let mut writer = ObservationFiles::create(&path, request, capture, None).unwrap();
     writer.describe(source).unwrap();
     for index in 0..4 {
         writer.seal(index).unwrap();
@@ -256,7 +256,7 @@ pub(super) fn empty_diagnostics_for_version(
         }),
     };
     let path = root.join(&capture.observation_id);
-    let mut writer = ObservationFiles::create(&path, request, capture).unwrap();
+    let mut writer = ObservationFiles::create(&path, request, capture, None).unwrap();
     writer.describe(source).unwrap();
     writer.seal(0).unwrap();
     writer.begin_page(1).unwrap();

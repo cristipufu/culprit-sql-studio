@@ -1,7 +1,7 @@
 //! Offline analysis runs on sealed evidence. This module has no provider, credential or native query dependency.
 mod planning;
 mod transition;
-pub(crate) use transition::set_analysis;
+pub(crate) use transition::{record_investigation, set_analysis};
 #[cfg(test)]
 mod tests;
 use crate::{

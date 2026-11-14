@@ -341,17 +341,22 @@ impl Investigations {
             match storage.outbox.diagnostic_input_state(result, DIAGNOSTIC_CONTROLLER_VERSION).await? {
                 DiagnosticInputState::Pending => return Ok(false),
                 state @ (DiagnosticInputState::Consumed | DiagnosticInputState::EvidenceOnly) => {
-                    match storage
-                        .outbox
-                        .diagnostic_input(&result.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
-                        .await
-                    {
-                        Ok(input) => {
-                            if input.parent != *result || !result_matches_intent(&input.source, intent)? {
-                                return Err(DeliveryProblem::Integrity.error());
-                            }
-                            state == DiagnosticInputState::Consumed
+                    let authenticated = async {
+                        let input = storage
+                            .outbox
+                            .diagnostic_input(&result.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+                            .await?;
+                        let manifest = storage.outbox.verify(&result.capture.observation_id).await?;
+                        if input.parent != *result
+                            || !result_matches_intent(&input.source, manifest.investigation.as_ref(), intent)?
+                        {
+                            return Err(DeliveryProblem::Integrity.error());
                         }
+                        Ok(())
+                    }
+                    .await;
+                    match authenticated {
+                        Ok(()) => state == DiagnosticInputState::Consumed,
                         // Archive acknowledgement may evict raw bytes before compacting their consumption row.
                         // Only actual absence may use the configured archive; a corrupt local artifact still fails.
                         Err(error)
@@ -375,14 +380,14 @@ impl Investigations {
             result = tokio::time::timeout(Duration::from_secs(30), async {
                 let manifest = recovery.capture_manifest(&result.capture).await?;
                 if crate::delivery::diagnostic_recovery::capture_reference(&manifest)? != *result
-                    || !result_matches_intent(&manifest.source, intent)?
+                    || !result_matches_intent(&manifest.source, manifest.investigation.as_ref(), intent)?
                 {
                     return Err(DeliveryProblem::Integrity.error());
                 }
                 let recovered = crate::delivery::diagnostic_recovery::load_diagnostic_input(recovery, &manifest.range_id).await?;
                 if recovered.range().manifest_digest() != manifest.digest()?
                     || crate::delivery::diagnostic_recovery::capture_reference(recovered.range().manifest())? != *result
-                    || !result_matches_intent(&recovered.range().manifest().source, intent)?
+                    || !result_matches_intent(&recovered.range().manifest().source, recovered.range().manifest().investigation.as_ref(), intent)?
                 {
                     return Err(DeliveryProblem::Integrity.error());
                 }
@@ -401,18 +406,13 @@ mod tests;
 
 pub(super) fn result_matches_intent(
     source: &CollectionDescription,
+    lineage: Option<&DiagnosticInvestigationLineage>,
     intent: &DiagnosticInvestigationIntent,
 ) -> Result<bool> {
     let SourceObservation::FocusedPageWait { result, .. } = &source.observation else {
         return Err(DeliveryProblem::Integrity.error());
     };
-    let expected_key = intent.key()?;
     Ok(result.is_valid()
         && result.focus == intent.focus
-        && result.lineage.as_ref().is_some_and(|lineage| {
-            lineage.intent_key == expected_key
-                && lineage
-                    .reconstruct(&result.focus)
-                    .is_ok_and(|reconstructed| reconstructed.key().is_ok_and(|key| key == expected_key))
-        }))
+        && lineage.is_some_and(|lineage| lineage.matches_intent(&result.focus, intent)))
 }

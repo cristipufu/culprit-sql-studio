@@ -16,4 +16,8 @@ revision: string, lifecycle: DiagnosticLifecycle, analysis: DiagnosticAnalysisSt
 /**
  * Recovery is a qualified complete capture; absence does not have a native row receipt.
  */
-recovery: DiagnosticRecoveryProof | null, };
+recovery: DiagnosticRecoveryProof | null, 
+/**
+ * Compact reference only; the complete event belongs to immutable revision history.
+ */
+investigation_event?: string, };

@@ -4,6 +4,7 @@ pub mod encoding;
 pub mod envelope;
 pub mod evidence;
 pub mod indexes;
+mod investigations;
 pub mod prepared;
 pub mod projection;
 pub mod publication;

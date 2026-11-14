@@ -263,7 +263,7 @@ impl DiagnosticCaptureDescription {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum SourceObservation {
@@ -374,7 +374,7 @@ impl SourceObservation {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct CollectionDescription {
     pub target: CollectionTarget,
@@ -439,7 +439,6 @@ impl CollectionDescription {
         {
             return snapshot.is_valid()
                 && result.is_valid()
-                && result.lineage.as_ref().is_none_or(|lineage| lineage.budget == request.budget)
                 && &result.focus == focus.as_ref()
                 && self.target == focus.target
                 && snapshot.dataset == SnapshotDataset::PageWaitTargets

@@ -5,8 +5,8 @@ use culprit_core::{
     Error, Result, t,
     telemetry::{
         CaptureIdentity, CollectedFile, CollectionDescription, CollectionManifest, CollectionRequest, CollectionStatus,
-        CollectionStop, EXPORT_FORMAT_VERSION, ExportedRecord, NativeRecordIdentity, ReferenceCoverage,
-        TelemetryRecord,
+        CollectionStop, DiagnosticInvestigationLineage, EXPORT_FORMAT_VERSION, ExportedRecord, NativeRecordIdentity,
+        ReferenceCoverage, TelemetryRecord,
     },
 };
 use sha2::{Digest, Sha256};
@@ -28,6 +28,8 @@ struct EncodedPage {
     records: Vec<TelemetryRecord>,
 }
 
+pub(crate) const MAX_MANIFEST_BYTES: usize = 128 * 1024;
+
 pub(crate) struct ObservationFiles {
     directory: PathBuf,
     pub(crate) manifest: CollectionManifest,
@@ -37,9 +39,16 @@ pub(crate) struct ObservationFiles {
 }
 
 impl ObservationFiles {
-    pub(crate) fn create(directory: &Path, request: CollectionRequest, capture: CaptureIdentity) -> Result<Self> {
+    pub(crate) fn create(
+        directory: &Path,
+        request: CollectionRequest,
+        capture: CaptureIdentity,
+        investigation: Option<DiagnosticInvestigationLineage>,
+    ) -> Result<Self> {
+        if investigation.as_ref().is_some_and(|lineage| !lineage.matches_request(&request)) {
+            return Err(CollectionStop::InvalidPage.error());
+        }
         let streams = request.collection().streams();
-        durable_fs::create_directory(directory).map_err(file_error)?;
         let mut writer = Self {
             directory: directory.into(),
             manifest: CollectionManifest {
@@ -48,6 +57,7 @@ impl ObservationFiles {
                 started_at: Utc::now().to_rfc3339(),
                 finished_at: None,
                 request,
+                investigation,
                 description: None,
                 status: CollectionStatus::Incomplete(CollectionStop::Pending),
                 source_queries: 0,
@@ -76,7 +86,9 @@ impl ObservationFiles {
             source_rechecked: false,
             references: ObservationReferences::default(),
         };
-        writer.persist()?;
+        let initial_manifest = writer.manifest_bytes()?;
+        durable_fs::create_directory(directory).map_err(file_error)?;
+        writer.publish_manifest(&initial_manifest)?;
         for &stream in streams {
             writer.outputs.push(OutputFile {
                 handle: Some(
@@ -291,8 +303,13 @@ impl ObservationFiles {
         Ok(self.manifest)
     }
     fn persist(&self) -> Result<()> {
-        let bytes = durable_fs::json_bytes(&self.manifest, 128 * 1024).map_err(file_error)?;
-        durable_fs::publish(&self.directory.join("manifest.json"), &bytes).map_err(file_error)
+        self.publish_manifest(&self.manifest_bytes()?)
+    }
+    fn manifest_bytes(&self) -> Result<Vec<u8>> {
+        durable_fs::json_bytes(&self.manifest, MAX_MANIFEST_BYTES).map_err(file_error)
+    }
+    fn publish_manifest(&self, bytes: &[u8]) -> Result<()> {
+        durable_fs::publish(&self.directory.join("manifest.json"), bytes).map_err(file_error)
     }
 }
 
@@ -330,6 +347,7 @@ mod tests {
                 &temporary.path().join("observation"),
                 request,
                 CaptureIdentity { observation_id: durable_fs::random_id().unwrap(), revision: None },
+                None,
             )
             .unwrap();
             files
@@ -430,7 +448,7 @@ mod tests {
                 budget: Default::default(),
             };
             let directory = temporary.path().join("observation");
-            let mut files = ObservationFiles::create(&directory, request, capture).unwrap();
+            let mut files = ObservationFiles::create(&directory, request, capture, None).unwrap();
             files
                 .describe(CollectionDescription {
                     target: culprit_core::DatabaseIdentity::server(
@@ -484,6 +502,7 @@ mod tests {
             &directory,
             request(),
             CaptureIdentity { observation_id: durable_fs::random_id().unwrap(), revision: None },
+            None,
         )
         .unwrap();
         for index in 0..files.manifest.files.len() {
@@ -534,6 +553,7 @@ mod tests {
             &directory,
             request(),
             CaptureIdentity { observation_id: durable_fs::random_id().unwrap(), revision: None },
+            None,
         )
         .unwrap();
         for index in 0..files.manifest.files.len() {

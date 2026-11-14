@@ -323,10 +323,15 @@ pub struct DiagnosticEpisode {
     pub latest: DiagnosticEvidenceRef,
     /// Recovery is a qualified complete capture; absence does not have a native row receipt.
     pub recovery: Option<DiagnosticRecoveryProof>,
+    /// Compact reference only; the complete event belongs to immutable revision history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub investigation_event: Option<String>,
 }
 impl DiagnosticEpisode {
     pub fn is_valid(&self) -> bool {
         valid_digest(&self.id)
+            && self.investigation_event.as_deref().is_none_or(valid_digest)
             && self.scope.is_valid()
             && self.signal.is_valid()
             && [&self.first, &self.latest]
@@ -376,6 +381,7 @@ impl DiagnosticEpisode {
             peak: None,
             latest: evidence,
             recovery: None,
+            investigation_event: None,
         };
         if !value.is_valid() {
             return Err(invalid());
@@ -434,6 +440,10 @@ pub struct DiagnosticRevision {
     pub previous_revision: Option<String>,
     pub inputs: Vec<DiagnosticEvidenceRef>,
     pub analyzed_at: String,
+    /// Present only when this transition installs a new immutable investigation event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub investigation: Option<Box<DiagnosticInvestigationEvent>>,
 }
 impl DiagnosticRevision {
     pub fn is_valid(&self) -> bool {
@@ -452,6 +462,14 @@ impl DiagnosticRevision {
             && !self.inputs.is_empty()
             && self.inputs.len() <= MAX_DIAGNOSTIC_INPUTS
             && self.inputs.iter().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
+            && self.investigation.as_ref().is_none_or(|event| {
+                event.matches_episode(&self.episode)
+                    && event.key().ok().as_deref() == self.episode.investigation_event.as_deref()
+                    && self.inputs.contains(&event.intent.focus.parent)
+            })
+            && (self.previous_revision.is_some()
+                || self.investigation.is_some()
+                || self.episode.investigation_event.is_none())
             && (self.episode.analysis != DiagnosticAnalysisStatus::Analyzed || self.episode.report.is_some())
             && self
                 .episode
@@ -467,6 +485,7 @@ impl DiagnosticRevision {
             &self.episode,
             &self.previous_revision,
             &self.inputs,
+            &self.investigation,
         ))
     }
 }
@@ -591,7 +610,7 @@ pub fn diagnostic_baseline_can_resolve(
         && matches!(source_state, SourceState::Collected | SourceState::Empty)
 }
 
-fn valid_capture(capture: &CaptureIdentity) -> bool {
+pub(super) fn valid_capture(capture: &CaptureIdentity) -> bool {
     valid_key(&capture.observation_id)
         && capture.revision.as_ref().is_some_and(|revision| {
             valid_key(&revision.outbox_id)
@@ -602,7 +621,7 @@ fn valid_capture(capture: &CaptureIdentity) -> bool {
 pub(super) fn positive(value: &str) -> Option<u64> {
     value.parse::<u64>().ok().filter(|parsed| *parsed > 0 && parsed.to_string() == value)
 }
-fn digest_value(value: &impl Serialize) -> Result<String> {
+pub(super) fn digest_value(value: &impl Serialize) -> Result<String> {
     serde_json::to_vec(value).map(|bytes| digest(&bytes)).map_err(|_| invalid())
 }
 fn invalid() -> Error {

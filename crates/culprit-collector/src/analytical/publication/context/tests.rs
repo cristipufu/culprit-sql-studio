@@ -50,7 +50,6 @@ fn focused_source() -> CollectionDescription {
         resource,
     };
     let result = ActivityWaitFocusResult {
-        lineage: None,
         focus,
         observed_from: "2020-01-01T12:00:01Z".into(),
         observed_until: "2020-01-01T12:00:02Z".into(),
@@ -161,9 +160,12 @@ fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sq
         Engine::Mssql,
     );
     assert!(intent.is_valid());
-    result.lineage = Some(DiagnosticInvestigationLineage::from_intent(&intent).unwrap());
-    let public = observation(&source.observation).unwrap();
-    let lineage = &public["data"]["result"]["lineage"];
+    let owner = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
+    let mut manifest = test_support::fixture().0;
+    manifest.source = source.clone();
+    manifest.investigation = Some(owner);
+    let public = envelope::capture_context(&manifest, &digest(b"owner recovery manifest")).unwrap();
+    let lineage = &public["investigation"];
     assert_eq!(lineage["intent_key"], intent.key().unwrap());
     assert_eq!(lineage["recipe_id"], intent.recipe_id);
     assert_eq!(lineage["qualification_key"], intent.qualification.key().unwrap());

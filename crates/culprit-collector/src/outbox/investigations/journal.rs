@@ -147,6 +147,7 @@ pub(in crate::outbox) fn validate_transition(
         if prior.map(|episode| &episode.revision) != revision.previous_revision.as_ref() {
             return Err(DeliveryProblem::Conflict.error());
         }
+        validate_investigation_transition(prior, revision)?;
         if let Some(prior) = prior
             && (revision.episode.first != prior.first
                 || revision.episode.scope != prior.scope
@@ -168,6 +169,20 @@ pub(in crate::outbox) fn validate_transition(
     let next: BTreeMap<_, _> =
         update.checkpoint.episodes.iter().map(|episode| (episode.id.clone(), episode.clone())).collect();
     if previous != next {
+        return Err(integrity());
+    }
+    Ok(())
+}
+
+fn validate_investigation_transition(prior: Option<&DiagnosticEpisode>, revision: &DiagnosticRevision) -> Result<()> {
+    let previous_key = prior.and_then(|episode| episode.investigation_event.as_ref());
+    let changed = previous_key != revision.episode.investigation_event.as_ref();
+    if changed != revision.investigation.is_some()
+        || revision
+            .investigation
+            .as_ref()
+            .is_some_and(|event| prior.is_none_or(|episode| !event.matches_episode(episode)))
+    {
         return Err(integrity());
     }
     Ok(())

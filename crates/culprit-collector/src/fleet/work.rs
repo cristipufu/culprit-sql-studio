@@ -188,6 +188,7 @@ pub(super) fn completed_for(
                 coverage
             }
         });
+    let error_code = manifest.files.iter().find(|file| file.status == manifest.status).and_then(|file| file.error_code);
     Ok(WorkResult {
         source: manifest.description,
         event: FleetCollectionEvent {
@@ -198,7 +199,7 @@ pub(super) fn completed_for(
             status: manifest.status,
             native_coverage,
             capture: Some(manifest.capture),
-            error_code: None,
+            error_code,
             gap,
         },
         outcome,

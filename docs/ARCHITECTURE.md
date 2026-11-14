@@ -306,8 +306,13 @@ artifact. The collector authenticates that artifact's manifest membership and ro
 registration's pure verifier interprets it. Settled client timing and row accounting alone do not establish native
 CPU or I/O cost. The tested budget must fit the current caller and recipe unchanged; reducing it does not inherit
 the original experiment's qualification. Queue deduplication is per episode/stage, independent of later baselines.
-Completed focused captures retain their admitted recipe, budget and qualification lineage in private recovery;
-the warehouse projection includes approved identifiers and recovery references without the private target or SQL.
+The capture manifest owns admitted recipe, budget and qualification lineage before authentication starts; native
+source observations own only native facts. The capture owner returns its allocated attempt independently of success
+and explicit source settlement, with an exact manifest digest when available. Immutable diagnostic revisions retain
+admission and attempt events through the existing recovery pipeline; checkpoints hold only the latest event digest.
+The CAS owner authenticates each original question and permits a changed digest only with its corresponding full event.
+Failed native prefixes remain incomplete. An uncertain shutdown can be recorded without releasing source debt.
+The warehouse projection includes approved identifiers, outcomes and recovery references without private targets or SQL.
 
 The package layout distinguishes independent extension roles:
 

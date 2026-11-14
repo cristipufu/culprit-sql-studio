@@ -110,9 +110,14 @@ fn factory(request: &CollectionRequest, authentication_delay: Duration, close: C
     }
 }
 async fn prepared(path: &Path, request: &CollectionRequest) -> ObservationWriter {
-    ObservationWriter::create(path.into(), request.clone(), culprit_read::admission::observation_identity().unwrap())
-        .await
-        .unwrap()
+    ObservationWriter::create(
+        path.into(),
+        request.clone(),
+        culprit_read::admission::observation_identity().unwrap(),
+        None,
+    )
+    .await
+    .unwrap()
 }
 fn start_prepared(
     gate: Arc<SourceGate>,
@@ -204,9 +209,10 @@ fn late_source_lease_write_withholds_observe_and_closes_the_created_source_once(
         let mut outbox =
             crate::outbox::Outbox::create(&directory.path().join("outbox"), OutboxLimits::default()).unwrap();
         let mut lease = outbox.reserve("fixture", &request).await.unwrap();
-        let files = ObservationWriter::create(lease.directory().into(), request.clone(), lease.identity().clone())
-            .await
-            .unwrap();
+        let files =
+            ObservationWriter::create(lease.directory().into(), request.clone(), lease.identity().clone(), None)
+                .await
+                .unwrap();
         let factory = factory(&request, Duration::ZERO, Close::QuietAfter(Duration::ZERO));
         let probe = factory.probe.clone();
         let gate = SourceGate::default();

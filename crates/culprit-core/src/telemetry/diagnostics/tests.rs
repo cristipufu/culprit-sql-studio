@@ -56,6 +56,7 @@ fn revision() -> DiagnosticRevision {
         inputs: vec![episode.latest.clone()],
         episode,
         previous_revision: None,
+        investigation: None,
         analyzed_at: "2026-11-14T08:01:00Z".into(),
     };
     revision.id = revision.expected_id().unwrap();
@@ -278,7 +279,6 @@ fn an_episode_focus_binding_requires_the_same_native_actor_statement_resource_sc
 fn only_matched_exact_focused_missing_can_resolve_a_participant_without_complete_inventory() {
     let (mut episode, focus) = focused_episode();
     let result = ActivityWaitFocusResult {
-        lineage: None,
         focus,
         observed_from: "2026-11-14T08:01:00Z".into(),
         observed_until: "2026-11-14T08:01:01Z".into(),

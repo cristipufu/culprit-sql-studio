@@ -1,6 +1,7 @@
 //! One local owner, immutable capture artifacts and a transactional commit boundary.
 mod archive;
 mod artifacts;
+mod attempts;
 mod eviction;
 mod investigations;
 mod journal;
@@ -20,7 +21,7 @@ use std::{
 };
 
 const IDENTITY_VERSION: u32 = 6;
-const MANIFEST_LIMIT: usize = 128 * 1024;
+use crate::collection_files::MAX_MANIFEST_BYTES as MANIFEST_LIMIT;
 const CAPTURE_ALLOWANCE: u64 = 256 * 1024;
 const CAPTURE_ACCOUNTING: u64 = 4096;
 

@@ -2,6 +2,7 @@ use super::*;
 use culprit_core::telemetry::*;
 use std::sync::Arc;
 mod admission_window;
+mod investigation_owner;
 
 #[derive(Default)]
 struct Lifecycle {
@@ -66,6 +67,7 @@ async fn cancellation_closes_native_work_before_waiting_for_stalled_artifact_io(
         directory.path().join("capture"),
         request.clone(),
         culprit_read::admission::observation_identity().unwrap(),
+        None,
     )
     .await
     .unwrap();

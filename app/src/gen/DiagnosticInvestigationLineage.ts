@@ -3,8 +3,8 @@ import type { CollectionBudget } from "./CollectionBudget";
 import type { RecipeCostReceipt } from "./RecipeCostReceipt";
 
 /**
- * Durable provenance for a completed attempt. The focused result already owns its exact original question;
- * this stores the remaining intent fields once so retirement cannot erase recipe, budget or approval history.
+ * Owner-written provenance retained before source authentication or description. The request already owns its
+ * exact original question; this stores the remaining fields once so failure cannot erase admitted recipe history.
  * It records structural provenance, never permission to dispatch or a replacement for the source's verifier.
  */
 export type DiagnosticInvestigationLineage = { intent_key: string, episode_id: string, episode_revision: string, recipe_id: string, recipe_version: number, budget: CollectionBudget, qualification: RecipeCostReceipt, };

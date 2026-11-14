@@ -17,7 +17,11 @@ pub(super) struct AdmittedBackend<'a> {
     start_before: Instant,
     dispatched: AtomicBool,
     used_route: OnceLock<Option<String>>,
-    source_work: Mutex<SourceWorkState>,
+    capture: Mutex<AdmittedCapture>,
+}
+struct AdmittedCapture {
+    source_work: SourceWorkState,
+    attempt: Option<DiagnosticAttemptReceipt>,
 }
 impl<'a> AdmittedBackend<'a> {
     pub fn new(backend: &'a dyn FleetBackend, admitted_at: Instant) -> Self {
@@ -27,7 +31,7 @@ impl<'a> AdmittedBackend<'a> {
             start_before: admitted_at + ADMISSION_START_WINDOW,
             dispatched: AtomicBool::new(false),
             used_route: OnceLock::new(),
-            source_work: Mutex::new(SourceWorkState::NotStarted),
+            capture: Mutex::new(AdmittedCapture { source_work: SourceWorkState::NotStarted, attempt: None }),
         }
     }
     fn check(&self) -> Result<()> {
@@ -59,10 +63,17 @@ impl<'a> AdmittedBackend<'a> {
         self.used_route.get().and_then(|revision| revision.as_deref())
     }
     pub fn source_work(&self) -> SourceWorkState {
-        self.source_work.lock().map_or(SourceWorkState::Unconfirmed, |state| *state)
+        self.capture.lock().map_or(SourceWorkState::Unconfirmed, |state| state.source_work)
     }
-    fn record_source_work(&self, state: SourceWorkState) -> Result<()> {
-        *self.source_work.lock().map_err(|_| CollectionStop::CancellationUnconfirmed.error())? = state;
+    pub fn attempt(&self) -> Result<Option<DiagnosticAttemptReceipt>> {
+        self.capture
+            .lock()
+            .map(|state| state.attempt.clone())
+            .map_err(|_| CollectionStop::CancellationUnconfirmed.error())
+    }
+    fn record_capture(&self, source_work: SourceWorkState, attempt: Option<DiagnosticAttemptReceipt>) -> Result<()> {
+        *self.capture.lock().map_err(|_| CollectionStop::CancellationUnconfirmed.error())? =
+            AdmittedCapture { source_work, attempt };
         Ok(())
     }
     pub async fn discover(
@@ -110,7 +121,8 @@ impl<'a> AdmittedBackend<'a> {
         cancellation: &CollectionCancellation,
         admission: FleetSourceAdmission,
     ) -> Result<CollectionManifest> {
-        self.record_source_work(SourceWorkState::Active)?;
+        let expected = admission.investigation.as_ref().map(DiagnosticInvestigationIntent::key).transpose()?;
+        self.record_capture(SourceWorkState::Active, None)?;
         let outcome = self.backend.capture(connection, request, outbox, cancellation, admission).await;
         let unconfirmed = matches!(outcome.source_work, SourceWorkState::Active | SourceWorkState::Unconfirmed)
             || outcome.result.is_ok() && outcome.source_work != SourceWorkState::Quiescent
@@ -121,9 +133,25 @@ impl<'a> AdmittedBackend<'a> {
             || outcome.result.as_ref().is_ok_and(|manifest| {
                 manifest.status == CollectionStatus::Incomplete(CollectionStop::CancellationUnconfirmed)
             });
-        self.record_source_work(if unconfirmed { SourceWorkState::Unconfirmed } else { outcome.source_work })?;
+        self.record_capture(
+            if unconfirmed { SourceWorkState::Unconfirmed } else { outcome.source_work },
+            outcome.attempt.clone(),
+        )?;
         if unconfirmed {
             return Err(CollectionStop::CancellationUnconfirmed.error());
+        }
+        if outcome.attempt.as_ref().is_some_and(|attempt| !attempt.is_valid()) {
+            return Err(DeliveryProblem::Integrity.error());
+        }
+        if let Ok(manifest) = &outcome.result {
+            let actual = manifest.investigation_intent()?.map(|intent| intent.key()).transpose()?;
+            if actual != expected || outcome.attempt.as_ref().is_some_and(|attempt| attempt.capture != manifest.capture)
+            {
+                return Err(DeliveryProblem::Integrity.error());
+            }
+        }
+        if expected.is_some() && outcome.source_work == SourceWorkState::Quiescent && outcome.attempt.is_none() {
+            return Err(DeliveryProblem::Integrity.error());
         }
         outcome.result
     }

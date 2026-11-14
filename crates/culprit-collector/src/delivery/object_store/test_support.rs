@@ -122,6 +122,7 @@ fn empty_range(contract: crate::delivery::contract::Contract, epoch: u64) -> cra
     let range_id = digest(&serde_json::to_vec(&(&contract, &capture)).unwrap());
     RangeManifest {
         capture_manifest_sha256: culprit_core::telemetry::digest(b"fixture-manifest"),
+        investigation: None,
         contract,
         range_id,
         capture,

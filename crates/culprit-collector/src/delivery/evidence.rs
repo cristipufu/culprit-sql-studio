@@ -91,6 +91,8 @@ pub struct RangeManifest {
     pub capture: CaptureIdentity,
     /// Digest of the original sealed CollectionManifest bytes, attested at preparation.
     pub capture_manifest_sha256: String,
+    /// Admitted investigation ownership survives native failure and is independent of the native source result.
+    pub investigation: Option<DiagnosticInvestigationLineage>,
     pub source: CollectionDescription,
     /// Collector clock readings, separate from native measurement and observation times.
     pub collected_from: String,
@@ -112,6 +114,7 @@ impl RangeManifest {
     }
     pub fn validate(&self) -> Result<()> {
         self.contract.validate()?;
+        self.validate_investigation()?;
         if chrono::DateTime::parse_from_rfc3339(&self.collected_from).is_err()
             || chrono::DateTime::parse_from_rfc3339(&self.collected_until).is_err()
         {
@@ -204,6 +207,25 @@ impl RangeManifest {
         }
         Ok(())
     }
+    fn validate_investigation(&self) -> Result<()> {
+        let Some(owner) = &self.investigation else { return Ok(()) };
+        let SourceObservation::FocusedPageWait { result, .. } = &self.source.observation else {
+            return Err(DeliveryProblem::Integrity.error());
+        };
+        let intent = owner.reconstruct(&result.focus).map_err(|_| DeliveryProblem::Integrity.error())?;
+        let request = CollectionRequest {
+            subject: match &self.source.target {
+                CollectionTarget::Database(_) => CollectionSubject::Database,
+                CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
+            },
+            selection: CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.clone()) },
+            budget: intent.budget,
+        };
+        if !owner.matches_request(&request) || !self.source.matches_request(&request) {
+            return Err(DeliveryProblem::Integrity.error());
+        }
+        Ok(())
+    }
     pub fn digest(&self) -> Result<String> {
         self.validate()?;
         Ok(digest(&serde_json::to_vec(self).map_err(|_| DeliveryProblem::Integrity.error())?))
@@ -230,6 +252,8 @@ impl PreparedRange {
         if manifest.status != CollectionStatus::Complete || !manifest.references.complete {
             return Err(DeliveryProblem::NotReady.error());
         }
+        manifest.request.validate().map_err(|_| DeliveryProblem::Integrity.error())?;
+        manifest.investigation_intent().map_err(|_| DeliveryProblem::Integrity.error())?;
         let mut native_manifest_bytes = Vec::new();
         crate::durable_fs::regular_file(&directory.join("manifest.json"))
             .map_err(|_| DeliveryProblem::Storage.error())?
@@ -296,6 +320,7 @@ impl PreparedRange {
             range_id,
             capture: manifest.capture.clone(),
             capture_manifest_sha256: digest(&native_manifest_bytes),
+            investigation: manifest.investigation.clone(),
             source: manifest.description.clone().ok_or_else(|| DeliveryProblem::Integrity.error())?,
             collected_from: manifest.started_at.clone(),
             collected_until: manifest.finished_at.clone().ok_or_else(|| DeliveryProblem::NotReady.error())?,

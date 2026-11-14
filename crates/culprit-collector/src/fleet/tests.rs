@@ -123,6 +123,7 @@ impl FleetBackend for Backend {
                 CollectionSubject::Shared { resource } => CollectionTarget::Shared(resource.clone()),
             });
             Ok(CollectionManifest {
+                investigation: None,
                 format_version: EXPORT_FORMAT_VERSION,
                 capture: CaptureIdentity {
                     observation_id: format!("test-{}", self.requests.lock().unwrap().len()),
@@ -146,7 +147,7 @@ impl FleetBackend for Backend {
             })
         }
         .await;
-        FleetCaptureOutcome { result, source_work: SourceWorkState::Quiescent }
+        FleetCaptureOutcome { result, source_work: SourceWorkState::Quiescent, attempt: None }
     }
 }
 use chrono::Timelike;

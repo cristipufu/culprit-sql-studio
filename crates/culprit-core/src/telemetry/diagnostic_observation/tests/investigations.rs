@@ -392,7 +392,6 @@ fn raw_intent_changes_and_unknown_components_fail_storage_validation_without_rep
 fn completed_result(scenario: &Scenario) -> ActivityWaitFocusResult {
     ActivityWaitFocusResult {
         focus: scenario.focus.clone(),
-        lineage: Some(DiagnosticInvestigationLineage::from_intent(&scenario.intent()).unwrap()),
         observed_from: "2020-01-01T00:02:00Z".into(),
         observed_until: "2020-01-01T00:02:01Z".into(),
         source: FocusSourceState::Matched,
@@ -420,32 +419,75 @@ fn result_source(result: ActivityWaitFocusResult) -> CollectionDescription {
     }
 }
 
+fn owner_manifest(scenario: &Scenario) -> CollectionManifest {
+    let intent = scenario.intent();
+    let capture = CaptureIdentity {
+        observation_id: "focused-attempt".into(),
+        revision: Some(CaptureRevision {
+            outbox_id: "attempt-owner".into(),
+            owner_epoch: "2".into(),
+            sequence: "3".into(),
+        }),
+    };
+    let stream = TelemetryStream::OperationalSamples;
+    CollectionManifest {
+        format_version: EXPORT_FORMAT_VERSION,
+        capture: capture.clone(),
+        started_at: "2026-11-14T12:00:00Z".into(),
+        finished_at: None,
+        request: CollectionRequest {
+            subject: CollectionSubject::Database,
+            selection: CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.clone()) },
+            budget: intent.budget.clone(),
+        },
+        investigation: Some(DiagnosticInvestigationLineage::from_intent(&intent).unwrap()),
+        description: None,
+        status: CollectionStatus::Incomplete(CollectionStop::Pending),
+        source_queries: 0,
+        read_metrics: None,
+        directory_synced: true,
+        files: vec![CollectedFile {
+            batch_id: batch_id(&capture.observation_id, stream).unwrap(),
+            stream,
+            semantics: stream.semantics(),
+            file: format!("{}.part", stream.file_name()),
+            status: CollectionStatus::Incomplete(CollectionStop::Pending),
+            error_code: None,
+            rows: 0,
+            bytes: 0,
+            pages: 0,
+            sha256: None,
+        }],
+        references: ReferenceCoverage::default(),
+    }
+}
+
 #[test]
-fn completed_lineage_reconstructs_the_exact_retired_intent_without_duplicating_its_original_focus() {
+fn initial_owner_lineage_reconstructs_the_exact_intent_without_a_native_source_description() {
     let scenario = scenario();
     let intent = scenario.intent();
-    let source = result_source(completed_result(&scenario));
-    let encoded = serde_json::to_vec(&source).unwrap();
-    let restored: CollectionDescription = serde_json::from_slice(&encoded).unwrap();
-    let SourceObservation::FocusedPageWait { result, .. } = &restored.observation else { panic!() };
-    let lineage = result.lineage.as_ref().unwrap();
-    assert!(result.is_valid());
-    assert_eq!(lineage.reconstruct(&result.focus).unwrap(), intent);
+    let manifest = owner_manifest(&scenario);
+    assert!(manifest.description.is_none());
+    assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::Pending));
+    let encoded = serde_json::to_vec(&manifest).unwrap();
+    let restored: CollectionManifest = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(restored.investigation_intent().unwrap(), Some(intent.clone()));
+    let lineage = restored.investigation.as_ref().unwrap();
+    assert!(lineage.matches_request(&restored.request));
     assert_eq!(lineage.intent_key, intent.key().unwrap());
     assert_eq!(lineage.budget, intent.budget);
     assert_eq!(lineage.qualification, intent.qualification);
     assert!(serde_json::to_value(lineage).unwrap().get("focus").is_none());
-    assert_eq!(restored, source);
 }
 
 #[test]
-fn completed_lineage_rejects_changed_intent_episode_recipe_budget_approval_and_original_parent() {
+fn owner_lineage_rejects_changed_intent_episode_recipe_budget_approval_and_original_parent() {
     let scenario = scenario();
     for changed in
         ["intent-key", "episode", "revision", "recipe-version", "budget", "receipt", "component", "parent", "original"]
     {
-        let mut result = completed_result(&scenario);
-        let lineage = result.lineage.as_mut().unwrap();
+        let mut manifest = owner_manifest(&scenario);
+        let lineage = manifest.investigation.as_mut().unwrap();
         match changed {
             "intent-key" => lineage.intent_key = digest(b"another-admitted-intent"),
             "episode" => lineage.episode_id = digest(b"another-episode"),
@@ -460,25 +502,23 @@ fn completed_lineage_rejects_changed_intent_episode_recipe_budget_approval_and_o
             }
             "receipt" => lineage.qualification.evidence.row_ordinal += 1,
             "component" => lineage.qualification.component.revision = Some("another-native-build".into()),
-            "parent" => result.focus.parent.row_ordinal += 1,
-            _ => result.focus.original.elapsed_ms = Some("2".into()),
+            _ => {
+                let CollectionSelection::FocusedPageWait { focus } = &mut manifest.request.selection else { panic!() };
+                if changed == "parent" {
+                    focus.parent.row_ordinal += 1;
+                } else {
+                    focus.original.elapsed_ms = Some("2".into());
+                }
+            }
         }
-        assert!(!result.is_valid(), "{changed}");
-        assert!(result.lineage.as_ref().unwrap().reconstruct(&result.focus).is_err(), "{changed}");
+        assert!(manifest.investigation_intent().is_err(), "{changed}");
+        assert!(!manifest.investigation.as_ref().unwrap().matches_request(&manifest.request), "{changed}");
     }
 }
 
 #[test]
-fn automatic_lineage_requires_the_same_admitted_request_budget_in_every_dimension() {
+fn owner_lineage_requires_the_same_admitted_request_budget_in_every_dimension() {
     let scenario = scenario();
-    let intent = scenario.intent();
-    let source = result_source(completed_result(&scenario));
-    let original = CollectionRequest {
-        subject: CollectionSubject::Database,
-        selection: CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.clone()) },
-        budget: intent.budget.clone(),
-    };
-    assert!(source.matches_request(&original));
     for changed in [
         "page_rows",
         "max_snapshot_rows",
@@ -491,35 +531,75 @@ fn automatic_lineage_requires_the_same_admitted_request_budget_in_every_dimensio
         "statement_timeout_ms",
         "total_timeout_ms",
     ] {
-        let mut request = original.clone();
+        let mut manifest = owner_manifest(&scenario);
+        let budget = &mut manifest.request.budget;
         match changed {
-            "page_rows" => request.budget.page_rows += 1,
-            "max_snapshot_rows" => request.budget.max_snapshot_rows += 1,
-            "page_bytes" => request.budget.page_bytes += 1,
-            "total_bytes" => request.budget.total_bytes += 1,
-            "max_sql_bytes" => request.budget.max_sql_bytes += 1,
-            "max_plan_bytes" => request.budget.max_plan_bytes += 1,
-            "max_pages" => request.budget.max_pages += 1,
-            "max_queries" => request.budget.max_queries += 1,
-            "statement_timeout_ms" => request.budget.statement_timeout_ms += 1,
-            _ => request.budget.total_timeout_ms += 1,
+            "page_rows" => budget.page_rows += 1,
+            "max_snapshot_rows" => budget.max_snapshot_rows += 1,
+            "page_bytes" => budget.page_bytes += 1,
+            "total_bytes" => budget.total_bytes += 1,
+            "max_sql_bytes" => budget.max_sql_bytes += 1,
+            "max_plan_bytes" => budget.max_plan_bytes += 1,
+            "max_pages" => budget.max_pages += 1,
+            "max_queries" => budget.max_queries += 1,
+            "statement_timeout_ms" => budget.statement_timeout_ms += 1,
+            _ => budget.total_timeout_ms += 1,
         }
-        request.validate().unwrap();
-        assert!(!source.matches_request(&request), "{changed}: a compatible ceiling cannot replace admitted work");
+        manifest.request.validate().unwrap();
+        assert!(
+            manifest.investigation_intent().is_err(),
+            "{changed}: a compatible ceiling cannot replace admitted work"
+        );
     }
 }
 
 #[test]
-fn manual_focused_results_retain_no_automatic_lineage_or_inferred_admission_budget() {
+fn manual_manifests_and_native_results_do_not_infer_automatic_admission() {
     let scenario = scenario();
-    let mut result = completed_result(&scenario);
-    result.lineage = None;
+    let mut manifest = owner_manifest(&scenario);
+    manifest.investigation = None;
+    manifest.request.budget = CollectionBudget::default();
+    manifest.description = Some(result_source(completed_result(&scenario)));
+    assert_eq!(manifest.investigation_intent().unwrap(), None);
+    assert!(serde_json::to_value(&manifest).unwrap().get("investigation").is_none());
+    let result = completed_result(&scenario);
     assert!(result.is_valid());
-    assert!(serde_json::to_value(&result).unwrap().get("lineage").is_none());
-    let request = CollectionRequest {
-        subject: CollectionSubject::Database,
-        selection: CollectionSelection::FocusedPageWait { focus: Box::new(result.focus.clone()) },
-        budget: CollectionBudget::default(),
-    };
-    assert!(result_source(result).matches_request(&request));
+    let mut encoded = serde_json::to_value(result).unwrap();
+    assert!(encoded.get("lineage").is_none());
+    encoded["lineage"] =
+        serde_json::to_value(DiagnosticInvestigationLineage::from_intent(&scenario.intent()).unwrap()).unwrap();
+    assert!(
+        serde_json::from_value::<ActivityWaitFocusResult>(encoded).is_err(),
+        "native facts cannot impersonate owner provenance"
+    );
 }
+
+#[test]
+fn initial_owner_metadata_rejects_wrong_selection_subject_or_a_contradictory_native_description() {
+    let scenario = scenario();
+    for changed in ["selection", "subject", "source"] {
+        let mut manifest = owner_manifest(&scenario);
+        match changed {
+            "selection" => manifest.request.selection = CollectionSelection::Activity,
+            "subject" => {
+                manifest.request.subject = CollectionSubject::Shared {
+                    resource: SharedResourceIdentity {
+                        engine: crate::Engine::Mssql,
+                        kind: SharedResourceKind::Instance,
+                        namespace: NativeIdentity::new("server"),
+                        native: NativeIdentity::new("instance"),
+                    },
+                }
+            }
+            _ => {
+                let mut result = completed_result(&scenario);
+                result.focus.original.elapsed_ms = Some("2".into());
+                assert!(result.is_valid(), "the other native result is structurally valid but is not this request");
+                manifest.description = Some(result_source(result));
+            }
+        }
+        assert!(manifest.investigation_intent().is_err(), "{changed}");
+    }
+}
+
+mod provenance;
