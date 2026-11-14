@@ -9,7 +9,14 @@ const MAX_PENDING_RANGES: usize = 20_000;
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub(super) struct PendingRanges(BTreeMap<u64, String>);
+pub(super) struct PendingRanges(BTreeMap<u64, PendingRange>);
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PendingRange {
+    range_id: String,
+    publication_pending: bool,
+    diagnostic_input: Option<culprit_core::telemetry::DiagnosticCaptureRef>,
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Cursor {
@@ -17,13 +24,35 @@ struct Cursor {
     upper: u64,
     after: u64,
     order: RecoveryOrder,
+    phase: PendingPhase,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum PendingPhase {
+    Publication,
+    Diagnostics,
+}
+impl PendingPhase {
+    fn accepts(self, entry: &PendingRange) -> bool {
+        match self {
+            Self::Publication => entry.publication_pending,
+            Self::Diagnostics => entry.diagnostic_input.is_some(),
+        }
+    }
 }
 
 impl PendingRanges {
     pub fn validate(&self) -> Result<()> {
         let mut ids = BTreeSet::new();
         if self.0.len() > MAX_PENDING_RANGES
-            || self.0.iter().any(|(order, id)| *order == 0 || !valid_digest(id) || !ids.insert(id))
+            || self.0.iter().any(|(order, id)| {
+                *order == 0
+                    || !valid_digest(&id.range_id)
+                    || !ids.insert(&id.range_id)
+                    || (!id.publication_pending && id.diagnostic_input.is_none())
+                    || id.diagnostic_input.as_ref().is_some_and(|input| !input.is_valid())
+            })
         {
             return Err(DeliveryProblem::Integrity.error());
         }
@@ -40,19 +69,46 @@ impl PendingRanges {
             return Err(DeliveryProblem::Integrity.error());
         }
         if let Some(existing) = self.0.get(&order) {
-            return if existing == id { Ok(()) } else { Err(DeliveryProblem::Integrity.error()) };
+            return if existing.range_id == id { Ok(()) } else { Err(DeliveryProblem::Integrity.error()) };
         }
-        if self.0.values().any(|existing| existing == id) {
+        if self.0.values().any(|existing| existing.range_id == id) {
             return Err(DeliveryProblem::Integrity.error());
         }
         if self.0.len() >= MAX_PENDING_RANGES {
             return Err(DeliveryProblem::Capacity.error());
         }
-        self.0.insert(order, id.into());
+        self.0.insert(order, PendingRange { range_id: id.into(), publication_pending: true, diagnostic_input: None });
         Ok(())
     }
     pub fn retire(&mut self, id: &str) {
-        self.0.retain(|_, existing| existing != id);
+        for entry in self.0.values_mut().filter(|entry| entry.range_id == id) {
+            entry.publication_pending = false;
+        }
+        self.0.retain(|_, entry| entry.publication_pending || entry.diagnostic_input.is_some());
+    }
+    pub fn observe(&mut self, order: u64, manifest: &super::evidence::RangeManifest) -> Result<()> {
+        use culprit_core::telemetry::{DiagnosticCaptureRef, SourceObservation};
+        self.insert(order, &manifest.range_id)?;
+        if matches!(
+            manifest.source.observation,
+            SourceObservation::Activity(_) | SourceObservation::FocusedPageWait { .. }
+        ) {
+            let input = DiagnosticCaptureRef {
+                capture: manifest.capture.clone(),
+                manifest_sha256: manifest.capture_manifest_sha256.clone(),
+                source_scope_id: manifest.source.captured_range()?.scope_id,
+            };
+            self.0.get_mut(&order).ok_or_else(|| DeliveryProblem::Integrity.error())?.diagnostic_input = Some(input);
+        }
+        if let SourceObservation::Diagnostics(description) = &manifest.source.observation {
+            for pending in self.0.values_mut() {
+                if pending.diagnostic_input.as_ref() == Some(&description.parent) {
+                    pending.diagnostic_input = None;
+                }
+            }
+            self.0.retain(|_, entry| entry.publication_pending || entry.diagnostic_input.is_some());
+        }
+        self.validate()
     }
     pub fn page(
         &self,
@@ -61,6 +117,26 @@ impl PendingRanges {
         store_id: &str,
         committed_order: u64,
         order: RecoveryOrder,
+    ) -> Result<(Vec<String>, Option<String>)> {
+        self.page_for(cursor, limit, store_id, committed_order, order, PendingPhase::Publication)
+    }
+    pub fn diagnostic_page(
+        &self,
+        cursor: Option<&str>,
+        limit: u32,
+        store_id: &str,
+        committed_order: u64,
+    ) -> Result<(Vec<String>, Option<String>)> {
+        self.page_for(cursor, limit, store_id, committed_order, RecoveryOrder::OldestFirst, PendingPhase::Diagnostics)
+    }
+    fn page_for(
+        &self,
+        cursor: Option<&str>,
+        limit: u32,
+        store_id: &str,
+        committed_order: u64,
+        order: RecoveryOrder,
+        phase: PendingPhase,
     ) -> Result<(Vec<String>, Option<String>)> {
         self.validate()?;
         if !(1..=128).contains(&limit) {
@@ -74,6 +150,7 @@ impl PendingRanges {
                 let cursor: Cursor = serde_json::from_str(text).map_err(|_| DeliveryProblem::Integrity.error())?;
                 if cursor.store_id != store_id
                     || cursor.order != order
+                    || cursor.phase != phase
                     || cursor.upper > committed_order
                     || cursor.after > cursor.upper
                     || (order == RecoveryOrder::OldestFirst && cursor.after == cursor.upper)
@@ -83,22 +160,23 @@ impl PendingRanges {
                 cursor
             }
             Some(_) => return Err(DeliveryProblem::Capacity.error()),
-            None => Cursor { store_id: store_id.into(), upper: committed_order, after: 0, order },
+            None => Cursor { store_id: store_id.into(), upper: committed_order, after: 0, order, phase },
         };
-        let mut ids: Box<dyn Iterator<Item = (&u64, &String)>> = match order {
+        let ids: Box<dyn Iterator<Item = (&u64, &PendingRange)>> = match order {
             RecoveryOrder::OldestFirst => Box::new(self.0.range((Excluded(cursor.after), Included(cursor.upper)))),
             RecoveryOrder::NewestFirst => {
                 let upper = if cursor.after == 0 { Included(cursor.upper) } else { Excluded(cursor.after) };
                 Box::new(self.0.range((Excluded(0), upper)).rev())
             }
         };
+        let mut ids = ids.filter(|(_, entry)| phase.accepts(entry));
         let mut last = cursor.after;
         let page = ids
             .by_ref()
             .take(limit as usize)
             .map(|(order, id)| {
                 last = *order;
-                id.clone()
+                id.range_id.clone()
             })
             .collect::<Vec<_>>();
         let next = if ids.next().is_some() {
@@ -162,6 +240,29 @@ mod tests {
         assert_eq!(
             pending.page(cursor.as_deref(), 1, &store, 3, RecoveryOrder::OldestFirst).unwrap(),
             (vec![ids[2].clone()], None)
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase_tests {
+    use super::*;
+    #[test]
+    fn publication_and_initial_analysis_have_distinct_views_of_one_atomic_index() {
+        let root = tempfile::tempdir().unwrap();
+        let native = crate::delivery::batch_tests::quiet_activity(root.path());
+        let derived = crate::delivery::batch_tests::empty_diagnostics(root.path(), native.manifest(), 2);
+        let store = culprit_core::telemetry::digest(b"store");
+        let mut pending = PendingRanges::default();
+        pending.observe(1, native.manifest()).unwrap();
+        pending.retire(&native.manifest().range_id);
+        assert!(pending.page(None, 1, &store, 1, RecoveryOrder::OldestFirst).unwrap().0.is_empty());
+        assert_eq!(pending.diagnostic_page(None, 1, &store, 1).unwrap().0, vec![native.manifest().range_id.clone()]);
+        pending.observe(2, derived.manifest()).unwrap();
+        assert!(pending.diagnostic_page(None, 1, &store, 2).unwrap().0.is_empty());
+        assert_eq!(
+            pending.page(None, 1, &store, 2, RecoveryOrder::OldestFirst).unwrap().0,
+            vec![derived.manifest().range_id.clone()]
         );
     }
 }

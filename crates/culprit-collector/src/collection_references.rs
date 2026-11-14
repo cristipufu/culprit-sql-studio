@@ -1,7 +1,8 @@
 //! Definition closure belongs to an observation; native IDs and optional plans have no engine-specific meaning here.
 use culprit_core::telemetry::{
-    CollectionDescription, DefinitionCoverage, NativeDefinitionReference, NativeIdentity, ReferenceCoverage,
-    TelemetryRecord,
+    CollectionDescription, DIAGNOSTICS_SOURCE, DefinitionCoverage, DiagnosticCheckpoint, DiagnosticCheckpointPart,
+    DiagnosticRevision, NativeDefinitionReference, NativeIdentity, OperationalFact, ReferenceCoverage,
+    SourceObservation, TelemetryRecord,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -36,6 +37,8 @@ pub(crate) struct ObservationReferences {
     queries: BTreeMap<String, NativeIdentity>,
     unavailable_payloads: u32,
     state_rows: BTreeMap<String, u32>,
+    pub(crate) diagnostic_revisions: Vec<DiagnosticRevision>,
+    pub(crate) diagnostic_parts: Vec<DiagnosticCheckpointPart>,
     pub(crate) activity: crate::collection_activity::ActivityRecords,
 }
 impl ObservationReferences {
@@ -69,10 +72,8 @@ impl ObservationReferences {
     }
     pub(crate) fn record(&mut self, record: &TelemetryRecord) {
         self.activity.record(record);
-        if !matches!(record, TelemetryRecord::Incident(_) | TelemetryRecord::ActivityCheckpoint(_)) {
-            self.unavailable_payloads +=
-                record.definition_payloads().map(|field| u32::from(!field.payload.is_available())).sum::<u32>();
-        }
+        self.unavailable_payloads +=
+            record.definition_payloads().map(|field| u32::from(!field.payload.is_available())).sum::<u32>();
         match record {
             TelemetryRecord::QueryDefinition(row) => {
                 self.queries.insert(row.id.clone(), row.identity.native());
@@ -88,7 +89,13 @@ impl ObservationReferences {
                 );
             }
             TelemetryRecord::Operational(row) => {
+                if let OperationalFact::DiagnosticRevision(revision) = &row.fact {
+                    self.diagnostic_revisions.push((**revision).clone());
+                }
                 *self.state_rows.entry(row.source.clone()).or_default() += 1;
+            }
+            TelemetryRecord::DiagnosticCheckpoint(part) => {
+                self.diagnostic_parts.push(part.clone());
             }
             TelemetryRecord::ObjectDefinition(row) => {
                 *self.state_rows.entry(row.source.clone()).or_default() += 1;
@@ -129,6 +136,37 @@ impl ObservationReferences {
             && query.definition_id.as_ref() == Some(query_definition_id)
             && self.queries.get(query_definition_id) == Some(&query.native)
     }
+    fn diagnostics_complete(&self, source: Option<&CollectionDescription>) -> bool {
+        let Some(source) = source else {
+            return self.diagnostic_parts.is_empty() && self.diagnostic_revisions.is_empty();
+        };
+        let SourceObservation::Diagnostics(description) = &source.observation else {
+            return self.diagnostic_parts.is_empty() && self.diagnostic_revisions.is_empty();
+        };
+        if source.source != DIAGNOSTICS_SOURCE
+            || self.diagnostic_revisions.len() != description.records as usize
+            || self.diagnostic_parts.len() != description.checkpoint_records as usize
+        {
+            return false;
+        }
+        let Ok(checkpoint) = DiagnosticCheckpointPart::assemble(self.diagnostic_parts.clone()) else {
+            return false;
+        };
+        checkpoint.controller_version == description.controller_version
+            && checkpoint.target == source.target
+            && checkpoint.input == description.parent
+            && self.diagnostic_revisions.iter().all(|revision| {
+                revision.is_valid()
+                    && revision.controller_version == description.controller_version
+                    && revision.analyzed_at == description.analyzed_at
+                    && revision.episode.scope.target == source.target
+            })
+    }
+    pub(crate) fn diagnostic_checkpoint(&self) -> Option<DiagnosticCheckpoint> {
+        (!self.diagnostic_parts.is_empty())
+            .then(|| DiagnosticCheckpointPart::assemble(self.diagnostic_parts.clone()).ok())
+            .flatten()
+    }
     pub(crate) fn coverage(&self, source_rechecked: bool, source: Option<&CollectionDescription>) -> ReferenceCoverage {
         let queries = self
             .required_queries
@@ -138,6 +176,7 @@ impl ObservationReferences {
             source.and_then(|source| source.observation.activity()).map(|snapshot| self.activity.coverage(snapshot));
         ReferenceCoverage {
             complete: source_rechecked
+                && self.diagnostics_complete(source)
                 && queries.complete()
                 && plans.complete()
                 && source.and_then(|source| source.observation.snapshot()).is_none_or(|snapshot| {

@@ -61,6 +61,7 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
     let range_id = digest(&serde_json::to_vec(&(&contract, &capture)).unwrap());
     PreparedRange {
         manifest: Arc::new(RangeManifest {
+            capture_manifest_sha256: culprit_core::telemetry::digest(b"fixture-manifest"),
             contract,
             range_id,
             capture,

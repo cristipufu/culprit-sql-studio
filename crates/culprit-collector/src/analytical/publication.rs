@@ -10,6 +10,7 @@ use culprit_core::{
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
+mod context;
 pub struct ControlPublisher {
     catalog: Arc<dyn ProjectionCatalog>,
     store: Arc<dyn AnalyticalStore>,
@@ -76,11 +77,12 @@ pub fn input(catalog: &dyn ProjectionCatalog, range: &CommittedRange) -> Result<
         Ok(json!({"batch_id":batch.batch_id,"stream":batch.stream,"table":table,"rows":batch.rows.len(),
             "native_object":batch.object,"native_sha256":batch.sha256,"bytes":batch.bytes,"delivery_required":batch.delivery_required}))
     }).collect::<Result<Vec<_>>>()?;
+    let observation = context::observation(&manifest.source.observation)?;
     // Coverage is public analytical evidence; raw target identities remain in the private recovery manifest.
     Ok(json!({"_culprit":capture_context(manifest,range.manifest_digest())?,"recovery_store_id":range.store_id(),
         "receipts_sha256":receipts,"publication_id":publication_id,"capture":manifest.capture,
         "source":{"source":manifest.source.source,"continuity":manifest.source.continuity,
-            "observation":manifest.source.observation},
+            "observation":observation},
         "read_metrics":manifest.read_metrics,"batches":batches}))
 }
 

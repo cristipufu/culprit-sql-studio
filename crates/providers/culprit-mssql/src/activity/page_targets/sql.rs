@@ -20,19 +20,20 @@ pub(super) fn observation(identity: IdentityDetail) -> String {
     super::super::sql::frame_query(&rows, identity, super::super::sql::QueryPolicy::SerialMetadata)
 }
 
-pub(super) fn context(identity: IdentityDetail) -> String {
-    super::super::sql::frame_query(
-        r#"SELECT CAST(NULL AS int) AS session_id,
- sd.database_id AS selected_database_id,CONVERT(varchar(40),CAST(sd.create_date AS datetime2),126) AS database_created_without_offset,
- CONVERT(varchar(36),df.file_guid) AS database_file_guid,CONVERT(varchar(30),df.create_lsn) AS database_file_create_lsn,
- CASE WHEN OBJECT_ID('sys.dm_db_page_info') IS NOT NULL THEN 1 ELSE 0 END AS page_info_available,
- CASE WHEN HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE STATE')=1
-   OR HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE PERFORMANCE STATE')=1 THEN 1 ELSE 0 END AS page_permission
- FROM sys.databases sd LEFT JOIN sys.database_files df ON df.file_id=1 AND df.type=0
- WHERE sd.database_id=DB_ID()"#,
-        identity,
-        super::super::sql::QueryPolicy::SerialMetadata,
-    )
+/// A durable focus admits only its original native request. It never selects another page-wait population.
+pub(super) fn focused_observation(identity: IdentityDetail) -> String {
+    let rows = format!(
+        r#"SELECT {request},
+ CASE WHEN r.request_id IS NULL THEN 1 ELSE 0 END AS no_current_request,
+ CASE WHEN r.database_id=DB_ID() THEN 1 ELSE 5 END AS scope_basis,
+ CAST(NULL AS bigint) AS transaction_id,CAST(NULL AS varchar(40)) AS transaction_start
+ FROM sys.dm_exec_requests r
+ JOIN sys.dm_exec_sessions s ON s.session_id=r.session_id
+ LEFT JOIN sys.dm_exec_sessions b ON b.session_id=r.blocking_session_id
+ WHERE r.session_id=@P2 AND r.request_id=@P3 AND r.session_id<>@@SPID AND s.is_user_process=1"#,
+        request = super::super::sql::REQUEST_COLUMNS
+    );
+    super::super::sql::frame_query(&rows, identity, super::super::sql::QueryPolicy::SerialMetadata)
 }
 
 pub(super) fn headers() -> String {

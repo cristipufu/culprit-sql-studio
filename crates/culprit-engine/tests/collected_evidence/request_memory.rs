@@ -59,7 +59,7 @@ async fn authenticated_request_memory_reuses_scan_explanations_and_keeps_native_
         assert_eq!(result.report, expected);
         assert_eq!(result.context.source, source);
         assert_eq!(result.context.records.len(), rows.len());
-        assert_eq!(result.context.manifest_sha256, fixture.range.manifest_digest());
+        assert_eq!(result.context.recovery_manifest_sha256, fixture.range.manifest_digest());
         for row in &rows {
             let expected = ExportedRecord::new(&source, capture.capture(), row.clone()).unwrap();
             assert!(result.context.records.iter().any(|actual| actual.row == expected));

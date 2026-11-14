@@ -9,6 +9,7 @@ pub enum TelemetryCollection {
     ResourceHistory,
     DeadlockHistory,
     Activity,
+    Diagnostics,
     Snapshot(SnapshotDataset),
 }
 impl TelemetryCollection {
@@ -22,21 +23,13 @@ impl TelemetryCollection {
             ],
             Self::ResourceHistory => &[TelemetryStream::ResourceSamples],
             Self::DeadlockHistory => &[TelemetryStream::DeadlockEvents],
-            Self::Activity => &[
-                TelemetryStream::ActivityObservations,
-                TelemetryStream::BlockingEdges,
-                TelemetryStream::ActivityIncidents,
-                TelemetryStream::ActivityCheckpoints,
-            ],
+            Self::Activity => &[TelemetryStream::ActivityObservations],
+            Self::Diagnostics => &[TelemetryStream::OperationalSamples, TelemetryStream::DiagnosticCheckpoints],
             Self::Snapshot(dataset) => dataset.streams(),
         }
     }
     pub fn source_streams(self) -> &'static [TelemetryStream] {
-        if self == Self::Activity {
-            &[TelemetryStream::ActivityObservations, TelemetryStream::BlockingEdges]
-        } else {
-            self.streams()
-        }
+        self.streams()
     }
 }
 
@@ -47,7 +40,9 @@ pub enum CollectionSelection {
     QueryHistory { from: String, until: String },
     ResourceHistory { from: String, until: String },
     DeadlockHistory { from: String, until: String },
-    Activity { policy: ActivityPolicy },
+    Activity,
+    FocusedPageWait { focus: Box<ActivityWaitFocus> },
+    Diagnostics { parent: DiagnosticCaptureRef, controller_version: u32, step_id: String },
     Snapshot { dataset: SnapshotDataset },
 }
 impl CollectionSelection {
@@ -56,7 +51,9 @@ impl CollectionSelection {
             Self::QueryHistory { .. } => TelemetryCollection::QueryHistory,
             Self::ResourceHistory { .. } => TelemetryCollection::ResourceHistory,
             Self::DeadlockHistory { .. } => TelemetryCollection::DeadlockHistory,
-            Self::Activity { .. } => TelemetryCollection::Activity,
+            Self::Activity => TelemetryCollection::Activity,
+            Self::FocusedPageWait { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
+            Self::Diagnostics { .. } => TelemetryCollection::Diagnostics,
             Self::Snapshot { dataset } => TelemetryCollection::Snapshot(*dataset),
         }
     }
@@ -81,9 +78,9 @@ impl TelemetryStream {
             Self::QueryRuntime | Self::QueryWaits => TelemetrySemantics::Interval,
             Self::ResourceSamples => TelemetrySemantics::Sample,
             Self::QueryDefinitions | Self::PlanDefinitions | Self::ObjectDefinitions => TelemetrySemantics::Definition,
-            Self::ActivityObservations | Self::BlockingEdges => TelemetrySemantics::Sample,
-            Self::ActivityIncidents | Self::DeadlockEvents => TelemetrySemantics::Event,
-            Self::ActivityCheckpoints => TelemetrySemantics::Checkpoint,
+            Self::ActivityObservations => TelemetrySemantics::Sample,
+            Self::DeadlockEvents => TelemetrySemantics::Event,
+            Self::DiagnosticCheckpoints => TelemetrySemantics::Checkpoint,
             Self::OperationalSamples => TelemetrySemantics::Sample,
             Self::WaitCounterSamples => TelemetrySemantics::CumulativeCounter,
             Self::ReplicationSamples => TelemetrySemantics::Sample,
@@ -107,6 +104,10 @@ pub enum TelemetryRange {
     },
     /// Latest confirmed current observation. Capture revisions, not clocks, choose its head.
     Current,
+    /// Exact controller/focus work identity. It does not imply a native time interval or source continuity.
+    Focused {
+        key: String,
+    },
 }
 impl TelemetryRange {
     pub fn canonical(&self) -> Result<Self> {
@@ -122,6 +123,12 @@ impl TelemetryRange {
                 Self::TimeWindow { from: canonical_time(from)?, until: canonical_time(until)? }
             }
             Self::Current => Self::Current,
+            Self::Focused { key } => {
+                if !valid_digest(key) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                Self::Focused { key: key.clone() }
+            }
         })
     }
 }
@@ -228,6 +235,35 @@ impl SampleHistoryDescription {
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct DiagnosticCaptureDescription {
+    pub controller_version: u32,
+    pub parent: DiagnosticCaptureRef,
+    pub step_id: String,
+    /// Analysis time on the collector; native observation clocks remain in referenced evidence.
+    pub analyzed_at: String,
+    pub records: u32,
+    pub checkpoint_records: u32,
+}
+impl DiagnosticCaptureDescription {
+    pub fn is_valid(&self) -> bool {
+        self.controller_version > 0
+            && self.parent.is_valid()
+            && valid_digest(&self.step_id)
+            && canonical_time(&self.analyzed_at).is_ok()
+            && self.records <= MAX_DIAGNOSTIC_EPISODES as u32
+            && self.checkpoint_records > 0
+            && self.checkpoint_records <= MAX_DIAGNOSTIC_EPISODES as u32
+    }
+    pub fn work_key(&self) -> Result<String> {
+        serde_json::to_vec(&(&self.parent, self.controller_version, &self.step_id))
+            .map(|bytes| digest(&bytes))
+            .map_err(|_| CollectionStop::InvalidPage.error())
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum SourceObservation {
@@ -235,6 +271,8 @@ pub enum SourceObservation {
     RetainedSamples(SampleHistoryDescription),
     RetainedEvents(EventHistoryDescription),
     Activity(ActivitySnapshotDescription),
+    FocusedPageWait { snapshot: StateSnapshotDescription, result: Box<ActivityWaitFocusResult> },
+    Diagnostics(DiagnosticCaptureDescription),
     Snapshot(StateSnapshotDescription),
     PagedSnapshot(PagedSnapshotDescription),
 }
@@ -245,12 +283,14 @@ impl SourceObservation {
             Self::RetainedSamples(_) => TelemetryCollection::ResourceHistory,
             Self::RetainedEvents(_) => TelemetryCollection::DeadlockHistory,
             Self::Activity(_) => TelemetryCollection::Activity,
+            Self::FocusedPageWait { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
+            Self::Diagnostics(_) => TelemetryCollection::Diagnostics,
             Self::Snapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
             Self::PagedSnapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
         }
     }
-    pub fn range(&self) -> TelemetryRange {
-        match self {
+    pub fn range(&self) -> Result<TelemetryRange> {
+        Ok(match self {
             Self::QueryHistory(history) => TelemetryRange::NativeInterval { interval: history.interval.clone() },
             Self::RetainedSamples(history) => {
                 TelemetryRange::TimeWindow { from: history.from.clone(), until: history.until.clone() }
@@ -259,8 +299,10 @@ impl SourceObservation {
                 TelemetryRange::TimeWindow { from: history.from.clone(), until: history.until.clone() }
             }
             Self::Activity(_) => TelemetryRange::Current,
+            Self::FocusedPageWait { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
+            Self::Diagnostics(description) => TelemetryRange::Focused { key: description.work_key()? },
             Self::Snapshot(_) | Self::PagedSnapshot(_) => TelemetryRange::Current,
-        }
+        })
     }
     pub fn accepts_sample(&self, at: &str) -> bool {
         let Self::RetainedSamples(history) = self else {
@@ -275,7 +317,9 @@ impl SourceObservation {
             Self::RetainedSamples(history) => history.covers_request(),
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
-            Self::Activity(snapshot) => snapshot.complete_scope,
+            Self::Activity(snapshot) => snapshot.is_valid(),
+            Self::FocusedPageWait { snapshot, result } => snapshot.is_valid() && result.is_valid(),
+            Self::Diagnostics(description) => description.is_valid(),
             Self::Snapshot(snapshot) => snapshot.is_valid(),
             Self::PagedSnapshot(_) => false,
         }
@@ -294,13 +338,14 @@ impl SourceObservation {
     }
     pub fn snapshot(&self) -> Option<&StateSnapshotDescription> {
         match self {
-            Self::Snapshot(snapshot) => Some(snapshot),
+            Self::Snapshot(snapshot) | Self::FocusedPageWait { snapshot, .. } => Some(snapshot),
             _ => None,
         }
     }
     pub fn accepts_snapshot_record(&self, stream: TelemetryStream, source: &str) -> bool {
         match self {
-            Self::Snapshot(snapshot) => snapshot.accepts(stream, source),
+            Self::Snapshot(snapshot) | Self::FocusedPageWait { snapshot, .. } => snapshot.accepts(stream, source),
+            Self::Diagnostics(_) => stream == TelemetryStream::OperationalSamples && source == DIAGNOSTICS_SOURCE,
             Self::PagedSnapshot(snapshot) => snapshot.accepts(stream, source),
             _ => false,
         }
@@ -315,7 +360,13 @@ impl SourceObservation {
             }
             Self::Activity(snapshot) => {
                 count(TelemetryStream::ActivityObservations) == u64::from(snapshot.observations)
-                    && count(TelemetryStream::BlockingEdges) == u64::from(snapshot.blocking_edges)
+            }
+            Self::FocusedPageWait { snapshot, .. } => {
+                count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
+            }
+            Self::Diagnostics(description) => {
+                count(TelemetryStream::OperationalSamples) == u64::from(description.records)
+                    && count(TelemetryStream::DiagnosticCheckpoints) == u64::from(description.checkpoint_records)
             }
             Self::Snapshot(snapshot) => count(snapshot.dataset.stream()) == u64::from(snapshot.records),
             Self::PagedSnapshot(_) => false,
@@ -370,12 +421,42 @@ impl CollectionDescription {
         if self.source.is_empty() || !self.target.is_valid() || !request.subject.accepts(&self.target) {
             return false;
         }
-        if let (SourceObservation::Activity(snapshot), CollectionSelection::Activity { policy }) =
+        if let (SourceObservation::Activity(snapshot), CollectionSelection::Activity) =
             (&self.observation, &request.selection)
         {
             return snapshot.is_valid()
-                && &snapshot.policy == policy
-                && snapshot.native_rows <= request.budget.max_snapshot_rows;
+                && snapshot.coverage.source == self.source
+                && snapshot.observations <= request.budget.max_snapshot_rows
+                && (snapshot.native_rows <= request.budget.max_snapshot_rows
+                    || snapshot.native_rows == request.budget.max_snapshot_rows.saturating_add(1)
+                        && snapshot.coverage.state == crate::SourceState::Partial
+                        && snapshot.coverage.stopped == Some(CollectionStop::RowLimit));
+        }
+        if let (
+            SourceObservation::FocusedPageWait { snapshot, result },
+            CollectionSelection::FocusedPageWait { focus },
+        ) = (&self.observation, &request.selection)
+        {
+            return snapshot.is_valid()
+                && result.is_valid()
+                && &result.focus == focus.as_ref()
+                && self.target == focus.target
+                && snapshot.dataset == SnapshotDataset::PageWaitTargets
+                && snapshot.records <= request.budget.max_snapshot_rows
+                && snapshot.observed_from == result.observed_from
+                && snapshot.observed_until == result.observed_until;
+        }
+        if let (
+            SourceObservation::Diagnostics(description),
+            CollectionSelection::Diagnostics { parent, controller_version, step_id },
+        ) = (&self.observation, &request.selection)
+        {
+            return description.is_valid()
+                && &description.parent == parent
+                && description.controller_version == *controller_version
+                && &description.step_id == step_id
+                && description.records.saturating_add(description.checkpoint_records)
+                    <= request.budget.max_snapshot_rows;
         }
         if let (SourceObservation::Snapshot(snapshot), CollectionSelection::Snapshot { dataset }) =
             (&self.observation, &request.selection)

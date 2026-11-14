@@ -1,4 +1,6 @@
 //! Workspace authentication composes with the source-independent capture controller.
+#[cfg(test)]
+mod tests;
 use crate::Workspace;
 use culprit_collector::{
     capture::{self, CollectionCancellation, SourceFactory},
@@ -6,7 +8,9 @@ use culprit_collector::{
 };
 use culprit_core::{
     Result,
-    telemetry::{CollectionManifest, CollectionRequest, TelemetrySource},
+    telemetry::{
+        CollectionManifest, CollectionRequest, CollectionSelection, CollectionStop, TelemetryRecord, TelemetrySource,
+    },
 };
 use culprit_read::admission::SourceAdmission;
 use std::path::Path;
@@ -86,6 +90,10 @@ impl Workspace {
         cancellation: &CollectionCancellation,
     ) -> Result<CollectionManifest> {
         request.validate()?;
+        if matches!(request.selection, CollectionSelection::FocusedPageWait { .. }) {
+            // Focus requires the immutable original receipt, which only the outbox/recovery path can resolve.
+            return Err(CollectionStop::InvalidPage.error());
+        }
         self.connection(name)?;
         let admission = SourceAdmission::acquire(self.collection_admission_path()).await?;
         let identity = culprit_read::admission::observation_identity()?;
@@ -108,6 +116,15 @@ impl Workspace {
         cancellation: &CollectionCancellation,
     ) -> Result<CollectionManifest> {
         request.validate()?;
+        if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
+            let (source, row) = outbox.diagnostic_evidence(&focus.parent).await?;
+            let TelemetryRecord::Activity(original) = &row.record else {
+                return Err(CollectionStop::InvalidPage.error());
+            };
+            if !focus.matches_parent(&source, original, &focus.parent) {
+                return Err(CollectionStop::InvalidPage.error());
+            }
+        }
         self.connection(name)?;
         let admission = SourceAdmission::acquire(self.collection_admission_path()).await?;
         let mut lease = outbox.reserve(name, &request).await?;

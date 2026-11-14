@@ -5,6 +5,11 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod activity;
+pub use activity::{activity_evidence_cases, activity_observation, assert_activity_capture};
+mod diagnostics;
+pub use diagnostics::{assert_diagnostic_capture, diagnostic_evidence_cases};
+
 mod queries;
 pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};
 mod cached_runtime;
@@ -150,6 +155,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
         Contract::new("pipeline".into(), "shard-0".into(), "fixture:test".into(), digest(b"schema")).unwrap();
     let range_id = digest(&serde_json::to_vec(&(&contract, &capture)).unwrap());
     let manifest = RangeManifest {
+        capture_manifest_sha256: culprit_core::telemetry::digest(b"fixture-manifest"),
         contract,
         range_id,
         capture,
@@ -312,7 +318,7 @@ impl Recovery {
                     sha256,
                     bytes: bytes.len() as u64,
                     rows,
-                    delivery_required: *stream != TelemetryStream::ActivityCheckpoints,
+                    delivery_required: stream.delivery_required(),
                 };
                 objects.insert(object, bytes);
                 batch
@@ -332,11 +338,20 @@ impl RecoveryStore for Recovery {
     ) -> Result<RecoveryPage> {
         unreachable!("not a recovery enumeration fixture")
     }
+    async fn pending_diagnostic_inputs(&self, _: Option<&str>, _: u32) -> Result<RecoveryPage> {
+        unreachable!("not a diagnostic recovery enumeration fixture")
+    }
     async fn retire(&self, _: &Fence, _: &crate::delivery::sink::PublishedRange) -> Result<()> {
         unreachable!("not a retirement fixture")
     }
-    async fn activity_heads(&self, _: Option<&str>, _: u32) -> Result<ActivityHeadPage> {
-        unreachable!()
+    async fn capture_manifest(&self, capture: &CaptureIdentity) -> Result<RangeManifest> {
+        if &self.manifest.capture != capture {
+            return Err(DeliveryProblem::NotReady.error());
+        }
+        Ok(self.manifest.clone())
+    }
+    async fn diagnostic_heads(&self, _: Option<&str>, _: u32) -> Result<crate::delivery::recovery::DiagnosticHeadPage> {
+        unreachable!("not a checkpoint enumeration fixture")
     }
     fn id(&self) -> &str {
         "fixture-recovery"
@@ -641,29 +656,10 @@ pub fn shared_operational_capture(destination: &str, schema: &str) -> Recovery {
     Recovery::capture(destination, schema, source, records, 30_001)
 }
 
-pub fn activity(destination: &str, schema: &str, sequence: u64, empty: bool) -> Recovery {
-    let (mut manifest, _) = fixture();
-    manifest.source.source = "activity".into();
-    manifest.source.observation = SourceObservation::Activity(ActivitySnapshotDescription {
-        epoch: "native-epoch".into(),
-        at: "2020-01-01T12:00:00Z".into(),
-        scope: culprit_core::MeasurementScope::Database,
-        complete_scope: true,
-        policy: ActivityPolicy::default(),
-        native_rows: u32::from(!empty),
-        qualifying: u32::from(!empty),
-        uncertain: 0,
-        observations: u32::from(!empty),
-        blocking_edges: 0,
-        details: ActivityDetailStatus::Collected,
-    });
-    let record = TelemetryRecord::Activity(activity_sample());
-    Recovery::capture(destination, schema, manifest.source, if empty { vec![] } else { vec![record] }, sequence)
-}
-
 fn activity_sample() -> ActivityObservation {
     ActivityObservation {
         blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
+        waiting_on_lock: None,
         key: ActivityKey {
             session: NativeActivityIdentity { id: "61".into(), generation: "login-1".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),
@@ -675,13 +671,14 @@ fn activity_sample() -> ActivityObservation {
         database: Some("db".into()),
         command: Some("SELECT".into()),
         last_request_age_ms: None,
-        open_transactions: 0,
+        open_transactions: Some(0),
         elapsed_ms: Some("120000".into()),
         transaction_age_ms: None,
         session_counters: ActivityCounters::default(),
         request_counters: Some(ActivityCounters::default()),
         wait: None,
         query_hash: None,
+        statement_identity: None,
         client: None,
         statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
     }
@@ -693,7 +690,11 @@ pub fn activity_with_wait_resource(
     sequence: u64,
     kind: culprit_core::WaitResourceKind,
 ) -> Recovery {
-    let source = activity(destination, schema, sequence, false).manifest.source;
+    let (mut source, _) = activity_evidence_cases().remove(0);
+    let SourceObservation::Activity(snapshot) = &mut source.observation else { unreachable!() };
+    snapshot.native_rows = 1;
+    snapshot.observations = 1;
+    snapshot.coverage = StateSourceCoverage::collected(source.source.clone(), 1);
     let mut row = activity_sample();
     row.state = "waiting".into();
     row.wait = Some(ActivityWait {
@@ -713,7 +714,7 @@ pub fn activity_with_wait_resource(
             native: NativeIdentity::new("native-wait-resource").qualified("namespace", "native-local"),
         }],
     });
-    Recovery::capture(destination, schema, source, vec![TelemetryRecord::Activity(row)], sequence)
+    Recovery::capture(destination, schema, source, vec![TelemetryRecord::from(row)], sequence)
 }
 
 pub fn waits(destination: &str, schema: &str, sequence: u64, empty: bool, complete: bool) -> Recovery {

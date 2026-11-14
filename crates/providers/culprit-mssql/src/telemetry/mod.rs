@@ -10,6 +10,7 @@ mod indexes;
 mod objects;
 mod page_waits;
 mod partitions;
+mod recipes;
 mod request_memory;
 mod retained_definitions;
 mod streamed;
@@ -40,109 +41,11 @@ pub(crate) fn source(
     host: String,
     port: u16,
 ) -> Result<Box<dyn TelemetrySource>> {
-    request.validate()?;
-    if let culprit_core::telemetry::CollectionSubject::Shared { resource } = &request.subject
-        && resource.engine == culprit_core::Engine::Mssql
-        && resource.kind == culprit_core::telemetry::SharedResourceKind::Pool
-        && request.collection() == culprit_core::telemetry::TelemetryCollection::ResourceHistory
-    {
-        return resources::pool_source(pool, request);
-    }
-    if matches!(request.subject, culprit_core::telemetry::CollectionSubject::Shared { .. })
-        && matches!(
-            request.collection(),
-            culprit_core::telemetry::TelemetryCollection::Snapshot(
-                SnapshotDataset::Operational | SnapshotDataset::MemoryFailures
-            )
-        )
-    {
-        subject::is_shared(&request.subject)?;
-        return Ok(Box::new(state::StateSource::new(pool, request, host, port)?));
-    }
-    request.subject.require_database()?;
-    match request.collection() {
-        culprit_core::telemetry::TelemetryCollection::Snapshot(
-            SnapshotDataset::StatementCounters
-            | SnapshotDataset::RuntimeDistributions
-            | SnapshotDataset::StatementDefinitions
-            | SnapshotDataset::Sequences
-            | SnapshotDataset::Cleanup
-            | SnapshotDataset::NativeFailures
-            | SnapshotDataset::SessionMemory,
-        ) => Err(culprit_core::Error::new(
-            culprit_core::ErrorCode::Unsupported,
-            culprit_core::t!("collection.unsupported"),
-        )),
-        culprit_core::telemetry::TelemetryCollection::DeadlockHistory => {
-            Ok(Box::new(events::EventSource::new(pool, request, host, port)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Activity => {
-            Ok(Box::new(activity::ActivitySource::new(pool, request, host, port)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::QueryHistory => {
-            Ok(Box::new(Source::new(pool, request, host, port)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::ResourceHistory => {
-            Ok(Box::new(resources::ResourceSource::new(pool, request, host, port)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::StatementGrants) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, grants::Grants)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestMemory) => {
-            Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets) => {
-            Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::TaskSpace) => {
-            Ok(Box::new(task_space::TaskSpaceSource::new(pool, request, host, port)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::IndexOperations) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, index_operations::IndexOperations)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Tables) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, tables::Tables)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::ForeignKeys) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, foreign_keys::ForeignKeys)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Columns) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, columns::Columns)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Statistics) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, statistics::Statistics)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Indexes) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, indexes::Indexes)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::CheckConstraints) => Ok(Box::new(
-            streamed::StreamedSnapshot::new(pool, request, host, port, check_constraints::CheckConstraints)?,
-        )),
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::QueryCompilation) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, compilation::QueryCompilation)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::CachedRuntime) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, cached_runtime::CachedRuntime)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Objects) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, objects::Objects)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Triggers) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, triggers::Triggers)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Partitions) => {
-            Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, partitions::Partitions)?))
-        }
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::CachedDefinitions) => Ok(Box::new(
-            streamed::StreamedSnapshot::new(pool, request, host, port, cached_definitions::CachedDefinitions)?,
-        )),
-        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::RetainedPlans) => Ok(Box::new(
-            streamed::StreamedSnapshot::new(pool, request, host, port, retained_definitions::RetainedPlans)?,
-        )),
-        culprit_core::telemetry::TelemetryCollection::Snapshot(_) => {
-            Ok(Box::new(state::StateSource::new(pool, request, host, port)?))
-        }
-    }
+    recipes::open(pool, request, host, port)
+}
+
+pub(crate) fn recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
+    recipes::declarations()
 }
 
 use crate::read::{Parameter, ReadError, ReadSession as Session};
@@ -151,8 +54,8 @@ use async_trait::async_trait;
 use culprit_core::{
     Result,
     telemetry::{
-        CollectionDescription, CollectionRead, CollectionRequest, CollectionStop, ReadWorkMetrics, SnapshotDataset,
-        TelemetrySource, TelemetryStream,
+        CollectionDescription, CollectionRead, CollectionRequest, CollectionStop, ReadWorkMetrics, TelemetrySource,
+        TelemetryStream,
     },
 };
 use cursor::{Cursor, PlanRange};

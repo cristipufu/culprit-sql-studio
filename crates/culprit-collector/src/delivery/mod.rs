@@ -1,10 +1,9 @@
 //! Destination-independent recovery and analytical publication protocol.
-mod activity_heads;
-pub mod activity_recovery;
 mod archive_driver;
 mod archive_worker;
 pub mod committed_cache;
 pub mod contract;
+pub mod diagnostic_recovery;
 pub mod evidence;
 pub mod file_store;
 mod hydration;

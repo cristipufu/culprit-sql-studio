@@ -2,7 +2,7 @@ use super::*;
 use crate::collection_files::ObservationFiles;
 mod delivery_worker;
 mod eviction;
-mod restored_activity;
+mod restored_diagnostics;
 
 fn request() -> CollectionRequest {
     CollectionRequest {
@@ -64,6 +64,7 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
     let identity = plan();
     let source = source();
     match stream {
+        TelemetryStream::DiagnosticCheckpoints => vec![],
         TelemetryStream::QueryRuntime => vec![TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: NativeMeasurementKey {
                 native: NativeIdentity::new("1")
@@ -124,10 +125,7 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
         | TelemetryStream::TuningObservations
         | TelemetryStream::ObjectDefinitions
         | TelemetryStream::ResourceSamples
-        | TelemetryStream::ActivityObservations
-        | TelemetryStream::BlockingEdges
-        | TelemetryStream::ActivityIncidents
-        | TelemetryStream::ActivityCheckpoints => panic!("query-history fixture does not collect this stream"),
+        | TelemetryStream::ActivityObservations => panic!("query-history fixture does not collect this stream"),
         TelemetryStream::PlanDefinitions => vec![TelemetryRecord::PlanDefinition(PlanDefinition {
             identity: identity.clone(),
             id: identity.definition_id(&source).unwrap(),

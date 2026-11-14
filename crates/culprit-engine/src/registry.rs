@@ -66,7 +66,13 @@ mod tests {
     fn every_engine_declares_its_sources_once() {
         for engine in Engine::ALL {
             let list = sources(engine);
-            assert!(!list.is_empty(), "{engine:?} declares no sources");
+            if list.is_empty() {
+                let spec =
+                    ConnectionSpec { engine: Some(engine), host: "fixture.invalid".into(), ..Default::default() };
+                let error = provider(&spec).err().expect("a registered provider must declare its native sources");
+                assert_eq!(error.code, ErrorCode::Unsupported, "{engine:?} lacks sources for a selectable provider");
+                continue;
+            }
             let mut names: Vec<&str> = list.iter().map(|s| s.name).collect();
             names.sort();
             let before = names.len();

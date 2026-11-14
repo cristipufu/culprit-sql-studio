@@ -1,9 +1,10 @@
 //! One local owner, immutable capture artifacts and a transactional commit boundary.
 mod archive;
 mod artifacts;
-mod baselines;
 mod eviction;
+mod investigations;
 mod journal;
+pub use investigations::{DiagnosticCheckpointPage, DiagnosticInput, DiagnosticInputRow, DiagnosticUpdate};
 mod runtime;
 pub use runtime::{CaptureLease, Outbox, OutboxDelivery};
 #[cfg(test)]
@@ -40,6 +41,7 @@ struct Files {
     journal: journal::Journal,
     _owner: durable_fs::ExclusiveFile,
     epoch: Option<i64>,
+    native_epoch_enabled: bool,
     recovered: bool,
     authority: RevisionAuthority,
 }
@@ -47,7 +49,6 @@ struct Files {
 struct Reservation {
     entry: journal::Capture,
     directory: PathBuf,
-    baseline: Option<crate::collection_activity::ActivityBaseline>,
 }
 
 impl Files {
@@ -79,7 +80,6 @@ impl Files {
         durable_fs::create_file(&owner_path).map_err(storage)?.sync_all().map_err(storage)?;
         let owner = lock(&owner_path)?;
         durable_fs::create_directory(&path.join("captures")).map_err(storage)?;
-        durable_fs::create_directory(&path.join("baselines")).map_err(storage)?;
         let journal = journal::Journal::create(&path.join("journal.sqlite3"), &identity.id, limits)?;
         durable_fs::publish(&path.join("identity.json"), &durable_fs::json_bytes(&identity, 4096).map_err(storage)?)
             .map_err(storage)?;
@@ -88,6 +88,7 @@ impl Files {
             journal,
             _owner: owner,
             epoch: None,
+            native_epoch_enabled: false,
             recovered: false,
             authority: identity.authority,
         })
@@ -101,6 +102,7 @@ impl Files {
             journal,
             _owner: owner,
             epoch: None,
+            native_epoch_enabled: false,
             recovered: false,
             authority: identity.authority,
         })
@@ -115,8 +117,6 @@ impl Files {
 
     pub fn recover(&mut self) -> Result<OutboxRecovery> {
         self.recovered = false;
-        self.recover_baselines()?;
-        self.validate_baselines()?;
         self.check_inventory()?;
         self.resume_eviction()?;
         let mut report = OutboxRecovery::default();
@@ -186,12 +186,16 @@ impl Files {
         advances: Vec<crate::delivery::evidence::StreamAdvance>,
     ) -> Result<crate::delivery::evidence::PreparedRange> {
         let validated = self.validated(observation_id)?;
-        crate::delivery::evidence::PreparedRange::from_validated(
+        let prepared = crate::delivery::evidence::PreparedRange::from_validated(
             &self.directory(observation_id),
             &validated.manifest,
             contract,
             advances,
-        )
+        )?;
+        if prepared.manifest().capture_manifest_sha256 != validated.manifest_sha {
+            return Err(problem(OutboxProblem::Integrity));
+        }
+        Ok(prepared)
     }
     pub fn captured_range(&self, key: &CapturedRange) -> Result<Option<CaptureIdentity>> {
         self.journal.head(key)
@@ -217,7 +221,10 @@ impl Files {
     }
 
     pub fn reserve(&mut self, connection: &str, request: &CollectionRequest) -> Result<Reservation> {
-        if matches!(self.authority, RevisionAuthority::Recovery { .. }) && self.epoch.is_none() {
+        if matches!(self.authority, RevisionAuthority::Recovery { .. })
+            && (self.epoch.is_none()
+                || request.collection() != TelemetryCollection::Diagnostics && !self.native_epoch_enabled)
+        {
             return Err(problem(OutboxProblem::RecoveryRequired));
         }
         request.validate()?;
@@ -227,24 +234,12 @@ impl Files {
         if !self.recovered || !self.journal.unfinished()?.is_empty() {
             self.recover()?;
         }
-        let baseline = if request.collection() == TelemetryCollection::Activity {
-            match self.journal.latest(connection, TelemetryCollection::Activity)? {
-                Some(previous) if previous.request.selection == request.selection => {
-                    let validated = self.validated(&previous.identity.observation_id)?;
-                    Some(crate::collection_activity::ActivityBaseline {
-                        capture: validated.manifest.capture.clone(),
-                        source: validated.manifest.description.ok_or_else(|| problem(OutboxProblem::Integrity))?,
-                        states: validated.activity_states,
-                    })
-                }
-                _ => None,
-            }
-        } else {
-            None
-        };
+        if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
+            self.verify_focus_parent(focus)?;
+        }
         let capture = self.journal.reserve(connection, request, &mut self.epoch)?;
         let directory = self.directory(&capture.identity.observation_id);
-        Ok(Reservation { entry: capture, directory, baseline })
+        Ok(Reservation { entry: capture, directory })
     }
     fn directory(&self, id: &str) -> PathBuf {
         self.root.join("captures").join(id)
@@ -256,7 +251,8 @@ impl Files {
         if store_id != fence.store_id() {
             return Err(DeliveryProblem::DestinationChanged.error());
         }
-        if self.epoch.is_some() {
+        let epoch = i64::try_from(fence.epoch()).map_err(|_| problem(OutboxProblem::Integrity))?;
+        if self.native_epoch_enabled || self.epoch.is_some_and(|current| current != epoch) {
             return Err(DeliveryProblem::Fenced.error());
         }
         if !self.recovered {
@@ -268,8 +264,26 @@ impl Files {
         if !self.journal.unfinished()?.is_empty() {
             return Err(problem(OutboxProblem::RecoveryRequired));
         }
+        if self.epoch.is_none() {
+            self.journal.begin_remote_epoch(fence.epoch(), high_sequence)?;
+            self.epoch = Some(epoch);
+        }
+        self.native_epoch_enabled = true;
+        Ok(())
+    }
+    fn begin_diagnostic_epoch(&mut self, fence: &crate::delivery::recovery::Fence, high_sequence: u64) -> Result<()> {
+        if !matches!(&self.authority,RevisionAuthority::Recovery {store_id} if *store_id==fence.store_id()) {
+            return Err(DeliveryProblem::DestinationChanged.error());
+        }
+        if !self.recovered || !self.journal.unfinished()?.is_empty() {
+            return Err(problem(OutboxProblem::RecoveryRequired));
+        }
+        let epoch = i64::try_from(fence.epoch()).map_err(|_| problem(OutboxProblem::Integrity))?;
+        if let Some(current) = self.epoch {
+            return if current == epoch { Ok(()) } else { Err(DeliveryProblem::Fenced.error()) };
+        }
         self.journal.begin_remote_epoch(fence.epoch(), high_sequence)?;
-        self.epoch = Some(i64::try_from(fence.epoch()).map_err(|_| problem(OutboxProblem::Integrity))?);
+        self.epoch = Some(epoch);
         Ok(())
     }
     fn check_inventory(&self) -> Result<()> {

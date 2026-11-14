@@ -20,11 +20,14 @@ pub(super) struct Fixture {
     password: String,
     pub(super) pool: Option<Arc<Pool>>,
     pub(super) workers: Vec<Option<tokio::task::JoinHandle<Result<super::workload::CompletedWorker>>>>,
+    pub(super) setup_elapsed_ms: f64,
+    setup_started: std::time::Instant,
     admin: MsClient,
     owned_host: bool,
 }
 impl Fixture {
     async fn open() -> Result<Self> {
+        let setup_started = std::time::Instant::now();
         let port =
             std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PORT").expect("owned loopback port").parse::<u16>().unwrap();
         let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").expect("owned database password");
@@ -32,7 +35,17 @@ impl Fixture {
         let admin =
             crate::test_support::connect(&config(port, "master", &password, "page-fixture-admin"), SessionKind::User)
                 .await?;
-        Ok(Self { name, port, password, pool: None, workers: Vec::new(), admin, owned_host: false })
+        Ok(Self {
+            name,
+            port,
+            password,
+            pool: None,
+            workers: Vec::new(),
+            setup_elapsed_ms: 0.0,
+            setup_started,
+            admin,
+            owned_host: false,
+        })
     }
     async fn initialize(&mut self) -> Result<()> {
         let rows = self
@@ -73,6 +86,7 @@ impl Fixture {
         ] {
             execute(&mut setup, statement).await?;
         }
+        self.setup_elapsed_ms = self.setup_started.elapsed().as_secs_f64() * 1000.0;
         Ok(())
     }
     pub async fn client(&self, application: &str) -> Result<MsClient> {

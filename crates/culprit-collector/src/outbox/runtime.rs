@@ -1,6 +1,6 @@
 //! Outbox transactions retain file ownership on a blocking worker while async source cancellation remains runnable.
 use super::{Files, Reservation, problem};
-use crate::{blocking_state::BlockingState, collection_activity::ActivityBaseline, delivery};
+use crate::{blocking_state::BlockingState, delivery};
 use culprit_core::{Result, telemetry::*};
 use std::path::Path;
 
@@ -37,12 +37,104 @@ impl Outbox {
             })
             .await
     }
-    /// Install verified native checkpoints before source activation. This operation never opens a database.
-    pub async fn restore_activity(
+    /// Bind allocation for local-only diagnostics while native source activation remains independently fenced.
+    pub async fn begin_diagnostic_epoch(
         &mut self,
-        checkpoint: delivery::activity_recovery::RecoveredActivityCheckpoint,
+        fence: &delivery::recovery::Fence,
+        high_sequence: u64,
     ) -> Result<()> {
-        self.files.run(|| move |files| files.restore_activity(checkpoint)).await
+        self.files
+            .run(|| {
+                let fence = fence.clone();
+                move |files| files.begin_diagnostic_epoch(&fence, high_sequence)
+            })
+            .await
+    }
+    pub async fn restore_diagnostic_input(
+        &mut self,
+        connection: &str,
+        recovered: delivery::diagnostic_recovery::RecoveredDiagnosticInput,
+    ) -> Result<()> {
+        let (range, rows) = recovered.into_parts();
+        let parent = delivery::diagnostic_recovery::capture_reference(range.manifest())?;
+        let input = super::investigations::RestoredInput {
+            store_id: range.store_id().into(),
+            parent,
+            source: range.manifest().source.clone(),
+            connection: connection.into(),
+            rows,
+        };
+        self.files.run(|| move |files| files.restore_diagnostic_input(input)).await
+    }
+    /// Cache authenticated original evidence without adding or acknowledging diagnostic work.
+    pub async fn cache_diagnostic_evidence(
+        &mut self,
+        connection: &str,
+        recovered: delivery::diagnostic_recovery::RecoveredDiagnosticInput,
+    ) -> Result<()> {
+        let (range, rows) = recovered.into_parts();
+        let parent = delivery::diagnostic_recovery::capture_reference(range.manifest())?;
+        let input = super::investigations::RestoredInput {
+            store_id: range.store_id().into(),
+            parent,
+            source: range.manifest().source.clone(),
+            connection: connection.into(),
+            rows,
+        };
+        self.files.run(|| move |files| files.cache_diagnostic_evidence(input)).await
+    }
+    pub async fn restore_diagnostics(
+        &mut self,
+        recovered: delivery::diagnostic_recovery::RecoveredDiagnosticCheckpoint,
+    ) -> Result<()> {
+        self.files.run(|| move |files| files.restore_diagnostic_checkpoint(recovered)).await
+    }
+    pub async fn diagnostic_checkpoints(
+        &self,
+        controller_version: u32,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<super::DiagnosticCheckpointPage> {
+        self.files
+            .run(|| {
+                let cursor = cursor.map(str::to_owned);
+                move |files| files.diagnostic_checkpoints(controller_version, cursor.as_deref(), limit)
+            })
+            .await
+    }
+    pub async fn diagnostic_evidence(
+        &self,
+        reference: &DiagnosticEvidenceRef,
+    ) -> Result<(CollectionDescription, ExportedRecord)> {
+        self.files
+            .run(|| {
+                let reference = reference.clone();
+                move |files| files.diagnostic_reference(&reference)
+            })
+            .await
+    }
+    /// Consume only sealed native evidence; this path never creates a native source session.
+    pub async fn next_diagnostic_input(&self, controller_version: u32) -> Result<Option<super::DiagnosticInput>> {
+        self.files.run(|| move |files| files.next_diagnostic_input(controller_version)).await
+    }
+    pub async fn diagnostic_input(
+        &self,
+        observation_id: &str,
+        controller_version: u32,
+    ) -> Result<super::DiagnosticInput> {
+        self.files
+            .run(|| {
+                let id = observation_id.to_owned();
+                move |files| files.diagnostic_input(&id, controller_version)
+            })
+            .await
+    }
+    pub async fn commit_diagnostics(
+        &mut self,
+        input: super::DiagnosticInput,
+        update: super::DiagnosticUpdate,
+    ) -> Result<CaptureIdentity> {
+        self.files.run(|| move |files| files.commit_diagnostics(input, update)).await
     }
     pub fn open(path: &Path) -> Result<Self> {
         Ok(Self::from_files(Files::open(path)?))
@@ -188,32 +280,6 @@ impl OutboxDelivery {
     }
 }
 impl CaptureLease<'_> {
-    pub(crate) async fn baseline(&self, source: &CollectionDescription) -> Result<Option<ActivityBaseline>> {
-        let restored = self
-            .outbox
-            .files
-            .run(|| {
-                let source = source.clone();
-                move |files| files.restored_baseline(&source)
-            })
-            .await?;
-        let source_id = source.logical_source_id()?;
-        let local = match self.reservation.baseline.as_ref() {
-            Some(baseline) if baseline.source.logical_source_id()? == source_id => Some(baseline),
-            _ => None,
-        };
-        match (local, restored) {
-            (Some(local), Some(remote)) => {
-                if super::baselines::compare(&local.capture, &remote.capture)?.is_lt() {
-                    Ok(Some(remote))
-                } else {
-                    Ok(Some(local.clone()))
-                }
-            }
-            (Some(local), None) => Ok(Some(local.clone())),
-            (None, remote) => Ok(remote),
-        }
-    }
     pub fn identity(&self) -> &CaptureIdentity {
         &self.reservation.entry.identity
     }

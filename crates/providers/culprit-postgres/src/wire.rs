@@ -43,7 +43,9 @@ pub mod catalog {
 }
 /// SQL activity row layout and generation-checked enrichment only. Blocking semantics remain native-provider code.
 pub mod activity {
-    pub use crate::native::activity::{ActivityFrame, ActivityRecord, enrich_for, observe_rows, query_layout};
+    pub use crate::native::activity::{
+        ActivityFrame, ActivityRecord, BaselineFrame, enrich_for, observe_baseline_rows, observe_rows, query_layout,
+    };
 }
 /// Native SQL configuration layout, with an explicit allowlist and source scope supplied by its provider.
 pub mod settings {

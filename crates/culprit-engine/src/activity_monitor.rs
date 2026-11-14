@@ -1,6 +1,10 @@
 //! A conservative single-target loop. No overlapping reads, catch-up bursts or incident resolution on failed polls.
 use crate::Workspace;
-use culprit_collector::{capture::CollectionCancellation, outbox::Outbox};
+use culprit_collector::{
+    capture::CollectionCancellation,
+    diagnostics::{DiagnosticPolicies, drain_pending},
+    outbox::Outbox,
+};
 use culprit_core::{Result, telemetry::*};
 use std::time::Duration;
 
@@ -15,6 +19,8 @@ impl Workspace {
         mut report: impl FnMut(&ActivityMonitorEvent) -> Result<()>,
     ) -> Result<ActivityMonitorSummary> {
         options.validate()?;
+        let policies = DiagnosticPolicies::for_activity(name, CollectionSubject::Database, options.policy.clone())?;
+        drain_pending(outbox, &policies, cancellation, None).await?;
         self.connection(name)?;
         let mut summary = ActivityMonitorSummary::default();
         let mut failures = 0u32;
@@ -25,12 +31,17 @@ impl Workspace {
             summary.attempts = summary.attempts.checked_add(1).ok_or_else(|| CollectionStop::QueryLimit.error())?;
             let request = CollectionRequest {
                 subject: culprit_core::telemetry::CollectionSubject::Database,
-                selection: CollectionSelection::Activity { policy: options.policy.clone() },
+                selection: CollectionSelection::Activity,
                 budget: options.budget.clone(),
             };
             let result = self.collect_into_outbox(name, request, outbox, cancellation).await;
             let event = match result {
-                Ok(manifest) => event(summary.attempts, manifest),
+                Ok(manifest) => {
+                    if manifest.status == CollectionStatus::Complete {
+                        drain_pending(outbox, &policies, cancellation, None).await?;
+                    }
+                    event(summary.attempts, manifest, outbox).await?
+                }
                 Err(error) => {
                     if matches!(error.detail, Some(culprit_core::ErrorDetail::Outbox(_)))
                         || matches!(
@@ -46,8 +57,9 @@ impl Workspace {
                         error_code: Some(error.code),
                         capture: None,
                         observed_at: None,
-                        active_incidents: None,
-                        changes: None,
+                        active_episodes: None,
+                        uncertain_episodes: None,
+                        native_coverage: None,
                         source_queries: None,
                     }
                 }
@@ -72,26 +84,65 @@ impl Workspace {
         Ok(summary)
     }
 }
-fn event(attempt: u32, manifest: CollectionManifest) -> ActivityMonitorEvent {
-    let complete = manifest.status == CollectionStatus::Complete;
-    ActivityMonitorEvent {
+async fn event(attempt: u32, manifest: CollectionManifest, outbox: &Outbox) -> Result<ActivityMonitorEvent> {
+    let episodes =
+        if manifest.status == CollectionStatus::Complete { episode_counts(outbox, &manifest).await? } else { None };
+    Ok(ActivityMonitorEvent {
         attempt,
         status: manifest.status,
         error_code: None,
-        capture: Some(manifest.capture),
         observed_at: manifest
             .description
             .as_ref()
             .and_then(|source| source.observation.activity())
             .map(|snapshot| snapshot.at.clone()),
-        active_incidents: complete.then(|| count(&manifest.files, TelemetryStream::ActivityCheckpoints)),
-        changes: complete.then(|| count(&manifest.files, TelemetryStream::ActivityIncidents)),
+        native_coverage: manifest
+            .description
+            .as_ref()
+            .and_then(|source| source.observation.activity())
+            .map(|snapshot| snapshot.coverage.clone()),
+        active_episodes: episodes.as_ref().map(|counts| counts.active),
+        uncertain_episodes: episodes.as_ref().map(|counts| counts.uncertain),
+        capture: Some(manifest.capture),
         source_queries: Some(manifest.source_queries),
+    })
+}
+struct EpisodeCounts {
+    active: u32,
+    uncertain: u32,
+}
+async fn episode_counts(outbox: &Outbox, manifest: &CollectionManifest) -> Result<Option<EpisodeCounts>> {
+    let Some(source) = &manifest.description else { return Ok(None) };
+    let target = source.target.telemetry_id()?;
+    let scope = source.captured_range()?.scope_id;
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_FLEET_TARGETS {
+        let page = outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, cursor.as_deref(), 128).await?;
+        for checkpoint in page.checkpoints {
+            if checkpoint.target.telemetry_id()? == target
+                && checkpoint.input.capture == manifest.capture
+                && checkpoint.input.source_scope_id == scope
+            {
+                let mut counts = EpisodeCounts { active: 0, uncertain: 0 };
+                for episode in checkpoint.episodes.iter().filter(|episode| episode.scope.source == source.source) {
+                    match episode.lifecycle {
+                        DiagnosticLifecycle::Active => counts.active += 1,
+                        DiagnosticLifecycle::Uncertain => counts.uncertain += 1,
+                        DiagnosticLifecycle::Resolved => {}
+                    }
+                }
+                return Ok(Some(counts));
+            }
+        }
+        let Some(next) = page.next_cursor else { return Ok(None) };
+        if cursor.as_ref().is_some_and(|before| next <= *before) {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        cursor = Some(next);
     }
+    Err(CollectionStop::InvalidPage.error())
 }
-fn count(files: &[CollectedFile], stream: TelemetryStream) -> u32 {
-    files.iter().find(|file| file.stream == stream).map_or(0, |file| file.rows)
-}
+
 fn delay(interval: u32, failures: u32) -> Duration {
     let multiplier = 1u64 << failures.saturating_sub(1).min(10);
     Duration::from_secs(

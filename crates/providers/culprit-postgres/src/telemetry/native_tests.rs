@@ -411,7 +411,7 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
 
 #[tokio::test]
 #[ignore = "requires the owned loopback PostgreSQL provider fixture"]
-async fn native_activity_shares_live_facts_and_only_reads_locks_for_persistent_waiters() {
+async fn native_activity_persists_waiting_and_idle_metadata_before_optional_live_blocker_work() {
     use crate::read::QueryRead;
     let provider = crate::PostgresProvider::new(&spec()).unwrap();
     let admin = provider.connector.connect_unconfigured().await.unwrap().client;
@@ -443,12 +443,9 @@ async fn native_activity_shares_live_facts_and_only_reads_locks_for_persistent_w
         assert!(tokio::time::Instant::now() < deadline, "fixture waiter must reach its native lock wait");
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     let request = CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity {
-            policy: ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 1000, update_every_ms: 60000 },
-        },
+        selection: CollectionSelection::Activity,
         budget: CollectionBudget { page_rows: 1, ..Default::default() },
     };
     let factory = Factory(crate::PostgresProvider::new(&spec()).unwrap());
@@ -479,14 +476,20 @@ async fn native_activity_shares_live_facts_and_only_reads_locks_for_persistent_w
         })
         .collect::<Vec<_>>();
     let blocked = observations.iter().find(|row| row.key.session.id == waiter_pid).expect("native blocked statement");
-    assert!(blocked.conditions(request.activity_policy().unwrap()).contains(&ActivityCondition::Blocked));
+    assert_eq!(blocked.blocking_status, ActivityBlockingStatus::Unknown);
+    assert_eq!(blocked.wait.as_ref().unwrap().native_type.as_deref(), Some("Lock: transactionid"));
+    assert!(blocked.wait.as_ref().unwrap().owners.is_empty());
+    assert!(blocked.statement_identity.is_some());
+    assert!(matches!(blocked.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }));
     assert!(blocked.request_counters.as_ref().unwrap().cpu_ms.is_none());
-    assert!(
-        blocked.wait.as_ref().unwrap().resources.as_ref().unwrap().iter().any(|resource| resource.resource.is_some())
-    );
+    assert!(blocked.wait.as_ref().unwrap().resources.is_none(), "the lock walk is a later investigation");
     let owner = observations.iter().find(|row| row.key.session.id == owner_pid).expect("idle blocker context");
     assert!(owner.idle && owner.key.transaction.is_some());
-    assert!(records.iter().any(|row|matches!(&row.record,TelemetryRecord::Blocking(edge) if edge.waiter.session.id==waiter_pid&&edge.owner.session().is_some_and(|owner|owner.id==owner_pid)&&edge.owner_observed)));
+    assert!(records.iter().all(|row| matches!(&row.record, TelemetryRecord::Activity(_))));
+    assert_eq!(
+        manifest.description.as_ref().unwrap().observation.activity().unwrap().population,
+        ActivityPopulation::ClientBackends
+    );
     let live = provider.live().await.unwrap();
     assert_eq!(
         live.sessions.iter().find(|row| row.id == waiter_pid).unwrap().blocked_by.as_deref(),
@@ -500,11 +503,11 @@ async fn native_activity_shares_live_facts_and_only_reads_locks_for_persistent_w
         .await
         .unwrap();
     assert_eq!(healthy.status, CollectionStatus::Complete);
-    assert_eq!(
-        healthy.files.iter().map(|file| file.rows).sum::<u32>(),
-        0,
-        "successful empty captures allow persistent incidents to resolve"
+    assert!(
+        healthy.files.iter().map(|file| file.rows).sum::<u32>() >= 2,
+        "ordinary idle clients remain baseline evidence after the lock has ended"
     );
+    assert!(healthy.description.as_ref().unwrap().observation.activity().unwrap().coverage.complete_scope);
     let sql = serde_json::to_value(&healthy).unwrap();
     assert!(!sql.to_string().contains("pg_locks"), "healthy activity polls must not acquire a lock-manager snapshot");
 }

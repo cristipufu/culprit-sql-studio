@@ -5,7 +5,8 @@ use culprit_core::collected_analysis::{CollectedAnalysisRecord, CollectedEvidenc
 pub(crate) fn from_capture(capture: &EvidenceCapture) -> CollectedEvidenceContext {
     CollectedEvidenceContext {
         range_id: capture.range_id().into(),
-        manifest_sha256: capture.manifest_sha256().into(),
+        recovery_manifest_sha256: capture.recovery_manifest_sha256().into(),
+        capture_manifest_sha256: capture.capture_manifest_sha256().into(),
         source: capture.source().clone(),
         capture: capture.capture().clone(),
         collected_from: capture.collected_from().into(),

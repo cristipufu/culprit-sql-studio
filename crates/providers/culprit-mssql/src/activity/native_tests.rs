@@ -44,7 +44,7 @@ async fn local_blocking_uses_the_shared_reader_for_live_and_export_at_compatibil
     });
     let pool = Arc::new(Pool::new(config(port, &database, &password, "culprit"), None));
     let started = Instant::now();
-    let policy = ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 86_400_000, update_every_ms: 60_000 };
+    let policy = ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 86_400_000 };
     let (mut reader, mut frame) = loop {
         assert!(started.elapsed() < Duration::from_secs(12), "the fixture never established a sustained blocker");
         let mut reader =
@@ -108,7 +108,7 @@ async fn local_blocking_uses_the_shared_reader_for_live_and_export_at_compatibil
     let native_waiter = frame.records.iter().find(|record| record.facts.key.session.id == waiter_id).unwrap();
     assert_eq!(native_waiter.current_sql.text().unwrap().trim(), current);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
-    let exported = crate::telemetry::activity::export_observations(frame.records, &keys);
+    let exported = crate::telemetry::activity::export_observations(frame.records);
     let exported_waiter = exported.iter().find(|row| row.key.session.id == waiter_id).unwrap();
     assert_eq!(exported_waiter.key, key);
     assert!(!serde_json::to_string(&exported).unwrap().contains("blocked-current-canary"));

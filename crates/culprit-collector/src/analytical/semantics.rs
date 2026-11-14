@@ -15,12 +15,13 @@ pub struct StreamSemantics {
 pub fn stream_semantics(stream: TelemetryStream) -> Result<StreamSemantics> {
     use TelemetryStream::*;
     let (latest_revision, current) = match stream {
-        ActivityObservations | BlockingEdges => (false, Some(CurrentScope::Activity)),
+        ActivityObservations => (false, Some(CurrentScope::Activity)),
         OperationalSamples | WaitCounterSamples | ReplicationSamples | SettingObservations | TuningObservations
         | ObjectDefinitions => (false, Some(CurrentScope::NativeSource)),
-        QueryRuntime | QueryWaits | QueryDefinitions | PlanDefinitions | ResourceSamples | ActivityIncidents
-        | DeadlockEvents => (true, None),
-        ActivityCheckpoints => return Err(DeliveryProblem::UnsupportedSchema.error()),
+        QueryRuntime | QueryWaits | QueryDefinitions | PlanDefinitions | ResourceSamples | DeadlockEvents => {
+            (true, None)
+        }
+        DiagnosticCheckpoints => return Err(DeliveryProblem::UnsupportedSchema.error()),
     };
     Ok(StreamSemantics { latest_revision, current })
 }

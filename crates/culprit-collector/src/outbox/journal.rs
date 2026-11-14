@@ -7,7 +7,7 @@ use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 7;
+const JOURNAL_VERSION: i64 = 8;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
 const REQUEST_LIMIT: usize = 4096;
@@ -50,7 +50,7 @@ impl Journal {
         durable_fs::create_file(path).map_err(storage)?.sync_all().map_err(storage)?;
         let conn = open(path, true)?;
         configure_owner(&conn)?;
-        conn.execute_batch("PRAGMA application_id=1129663572; PRAGMA user_version=7;
+        conn.execute_batch("PRAGMA application_id=1129663572; PRAGMA user_version=8;
           CREATE TABLE metadata(id TEXT PRIMARY KEY, limits_json TEXT NOT NULL, owner_epoch INTEGER NOT NULL, sequence INTEGER NOT NULL);
           CREATE TABLE captures(observation_id TEXT PRIMARY KEY,epoch INTEGER NOT NULL,sequence INTEGER NOT NULL,
             connection TEXT NOT NULL,collection TEXT NOT NULL,request_json TEXT NOT NULL CHECK(length(request_json)<=4096),state TEXT NOT NULL,
@@ -59,13 +59,21 @@ impl Journal {
           CREATE TABLE batches(batch_id TEXT PRIMARY KEY,observation_id TEXT NOT NULL REFERENCES captures(observation_id),
             stream TEXT NOT NULL,file TEXT NOT NULL,sha TEXT NOT NULL,rows INTEGER NOT NULL,bytes INTEGER NOT NULL);
           CREATE TABLE range_heads(range_key TEXT PRIMARY KEY,observation_id TEXT NOT NULL REFERENCES captures(observation_id));
-          CREATE TABLE baseline_payloads(id TEXT PRIMARY KEY,bytes INTEGER NOT NULL CHECK(bytes>=0),charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0));
-          CREATE TABLE baseline_heads(source_id TEXT PRIMARY KEY,payload TEXT NOT NULL REFERENCES baseline_payloads(id),metadata TEXT NOT NULL CHECK(length(metadata)<=65536));
+          CREATE TABLE diagnostic_inputs(observation_id TEXT PRIMARY KEY,controller_version INTEGER NOT NULL,parent_json TEXT NOT NULL,source_json TEXT NOT NULL,connection TEXT NOT NULL,acknowledged INTEGER NOT NULL CHECK(acknowledged IN(0,1)),restored_json TEXT,charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0),restored_sha TEXT,evidence_only INTEGER NOT NULL DEFAULT 0 CHECK(evidence_only IN(0,1)));
+          CREATE TABLE diagnostic_heads(controller_key TEXT PRIMARY KEY,controller_version INTEGER NOT NULL,observation_id TEXT NOT NULL,checkpoint_json TEXT NOT NULL,capture_json TEXT NOT NULL);
+          CREATE TABLE diagnostic_episodes(controller_key TEXT NOT NULL,episode_id TEXT NOT NULL,revision TEXT NOT NULL,episode_json TEXT NOT NULL,PRIMARY KEY(controller_key,episode_id));
+          CREATE TABLE diagnostic_pins(owner TEXT NOT NULL,observation_id TEXT NOT NULL,PRIMARY KEY(owner,observation_id));
+          CREATE INDEX diagnostic_pin_capture ON diagnostic_pins(observation_id);
+          CREATE TABLE diagnostic_steps(observation_id TEXT PRIMARY KEY,input_id TEXT NOT NULL,controller_key TEXT NOT NULL,expected_head TEXT,step_id TEXT NOT NULL,update_json TEXT NOT NULL,result_json TEXT,UNIQUE(input_id,step_id));
           CREATE INDEX capture_state ON captures(state);
           CREATE INDEX capture_collection ON captures(connection,collection,state,epoch DESC,sequence DESC);") .map_err(storage)?;
         conn.execute("INSERT INTO metadata VALUES(?1,?2,0,0)", params![id, encode(&limits)?]).map_err(storage)?;
         durable_fs::sync_directory(path.parent().ok_or_else(|| problem(OutboxProblem::Storage))?).map_err(storage)?;
         Ok(Self { conn, id: id.into(), limits })
+    }
+    fn release_terminal_focus(tx: &Transaction<'_>, id: &str) -> Result<()> {
+        tx.execute("DELETE FROM diagnostic_pins WHERE owner=?1 AND NOT EXISTS(SELECT 1 FROM captures WHERE observation_id=?2 AND source_work IN(?3,?4))",params![format!("focus:{id}"),id,encode(&SourceWorkState::Active)?,encode(&SourceWorkState::Unconfirmed)?]).map_err(storage)?;
+        Ok(())
     }
     pub(super) fn open(path: &Path, id: &str, owner: bool) -> Result<Self> {
         let conn = open(path, owner)?;
@@ -108,9 +116,9 @@ impl Journal {
                 Ok((row.get(0)?, row.get(1)?))
             })
             .map_err(storage)?;
-        let used = bytes_from_sql(used)?
-            .checked_add(super::baselines::charged_bytes(&tx)?)
-            .ok_or_else(|| problem(OutboxProblem::Capacity))?;
+        let diagnostic_bytes = super::investigations::journal::charged_bytes(&tx)?;
+        let used =
+            bytes_from_sql(used)?.checked_add(diagnostic_bytes).ok_or_else(|| problem(OutboxProblem::Capacity))?;
         let debts: u32 = tx
             .query_row(
                 "SELECT count(*) FROM captures WHERE source_work IN (?1,?2)",
@@ -118,7 +126,7 @@ impl Journal {
                 |row| row.get(0),
             )
             .map_err(storage)?;
-        if debts > 0 {
+        if debts > 0 && request.collection() != TelemetryCollection::Diagnostics {
             return Err(problem(OutboxProblem::SourceUnconfirmed));
         }
         let pending: u32 = tx
@@ -158,9 +166,21 @@ impl Journal {
             }),
         };
         tx.execute("UPDATE metadata SET owner_epoch=?1,sequence=?2", params![epoch, sequence]).map_err(storage)?;
+        let source_work = if request.collection() == TelemetryCollection::Diagnostics {
+            SourceWorkState::Quiescent
+        } else {
+            SourceWorkState::NotStarted
+        };
         tx.execute("INSERT INTO captures(observation_id,epoch,sequence,connection,request_json,state,source_work,charged_bytes,collection)
           VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![identity.observation_id,epoch,sequence,connection,request_json,
-            encode(&OutboxCaptureState::Capturing)?,encode(&SourceWorkState::NotStarted)?,bytes_to_sql(charge)?,encode(&request.collection())?]).map_err(storage)?;
+            encode(&OutboxCaptureState::Capturing)?,encode(&source_work)?,bytes_to_sql(charge)?,encode(&request.collection())?]).map_err(storage)?;
+        if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
+            tx.execute(
+                "INSERT INTO diagnostic_pins VALUES(?1,?2)",
+                params![format!("focus:{}", identity.observation_id), focus.parent.capture.observation_id],
+            )
+            .map_err(storage)?;
+        }
         tx.commit().map_err(storage)?;
         *owner_epoch = Some(epoch);
         Ok(Capture {
@@ -168,7 +188,7 @@ impl Journal {
             connection: connection.into(),
             request: request.clone(),
             state: OutboxCaptureState::Capturing,
-            source_work: SourceWorkState::NotStarted,
+            source_work,
             charged_bytes: charge,
             problem: None,
         })
@@ -204,11 +224,6 @@ impl Journal {
             charged_bytes: bytes_from_sql(row.get(6).map_err(storage)?)?,
             problem: row.get::<_, Option<String>>(7).map_err(storage)?.map(|text| decode(&text)).transpose()?,
         })
-    }
-    pub(super) fn latest(&self, connection: &str, collection: TelemetryCollection) -> Result<Option<Capture>> {
-        let id:Option<String>=self.conn.query_row("SELECT observation_id FROM captures WHERE connection=?1 AND collection=?2 AND state=?3 ORDER BY epoch DESC,sequence DESC LIMIT 1",
-            params![connection,encode(&collection)?,encode(&OutboxCaptureState::Ready)?],|row|row.get(0)).optional().map_err(storage)?;
-        id.map(|id| self.capture(&id)).transpose()
     }
     pub(super) fn source_work(&mut self, capture: &Capture, state: SourceWorkState) -> Result<()> {
         let previous =
@@ -272,6 +287,7 @@ impl Journal {
         .map_err(storage)?;
         tx.execute("INSERT INTO range_heads VALUES(?1,?2) ON CONFLICT(range_key) DO UPDATE SET observation_id=excluded.observation_id",
             params![range_key(&range)?,capture.identity.observation_id]).map_err(storage)?;
+        super::investigations::journal::prepare_commit(&tx, capture, validated)?;
         Ok(tx)
     }
     pub(super) fn check_receipt(&self, capture: &Capture, validated: &ValidatedCapture) -> Result<()> {
@@ -335,6 +351,12 @@ impl Journal {
             ],
         )
         .map_err(storage)?;
+        if matches!(
+            state,
+            OutboxCaptureState::Incomplete | OutboxCaptureState::Interrupted | OutboxCaptureState::Quarantined
+        ) {
+            Self::release_terminal_focus(&tx, &capture.identity.observation_id)?;
+        }
         tx.commit().map_err(storage)
     }
     pub(super) fn acknowledge(&mut self, id: &str) -> Result<()> {
@@ -345,12 +367,14 @@ impl Journal {
         if !matches!(capture.source_work, SourceWorkState::Active | SourceWorkState::Unconfirmed) {
             return Err(problem(OutboxProblem::Integrity));
         }
-        self.conn
-            .execute(
-                "UPDATE captures SET source_work=?1 WHERE observation_id=?2",
-                params![encode(&SourceWorkState::Quiescent)?, id],
-            )
-            .map_err(storage)?;
+        let tx = self.conn.transaction().map_err(storage)?;
+        tx.execute(
+            "UPDATE captures SET source_work=?1 WHERE observation_id=?2",
+            params![encode(&SourceWorkState::Quiescent)?, id],
+        )
+        .map_err(storage)?;
+        Self::release_terminal_focus(&tx, id)?;
+        tx.commit().map_err(storage)?;
         Ok(())
     }
     pub(super) fn ids(&self) -> Result<BTreeSet<String>> {
@@ -406,8 +430,9 @@ impl Journal {
                 Ok((row.get(0)?, row.get(1)?))
             })
             .map_err(storage)?;
+        let diagnostic_bytes = super::investigations::journal::charged_bytes(&tx)?;
         let charged_bytes = bytes_from_sql(charged_bytes)?
-            .checked_add(super::baselines::charged_bytes(&tx)?)
+            .checked_add(diagnostic_bytes)
             .ok_or_else(|| problem(OutboxProblem::Integrity))?;
         let ready: u32 = tx
             .query_row("SELECT count(*) FROM captures WHERE state=?1", [encode(&OutboxCaptureState::Ready)?], |row| {

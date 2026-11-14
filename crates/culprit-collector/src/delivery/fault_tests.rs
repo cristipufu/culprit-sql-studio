@@ -1,6 +1,7 @@
 //! Hard process exits exercise durable intents before and after the external effects.
 use super::{
     driver::*,
+    evidence::RangeManifest,
     file_sink::FileTelemetrySink,
     file_store::*,
     journal::DeliveryJournal,
@@ -33,11 +34,17 @@ impl RecoveryStore for CrashStore {
     async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage> {
         self.inner.pending_ranges(cursor, limit, order).await
     }
+    async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
+        self.inner.pending_diagnostic_inputs(cursor, limit).await
+    }
     async fn retire(&self, fence: &Fence, publication: &PublishedRange) -> Result<()> {
         self.inner.retire(fence, publication).await
     }
-    async fn activity_heads(&self, cursor: Option<&str>, limit: u32) -> Result<ActivityHeadPage> {
-        self.inner.activity_heads(cursor, limit).await
+    async fn capture_manifest(&self, capture: &culprit_core::telemetry::CaptureIdentity) -> Result<RangeManifest> {
+        self.inner.capture_manifest(capture).await
+    }
+    async fn diagnostic_heads(&self, cursor: Option<&str>, limit: u32) -> Result<super::recovery::DiagnosticHeadPage> {
+        self.inner.diagnostic_heads(cursor, limit).await
     }
     fn id(&self) -> &str {
         self.inner.id()

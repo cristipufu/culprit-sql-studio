@@ -9,6 +9,11 @@ use std::{
     sync::Arc,
 };
 
+/// One canonical identity for a committed capture inside its exact delivery contract.
+pub fn range_id_for(contract: &Contract, capture: &CaptureIdentity) -> Result<String> {
+    serde_json::to_vec(&(contract, capture)).map(|bytes| digest(&bytes)).map_err(|_| DeliveryProblem::Integrity.error())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(deny_unknown_fields)]
 pub struct RecordKey {
@@ -24,6 +29,7 @@ pub struct RecordKey {
 pub struct RowReceipt {
     pub key: RecordKey,
     pub payload_digest: String,
+    pub native_key: NativeRecordIdentity,
     pub critical_fields_valid: bool,
 }
 impl RowReceipt {
@@ -53,7 +59,8 @@ impl RowReceipt {
                 sequence: positive(&revision.sequence)?,
                 representation_version: row.representation_version,
             },
-            payload_digest: digest(&serde_json::to_vec(row).map_err(|_| DeliveryProblem::Integrity.error())?),
+            native_key: row.record.native_identity(),
+            payload_digest: row.payload_sha256().map_err(|_| DeliveryProblem::Integrity.error())?,
             critical_fields_valid: true,
         })
     }
@@ -82,6 +89,8 @@ pub struct RangeManifest {
     pub contract: Contract,
     pub range_id: String,
     pub capture: CaptureIdentity,
+    /// Digest of the original sealed CollectionManifest bytes, attested at preparation.
+    pub capture_manifest_sha256: String,
     pub source: CollectionDescription,
     /// Collector clock readings, separate from native measurement and observation times.
     pub collected_from: String,
@@ -111,12 +120,14 @@ impl RangeManifest {
         if self.read_metrics.as_ref().is_some_and(|metrics| !metrics.is_valid() || metrics.has_unconfirmed_work()) {
             return Err(DeliveryProblem::Integrity.error());
         }
-        if !valid_digest(&self.range_id) || self.capture.revision.is_none() || self.batches.len() > MAX_BATCHES {
+        if !valid_digest(&self.range_id)
+            || !valid_digest(&self.capture_manifest_sha256)
+            || self.capture.revision.is_none()
+            || self.batches.len() > MAX_BATCHES
+        {
             return Err(DeliveryProblem::Integrity.error());
         }
-        let identity = digest(
-            &serde_json::to_vec(&(&self.contract, &self.capture)).map_err(|_| DeliveryProblem::Integrity.error())?,
-        );
+        let identity = range_id_for(&self.contract, &self.capture)?;
         if identity != self.range_id {
             return Err(DeliveryProblem::Integrity.error());
         }
@@ -140,6 +151,7 @@ impl RangeManifest {
         {
             return Err(DeliveryProblem::Integrity.error());
         }
+        self.source.captured_range()?;
         let mut batches = BTreeSet::new();
         let mut rows = BTreeSet::new();
         let mut bytes = 0u64;
@@ -151,7 +163,7 @@ impl RangeManifest {
                 || !valid_digest(&batch.sha256)
                 || !bounded_id(&batch.object)
                 || !batches.insert(&batch.batch_id)
-                || batch.delivery_required != (batch.stream != TelemetryStream::ActivityCheckpoints)
+                || batch.delivery_required != (batch.stream.delivery_required())
             {
                 return Err(DeliveryProblem::Integrity.error());
             }
@@ -164,6 +176,9 @@ impl RangeManifest {
                     || !valid_digest(&row.payload_digest)
                     || !row.critical_fields_valid
                     || row.key.representation_version == 0
+                    || row.key.representation_version != REPRESENTATION_VERSION
+                    || !row.native_key.is_valid()
+                    || row.native_key.stream() != batch.stream
                     || !rows.insert(&row.key)
                 {
                     return Err(DeliveryProblem::Integrity.error());
@@ -215,6 +230,19 @@ impl PreparedRange {
         if manifest.status != CollectionStatus::Complete || !manifest.references.complete {
             return Err(DeliveryProblem::NotReady.error());
         }
+        let mut native_manifest_bytes = Vec::new();
+        crate::durable_fs::regular_file(&directory.join("manifest.json"))
+            .map_err(|_| DeliveryProblem::Storage.error())?
+            .take(128 * 1024 + 1)
+            .read_to_end(&mut native_manifest_bytes)
+            .map_err(|_| DeliveryProblem::Storage.error())?;
+        if native_manifest_bytes.len() > 128 * 1024
+            || serde_json::from_slice::<serde_json::Value>(&native_manifest_bytes)
+                .map_err(|_| DeliveryProblem::Integrity.error())?
+                != serde_json::to_value(manifest).map_err(|_| DeliveryProblem::Integrity.error())?
+        {
+            return Err(DeliveryProblem::Integrity.error());
+        }
         let mut batches = Vec::new();
         let mut total_rows = 0usize;
         for file in &manifest.files {
@@ -259,16 +287,15 @@ impl PreparedRange {
                 sha256: sha,
                 bytes: u64::from(file.bytes),
                 rows,
-                delivery_required: file.stream != TelemetryStream::ActivityCheckpoints,
+                delivery_required: file.stream.delivery_required(),
             });
         }
-        let range_id = digest(
-            &serde_json::to_vec(&(&contract, &manifest.capture)).map_err(|_| DeliveryProblem::Integrity.error())?,
-        );
+        let range_id = range_id_for(&contract, &manifest.capture)?;
         let value = RangeManifest {
             contract,
             range_id,
             capture: manifest.capture.clone(),
+            capture_manifest_sha256: digest(&native_manifest_bytes),
             source: manifest.description.clone().ok_or_else(|| DeliveryProblem::Integrity.error())?,
             collected_from: manifest.started_at.clone(),
             collected_until: manifest.finished_at.clone().ok_or_else(|| DeliveryProblem::NotReady.error())?,

@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 pub(crate) use culprit_collector::analytical::test_support::{
-    Blobs, Fault, Recovery, activity, cumulative_queries, fixture, interval_queries, waits,
+    Blobs, Fault, Recovery, cumulative_queries, fixture, interval_queries, waits,
 };
 use culprit_core::{Result, telemetry::DeliveryProblem};
 use serde_json::{Value, json};

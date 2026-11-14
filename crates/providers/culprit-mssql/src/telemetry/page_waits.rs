@@ -29,14 +29,28 @@ impl PageWaitSource {
 fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
     request.validate()?;
     let mut bounded = request.clone();
-    bounded.budget = crate::page_waits::bounded_budget(&request.budget);
+    bounded.budget = if matches!(request.selection, CollectionSelection::FocusedPageWait { .. }) {
+        focused_budget(&request.budget)
+    } else {
+        crate::page_waits::bounded_budget(&request.budget)
+    };
     bounded.budget.validate()?;
     Ok(bounded)
+}
+pub(super) fn focused_budget(requested: &CollectionBudget) -> CollectionBudget {
+    let mut budget = crate::page_waits::bounded_budget(requested);
+    budget.max_snapshot_rows = budget.max_snapshot_rows.min(1);
+    budget.page_rows = budget.page_rows.min(1);
+    budget
 }
 impl<R: NativeRead> PageWaitSource<R> {
     pub(super) fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {
         request.subject.require_database()?;
-        if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }) {
+        if !matches!(
+            request.selection,
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }
+                | CollectionSelection::FocusedPageWait { .. }
+        ) {
             return Err(invalid_data());
         }
         Ok(Self { inner: culprit_read::FrozenSource::new(PageWaitReader { reader, guard: None }, request)? })
@@ -44,8 +58,14 @@ impl<R: NativeRead> PageWaitSource<R> {
 }
 #[async_trait::async_trait]
 impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
-    async fn observe(&mut self, _: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
-        let captured = self.reader.capture_page_wait_targets().await?;
+    async fn observe(&mut self, request: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
+        let (captured, result) = match &request.selection {
+            CollectionSelection::FocusedPageWait { focus } => {
+                let focused = self.reader.capture_focused_page_wait_targets(focus).await?;
+                (focused.capture, Some(focused.result))
+            }
+            _ => (self.reader.capture_page_wait_targets().await?, None),
+        };
         let records = captured
             .snapshot
             .observations
@@ -61,18 +81,23 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
         let mut coverage =
             StateSourceCoverage::observed(sources::PAGE_WAIT_TARGETS.name.into(), records.len() as u32, false);
         coverage.stopped = captured.limited.then_some(CollectionStop::RowLimit);
+        let snapshot = StateSnapshotDescription {
+            dataset: SnapshotDataset::PageWaitTargets,
+            observed_from: captured.snapshot.observed_from,
+            observed_until: captured.snapshot.observed_until,
+            records: records.len() as u32,
+            // A verified frozen row population is still only native request/coordinator coverage.
+            sources: vec![coverage],
+        };
+        let observation = match result {
+            Some(result) => SourceObservation::FocusedPageWait { snapshot, result: Box::new(result) },
+            None => SourceObservation::Snapshot(snapshot),
+        };
         let description = CollectionDescription {
             target: captured.context.database.into(),
             source: sources::PAGE_WAIT_TARGETS.name.into(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::PageWaitTargets,
-                observed_from: captured.snapshot.observed_from,
-                observed_until: captured.snapshot.observed_until,
-                records: records.len() as u32,
-                // A verified frozen row population is still only native request/coordinator coverage.
-                sources: vec![coverage],
-            }),
+            observation,
         };
         self.guard = Some(captured.guard);
         Ok(culprit_read::FrozenObservation { description, records })

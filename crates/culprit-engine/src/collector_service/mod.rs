@@ -5,6 +5,8 @@ pub mod evidence;
 mod recovery;
 mod runtime;
 pub use runtime::CollectorRuntime;
+#[cfg(test)]
+mod startup_tests;
 #[cfg(all(test, feature = "store-adx", feature = "recovery-azure"))]
 mod tests;
 use crate::Workspace;
@@ -12,14 +14,14 @@ use config::*;
 use culprit_collector::{
     capture::CollectionCancellation,
     delivery::{
-        activity_recovery::ActivityRestoreBudget,
         contract::Contract,
         journal::{DeliveryHealthReader, DeliveryJournal},
         object_store::ObjectRecoveryStore,
         recovery::RecoveryStore,
-        restore::restore_activity_page,
+        restore::{restore_diagnostic_inputs_page, restore_diagnostics_page},
         worker::{DeliveryJournals, DeliveryWorker},
     },
+    diagnostics::{DiagnosticPolicies, drain_pending as drain_diagnostics},
     fleet::{FleetBackend, FleetJournal, FleetRunner},
     health::{CollectorHealth, HealthServer},
     lifecycle::with_background,
@@ -29,7 +31,7 @@ use culprit_collector::{
 use culprit_core::{Result, telemetry::*};
 use std::{collections::BTreeSet, path::Path, sync::Arc};
 
-/// Delivery-only recovery never opens a native connection or advances its ownership epoch.
+/// Delivery-only recovery never opens a native connection or enables native capture allocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceMode {
     Collect,
@@ -38,12 +40,14 @@ pub enum SourceMode {
 
 struct Adapters {
     workspace: Workspace,
+    credentials: Arc<dyn culprit_auth::CredentialResolver>,
     recovery: Arc<ObjectRecoveryStore>,
     destination: Box<dyn destination::SinkFactory>,
     contract: Contract,
 }
 struct ConfiguredAdapters {
     workspace: Workspace,
+    credentials: Arc<dyn culprit_auth::CredentialResolver>,
     recovery: Arc<dyn culprit_collector::delivery::object_store::transport::ObjectTransport>,
     destination: Box<dyn destination::SinkFactory>,
     contract: Contract,
@@ -65,16 +69,11 @@ impl ConfiguredAdapters {
         config.validate()?;
         let mut workspace = Workspace::open_in(&config.workspace);
         if mode == SourceMode::Collect {
-            for target in config.inventory.targets.iter().filter(|target| target.shard == config.shard) {
-                if let Some(profile) = config.source_credentials.get(&target.connection) {
-                    workspace = workspace.with_connection_tokens(&target.connection, credentials.database(profile)?);
-                }
-                workspace.validate_target(&target.connection)?;
-            }
+            workspace = bind_sources(workspace, config, credentials.as_ref())?;
         }
         let recovery = runtime.recovery.configure(&config.recovery, credentials.as_ref())?;
         let transport = recovery.transport;
-        let destination = destination::configure(&config.target, credentials, transport.clone())?;
+        let destination = destination::configure(&config.target, credentials.clone(), transport.clone())?;
         if destination.staging_scope().is_some_and(|scope| scope == recovery.access_scope) {
             return Err(DeliveryProblem::InvalidContract.error());
         }
@@ -84,7 +83,7 @@ impl ConfiguredAdapters {
             destination.destination().into(),
             destination.schema_digest().into(),
         )?;
-        Ok(Self { workspace, recovery: transport, destination, contract })
+        Ok(Self { workspace, credentials, recovery: transport, destination, contract })
     }
 }
 impl Adapters {
@@ -94,15 +93,40 @@ impl Adapters {
         mode: SourceMode,
         runtime: &CollectorRuntime,
     ) -> Result<Self> {
-        let ConfiguredAdapters { workspace, recovery: transport, destination, contract } =
+        let ConfiguredAdapters { workspace, credentials, recovery: transport, destination, contract } =
             ConfiguredAdapters::new(config, mode, runtime)?;
         let recovery = Arc::new(if initialize {
             ObjectRecoveryStore::create(transport, contract.clone()).await?
         } else {
             ObjectRecoveryStore::open(transport, contract.clone()).await?
         });
-        Ok(Self { workspace, recovery, destination, contract })
+        Ok(Self { workspace, credentials, recovery, destination, contract })
     }
+    fn activate_sources(mut self, config: &CollectorConfig) -> Result<Self> {
+        self.workspace = bind_sources(self.workspace, config, self.credentials.as_ref())?;
+        Ok(self)
+    }
+}
+
+fn bind_sources(
+    mut workspace: Workspace,
+    config: &CollectorConfig,
+    credentials: &dyn culprit_auth::CredentialResolver,
+) -> Result<Workspace> {
+    let routes: BTreeSet<_> = config
+        .inventory
+        .targets
+        .iter()
+        .filter(|target| target.shard == config.shard)
+        .map(|target| target.connection.as_str())
+        .collect();
+    for connection in routes {
+        if let Some(profile) = config.source_credentials.get(connection) {
+            workspace = workspace.with_connection_tokens(connection, credentials.database(profile)?);
+        }
+        workspace.validate_target(connection)?;
+    }
+    Ok(workspace)
 }
 
 /// Validate source metadata, identity configuration, destinations and schema without acquiring tokens or
@@ -137,7 +161,9 @@ async fn run_with_runtime(
     max_work: Option<u32>,
     reporter: &dyn ServiceReporter,
 ) -> Result<FleetSummary> {
-    ConfiguredAdapters::new(config, mode, runtime)?;
+    // Startup must inspect durable source debt and restore native evidence before resolving source profiles.
+    // Explicit validate() still checks every configured source offline.
+    ConfiguredAdapters::new(config, SourceMode::DeliveryOnly, runtime)?;
     if mode == SourceMode::DeliveryOnly && max_work.is_some() {
         return Err(DeliveryProblem::InvalidContract.error());
     }
@@ -162,7 +188,7 @@ async fn run_configured(
     reporter: &dyn ServiceReporter,
     health: &CollectorHealth,
 ) -> Result<FleetSummary> {
-    let adapters = Adapters::open(config, false, mode, runtime).await?;
+    let mut adapters = Adapters::open(config, false, SourceMode::DeliveryOnly, runtime).await?;
     if cancellation.is_cancelled() {
         return Ok(FleetSummary::default());
     }
@@ -181,19 +207,27 @@ async fn run_configured(
     let source_paused = mode == SourceMode::Collect
         && (recovered.source_debts > 0
             || adapters.workspace.collection_admission_status().await?.source_quiescence_required);
-    if source_paused && max_work.is_some() {
-        return Err(CollectionStop::CancellationUnconfirmed.error());
-    }
     let mut journal = open_journal(&config.state.join("delivery"), &adapters.contract)?;
     let mut archive = open_journal(&config.state.join("archive"), &adapters.contract)?;
     archive.bind_store(adapters.recovery.id()).await?;
     journal.bind_store(adapters.recovery.id()).await?;
     let fence = adapters.recovery.acquire().await?;
+    let high = restore_diagnostic_state(&mut outbox, &*adapters.recovery, cancellation).await?;
+    if cancellation.is_cancelled() {
+        return Ok(FleetSummary::default());
+    }
+    outbox.begin_diagnostic_epoch(&fence, high).await?;
+    let policies = DiagnosticPolicies::from_inventory(&config.inventory, &config.shard)?;
+    drain_diagnostics(&mut outbox, &policies, cancellation, Some(&*adapters.recovery)).await?;
+    if cancellation.is_cancelled() {
+        return Ok(FleetSummary::default());
+    }
+    if source_paused && max_work.is_some() {
+        return Err(CollectionStop::CancellationUnconfirmed.error());
+    }
     if mode == SourceMode::Collect && !source_paused {
-        let high = restore(&mut outbox, &*adapters.recovery, cancellation).await?;
-        if !cancellation.is_cancelled() {
-            outbox.begin_remote_epoch(&fence, high).await?;
-        }
+        adapters = adapters.activate_sources(config)?;
+        outbox.begin_remote_epoch(&fence, high).await?;
     }
     if cancellation.is_cancelled() {
         return Ok(FleetSummary::default());
@@ -284,30 +318,70 @@ async fn refresh_health(
     Ok(())
 }
 
-async fn restore(
+const RESTORE_PAGE_ROWS: u32 = 128;
+const MAX_RESTORE_PAGES: usize = MAX_FLEET_TARGETS;
+
+#[derive(Clone, Copy)]
+enum RestorePhase {
+    WorkingSet,
+    PendingNativeInputs,
+}
+
+async fn restore_diagnostic_state(
     outbox: &mut Outbox,
     recovery: &dyn RecoveryStore,
     cancellation: &CollectionCancellation,
 ) -> Result<u64> {
     let mut high = 0;
+    for phase in [RestorePhase::WorkingSet, RestorePhase::PendingNativeInputs] {
+        high = high.max(restore_phase(outbox, recovery, cancellation, phase).await?);
+        if cancellation.is_cancelled() {
+            break;
+        }
+    }
+    Ok(high)
+}
+
+async fn restore_phase(
+    outbox: &mut Outbox,
+    recovery: &dyn RecoveryStore,
+    cancellation: &CollectionCancellation,
+    phase: RestorePhase,
+) -> Result<u64> {
+    let mut high = 0;
     let mut cursor = None;
     let mut visited = BTreeSet::new();
-    loop {
+    for _ in 0..MAX_RESTORE_PAGES {
         if cancellation.is_cancelled() {
             return Ok(high);
         }
-        let page =
-            restore_activity_page(outbox, recovery, cursor.as_deref(), 128, ActivityRestoreBudget::default()).await?;
-        high = high.max(page.high_sequence);
-        let Some(next) = page.next_cursor else {
-            break;
+        let (next, sequence) = match phase {
+            RestorePhase::WorkingSet => {
+                let page = restore_diagnostics_page(outbox, recovery, cursor.as_deref(), RESTORE_PAGE_ROWS).await?;
+                (page.next_cursor, page.high_sequence)
+            }
+            RestorePhase::PendingNativeInputs => {
+                let page = restore_diagnostic_inputs_page(
+                    outbox,
+                    recovery,
+                    cursor.as_deref(),
+                    RESTORE_PAGE_ROWS,
+                    CollectionDescription::logical_source_id,
+                )
+                .await?;
+                (page.next_cursor, page.high_sequence)
+            }
         };
-        if visited.len() >= MAX_FLEET_TARGETS || !visited.insert(next.clone()) {
+        high = high.max(sequence);
+        let Some(next) = next else {
+            return Ok(high);
+        };
+        if next.len() > MAX_CURSOR_BYTES || !visited.insert(next.clone()) {
             return Err(DeliveryProblem::Integrity.error());
         }
         cursor = Some(next);
     }
-    Ok(high)
+    Err(DeliveryProblem::Integrity.error())
 }
 fn private_state(path: &Path) -> Result<()> {
     if path.try_exists().map_err(|_| storage())?

@@ -23,6 +23,8 @@ pub const COMMON: &[Field] = &[
     Field::required("Engine", "/_culprit/engine", String),
     Field::required("RangeId", "/_culprit/range_id", String),
     Field::required("RangeKind", "/_culprit/range_kind", String),
+    Field::optional("FocusKey", "/_culprit/focus_key", String),
+    Field::optional("DiagnosticContext", "/_culprit/diagnostic", JsonContainer),
     Field::optional("Dataset", "/_culprit/dataset", String),
     Field::required("SourceContinuity", "/_culprit/continuity", String),
     Field::required("PayloadObject", "/_culprit/payload_object", String),
@@ -62,6 +64,9 @@ impl<'a> Envelope<'a> {
     }
     fn with_digest(manifest: &'a RangeManifest, batch_id: &str, manifest_digest: &str) -> Result<Self> {
         let batch = manifest.batches.iter().find(|batch| batch.batch_id == batch_id).ok_or_else(invalid)?;
+        if !batch.delivery_required || !batch.stream.delivery_required() {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
         let mut context = capture_context(manifest, manifest_digest)?;
         context["payload_object"] = json!(batch.object);
         Ok(Self { manifest, batch, context })
@@ -110,16 +115,25 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
             context["interval_until"] = json!(until);
         }
         TelemetryRange::Current => context["range_kind"] = json!("current"),
+        TelemetryRange::Focused { key } => {
+            context["range_kind"] = json!("focused");
+            context["focus_key"] = json!(key);
+        }
     }
     match &source.observation {
         SourceObservation::RetainedSamples(history) => context["observed_at"] = json!(history.observed_at),
         SourceObservation::RetainedEvents(history) => context["observed_at"] = json!(history.observed_at),
-        SourceObservation::Activity(snapshot) => context["observed_at"] = json!(snapshot.at),
-        SourceObservation::Snapshot(snapshot) => {
+        SourceObservation::Activity(snapshot) => {
+            context["observed_at"] = json!(snapshot.at);
+            context["observed_from"] = json!(snapshot.observed_from);
+            context["observed_until"] = json!(snapshot.observed_until);
+        }
+        SourceObservation::Snapshot(snapshot) | SourceObservation::FocusedPageWait { snapshot, .. } => {
             context["dataset"] = json!(snapshot.dataset);
             context["observed_from"] = json!(snapshot.observed_from);
             context["observed_until"] = json!(snapshot.observed_until);
         }
+        SourceObservation::Diagnostics(description) => context["diagnostic"] = json!(description),
         SourceObservation::QueryHistory(_) => (),
         SourceObservation::PagedSnapshot(_) => return Err(invalid()),
     }

@@ -14,7 +14,8 @@ pub(super) struct ValidatedCapture {
     pub manifest_bytes: Vec<u8>,
     pub manifest_sha: String,
     pub bytes: u64,
-    pub activity_states: Vec<ActivityIncidentState>,
+    pub diagnostic_checkpoint: Option<DiagnosticCheckpoint>,
+    pub diagnostic_revisions: Vec<DiagnosticRevision>,
 }
 impl ValidatedCapture {
     pub fn range(&self) -> Result<CapturedRange> {
@@ -116,7 +117,8 @@ pub(super) fn validate(directory: &Path, capture: &Capture, destination: Option<
         manifest_bytes,
         manifest_sha,
         bytes,
-        activity_states: references.activity.checkpoints,
+        diagnostic_checkpoint: references.diagnostic_checkpoint(),
+        diagnostic_revisions: references.diagnostic_revisions,
     })
 }
 

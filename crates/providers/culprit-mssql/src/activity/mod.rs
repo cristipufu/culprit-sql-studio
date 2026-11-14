@@ -1,10 +1,12 @@
 //! One native activity reader. Consumers choose scope, enrichment and presentation after reading the same facts.
+pub(crate) mod database_context;
 pub(crate) mod memory;
 pub(crate) mod page_targets;
 mod participants;
 mod resources;
 mod rows;
 mod sql;
+mod statement_identity;
 pub(crate) mod tempdb;
 
 use crate::{
@@ -45,20 +47,32 @@ pub(crate) struct ActivityContext {
 }
 impl ActivityContext {
     fn decode(row: &Rec, host: &str, port: u16, identity: IdentityDetail) -> Result<Self> {
+        let (context, database_wide) = Self::observed(row, host, port, identity)?;
+        if !database_wide {
+            return Err(Self::visibility_error(row, &context)?);
+        }
+        Ok(context)
+    }
+    fn visibility_error(row: &Rec, context: &Self) -> Result<Error> {
+        let grant = crate::probe::monitoring_grant(
+            context.edition,
+            context.major,
+            &text(row, "reader_login")?,
+            &text(row, "reader_user")?,
+        );
+        Ok(Error::new(
+            ErrorCode::PermissionDenied,
+            culprit_core::t!("provider.mssql.activity.visibility", grant = grant),
+        )
+        .with_detail(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceUnavailable)))
+    }
+    fn observed(row: &Rec, host: &str, port: u16, identity: IdentityDetail) -> Result<(Self, bool)> {
         let edition = integer(row, "edition")?;
         let major = u32::try_from(integer(row, "major")?).map_err(|_| invalid_data())?;
         if identity == IdentityDetail::AzureDatabase && edition != 5 {
             return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.azure_sql_only")));
         }
-        if !crate::read::boolean(row, "database_wide")? {
-            let grant =
-                crate::probe::monitoring_grant(edition, major, &text(row, "reader_login")?, &text(row, "reader_user")?);
-            return Err(Error::new(
-                ErrorCode::PermissionDenied,
-                culprit_core::t!("provider.mssql.activity.visibility", grant = grant),
-            )
-            .with_detail(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceUnavailable)));
-        }
+        let database_wide = crate::read::boolean(row, "database_wide")?;
         let mut database = DatabaseIdentity::server(Engine::Mssql, &text(row, "database_name")?, host, port, None);
         let epoch = if identity == IdentityDetail::AzureDatabase {
             database.incarnation = Some(text(row, "incarnation")?);
@@ -74,14 +88,24 @@ impl ActivityContext {
         } else {
             None
         };
-        Ok(Self {
-            edition,
-            major,
-            database,
-            epoch,
-            at: canonical_time(&text(row, "observed_at")?)?,
-            writable: crate::read::database_writable(row)?,
-        })
+        Ok((
+            Self {
+                edition,
+                major,
+                database,
+                epoch,
+                at: canonical_time(&text(row, "observed_at")?)?,
+                writable: crate::read::database_writable(row)?,
+            },
+            database_wide,
+        ))
+    }
+    pub(crate) fn same_source(&self, other: &Self) -> bool {
+        self.edition == other.edition
+            && self.major == other.major
+            && self.database == other.database
+            && self.epoch == other.epoch
+            && self.writable == other.writable
     }
 }
 
@@ -133,6 +157,23 @@ pub(crate) struct ActivityFrame {
     pub context: ActivityContext,
     pub records: Vec<ActivityRecord>,
 }
+pub(crate) struct ActivityBaseline {
+    pub frame: ActivityFrame,
+    pub native_rows: u32,
+    pub coverage: StateSourceCoverage,
+    restriction: Option<Error>,
+}
+impl ActivityBaseline {
+    fn into_complete(self) -> Result<ActivityFrame> {
+        if let Some(error) = self.restriction {
+            return Err(error);
+        }
+        if let Some(stop) = self.coverage.stopped {
+            return Err(stop.error());
+        }
+        Ok(self.frame)
+    }
+}
 impl ActivityFrame {
     pub(crate) fn observations(&self) -> Vec<ActivityObservation> {
         self.records.iter().map(|record| record.facts.clone()).collect()
@@ -173,12 +214,16 @@ impl<R: NativeRead> ActivityReader<R> {
         self.io.close().await
     }
     pub(crate) async fn observe(&mut self) -> Result<ActivityFrame> {
+        self.observe_baseline().await?.into_complete()
+    }
+
+    pub(crate) async fn observe_baseline(&mut self) -> Result<ActivityBaseline> {
         let sql = sql::metadata(self.options.identity);
         let scope = match self.options.scope {
             ActivityScope::Visible => 0,
             ActivityScope::CurrentDatabase => 1,
         };
-        self.read_frame(
+        self.read_baseline_frame(
             &sql,
             vec![Parameter::Integer(i64::from(self.options.budget.max_snapshot_rows) + 1), Parameter::Integer(scope)],
         )
@@ -186,33 +231,67 @@ impl<R: NativeRead> ActivityReader<R> {
     }
 
     async fn read_frame(&mut self, sql: &str, parameters: Vec<Parameter>) -> Result<ActivityFrame> {
+        self.read_baseline_frame(sql, parameters).await?.into_complete()
+    }
+
+    async fn read_baseline_frame(&mut self, sql: &str, parameters: Vec<Parameter>) -> Result<ActivityBaseline> {
         if self.observed {
             return Err(invalid_data());
         }
         self.observed = true;
         let limit = self.options.budget.max_snapshot_rows;
         let rows = self.io.query(sql, parameters, limit as usize + 1).await.map_err(ReadError::into_error)?;
-        let context = ActivityContext::decode(
-            rows.first().ok_or_else(invalid_data)?,
-            &self.host,
-            self.port,
-            self.options.identity,
-        )?;
+        if rows.len() > limit as usize + 1 {
+            return Err(invalid_data());
+        }
+        let first = rows.first().ok_or_else(invalid_data)?;
+        let (context, database_wide) = ActivityContext::observed(first, &self.host, self.port, self.options.identity)?;
+        let restriction = (!database_wide).then(|| ActivityContext::visibility_error(first, &context)).transpose()?;
         let mut records = Vec::new();
+        let mut native_rows = 0u32;
+        let mut represented = true;
         for row in &rows {
-            if context != ActivityContext::decode(row, &self.host, self.port, self.options.identity)? {
+            let (row_context, row_visible) =
+                ActivityContext::observed(row, &self.host, self.port, self.options.identity)?;
+            if context != row_context || database_wide != row_visible {
                 return Err(CollectionStop::SourceChanged.error());
+            }
+            if crate::read::optional_counter(row, "session_id")?.is_none() {
+                continue;
+            }
+            native_rows += 1;
+            if native_rows > limit {
+                continue;
+            }
+            if crate::read::optional_text(row, "session_generation")?.is_none()
+                || (crate::read::optional_counter(row, "request_id")?.is_some()
+                    && crate::read::optional_text(row, "request_generation")?.is_none())
+            {
+                represented = false;
+                continue;
             }
             if let Some(record) = rows::record(row)? {
                 records.push(record);
             }
         }
-        if records.len() > limit as usize {
-            return Err(CollectionStop::RowLimit.error());
-        }
         let frame = ActivityFrame { context, records };
         ActivityEvidence::validate(&frame.observations())?;
-        Ok(frame)
+        let limited = native_rows > limit;
+        let complete = database_wide && represented && !limited;
+        let mut coverage = StateSourceCoverage::observed(
+            culprit_core::source_id::SESSIONS.into(),
+            frame.records.len() as u32,
+            complete,
+        );
+        if !database_wide {
+            coverage.error_code = Some(ErrorCode::PermissionDenied);
+        }
+        if limited {
+            coverage.stopped = Some(CollectionStop::RowLimit);
+        } else if !complete {
+            coverage.stopped = Some(CollectionStop::SourceUnavailable);
+        }
+        Ok(ActivityBaseline { frame, native_rows, coverage, restriction })
     }
     /// The selector contains keys from this frozen frame. Earlier batches are an explicit, separate enrichment.
     pub(crate) async fn enrich(

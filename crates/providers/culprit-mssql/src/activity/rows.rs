@@ -45,6 +45,7 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
     // Preserve that positive observation; the SQL enrichment guard will refuse a statement that has ended.
     let idle = request.is_none() && no_current_request;
     let native_type = optional_text(row, "wait_type")?;
+    let waiting_on_lock = native_type.as_deref().filter(|wait| crate::waits::is_lock_wait_type(wait)).map(|_| true);
     let owner = owner(row)?;
     let wait = if native_type.is_some() || owner.is_some() {
         Some(ActivityWait {
@@ -60,7 +61,9 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
     } else {
         None
     };
+    let current_locator = request.as_ref().map(|_| request_locator(row)).transpose()?.flatten();
     let observation = ActivityObservation {
+        waiting_on_lock,
         blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: session, generation: generation(row, "session_generation")? },
@@ -80,13 +83,16 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
         database: optional_text(row, "session_database")?,
         command: optional_text(row, "command")?,
         last_request_age_ms: age(row, "last_request_start")?,
-        open_transactions: integer(row, "open_transaction_count")?.try_into().map_err(|_| invalid_data())?,
+        open_transactions: optional_counter(row, "open_transaction_count")?
+            .map(|value| value.parse::<u32>().map_err(|_| invalid_data()))
+            .transpose()?,
         elapsed_ms: optional_counter(row, "elapsed_ms")?,
         transaction_age_ms: age(row, "transaction_start")?,
         session_counters: counters(row, "session")?,
         request_counters: if request.is_some() { Some(counters(row, "request")?) } else { None },
         wait,
         query_hash: optional_text(row, "query_hash")?,
+        statement_identity: current_locator.as_ref().map(RequestLocator::identity),
         client: Some(ActivityClient {
             application: optional_text(row, "program_name")?,
             user: optional_text(row, "login_name")?,
@@ -97,7 +103,6 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
     if !observation.is_valid() {
         return Err(invalid_data());
     }
-    let current_locator = request.as_ref().map(|_| request_locator(row)).transpose()?.flatten();
     let previous_locator = if observation.idle && request.is_none() { previous_locator(row)? } else { None };
     Ok(Some(ActivityRecord {
         facts: observation,
@@ -132,12 +137,12 @@ fn request_locator(row: &Rec) -> Result<Option<RequestLocator>> {
         Val::Int(value) if *value == -1 || *value >= start => *value,
         _ => return Err(invalid_data()),
     };
-    Ok(Some(RequestLocator {
+    Ok(RequestLocator::from_native(
         handle,
-        start: i32::try_from(start).map_err(|_| invalid_data())?,
-        end: i32::try_from(end).map_err(|_| invalid_data())?,
-        database: integer(row, "request_database_id")?.try_into().map_err(|_| invalid_data())?,
-    }))
+        i32::try_from(start).map_err(|_| invalid_data())?,
+        i32::try_from(end).map_err(|_| invalid_data())?,
+        integer(row, "request_database_id")?.try_into().map_err(|_| invalid_data())?,
+    ))
 }
 fn previous_locator(row: &Rec) -> Result<Option<PreviousBatchLocator>> {
     match (optional_text(row, "last_request_start")?, optional_text(row, "last_request_end")?) {

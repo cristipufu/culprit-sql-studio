@@ -4,7 +4,7 @@ use super::*;
 use culprit_core::{Engine, Session, telemetry::*};
 use std::collections::{BTreeMap, BTreeSet};
 mod blocking;
-pub(crate) use blocking::{ActivityScope, BlockingReadOptions, blockers, unqualified_owner_ids};
+pub(crate) use blocking::{BlockingReadOptions, blockers, unqualified_owner_ids};
 pub struct ActivityRecord {
     pub facts: Option<ActivityObservation>,
     row: Row,
@@ -20,12 +20,15 @@ pub struct ActivityFrame {
     pub records: Vec<ActivityRecord>,
     pub locks: Vec<culprit_core::LockWait>,
 }
+/// A fully drained metadata read may retain a prefix without establishing absence in its native population.
+pub struct BaselineFrame {
+    pub frame: ActivityFrame,
+    pub native_rows: u32,
+    pub limited: bool,
+}
 impl ActivityFrame {
     pub fn observations(&self) -> Vec<ActivityObservation> {
         self.records.iter().filter_map(|row| row.facts.clone()).collect()
-    }
-    pub(crate) fn fully_visible(&self, meta: &Metadata) -> bool {
-        meta.full_visibility && self.fully_visible_for(&meta.database_oid)
     }
     pub fn fully_visible_for(&self, database_oid: &str) -> bool {
         self.records
@@ -77,11 +80,20 @@ fn metadata_query(query_id: bool, extra_columns: &str, selection: &str, limit: u
 fn optional_counter(row: &Row, name: &str) -> Result<Option<String>> {
     row.text(name).map(|raw| raw.parse::<u64>().map(|value| value.to_string()).map_err(|_| invalid())).transpose()
 }
+fn waiting_on_lock(row: &Row) -> Option<bool> {
+    // This native point proves a heavyweight lock wait. Other/extension events are not a complete
+    // negative lock inventory, particularly when this decoder is used by YSQL.
+    (row.text("wait_event_type").as_deref() == Some("Lock")).then_some(true)
+}
 fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
     let pid = text(&row, "pid")?;
     pid.parse::<u32>().map_err(|_| invalid())?;
     let state = text(&row, "state")?;
-    let active = state == "active";
+    let active = matches!(state.as_str(), "active" | "fastpath function call");
+    let known_state = matches!(
+        state.as_str(),
+        "active" | "fastpath function call" | "idle" | "idle in transaction" | "idle in transaction (aborted)"
+    );
     let scope = if row.text("database_oid").as_deref() == Some(database_oid) {
         ActivityScopeBasis::SessionDatabase
     } else {
@@ -89,7 +101,8 @@ fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
     };
     let backend_start = row.text("backend_start");
     let query_start = row.text("query_start");
-    let facts = if let Some(backend_start) = backend_start.filter(|_| !active || query_start.is_some()) {
+    let facts = if let Some(backend_start) = backend_start.filter(|_| known_state && (!active || query_start.is_some()))
+    {
         let request = if active {
             Some(NativeActivityIdentity {
                 id: "statement".into(),
@@ -104,7 +117,13 @@ fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             (Some(kind), None) => Some(kind),
             _ => None,
         };
+        let statement_identity = request.as_ref().map(|request| {
+            NativeIdentity::new(digest(format!("{pid}|{backend_start}|{}", request.generation).as_bytes()))
+                .qualified("source", "pg_stat_activity")
+                .qualified("basis", "backend-query-start")
+        });
         let observation = ActivityObservation {
+            waiting_on_lock: waiting_on_lock(&row),
             blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
             key: ActivityKey {
                 session: NativeActivityIdentity { id: pid, generation: backend_start },
@@ -117,7 +136,7 @@ fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             database: row.text("database"),
             command: None,
             last_request_age_ms: if active { None } else { optional_counter(&row, "elapsed_ms")? },
-            open_transactions: u32::from(transaction.is_some()),
+            open_transactions: Some(u32::from(transaction.is_some())),
             elapsed_ms: if active { optional_counter(&row, "elapsed_ms")? } else { None },
             transaction_age_ms: optional_counter(&row, "transaction_ms")?,
             session_counters: ActivityCounters::default(),
@@ -130,6 +149,7 @@ fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
                 owners: vec![],
             }),
             query_hash: row.text("query_id"),
+            statement_identity,
             client: Some(ActivityClient {
                 application: row.text("application_name"),
                 user: row.text("username"),
@@ -173,22 +193,49 @@ async fn observe_limited<R: QueryRead>(
     database_oid: &str,
     limit: usize,
 ) -> Result<ActivityFrame> {
+    let read = read_baseline(reader, sql, database_oid, limit).await?;
+    if read.limited {
+        return Err(CollectionStop::RowLimit.error());
+    }
+    Ok(read.frame)
+}
+
+pub async fn observe_baseline_rows<R: QueryRead>(
+    reader: &mut R,
+    sql: &str,
+    database_oid: &str,
+    budget: &CollectionBudget,
+) -> Result<BaselineFrame> {
+    read_baseline(reader, sql, database_oid, budget.max_snapshot_rows as usize).await
+}
+
+async fn read_baseline<R: QueryRead>(
+    reader: &mut R,
+    sql: &str,
+    database_oid: &str,
+    limit: usize,
+) -> Result<BaselineFrame> {
     let rows = reader.query(sql, limit + 1).await?;
-    let at = text(rows.first().ok_or_else(invalid)?, "observed_at")?;
+    if rows.len() > limit + 1 {
+        return Err(invalid());
+    }
+    let at = canonical_time(&text(rows.first().ok_or_else(invalid)?, "observed_at")?)?;
+    let native_rows = rows.iter().filter(|row| row.text("pid").is_some()).count();
     let mut records = vec![];
     for row in rows {
-        if text(&row, "observed_at")? != at {
+        if canonical_time(&text(&row, "observed_at")?)? != at {
             return Err(invalid());
         }
-        if row.text("pid").is_some() {
+        if row.text("pid").is_some() && records.len() < limit {
             records.push(decode(row, database_oid)?);
         }
     }
-    if records.len() > limit {
-        return Err(CollectionStop::RowLimit.error());
-    }
     ActivityEvidence::validate(&records.iter().filter_map(|row| row.facts.clone()).collect::<Vec<_>>())?;
-    Ok(ActivityFrame { at, records, locks: vec![] })
+    Ok(BaselineFrame {
+        frame: ActivityFrame { at, records, locks: vec![] },
+        native_rows: native_rows.try_into().map_err(|_| invalid())?,
+        limited: native_rows > limit,
+    })
 }
 fn selector(record: &ActivityRecord) -> Result<String> {
     let facts = record.facts.as_ref().ok_or_else(invalid)?;
@@ -282,7 +329,7 @@ pub(crate) fn project(record: &ActivityRecord) -> Session {
             None
         },
         wait: if active { wait } else { None },
-        waiting_on_lock: Some(active && row.text("wait_event_type").as_deref() == Some("Lock")),
+        waiting_on_lock: waiting_on_lock(row),
         wait_resources: None,
         wait_ms: record
             .facts

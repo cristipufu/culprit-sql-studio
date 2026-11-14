@@ -48,8 +48,6 @@ pub(crate) struct OnceArgs {
     #[command(flatten)]
     budget: BudgetArgs,
     #[command(flatten)]
-    tuning: ActivityTuning,
-    #[command(flatten)]
     identity: AzureIdentityArgs,
 }
 
@@ -179,8 +177,6 @@ pub(crate) struct ActivityTuning {
     blocked_seconds: u32,
     #[arg(long,default_value_t=culprit_core::telemetry::ActivityPolicy::default().running_after_ms/1000,help=culprit_core::t!("activity.cli.running"))]
     running_seconds: u32,
-    #[arg(long,default_value_t=culprit_core::telemetry::ActivityPolicy::default().update_every_ms/1000,help=culprit_core::t!("activity.cli.update"))]
-    update_seconds: u32,
 }
 impl ActivityTuning {
     pub(crate) fn policy(&self) -> Result<culprit_core::telemetry::ActivityPolicy> {
@@ -192,7 +188,6 @@ impl ActivityTuning {
         let policy = culprit_core::telemetry::ActivityPolicy {
             blocked_after_ms: milliseconds(self.blocked_seconds)?,
             running_after_ms: milliseconds(self.running_seconds)?,
-            update_every_ms: milliseconds(self.update_seconds)?,
         };
         policy.validate()?;
         Ok(policy)
@@ -297,7 +292,7 @@ impl OnceArgs {
                         if self.from.is_some() || self.until.is_some() {
                             return Err(culprit_core::Error::invalid(culprit_core::t!("activity.cli.no_window")));
                         }
-                        CollectionSelection::Activity { policy: self.tuning.policy()? }
+                        CollectionSelection::Activity
                     }
                     CollectionChoice::QueryHistory
                     | CollectionChoice::ResourceHistory
@@ -649,6 +644,7 @@ mod tests {
         let cli = crate::Cli::try_parse_from(base).unwrap();
         let crate::Command::Collect(CollectCommand::Once(args)) = cli.command else { panic!("wrong command") };
         assert_eq!(args.request().unwrap().collection(), culprit_core::telemetry::TelemetryCollection::Activity);
+        assert!(crate::Cli::try_parse_from(base.into_iter().chain(["--blocked-seconds", "30"])).is_err());
         let cli = crate::Cli::try_parse_from(base.into_iter().chain([
             "--from",
             "2020-01-01T00:00:00Z",

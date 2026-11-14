@@ -1,37 +1,6 @@
 use super::*;
 use crate::analytical::{catalog::LogicalCatalog, schema};
 
-fn activity() -> ActivityObservation {
-    ActivityObservation {
-        blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
-        key: ActivityKey {
-            session: NativeActivityIdentity { id: "61".into(), generation: "login-1".into() },
-            request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),
-            transaction: None,
-        },
-        idle: false,
-        scope: ActivityScopeBasis::RequestDatabase,
-        state: "suspended".into(),
-        database: Some("db".into()),
-        command: Some("SELECT".into()),
-        last_request_age_ms: None,
-        open_transactions: 1,
-        elapsed_ms: Some("9007199254740993".into()),
-        transaction_age_ms: None,
-        session_counters: ActivityCounters { cpu_ms: Some("11".into()), ..Default::default() },
-        request_counters: Some(ActivityCounters { cpu_ms: Some("0".into()), ..Default::default() }),
-        wait: Some(ActivityWait {
-            identified_resources: vec![],
-            resources: None,
-            native_type: Some("LCK_M_X".into()),
-            elapsed_ms: Some("40000".into()),
-            owners: vec![ActivityWaitOwner::Session { id: "62".into(), generation: None }],
-        }),
-        query_hash: None,
-        client: Some(ActivityClient { application: Some("collector-name".into()), user: None, host: None }),
-        statement: DefinitionPayload::sql(&format!("SELECT {};", "字段".repeat(1000)), culprit_core::Engine::Mssql),
-    }
-}
 fn input(record: &TelemetryRecord) -> Value {
     let mut input = json!({"record":record});
     let target = crate::analytical::test_support::fixture().0.source.target;
@@ -56,6 +25,28 @@ fn resource_projection_distinguishes_subject_usage_from_shared_context_without_c
     assert_eq!(prepared["record"], serde_json::to_value(&record).unwrap());
     assert!(prepared["record"]["data"]["metrics"][0].get("describes_subject").is_none());
 }
+#[test]
+fn diagnostic_details_omit_only_the_private_target_while_native_recovery_evidence_stays_exact() {
+    for (source, records) in crate::analytical::test_support::diagnostic_evidence_cases() {
+        let record = &records[0];
+        let original = serde_json::to_value(record).unwrap();
+        let original_bytes = serde_json::to_vec(record).unwrap();
+        let prepared = input(record);
+        let mut public_record = original.clone();
+        public_record["data"]["fact"]["data"]["episode"]["scope"].as_object_mut().unwrap().remove("target");
+        assert_eq!(prepared["record"], public_record);
+        assert_eq!(serde_json::to_vec(record).unwrap(), original_bytes);
+        let projected = wire(schema::facts::operational(&[]).unwrap(), &prepared);
+        let details: Value = serde_json::from_str(projected["Details"].as_str().unwrap()).unwrap();
+        let mut expected = original["data"]["fact"]["data"].clone();
+        assert_eq!(expected["episode"]["scope"]["target"], serde_json::to_value(&source.target).unwrap());
+        expected["episode"]["scope"].as_object_mut().unwrap().remove("target");
+        assert_eq!(details, expected, "only the duplicated private target leaves warehouse Details");
+        let encoded = serde_json::to_string(&prepared).unwrap();
+        assert!(!encoded.contains("private-diagnostic"));
+        assert!(!encoded.contains("/private/diagnostics"));
+    }
+}
 fn wire(schema: schema::LogicalSchema, input: &Value) -> Value {
     let values = schema.project(input).unwrap();
     serde_json::from_slice(&schema.encode(&values).unwrap()).unwrap()
@@ -65,11 +56,16 @@ fn every_analytical_stream_has_one_complete_bounded_schema_and_checkpoints_stay_
     let catalog = LogicalCatalog::new().unwrap();
     let second = LogicalCatalog::new().unwrap();
     assert_eq!(catalog.digest(), second.digest());
-    assert_eq!(catalog.schemas().count(), TelemetryStream::ALL.len() - 1);
+    assert_eq!(
+        catalog.schemas().count(),
+        TelemetryStream::ALL.into_iter().filter(|stream| stream.delivery_required()).count()
+    );
     let mut tables = std::collections::BTreeSet::new();
     for stream in TelemetryStream::ALL {
         match stream {
-            TelemetryStream::ActivityCheckpoints => assert!(catalog.get(stream).is_err()),
+            TelemetryStream::DiagnosticCheckpoints => {
+                assert!(catalog.get(stream).is_err())
+            }
             _ => {
                 let schema = catalog.get(stream).unwrap();
                 assert!(tables.insert(schema.table()));
@@ -80,11 +76,20 @@ fn every_analytical_stream_has_one_complete_bounded_schema_and_checkpoints_stay_
     }
 }
 #[test]
-fn activity_and_incidents_keep_owner_generations_separate_counters_and_bounded_utf8_sql_references() {
-    let activity = activity();
+fn native_activity_keeps_owner_generations_separate_counters_and_bounded_utf8_sql_references() {
+    let mut activity = crate::analytical::test_support::activity_observation(DefinitionPayload::sql(
+        &format!("SELECT {} FROM dbo.orders WHERE token='private-activity-value';", "字段".repeat(1000)),
+        culprit_core::Engine::Mssql,
+    ));
+    activity
+        .wait
+        .as_mut()
+        .unwrap()
+        .owners
+        .push(ActivityWaitOwner::Session { id: "63".into(), generation: Some("observed-owner-generation".into()) });
     assert!(activity.is_valid());
     let original = serde_json::to_vec(&activity).unwrap();
-    let projected = input(&TelemetryRecord::Activity(activity.clone()));
+    let projected = input(&TelemetryRecord::from(activity.clone()));
     let payload = &projected["_projection"]["payloads"][0];
     assert_eq!(payload["pointer"], "/record/data/statement");
     assert_eq!(payload["preview_truncated"], true);
@@ -101,28 +106,47 @@ fn activity_and_incidents_keep_owner_generations_separate_counters_and_bounded_u
         Value::Null
     );
     assert_eq!(projected["ClientApplication"], "collector-name");
-    let change = ActivityIncidentChange {
-        id: digest(b"change"),
-        at: "2026-11-11T06:05:00Z".into(),
-        transition: ActivityIncidentTransition::Resolved,
-        state: ActivityIncidentState {
-            status: culprit_core::telemetry::ActivityIncidentStatus::Current,
-            id: digest(b"incident"),
-            first_seen_at: "2026-11-11T06:00:00Z".into(),
-            last_seen_at: "2026-11-11T06:04:00Z".into(),
-            last_emitted_at: "2026-11-11T06:00:00Z".into(),
-            conditions: vec![ActivityCondition::Blocked],
-            progress: ActivityProgress::NoObservedCounterChange,
-            observation: activity,
-        },
-    };
-    assert!(change.is_valid());
-    let projected = wire(schema::activity::incidents(&[]).unwrap(), &input(&TelemetryRecord::Incident(change)));
-    assert_eq!(projected["Transition"], "resolved");
-    assert_eq!(projected["LastSeenAt"], "2026-11-11T06:04:00.000000000Z");
-    assert_eq!(projected["ChangedAt"], "2026-11-11T06:05:00.000000000Z");
-    assert_eq!(projected["Progress"], "no-observed-counter-change");
+    let owners: Value = serde_json::from_str(projected["WaitOwners"].as_str().unwrap()).unwrap();
+    assert_eq!(owners[1]["generation"], "observed-owner-generation");
+    assert!(!serde_json::to_string(&projected).unwrap().contains("private-activity-value"));
 }
+
+#[test]
+fn activity_facts_keep_unknowns_and_native_statement_identity_without_copying_full_sql_into_projection() {
+    let (source, records) = crate::analytical::test_support::activity_evidence_cases().remove(0);
+    let TelemetryRecord::Activity(native) = &records[0] else { panic!() };
+    let prepared = input(&records[0]);
+    let projection = wire(schema::activity::observations(&[]).unwrap(), &prepared);
+    let facts: Value = serde_json::from_str(projection["ActivityFacts"].as_str().unwrap()).unwrap();
+    let token: Value = serde_json::from_str(projection["StatementIdentity"].as_str().unwrap()).unwrap();
+    assert_eq!(token, serde_json::to_value(native.statement_identity.as_ref().unwrap()).unwrap());
+    assert_eq!(facts["statement_identity"], token);
+    assert!(facts["open_transactions"].is_null());
+    assert_eq!(facts["session_counters"]["logical_reads"], "18446744073709551615");
+    assert_eq!(facts["client"]["user"], "");
+    assert!(facts["client"]["host"].is_null());
+    assert!(facts["statement"].get("text").is_none());
+    assert_eq!(facts["statement"]["pointer"], "/record/data/statement");
+    assert!(!serde_json::to_string(&projection).unwrap().contains("private-activity-canary"));
+    assert!(source.observation.activity().unwrap().is_valid());
+}
+
+#[test]
+fn activity_lock_wait_verdict_projects_unknown_and_native_negative_separately() {
+    let mut activity = crate::analytical::test_support::activity_observation(DefinitionPayload::Unavailable {
+        reason: PayloadUnavailable::NotCollected,
+    });
+    for verdict in [None, Some(false), Some(true)] {
+        activity.waiting_on_lock = verdict;
+        let projected = input(&TelemetryRecord::from(activity.clone()));
+        let projection = wire(schema::activity::observations(&[]).unwrap(), &projected);
+        let expected = serde_json::to_value(verdict).unwrap();
+        assert_eq!(projection["WaitingOnLock"], expected);
+        let facts: Value = serde_json::from_str(projection["ActivityFacts"].as_str().unwrap()).unwrap();
+        assert_eq!(facts["waiting_on_lock"], expected);
+    }
+}
+
 #[test]
 fn catalog_expressions_and_tuning_bodies_are_references_with_their_native_metadata_intact() {
     let column =

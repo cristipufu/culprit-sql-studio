@@ -21,8 +21,7 @@
               "kind": "activity",
               "policy": {
                 "blocked_after_ms": 30000,
-                "running_after_ms": 60000,
-                "update_every_ms": 300000
+                "running_after_ms": 60000
               }
             },
             "budget": {

@@ -41,6 +41,9 @@ pub(crate) struct Metadata {
     pub started_second: Option<u64>,
 }
 impl Metadata {
+    pub(crate) fn same_activity_source(&self, other: &Self) -> bool {
+        self.connection.same_source(&other.connection) && self.started_second == other.started_second
+    }
     pub(crate) fn same_source(&self, other: &Self) -> bool {
         self.connection.same_source(&other.connection)
             && self.database_wide == other.database_wide

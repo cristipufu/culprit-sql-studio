@@ -56,9 +56,10 @@ enum Scenario {
     DuplicateResourceSample,
     ResourceCountMismatch,
     ActivitySequence,
-    ActivityWrongEdges,
+    ActivityConflictingRows,
     ActivityUnconfirmed,
     ActivityRestricted,
+    ActivityLockPoint,
     ResourceDiscoveryDuplicate,
     ResourceDiscoveryWrongKind,
     ResourceDiscoveryWrongEngine,
@@ -315,9 +316,10 @@ impl TelemetrySource for TestSource {
         if matches!(
             self.0.scenario,
             Scenario::ActivitySequence
-                | Scenario::ActivityWrongEdges
+                | Scenario::ActivityConflictingRows
                 | Scenario::ActivityUnconfirmed
                 | Scenario::ActivityRestricted
+                | Scenario::ActivityLockPoint
         ) {
             if matches!(self.0.scenario, Scenario::ActivitySequence) && self.1 == 1 {
                 return Err(CollectionStop::SourceUnavailable.error());
@@ -362,32 +364,14 @@ impl TelemetrySource for TestSource {
         if matches!(
             self.0.scenario,
             Scenario::ActivitySequence
-                | Scenario::ActivityWrongEdges
+                | Scenario::ActivityConflictingRows
                 | Scenario::ActivityUnconfirmed
                 | Scenario::ActivityRestricted
+                | Scenario::ActivityLockPoint
         ) {
             let rows = activity_rows(self.0.scenario, self.1);
-            let records = match stream {
-                TelemetryStream::ActivityObservations => {
-                    rows.into_iter().map(culprit_core::telemetry::TelemetryRecord::Activity).collect()
-                }
-                TelemetryStream::BlockingEdges => {
-                    let mut edges = culprit_core::telemetry::ActivityEvidence::select(
-                        &rows,
-                        &culprit_core::telemetry::ActivityPolicy::default(),
-                    )
-                    .unwrap()
-                    .blocking;
-                    if matches!(self.0.scenario, Scenario::ActivityWrongEdges) {
-                        edges[0].owner = culprit_core::telemetry::ActivityWaitOwner::Session {
-                            id: "unrelated".into(),
-                            generation: None,
-                        };
-                    }
-                    edges.into_iter().map(TelemetryRecord::Blocking).collect()
-                }
-                _ => panic!("the provider must not produce derived incident state"),
-            };
+            assert_eq!(stream, TelemetryStream::ActivityObservations, "the provider emits native baseline only");
+            let records = rows.into_iter().map(culprit_core::telemetry::TelemetryRecord::from).collect();
             return Ok(CollectionRead::Page { records, next_cursor: None });
         }
 
@@ -1304,13 +1288,15 @@ fn activity_row() -> culprit_core::telemetry::ActivityObservation {
         database: Some("sample".into()),
         command: Some("SELECT".into()),
         last_request_age_ms: None,
-        open_transactions: 0,
+        open_transactions: Some(0),
         elapsed_ms: Some("100000".into()),
         transaction_age_ms: None,
         session_counters: ActivityCounters::default(),
         request_counters: Some(ActivityCounters { cpu_ms: Some("0".into()), ..ActivityCounters::default() }),
         wait: None,
+        waiting_on_lock: None,
         query_hash: Some("query-hash".into()),
+        statement_identity: None,
         client: None,
         statement: DefinitionPayload::Available {
             text: "SELECT N'activity-canary-secret'".into(),
@@ -1321,40 +1307,53 @@ fn activity_row() -> culprit_core::telemetry::ActivityObservation {
 }
 fn activity_rows(scenario: Scenario, step: usize) -> Vec<culprit_core::telemetry::ActivityObservation> {
     use culprit_core::telemetry::*;
-    if matches!(scenario, Scenario::ActivitySequence) && step >= 4 {
+    if matches!(scenario, Scenario::ActivitySequence) && step >= 4
+        || matches!(scenario, Scenario::ActivityRestricted) && step > 0
+    {
         return vec![];
     }
     let mut row = activity_row();
-    if matches!(scenario, Scenario::ActivityWrongEdges) {
+    if matches!(scenario, Scenario::ActivityConflictingRows) {
+        let first = row.clone();
+        row.key.session.generation = "recycled-login".into();
+        return vec![first, row];
+    }
+    if matches!(scenario, Scenario::ActivityLockPoint) {
+        row.blocking_status = ActivityBlockingStatus::Unknown;
+        row.state = "suspended".into();
+        row.waiting_on_lock = Some(true);
+        row.elapsed_ms = Some("40000".into());
         row.wait = Some(ActivityWait {
+            native_type: Some("LCK_M_X".into()),
+            elapsed_ms: None,
             identified_resources: vec![],
+            owners: vec![],
             resources: None,
-            native_type: Some("Lock".into()),
-            elapsed_ms: Some("40000".into()),
-            owners: vec![ActivityWaitOwner::Session { id: "unobserved".into(), generation: None }],
         });
     }
     vec![row]
 }
 fn activity_description(scenario: Scenario, step: usize) -> CollectionDescription {
     use culprit_core::telemetry::*;
-    let count = if matches!(scenario, Scenario::ActivitySequence) && step >= 4 { 0 } else { 1 };
+    let count = activity_rows(scenario, step).len() as u32;
     CollectionDescription {
         target: description().target,
         source: "activity-fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
-            epoch: "native-epoch-1".into(),
+            epoch: Some("native-epoch-1".into()),
+            observed_from: format!("2020-01-01T06:{step:02}:00Z"),
+            observed_until: format!("2020-01-01T06:{step:02}:00Z"),
             at: format!("2020-01-01T06:{step:02}:00Z"),
             scope: culprit_core::MeasurementScope::Database,
-            complete_scope: !matches!(scenario, Scenario::ActivityRestricted),
-            policy: ActivityPolicy::default(),
+            population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
             native_rows: count,
-            qualifying: count,
-            uncertain: 0,
             observations: count,
-            blocking_edges: if matches!(scenario, Scenario::ActivityWrongEdges) { 1 } else { 0 },
-            details: ActivityDetailStatus::Collected,
+            coverage: StateSourceCoverage::observed(
+                "activity-fixture".into(),
+                count,
+                !matches!(scenario, Scenario::ActivityRestricted),
+            ),
         }),
     }
 }
@@ -1362,24 +1361,26 @@ fn activity_request() -> CollectionRequest {
     use culprit_core::telemetry::*;
     CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
+        selection: CollectionSelection::Activity,
         budget: CollectionBudget::default(),
     }
 }
-fn read_records(
-    root: &std::path::Path,
-    manifest: &culprit_core::telemetry::CollectionManifest,
-    stream: TelemetryStream,
-) -> Vec<Value> {
-    let file = manifest.files.iter().find(|file| file.stream == stream).unwrap();
-    std::fs::read_to_string(root.join("captures").join(&manifest.capture.observation_id).join(&file.file))
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect()
+async fn analyze_activity_checkpoint(
+    outbox: &mut culprit_collector::outbox::Outbox,
+) -> culprit_core::telemetry::DiagnosticCheckpoint {
+    use culprit_collector::diagnostics::{DiagnosticPolicies, drain_pending};
+    use culprit_core::telemetry::*;
+    let policies =
+        DiagnosticPolicies::for_activity("pilot", CollectionSubject::Database, ActivityPolicy::default()).unwrap();
+    drain_pending(outbox, &policies, &CollectionCancellation::default(), None).await.unwrap();
+    assert!(outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
+    let mut page = outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 128).await.unwrap();
+    assert!(page.next_cursor.is_none());
+    assert_eq!(page.checkpoints.len(), 1);
+    page.checkpoints.remove(0)
 }
 #[tokio::test]
-async fn activity_state_survives_reopen_and_failed_polls_without_resolving_or_restarting_the_incident() {
+async fn sealed_baselines_survive_reopen_and_failed_polls_without_resolving_or_restarting_the_episode() {
     use culprit_collector::outbox::Outbox;
     use culprit_core::telemetry::*;
     let dir = TestDirectory::new();
@@ -1392,9 +1393,20 @@ async fn activity_state_survives_reopen_and_failed_polls_without_resolving_or_re
         .await
         .unwrap();
     assert_eq!(first.status, CollectionStatus::Complete);
-    let first_events = read_records(&root, &first, TelemetryStream::ActivityIncidents);
-    assert_eq!(first_events[0]["record"]["data"]["transition"], "started");
-    let incident = first_events[0]["record"]["data"]["state"]["id"].clone();
+    assert_eq!(
+        first.files.iter().map(|file| file.stream).collect::<Vec<_>>(),
+        vec![TelemetryStream::ActivityObservations]
+    );
+    assert!(
+        outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 128).await.unwrap().checkpoints.is_empty()
+    );
+    assert_eq!(outbox.status(10, None).await.unwrap().ready, 1, "the baseline is durable before analysis");
+    let first_checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    assert_eq!(first_checkpoint.input.capture, first.capture);
+    assert_eq!(first_checkpoint.episodes.len(), 1);
+    let original = first_checkpoint.episodes[0].clone();
+    assert_eq!(original.lifecycle, DiagnosticLifecycle::Active);
+    assert_eq!(original.first.capture, first.capture);
     drop(outbox);
     let mut outbox = Outbox::open(&root).unwrap();
     let failed = ws
@@ -1402,28 +1414,44 @@ async fn activity_state_survives_reopen_and_failed_polls_without_resolving_or_re
         .await
         .unwrap();
     assert!(matches!(failed.status, CollectionStatus::Incomplete(_)));
-    assert_eq!(outbox.status(10, None).await.unwrap().ready, 1);
+    assert_eq!(outbox.status(10, None).await.unwrap().ready, 2, "raw evidence and diagnostics are separate captures");
+    assert_eq!(analyze_activity_checkpoint(&mut outbox).await, first_checkpoint);
     let next = ws
         .collect_into_outbox("pilot", activity_request(), &mut outbox, &CollectionCancellation::default())
         .await
         .unwrap();
     assert_eq!(next.status, CollectionStatus::Complete);
-    let checkpoint = read_records(&root, &next, TelemetryStream::ActivityCheckpoints);
-    assert_eq!(checkpoint[0]["record"]["data"]["id"], incident);
+    let checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    assert_eq!(checkpoint.input.capture, next.capture);
+    assert_eq!(checkpoint.episodes[0].id, original.id);
+    assert_eq!(checkpoint.episodes[0].first, original.first);
+    assert_eq!(checkpoint.episodes[0].latest.capture, next.capture);
+    assert_eq!(checkpoint.episodes[0].last_seen_at, "2020-01-01T06:02:00Z");
     let unchanged = ws
         .collect_into_outbox("pilot", activity_request(), &mut outbox, &CollectionCancellation::default())
         .await
         .unwrap();
-    assert!(read_records(&root, &unchanged, TelemetryStream::ActivityIncidents).is_empty());
+    let unchanged_checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    assert_eq!(unchanged_checkpoint.episodes[0].id, original.id);
+    assert_eq!(unchanged_checkpoint.episodes[0].first_seen_at, original.first_seen_at);
+    assert_eq!(unchanged_checkpoint.episodes[0].latest.capture, unchanged.capture);
     let cleared = ws
         .collect_into_outbox("pilot", activity_request(), &mut outbox, &CollectionCancellation::default())
         .await
         .unwrap();
     assert_eq!(cleared.status, CollectionStatus::Complete);
-    let events = read_records(&root, &cleared, TelemetryStream::ActivityIncidents);
-    assert_eq!(events[0]["record"]["data"]["transition"], "resolved");
-    assert_eq!(events[0]["record"]["data"]["state"]["id"], incident);
-    assert!(read_records(&root, &cleared, TelemetryStream::ActivityCheckpoints).is_empty());
+    let cleared_checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    let recovered = &cleared_checkpoint.episodes[0];
+    assert_eq!(recovered.lifecycle, DiagnosticLifecycle::Resolved);
+    assert_eq!(recovered.id, original.id);
+    assert_eq!(recovered.first, original.first);
+    assert_eq!(recovered.latest.capture, unchanged.capture, "absence does not invent a native observation");
+    assert_eq!(recovered.recovery.as_ref().unwrap().capture().capture, cleared.capture);
+    assert_eq!(
+        recovered.analysis,
+        DiagnosticAnalysisStatus::Pending,
+        "recovery does not erase historical analysis debt"
+    );
     let replay = dir.0.path().join("activity-replay");
     Outbox::replay(&root, &next.capture.observation_id, &replay).await.unwrap();
     for file in &next.files {
@@ -1432,11 +1460,11 @@ async fn activity_state_survives_reopen_and_failed_polls_without_resolving_or_re
     }
 }
 #[tokio::test]
-async fn mismatched_blocking_evidence_never_publishes_an_incident_checkpoint() {
+async fn conflicting_native_session_generations_cannot_seal_a_baseline_or_derive_an_episode() {
     use culprit_collector::outbox::Outbox;
     use culprit_core::telemetry::*;
     let dir = TestDirectory::new();
-    let state = State::new(Scenario::ActivityWrongEdges);
+    let state = State::new(Scenario::ActivityConflictingRows);
     let ws = dir.workspace(state);
     let root = dir.0.path().join("outbox");
     let mut outbox = Outbox::create(&root, OutboxLimits::default()).unwrap();
@@ -1447,6 +1475,10 @@ async fn mismatched_blocking_evidence_never_publishes_an_incident_checkpoint() {
     assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::InvalidPage));
     assert!(!manifest.references.complete);
     assert_eq!(outbox.status(10, None).await.unwrap().ready, 0);
+    assert!(outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
+    assert!(
+        outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 128).await.unwrap().checkpoints.is_empty()
+    );
 }
 #[tokio::test(start_paused = true)]
 async fn activity_monitor_keeps_a_minute_between_attempts_and_reports_failed_polls_as_unknown() {
@@ -1468,7 +1500,9 @@ async fn activity_monitor_keeps_a_minute_between_attempts_and_reports_failed_pol
         .unwrap();
     assert_eq!((summary.attempts, summary.complete, summary.unknown), (3, 2, 1));
     assert!(reports.windows(2).all(|pair| pair[1].0.duration_since(pair[0].0) >= std::time::Duration::from_secs(60)));
-    assert!(reports[1].1.active_incidents.is_none());
+    assert_eq!((reports[0].1.active_episodes, reports[0].1.uncertain_episodes), (Some(1), Some(0)));
+    assert!(reports[1].1.active_episodes.is_none() && reports[1].1.uncertain_episodes.is_none());
+    assert_eq!((reports[2].1.active_episodes, reports[2].1.uncertain_episodes), (Some(1), Some(0)));
     assert!(matches!(reports[1].1.status, CollectionStatus::Incomplete(_)));
 }
 
@@ -1497,7 +1531,7 @@ async fn activity_monitor_stops_immediately_when_native_shutdown_is_unconfirmed(
         .unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
     assert_eq!(reports.len(), 1);
-    assert!(reports[0].active_incidents.is_none());
+    assert!(reports[0].active_episodes.is_none() && reports[0].uncertain_episodes.is_none());
     assert!(started.elapsed() < std::time::Duration::from_secs(60));
     assert_eq!(state.factories.load(Ordering::SeqCst), 1);
 }
@@ -1527,7 +1561,7 @@ async fn activity_monitor_cancels_while_idle_without_another_source_read() {
     assert!(state.closed.load(Ordering::SeqCst));
 }
 #[tokio::test]
-async fn restricted_activity_visibility_cannot_commit_state_or_report_retention_loss() {
+async fn restricted_activity_visibility_preserves_a_sealed_positive_baseline_and_qualified_coverage() {
     use culprit_collector::outbox::Outbox;
     use culprit_core::telemetry::*;
     let dir = TestDirectory::new();
@@ -1537,9 +1571,79 @@ async fn restricted_activity_visibility_cannot_commit_state_or_report_retention_
         .collect_into_outbox("pilot", activity_request(), &mut outbox, &CollectionCancellation::default())
         .await
         .unwrap();
-    assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::SourceUnavailable));
-    assert!(!manifest.references.complete);
-    assert_eq!(outbox.status(10, None).await.unwrap().ready, 0);
+    assert_eq!(manifest.status, CollectionStatus::Complete);
+    assert!(manifest.references.complete);
+    let native = manifest.description.as_ref().unwrap().observation.activity().unwrap();
+    assert_eq!(native.coverage.state, culprit_core::SourceState::Partial);
+    assert!(!native.coverage.complete_scope);
+    assert_eq!(outbox.status(10, None).await.unwrap().ready, 1);
+    let checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    assert_eq!(checkpoint.episodes[0].lifecycle, DiagnosticLifecycle::Active);
+    assert_eq!(checkpoint.episodes[0].first.capture, manifest.capture);
+}
+
+#[tokio::test(start_paused = true)]
+async fn activity_monitor_reports_partial_absence_as_uncertain_without_fabricating_recovery() {
+    use culprit_collector::outbox::Outbox;
+    use culprit_core::telemetry::*;
+    let dir = TestDirectory::new();
+    let ws = dir.workspace(State::new(Scenario::ActivityRestricted));
+    let mut outbox = Outbox::create(&dir.0.path().join("outbox"), OutboxLimits::default()).unwrap();
+    let options = ActivityMonitorOptions { max_polls: Some(2), ..Default::default() };
+    let mut events = Vec::new();
+    let summary = ws
+        .monitor_activity("pilot", &options, &mut outbox, &CollectionCancellation::default(), |event| {
+            events.push(event.clone());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!((summary.attempts, summary.complete, summary.unknown), (2, 2, 0));
+    assert_eq!((events[0].active_episodes, events[0].uncertain_episodes), (Some(1), Some(0)));
+    assert_eq!((events[1].active_episodes, events[1].uncertain_episodes), (Some(0), Some(1)));
+    assert!(events.iter().all(|event| event.native_coverage.as_ref().is_some_and(|coverage| !coverage.complete_scope)));
+    let checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    assert_eq!(checkpoint.episodes[0].lifecycle, DiagnosticLifecycle::Uncertain);
+    assert!(checkpoint.episodes[0].recovery.is_none());
+}
+
+#[tokio::test]
+async fn activity_monitor_retains_a_native_lock_point_without_turning_request_age_into_blocking_duration() {
+    use culprit_collector::outbox::Outbox;
+    use culprit_core::telemetry::*;
+    let dir = TestDirectory::new();
+    let ws = dir.workspace(State::new(Scenario::ActivityLockPoint));
+    let mut outbox = Outbox::create(&dir.0.path().join("outbox"), OutboxLimits::default()).unwrap();
+    let options = ActivityMonitorOptions { max_polls: Some(1), ..Default::default() };
+    let mut events = Vec::new();
+    let summary = ws
+        .monitor_activity("pilot", &options, &mut outbox, &CollectionCancellation::default(), |event| {
+            events.push(event.clone());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!((summary.attempts, summary.complete, summary.unknown), (1, 1, 0));
+    assert_eq!((events[0].active_episodes, events[0].uncertain_episodes), (Some(1), Some(0)));
+    let checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    assert_eq!(
+        checkpoint.episodes.len(),
+        1,
+        "request age establishes neither aged blocking nor a long-running request"
+    );
+    let episode = &checkpoint.episodes[0];
+    assert_eq!(episode.lifecycle, DiagnosticLifecycle::Active);
+    assert!(matches!(&episode.signal, DiagnosticSignal::LockWait { key } if key == &activity_row().key));
+    assert_eq!(episode.first.capture, events[0].capture.clone().unwrap());
+    let (_, original) = outbox.diagnostic_evidence(&episode.first).await.unwrap();
+    let TelemetryRecord::Activity(row) = original.record else {
+        panic!("the incident must reference its original native activity")
+    };
+    assert_eq!(row.waiting_on_lock, Some(true));
+    assert_eq!(row.elapsed_ms.as_deref(), Some("40000"));
+    let wait = row.wait.as_ref().unwrap();
+    assert_eq!(wait.native_type.as_deref(), Some("LCK_M_X"));
+    assert!(wait.elapsed_ms.is_none() && wait.owners.is_empty() && wait.resources.is_none());
 }
 
 fn operational_description(scenario: Scenario) -> CollectionDescription {
@@ -1763,7 +1867,7 @@ async fn cumulative_statement_counters_survive_durable_outbox_restart_and_replay
     assert_eq!(manifest.status, CollectionStatus::Complete);
     assert!(matches!(
         manifest.description.as_ref().unwrap().observation.range(),
-        culprit_core::telemetry::TelemetryRange::Current
+        Ok(culprit_core::telemetry::TelemetryRange::Current)
     ));
     drop(outbox);
     let reopened = Outbox::open(&path).unwrap();

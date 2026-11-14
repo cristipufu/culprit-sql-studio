@@ -4,14 +4,8 @@ use super::*;
 const MAX_BLOCKING_LOOKUPS: usize = 64;
 const MAX_BLOCKING_DEPTH: usize = 8;
 
-#[derive(Clone, Copy)]
-pub(crate) enum ActivityScope {
-    Visible,
-    CurrentDatabase,
-}
 pub(crate) struct BlockingReadOptions<'a> {
     pub minimum_request_age_ms: u32,
-    pub scope: ActivityScope,
     pub version: u32,
     pub database_oid: &'a str,
     pub max_snapshot_rows: usize,
@@ -54,8 +48,7 @@ impl Closure {
             }
             if row.row.text("wait_event_type").as_deref() == Some("Lock")
                 && row.facts.as_ref().is_some_and(|facts| {
-                    (matches!(options.scope, ActivityScope::Visible)
-                        || facts.scope != ActivityScopeBasis::OtherDatabase)
+                    facts.scope != ActivityScopeBasis::OtherDatabase
                         && facts
                             .elapsed_ms
                             .as_deref()

@@ -180,6 +180,33 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
             assert!(result.records().iter().any(|record| record.row() == &expected));
         }
     }
+    for (index, (source, records)) in test_support::activity_evidence_cases().into_iter().enumerate() {
+        let scenario = Scenario::new(
+            &server,
+            Recovery::capture(
+                server.client.destination(),
+                catalog.digest(),
+                source.clone(),
+                records.clone(),
+                230_000 + index as u64,
+            ),
+        )
+        .await;
+        scenario.complete().await;
+        *scenario.recovery.fault.lock().unwrap() = Fault::Stall;
+        let reader =
+            crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
+                .unwrap();
+        let capture = reader
+            .read_capture(
+                &scenario.range,
+                &[EvidenceFamily::ActivityObservations],
+                EvidenceReadBudget { page_rows: 1, ..budget },
+            )
+            .await
+            .unwrap();
+        test_support::assert_activity_capture(&capture, &source, &records);
+    }
     let sql = format!("SELECT {}last_column FROM dbo.orders", "column_name,".repeat(200));
     let (source, records) =
         test_support::request_memory_evidence(DefinitionPayload::sql(&sql, culprit_core::Engine::Mssql), true);

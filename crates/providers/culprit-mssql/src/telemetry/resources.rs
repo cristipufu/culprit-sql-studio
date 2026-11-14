@@ -183,21 +183,18 @@ async fn discover_with_io<R: NativeRead>(
             let pool = membership.pool;
             pool.into_iter()
                 .map(|pool| CollectionResource {
+                    collections: super::recipes::collections_for(
+                        &pool.identity,
+                        crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE,
+                    ),
                     identity: pool.identity,
                     observed_at: observed_at.clone(),
-                    collections: vec![
-                        TelemetryCollection::ResourceHistory,
-                        TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures),
-                    ],
                 })
                 .collect::<Vec<_>>()
         }
         SharedResourceKind::Instance => {
             let (instance, observed_at) = crate::instance::read(reader).await?;
-            let mut collections = vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)];
-            if instance.engine_edition() == crate::probe::ENGINE_EDITION_MANAGED_INSTANCE {
-                collections.push(TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures));
-            }
+            let collections = super::recipes::collections_for(&instance.identity, instance.engine_edition());
             vec![CollectionResource { identity: instance.identity, observed_at, collections }]
         }
         _ => {

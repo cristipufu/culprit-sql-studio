@@ -37,8 +37,9 @@ pub struct ActivityMonitorEvent {
     pub error_code: Option<ErrorCode>,
     pub capture: Option<CaptureIdentity>,
     pub observed_at: Option<String>,
-    pub active_incidents: Option<u32>,
-    pub changes: Option<u32>,
+    pub active_episodes: Option<u32>,
+    pub uncertain_episodes: Option<u32>,
+    pub native_coverage: Option<StateSourceCoverage>,
     pub source_queries: Option<u32>,
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default)]

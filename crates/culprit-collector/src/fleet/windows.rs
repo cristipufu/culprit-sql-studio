@@ -21,9 +21,6 @@ pub(super) fn request(
             return Err(state_failed());
         }
         match &schedule.collection {
-            ScheduledCollection::Activity { policy } if request.activity_policy() != Some(policy) => {
-                return Err(state_failed());
-            }
             ScheduledCollection::ResourceHistory { window_seconds, overlap_seconds }
             | ScheduledCollection::DeadlockHistory { window_seconds, overlap_seconds } => {
                 let (from, until) = request.bounds()?;
@@ -37,7 +34,7 @@ pub(super) fn request(
     }
     let mut gap = None;
     let selection = match &schedule.collection {
-        ScheduledCollection::Activity { policy } => CollectionSelection::Activity { policy: policy.clone() },
+        ScheduledCollection::Activity { .. } => CollectionSelection::Activity,
         ScheduledCollection::Snapshot { dataset } => CollectionSelection::Snapshot { dataset: *dataset },
         ScheduledCollection::ResourceHistory { window_seconds, overlap_seconds }
         | ScheduledCollection::DeadlockHistory { window_seconds, overlap_seconds } => {

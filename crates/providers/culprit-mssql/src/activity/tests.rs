@@ -107,8 +107,9 @@ async fn native_replica_facts_remain_readable_but_background_activity_requires_t
     let readonly = replace(&metadata(42), &[("updateability", Val::Text("READ_ONLY".into()))]);
     let context = ActivityContext::decode(&readonly, "fixture.invalid", 1433, IdentityDetail::Endpoint).unwrap();
     assert_eq!(context.writable, Some(false));
-    let mut reader = reader(vec![Ok(vec![readonly])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-    let error = crate::telemetry::activity::capture(&mut reader, &ActivityPolicy::default()).await.err().unwrap();
+    let mut reader =
+        reader(vec![Ok(vec![authority(&readonly)])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+    let error = crate::telemetry::activity::capture(&mut reader).await.err().unwrap();
     assert_eq!(error.code, ErrorCode::Unsupported);
     assert_eq!(reader.query_count(), 1);
 }
@@ -170,8 +171,36 @@ fn xml_parameter(call: &Call) -> &str {
     }
 }
 
+fn authority(row: &Rec) -> Rec {
+    let mut columns: Vec<_> = row.columns().map(|(name, value)| (name, value.clone())).collect();
+    columns.extend([
+        ("selected_database_id", Val::Int(7)),
+        ("database_created_without_offset", Val::Text("2019-01-01T00:00:00".into())),
+        ("database_file_guid", Val::Text("11111111-2222-3333-4444-555555555555".into())),
+        ("database_file_create_lsn", Val::Null),
+        ("database_guid", Val::Null),
+        ("recovery_fork_guid", Val::Null),
+    ]);
+    Rec::of(&columns)
+}
+fn baseline_reader(rows: Vec<Rec>) -> ActivityReader<FakeRead> {
+    let after = authority(&replace(&metadata(0), &[("observed_at", Val::Text("2020-01-01T06:00:01Z".into()))]));
+    let before = authority(&replace(&metadata(0), &[("observed_at", Val::Text("2020-01-01T05:59:59Z".into()))]));
+    reader(
+        vec![Ok(vec![before]), Ok(rows), Ok(vec![after])],
+        ActivityScope::CurrentDatabase,
+        IdentityDetail::AzureDatabase,
+    )
+}
+async fn enriched(reader: &mut ActivityReader<FakeRead>) -> (ActivityDetailStatus, Vec<ActivityObservation>) {
+    let mut frame = reader.observe().await.unwrap();
+    let keys = frame.keys();
+    let status = reader.enrich(&mut frame, &keys, false, 16 * 1024).await.unwrap();
+    (status, crate::telemetry::activity::export_observations(frame.records))
+}
+
 #[tokio::test]
-async fn live_and_export_share_request_facts_with_different_selection_and_payload_policies() {
+async fn live_and_baseline_share_all_request_facts_without_baseline_sql_enrichment() {
     let sql = "SELECT N'private-activity-canary' FROM dbo.orders";
     let rows = vec![metadata(42), healthy(99)];
     let mut interactive = reader(
@@ -180,41 +209,34 @@ async fn live_and_export_share_request_facts_with_different_selection_and_payloa
         IdentityDetail::Endpoint,
     );
     let live = crate::live::collect_from(&mut interactive).await.unwrap();
-    assert_eq!(live.sessions.len(), 2);
     let session = live.sessions.iter().find(|session| session.id == "42").unwrap();
-    assert_eq!(session.cpu_ms, Some(10.0));
-    assert_eq!(session.reads, Some(20.0));
-    assert_eq!(session.transaction_ms, Some(90_000.0));
-    assert_eq!(session.database.as_deref(), Some("shop"));
-    assert_eq!(session.command.as_deref(), Some("SELECT"));
+    assert_eq!(live.sessions.len(), 2);
     assert_eq!(session.sql.as_deref(), Some(sql));
     assert_eq!(interactive.io.closed, 1);
-    assert!(interactive.io.replies.is_empty());
-    let mut exporting = reader(
-        vec![Ok(rows), Ok(vec![details(42, sql)])],
-        ActivityScope::CurrentDatabase,
-        IdentityDetail::AzureDatabase,
-    );
-    let (description, observations, blocking) =
-        crate::telemetry::activity::capture(&mut exporting, &ActivityPolicy::default()).await.unwrap();
-    assert_eq!(observations.len(), 1);
-    assert_eq!(blocking.len(), 1);
-    let row = &observations[0];
-    assert_eq!(row.key.session.id, session.id);
+    let mut exporting = baseline_reader(rows);
+    let (description, observations) = crate::telemetry::activity::capture(&mut exporting).await.unwrap();
+    assert_eq!(observations.len(), 2, "ordinary short requests are baseline evidence too");
+    let row = observations.iter().find(|row| row.key.session.id == session.id).unwrap();
     assert_eq!(row.request_counters.as_ref().unwrap().cpu_ms.as_deref(), Some("10"));
     assert_eq!(row.session_counters.logical_reads.as_deref(), Some("9007199254740993"));
     assert_eq!(row.database, session.database);
     assert_eq!(row.command, session.command);
     assert_eq!(row.transaction_age_ms.as_deref(), Some("90000"));
-    assert!(!serde_json::to_string(row).unwrap().contains("private-activity-canary"));
-    assert_eq!(description.observation.activity().unwrap().native_rows, 2);
-    assert_eq!(exporting.query_count(), 2);
-    assert_eq!(interactive.query_count(), 2);
+    assert!(row.statement_identity.is_some());
+    assert_eq!(row.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
+    assert!(!serde_json::to_string(&observations).unwrap().contains("private-activity-canary"));
+    let native = description.observation.activity().unwrap();
+    assert_eq!(native.native_rows, 2);
+    assert_eq!(native.coverage.records, 2);
+    assert!(native.coverage.complete_scope);
+    assert_eq!(native.population, ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers);
+    assert_eq!(exporting.query_count(), 3);
+    assert!(exporting.io.calls[2].sql.contains("WHERE sd.database_id=DB_ID()"));
+    assert!(!exporting.io.calls.iter().any(|call| call.sql.contains("sys.dm_exec_sql_text")));
     assert!(xml_parameter(&interactive.io.calls[1]).contains("session=\"99\""));
-    assert!(!xml_parameter(&exporting.io.calls[1]).contains("session=\"99\""));
 }
 #[tokio::test]
-async fn idle_previous_batches_remain_visible_without_becoming_current_export_statements() {
+async fn idle_previous_batches_are_separate_from_the_metadata_baseline() {
     let last = "UPDATE dbo.orders SET status=N'previous-batch-canary'";
     let rows = vec![metadata(42), idle(55)];
     let mut interactive = reader(
@@ -228,28 +250,25 @@ async fn idle_previous_batches_remain_visible_without_becoming_current_export_st
     assert_eq!(sleeper.elapsed_ms, Some(300_000.0));
     assert_eq!(sleeper.cpu_ms, Some(1000.0));
     assert_eq!(interactive.io.calls[2].sql, sql::details(true, sql::QueryPolicy::Activity));
-    let mut exporting = reader(
-        vec![Ok(rows), Ok(vec![details(42, "SELECT 1")])],
-        ActivityScope::CurrentDatabase,
-        IdentityDetail::AzureDatabase,
-    );
-    let (_, observations, _) =
-        crate::telemetry::activity::capture(&mut exporting, &ActivityPolicy::default()).await.unwrap();
-    assert_eq!(observations.len(), 2);
-    assert_eq!(exporting.query_count(), 2);
+    let mut exporting = baseline_reader(rows);
+    let (_, observations) = crate::telemetry::activity::capture(&mut exporting).await.unwrap();
     let sleeper = observations.iter().find(|row| row.key.session.id == "55").unwrap();
+    assert!(sleeper.idle && sleeper.key.request.is_none());
+    assert_eq!(sleeper.open_transactions, Some(1));
     assert_eq!(sleeper.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
+    assert!(sleeper.statement_identity.is_none());
     assert!(!serde_json::to_string(&observations).unwrap().contains("previous-batch-canary"));
+    assert_eq!(exporting.query_count(), 3);
 }
 #[tokio::test]
-async fn quiet_and_healthy_export_polls_do_not_fetch_sql() {
-    for row in [replace(&metadata(42), &[("session_id", Val::Null)]), healthy(42)] {
-        let mut reader = reader(vec![Ok(vec![row])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-        let (_, observations, blocking) =
-            crate::telemetry::activity::capture(&mut reader, &ActivityPolicy::default()).await.unwrap();
-        assert!(observations.is_empty());
-        assert!(blocking.is_empty());
-        assert_eq!(reader.query_count(), 1);
+async fn quiet_and_short_request_baselines_never_fetch_sql_or_drop_normal_rows() {
+    for (row, expected) in [(replace(&metadata(42), &[("session_id", Val::Null)]), 0), (healthy(42), 1)] {
+        let mut reader = baseline_reader(vec![row]);
+        let (description, observations) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+        assert_eq!(observations.len(), expected);
+        assert_eq!(description.observation.activity().unwrap().coverage.records, expected as u32);
+        assert_eq!(reader.query_count(), 3);
+        assert!(reader.io.calls.iter().all(|call| !call.sql.contains("sys.dm_exec_sql_text")));
     }
 }
 #[tokio::test]
@@ -275,8 +294,7 @@ async fn a_reused_request_or_advancing_statement_never_supplies_unowned_text() {
         ActivityScope::CurrentDatabase,
         IdentityDetail::AzureDatabase,
     );
-    let (_, observations, _) =
-        crate::telemetry::activity::capture(&mut reader, &ActivityPolicy::default()).await.unwrap();
+    let (_, observations) = enriched(&mut reader).await;
     assert_eq!(observations[0].statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::Missing });
 }
 #[tokio::test]
@@ -310,8 +328,7 @@ async fn multiple_requests_on_one_session_keep_their_own_text_even_when_results_
         ActivityScope::CurrentDatabase,
         IdentityDetail::AzureDatabase,
     );
-    let (_, observations, _) =
-        crate::telemetry::activity::capture(&mut reader, &ActivityPolicy::default()).await.unwrap();
+    let (_, observations) = enriched(&mut reader).await;
     assert_eq!(observations.len(), 2);
     let text = serde_json::to_string(&observations).unwrap();
     assert!(text.contains("first_request") && text.contains("second_request"));
@@ -383,7 +400,7 @@ async fn stopped_or_unconfirmed_reads_close_owned_work_and_never_return_fresh_li
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
 }
 #[tokio::test]
-async fn other_databases_and_unknown_wait_owners_do_not_become_database_incidents() {
+async fn baseline_retains_other_database_context_and_unknown_owners_without_promoting_incidents() {
     let other =
         replace(&metadata(42), &[("scope_basis", Val::Int(5)), ("session_database", Val::Text("elsewhere".into()))]);
     let unknown = replace(
@@ -394,12 +411,12 @@ async fn other_databases_and_unknown_wait_owners_do_not_become_database_incident
             ("blocking_session_id", Val::Int(-5)),
         ],
     );
-    let mut reader =
-        reader(vec![Ok(vec![other, unknown])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-    let (_, observations, blocking) =
-        crate::telemetry::activity::capture(&mut reader, &ActivityPolicy::default()).await.unwrap();
-    assert!(observations.is_empty());
-    assert!(blocking.is_empty());
+    let mut reader = baseline_reader(vec![other, unknown]);
+    let (_, observations) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+    assert_eq!(observations.len(), 2);
+    assert_eq!(observations[0].scope, ActivityScopeBasis::OtherDatabase);
+    let selected = ActivityEvidence::select(&observations, &ActivityPolicy::default()).unwrap();
+    assert!(selected.observations.is_empty() && selected.blocking.is_empty());
     for id in [-2, -3, -4, -5, -6] {
         let row = replace(&metadata(42), &[("blocking_session_id", Val::Int(id))]);
         let owner = rows::record(&row).unwrap().unwrap().facts.wait.unwrap().owners.remove(0);
@@ -425,12 +442,11 @@ async fn malformed_detail_sets_and_oversized_sql_do_not_replace_valid_metadata()
             ActivityScope::CurrentDatabase,
             IdentityDetail::AzureDatabase,
         );
-        let (description, observations, _) =
-            crate::telemetry::activity::capture(&mut reader, &ActivityPolicy::default()).await.unwrap();
+        let (actual_details, observations) = enriched(&mut reader).await;
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].request_counters.as_ref().unwrap().cpu_ms.as_deref(), Some("10"));
         assert_eq!(observations[0].statement, DefinitionPayload::Unavailable { reason: expected_reason });
-        assert_eq!(description.observation.activity().unwrap().details, expected_details);
+        assert_eq!(actual_details, expected_details);
     }
 }
 #[tokio::test]
@@ -504,14 +520,12 @@ async fn native_requests_without_a_statement_span_preserve_counters_without_fetc
         assert_eq!(live.sessions[0].cpu_ms, Some(10.0));
         assert!(live.sessions[0].sql.is_none());
         assert_eq!(interactive.query_count(), 1);
-        let mut exporting =
-            reader(vec![Ok(vec![metadata])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-        let (_, observations, _) =
-            crate::telemetry::activity::capture(&mut exporting, &ActivityPolicy::default()).await.unwrap();
+        let mut exporting = baseline_reader(vec![metadata]);
+        let (_, observations) = crate::telemetry::activity::capture(&mut exporting).await.unwrap();
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].request_counters.as_ref().unwrap().cpu_ms.as_deref(), Some("10"));
         assert_eq!(observations[0].statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::Missing });
-        assert_eq!(exporting.query_count(), 1);
+        assert_eq!(exporting.query_count(), 3);
     }
 }
 
@@ -529,18 +543,12 @@ async fn an_observed_request_wins_over_a_later_absence_probe_without_attributing
     assert_eq!(live.sessions[0].cpu_ms, Some(10.0));
     assert_eq!(live.sessions[0].command.as_deref(), Some("SELECT"));
     assert!(live.sessions[0].sql.is_none());
-    let mut exporting = reader(
-        vec![Ok(vec![metadata]), Ok(vec![ended])],
-        ActivityScope::CurrentDatabase,
-        IdentityDetail::AzureDatabase,
-    );
-    let (_, observations, _) =
-        crate::telemetry::activity::capture(&mut exporting, &ActivityPolicy::default()).await.unwrap();
+    let mut exporting = baseline_reader(vec![metadata]);
+    let (_, observations) = crate::telemetry::activity::capture(&mut exporting).await.unwrap();
     assert_eq!(observations.len(), 1);
-    assert!(!observations[0].idle);
-    assert!(observations[0].key.request.is_some());
+    assert!(!observations[0].idle && observations[0].key.request.is_some());
     assert_eq!(observations[0].request_counters.as_ref().unwrap().cpu_ms.as_deref(), Some("10"));
-    assert_eq!(observations[0].statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::Missing });
+    assert_eq!(observations[0].statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
 }
 
 #[tokio::test]
@@ -573,20 +581,15 @@ async fn page_wait_targets_share_the_request_identity_without_inventing_a_holder
         assert_eq!(targets[0].native.qualifiers["source"], "sys.dm_exec_requests.wait_resource");
         assert!(session.blocked_by.is_none(), "a waited-on page is not its holder");
         assert_eq!(session.sql.as_deref(), Some(sql));
-        let mut exporting = reader(
-            vec![Ok(vec![row]), Ok(vec![details(42, sql)])],
-            ActivityScope::CurrentDatabase,
-            IdentityDetail::AzureDatabase,
-        );
-        let (_, observations, blocking) =
-            crate::telemetry::activity::capture(&mut exporting, &ActivityPolicy::default()).await.unwrap();
+        let mut exporting = baseline_reader(vec![row]);
+        let (_, observations) = crate::telemetry::activity::capture(&mut exporting).await.unwrap();
         let wait = observations[0].wait.as_ref().unwrap();
         assert_eq!(&wait.identified_resources, targets);
         assert!(wait.owners.iter().all(|owner| !owner.is_blocker()));
         assert_eq!(observations[0].conditions(&ActivityPolicy::default()), vec![ActivityCondition::LongRunning]);
-        assert!(blocking.is_empty());
+        assert!(ActivityEvidence::select(&observations, &ActivityPolicy::default()).unwrap().blocking.is_empty());
         assert_eq!(interactive.query_count(), 2);
-        assert_eq!(exporting.query_count(), 2);
+        assert_eq!(exporting.query_count(), 3);
     }
 }
 
@@ -605,4 +608,131 @@ async fn an_unidentified_page_stays_unknown_and_invalid_native_identifiers_canno
         assert!(reader.observe().await.is_err());
         assert_eq!(reader.query_count(), 1);
     }
+}
+
+#[tokio::test]
+async fn baseline_retains_prefix_and_permission_limited_positives_without_absence_authority() {
+    let mut prefix = baseline_reader(vec![healthy(42), healthy(43)]);
+    prefix.options.budget.max_snapshot_rows = 1;
+    let (description, observations) = crate::telemetry::activity::capture(&mut prefix).await.unwrap();
+    assert_eq!(observations.len(), 1);
+    assert_eq!(observations[0].key.session.id, "42");
+    let native = description.observation.activity().unwrap();
+    assert_eq!(native.native_rows, 2);
+    assert_eq!(native.coverage.records, 1);
+    assert_eq!(native.coverage.state, culprit_core::SourceState::Partial);
+    assert_eq!(native.coverage.stopped, Some(CollectionStop::RowLimit));
+    assert!(!native.coverage.complete_scope);
+    assert_eq!(prefix.io.calls[1].limit, 2);
+    assert_eq!(prefix.query_count(), 3);
+    let mut restricted = baseline_reader(vec![replace(&healthy(42), &[("database_wide", Val::Int(0))])]);
+    let (description, observations) = crate::telemetry::activity::capture(&mut restricted).await.unwrap();
+    assert_eq!(observations.len(), 1);
+    let native = description.observation.activity().unwrap();
+    assert_eq!(native.coverage.state, culprit_core::SourceState::Partial);
+    assert_eq!(native.coverage.error_code, Some(ErrorCode::PermissionDenied));
+    assert!(!native.coverage.complete_scope);
+}
+
+#[tokio::test]
+async fn baseline_does_not_invent_generations_or_known_transaction_counts_for_masked_rows() {
+    let missing = replace(&healthy(42), &[("session_generation", Val::Null)]);
+    let unknown_transactions = replace(&healthy(43), &[("open_transaction_count", Val::Null)]);
+    let mut reader = baseline_reader(vec![missing, unknown_transactions]);
+    let (description, observations) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+    assert_eq!(observations.len(), 1);
+    assert_eq!(observations[0].key.session.id, "43");
+    assert!(observations[0].open_transactions.is_none());
+    assert_eq!(description.observation.activity().unwrap().native_rows, 2);
+    assert!(!description.observation.activity().unwrap().coverage.complete_scope);
+}
+
+#[tokio::test]
+async fn a_forty_second_native_lock_wait_is_retained_without_a_visible_owner_or_optional_reads() {
+    let row = replace(
+        &metadata(42),
+        &[("elapsed_ms", Val::Int(40_000)), ("blocking_session_id", Val::Int(0)), ("blocker_generation", Val::Null)],
+    );
+    let mut reader = baseline_reader(vec![row]);
+    let (_, observations) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+    let row = &observations[0];
+    assert_eq!(row.waiting_on_lock, Some(true));
+    assert_eq!(row.elapsed_ms.as_deref(), Some("40000"));
+    assert_eq!(row.wait.as_ref().unwrap().elapsed_ms.as_deref(), Some("40000"));
+    assert!(row.wait.as_ref().unwrap().owners.is_empty());
+    assert!(matches!(row.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }));
+    assert_eq!(reader.query_count(), 3);
+    assert!(reader.io.calls.iter().all(|call| !call.sql.contains("sys.dm_exec_sql_text")
+        && !call.sql.contains("sys.dm_db_page_info")
+        && !call.sql.contains("sys.dm_tran_locks")));
+}
+
+#[test]
+fn native_latches_and_untracked_owners_do_not_become_sql_lock_verdicts() {
+    for wait_type in [Val::Null, Val::Text("PAGELATCH_EX".into()), Val::Text("EXTENSION_FUTURE".into())] {
+        let row = replace(
+            &metadata(42),
+            &[("wait_type", wait_type), ("blocking_session_id", Val::Int(-5)), ("blocker_generation", Val::Null)],
+        );
+        let row = rows::record(&row).unwrap().unwrap();
+        assert!(row.facts.waiting_on_lock.is_none());
+        assert!(matches!(row.facts.wait.as_ref().unwrap().owners[0], ActivityWaitOwner::Unknown { .. }));
+    }
+}
+
+#[tokio::test]
+async fn baseline_final_identity_clock_and_terminal_read_failures_cannot_commit_a_fresh_frame() {
+    for after in [
+        replace(&authority(&metadata(0)), &[("physical_incarnation", Val::Text("new-source".into()))]),
+        replace(&authority(&metadata(0)), &[("observed_at", Val::Text("2020-01-01T05:59:59Z".into()))]),
+    ] {
+        let mut reader = baseline_reader(vec![healthy(42)]);
+        reader.io.replies.pop_back();
+        reader.io.replies.push_back(Ok(vec![after]));
+        let error = crate::telemetry::activity::capture(&mut reader).await.unwrap_err();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+        assert_eq!(reader.query_count(), 3);
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
+    for stop in [CollectionStop::Cancelled, CollectionStop::TimedOut, CollectionStop::CancellationUnconfirmed] {
+        let mut reader = baseline_reader(vec![healthy(42)]);
+        reader.io.replies.pop_back();
+        reader.io.replies.push_back(Err(ReadError::Stopped(stop)));
+        let error = crate::telemetry::activity::capture(&mut reader).await.unwrap_err();
+        assert_eq!(CollectionStop::from_error(&error), stop);
+        assert_eq!(reader.query_count(), 3);
+        assert!(reader.io.replies.is_empty());
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn denied_optional_authority_retains_native_actors_but_cannot_authorize_focus_or_absence() {
+    for before in [true, false] {
+        let mut reader = baseline_reader(vec![healthy(42)]);
+        let denied = Err(ReadError::Source(Error::new(ErrorCode::PermissionDenied, "fixture")));
+        if before {
+            reader.io.replies.pop_front();
+            reader.io.replies.push_front(denied);
+        } else {
+            reader.io.replies.pop_back();
+            reader.io.replies.push_back(denied);
+        }
+        let (description, observations) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+        assert_eq!(observations.len(), 1);
+        let native = description.observation.activity().unwrap();
+        assert!(native.epoch.is_none());
+        assert_eq!(native.coverage.state, culprit_core::SourceState::Partial);
+        assert_eq!(native.coverage.error_code, Some(ErrorCode::PermissionDenied));
+        assert!(!native.coverage.complete_scope);
+        assert_eq!(reader.query_count(), 3);
+    }
+    let mut reader = reader(
+        vec![Err(ReadError::Stopped(CollectionStop::Cancelled))],
+        ActivityScope::CurrentDatabase,
+        IdentityDetail::AzureDatabase,
+    );
+    let error = crate::telemetry::activity::capture(&mut reader).await.unwrap_err();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::Cancelled);
+    assert_eq!(reader.query_count(), 1, "no actor read follows a terminal authority failure");
 }

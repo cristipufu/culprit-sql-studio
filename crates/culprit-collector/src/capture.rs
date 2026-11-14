@@ -109,7 +109,7 @@ async fn collect_prepared(
         biased;
         _=cancellation.cancelled()=>Err(CollectionStop::Cancelled.error()),
         _=tokio::time::sleep_until(deadline)=>Err(CollectionStop::TimedOut.error()),
-        result=observe(source.as_mut(),&files,&request,lease.as_deref())=>result,
+        result=observe(source.as_mut(),&files,&request)=>result,
     };
     let mut shutdown =
         tokio::time::timeout(SOURCE_SHUTDOWN_TIMEOUT, source.close()).await.unwrap_or(SourceShutdown::Unconfirmed);
@@ -148,17 +148,8 @@ async fn observe(
     source: &mut dyn TelemetrySource,
     files: &ObservationWriter,
     request: &CollectionRequest,
-    lease: Option<&CaptureLease<'_>>,
 ) -> Result<Option<Error>> {
     let description = source.describe().await?;
-    let baseline = if request.collection() == culprit_core::telemetry::TelemetryCollection::Activity {
-        match lease {
-            Some(lease) => lease.baseline(&description).await?,
-            None => None,
-        }
-    } else {
-        None
-    };
     files.apply(move |files| files.describe(description)).await?;
     let mut failure = None;
     for (index, stream) in request.collection().source_streams().iter().copied().enumerate() {
@@ -202,15 +193,6 @@ async fn observe(
             files
                 .apply(move |files| {
                     files.confirm_source(completion)?;
-                    if files.manifest.request.collection() == culprit_core::telemetry::TelemetryCollection::Activity {
-                        let before = baseline
-                            .as_ref()
-                            .and_then(|baseline| {
-                                files.manifest.description.as_ref().map(|source| baseline.matching(source))
-                            })
-                            .unwrap_or(&[]);
-                        files.derive_activity(before)?;
-                    }
                     Ok(())
                 })
                 .await?;

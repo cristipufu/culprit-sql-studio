@@ -1,8 +1,13 @@
-//! Activity and incident rows share one projection of native session/request facts.
+//! Native session/request observations keep blocker relationships in the same authenticated row.
 use super::*;
 use ScalarType::*;
 
 const OBSERVATION: &[Field] = &[
+    // Retain the complete typed metadata representation for exact authenticated reconstruction. The scalar
+    // columns below remain directly queryable; payload text still follows the shared recovery inventory.
+    Field::required("ActivityFacts", "/_projection/activity", JsonContainer),
+    Field::required("BlockingStatus", "/_projection/activity/blocking_status", String),
+    Field::optional("WaitingOnLock", "/_projection/activity/waiting_on_lock", Bool),
     Field::required("SessionId", "/_projection/activity/key/session/id", String),
     Field::required("SessionGeneration", "/_projection/activity/key/session/generation", String),
     Field::optional("RequestId", "/_projection/activity/key/request/id", String),
@@ -14,7 +19,7 @@ const OBSERVATION: &[Field] = &[
     Field::optional("NativeDatabase", "/_projection/activity/database", String),
     Field::optional("Command", "/_projection/activity/command", String),
     Field::optional("LastRequestAgeMs", "/_projection/activity/last_request_age_ms", ExactCounter),
-    Field::required("OpenTransactions", "/_projection/activity/open_transactions", Long),
+    Field::optional("OpenTransactions", "/_projection/activity/open_transactions", Long),
     Field::optional("ElapsedMs", "/_projection/activity/elapsed_ms", ExactCounter),
     Field::optional("TransactionAgeMs", "/_projection/activity/transaction_age_ms", ExactCounter),
     Field::optional("SessionCpuMs", "/_projection/activity/session_counters/cpu_ms", ExactCounter),
@@ -30,39 +35,11 @@ const OBSERVATION: &[Field] = &[
     Field::optional("WaitResources", "/_projection/activity/wait/identified_resources", JsonContainer),
     Field::optional("WaitOwners", "/_projection/activity/wait/owners", JsonContainer),
     Field::optional("QueryHash", "/_projection/activity/query_hash", String),
+    Field::optional("StatementIdentity", "/_projection/activity/statement_identity", JsonContainer),
     Field::optional("ClientApplication", "/_projection/activity/client/application", String),
     Field::optional("ClientUser", "/_projection/activity/client/user", String),
     Field::optional("ClientHost", "/_projection/activity/client/host", String),
 ];
-const INCIDENT: &[Field] = &[
-    Field::required("ChangeId", "/record/data/id", String),
-    Field::required("ChangedAt", "/record/data/at", Timestamp),
-    Field::required("Transition", "/record/data/transition", String),
-    Field::required("IncidentId", "/record/data/state/id", String),
-    Field::required("FirstSeenAt", "/record/data/state/first_seen_at", Timestamp),
-    Field::required("LastSeenAt", "/record/data/state/last_seen_at", Timestamp),
-    Field::required("LastEmittedAt", "/record/data/state/last_emitted_at", Timestamp),
-    Field::required("Conditions", "/record/data/state/conditions", JsonContainer),
-    Field::required("Progress", "/record/data/state/progress", String),
-];
-const BLOCKING: &[Field] = &[
-    Field::required("WaiterSessionId", "/record/data/waiter/session/id", String),
-    Field::required("WaiterSessionGeneration", "/record/data/waiter/session/generation", String),
-    Field::required("WaiterRequestId", "/record/data/waiter/request/id", String),
-    Field::required("WaiterRequestGeneration", "/record/data/waiter/request/generation", String),
-    Field::required("OwnerKind", "/record/data/owner/kind", String),
-    Field::optional("OwnerSessionId", "/record/data/owner/id", String),
-    Field::optional("OwnerSessionGeneration", "/record/data/owner/generation", String),
-    Field::optional("OwnerTransactionId", "/record/data/owner/native_id", String),
-    Field::optional("TransactionOwner", "/record/data/owner/owner", String),
-    Field::required("OwnerObserved", "/record/data/owner_observed", Bool),
-];
 pub fn observations(common: &[Field]) -> Result<LogicalSchema> {
     LogicalSchema::new("CulpritActivityV1", common.iter().chain(OBSERVATION).copied())
-}
-pub fn incidents(common: &[Field]) -> Result<LogicalSchema> {
-    LogicalSchema::new("CulpritActivityIncidentsV1", common.iter().chain(INCIDENT).chain(OBSERVATION).copied())
-}
-pub fn blocking(common: &[Field]) -> Result<LogicalSchema> {
-    LogicalSchema::new("CulpritBlockingV1", common.iter().chain(BLOCKING).copied())
 }

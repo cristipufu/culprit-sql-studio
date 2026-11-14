@@ -1,6 +1,6 @@
 //! Rebuilds bounded delivery metadata from remote commits without querying a source database.
 use super::{
-    activity_recovery::{ActivityRestoreBudget, load_activity_checkpoint},
+    diagnostic_recovery::{load_diagnostic_checkpoint, load_diagnostic_input},
     journal::{DeliveryJournal, HydrationPriority},
     recovery::{self, RecoveryOrder, RecoveryPage, RecoveryStore},
 };
@@ -52,23 +52,52 @@ async fn restore_ranges(
     Ok(())
 }
 
-/// Recover bounded incident state before activating a source owner. Empty heads are installed too.
-pub async fn restore_activity_page(
+/// Restore the full working set before source activation; successful empty checkpoints are installed too.
+pub async fn restore_diagnostics_page(
     outbox: &mut crate::outbox::Outbox,
     store: &dyn RecoveryStore,
     cursor: Option<&str>,
     limit: u32,
-    budget: ActivityRestoreBudget,
-) -> Result<super::recovery::ActivityHeadPage> {
+) -> Result<super::recovery::DiagnosticHeadPage> {
     if outbox.recovery_store_id() != Some(store.id()) {
         return Err(DeliveryProblem::DestinationChanged.error());
     }
-    let page = store.activity_heads(cursor, limit).await?;
+    let page = store.diagnostic_heads(cursor, limit).await?;
     if page.heads.len() > limit as usize {
         return Err(DeliveryProblem::Capacity.error());
     }
     for head in &page.heads {
-        outbox.restore_activity(load_activity_checkpoint(store, head, budget).await?).await?;
+        outbox.restore_diagnostics(load_diagnostic_checkpoint(store, head).await?).await?;
+    }
+    Ok(page)
+}
+/// Published native inputs remain here until their first diagnostic checkpoint is durably committed.
+/// The supplied logical label never authorizes or opens a source connection.
+pub async fn restore_diagnostic_inputs_page(
+    outbox: &mut crate::outbox::Outbox,
+    store: &dyn RecoveryStore,
+    cursor: Option<&str>,
+    limit: u32,
+    connection_for: impl Fn(&culprit_core::telemetry::CollectionDescription) -> Result<String>,
+) -> Result<RecoveryPage> {
+    use culprit_core::telemetry::SourceObservation;
+    if outbox.recovery_store_id() != Some(store.id()) {
+        return Err(DeliveryProblem::DestinationChanged.error());
+    }
+    let page = store.pending_diagnostic_inputs(cursor, limit).await?;
+    if page.ranges.len() > limit as usize {
+        return Err(DeliveryProblem::Capacity.error());
+    }
+    for manifest in &page.ranges {
+        if matches!(
+            manifest.source.observation,
+            SourceObservation::Activity(_) | SourceObservation::FocusedPageWait { .. }
+        ) {
+            let connection = connection_for(&manifest.source)?;
+            outbox
+                .restore_diagnostic_input(&connection, load_diagnostic_input(store, &manifest.range_id).await?)
+                .await?;
+        }
     }
     Ok(page)
 }

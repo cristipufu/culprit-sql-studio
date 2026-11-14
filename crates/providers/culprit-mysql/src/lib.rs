@@ -350,10 +350,7 @@ impl Provider for MysqlProvider {
                     host: r.text("host"),
                     database: r.text("db"),
                     command: active.then(|| command.to_uppercase()),
-                    waiting_on_lock: Some(
-                        blockers.contains_key(&id)
-                            || wait.as_deref().is_some_and(|s| s.to_ascii_lowercase().contains("lock")),
-                    ),
+                    waiting_on_lock: native::activity::waiting_on_lock(wait.as_deref(), blockers.contains_key(&id)),
                     wait: wait.map(|w| with_progress(w, r)),
                     wait_ms: None,
                     wait_resources: resources.get(&id).cloned(),

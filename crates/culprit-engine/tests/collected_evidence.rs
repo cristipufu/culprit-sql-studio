@@ -108,7 +108,7 @@ async fn authenticated_archived_scan_measurements_reach_the_existing_pure_checks
     assert_eq!(workload.kind, None);
     assert!(workload.windowed && workload.counter_set.is_none() && workload.history_inputs.is_empty());
     assert_eq!(analysis.context.evidence.source, source);
-    assert_eq!(analysis.context.evidence.manifest_sha256, fixture.range.manifest_digest());
+    assert_eq!(analysis.context.evidence.recovery_manifest_sha256, fixture.range.manifest_digest());
     assert_eq!(analysis.provenance.as_ref().unwrap().origin, culprit_core::AnalysisOrigin::ArchivedTelemetry);
     let original = scan.workload.as_ref().unwrap();
     for input in &analysis.context.query_inputs {

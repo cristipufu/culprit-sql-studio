@@ -73,7 +73,7 @@ impl ReadPlan {
 }
 
 fn target(context: &LookupContext, record: &HeaderRecord) -> Option<targeted::Target> {
-    if record.address.database != context.database_id || !record.address.matches(&record.header).ok()? {
+    if record.address.database != context.authority.database_id || !record.address.matches(&record.header).ok()? {
         return None;
     }
     let mapped = mapped_target(context, record).ok()?;

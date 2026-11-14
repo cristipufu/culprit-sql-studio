@@ -2,5 +2,6 @@
 import type { CaptureIdentity } from "./CaptureIdentity";
 import type { CollectionStatus } from "./CollectionStatus";
 import type { ErrorCode } from "./ErrorCode";
+import type { StateSourceCoverage } from "./StateSourceCoverage";
 
-export type ActivityMonitorEvent = { attempt: number, status: CollectionStatus, error_code: ErrorCode | null, capture: CaptureIdentity | null, observed_at: string | null, active_incidents: number | null, changes: number | null, source_queries: number | null, };
+export type ActivityMonitorEvent = { attempt: number, status: CollectionStatus, error_code: ErrorCode | null, capture: CaptureIdentity | null, observed_at: string | null, active_episodes: number | null, uncertain_episodes: number | null, native_coverage: StateSourceCoverage | null, source_queries: number | null, };

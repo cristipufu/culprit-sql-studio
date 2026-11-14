@@ -18,13 +18,16 @@ mod compilation;
 mod counters;
 mod definitions;
 mod delivery;
+mod diagnostic_focus;
+mod diagnostic_observation;
+mod diagnostics;
 mod discovery;
 mod events;
 mod fleet;
+mod focus;
 mod foreign_keys;
 mod grants;
 mod identity;
-mod incidents;
 mod index_operations;
 mod indexes;
 mod io;
@@ -43,6 +46,7 @@ mod persistent_versions;
 mod queues;
 mod read_accounting;
 mod read_metrics;
+mod recipes;
 mod replication;
 mod request_resources;
 mod resources;
@@ -75,13 +79,16 @@ pub use compilation::*;
 pub use counters::*;
 pub use definitions::*;
 pub use delivery::*;
+pub use diagnostic_focus::*;
+pub use diagnostic_observation::*;
+pub use diagnostics::*;
 pub use discovery::*;
 pub use events::*;
 pub use fleet::*;
+pub use focus::*;
 pub use foreign_keys::*;
 pub use grants::*;
 pub use identity::*;
-pub use incidents::*;
 pub use index_operations::*;
 pub use indexes::*;
 pub use io::*;
@@ -100,6 +107,7 @@ pub use persistent_versions::*;
 pub use queues::*;
 pub use read_accounting::*;
 pub use read_metrics::*;
+pub use recipes::*;
 pub use replication::*;
 pub use request_resources::*;
 pub use resources::*;
@@ -207,12 +215,6 @@ impl CollectionRequest {
     pub fn collection(&self) -> TelemetryCollection {
         self.selection.collection()
     }
-    pub fn activity_policy(&self) -> Option<&ActivityPolicy> {
-        match &self.selection {
-            CollectionSelection::Activity { policy } => Some(policy),
-            _ => None,
-        }
-    }
     pub fn bounds(&self) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
         let (from, until) = match &self.selection {
             CollectionSelection::QueryHistory { from, until }
@@ -226,10 +228,22 @@ impl CollectionRequest {
     pub fn validate(&self) -> Result<()> {
         self.subject.validate()?;
         self.budget.validate()?;
-        if let Some(policy) = self.activity_policy() {
-            policy.validate()?;
-        } else if !matches!(self.selection, CollectionSelection::Snapshot { .. }) {
-            self.bounds()?;
+        match &self.selection {
+            CollectionSelection::FocusedPageWait { focus } => {
+                self.subject.require_database()?;
+                if !focus.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::Diagnostics { parent, controller_version, step_id } => {
+                if !parent.is_valid() || *controller_version == 0 || !valid_digest(step_id) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::Activity | CollectionSelection::Snapshot { .. } => {}
+            _ => {
+                self.bounds()?;
+            }
         }
         Ok(())
     }
@@ -270,9 +284,7 @@ pub enum TelemetryStream {
     PlanDefinitions,
     ResourceSamples,
     ActivityObservations,
-    BlockingEdges,
-    ActivityIncidents,
-    ActivityCheckpoints,
+    DiagnosticCheckpoints,
     DeadlockEvents,
     OperationalSamples,
     WaitCounterSamples,
@@ -283,16 +295,19 @@ pub enum TelemetryStream {
 }
 
 impl TelemetryStream {
-    pub const ALL: [Self; 16] = [
+    /// Checkpoints travel through exact private recovery; warehouse publication contains analytical records.
+    pub fn delivery_required(self) -> bool {
+        self != Self::DiagnosticCheckpoints
+    }
+
+    pub const ALL: [Self; 14] = [
         Self::QueryRuntime,
         Self::QueryWaits,
         Self::QueryDefinitions,
         Self::PlanDefinitions,
         Self::ResourceSamples,
         Self::ActivityObservations,
-        Self::BlockingEdges,
-        Self::ActivityIncidents,
-        Self::ActivityCheckpoints,
+        Self::DiagnosticCheckpoints,
         Self::DeadlockEvents,
         Self::OperationalSamples,
         Self::WaitCounterSamples,
@@ -310,9 +325,7 @@ impl TelemetryStream {
             Self::PlanDefinitions => "plans.ndjson",
             Self::ResourceSamples => "resources.ndjson",
             Self::ActivityObservations => "activity.ndjson",
-            Self::BlockingEdges => "blocking.ndjson",
-            Self::ActivityIncidents => "incidents.ndjson",
-            Self::ActivityCheckpoints => "activity-state.ndjson",
+            Self::DiagnosticCheckpoints => "diagnostic-state.ndjson",
             Self::DeadlockEvents => "deadlocks.ndjson",
             Self::OperationalSamples => "operations.ndjson",
             Self::WaitCounterSamples => "wait-counters.ndjson",
@@ -352,13 +365,9 @@ pub enum TelemetryRecord {
     #[serde(rename = "resource-samples")]
     ResourceSample(ResourceMeasurement),
     #[serde(rename = "activity-observations")]
-    Activity(ActivityObservation),
-    #[serde(rename = "blocking-edges")]
-    Blocking(BlockingObservation),
-    #[serde(rename = "activity-incidents")]
-    Incident(ActivityIncidentChange),
-    #[serde(rename = "activity-checkpoints")]
-    ActivityCheckpoint(ActivityIncidentState),
+    Activity(Box<ActivityObservation>),
+    #[serde(rename = "diagnostic-checkpoints")]
+    DiagnosticCheckpoint(DiagnosticCheckpointPart),
     #[serde(rename = "deadlock-events")]
     Deadlock(DeadlockEvent),
     #[serde(rename = "operational-samples")]
@@ -376,7 +385,9 @@ pub enum TelemetryRecord {
 }
 
 /// Identity within one source interval and observation; it does not prove continuity across source resets.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
+#[ts(export)]
 pub enum NativeRecordIdentity {
     Runtime(NativeIdentity),
     Waits { key: NativeIdentity, category: String },
@@ -384,9 +395,7 @@ pub enum NativeRecordIdentity {
     PlanDefinition(String),
     ResourceSample { at: String, replica_id: Option<String> },
     Activity(ActivityKey),
-    Blocking(ActivityKey, ActivityWaitOwner),
-    Incident(String),
-    Checkpoint(String),
+    DiagnosticCheckpoint(String),
     Deadlock { position: String, ordinal: u32 },
     Operational { source: String, key: String },
     WaitCounter { source: String, wait_type: String },
@@ -394,6 +403,12 @@ pub enum NativeRecordIdentity {
     Setting { source: String, namespace: String, name: String },
     Tuning { source: String, key: String },
     ObjectDefinition { source: String, key: String },
+}
+
+impl From<ActivityObservation> for TelemetryRecord {
+    fn from(observation: ActivityObservation) -> Self {
+        Self::Activity(Box::new(observation))
+    }
 }
 
 impl TelemetryRecord {
@@ -426,24 +441,37 @@ impl TelemetryRecord {
             Self::Activity(row) => {
                 row.redact(source.target.engine());
                 source.observation.activity().is_some()
+                    && source
+                        .target
+                        .database()
+                        .is_none_or(|database| row.database_context_is_consistent(&database.database))
             }
-            Self::Incident(row) => {
-                row.state.observation.redact(source.target.engine());
-                source.observation.activity().is_some()
-            }
-            Self::ActivityCheckpoint(row) => {
-                row.observation.redact(source.target.engine());
-                source.observation.activity().is_some()
-            }
+            Self::DiagnosticCheckpoint(row) => match &source.observation {
+                SourceObservation::Diagnostics(description) => {
+                    row.is_valid()
+                        && row.target == source.target
+                        && row.input == description.parent
+                        && row.controller_version == description.controller_version
+                }
+                _ => false,
+            },
             Self::Deadlock(row) => {
                 row.at = canonical_time(&row.at)?;
                 row.redact(source.target.engine());
                 source.observation.events().is_some_and(|history| history.accepts(&row.at))
             }
-            Self::Blocking(_) => source.observation.activity().is_some(),
             Self::Operational(row) => {
                 row.fact.redact(source.target.engine());
-                source.observation.accepts_snapshot_record(row.stream(), &row.source)
+                let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
+                match (&source.observation, &row.fact) {
+                    (SourceObservation::Diagnostics(description), OperationalFact::DiagnosticRevision(revision)) => {
+                        accepted
+                            && revision.controller_version == description.controller_version
+                            && revision.episode.scope.target.telemetry_id()? == source.target.telemetry_id()?
+                    }
+                    (SourceObservation::Diagnostics(_), _) | (_, OperationalFact::DiagnosticRevision(_)) => false,
+                    _ => accepted,
+                }
             }
             Self::ObjectDefinition(row) => {
                 *row = row.for_export(source.target.engine())?;
@@ -485,9 +513,7 @@ impl TelemetryRecord {
                 NativeRecordIdentity::ResourceSample { at: row.at.clone(), replica_id: row.replica_id.clone() }
             }
             Self::Activity(row) => NativeRecordIdentity::Activity(row.key.clone()),
-            Self::Blocking(row) => NativeRecordIdentity::Blocking(row.waiter.clone(), row.owner.clone()),
-            Self::Incident(row) => NativeRecordIdentity::Incident(row.id.clone()),
-            Self::ActivityCheckpoint(row) => NativeRecordIdentity::Checkpoint(row.id.clone()),
+            Self::DiagnosticCheckpoint(row) => NativeRecordIdentity::DiagnosticCheckpoint(row.id.clone()),
             Self::Deadlock(row) => {
                 NativeRecordIdentity::Deadlock { position: row.position.clone(), ordinal: row.graph_ordinal }
             }
@@ -520,9 +546,7 @@ impl TelemetryRecord {
             Self::PlanDefinition(row) => row.is_valid(),
             Self::ResourceSample(row) => row.is_valid(),
             Self::Activity(row) => row.is_valid(),
-            Self::Blocking(row) => row.is_valid(),
-            Self::Incident(row) => row.is_valid(),
-            Self::ActivityCheckpoint(row) => row.is_valid(),
+            Self::DiagnosticCheckpoint(row) => row.is_valid(),
             Self::Deadlock(row) => row.is_valid(),
             Self::Operational(row) => row.is_valid(),
             Self::WaitCounter(row) => row.is_valid(),
@@ -541,9 +565,7 @@ impl TelemetryRecord {
             Self::PlanDefinition(_) => TelemetryStream::PlanDefinitions,
             Self::ResourceSample(_) => TelemetryStream::ResourceSamples,
             Self::Activity(_) => TelemetryStream::ActivityObservations,
-            Self::Blocking(_) => TelemetryStream::BlockingEdges,
-            Self::Incident(_) => TelemetryStream::ActivityIncidents,
-            Self::ActivityCheckpoint(_) => TelemetryStream::ActivityCheckpoints,
+            Self::DiagnosticCheckpoint(_) => TelemetryStream::DiagnosticCheckpoints,
             Self::Deadlock(_) => TelemetryStream::DeadlockEvents,
             Self::Operational(row) => row.stream(),
             Self::WaitCounter(_) => TelemetryStream::WaitCounterSamples,

@@ -407,17 +407,35 @@ async fn exact_delivery_and_recovery(server: &Server, catalog: &SchemaCatalog) {
 }
 async fn complete_current_sets(server: &Server, catalog: &SchemaCatalog) {
     let destination = server.client.destination();
-    let active = Scenario::new(server, test_support::activity(destination, catalog.digest(), 4, false)).await;
+    let [(source, records), partial, (mut empty_source, empty_records), unavailable]: [(
+        CollectionDescription,
+        Vec<TelemetryRecord>,
+    ); 4] = test_support::activity_evidence_cases().try_into().unwrap();
+    let expected_active = records.len() as u64;
+    let active = Scenario::new(server, Recovery::capture(destination, catalog.digest(), source, records, 4)).await;
     active.complete().await;
-    assert_eq!(server.count("CulpritActivityV1Current", &active.range, true).await, 1);
-    let empty = Scenario::new(server, test_support::activity(destination, catalog.digest(), 5, true)).await;
+    assert_eq!(server.count("CulpritActivityV1Current", &active.range, true).await, expected_active);
+    for (sequence, (source, records)) in [(401, partial), (402, unavailable)] {
+        let incomplete =
+            Scenario::new(server, Recovery::capture(destination, catalog.digest(), source, records, sequence)).await;
+        incomplete.complete().await;
+        assert_eq!(
+            server.count("CulpritActivityV1Current", &active.range, true).await,
+            expected_active,
+            "partial or unavailable activity cannot clear the last qualified complete set"
+        );
+    }
+    let SourceObservation::Activity(snapshot) = &mut empty_source.observation else { unreachable!() };
+    snapshot.epoch = Some("restarted-native-epoch".into());
+    let empty =
+        Scenario::new(server, Recovery::capture(destination, catalog.digest(), empty_source, empty_records, 403)).await;
     empty.dispatch().await;
-    assert_eq!(server.count("CulpritActivityV1Current", &active.range, true).await, 1);
+    assert_eq!(server.count("CulpritActivityV1Current", &active.range, true).await, expected_active);
     empty.publish().await;
     assert_eq!(
         server.count("CulpritActivityV1Current", &active.range, true).await,
         0,
-        "a published successful-empty head closes the prior activity set"
+        "a published successful-empty head closes the prior activity set across native epochs"
     );
     let counters = Scenario::new(server, test_support::waits(destination, catalog.digest(), 6, false, true)).await;
     counters.complete().await;

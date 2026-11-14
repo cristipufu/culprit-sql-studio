@@ -46,20 +46,27 @@ pub(crate) async fn run(ws: &Workspace, args: ActivityArgs, out: &Out) -> Result
     Ok(if summary.unknown > 0 && summary.complete == 0 { 2 } else { 0 })
 }
 fn print(event: &ActivityMonitorEvent, out: &Out) -> Result<()> {
-    let line = if out.format() == Format::Json {
+    let line = line(event, out.format())?;
+    writeln!(std::io::stdout().lock(), "{line}")
+        .map_err(|_| culprit_core::Error::internal(culprit_core::t!("activity.cli.output_failed")))
+}
+fn line(event: &ActivityMonitorEvent, format: Format) -> Result<String> {
+    Ok(if format == Format::Json {
         serde_json::to_string(event)
             .map_err(|_| culprit_core::Error::internal(culprit_core::t!("collection.manifest_failed")))?
     } else if event.status == CollectionStatus::Complete {
-        culprit_core::t!(
-            "activity.cli.complete",
-            active = event.active_incidents.unwrap_or(0),
-            changes = event.changes.unwrap_or(0)
-        )
+        match (event.active_episodes, event.uncertain_episodes, &event.native_coverage) {
+            (Some(active), Some(uncertain), Some(coverage)) if coverage.complete_scope => {
+                culprit_core::t!("activity.cli.complete", active = active, uncertain = uncertain)
+            }
+            (Some(active), Some(uncertain), Some(_)) => {
+                culprit_core::t!("activity.cli.partial", active = active, uncertain = uncertain)
+            }
+            _ => culprit_core::t!("activity.cli.analysis_pending"),
+        }
     } else {
         culprit_core::t!("activity.cli.unknown")
-    };
-    writeln!(std::io::stdout().lock(), "{line}")
-        .map_err(|_| culprit_core::Error::internal(culprit_core::t!("activity.cli.output_failed")))
+    })
 }
 
 #[cfg(test)]
@@ -96,5 +103,56 @@ mod tests {
         assert!(parse(&["--max-polls", "0"]).options().is_err());
         assert!(parse(&["--running-seconds", "0"]).options().is_err());
         assert!(parse(&["--blocked-seconds", "4294967295"]).options().is_err());
+        assert!(
+            crate::Cli::try_parse_from([
+                "culprit",
+                "collect",
+                "activity",
+                "pilot",
+                "--outbox",
+                "journal",
+                "--update-seconds",
+                "300",
+            ])
+            .is_err()
+        );
+    }
+    fn event() -> ActivityMonitorEvent {
+        ActivityMonitorEvent {
+            attempt: 1,
+            status: CollectionStatus::Complete,
+            error_code: None,
+            capture: None,
+            observed_at: None,
+            active_episodes: Some(2),
+            uncertain_episodes: Some(1),
+            native_coverage: Some(StateSourceCoverage::collected("native-activity".into(), 3)),
+            source_queries: Some(3),
+        }
+    }
+    #[test]
+    fn saved_baseline_without_matching_analysis_never_prints_a_fabricated_zero() {
+        let mut event = event();
+        event.active_episodes = None;
+        event.uncertain_episodes = None;
+        assert_eq!(line(&event, Format::Text).unwrap(), culprit_core::t!("activity.cli.analysis_pending"));
+        let value: serde_json::Value = serde_json::from_str(&line(&event, Format::Json).unwrap()).unwrap();
+        assert!(value["active_episodes"].is_null() && value["uncertain_episodes"].is_null());
+        assert!(value.get("active_incidents").is_none() && value.get("changes").is_none());
+    }
+    #[test]
+    fn retained_uncertainty_and_incomplete_native_coverage_are_visible_independently_of_capture_completion() {
+        let mut event = event();
+        assert_eq!(
+            line(&event, Format::Text).unwrap(),
+            culprit_core::t!("activity.cli.complete", active = 2, uncertain = 1)
+        );
+        event.native_coverage = Some(StateSourceCoverage::observed("native-activity".into(), 3, false));
+        assert_eq!(
+            line(&event, Format::Text).unwrap(),
+            culprit_core::t!("activity.cli.partial", active = 2, uncertain = 1)
+        );
+        event.status = CollectionStatus::Incomplete(CollectionStop::Cancelled);
+        assert_eq!(line(&event, Format::Text).unwrap(), culprit_core::t!("activity.cli.unknown"));
     }
 }

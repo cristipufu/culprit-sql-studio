@@ -370,9 +370,7 @@ fn request() -> CollectionRequest {
 async fn activity(provider: &crate::MysqlProvider) -> (CollectionDescription, Vec<TelemetryRecord>, ReadWorkMetrics) {
     let request = CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity {
-            policy: ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 1000, ..Default::default() },
-        },
+        selection: CollectionSelection::Activity,
         budget: CollectionBudget::default(),
     };
     let mut source = provider.telemetry_source(&request).unwrap();
@@ -407,8 +405,8 @@ async fn healthy_activity_skips_lock_detail_and_sql_and_process_epoch_survives_s
     let (first, rows, metrics) = activity(&provider).await;
     assert!(rows.is_empty());
     let SourceObservation::Activity(frame) = &first.observation else { panic!() };
-    assert_eq!(frame.details, ActivityDetailStatus::NotNeeded);
-    assert!(frame.complete_scope);
+    assert_eq!(frame.population, ActivityPopulation::DefaultDatabaseConnections);
+    assert!(frame.coverage.complete_scope);
     for metric in metrics.templates {
         if let DefinitionPayload::Available { text, .. } = metric.statement {
             let text = text.to_lowercase();
@@ -422,7 +420,7 @@ async fn healthy_activity_skips_lock_detail_and_sql_and_process_epoch_survives_s
 
 #[tokio::test]
 #[ignore = "requires the owned MySQL/MariaDB fixture"]
-async fn persistent_row_blocking_keeps_the_idle_owner_and_current_request_generation() {
+async fn metadata_baseline_retains_waiter_generation_and_idle_context_without_a_lock_walk() {
     use mysql_async::prelude::Queryable;
     let provider = fixture();
     let mut owner = provider.connector.connect_unconfigured().await.unwrap();
@@ -445,7 +443,7 @@ async fn persistent_row_blocking_keeps_the_idle_owner_and_current_request_genera
     owner.query_drop("ROLLBACK").await.unwrap();
     let _ = owner.disconnect().await;
     blocked.await.unwrap().unwrap();
-    assert!(description.observation.activity().unwrap().complete_scope);
+    assert!(description.observation.activity().unwrap().coverage.complete_scope);
     let waiter = rows
         .iter()
         .find_map(|record| match record {
@@ -454,20 +452,25 @@ async fn persistent_row_blocking_keeps_the_idle_owner_and_current_request_genera
         })
         .expect("the blocked request was not selected");
     assert!(waiter.key.request.is_some());
-    let resources = &waiter.wait.as_ref().unwrap().identified_resources;
-    assert!(!resources.is_empty(), "native lock identity must reach the persistent observation");
+    assert!(waiter.statement_identity.is_some());
+    assert_eq!(waiter.blocking_status, ActivityBlockingStatus::Unknown);
+    assert!(waiter.wait.as_ref().is_none_or(|wait| wait.owners.is_empty() && wait.identified_resources.is_empty()));
     let live_waiter = live.sessions.iter().find(|row| row.id == waiter_id).unwrap();
-    assert_eq!(live_waiter.wait_resources.as_ref().unwrap(), resources);
-    assert!(resources.iter().all(|resource| resource.kind == culprit_core::WaitResourceKind::DataLock
-        && resource.native.qualifiers.get("engine").map(String::as_str) == Some("INNODB")));
-
+    assert_eq!(live_waiter.blocked_by.as_deref(), Some(owner_id.as_str()));
     assert!(
-        waiter
-            .conditions(&ActivityPolicy { blocked_after_ms: 1000, ..Default::default() })
-            .contains(&ActivityCondition::Blocked)
+        live_waiter.wait_resources.as_ref().is_some_and(|resources| !resources.is_empty()),
+        "the existing separate Live path still collects native row-lock evidence"
     );
-    assert!(rows.iter().any(|record| matches!(record, TelemetryRecord::Activity(row) if row.idle && row.key.session.id == owner_id && row.open_transactions > 0)));
-    assert!(matches!(waiter.statement, DefinitionPayload::Available { .. }));
+    let owner = rows
+        .iter()
+        .find_map(|record| match record {
+            TelemetryRecord::Activity(row) if row.idle && row.key.session.id == owner_id => Some(row),
+            _ => None,
+        })
+        .expect("the idle connection is retained without pretending its transaction count was queried");
+    assert!(owner.open_transactions.is_none());
+    assert!(matches!(waiter.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }));
+    assert!(rows.iter().all(|record| matches!(record, TelemetryRecord::Activity(_))));
 }
 
 #[tokio::test]
@@ -670,7 +673,7 @@ async fn disabled_activity_instrumentation_is_unknown_and_never_a_complete_empty
         .unwrap();
     let request = CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity { policy: Default::default() },
+        selection: CollectionSelection::Activity,
         budget: Default::default(),
     };
     let mut source = provider.telemetry_source(&request).unwrap();
@@ -682,7 +685,10 @@ async fn disabled_activity_instrumentation_is_unknown_and_never_a_complete_empty
         .await
         .unwrap();
     admin.disconnect().await.unwrap();
-    assert!(result.is_err());
+    let description = result.unwrap();
+    let frame = description.observation.activity().unwrap();
+    assert_eq!(frame.coverage.state, culprit_core::SourceState::Partial);
+    assert!(!frame.coverage.complete_scope);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert!(activity(&provider).await.0.observation.covers_request());
 }

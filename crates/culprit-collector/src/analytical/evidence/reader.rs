@@ -72,7 +72,8 @@ impl EvidenceReader {
         let manifest = range.manifest();
         let mut capture = EvidenceCapture {
             range_id: manifest.range_id.clone(),
-            manifest_sha256: range.manifest_digest().into(),
+            recovery_manifest_sha256: range.manifest_digest().into(),
+            capture_manifest_sha256: manifest.capture_manifest_sha256.clone(),
             source: manifest.source.clone(),
             capture: manifest.capture.clone(),
             collected_from: manifest.collected_from.clone(),

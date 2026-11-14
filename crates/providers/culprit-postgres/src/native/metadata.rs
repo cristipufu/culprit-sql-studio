@@ -21,6 +21,14 @@ pub(crate) struct Metadata {
     pub statements: Option<StatementCatalog>,
 }
 impl Metadata {
+    /// Activity does not depend on extension installation, statement instrumentation or relation block size.
+    pub fn same_activity_source(&self, other: &Self) -> bool {
+        self.database == other.database
+            && self.database_oid == other.database_oid
+            && self.version == other.version
+            && self.started_at == other.started_at
+            && self.standby == other.standby
+    }
     pub fn same_source(&self, other: &Self) -> bool {
         self.database == other.database
             && self.database_oid == other.database_oid
@@ -33,12 +41,15 @@ impl Metadata {
     }
 }
 pub(crate) async fn read<R: QueryRead>(reader: &mut R, host: &str, port: u16) -> Result<Metadata> {
-    let sql = format!("SELECT pg_catalog.version() AS build, d.oid::text AS database_oid, d.datname AS database,
-      pg_catalog.current_setting('server_version_num') AS version,
-      pg_catalog.current_setting('block_size') AS block_bytes, pg_catalog.pg_is_in_recovery() AS standby, {} AS started_at, {} AS observed_at,
-      (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)
-        OR pg_catalog.pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') AS full_visibility,
-      (SELECT n.nspname FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_stat_statements') AS pgss_schema,
+    read_context(reader, host, port, true).await
+}
+/// The same native database/process/permission context, without inspecting an unrelated extension catalog.
+pub(crate) async fn activity<R: QueryRead>(reader: &mut R, host: &str, port: u16) -> Result<Metadata> {
+    read_context(reader, host, port, false).await
+}
+async fn read_context<R: QueryRead>(reader: &mut R, host: &str, port: u16, statements: bool) -> Result<Metadata> {
+    let statement_catalog = if statements {
+        r#"(SELECT n.nspname FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_stat_statements') AS pgss_schema,
       (SELECT pg_catalog.array_to_json(pg_catalog.array_agg(a.attname ORDER BY a.attnum))::text
          FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace
          JOIN pg_catalog.pg_class c ON c.relnamespace=n.oid AND c.relname='pg_stat_statements'
@@ -46,7 +57,16 @@ pub(crate) async fn read<R: QueryRead>(reader: &mut R, host: &str, port: u16) ->
         WHERE e.extname='pg_stat_statements') AS pgss_columns,
       EXISTS (SELECT 1 FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_class c ON c.relnamespace=e.extnamespace
         JOIN pg_catalog.pg_depend d ON d.classid='pg_catalog.pg_class'::regclass AND d.objid=c.oid AND d.refclassid='pg_catalog.pg_extension'::regclass AND d.refobjid=e.oid AND d.deptype='e'
-        WHERE e.extname='pg_stat_statements' AND c.relname='pg_stat_statements_info') AS pgss_info
+        WHERE e.extname='pg_stat_statements' AND c.relname='pg_stat_statements_info') AS pgss_info"#
+    } else {
+        "NULL::text AS pgss_schema,NULL::text AS pgss_columns,false AS pgss_info"
+    };
+    let sql = format!("SELECT pg_catalog.version() AS build, d.oid::text AS database_oid, d.datname AS database,
+      pg_catalog.current_setting('server_version_num') AS version,
+      pg_catalog.current_setting('block_size') AS block_bytes, pg_catalog.pg_is_in_recovery() AS standby, {} AS started_at, {} AS observed_at,
+      (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)
+        OR pg_catalog.pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') AS full_visibility,
+      {statement_catalog}
       FROM pg_catalog.pg_database d WHERE d.datname=pg_catalog.current_database()", iso("pg_catalog.pg_postmaster_start_time()"), iso("pg_catalog.clock_timestamp()"));
     let row = one(reader, &sql).await?;
     crate::probe::ensure_postgres(&text(&row, "build")?)?;

@@ -71,62 +71,34 @@ pub(super) async fn activity(
     at: &str,
     observation: Option<ActivityObservation>,
 ) -> CollectionManifest {
-    activity_with_baseline(outbox, at, observation, &[]).await
-}
-pub(super) async fn activity_with_baseline(
-    outbox: &mut Outbox,
-    at: &str,
-    observation: Option<ActivityObservation>,
-    before: &[ActivityIncidentState],
-) -> CollectionManifest {
     let request = CollectionRequest {
-        subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
-        budget: CollectionBudget::default(),
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Activity,
+        budget: Default::default(),
     };
     let mut lease = outbox.reserve("fixture", &request).await.unwrap();
     let mut source = source();
     source.source = "live_requests".into();
     source.observation = SourceObservation::Activity(ActivitySnapshotDescription {
-        epoch: "native-activity-epoch".into(),
+        population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
+        epoch: Some("native-activity-epoch".into()),
+        observed_from: at.into(),
+        observed_until: at.into(),
         at: at.into(),
         scope: culprit_core::MeasurementScope::Database,
-        complete_scope: true,
-        policy: ActivityPolicy::default(),
         native_rows: u32::from(observation.is_some()),
-        qualifying: observation
-            .as_ref()
-            .map_or(0, |row| u32::from(!row.conditions(request.activity_policy().unwrap()).is_empty())),
-        uncertain: observation
-            .as_ref()
-            .map_or(0, |row| u32::from(row.blocking_uncertain(request.activity_policy().unwrap()))),
         observations: u32::from(observation.is_some()),
-        blocking_edges: observation
-            .as_ref()
-            .and_then(|row| row.wait.as_ref())
-            .map_or(0, |wait| wait.owners.iter().filter(|owner| owner.is_blocker()).count() as u32),
-        details: if observation.is_some() { ActivityDetailStatus::Collected } else { ActivityDetailStatus::NotNeeded },
+        coverage: StateSourceCoverage::collected("live_requests".into(), u32::from(observation.is_some())),
     });
-    let mut files = ObservationFiles::create(lease.directory(), request.clone(), lease.identity().clone()).unwrap();
+    let mut files = ObservationFiles::create(lease.directory(), request, lease.identity().clone()).unwrap();
     lease.source_started().await.unwrap();
     files.describe(source).unwrap();
     if let Some(observation) = observation {
         files.begin_page(0).unwrap();
-        let selected =
-            ActivityEvidence::select(std::slice::from_ref(&observation), request.activity_policy().unwrap()).unwrap();
-        files.write_page(0, &[TelemetryRecord::Activity(observation)]).unwrap();
-        if !selected.blocking.is_empty() {
-            files.begin_page(1).unwrap();
-            files
-                .write_page(1, &selected.blocking.into_iter().map(TelemetryRecord::Blocking).collect::<Vec<_>>())
-                .unwrap();
-        }
+        assert!(files.write_page(0, &[TelemetryRecord::from(observation)]).unwrap().is_none());
     }
-    for index in 0..request.collection().source_streams().len() {
-        files.seal(index).unwrap();
-    }
+    files.seal(0).unwrap();
     files.confirm_source(SourceCompletion::Verified).unwrap();
-    files.derive_activity(before).unwrap();
     lease.source_closed(SourceShutdown::Quiescent).await.unwrap();
     let manifest = files.finish(0).unwrap();
     lease.finish().await.unwrap();
@@ -134,25 +106,26 @@ pub(super) async fn activity_with_baseline(
 }
 
 #[tokio::test]
-async fn latest_activity_checkpoint_stays_local_until_its_successor_is_sealed() {
+async fn a_native_baseline_is_pinned_until_its_diagnostic_input_has_a_durable_successor() {
     let root = tempfile::TempDir::new().unwrap();
     let (store, owner, contract, mut outbox) = remote_box(root.path()).await;
     let first = empty_activity(&mut outbox, "2020-01-01T06:00:00Z").await;
     let delivery = outbox.delivery();
     let prepared = delivery.prepare(&first.capture.observation_id, contract.clone(), vec![]).await.unwrap();
-    let committed = stage_and_commit(&store, owner.fence(), None, &prepared).await.unwrap();
-    assert!(!delivery.evict(&committed).await.unwrap());
-    let second = empty_activity(&mut outbox, "2020-01-01T06:01:00Z").await;
-    assert!(delivery.evict(&committed).await.unwrap());
-    assert_eq!(outbox.status(50, None).await.unwrap().captures, 1);
-    let request = CollectionRequest {
-        subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
-        budget: CollectionBudget::default(),
-    };
-    let next = outbox.reserve("fixture", &request).await.unwrap();
-    let source = second.description.unwrap();
-    assert_eq!(next.baseline(&source).await.unwrap().unwrap().source, source);
+    let native = stage_and_commit(&store, owner.fence(), None, &prepared).await.unwrap();
+    assert!(!delivery.evict(&native).await.unwrap());
+    let input = outbox.next_diagnostic_input(1).await.unwrap().unwrap();
+    let derived = outbox
+        .commit_diagnostics(input.clone(), super::restored_diagnostics::pending_update(&input, "initial"))
+        .await
+        .unwrap();
+    let prepared = delivery.prepare(&derived.observation_id, contract, vec![]).await.unwrap();
+    let checkpoint =
+        stage_and_commit(&store, owner.fence(), Some(&native.manifest().range_id), &prepared).await.unwrap();
+    assert!(!delivery.evict(&checkpoint).await.unwrap());
+    delivery.mark_archived(&checkpoint).await.unwrap();
+    assert!(delivery.evict(&native).await.unwrap());
+    assert_eq!(outbox.status(50, None).await.unwrap().captures, 0);
 }
 
 #[tokio::test]
@@ -179,11 +152,18 @@ async fn archived_baseline_markers_survive_restart_and_do_not_rearchive_the_prot
     drop(owner);
     let owner = store.acquire().await.unwrap();
     outbox.begin_remote_epoch(owner.fence(), 1).await.unwrap();
-    let second = empty_activity(&mut outbox, "2020-01-01T06:01:00Z").await;
-    assert_eq!(delivery.next_archive().await.unwrap().as_deref(), Some(second.capture.observation_id.as_str()));
+    let input = outbox.next_diagnostic_input(1).await.unwrap().unwrap();
+    let derived = outbox
+        .commit_diagnostics(input.clone(), super::restored_diagnostics::pending_update(&input, "initial"))
+        .await
+        .unwrap();
+    let prepared =
+        delivery.prepare(&derived.observation_id, committed.manifest().contract.clone(), vec![]).await.unwrap();
+    let checkpoint =
+        stage_and_commit(&store, owner.fence(), Some(&committed.manifest().range_id), &prepared).await.unwrap();
+    delivery.mark_archived(&checkpoint).await.unwrap();
     assert!(delivery.evict(&committed).await.unwrap());
-    delivery.mark_archived(&committed).await.unwrap();
-    assert_eq!(outbox.status(50, None).await.unwrap().captures, 1);
+    assert_eq!(outbox.status(50, None).await.unwrap().captures, 0);
 }
 
 #[tokio::test]

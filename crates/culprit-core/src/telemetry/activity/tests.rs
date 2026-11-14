@@ -3,6 +3,7 @@ use super::*;
 pub(crate) fn request(id: &str) -> ActivityObservation {
     ActivityObservation {
         blocking_status: crate::telemetry::ActivityBlockingStatus::Known,
+        waiting_on_lock: None,
         key: ActivityKey {
             session: NativeActivityIdentity { id: id.into(), generation: "login-1".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),
@@ -14,7 +15,7 @@ pub(crate) fn request(id: &str) -> ActivityObservation {
         database: Some("sample".into()),
         command: Some("SELECT".into()),
         last_request_age_ms: None,
-        open_transactions: 0,
+        open_transactions: Some(0),
         elapsed_ms: Some("100000".into()),
         transaction_age_ms: None,
         session_counters: ActivityCounters::default(),
@@ -25,6 +26,7 @@ pub(crate) fn request(id: &str) -> ActivityObservation {
         }),
         wait: None,
         query_hash: None,
+        statement_identity: None,
         client: None,
         statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
     }
@@ -36,7 +38,7 @@ fn idle(id: &str) -> ActivityObservation {
     row.idle = true;
     row.scope = ActivityScopeBasis::TransactionDatabase;
     row.state = "sleeping".into();
-    row.open_transactions = 1;
+    row.open_transactions = Some(1);
     row.request_counters = None;
     row.elapsed_ms = None;
     row.transaction_age_ms = Some("300000".into());
@@ -112,4 +114,60 @@ fn unknown_counters_remain_unknown_and_resets_are_not_progress() {
     let high = ActivityCounters { cpu_ms: Some("9007199254740993".into()), ..ActivityCounters::default() };
     assert_eq!(high.progress(&zero), ActivityProgress::ChangedCounters);
     assert_eq!(zero.progress(&high), ActivityProgress::Unknown);
+}
+
+#[test]
+fn native_lock_wait_without_visible_owner_needs_measured_wait_duration_for_threshold_blocking() {
+    let mut row = request("1");
+    row.elapsed_ms = Some("40000".into());
+    row.blocking_status = ActivityBlockingStatus::Unknown;
+    row.waiting_on_lock = Some(true);
+    row.wait = Some(ActivityWait {
+        identified_resources: vec![],
+        native_type: Some("native-lock-wait".into()),
+        elapsed_ms: None,
+        owners: vec![],
+        resources: None,
+    });
+    assert!(row.is_valid());
+    assert!(row.conditions(&ActivityPolicy::default()).is_empty());
+    row.wait.as_mut().unwrap().elapsed_ms = Some("29999".into());
+    assert!(row.conditions(&ActivityPolicy::default()).is_empty());
+    row.wait.as_mut().unwrap().elapsed_ms = Some("30000".into());
+    assert_eq!(row.conditions(&ActivityPolicy::default()), [ActivityCondition::Blocked]);
+    assert!(ActivityEvidence::select(&[row], &ActivityPolicy::default()).unwrap().blocking.is_empty());
+}
+
+#[test]
+fn request_age_never_supplies_wait_duration_and_unknown_lock_measurements_stay_uncertain() {
+    let mut row = request("1");
+    row.elapsed_ms = Some("40000".into());
+    row.blocking_status = ActivityBlockingStatus::Unknown;
+    row.wait = Some(ActivityWait {
+        identified_resources: vec![],
+        native_type: Some("native-wait".into()),
+        elapsed_ms: None,
+        owners: vec![owner("missing")],
+        resources: None,
+    });
+    let policy = ActivityPolicy::default();
+    assert!(row.conditions(&policy).is_empty());
+    assert!(row.blocking_uncertain(&policy));
+    row.wait.as_mut().unwrap().elapsed_ms = Some("1".into());
+    assert!(row.conditions(&policy).is_empty());
+    row.wait.as_mut().unwrap().elapsed_ms = Some("30000".into());
+    assert_eq!(row.conditions(&policy), [ActivityCondition::Blocked]);
+    row.wait.as_mut().unwrap().owners.clear();
+    assert!(row.conditions(&policy).is_empty(), "an unidentified long native wait is not a lock verdict");
+}
+
+#[test]
+fn current_lock_wait_unknown_and_native_negative_are_distinct_wire_facts() {
+    let mut row = request("1");
+    for verdict in [None, Some(false), Some(true)] {
+        row.waiting_on_lock = verdict;
+        let value = serde_json::to_value(&row).unwrap();
+        assert_eq!(value["waiting_on_lock"], serde_json::to_value(verdict).unwrap());
+        assert_eq!(serde_json::from_value::<ActivityObservation>(value).unwrap(), row);
+    }
 }

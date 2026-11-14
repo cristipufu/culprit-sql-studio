@@ -54,13 +54,12 @@ pub(crate) fn decode(rows: Vec<Rec>) -> Result<Vec<LockPair>> {
 
 pub(crate) struct RowLockLayout {
     pub sql: &'static str,
-    pub session_column: &'static str,
 }
 pub(crate) fn row_waits(flavor: Flavor, version: &str) -> RowLockLayout {
     if flavor == Flavor::Mysql && culprit_core::version_at_least(version, [8, 0, 0]) {
-        RowLockLayout { sql: LOCK_WAITS_SQL, session_column: "t.PROCESSLIST_ID" }
+        RowLockLayout { sql: LOCK_WAITS_SQL }
     } else {
-        RowLockLayout { sql: INNODB_LOCK_WAITS_SQL, session_column: "r.trx_mysql_thread_id" }
+        RowLockLayout { sql: INNODB_LOCK_WAITS_SQL }
     }
 }
 

@@ -6,13 +6,28 @@ import type { ActivityKey } from "./ActivityKey";
 import type { ActivityScopeBasis } from "./ActivityScopeBasis";
 import type { ActivityWait } from "./ActivityWait";
 import type { DefinitionPayload } from "./DefinitionPayload";
+import type { NativeIdentity } from "./NativeIdentity";
 
-export type ActivityObservation = { blocking_status: ActivityBlockingStatus, key: ActivityKey, idle: boolean, scope: ActivityScopeBasis, state: string, database: string | null, command: string | null, 
+export type ActivityObservation = { blocking_status: ActivityBlockingStatus, 
+/**
+ * Native current lock-wait verdict, independent of owner visibility or measured wait duration.
+ * None means the source could not establish whether this actor is waiting on a lock.
+ */
+waiting_on_lock: boolean | null, key: ActivityKey, idle: boolean, scope: ActivityScopeBasis, state: string, database: string | null, command: string | null, 
 /**
  * Age of the previous request start, separate from current request execution time.
  */
-last_request_age_ms: string | null, open_transactions: number, elapsed_ms: string | null, transaction_age_ms: string | null, 
+last_request_age_ms: string | null, 
+/**
+ * None means the metadata source did not measure transaction state.
+ */
+open_transactions: number | null, elapsed_ms: string | null, transaction_age_ms: string | null, 
 /**
  * These are running totals for different native lifetimes. Never add them or infer a rate from one poll.
  */
-session_counters: ActivityCounters, request_counters: ActivityCounters | null, wait: ActivityWait | null, query_hash: string | null, client: ActivityClient | null, statement: DefinitionPayload, };
+session_counters: ActivityCounters, request_counters: ActivityCounters | null, wait: ActivityWait | null, query_hash: string | null, 
+/**
+ * Source-owned current-statement identity, independent of query hash or SQL text. Native qualification and
+ * observation bounds remain necessary before using it for a later, focused read.
+ */
+statement_identity?: NativeIdentity, client: ActivityClient | null, statement: DefinitionPayload, };

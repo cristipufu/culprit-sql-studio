@@ -26,14 +26,25 @@ pub(super) fn record(
     let payloads = payloads::references(values)?;
     let native = match stream {
         TelemetryStream::ResourceSamples => Decoded::Record(Box::new(resources(values)?)),
+        TelemetryStream::ActivityObservations => activity(values, &payloads)?,
         TelemetryStream::OperationalSamples => {
             if text(values, "DetailState")? != "inline" {
                 return Ok(Decoded::Unavailable(EvidenceGapReason::DetailInRecovery));
             }
-            let details = match payloads::details(values, &payloads)? {
+            let mut details = match payloads::details(values, &payloads)? {
                 Decoded::Record(details) => details,
                 Decoded::Unavailable(reason) => return Ok(Decoded::Unavailable(reason)),
             };
+            if text(values, "FactKind")? == "diagnostic-revision" {
+                let scope = details.pointer_mut("/episode/scope").and_then(Value::as_object_mut).ok_or_else(invalid)?;
+                if scope.contains_key("target") {
+                    return Err(invalid());
+                }
+                scope.insert(
+                    "target".into(),
+                    serde_json::to_value(&range.manifest().source.target).map_err(|_| invalid())?,
+                );
+            }
             let fact = match serde_json::from_value::<OperationalFact>(json!({
                 "kind": text(values, "FactKind")?, "data": details,
             })) {
@@ -76,6 +87,21 @@ fn resources(values: &Map<String, Value>) -> Result<TelemetryRecord> {
     let metrics: Vec<ResourceMetricSample> =
         serde_json::from_value(values.get("Metrics").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
     Ok(TelemetryRecord::ResourceSample(ResourceMeasurement { at, replica_id, metrics }))
+}
+
+fn activity(values: &Map<String, Value>, references: &payloads::References<'_>) -> Result<Decoded<TelemetryRecord>> {
+    let mut facts = values.get("ActivityFacts").and_then(Value::as_object).cloned().ok_or_else(invalid)?;
+    let statement = match payloads::definition(references, "/record/data/statement")? {
+        Decoded::Record(statement) => statement,
+        Decoded::Unavailable(reason) => return Ok(Decoded::Unavailable(reason)),
+    };
+    let original = references.get("/record/data/statement").ok_or_else(invalid)?;
+    if facts.get("statement") != Some(*original) {
+        return Err(invalid());
+    }
+    facts.insert("statement".into(), serde_json::to_value(statement).map_err(|_| invalid())?);
+    let row: ActivityObservation = serde_json::from_value(Value::Object(facts)).map_err(|_| invalid())?;
+    Ok(Decoded::Record(Box::new(TelemetryRecord::from(row))))
 }
 
 fn text<'a>(values: &'a Map<String, Value>, key: &str) -> Result<&'a str> {

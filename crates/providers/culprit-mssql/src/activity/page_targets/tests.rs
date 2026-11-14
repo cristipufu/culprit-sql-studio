@@ -18,6 +18,18 @@ use crate::{
 pub(crate) fn reader(replies: Vec<ReadResult<Vec<Rec>>>) -> ActivityReader<FakeRead> {
     reader_with_identity(replies, IdentityDetail::AzureDatabase)
 }
+pub(crate) fn reader_with_native(io: FakeRead) -> ActivityReader<FakeRead> {
+    ActivityReader::new(
+        io,
+        ReadOptions {
+            budget: CollectionBudget::default(),
+            scope: ActivityScope::CurrentDatabase,
+            identity: IdentityDetail::AzureDatabase,
+        },
+        "fixture.invalid".into(),
+        1433,
+    )
+}
 fn reader_with_identity(replies: Vec<ReadResult<Vec<Rec>>>, identity: IdentityDetail) -> ActivityReader<FakeRead> {
     ActivityReader::new(
         FakeRead::new(replies),
@@ -28,26 +40,26 @@ fn reader_with_identity(replies: Vec<ReadResult<Vec<Rec>>>, identity: IdentityDe
 }
 
 #[tokio::test]
-async fn boxed_native_instance_and_file_epoch_qualify_local_mapping_without_inventing_a_database_guid() {
-    let selected = replace(&context(), &[("edition", Val::Int(3)), ("database_file_create_lsn", Val::Null)]);
+async fn boxed_native_recovery_and_file_context_qualify_local_mapping_without_a_guessed_incarnation() {
+    let selected = replace(&boxed_context(), &[("database_file_create_lsn", Val::Null)]);
     let wait = replace(&page_wait(42, "PAGELATCH_EX", "7:1:4144"), &[("edition", Val::Int(3))]);
     let participant = participant(0, &wait);
     let native_instance = crate::instance::test_support::metadata();
     let native_epoch = crate::instance::test_support::epoch(100);
     let native_header = replace(&header(0, 4144), &[("file_create_lsn", Val::Null)]);
     let replies = vec![
-        Ok(vec![selected.clone()]),
         Ok(vec![native_instance.clone()]),
         Ok(vec![native_epoch.clone()]),
+        Ok(vec![selected.clone()]),
         Ok(vec![wait]),
         Ok(vec![participant.clone()]),
         Ok(vec![native_header.clone()]),
         Ok(vec![details(42, "SELECT 1")]),
         Ok(vec![native_header]),
         Ok(vec![participant]),
-        Ok(vec![selected]),
         Ok(vec![native_instance]),
         Ok(vec![native_epoch]),
+        Ok(vec![selected]),
     ];
     let mut reader = reader_with_identity(replies, IdentityDetail::Endpoint);
     let capture = reader.capture_page_wait_targets().await.unwrap();
@@ -64,24 +76,29 @@ async fn boxed_native_instance_and_file_epoch_qualify_local_mapping_without_inve
     assert!(!target.database.qualifiers.contains_key("database_file_create_lsn"));
     assert!(capture.context.epoch.is_some());
     assert!(capture.context.database.incarnation.is_none());
+    assert_eq!(target.database.qualifiers["database_guid"], "native-database-guid");
+    assert_eq!(target.database.qualifiers["recovery_fork_guid"], "native-recovery-fork");
     assert_eq!(reader.query_count(), 12);
 }
 
 #[tokio::test]
 async fn denied_boxed_authority_preserves_waits_but_never_reads_headers_or_verifies_none_equals_none() {
-    let selected = replace(&context(), &[("edition", Val::Int(3))]);
+    let selected = boxed_context();
     let wait = replace(&page_wait(42, "PAGELATCH_EX", "7:1:4144"), &[("edition", Val::Int(3))]);
     let denied = || Err(ReadError::Source(culprit_core::Error::new(ErrorCode::PermissionDenied, "fixture")));
     let mut reader = reader_with_identity(
         vec![
-            Ok(vec![selected.clone()]),
+            Ok(vec![crate::instance::test_support::metadata()]),
             denied(),
+            Ok(vec![selected.clone()]),
             Ok(vec![wait]),
             Ok(vec![details(42, "SELECT 1")]),
+            Ok(vec![crate::instance::test_support::metadata()]),
+            denied(),
             Ok(vec![selected.clone()]),
+            Ok(vec![crate::instance::test_support::metadata()]),
             denied(),
             Ok(vec![selected]),
-            denied(),
         ],
         IdentityDetail::Endpoint,
     );
@@ -110,16 +127,15 @@ async fn a_request_that_advances_keeps_its_original_wait_and_independently_quali
     assert!(!observation.request.statement.is_available());
 }
 pub(crate) fn context() -> Rec {
-    let base = metadata(42);
+    page_context(5)
+}
+pub(crate) fn boxed_context() -> Rec {
+    page_context(3)
+}
+fn page_context(edition: i64) -> Rec {
+    let base = crate::activity::database_context::tests::row(edition);
     let mut values = base.columns().map(|(key, value)| (key, value.clone())).collect::<Vec<_>>();
-    values.extend([
-        ("selected_database_id", Val::Int(7)),
-        ("database_created_without_offset", Val::Text("2019-01-01T04:00:00.3066667".into())),
-        ("database_file_guid", Val::Text("native-file-guid".into())),
-        ("database_file_create_lsn", Val::Text("0".into())),
-        ("page_info_available", Val::Int(1)),
-        ("page_permission", Val::Int(1)),
-    ]);
+    values.extend([("page_info_available", Val::Int(1)), ("page_permission", Val::Int(1))]);
     replace(&Rec::of(&values), &[("session_id", Val::Null)])
 }
 pub(crate) fn page_wait(session: i64, wait_type: &str, address: &str) -> Rec {

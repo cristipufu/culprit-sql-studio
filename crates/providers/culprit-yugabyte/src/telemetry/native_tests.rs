@@ -164,17 +164,20 @@ async fn operational_sources_keep_sampling_and_retained_history_distinct_and_hea
         "{:?}",
         completed.observation
     );
-    let (activity, rows, metrics) =
-        capture_source(&provider, CollectionSelection::Activity { policy: Default::default() }).await;
+    let (activity, rows, metrics) = capture_source(&provider, CollectionSelection::Activity).await;
     assert!(activity.observation.covers_request());
-    assert!(rows.is_empty(), "healthy fixture has no persistent requests: {rows:?}");
+    assert!(rows.iter().all(|row| matches!(row, TelemetryRecord::Activity(_))));
+    assert_eq!(
+        activity.observation.activity().unwrap().population,
+        ActivityPopulation::NodeClientBackendsAndConnectionWorkers
+    );
     let templates = serde_json::to_string(&metrics).unwrap();
     assert!(!templates.contains("yb_lock_status"));
     assert!(!templates.contains("a.query ELSE"));
 }
 #[tokio::test]
 #[ignore = "requires the owned YugabyteDB fixture"]
-async fn persistent_docdb_blocking_preserves_the_idle_owner_without_claiming_complete_lock_history() {
+async fn node_baseline_preserves_idle_and_waiting_context_without_docdb_lock_or_sql_reads() {
     use culprit_postgres::wire::{INTERACTIVE, tagged};
     let provider = crate::YugabyteProvider::new(&spec()).unwrap();
     let owner = provider.connector.connect(INTERACTIVE).await.unwrap();
@@ -189,25 +192,12 @@ async fn persistent_docdb_blocking_preserves_the_idle_owner_without_claiming_com
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     let request = CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity {
-            policy: ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 1000, ..Default::default() },
-        },
+        selection: CollectionSelection::Activity,
         budget: Default::default(),
     };
-    // Always release the fixture transaction even if capture fails; no stranded test holds the row lock.
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    let (mut source, result) = loop {
-        let mut source = provider.telemetry_source(&request).unwrap();
-        let result = source.describe().await;
-        let linked = result.as_ref().is_ok_and(|description| {
-            description.observation.activity().is_some_and(|activity| activity.blocking_edges > 0)
-        });
-        if linked || result.is_err() || tokio::time::Instant::now() >= deadline {
-            break (source, result);
-        }
-        source.close().await;
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    };
+    // Describe freezes metadata only. Always release fixture transactions before inspecting its result.
+    let mut source = provider.telemetry_source(&request).unwrap();
+    let result = source.describe().await;
     owner.batch_execute(&tagged("ROLLBACK")).await.unwrap();
     wait.await.unwrap().unwrap();
     let initial = result.unwrap();
@@ -233,7 +223,15 @@ async fn persistent_docdb_blocking_preserves_the_idle_owner_without_claiming_com
         "the base request frame is complete; uncertainty is declared per request"
     );
     assert!(records.iter().any(|record|matches!(record,TelemetryRecord::Activity(row) if row.idle && row.client.as_ref().and_then(|c|c.application.as_deref())==Some("culprit_telemetry_owner"))),"{records:?}");
-    assert!(records.iter().any(|record| matches!(record, TelemetryRecord::Blocking(_))), "{records:?}");
+    assert!(records.iter().all(|record| matches!(record, TelemetryRecord::Activity(_))), "{records:?}");
+    assert!(
+        records.iter().any(|record| matches!(record, TelemetryRecord::Activity(row)
+        if !row.idle && row.blocking_status == ActivityBlockingStatus::Unknown
+        && row.client.as_ref().and_then(|client| client.application.as_deref()) == Some("culprit_telemetry_waiter"))),
+        "{records:?}"
+    );
+    let templates = serde_json::to_string(&source.read_metrics()).unwrap();
+    assert!(!templates.contains("yb_lock_status") && !templates.contains("a.query ELSE"));
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
 

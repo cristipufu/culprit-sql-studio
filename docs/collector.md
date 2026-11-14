@@ -19,7 +19,8 @@ are starting configurations, not measured capacity claims.
 | Provider native reader | One implementation of a source's SQL, paging, scope, units and native completion |
 | `TelemetrySource` / `SourceFactory` | Describe and read one bounded native observation; settle cancellation |
 | `FleetBackend` / `FleetRunner` | Source authentication, static assignments, due work, backfill and coverage gaps |
-| `Outbox` | Exclusive local ownership, capture revisions, private files, quota and incident checkpoints |
+| `Outbox` | Exclusive local ownership, capture revisions, private files, quota and diagnostic working sets |
+| Shared diagnostic worker | Analyze sealed native inputs, retain episode lifecycle and analysis status, and commit separate diagnostic captures |
 | `RecoveryStore` | Immutable native objects, fenced commits, historical coverage and unfinished delivery index |
 | `TelemetrySink` | Destination dispatch, exact value/membership readback and completion publication |
 | `DeliveryWorker` | Independent native archive and analytical loops, with separate durable progress journals |
@@ -34,7 +35,7 @@ separate consumer; this service does not add an ADX-backed desktop connection.
 Embedders can read a specifically selected committed capture through
 `culprit_collector::analytical::evidence::EvidenceReader`; the store crates expose `evidence::AdxReadStore` and
 `evidence::ClickHouseReadStore`. The reader accepts an authenticated `CommittedRange`, selected evidence families and a read budget.
-`EvidenceFamily::ALL` declares the supported families: resource samples, inline typed operational facts, query and
+`EvidenceFamily::ALL` declares the supported families: resource samples, native activity observations, inline typed operational facts, query and
 plan definitions, interval query runtime and query waits. Runtime and waits retain native identities, dimensions,
 outcomes, exact execution counters, units and query/plan references. Definitions retain native context and plan-to-query
 parents; an available SQL or plan payload is reconstructed only when the stored preview is complete and verified.
@@ -368,8 +369,8 @@ use the same generated schema, recovery evidence, exact verification and publica
 Apply the generated SQL explicitly to the configured database before starting delivery. Give the collector only
 SELECT/INSERT access to the generated tables; use a separate deployment identity for DDL and preserve append-only
 landing data. Ordinary collector startup
-never provisions or mutates schema. The schema contains 15 analytical landing tables and one publication table;
-recovery-only activity checkpoints have no analytical table. Landing tables sort by range, batch and ordinal for
+never provisions or mutates schema. The schema contains 13 analytical landing tables and one publication table;
+recovery-only diagnostic checkpoints have no analytical table. Landing tables sort by range, batch and ordinal for
 bounded readback. A publication-table projection supports resource/time selection without duplicating every payload.
 
 `--store clickhouse --replicated` emits `ReplicatedMergeTree` tables using server-configured replication paths/macros.
@@ -406,7 +407,8 @@ Collection admits one native operation at a time per workspace and keeps a one-m
 the same configured physical resource. Relative lateness prioritizes frequent schedules without shortening that
 guard; pressure extends the delay. Cadences are minimum requested periods, not guaranteed sampling rates. Inspect
 missed-work metrics and qualify the combined workload before adding targets or shortening periods. The example's
-activity threshold is 30 seconds for blocking and 60 seconds for running requests, with a three-minute poll period.
+activity analysis threshold is 30 seconds for blocking and 60 seconds for running requests, with a three-minute poll period.
+These thresholds do not filter the native baseline before it is saved.
 Transient activity between polls is not a complete event history.
 
 The existing schedule journal persists due times, retry and pressure counters, fairness and resource/family
@@ -550,6 +552,48 @@ three seconds per statement and ten seconds overall. These limits do not prove l
 source under representative load before scheduling it. Native application, login and host labels follow the
 existing activity collection policy; SQL literals are redacted. Snapshot sharing removes those client labels.
 
+## Activity baselines and diagnostic episodes
+
+`activity` captures a bounded metadata baseline before optional SQL or blocker investigation. It retains ordinary
+actors and short waits within the provider's declared population; blocked/running thresholds belong to later
+episode analysis. The baseline uses the existing native projection and decoder without a SQL payload read,
+blocker closure, PostgreSQL lock-manager walk or YugabyteDB DocDB lock RPC. Native wait owners already present in
+the metadata remain attached to the original activity row. An unavailable owner or statement stays unavailable.
+
+Each description records native observation bounds, a point timestamp, population, measured scope, native row
+count, retained row count and source coverage. Populations differ: PostgreSQL selects current-database client
+backends; YugabyteDB selects local YSQL client backends and connection-manager workers; MySQL and MariaDB select
+visible connections whose default database is the selected database; SQL Server selects active requests,
+open-transaction context and blocker references under its native database predicate. These populations do not
+include every system actor, parallel task or node. A connection's default database does not prove every statement
+ran there. Open-transaction counts remain absent when the native source does not measure them.
+
+A row cap can retain a positive prefix with partial coverage. Hidden rows, missing source authority and unknown
+generations cannot become a complete empty observation. A fully read, sealed capture can still declare partial
+native coverage; successful persistence establishes retrieval, not database health or absence. A missing native
+epoch remains absent and prevents absence-based episode resolution or a focused lookup. Before/after source checks qualify
+the frozen point observation; they do not prove continuous identity or atomicity between those bounds.
+
+Baseline sources preserve stricter caller budgets and cap retained rows at 500, statement time at one second and
+total native time at five seconds. Their native phase ceilings are seven for SQL Server, four for PostgreSQL,
+twenty for MySQL/MariaDB and eight for YugabyteDB. Setup and prepared-statement phases count toward those limits;
+the counts are not a claim about server work per SQL statement. These hard bounds do not establish production
+overhead under representative load.
+
+After the native source has settled and its capture is sealed, the same source-independent diagnostic worker runs
+for fleet collection, the standalone monitor and offline recovery. It references original rows by capture, manifest,
+stream and ordinal instead of copying native evidence into an inline incident stream. Episode lifecycle
+(`active`, `uncertain`, `resolved`) is independent of analysis status (`pending`, `deferred`, `collecting`, `partial`,
+`analyzed`, `unresolved`). Recovery can leave historical analysis pending. Failed or partial absence cannot clear
+an episode. Absence-based recovery requires the matching native source, epoch, population and measurement scope;
+an old epoch is not declared healthy when a different source generation is observed.
+
+Diagnostic revisions are typed facts in `CulpritOperationalV1`; full working-set checkpoints stay in recovery.
+Both commits consume outbox quota and retain the original input obligation until analysis commits atomically.
+Page-wait focus has an explicit native request/result contract, but automatic native focus scheduling is not yet
+enabled. Saving an episode or declaring a recipe does not establish a completed root-cause investigation or a
+production-cost qualification. Existing explicit page-target collection remains separately bounded and opt-in.
+
 ## PostgreSQL source coverage
 
 PostgreSQL uses the same capture, outbox, fleet and delivery path as SQL Server. Configure PostgreSQL connections
@@ -560,7 +604,7 @@ schedules must not be copied wholesale: PostgreSQL has cumulative counters rathe
 |---|---|---|
 | `snapshot: statement-counters` | `pg_stat_statements(false)`: calls, duration, rows, available buffers, WAL, I/O timings, planning, JIT and runtime distributions | 5 minutes |
 | `snapshot: operational` | Current-database health, conflicts, XID/MultiXact ages and subscription errors; shared counters use the explicit instance route above | 5 minutes |
-| `activity` | Persistent requests, lock waits, blocker closure, idle transaction context, lock resources and incident transitions | 3 minutes |
+| `activity` | Current-database client-backend metadata, native generations, state, transaction context and current wait names; episode analysis follows the sealed baseline | 3 minutes |
 | `snapshot: replication` | Senders, local standby state and physical/current-database logical slots; unknown lag stays unknown | 10 minutes |
 | `snapshot: settings` | Allowlisted effective settings, native unit/context/source, defaults and pending restart | 1 hour |
 | `snapshot: tables`, `indexes`, `statistics` | Catalog size estimates, native usage/maintenance counters and safe planner summaries | 1 hour |
@@ -572,8 +616,9 @@ These cadences are starting policies, not measured production budgets. The fleet
 across profiles. The CLI uses `--collection statement-counters` for a point observation; JSON
 schedules use `{"kind":"snapshot","dataset":"statement-counters"}`. Keep definitions and catalog work out of the
 fast health profile. The collector does not run application statements, EXPLAIN, table scans or expression deparsing.
-It reads one bounded native response and streams provisional pages; limits, missing visibility and an identity change
-prevent complete publication. Activity reads lock resources only after an aged lock wait and bounds blocker traversal.
+Native snapshots retain their explicit bounds and coverage; failed reads and identity changes cannot become complete
+observations. Activity freezes and verifies its metadata before paging, preserving a capped positive prefix with
+partial coverage. Optional lock resources, blocker closure and SQL are excluded from this baseline.
 
 Counter values are current native totals or gauges, not fabricated time buckets. Per-entry reset timestamps are used
 when PostgreSQL exposes them; a global reset does not prove each entry's lifetime. Unknown resets cannot establish
@@ -583,11 +628,12 @@ Server-scoped observations must not be summed as if each database owns them. Set
 session, including its safety overrides; they do not reveal every application's settings or a pending configured value.
 
 Full statistics visibility is required for complete activity and restricted native sources. Planner statistics also
-need visibility of the selected relations. Activity capture requires PostgreSQL 14+ for native lock-wait start times;
-other version-dependent fields are detected explicitly. Native tests run against owned fixtures; optional package
-setup can upgrade PostgreSQL's base-image minor version, and the runner logs the actual restarted server version.
-Managed-service permissions, TimescaleDB-specific storage and production
-source cost require their own qualification.
+need visibility of the selected relations. Metadata-only activity capture supports PostgreSQL 12+; native query IDs
+are available from PostgreSQL 14 when exposed by the server. A wait name does not establish a measured wait duration
+or a blocker. Other version-dependent fields are detected explicitly. Native tests run against owned fixtures;
+optional package setup can upgrade PostgreSQL's base-image minor version, and the runner logs the actual restarted
+server version. Managed-service permissions, TimescaleDB-specific storage and production source cost require their
+own qualification.
 
 Cleanup observations retain session, prepared-transaction and replication-slot identities, independent data and
 catalog horizons, and source visibility. Qualification covers data and non-shared catalogs in the selected database;
@@ -605,14 +651,14 @@ events, CPU utilization, application parameters and executed plans are not inven
 
 ## Other provider source coverage
 
-All providers use the same capture, outbox, recovery, incident and delivery components. Native readers own SQL,
+All providers use the same capture, outbox, recovery, diagnostic and delivery components. Native readers own SQL,
 permissions, cancellation and measurement meaning; the scheduler and ADX adapter do not select database-specific
 queries. Unsupported selections fail explicitly rather than returning a complete empty observation.
 
 | Provider | Point observations | Activity and retained evidence |
 |---|---|---|
-| MySQL / MariaDB | Statement counters and definitions; operational, settings, tables, indexes, columns, foreign keys, check constraints, objects, triggers, partitions, statistics, replication, sequences and cleanup | Persistent requests and blockers; InnoDB's latest deadlock report, with limited retention |
-| YugabyteDB | Node-local statement counters and definitions; operational, settings, tables, indexes, columns, foreign keys, constraints, objects, triggers, partitions, statistics and retained plans | Persistent YSQL requests and bounded DocDB blocker lookups; sampled ASH and retained terminations are operational observations |
+| MySQL / MariaDB | Statement counters and definitions; operational, settings, tables, indexes, columns, foreign keys, check constraints, objects, triggers, partitions, statistics, replication, sequences and cleanup | Default-database connection metadata baseline; InnoDB's latest deadlock report, with limited retention |
+| YugabyteDB | Node-local statement counters and definitions; operational, settings, tables, indexes, columns, foreign keys, constraints, objects, triggers, partitions, statistics and retained plans | Local YSQL client/connection-manager metadata baseline; sampled ASH and retained terminations are separate operational observations |
 | SQLite | Settings, operational file metadata, tables, indexes, columns, foreign keys, objects, triggers, statistics and sequences | No server sessions, native statement counters or retained deadlock history |
 
 Keep the three-minute activity and five-minute health cadences as conservative starting policies, subject to the
@@ -640,10 +686,10 @@ evictable plan cache; its averages are not converted into exact duration totals,
 `pg_read_all_stats` access because the verified server's foreign-role redaction path is unsafe. CPU and memory
 observations describe shared hosts/TServers. Optional native features can remain unavailable.
 
-Activity distinguishes positive blocking evidence from unavailable or capped lookups. An unresolved lookup marks
-an existing incident `uncertain`, preserving its last verified timestamp and blocker context. It does not resolve
-the incident or silently claim fresh evidence. Repeated uncertainty does not emit repeated change notifications.
-The next complete request frame can refresh or resolve the incident.
+Activity retains positive native facts separately from missing ownership or optional detail. Later episode analysis
+preserves the last verified evidence when a condition cannot be measured. Partial absence becomes `uncertain`,
+without a fabricated fresh observation or recovery. Revisions describe evidence and lifecycle; notification
+throttling is separate.
 
 SQLite opens files read-only with trusted schema disabled. Its background metadata read has a 250 ms ceiling,
 releases its transaction and closes the file before destination paging, and validates file identity through
@@ -652,9 +698,10 @@ query logs remain separate app-supplied evidence, not native telemetry history.
 
 Timescale uses the PostgreSQL reader and native counter semantics. Hypertable/chunk-specific size aggregation is
 not part of background telemetry; base relation observations must not be interpreted as logical hypertable totals.
-SQL Server background admission remains restricted to the separately qualified Azure SQL Database topology.
+SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
+does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **14**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **17**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 ## Recovery and activation
@@ -684,15 +731,25 @@ To recover and deliver data without source credentials or a source-quiescence as
 culprit collect service run --config collector.json --delivery-only
 ```
 
-This mode opens no database connection, does not restore native activity state or allocate a source epoch, and never
-clears a native debt. It cannot be combined with `--source-quiescent` or `--max-work`. Keep the original destination
-contract and recovery namespace. Source schedules are explicitly disabled in health metrics.
+This mode opens no database connection and does not resolve source credentials. It restores and analyzes sealed native inputs,
+then continues archive and analytical delivery. A diagnostic-only allocation epoch permits derived captures while
+native allocation stays disabled; it never clears or bypasses native debt. The mode cannot be combined with
+`--source-quiescent` or `--max-work`. Keep the original destination contract and recovery namespace. Source schedules
+are explicitly disabled in health metrics.
 
-Startup restores the latest complete activity checkpoint for each native source before
-allocating a new capture revision or opening a database session. Restored checkpoints are bounded, checksum-verified
-and charged to local quota. Empty checkpoints clear older incident state. Database identity, native epoch and
-incident policy must match before a checkpoint can continue an incident. Connection aliases alone do not identify
-the database. No Blob request is made while restoring an incident inside an open database observation.
+Startup first acquires recovery ownership, restores the full verified diagnostic working set and restores the exact
+original native inputs still owed analysis. Those obligations are independent of unfinished warehouse publication;
+an already analyzed input is not requeued merely because its delivery is delayed. Restoration uses bounded pages,
+checksums, cursor checks and local quota, preserving the capture-sequence high-water mark. It runs before source
+credential binding or database sessions. The diagnostic-only epoch then permits bounded, cancellable batches of
+offline analysis. Only a later, separately admitted native activation can resolve source credentials and promote
+the same epoch without resetting its sequence.
+
+Restored aliases and endpoint/database display labels do not authorize a native route. Original target, source,
+epoch, generations and analysis policy remain evidence. A delayed focused result requires its exact authenticated
+baseline parent; missing local evidence may be hydrated from the configured recovery store without a source
+connection, while corrupt local evidence is rejected. Failed restoration cannot silently create an empty working
+set or clear earlier episodes.
 
 Unfinished analytical deliveries hydrate incrementally after startup, within a local metadata budget. Native
 archiving has a separate journal and I/O loop, so stalled warehouse readback or a full analytical journal cannot
@@ -721,20 +778,20 @@ an exhausted source. Unconfirmed source work is never evicted to free space.
 
 ## Tables and analytical reads
 
-The generated contract has 15 analytical tables and one completion table:
+The generated contract has 13 analytical tables and one completion table:
 
 | Tables | Evidence |
 |---|---|
 | `CulpritQueryRuntimeV1`, `CulpritQueryWaitsV1` | Native intervals and source-declared dimensions; optional query/plan references, exact counts and explicit metric units |
 | `CulpritQueryDefinitionsV1`, `CulpritPlanDefinitionsV1` | Versioned native definitions and bounded payload references |
 | `CulpritResourceSamplesV1`, `CulpritWaitCountersV1` | Database/resource scope, aggregation, reset evidence and unknown values |
-| `CulpritActivityV1`, `CulpritBlockingV1`, `CulpritActivityIncidentsV1` | Native session/request generations, wait owners and incident transitions |
+| `CulpritActivityV1` | Native session/request generations, statement identities, wait targets and available wait-owner references in one authenticated activity row |
 | `CulpritDeadlocksV1` | Native event position, time, graph identity and recovery references |
-| `CulpritOperationalV1`, `CulpritReplicationV1` | Typed operational facts, native counters and replication observations |
+| `CulpritOperationalV1`, `CulpritReplicationV1` | Typed operational facts, including diagnostic revisions that reference original native evidence; native counters and replication observations |
 | `CulpritSettingsV1`, `CulpritTuningV1`, `CulpritObjectsV1` | Settings, tuning state and object/catalog facts with per-source coverage |
 | `CulpritPublishedRangesV1` | Exact capture completion, batch membership, coverage and source-read metrics |
 
-Incident checkpoints are recovery-only. They are not duplicated into a seventeenth analytical table. Multiple logical
+Diagnostic working-set checkpoints are recovery-only. They have no analytical table. Multiple logical
 datasets deliberately share a typed physical table; `Dataset`, native source and fact kind identify their meaning.
 
 Every capture declares its subject through `CollectionTarget`: a database, or a native instance, pool, cluster or
@@ -749,14 +806,14 @@ memory consumption can be relative to a pool limit without describing the pool's
 that database. This flag establishes measurement scope, not a causal link to any query. Query ownership and cause
 require their own native evidence; a high resource value or a concurrent query alone establishes neither.
 
-Activity rows and incident rows retain `WaitResources`: source-local native identities observed with the waiting
+Activity rows retain `WaitResources`: source-local native identities observed with the waiting
 request. SQL Server distinguishes in-memory page latches from page-I/O waits and preserves `wait_resource`.
 MySQL and MariaDB preserve the requested native lock ID with its storage engine; the ID's internal format is never
 parsed, and locked key contents are not collected. Live and background collection use the same native decoders.
 These references are included in exact analytical readback. An empty list means that no targets were identified,
 not that there was no contention.
 
-These fields keep the existing blocked/running thresholds and polling cadence. Page-to-object/index enrichment
+These fields do not apply blocked/running thresholds before baseline persistence. Page-to-object/index enrichment
 and identification of an owning statement require separate evidence. A wait target, a concurrent writer, or the
 current/last statement of a blocking session does not by itself establish the statement that acquired a resource.
 
@@ -770,7 +827,8 @@ Query the generated `...Rows` functions with explicit contract, store, resource 
 native measurement-time filters separately. Current activity and snapshot functions additionally require an
 `asof` and positive maximum age. Complete empty observations replace prior sets; partial sources cannot clear them.
 Native epoch changes replace the same logical activity source. Revisions use owner epoch and capture sequence,
-not ingestion arrival order. Raw tables include unpublished and duplicated physical attempts and are not totals.
+not ingestion arrival order. These warehouse head rules do not resolve diagnostic episodes from a different native
+epoch or population. Raw tables include unpublished and duplicated physical attempts and are not totals.
 
 Runtime rows expose a `Metrics` array with a typed key, unit, average and optional distribution statistics.
 Filter the duration metric and its unit before calculating execution-weighted time

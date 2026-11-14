@@ -39,11 +39,17 @@ impl RecoveryStore for Transfers {
         }
         self.store.pending_ranges(cursor, limit, order).await
     }
+    async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
+        self.store.pending_diagnostic_inputs(cursor, limit).await
+    }
     async fn retire(&self, fence: &Fence, publication: &PublishedRange) -> Result<()> {
         self.store.retire(fence, publication).await
     }
-    async fn activity_heads(&self, cursor: Option<&str>, limit: u32) -> Result<ActivityHeadPage> {
-        self.store.activity_heads(cursor, limit).await
+    async fn capture_manifest(&self, capture: &culprit_core::telemetry::CaptureIdentity) -> Result<RangeManifest> {
+        self.store.capture_manifest(capture).await
+    }
+    async fn diagnostic_heads(&self, cursor: Option<&str>, limit: u32) -> Result<super::recovery::DiagnosticHeadPage> {
+        self.store.diagnostic_heads(cursor, limit).await
     }
     fn id(&self) -> &str {
         self.store.id()
@@ -102,10 +108,9 @@ impl TelemetrySink for Transfers {
     }
 }
 pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
-    let policy = ActivityPolicy::default();
     let request = CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Activity { policy: policy.clone() },
+        selection: CollectionSelection::Activity,
         budget: CollectionBudget::default(),
     };
     let capture = CaptureIdentity {
@@ -124,34 +129,136 @@ pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
         source: "activity".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
-            epoch: "native-epoch".into(),
+            population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
+            epoch: Some("native-epoch".into()),
+            observed_from: "2020-01-01T06:00:00Z".into(),
+            observed_until: "2020-01-01T06:00:01Z".into(),
             at: "2020-01-01T06:00:00Z".into(),
             scope: culprit_core::MeasurementScope::Database,
-            complete_scope: true,
-            policy,
             native_rows: 0,
-            qualifying: 0,
-            uncertain: 0,
             observations: 0,
-            blocking_edges: 0,
-            details: ActivityDetailStatus::NotNeeded,
+            coverage: StateSourceCoverage::collected("activity".into(), 0),
         }),
     };
     let path = root.join("capture");
     let mut writer = ObservationFiles::create(&path, request, capture).unwrap();
     writer.describe(source).unwrap();
-    for index in 0..4 {
+    for index in 0..writer.manifest.files.len() {
         assert!(writer.write_page(index, &[]).unwrap().is_none());
         writer.seal(index).unwrap();
     }
     writer.confirm_source(SourceCompletion::Verified).unwrap();
     PreparedRange::from_validated(&path, &writer.finish(4).unwrap(), contract(), vec![]).unwrap()
 }
+fn empty_query_history(root: &Path) -> PreparedRange {
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::QueryHistory {
+            from: "2020-01-01T06:00:00Z".into(),
+            until: "2020-01-01T07:00:00Z".into(),
+        },
+        budget: Default::default(),
+    };
+    let source = CollectionDescription {
+        target: culprit_core::DatabaseIdentity::server(
+            culprit_core::Engine::Mssql,
+            "db",
+            "fixture.invalid",
+            1433,
+            None,
+        )
+        .into(),
+        source: "query-store".into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            interval: TelemetryInterval {
+                native_id: "1".into(),
+                from: "2020-01-01T06:00:00Z".into(),
+                until: "2020-01-01T07:00:00Z".into(),
+            },
+            dimensions: Default::default(),
+            native_properties: Default::default(),
+            waits: None,
+        }),
+    };
+    let capture = CaptureIdentity {
+        observation_id: "history".into(),
+        revision: Some(CaptureRevision { outbox_id: "outbox".into(), owner_epoch: "1".into(), sequence: "1".into() }),
+    };
+    let path = root.join("history");
+    let mut writer = ObservationFiles::create(&path, request, capture).unwrap();
+    writer.describe(source).unwrap();
+    for index in 0..4 {
+        writer.seal(index).unwrap();
+    }
+    writer.confirm_source(SourceCompletion::Verified).unwrap();
+    PreparedRange::from_validated(&path, &writer.finish(4).unwrap(), contract(), vec![]).unwrap()
+}
+pub(super) fn empty_diagnostics(root: &Path, parent: &super::evidence::RangeManifest, sequence: u64) -> PreparedRange {
+    let parent = super::diagnostic_recovery::capture_reference(parent).unwrap();
+    let step_id = digest(format!("step-{sequence}").as_bytes());
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Diagnostics {
+            parent: parent.clone(),
+            controller_version: 1,
+            step_id: step_id.clone(),
+        },
+        budget: Default::default(),
+    };
+    let source = CollectionDescription {
+        target: culprit_core::DatabaseIdentity::server(
+            culprit_core::Engine::Mssql,
+            "db",
+            "fixture.invalid",
+            1433,
+            None,
+        )
+        .into(),
+        source: DIAGNOSTICS_SOURCE.into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::Diagnostics(DiagnosticCaptureDescription {
+            parent: parent.clone(),
+            controller_version: 1,
+            step_id,
+            analyzed_at: "2020-01-01T06:03:00Z".into(),
+            records: 0,
+            checkpoint_records: 1,
+        }),
+    };
+    let mut part = DiagnosticCheckpointPart {
+        id: String::new(),
+        controller_version: 1,
+        target: source.target.clone(),
+        input: parent,
+        part: 0,
+        parts: 1,
+        episodes: vec![],
+    };
+    part.id = part.expected_id().unwrap();
+    let capture = CaptureIdentity {
+        observation_id: format!("diagnostic-{sequence}"),
+        revision: Some(CaptureRevision {
+            outbox_id: "outbox".into(),
+            owner_epoch: "1".into(),
+            sequence: sequence.to_string(),
+        }),
+    };
+    let path = root.join(&capture.observation_id);
+    let mut writer = ObservationFiles::create(&path, request, capture).unwrap();
+    writer.describe(source).unwrap();
+    writer.seal(0).unwrap();
+    writer.begin_page(1).unwrap();
+    assert!(writer.write_page(1, &[TelemetryRecord::DiagnosticCheckpoint(part)]).unwrap().is_none());
+    writer.seal(1).unwrap();
+    writer.confirm_source(SourceCompletion::Verified).unwrap();
+    PreparedRange::from_validated(&path, &writer.finish(0).unwrap(), contract(), vec![]).unwrap()
+}
 // Transfer latency belongs to virtual time; filesystem scheduling must not spend the synthetic request budget.
 #[tokio::test(start_paused = true)]
 async fn transfers_larger_than_one_operation_budget_resume_at_the_next_batch_after_restart() {
     let root = tempfile::tempdir().unwrap();
-    let range = quiet_activity(root.path());
+    let range = empty_query_history(root.path());
     let id = range.manifest().range_id.clone();
     let store = Arc::new(FileRecoveryStore::create(&root.path().join("recovery"), contract()).unwrap());
     let owner = store.acquire().await.unwrap();
@@ -191,14 +298,13 @@ async fn transfers_larger_than_one_operation_budget_resume_at_the_next_batch_aft
         assert_eq!(staged.len(), 4);
         assert_eq!(staged.iter().collect::<std::collections::BTreeSet<_>>().len(), 4);
         let submitted = transfers.submitted.lock().unwrap();
-        assert_eq!(submitted.len(), 3); // Checkpoints are recovery-only; the other successful empty streams are explicit.
-        assert_eq!(submitted.iter().collect::<std::collections::BTreeSet<_>>().len(), 3);
+        assert_eq!(submitted.len(), 4); // All four query-history streams have explicit successful empty receipts.
+        assert_eq!(submitted.iter().collect::<std::collections::BTreeSet<_>>().len(), 4);
     }
-    let heads = RecoveryStore::activity_heads(&transfers, None, 10).await.unwrap();
-    assert_eq!(heads.heads.len(), 1);
-    assert_eq!(heads.heads[0].range_id, id);
+    assert!(transfers.diagnostic_heads(None, 10).await.unwrap().heads.is_empty());
     let reopened = FileRecoveryStore::open(&root.path().join("recovery"), contract()).unwrap();
-    assert_eq!(reopened.activity_heads(None, 10).await.unwrap().heads, heads.heads);
+    assert_eq!(reopened.load(&id).await.unwrap(), *range.manifest());
+    assert!(reopened.pending_ranges(None, 10, RecoveryOrder::OldestFirst).await.unwrap().ranges.is_empty());
 }
 
 #[tokio::test]

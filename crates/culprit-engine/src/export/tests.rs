@@ -99,6 +99,7 @@ fn retained_native_exports_preserve_missing_costs_and_row_estimates() {
 }
 
 #[test]
+#[cfg(feature = "mysql")]
 fn a_plan_file_never_puts_markup_into_an_html_page() {
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/plans/mariadb-index.json")).unwrap();
     let mut plan = crate::plans::parse_plan(&text).unwrap();

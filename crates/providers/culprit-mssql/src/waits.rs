@@ -203,9 +203,12 @@ pub(crate) const BENIGN_WAITS: &[&str] = &[
     "HADR_DATABASE_FLOW_CONTROL_IDLE",
 ];
 
+pub(crate) fn is_lock_wait_type(wait_type: &str) -> bool {
+    wait_type.get(..4).is_some_and(|prefix| prefix.eq_ignore_ascii_case("LCK_"))
+}
 pub(crate) fn wait_type_category(wait_type: &str) -> &'static str {
     let w = wait_type.to_ascii_uppercase();
-    if w.starts_with("LCK_") {
+    if is_lock_wait_type(&w) {
         return "Lock";
     }
     if w.starts_with("PAGEIOLATCH") || w == "IO_COMPLETION" || w == "ASYNC_IO_COMPLETION" || w.starts_with("BACKUPIO") {

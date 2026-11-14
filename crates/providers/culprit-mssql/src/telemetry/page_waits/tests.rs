@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    activity::page_targets::tests::{context, page_wait, reader, successful_replies},
-    resources::test_support::replace,
+    activity::page_targets::tests::{context, page_wait, reader, reader_with_native, successful_replies},
+    resources::test_support::{FakeRead, replace},
     value::Val,
 };
 
@@ -11,6 +11,108 @@ fn request() -> CollectionRequest {
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets },
         budget: CollectionBudget { page_rows: 1, ..Default::default() },
     }
+}
+
+fn focused_request() -> CollectionRequest {
+    CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::FocusedPageWait {
+            focus: Box::new(crate::activity::page_targets::test_focus(&page_wait(42, "PAGELATCH_EX", "7:1:4144"))),
+        },
+        budget: CollectionBudget::default(),
+    }
+}
+
+#[test]
+fn focused_factory_is_lazy_and_preserves_stricter_caller_bounds() {
+    let mut request = focused_request();
+    request.budget.max_queries = 2;
+    request.budget.statement_timeout_ms = 50;
+    request.budget.total_timeout_ms = 100;
+    let bounded = bounded_request(&request).unwrap();
+    assert_eq!(bounded.budget.max_snapshot_rows, 1);
+    assert_eq!(bounded.budget.page_rows, 1);
+    assert_eq!(bounded.budget.max_queries, 2);
+    assert_eq!(bounded.budget.statement_timeout_ms, 50);
+    assert_eq!(bounded.budget.total_timeout_ms, 100);
+    let source = PageWaitSource::new(
+        Arc::new(Pool::new(tiberius::Config::new(), None)),
+        &request,
+        "fixture.invalid".into(),
+        1433,
+    )
+    .unwrap();
+    assert_eq!(source.query_count(), 0);
+}
+
+#[tokio::test]
+async fn disappeared_focus_remains_a_published_typed_outcome_with_the_original_parent() {
+    let request = focused_request();
+    let mut source = PageWaitSource::from_reader(
+        reader(vec![Ok(vec![context()]), Ok(vec![context()]), Ok(vec![context()]), Ok(vec![context()])]),
+        &request,
+    )
+    .unwrap();
+    let description = source.describe().await.unwrap();
+    assert!(description.matches_request(&request));
+    let SourceObservation::FocusedPageWait { snapshot, result } = &description.observation else {
+        panic!("focused result")
+    };
+    assert_eq!(snapshot.records, 0);
+    assert_eq!(snapshot.sources[0].state, culprit_core::SourceState::Partial);
+    assert_eq!(result.request, PageWaitRequestState::Missing);
+    let CollectionSelection::FocusedPageWait { focus } = &request.selection else { panic!() };
+    assert_eq!(result.focus, **focus);
+    assert_eq!(source.query_count(), 3);
+    assert!(matches!(source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap(),
+        CollectionRead::Page { records, next_cursor: None } if records.is_empty()));
+    assert_eq!(source.query_count(), 3, "paging the retained terminal outcome performs no native work");
+    assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+    assert_eq!(source.query_count(), 4);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn focused_page_rows_and_parent_descriptor_have_exact_export_identity() {
+    let mut supplied = successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
+    supplied.push(Ok(vec![context()]));
+    let request = focused_request();
+    let mut source = PageWaitSource::from_reader(reader(supplied), &request).unwrap();
+    let description = source.describe().await.unwrap();
+    assert!(description.matches_request(&request));
+    assert!(matches!(description.observation.range().unwrap(), TelemetryRange::Focused { .. }));
+    let CollectionRead::Page { records, next_cursor: None } =
+        source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(records.len(), 1);
+    let exported = ExportedRecord::new(
+        &description,
+        &CaptureIdentity { observation_id: "focused-child".into(), revision: None },
+        records[0].clone(),
+    )
+    .unwrap();
+    assert!(exported.record.is_valid());
+    let TelemetryRecord::Operational(row) = exported.record else { panic!() };
+    let OperationalFact::PageWait(page) = row.fact else { panic!() };
+    assert!(page.target.is_some());
+    assert_eq!(page.statement_identity.as_ref(), page.request.statement_identity.as_ref());
+    assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn a_retired_focused_native_request_cannot_authorize_any_later_sql_or_publication() {
+    let mut native = FakeRead::new(vec![Ok(vec![context()])]).pause_on_query(2);
+    native.shutdown = SourceShutdown::Unconfirmed;
+    let mut source = PageWaitSource::from_reader(reader_with_native(native), &focused_request()).unwrap();
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(5), source.describe()).await.is_err());
+    assert_eq!(source.query_count(), 2);
+    assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
+    assert!(source.describe().await.is_err());
+    assert!(source.finish().await.is_err());
+    assert_eq!(source.query_count(), 2);
 }
 
 #[test]

@@ -175,7 +175,6 @@ impl Fixture {
             &mut healthy,
             BlockingReadOptions {
                 minimum_request_age_ms: 0,
-                scope: ActivityScope::CurrentDatabase,
                 version: before.version,
                 database_oid: &before.database_oid,
                 max_snapshot_rows: 2,
@@ -221,7 +220,6 @@ impl Fixture {
             &mut blocked,
             BlockingReadOptions {
                 minimum_request_age_ms: 0,
-                scope: ActivityScope::CurrentDatabase,
                 version: before.version,
                 database_oid: &before.database_oid,
                 max_snapshot_rows: 2,

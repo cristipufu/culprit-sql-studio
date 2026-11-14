@@ -22,6 +22,35 @@ pub(crate) struct Context {
     process_id: u64,
     started_at_ticks: u64,
 }
+
+/// Unsupported products still expose their observed platform; they never acquire invented instance facts.
+pub(crate) struct Observation {
+    pub edition: i64,
+    pub major: u32,
+    pub observed_at: String,
+    native: Option<(SharedResourceIdentity, u64)>,
+}
+impl Observation {
+    pub(crate) fn supports_instance(&self) -> bool {
+        self.native.is_some()
+    }
+    pub(crate) async fn context<R: NativeRead>(&self, reader: &mut R) -> Result<Option<Context>> {
+        let Some((identity, process_id)) = &self.native else { return Ok(None) };
+        let epoch = one(reader, EPOCH).await?;
+        let started_at_ticks = u64::try_from(integer(&epoch, "started_at_ticks")?).map_err(|_| invalid_data())?;
+        let now_ticks = u64::try_from(integer(&epoch, "ms_ticks")?).map_err(|_| invalid_data())?;
+        if started_at_ticks > now_ticks {
+            return Err(invalid_data());
+        }
+        Ok(Some(Context {
+            identity: identity.clone(),
+            major: self.major,
+            edition: self.edition,
+            process_id: *process_id,
+            started_at_ticks,
+        }))
+    }
+}
 impl Context {
     pub(crate) fn engine_edition(&self) -> i64 {
         self.edition
@@ -36,11 +65,21 @@ impl Context {
 }
 
 pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<(Context, String)> {
+    let observed = observe(reader).await?;
+    let context = observed
+        .context(reader)
+        .await?
+        .ok_or_else(|| Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")))?;
+    Ok((context, observed.observed_at))
+}
+
+pub(crate) async fn observe<R: NativeRead>(reader: &mut R) -> Result<Observation> {
     let row = one(reader, IDENTITY).await?;
     let edition = integer(&row, "edition")?;
     let major = text(&row, "major")?.parse::<u32>().map_err(|_| invalid_data())?;
+    let observed_at = canonical_time(&text(&row, "observed_at")?)?;
     if !SUPPORTED_EDITIONS.contains(&edition) || major < MIN_SUPPORTED_MAJOR {
-        return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+        return Ok(Observation { edition, major, observed_at, native: None });
     }
     let identity = SharedResourceIdentity {
         engine: Engine::Mssql,
@@ -52,14 +91,7 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<(Context, Stri
     if !identity.is_valid() || process_id == 0 {
         return Err(invalid_data());
     }
-    let observed_at = canonical_time(&text(&row, "observed_at")?)?;
-    let epoch = one(reader, EPOCH).await?;
-    let started_at_ticks = u64::try_from(integer(&epoch, "started_at_ticks")?).map_err(|_| invalid_data())?;
-    let now_ticks = u64::try_from(integer(&epoch, "ms_ticks")?).map_err(|_| invalid_data())?;
-    if started_at_ticks > now_ticks {
-        return Err(invalid_data());
-    }
-    Ok((Context { identity, major, edition, process_id, started_at_ticks }, observed_at))
+    Ok(Observation { edition, major, observed_at, native: Some((identity, process_id)) })
 }
 
 #[cfg(test)]

@@ -43,7 +43,8 @@ pub struct CollectedAnalysisRecord {
 #[ts(export)]
 pub struct CollectedEvidenceContext {
     pub range_id: String,
-    pub manifest_sha256: String,
+    pub recovery_manifest_sha256: String,
+    pub capture_manifest_sha256: String,
     pub source: CollectionDescription,
     pub capture: CaptureIdentity,
     pub collected_from: String,

@@ -48,7 +48,7 @@ impl RecoveryFiles {
         durable_fs::create_file(&root.join("recovery.sqlite3")).map_err(storage)?.sync_all().map_err(storage)?;
         let journal = Connection::open(root.join("recovery.sqlite3")).map_err(storage)?;
         configure(&journal)?;
-        journal.execute_batch("CREATE TABLE identity(id TEXT PRIMARY KEY,contract TEXT NOT NULL,epoch INTEGER NOT NULL,token TEXT NOT NULL,head TEXT,high_sequence INTEGER NOT NULL,activity_heads TEXT NOT NULL,pending TEXT NOT NULL);
+        journal.execute_batch("CREATE TABLE identity(id TEXT PRIMARY KEY,contract TEXT NOT NULL,epoch INTEGER NOT NULL,token TEXT NOT NULL,head TEXT,high_sequence INTEGER NOT NULL,pending TEXT NOT NULL,diagnostic_heads TEXT NOT NULL);
           CREATE TABLE objects(object TEXT PRIMARY KEY,sha TEXT NOT NULL,bytes INTEGER NOT NULL);
           CREATE TABLE ranges(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,previous TEXT,sha TEXT NOT NULL,manifest TEXT NOT NULL);
           CREATE TABLE checkpoints(stream_key TEXT PRIMARY KEY,cursor TEXT NOT NULL);
@@ -299,22 +299,23 @@ impl RecoveryFiles {
             tx.execute("INSERT OR IGNORE INTO coverage VALUES(?1,?2)", params![key, manifest.range_id])
                 .map_err(storage)?;
         }
-        let heads: String =
-            tx.query_row("SELECT activity_heads FROM identity", [], |row| row.get(0)).map_err(storage)?;
-        let mut heads: super::activity_heads::ActivityHeads = serde_json::from_str(&heads).map_err(|_| integrity())?;
-        heads.validate()?;
-        heads.observe(manifest, &sha)?;
         let pending: String = tx.query_row("SELECT pending FROM identity", [], |r| r.get(0)).map_err(storage)?;
         let mut pending: super::pending::PendingRanges = serde_json::from_str(&pending).map_err(|_| integrity())?;
         pending.validate()?;
-        pending.insert(commit_order, &manifest.range_id)?;
+        pending.observe(commit_order, manifest)?;
+        let diagnostics: String =
+            tx.query_row("SELECT diagnostic_heads FROM identity", [], |row| row.get(0)).map_err(storage)?;
+        let mut diagnostics: super::diagnostic_recovery::DiagnosticHeads =
+            serde_json::from_str(&diagnostics).map_err(|_| integrity())?;
+        diagnostics.validate()?;
+        diagnostics.observe(manifest, &sha)?;
         tx.execute(
-            "UPDATE identity SET head=?1,high_sequence=MAX(high_sequence,?2),activity_heads=?3,pending=?4",
+            "UPDATE identity SET head=?1,high_sequence=MAX(high_sequence,?2),pending=?3,diagnostic_heads=?4",
             params![
                 manifest.range_id,
                 sequence,
-                serde_json::to_string(&heads).map_err(storage)?,
-                serde_json::to_string(&pending).map_err(storage)?
+                serde_json::to_string(&pending).map_err(storage)?,
+                serde_json::to_string(&diagnostics).map_err(storage)?
             ],
         )
         .map_err(storage)?;
@@ -448,6 +449,39 @@ impl RecoveryStore for FileRecoveryStore {
             })
             .await
     }
+    async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
+        self.files
+            .run(|| {
+                let cursor = cursor.map(str::to_owned);
+                move |files| {
+                    let (pending, high): (String, i64) = files
+                        .journal
+                        .query_row("SELECT pending,high_sequence FROM identity", [], |row| {
+                            Ok((row.get(0)?, row.get(1)?))
+                        })
+                        .map_err(storage)?;
+                    let pending: super::pending::PendingRanges =
+                        serde_json::from_str(&pending).map_err(|_| integrity())?;
+                    let committed: i64 = files
+                        .journal
+                        .query_row("SELECT coalesce(MAX(ordinal),0) FROM ranges", [], |row| row.get(0))
+                        .map_err(storage)?;
+                    let (ids, next_cursor) = pending.diagnostic_page(
+                        cursor.as_deref(),
+                        limit,
+                        &files.id,
+                        u64::try_from(committed).map_err(|_| integrity())?,
+                    )?;
+                    let ranges = ids.iter().map(|id| files.load(id)).collect::<Result<Vec<_>>>()?;
+                    Ok(RecoveryPage {
+                        ranges,
+                        next_cursor,
+                        high_sequence: u64::try_from(high).map_err(|_| integrity())?,
+                    })
+                }
+            })
+            .await
+    }
     async fn retire(&self, fence: &Fence, publication: &super::sink::PublishedRange) -> Result<()> {
         let range = publication.committed();
         if range.store_id() != self.id {
@@ -487,19 +521,33 @@ impl RecoveryStore for FileRecoveryStore {
             })
             .await
     }
-    async fn activity_heads(&self, cursor: Option<&str>, limit: u32) -> Result<ActivityHeadPage> {
+    async fn capture_manifest(&self, capture: &culprit_core::telemetry::CaptureIdentity) -> Result<RangeManifest> {
+        self.files
+            .run(|| {
+                let capture = capture.clone();
+                move |files| {
+                    let manifest = files.load(&range_id_for(&files.contract, &capture)?)?;
+                    if manifest.capture != capture {
+                        return Err(integrity());
+                    }
+                    Ok(manifest)
+                }
+            })
+            .await
+    }
+    async fn diagnostic_heads(&self, cursor: Option<&str>, limit: u32) -> Result<super::recovery::DiagnosticHeadPage> {
         self.files
             .run(|| {
                 let cursor = cursor.map(str::to_owned);
-                move |files: &mut RecoveryFiles| {
-                    let (heads, high): (String, i64) = files
+                move |files| {
+                    let (json, high): (String, i64) = files
                         .journal
-                        .query_row("SELECT activity_heads,high_sequence FROM identity", [], |row| {
+                        .query_row("SELECT diagnostic_heads,high_sequence FROM identity", [], |row| {
                             Ok((row.get(0)?, row.get(1)?))
                         })
                         .map_err(storage)?;
-                    let heads: super::activity_heads::ActivityHeads =
-                        serde_json::from_str(&heads).map_err(|_| integrity())?;
+                    let heads: super::diagnostic_recovery::DiagnosticHeads =
+                        serde_json::from_str(&json).map_err(|_| integrity())?;
                     heads.page(cursor.as_deref(), limit, u64::try_from(high).map_err(|_| integrity())?)
                 }
             })
@@ -551,6 +599,7 @@ impl RecoveryStore for FileRecoveryStore {
         manifest: &RangeManifest,
         staged: &[StagedBatch],
     ) -> Result<CommitReceipt> {
+        super::diagnostic_recovery::validate_staged(self, manifest).await?;
         self.files
             .run(|| {
                 let fence = fence.clone();

@@ -4,6 +4,9 @@
 //! https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-page-info-transact-sql
 mod context;
 mod fields;
+mod focus;
+#[cfg(test)]
+pub(crate) use focus::tests::focus as test_focus;
 mod index_context;
 #[cfg(test)]
 mod native_tests;
@@ -29,6 +32,12 @@ pub(crate) struct PageWaitCapture {
     pub guard: PageWaitGuard,
 }
 pub(crate) struct PageWaitGuard(context::LookupContext);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LookupAdmission {
+    ObservedPopulation,
+    OriginalFocus,
+}
 
 struct Candidate {
     record: usize,
@@ -66,7 +75,7 @@ impl<R: NativeRead> ActivityReader<R> {
             return Err(invalid_data());
         }
         let initial = context::initial(self).await?;
-        let mut frame = self
+        let frame = self
             .read_frame(
                 &sql::observation(self.options.identity),
                 vec![Parameter::Integer(
@@ -77,6 +86,15 @@ impl<R: NativeRead> ActivityReader<R> {
         if !initial.matches_initial(&frame) {
             return Err(CollectionStop::SourceChanged.error());
         }
+        self.capture_selected_page_wait_targets(frame, initial, LookupAdmission::ObservedPopulation).await
+    }
+
+    async fn capture_selected_page_wait_targets(
+        &mut self,
+        mut frame: ActivityFrame,
+        initial: context::LookupContext,
+        admission: LookupAdmission,
+    ) -> Result<PageWaitCapture> {
         let (mut candidates, limited) = select(&frame, &initial);
         let keys = candidates.iter().map(|candidate| frame.records[candidate.record].facts.key.clone()).collect();
         if candidates.is_empty() {
@@ -88,8 +106,16 @@ impl<R: NativeRead> ActivityReader<R> {
                     candidate.withhold(unavailable);
                 }
             }
-            self.enrich_using_policy(&mut frame, &keys, false, MAX_SQL_BYTES, super::sql::QueryPolicy::SerialMetadata)
+            if admission == LookupAdmission::ObservedPopulation {
+                self.enrich_using_policy(
+                    &mut frame,
+                    &keys,
+                    false,
+                    MAX_SQL_BYTES,
+                    super::sql::QueryPolicy::SerialMetadata,
+                )
                 .await?;
+            }
             return self.finish_page_capture(frame, candidates, limited, initial).await;
         }
 
@@ -103,10 +129,30 @@ impl<R: NativeRead> ActivityReader<R> {
             }
         };
         apply_request_checks(&frame, &mut candidates, &before);
+        if admission == LookupAdmission::OriginalFocus {
+            for candidate in &mut candidates {
+                if candidate.is_pending()
+                    && !candidate.before_check.as_ref().is_some_and(|check| {
+                        check.request == PageWaitRequestState::SameStatement
+                            && check.wait == PageWaitRelation::OriginalObserved
+                    })
+                {
+                    candidate.withhold(PageWaitResolution::Unavailable);
+                }
+            }
+        }
         let addresses = admitted_addresses(&candidates);
         if addresses.is_empty() {
-            self.enrich_using_policy(&mut frame, &keys, false, MAX_SQL_BYTES, super::sql::QueryPolicy::SerialMetadata)
+            if admission == LookupAdmission::ObservedPopulation {
+                self.enrich_using_policy(
+                    &mut frame,
+                    &keys,
+                    false,
+                    MAX_SQL_BYTES,
+                    super::sql::QueryPolicy::SerialMetadata,
+                )
                 .await?;
+            }
             return self.finish_page_capture(frame, candidates, limited, initial).await;
         }
         self.admit_page_headers(&initial).await?;
@@ -174,13 +220,13 @@ impl<R: NativeRead> ActivityReader<R> {
                 index_context::qualify(point, None, header_before, header_after);
             }
             if !chronological(&[
-                &initial.activity.at,
+                &initial.authority.activity.at,
                 &frame.context.at,
                 &original.at,
                 &header_before.observed_at,
                 &header_after.observed_at,
                 &checked.at,
-                &final_context.activity.at,
+                &final_context.authority.activity.at,
             ]) {
                 return Err(CollectionStop::SourceChanged.error());
             }
@@ -215,11 +261,11 @@ impl<R: NativeRead> ActivityReader<R> {
                 Err(_) => candidate.withhold(PageWaitResolution::UnverifiedSource),
             }
         }
-        finish(frame, candidates, limited, initial, final_context.activity.at)
+        finish(frame, candidates, limited, initial, final_context.authority.activity.at)
     }
 
     async fn admit_page_headers(&mut self, context: &context::LookupContext) -> Result<()> {
-        if context.activity.edition != 5 {
+        if context.authority.activity.edition != 5 {
             // No equivalent Azure resource-stat contract exists for this boxed/MI route. Its small, explicit
             // header budget is not a production load qualification or permission to infer spare capacity.
             return Ok(());
@@ -241,7 +287,8 @@ impl<R: NativeRead> ActivityReader<R> {
     /// be returned to the scan after close, while a collector cannot verify such a source for publication.
     pub(crate) async fn verify_page_wait_context(&mut self, guard: &PageWaitGuard) -> Result<bool> {
         let checked = context::read(self, &guard.0).await?;
-        Ok(guard.0.same_source(&checked) && chronological(&[&guard.0.activity.at, &checked.activity.at]))
+        Ok(guard.0.same_source(&checked)
+            && chronological(&[&guard.0.authority.activity.at, &checked.authority.activity.at]))
     }
 
     async fn finish_page_capture(
@@ -253,11 +300,11 @@ impl<R: NativeRead> ActivityReader<R> {
     ) -> Result<PageWaitCapture> {
         let checked = context::read(self, &initial).await?;
         if !initial.same_observed_source(&checked)
-            || !chronological(&[&initial.activity.at, &frame.context.at, &checked.activity.at])
+            || !chronological(&[&initial.authority.activity.at, &frame.context.at, &checked.authority.activity.at])
         {
             return Err(CollectionStop::SourceChanged.error());
         }
-        finish(frame, candidates, limited, initial, checked.activity.at)
+        finish(frame, candidates, limited, initial, checked.authority.activity.at)
     }
 
     async fn page_headers(&mut self, addresses: &BTreeSet<PageAddress>) -> Result<BTreeMap<PageAddress, HeaderRecord>> {
@@ -313,7 +360,7 @@ fn select(frame: &ActivityFrame, context: &context::LookupContext) -> (Vec<Candi
             let state = match address {
                 None => LookupState::Unresolved(PageWaitResolution::UnrecognizedAddress),
                 Some(address)
-                    if address.database != context.database_id
+                    if address.database != context.authority.database_id
                         || record.facts.scope != ActivityScopeBasis::RequestDatabase =>
                 {
                     LookupState::Unresolved(PageWaitResolution::OutsideDatabase)

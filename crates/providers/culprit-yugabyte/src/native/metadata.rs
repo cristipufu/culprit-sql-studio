@@ -8,6 +8,15 @@ pub(crate) struct Metadata {
     pub database: DatabaseIdentity,
 }
 impl Metadata {
+    pub(crate) fn same_activity_source(&self, other: &Self) -> bool {
+        self.database == other.database
+            && self.node == other.node
+            && self.backend == other.backend
+            && self.probe.oid == other.probe.oid
+            && self.probe.started == other.probe.started
+            && self.probe.version == other.probe.version
+            && self.probe.compatibility == other.probe.compatibility
+    }
     pub(crate) fn same_source(&self, other: &Self) -> bool {
         self.database == other.database
             && self.node == other.node

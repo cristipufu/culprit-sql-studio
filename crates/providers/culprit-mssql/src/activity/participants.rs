@@ -1,4 +1,4 @@
-use super::{ActivityFrame, ActivityReader, ActivityRecord};
+use super::{ActivityFrame, ActivityReader, ActivityRecord, RequestLocator};
 use crate::read::{NativeRead, Parameter, ReadError};
 use crate::{
     read::{integer, invalid_data, optional_counter, optional_text, text},
@@ -37,6 +37,30 @@ pub(super) struct Check {
     plan_hash: Option<String>,
 }
 impl Check {
+    pub(super) fn from_record(record: &ActivityRecord, at: &str) -> Self {
+        let request = record.facts.key.request.as_ref();
+        let locator = record.current_locator.as_ref();
+        let wait = record.facts.wait.as_ref();
+        Self {
+            ordinal: 0,
+            at: at.into(),
+            session: Some(record.facts.key.session.id.clone()),
+            login: Some(record.facts.key.session.generation.clone()),
+            request: request.map(|request| request.id.clone()),
+            started: request.map(|request| request.generation.clone()),
+            sql_handle: locator.map(|locator| locator.handle.clone()),
+            begin: locator.map(|locator| locator.start),
+            end: locator.map(|locator| locator.end),
+            database: locator.map(|locator| locator.database),
+            wait_type: wait.and_then(|wait| wait.native_type.clone()),
+            resource: wait
+                .and_then(|wait| wait.identified_resources.first().map(|resource| resource.native.id.clone())),
+            plan_handle: None,
+            query_hash: record.facts.query_hash.clone(),
+            plan_hash: None,
+        }
+    }
+
     pub(super) fn decode(row: &Rec) -> Result<Self> {
         Ok(Self {
             ordinal: usize::try_from(integer(row, "ordinal")?).map_err(|_| invalid_data())?,
@@ -58,22 +82,30 @@ impl Check {
     }
 
     pub(super) fn request_state(&self, record: &ActivityRecord) -> RequestState {
+        self.matches_request(&record.facts, record.current_locator.as_ref())
+    }
+
+    fn matches_request(
+        &self,
+        original: &culprit_core::telemetry::ActivityObservation,
+        locator: Option<&RequestLocator>,
+    ) -> RequestState {
         if self.session.is_none() || self.request.is_none() {
             return RequestState::Missing;
         }
-        let key = &record.facts.key;
+        let key = &original.key;
         let Some(request) = &key.request else { return RequestState::Missing };
-        let Some(locator) = &record.current_locator else { return RequestState::Unverified };
-        let expected_hash =
-            record.facts.query_hash.as_deref().filter(|value| !value.bytes().all(|value| value == b'0'));
+        let Some(locator) = locator else { return RequestState::Unverified };
+        let expected_hash = original.query_hash.as_deref().filter(|value| !value.bytes().all(|value| value == b'0'));
+        let Some(current) = self.statement_locator() else { return RequestState::Unverified };
+        if self.login.is_none() || self.started.is_none() || expected_hash.is_some() && self.query_hash.is_none() {
+            return RequestState::Unverified;
+        }
         if self.session.as_deref() != Some(key.session.id.as_str())
             || self.login.as_deref() != Some(key.session.generation.as_str())
             || self.request.as_deref() != Some(request.id.as_str())
             || self.started.as_deref() != Some(request.generation.as_str())
-            || !self.sql_handle.as_ref().is_some_and(|handle| handle.eq_ignore_ascii_case(&locator.handle))
-            || self.begin != Some(locator.start)
-            || self.end != Some(locator.end)
-            || self.database != Some(locator.database)
+            || !current.matches(locator)
             || expected_hash
                 .is_some_and(|hash| !self.query_hash.as_ref().is_some_and(|current| current.eq_ignore_ascii_case(hash)))
         {
@@ -83,17 +115,24 @@ impl Check {
         }
     }
 
+    pub(super) fn observation_state(&self, original: &culprit_core::telemetry::ActivityObservation) -> RequestState {
+        let Some(identity) = original.statement_identity.as_ref() else { return RequestState::Unverified };
+        let Some(locator) = RequestLocator::from_identity(identity) else { return RequestState::Unverified };
+        self.matches_request(original, Some(&locator))
+    }
+
     fn same_plan(&self, other: &Self) -> bool {
         self.plan_handle == other.plan_handle
             && self.plan_hash == other.plan_hash
             && self.query_hash == other.query_hash
     }
 
+    fn statement_locator(&self) -> Option<RequestLocator> {
+        RequestLocator::from_native(self.sql_handle.clone()?, self.begin?, self.end?, self.database?)
+    }
+
     pub(super) fn identities(&self, other: &Self) -> Option<(NativeIdentity, Option<NativeIdentity>)> {
-        let statement = NativeIdentity::new(self.sql_handle.as_ref()?)
-            .qualified("native_object", "sys.dm_exec_requests.sql_handle")
-            .qualified("statement_start_offset", self.begin?.to_string())
-            .qualified("statement_end_offset", self.end?.to_string());
+        let statement = self.statement_locator()?.identity();
         let plan = self.plan_handle.as_ref().filter(|_| self.same_plan(other)).map(|handle| {
             let mut identity =
                 NativeIdentity::new(handle).qualified("native_object", "sys.dm_exec_requests.plan_handle");

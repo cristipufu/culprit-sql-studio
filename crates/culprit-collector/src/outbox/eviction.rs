@@ -5,20 +5,17 @@ use rusqlite::params;
 
 impl Files {
     pub(super) fn eviction_candidate(&self, id: &str) -> Result<Option<bool>> {
-        let capture = match self.journal.capture(id) {
-            Ok(capture) => capture,
+        match self.journal.capture(id) {
+            Ok(_) => (),
             Err(error) if error.detail == Some(culprit_core::ErrorDetail::Outbox(OutboxProblem::MissingCapture)) => {
                 return Ok(None);
             }
             Err(error) => return Err(error),
-        };
-        Ok(Some(
-            capture.request.collection() != TelemetryCollection::Activity
-                || self
-                    .journal
-                    .latest(&capture.connection, TelemetryCollection::Activity)?
-                    .is_none_or(|latest| latest.identity != capture.identity),
-        ))
+        }
+        if investigations::journal::is_pinned(&self.journal.conn, id)? {
+            return Ok(Some(false));
+        }
+        Ok(Some(true))
     }
     pub(super) fn evict(&mut self, committed: &CommittedRange) -> Result<bool> {
         let RevisionAuthority::Recovery { store_id } = &self.authority else {

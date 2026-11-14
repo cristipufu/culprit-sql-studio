@@ -6,7 +6,11 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(super) fn capture(capture: &EvidenceCapture) -> Result<DatabaseIdentity> {
     let source = capture.source();
     let CollectionTarget::Database(database) = &source.target else { return Err(invalid()) };
-    if !source.target.is_valid() || !valid_digest(capture.range_id()) || !valid_digest(capture.manifest_sha256()) {
+    if !source.target.is_valid()
+        || !valid_digest(capture.range_id())
+        || !valid_digest(capture.recovery_manifest_sha256())
+        || !valid_digest(capture.capture_manifest_sha256())
+    {
         return Err(invalid());
     }
     let history = source.query_history().ok_or_else(|| DeliveryProblem::UnsupportedSchema.error())?;

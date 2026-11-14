@@ -288,3 +288,21 @@ async fn a_staged_payload_lost_before_commit_cannot_advance_the_recovery_checkpo
     assert!(store.checkpoint_head().await.unwrap().is_none());
     assert!(store.checkpoint("db/resource-history").await.unwrap().is_none());
 }
+
+#[test]
+fn expected_native_receipt_identity_and_representation_must_match_the_actual_stream() {
+    let root = tempfile::tempdir().unwrap();
+    let prepared = prepared(root.path(), 1);
+    let original = prepared.manifest().clone();
+    let mut changed = original.clone();
+    changed.batches[0].rows[0].native_key =
+        NativeRecordIdentity::Operational { source: "other-source".into(), key: "other-key".into() };
+    assert_eq!(problem(changed.validate().unwrap_err()), DeliveryProblem::Integrity);
+    changed = original.clone();
+    changed.batches[0].rows[0].native_key =
+        NativeRecordIdentity::ResourceSample { at: "not-a-native-UTC-instant".into(), replica_id: None };
+    assert_eq!(problem(changed.validate().unwrap_err()), DeliveryProblem::Integrity);
+    changed = original;
+    changed.batches[0].rows[0].key.representation_version = REPRESENTATION_VERSION + 1;
+    assert_eq!(problem(changed.validate().unwrap_err()), DeliveryProblem::Integrity);
+}

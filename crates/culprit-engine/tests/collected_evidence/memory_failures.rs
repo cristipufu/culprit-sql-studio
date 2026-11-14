@@ -50,7 +50,7 @@ async fn authenticated_memory_failures_reuse_scan_explanations_without_inventing
     assert_eq!(serde_json::to_value(&analysis.report).unwrap(), serde_json::to_value(expected).unwrap());
     assert_eq!(analysis.context.source, source);
     assert!(analysis.context.source.target.database().is_none());
-    assert_eq!(analysis.context.manifest_sha256, fixture.range.manifest_digest());
+    assert_eq!(analysis.context.recovery_manifest_sha256, fixture.range.manifest_digest());
     assert_eq!(analysis.context.selected_streams, [TelemetryStream::OperationalSamples]);
     assert!(analysis.context.read_gaps.is_empty());
     assert_eq!(analysis.context.records.len(), 2);

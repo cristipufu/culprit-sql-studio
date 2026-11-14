@@ -180,8 +180,9 @@ release uncertain database work to a replacement operation.
 Interactive and background consumers share provider-owned native readers for equivalent evidence. SQL Server
 activity uses `culprit-mssql::activity`: one metadata projection and decoder, with explicit visibility, database
 identity, detail selectors and read budgets. Live projects these facts into sessions and can request idle sessions'
-previous batches. Background capture selects persistent trouble and blocker context, then redacts current SQL
-before export. Current SQL enrichment verifies the session and request generations, database, native SQL handle
+previous batches. Background activity first freezes a metadata-only baseline, including ordinary and short-lived
+observed waits, without SQL payload or optional blocker walks. Source-supplied owner references stay in the same
+native row. Later SQL enrichment verifies the session and request generations, database, native SQL handle
 and statement offsets; a previous batch never becomes a current statement. Native local datetime values remain
 opaque identity tokens, while observation times are UTC. A joined request takes precedence over a later absence
 probe: DMV reads are not atomic, and ended statements remain unavailable through the enrichment guard.
@@ -260,17 +261,26 @@ and S3 adapters share the bounded worker bridge, exact stream completion and fil
 composition never selects recovery. See [Background collection](collector.md#recovery-providers) for registration,
 profiles and native fixture coverage.
 
-Activity adapters produce one bounded metadata observation and an optional detail read. The shared core selects
-qualifying requests and their blocker closure, retaining native session/request generations, transaction identity,
-wait ownership, exact counters and database scope. It derives incident transitions only after a complete source
-observation; neither incomplete reads nor restricted visibility can clear state. `ActivityBaseline` loads the latest
-verified local or remotely recovered checkpoint by native source identity and policy, then checks its native epoch
-before reuse. Alias changes alone cannot discard recovered state; an empty complete checkpoint is authoritative.
-Events and the next active checkpoint commit in the same outbox transaction. Source replacement starts a separate
-namespace rather than resolving old incidents as if the database had been observed quiet.
+`CollectionSelection::Activity` acquires native metadata; analysis policy does not filter that baseline.
+`ActivitySnapshotDescription` declares source bounds, point timestamp, population, measured scope, native/retained
+row counts, optional native epoch and coverage. Provider adapters use the same native projections and decoders as
+their other consumers, excluding optional SQL and owner investigation before persistence. A capped prefix or hidden
+population can retain positive rows with partial coverage. Successfully sealing that input does not establish
+absence, health, a complete event history or coverage of system/parallel/distributed actors outside its population.
+
+The source-independent diagnostic worker consumes sealed native inputs after native ownership has settled. Core's
+pure observer selects symptoms under an explicit `ActivityPolicy`, references exact original row receipts and
+retains episode lifecycle separately from analysis status. Recovery can precede diagnosis without erasing historical
+analysis debt. Revisions are separate operational facts; the full working-set checkpoint and input acknowledgement
+commit atomically in a derived capture. There are no inline blocker, activity-incident or activity-checkpoint streams.
+Missing or partial observations preserve uncertainty. Absence-based recovery is scoped to the native source,
+epoch, population and measurement scope; a different native epoch cannot resolve the old source.
+The current implementation can express and analyze an explicit page-wait focus; automatic native focus scheduling
+is not yet enabled. A declared recipe is not a production-cost qualification or completed root-cause analysis.
 
 `Workspace::monitor_activity` owns a single-target loop, cancellation and bounded failure backoff. It schedules the
-next poll after completion, at least one minute later, and reports coverage independently of incident changes.
+next poll after completion, at least one minute later. It invokes that same worker and reports active and uncertain
+episode counts only for a checkpoint matching the exact sealed native input, separately from native coverage.
 Outbox admission still precedes native work. This loop does not implement fleet fairness, shared-pool budgets,
 pressure suppression or remote delivery. The source has no knowledge of polling cadence or incident persistence.
 
@@ -420,17 +430,20 @@ downloads. Effective Azure RBAC, networking, storage guarantees and managed inge
 `OutboxDelivery` shares the capture owner's journal and filesystem lock without borrowing its mutable source
 interface. `DeliveryWorker` advances bounded pages independently of source work. Recovery commit precedes analytical
 destination validation, so an analytical outage can accumulate remotely while collection continues. Exact committed
-capabilities authorize local eviction; a durable deletion intent survives an interruption. The latest activity
-checkpoint stays local until its successor is sealed. Completed delivery metadata is compacted only after publication
-and local eviction. Failed, incomplete and quarantined captures retain their local quota and cannot be deleted by
+capabilities authorize local eviction; a durable deletion intent survives an interruption. Original inputs still owed
+diagnostic analysis and the current working-set state have independent recovery obligations. Completed delivery
+metadata is compacted only after publication and local eviction. Failed, incomplete and quarantined captures retain their local quota and cannot be deleted by
 this path. Exact remote native-range receipts prevent eviction from causing historical SQL recollection.
 
-A remote outbox binds its namespace to its recovery store. Before reserving new captures, an owner activates a
-strictly newer remote epoch and restores the sequence high-water mark; reopening or replacing the volume cannot
-silently restart local allocation. This storage fence never proves that earlier database work stopped. Existing
-unconfirmed source work still blocks activation, and total volume loss requires an independent source-quiescence
-check before collection resumes. Recovery can rebuild delivery metadata and publish committed captures without
-their original local files or another database read.
+A remote outbox binds its namespace to its recovery store. Startup acquires recovery ownership and restores the full
+verified diagnostic working set plus the exact sealed native inputs still owed analysis, before source credential
+binding. It restores the sequence high-water mark and binds a diagnostic-only allocation epoch, allowing offline
+analysis and delivery while native allocation remains fenced. Native activation separately promotes the same epoch
+without restarting its sequence. This storage fence never proves that earlier database work stopped: native debt
+still blocks new source work, and total volume loss requires an independent source-quiescence check before collection
+resumes. Delivery-only startup performs restoration and offline analysis without source credentials or sessions.
+Recovered labels authorize no native route. An exact focused-result parent may be hydrated through recovery after
+local loss; corrupt local evidence is rejected rather than replaced by a healthy empty baseline.
 
 Paged snapshot sources declare their dataset, source names and native observation start before streaming. Their
 `finish` operation supplies final counts, observation end and source coverage after native identity checks. It cannot

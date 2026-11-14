@@ -100,13 +100,7 @@ fn activity_frame(rows: Vec<Row>) -> ActivityFrame {
     }
 }
 fn options() -> BlockingReadOptions<'static> {
-    BlockingReadOptions {
-        minimum_request_age_ms: 30_000,
-        scope: ActivityScope::CurrentDatabase,
-        version: 180_000,
-        database_oid: "42",
-        max_snapshot_rows: 500,
-    }
+    BlockingReadOptions { minimum_request_age_ms: 30_000, version: 180_000, database_oid: "42", max_snapshot_rows: 500 }
 }
 fn owners(frame: &ActivityFrame, index: usize) -> &[ActivityWaitOwner] {
     &frame.records[index].facts.as_ref().unwrap().wait.as_ref().unwrap().owners

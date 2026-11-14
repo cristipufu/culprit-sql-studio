@@ -14,10 +14,13 @@ const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
 
 fn native_budget(request: &CollectionRequest) -> CollectionBudget {
     if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::MemoryFailures }) {
-        crate::memory_failures::bounded_budget(&request.budget, SNAPSHOT_CLOCK_QUERIES)
+        memory_failure_budget(&request.budget)
     } else {
         request.budget.clone()
     }
+}
+pub(super) fn memory_failure_budget(requested: &CollectionBudget) -> CollectionBudget {
+    crate::memory_failures::bounded_budget(requested, SNAPSHOT_CLOCK_QUERIES)
 }
 
 pub(super) async fn clock<R: NativeRead>(reader: &mut R) -> Result<(String, bool)> {

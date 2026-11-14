@@ -106,7 +106,7 @@ fn heads(snapshot: bool) -> String {
     } else {
         (
             "CulpritActivityHeadsV1",
-            "JSONExtractString(SourceDescription,'observation','kind')='activity' AND JSONExtractBool(SourceDescription,'observation','data','complete_scope')",
+            "JSONExtractString(SourceDescription,'observation','kind')='activity' AND JSONExtractBool(SourceDescription,'observation','data','coverage','complete_scope') AND JSONExtractString(SourceDescription,'observation','data','coverage','state') IN ('collected','empty')",
             "",
             "",
             "LogicalSourceId, Dataset",

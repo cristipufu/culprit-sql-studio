@@ -4,7 +4,7 @@ fn deployment_contains_one_route_and_the_exact_runtime_mapping_for_every_analyti
     let catalog = SchemaCatalog::new().unwrap();
     let assets = DeploymentAssets::new().unwrap();
     assert_eq!(assets.schema_digest, catalog.digest());
-    assert_eq!(assets.routes.len(), 16);
+    assert_eq!(assets.routes.len(), catalog.schemas().count() + 1);
     for schema in catalog.schemas().map(|(_, schema)| schema).chain(std::iter::once(catalog.publication())) {
         assert!(assets.commands.contains(&schema.create_table()));
         assert!(assets.commands.contains(&schema.create_mapping().unwrap()));
@@ -40,6 +40,11 @@ fn empty_set_heads_and_revision_rules_are_deliberate_per_family_and_never_use_ar
     assert!(script.contains("CulpritDeadlocksV1Rows"));
     assert!(script.contains("CulpritActivityV1Current"));
     assert!(script.contains("CulpritObjectsV1Current"));
+    assert!(script.contains("tobool(SourceDescription.observation.data.coverage.complete_scope)"));
+    assert!(
+        script.contains("tostring(SourceDescription.observation.data.coverage.state) in (\"collected\", \"empty\")")
+    );
+    assert!(!script.contains("SourceDescription.observation.data.complete_scope"));
     assert!(script.contains("max(CaptureSequence)"));
     assert!(script.contains("PresentRows == ExpectedRows"));
     assert!(script.contains("Variants != 1"));

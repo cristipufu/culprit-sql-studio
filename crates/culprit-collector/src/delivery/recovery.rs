@@ -1,5 +1,5 @@
 //! A sink receives a committed capability only after the recovery provider acknowledges a fenced commit.
-pub use super::activity_heads::{ActivityHead, ActivityHeadPage};
+pub use super::diagnostic_recovery::{DiagnosticHead, DiagnosticHeadPage};
 pub use super::object::RecoveryRecords;
 use super::{contract::*, evidence::*};
 use async_trait::async_trait;
@@ -91,13 +91,16 @@ pub trait RecoveryStore: Send + Sync {
         staged: &[StagedBatch],
     ) -> Result<CommitReceipt>;
     async fn load(&self, range_id: &str) -> Result<RangeManifest>;
+    /// Exact immutable capture lookup under this store's delivery contract; it does not query a native source.
+    async fn capture_manifest(&self, capture: &culprit_core::telemetry::CaptureIdentity) -> Result<RangeManifest>;
     async fn recover(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage>;
     /// Cold recovery enumerates unpublished work, rather than replaying the entire retained history.
     async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage>;
+    /// Native inputs still lacking their initial diagnostic checkpoint, including already-published captures.
+    async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage>;
     async fn retire(&self, fence: &Fence, publication: &super::sink::PublishedRange) -> Result<()>;
-    /// Latest complete activity checkpoint per native source, including successful empty sets.
-    /// This is stored collector state, never a claim that present source activity is fresh or unchanged.
-    async fn activity_heads(&self, cursor: Option<&str>, limit: u32) -> Result<ActivityHeadPage>;
+    /// Latest full diagnostic working set per target and controller scope.
+    async fn diagnostic_heads(&self, cursor: Option<&str>, limit: u32) -> Result<DiagnosticHeadPage>;
     /// Open the exact immutable object as a stream. Consumers verify its complete length and checksum; a partial
     /// HTTP response, truncated file or late read error cannot authorize publication.
     async fn open_object(&self, batch: &PayloadObject) -> Result<RecoveryReader>;

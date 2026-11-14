@@ -52,12 +52,15 @@ fn unrepresentable_dates_and_bad_returned_types_fail_instead_of_wrapping() {
 #[test]
 fn every_stream_has_one_physical_schema_without_adx_presence_columns() {
     let catalog = crate::catalog::SchemaCatalog::new().unwrap();
-    assert_eq!(catalog.schemas().count(), culprit_core::telemetry::TelemetryStream::ALL.len() - 1);
+    assert_eq!(
+        catalog.schemas().count(),
+        culprit_core::telemetry::TelemetryStream::ALL.into_iter().filter(|stream| stream.delivery_required()).count()
+    );
     for (_, schema) in catalog.schemas() {
         assert!(schema.columns().iter().all(|column| !column.name.starts_with("Has")));
         assert_eq!(schema.columns().len(), schema.verification_columns().len());
     }
-    assert!(catalog.get(culprit_core::telemetry::TelemetryStream::ActivityCheckpoints).is_err());
+    assert!(catalog.get(culprit_core::telemetry::TelemetryStream::DiagnosticCheckpoints).is_err());
 }
 
 #[tokio::test]

@@ -389,7 +389,6 @@ impl Provider for PostgresProvider {
                 &mut frame,
                 crate::native::activity::BlockingReadOptions {
                     minimum_request_age_ms: 0,
-                    scope: crate::native::activity::ActivityScope::Visible,
                     version: meta.version,
                     database_oid: &meta.database_oid,
                     max_snapshot_rows: budget.max_snapshot_rows as usize,

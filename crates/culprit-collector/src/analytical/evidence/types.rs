@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum EvidenceFamily {
     ResourceSamples,
     OperationalSamples,
+    ActivityObservations,
     QueryDefinitions,
     PlanDefinitions,
     QueryRuntime,
@@ -16,6 +17,7 @@ impl EvidenceFamily {
     pub const ALL: &[Self] = &[
         Self::ResourceSamples,
         Self::OperationalSamples,
+        Self::ActivityObservations,
         Self::QueryDefinitions,
         Self::PlanDefinitions,
         Self::QueryRuntime,
@@ -26,6 +28,7 @@ impl EvidenceFamily {
         match self {
             Self::ResourceSamples => TelemetryStream::ResourceSamples,
             Self::OperationalSamples => TelemetryStream::OperationalSamples,
+            Self::ActivityObservations => TelemetryStream::ActivityObservations,
             Self::QueryDefinitions => TelemetryStream::QueryDefinitions,
             Self::PlanDefinitions => TelemetryStream::PlanDefinitions,
             Self::QueryRuntime => TelemetryStream::QueryRuntime,
@@ -114,7 +117,8 @@ impl VerifiedEvidenceRecord {
 #[derive(Clone, Debug, Serialize)]
 pub struct EvidenceCapture {
     pub(super) range_id: String,
-    pub(super) manifest_sha256: String,
+    pub(super) recovery_manifest_sha256: String,
+    pub(super) capture_manifest_sha256: String,
     pub(super) source: CollectionDescription,
     pub(super) capture: CaptureIdentity,
     pub(super) collected_from: String,
@@ -128,8 +132,11 @@ impl EvidenceCapture {
     pub fn range_id(&self) -> &str {
         &self.range_id
     }
-    pub fn manifest_sha256(&self) -> &str {
-        &self.manifest_sha256
+    pub fn recovery_manifest_sha256(&self) -> &str {
+        &self.recovery_manifest_sha256
+    }
+    pub fn capture_manifest_sha256(&self) -> &str {
+        &self.capture_manifest_sha256
     }
     pub fn source(&self) -> &CollectionDescription {
         &self.source

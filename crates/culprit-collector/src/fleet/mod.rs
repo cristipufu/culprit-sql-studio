@@ -39,6 +39,7 @@ pub struct FleetRunner<'a> {
     started: tokio::time::Instant,
     initialized: bool,
     stopped: bool,
+    diagnostics: crate::diagnostics::DiagnosticPolicies,
 }
 impl<'a> FleetRunner<'a> {
     pub fn new(
@@ -61,6 +62,7 @@ impl<'a> FleetRunner<'a> {
             started: tokio::time::Instant::now(),
             initialized: false,
             stopped: false,
+            diagnostics: crate::diagnostics::DiagnosticPolicies::from_inventory(inventory, shard)?,
         })
     }
     pub fn with_recovery(mut self, recovery: &'a dyn crate::delivery::recovery::RecoveryStore) -> Result<Self> {
@@ -132,6 +134,10 @@ impl<'a> FleetRunner<'a> {
         }
         self.initialize().await?;
         while !cancellation.is_cancelled() && max_work.is_none_or(|limit| summary.attempts < limit) {
+            self.analyze_pending(cancellation).await?;
+            if cancellation.is_cancelled() {
+                break;
+            }
             let admitted_at = self.started.elapsed();
             let Some(job) = self.scheduler.take(admitted_at)? else {
                 wait(cancellation, self.scheduler.wait(self.started.elapsed())).await;
@@ -151,6 +157,7 @@ impl<'a> FleetRunner<'a> {
                     .await?;
             self.scheduler.finish(self.started.elapsed(), result.outcome)?;
             self.save_completion().await?;
+            self.analyze_pending(cancellation).await?;
             summary.attempts = summary.attempts.checked_add(1).ok_or_else(scheduler::state_failed)?;
             if result.event.status == CollectionStatus::Complete {
                 summary.complete += 1;
@@ -164,6 +171,17 @@ impl<'a> FleetRunner<'a> {
             }
         }
         Ok(summary)
+    }
+    async fn analyze_pending(&mut self, cancellation: &CollectionCancellation) -> Result<()> {
+        crate::diagnostics::analyze_pending(
+            self.storage.outbox,
+            &self.diagnostics,
+            cancellation,
+            MAX_DIAGNOSTIC_INPUTS as u32,
+            self.storage.recovery,
+        )
+        .await?;
+        Ok(())
     }
 }
 async fn wait(cancellation: &CollectionCancellation, delay: Duration) {

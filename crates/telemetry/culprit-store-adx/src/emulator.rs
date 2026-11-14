@@ -217,16 +217,37 @@ async fn functional_contract_and_canonical_sets() {
     assert_eq!(emulator.values(query.into(), scope(&first.range), columns.clone()).await, vec![vec![json!(12.5)]]);
     later.publish(&emulator).await;
     assert_eq!(emulator.values(query.into(), scope(&first.range), columns.clone()).await, vec![vec![json!(30.0)]]);
-    let active = Scenario::new(test_support::activity("adx:test", catalog.digest(), 4, false), emulator.clone()).await;
+    let [(source, records), partial, (mut empty_source, empty_records), unavailable]: [(
+        CollectionDescription,
+        Vec<TelemetryRecord>,
+    ); 4] = culprit_collector::analytical::test_support::activity_evidence_cases().try_into().unwrap();
+    let expected_active = records.len() as u64;
+    let active =
+        Scenario::new(Recovery::capture("adx:test", catalog.digest(), source, records, 4), emulator.clone()).await;
     active.dispatch(&emulator).await;
     active.publish(&emulator).await;
-    assert_eq!(emulator.count("CulpritActivityV1Current", &active.range, true).await, 1);
-    let mut restarted = test_support::activity("adx:test", catalog.digest(), 5, true);
-    let SourceObservation::Activity(snapshot) = &mut restarted.manifest.source.observation else { unreachable!() };
-    snapshot.epoch = "restarted-native-epoch".into();
-    let empty = Scenario::new(restarted, emulator.clone()).await;
+    assert_eq!(emulator.count("CulpritActivityV1Current", &active.range, true).await, expected_active);
+    for (sequence, (source, records)) in [(401, partial), (402, unavailable)] {
+        let incomplete =
+            Scenario::new(Recovery::capture("adx:test", catalog.digest(), source, records, sequence), emulator.clone())
+                .await;
+        incomplete.dispatch(&emulator).await;
+        incomplete.publish(&emulator).await;
+        assert_eq!(
+            emulator.count("CulpritActivityV1Current", &active.range, true).await,
+            expected_active,
+            "partial or unavailable activity cannot clear the last qualified complete set"
+        );
+    }
+    let SourceObservation::Activity(snapshot) = &mut empty_source.observation else { unreachable!() };
+    snapshot.epoch = Some("restarted-native-epoch".into());
+    let empty = Scenario::new(
+        Recovery::capture("adx:test", catalog.digest(), empty_source, empty_records, 403),
+        emulator.clone(),
+    )
+    .await;
     empty.dispatch(&emulator).await;
-    assert_eq!(emulator.count("CulpritActivityV1Current", &active.range, true).await, 1);
+    assert_eq!(emulator.count("CulpritActivityV1Current", &active.range, true).await, expected_active);
     empty.publish(&emulator).await;
     assert_eq!(emulator.count("CulpritActivityV1Current", &active.range, true).await, 0);
     let counter =

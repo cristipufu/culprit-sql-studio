@@ -52,6 +52,16 @@ impl Files {
                 ],
             )
             .map_err(storage)?;
+        if capture.request.collection() == TelemetryCollection::Diagnostics {
+            self.journal.conn.execute("DELETE FROM diagnostic_pins WHERE owner IN (SELECT 'head:' || controller_key FROM diagnostic_heads WHERE observation_id=?1)", [&capture.identity.observation_id]).map_err(storage)?;
+        }
+        self.journal
+            .conn
+            .execute(
+                "DELETE FROM diagnostic_pins WHERE owner=?1",
+                [format!("derived:{}", capture.identity.observation_id)],
+            )
+            .map_err(storage)?;
         self.evict(committed)?;
         Ok(())
     }

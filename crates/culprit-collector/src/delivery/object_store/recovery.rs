@@ -70,7 +70,8 @@ impl RecoveryStore for ObjectRecoveryStore {
             return Err(DeliveryProblem::Conflict.error());
         }
         self.verify_staged(manifest, staged).await?;
-        root.activity_heads.observe(manifest, &manifest_digest)?;
+        super::super::diagnostic_recovery::validate_staged(self, manifest).await?;
+        root.diagnostic_heads.observe(manifest, &manifest_digest)?;
         self.repair_indexes(&root).await?;
         for advance in &manifest.advances {
             if root.checkpoints.get(&advance.stream_key) != advance.previous.as_ref() {
@@ -87,7 +88,7 @@ impl RecoveryStore for ObjectRecoveryStore {
             .parse::<u64>()
             .map_err(|_| integrity())?;
         let order = root.head.as_ref().map_or(Ok(1), |head| head.order.checked_add(1).ok_or_else(integrity))?;
-        root.pending.insert(order, &manifest.range_id)?;
+        root.pending.observe(order, manifest)?;
         let index = CommitIndex {
             store_id: self.id.clone(),
             order,
@@ -116,9 +117,16 @@ impl RecoveryStore for ObjectRecoveryStore {
         self.manifest(&index).await
     }
 
-    async fn activity_heads(&self, cursor: Option<&str>, limit: u32) -> Result<ActivityHeadPage> {
+    async fn capture_manifest(&self, capture: &culprit_core::telemetry::CaptureIdentity) -> Result<RangeManifest> {
+        let manifest = self.load(&range_id_for(&self.contract, capture)?).await?;
+        if &manifest.capture != capture {
+            return Err(integrity());
+        }
+        Ok(manifest)
+    }
+    async fn diagnostic_heads(&self, cursor: Option<&str>, limit: u32) -> Result<DiagnosticHeadPage> {
         let (root, _) = self.root().await?;
-        root.activity_heads.page(cursor, limit, root.high_sequence)
+        root.diagnostic_heads.page(cursor, limit, root.high_sequence)
     }
     async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage> {
         if !(1..=128).contains(&limit) {
@@ -127,6 +135,17 @@ impl RecoveryStore for ObjectRecoveryStore {
         let (root, _) = self.root().await?;
         let (ids, next_cursor) =
             root.pending.page(cursor, 1, &self.id, root.head.as_ref().map_or(0, |head| head.order), order)?;
+        let mut ranges = Vec::new();
+        for id in ids {
+            let index = self.committed_index(&id, &root).await?.ok_or_else(integrity)?;
+            ranges.push(self.manifest(&index).await?);
+        }
+        Ok(RecoveryPage { ranges, next_cursor, high_sequence: root.high_sequence })
+    }
+    async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
+        let (root, _) = self.root().await?;
+        let (ids, next_cursor) =
+            root.pending.diagnostic_page(cursor, limit, &self.id, root.head.as_ref().map_or(0, |head| head.order))?;
         let mut ranges = Vec::new();
         for id in ids {
             let index = self.committed_index(&id, &root).await?.ok_or_else(integrity)?;

@@ -8,18 +8,16 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub struct ActivityPolicy {
     pub blocked_after_ms: u32,
     pub running_after_ms: u32,
-    pub update_every_ms: u32,
 }
 impl Default for ActivityPolicy {
     fn default() -> Self {
-        Self { blocked_after_ms: 30_000, running_after_ms: 60_000, update_every_ms: 300_000 }
+        Self { blocked_after_ms: 30_000, running_after_ms: 60_000 }
     }
 }
 impl ActivityPolicy {
     pub fn validate(&self) -> Result<()> {
         if !(1_000..=604_800_000).contains(&self.blocked_after_ms)
             || !(1_000..=604_800_000).contains(&self.running_after_ms)
-            || !(60_000..=86_400_000).contains(&self.update_every_ms)
         {
             return Err(Error::invalid(t!("collection.invalid_budget")));
         }
@@ -181,6 +179,9 @@ pub enum ActivityBlockingStatus {
 #[ts(export)]
 pub struct ActivityObservation {
     pub blocking_status: ActivityBlockingStatus,
+    /// Native current lock-wait verdict, independent of owner visibility or measured wait duration.
+    /// None means the source could not establish whether this actor is waiting on a lock.
+    pub waiting_on_lock: Option<bool>,
     pub key: ActivityKey,
     pub idle: bool,
     pub scope: ActivityScopeBasis,
@@ -189,7 +190,8 @@ pub struct ActivityObservation {
     pub command: Option<String>,
     /// Age of the previous request start, separate from current request execution time.
     pub last_request_age_ms: Option<String>,
-    pub open_transactions: u32,
+    /// None means the metadata source did not measure transaction state.
+    pub open_transactions: Option<u32>,
     pub elapsed_ms: Option<String>,
     pub transaction_age_ms: Option<String>,
     /// These are running totals for different native lifetimes. Never add them or infer a rate from one poll.
@@ -197,6 +199,11 @@ pub struct ActivityObservation {
     pub request_counters: Option<ActivityCounters>,
     pub wait: Option<ActivityWait>,
     pub query_hash: Option<String>,
+    /// Source-owned current-statement identity, independent of query hash or SQL text. Native qualification and
+    /// observation bounds remain necessary before using it for a later, focused read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub statement_identity: Option<NativeIdentity>,
     pub client: Option<ActivityClient>,
     pub statement: DefinitionPayload,
 }
@@ -245,6 +252,7 @@ impl ActivityObservation {
                     })
             })
             && self.query_hash.as_deref().is_none_or(identifier)
+            && self.statement_identity.as_ref().is_none_or(|identity| self.key.request.is_some() && identity.is_valid())
             && self.client.as_ref().is_none_or(ActivityClient::is_valid)
             && self.statement.is_valid()
     }
@@ -282,7 +290,7 @@ impl ActivityObservation {
                 conditions.push(ActivityCondition::LongRunning);
             }
             if self.wait.as_ref().is_some_and(|wait| {
-                wait.owners.iter().any(ActivityWaitOwner::is_blocker)
+                (self.waiting_on_lock == Some(true) || wait.owners.iter().any(ActivityWaitOwner::is_blocker))
                     && wait
                         .elapsed_ms
                         .as_ref()
@@ -350,38 +358,49 @@ pub enum ActivityDetailStatus {
     Collected,
     Unavailable { code: crate::ErrorCode },
 }
+/// The native root predicate defines what a complete point observation can establish. It is not a claim about
+/// every session, parallel task or distributed component associated with the database.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ActivityPopulation {
+    ClientBackends,
+    ActiveRequestsOpenTransactionsAndBlockers,
+    DefaultDatabaseConnections,
+    NodeClientBackendsAndConnectionWorkers,
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct ActivitySnapshotDescription {
-    pub epoch: String,
+    pub epoch: Option<String>,
+    pub observed_from: String,
+    pub observed_until: String,
     pub at: String,
     pub scope: crate::MeasurementScope,
-    pub complete_scope: bool,
-    pub policy: ActivityPolicy,
+    pub population: ActivityPopulation,
     pub native_rows: u32,
-    pub qualifying: u32,
-    pub uncertain: u32,
     pub observations: u32,
-    pub blocking_edges: u32,
-    pub details: ActivityDetailStatus,
+    pub coverage: StateSourceCoverage,
 }
 impl ActivitySnapshotDescription {
     pub fn is_valid(&self) -> bool {
-        identifier(&self.epoch)
-            && valid_time(&self.at)
-            && (!self.complete_scope
+        self.epoch.as_deref().is_none_or(identifier)
+            && (self.epoch.is_some() || !self.coverage.complete_scope)
+            && ObservationBounds::new(&self.observed_from, &self.observed_until)
+                .is_some_and(|bounds| bounds.contains(&self.at))
+            && self.coverage.is_valid()
+            && self.coverage.records == self.observations
+            && (!self.coverage.complete_scope || self.observations == self.native_rows)
+            && (!self.coverage.complete_scope
                 || matches!(
                     self.scope,
                     crate::MeasurementScope::Database
                         | crate::MeasurementScope::Node
                         | crate::MeasurementScope::Cluster
                 ))
-            && self.policy.validate().is_ok()
-            && self.uncertain <= self.observations
-            && self.qualifying <= self.observations
             && self.observations <= self.native_rows
-            && self.blocking_edges <= self.observations.saturating_mul(64)
-            && (self.qualifying > 0 || self.uncertain > 0 || (self.observations == 0 && self.blocking_edges == 0))
+            && self.native_rows <= 100_001
     }
 }
 
@@ -423,7 +442,7 @@ impl ActivityEvidence {
                 && row.idle
                 && row.key.request.is_none()
                 && row.key.transaction.is_some()
-                && row.open_transactions > 0
+                && row.open_transactions.is_some_and(|count| count > 0)
             {
                 conditions.entry(key.clone()).or_default().push(ActivityCondition::IdleBlocker);
             }
@@ -503,18 +522,14 @@ pub(super) fn counter(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_digit())
         && value.parse::<u64>().is_ok()
 }
-pub(super) fn valid_time(value: &str) -> bool {
-    value.len() <= 64 && chrono::DateTime::parse_from_rfc3339(value).is_ok()
-}
-
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ActivityReferenceCoverage {
     pub observations: u32,
-    pub blocking_edges: u32,
-    pub unresolved_blockers: u32,
     pub complete: bool,
 }
 
+#[cfg(test)]
+mod baseline_tests;
 #[cfg(test)]
 pub(crate) mod tests;

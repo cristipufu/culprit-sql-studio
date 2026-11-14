@@ -1,6 +1,8 @@
 use culprit_core::{Capability, Engine, Error, Result, ServerInfo, t};
 #[cfg(test)]
 use tokio_postgres::Client;
+#[cfg(test)]
+mod tests;
 
 pub(crate) const ALL_STATS: &str = "(EXISTS(SELECT 1 FROM pg_roles WHERE rolname=current_user AND rolsuper) OR pg_has_role(current_user,'pg_read_all_stats','USAGE'))";
 
@@ -108,10 +110,19 @@ pub(crate) async fn read_from(reader: &mut impl culprit_postgres::wire::QueryRea
                 .with_hint(t!("provider.yugabyte.error.not_yugabyte_hint"))
         })?
         .to_string();
-    let node = one(reader, "SELECT yb_get_local_tserver_uuid()::text AS node")
-        .await
-        .ok()
-        .and_then(|r| node_id(&r.string("node")));
+    let node = match one(reader, "SELECT yb_get_local_tserver_uuid()::text AS node").await {
+        Ok(row) => node_id(&row.string("node")),
+        Err(error)
+            if error.detail.is_none()
+                && matches!(
+                    error.code,
+                    culprit_core::ErrorCode::PermissionDenied | culprit_core::ErrorCode::Unsupported
+                ) =>
+        {
+            None
+        }
+        Err(error) => return Err(error),
+    };
     Ok(Probe {
         now: row.string("now"),
         started: row.text("started"),

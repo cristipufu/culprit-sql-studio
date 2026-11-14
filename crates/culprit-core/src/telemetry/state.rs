@@ -226,7 +226,7 @@ impl StateSourceCoverage {
             stopped: None,
         }
     }
-    fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         let observed = match self.state {
             SourceState::Collected => self.records > 0 && self.complete_scope,
             SourceState::Empty => self.records == 0 && self.complete_scope,
@@ -439,6 +439,7 @@ pub enum OperationalFact {
     PostgresLog(Box<PostgresLogFailureObservation>),
     StatementCounters(Box<StatementCounterSample>),
     RuntimeDistribution(Box<StatementRuntimeDistribution>),
+    DiagnosticRevision(Box<DiagnosticRevision>),
     Queue(QueueSample),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
@@ -473,6 +474,7 @@ impl OperationalFact {
             Self::PostgresLog(observation) => observation.key(),
             Self::StatementCounters(counters) => counters.key(),
             Self::RuntimeDistribution(observation) => observation.key(),
+            Self::DiagnosticRevision(revision) => Ok(revision.id.clone()),
             Self::MssqlStatementGrants(grants) => grants.context.identity.key(),
             Self::MssqlIndexOperations(index) => index.identity.key(),
             Self::MssqlTable(table) => table.identity.key(),
@@ -511,6 +513,7 @@ impl OperationalFact {
             | Self::Counter(_)
             | Self::StatementCounters(_)
             | Self::RuntimeDistribution(_)
+            | Self::DiagnosticRevision(_)
             | Self::CounterSet(_)
             | Self::Retention(_)
             | Self::RetentionCoverage(_)
@@ -554,6 +557,7 @@ impl OperationalFact {
             Self::Counter(counter) => counter.is_valid(),
             Self::StatementCounters(counters) => counters.is_valid(),
             Self::RuntimeDistribution(observation) => observation.is_valid(),
+            Self::DiagnosticRevision(revision) => revision.is_valid(),
             Self::CounterSet(counters) => counters.is_valid(),
             Self::CatalogCounters(counters) => counters.is_valid(),
             Self::Retention(retainer) => retainer.is_valid(),

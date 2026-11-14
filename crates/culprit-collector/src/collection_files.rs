@@ -279,6 +279,7 @@ impl ObservationFiles {
             } else if matches!(
                 self.manifest.request.collection(),
                 culprit_core::telemetry::TelemetryCollection::Activity
+                    | culprit_core::telemetry::TelemetryCollection::Diagnostics
                     | culprit_core::telemetry::TelemetryCollection::Snapshot(_)
             ) {
                 CollectionStop::InvalidPage
@@ -288,55 +289,6 @@ impl ObservationFiles {
         }
         self.persist()?;
         Ok(self.manifest)
-    }
-    pub(crate) fn derive_activity(&mut self, before: &[culprit_core::telemetry::ActivityIncidentState]) -> Result<()> {
-        use culprit_core::telemetry::*;
-        let source = self.manifest.description.as_ref().ok_or_else(|| CollectionStop::InvalidPage.error())?;
-        let update = ActivityIncidentUpdate::observe(
-            source,
-            &self.manifest.capture,
-            &self.references.activity.observations,
-            before,
-        )?;
-        for (stream, records) in [
-            (
-                TelemetryStream::ActivityIncidents,
-                update.changes.into_iter().map(TelemetryRecord::Incident).collect::<Vec<_>>(),
-            ),
-            (
-                TelemetryStream::ActivityCheckpoints,
-                update.active.into_iter().map(TelemetryRecord::ActivityCheckpoint).collect(),
-            ),
-        ] {
-            let index = self
-                .manifest
-                .files
-                .iter()
-                .position(|file| file.stream == stream)
-                .ok_or_else(|| CollectionStop::InvalidPage.error())?;
-            // Pack derived output with the exact envelope encoder, rather than duplicating its size policy.
-            let mut offset = 0;
-            loop {
-                if let Err(reason) = self.begin_page(index) {
-                    self.stop(index, reason);
-                    break;
-                }
-                let mut count = (records.len() - offset).min(self.manifest.request.budget.page_rows as usize);
-                while count > 1 && self.encode_page(index, &records[offset..offset + count]).is_err() {
-                    count /= 2;
-                }
-                if let Some(reason) = self.write_page(index, &records[offset..offset + count])? {
-                    self.stop(index, reason);
-                    break;
-                }
-                offset += count;
-                if offset == records.len() {
-                    self.seal(index)?;
-                    break;
-                }
-            }
-        }
-        Ok(())
     }
     fn persist(&self) -> Result<()> {
         let bytes = durable_fs::json_bytes(&self.manifest, 128 * 1024).map_err(file_error)?;

@@ -158,25 +158,28 @@ async fn fixture() -> (Arc<MemoryBlobs>, ObjectRecoveryStore, Fence) {
     (blobs, store, fence)
 }
 #[tokio::test]
-async fn activity_recovery_heads_follow_the_same_root_cas_even_when_index_writes_or_acknowledgements_fail() {
+async fn diagnostic_recovery_heads_follow_the_same_root_cas_even_when_index_writes_or_acknowledgements_fail() {
     let root = tempfile::tempdir().unwrap();
-    let prepared = crate::delivery::batch_tests::quiet_activity(root.path());
+    let native = crate::delivery::batch_tests::quiet_activity(root.path());
+    let prepared = crate::delivery::batch_tests::empty_diagnostics(root.path(), native.manifest(), 2);
     let (blobs, store, fence) = fixture().await;
+    let parent = stage_and_commit(&store, &fence, None, &native).await.unwrap();
+    let previous = Some(parent.manifest().range_id.as_str());
     blobs.fail(ROOT_KEY, false);
-    assert_eq!(failure(stage_and_commit(&store, &fence, None, &prepared).await), DeliveryProblem::Transport);
-    assert!(store.activity_heads(None, 10).await.unwrap().heads.is_empty());
+    assert_eq!(failure(stage_and_commit(&store, &fence, previous, &prepared).await), DeliveryProblem::Transport);
+    assert!(store.diagnostic_heads(None, 10).await.unwrap().heads.is_empty());
     blobs.fail(ROOT_KEY, true);
-    assert_eq!(failure(stage_and_commit(&store, &fence, None, &prepared).await), DeliveryProblem::Transport);
-    let heads = store.activity_heads(None, 10).await.unwrap();
+    assert_eq!(failure(stage_and_commit(&store, &fence, previous, &prepared).await), DeliveryProblem::Transport);
+    let heads = store.diagnostic_heads(None, 10).await.unwrap();
     assert_eq!(heads.heads.len(), 1);
-    assert_eq!(heads.high_sequence, 1);
+    assert_eq!(heads.high_sequence, 2);
     assert_eq!(heads.heads[0].range_id, prepared.manifest().range_id);
     assert_eq!(heads.heads[0].manifest_digest, prepared.manifest().digest().unwrap());
     drop(store);
     let reopened = ObjectRecoveryStore::open(blobs, contract()).await.unwrap();
-    assert_eq!(reopened.activity_heads(None, 10).await.unwrap().heads, heads.heads);
+    assert_eq!(reopened.diagnostic_heads(None, 10).await.unwrap().heads, heads.heads);
     assert_eq!(reopened.load(&heads.heads[0].range_id).await.unwrap(), *prepared.manifest());
-    assert!(reopened.captured_range(&prepared.manifest().source.captured_range().unwrap()).await.unwrap().is_none());
+    assert!(reopened.captured_range(&native.manifest().source.captured_range().unwrap()).await.unwrap().is_none());
 }
 fn failure<T>(result: Result<T>) -> DeliveryProblem {
     problem(result.err().expect("must fail"))

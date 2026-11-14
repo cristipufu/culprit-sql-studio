@@ -14,19 +14,13 @@ impl TelemetryRecord {
             Self::QueryDefinition(row) => Some(reference("/record/data/sql", &row.sql)),
             Self::PlanDefinition(row) => Some(reference("/record/data/plan", &row.plan)),
             Self::Activity(row) => Some(reference("/record/data/statement", &row.statement)),
-            Self::Incident(row) => {
-                Some(reference("/record/data/state/observation/statement", &row.state.observation.statement))
-            }
-            Self::ActivityCheckpoint(row) => {
-                Some(reference("/record/data/observation/statement", &row.observation.statement))
-            }
             Self::Operational(row) => return row.fact.definition_fields().into_iter().flatten(),
             Self::Tuning(row) => return row.fact.definition_fields().into_iter().flatten(),
             Self::ObjectDefinition(row) => return row.fact.definition_fields().into_iter().flatten(),
             Self::QueryRuntime(_)
             | Self::QueryWaits(_)
             | Self::ResourceSample(_)
-            | Self::Blocking(_)
+            | Self::DiagnosticCheckpoint(_)
             | Self::Deadlock(_)
             | Self::WaitCounter(_)
             | Self::Replication(_)
@@ -129,6 +123,7 @@ impl OperationalFact {
             | Self::Counter(_)
             | Self::StatementCounters(_)
             | Self::RuntimeDistribution(_)
+            | Self::DiagnosticRevision(_)
             | Self::CounterSet(_)
             | Self::Retention(_)
             | Self::RetentionCoverage(_)

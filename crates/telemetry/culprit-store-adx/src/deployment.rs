@@ -35,7 +35,7 @@ impl DeploymentAssets {
             });
         }
         commands.push(published(&catalog));
-        commands.push(heads("CulpritActivityHeadsV1","tostring(SourceDescription.observation.kind) == \"activity\" and tobool(SourceDescription.observation.data.complete_scope)",false));
+        commands.push(heads("CulpritActivityHeadsV1","tostring(SourceDescription.observation.kind) == \"activity\" and tobool(SourceDescription.observation.data.coverage.complete_scope) and tostring(SourceDescription.observation.data.coverage.state) in (\"collected\", \"empty\")",false));
         commands.push(heads(
             "CulpritSnapshotHeadsV1",
             "tostring(SourceDescription.observation.kind) == \"snapshot\"",

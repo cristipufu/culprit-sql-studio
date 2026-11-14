@@ -5,6 +5,8 @@ use crate::{
 };
 use culprit_core::telemetry::*;
 
+mod activity;
+mod diagnostics;
 mod empty;
 
 #[tokio::test]

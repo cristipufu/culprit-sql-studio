@@ -1,4 +1,4 @@
-//! The complete analytical contract. Recovery-only incident checkpoints have no analytical table.
+//! The complete analytical contract. Recovery-only diagnostic checkpoints have no analytical table.
 use super::{
     envelope::COMMON,
     prepared,
@@ -26,8 +26,6 @@ impl LogicalCatalog {
                 PlanDefinitions => schema::definitions::plans(COMMON)?,
                 ResourceSamples => schema::samples::resources(COMMON)?,
                 ActivityObservations => schema::activity::observations(COMMON)?,
-                BlockingEdges => schema::activity::blocking(COMMON)?,
-                ActivityIncidents => schema::activity::incidents(COMMON)?,
                 DeadlockEvents => schema::facts::deadlocks(COMMON)?,
                 OperationalSamples => schema::facts::operational(COMMON)?,
                 WaitCounterSamples => schema::samples::wait_counters(COMMON)?,
@@ -35,7 +33,7 @@ impl LogicalCatalog {
                 SettingObservations => schema::samples::settings(COMMON)?,
                 TuningObservations => schema::facts::tuning(COMMON)?,
                 ObjectDefinitions => schema::facts::objects(COMMON)?,
-                ActivityCheckpoints => continue,
+                DiagnosticCheckpoints => continue,
             };
             schemas.push((stream, schema));
         }

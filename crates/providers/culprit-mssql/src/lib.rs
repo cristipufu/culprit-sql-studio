@@ -117,6 +117,10 @@ impl MssqlProvider {
 
 #[async_trait]
 impl Provider for MssqlProvider {
+    fn telemetry_recipes(&self) -> Vec<culprit_core::telemetry::RecipeDescriptor> {
+        telemetry::recipes()
+    }
+
     async fn telemetry_resources(
         &self,
         request: &culprit_core::telemetry::ResourceDiscoveryRequest,

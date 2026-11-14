@@ -153,7 +153,7 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
         selections.extend([
             CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementCounters },
             CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementDefinitions },
-            CollectionSelection::Activity { policy: Default::default() },
+            CollectionSelection::Activity,
         ]);
     }
     for (number, selection) in selections.into_iter().enumerate() {
@@ -169,15 +169,28 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
         assert_eq!(manifest.status, CollectionStatus::Complete, "{selection:?}: {manifest:?}");
         drop(outbox);
         outbox = Outbox::open(&path).unwrap();
+        if matches!(selection, CollectionSelection::Activity) {
+            use culprit_collector::diagnostics::{DiagnosticPolicies, drain_pending};
+            assert_eq!(manifest.files.len(), 1);
+            assert_eq!(manifest.files[0].stream, TelemetryStream::ActivityObservations);
+            let policies =
+                DiagnosticPolicies::for_activity("native", CollectionSubject::Database, ActivityPolicy::default())
+                    .unwrap();
+            drain_pending(&mut outbox, &policies, &CollectionCancellation::default(), None).await.unwrap();
+            let page = outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 128).await.unwrap();
+            assert!(page.next_cursor.is_none());
+            assert_eq!(page.checkpoints.len(), 1);
+            let checkpoint = &page.checkpoints[0];
+            assert_eq!(checkpoint.target, manifest.description.as_ref().unwrap().target);
+            assert_eq!(checkpoint.input.capture, manifest.capture);
+            assert!(checkpoint.episodes.iter().all(|episode| episode.first.capture == manifest.capture));
+        }
         let replay_dir = root.path().join(format!("replay-{number}"));
         let replay = Outbox::replay(&path, &manifest.capture.observation_id, &replay_dir).await.unwrap();
         assert_eq!(replay.capture, manifest.capture);
         let prepared =
             outbox.delivery().prepare(&manifest.capture.observation_id, contract.clone(), vec![]).await.unwrap();
         for file in &manifest.files {
-            if file.stream == TelemetryStream::ActivityCheckpoints {
-                continue; // Recovery-only state is deliberately absent from the analytical schema.
-            }
             let schema = catalog.get(file.stream).unwrap();
             let envelope = Envelope::new(prepared.manifest(), &file.batch_id).unwrap();
             let bytes = std::fs::read(replay_dir.join(&file.file)).unwrap();

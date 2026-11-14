@@ -1,6 +1,7 @@
 //! Native qualification only on owned loopback databases. Workloads exist solely inside nonce fixture databases.
 mod contention;
 mod fixture;
+mod focused;
 mod workload;
 use super::*;
 use crate::activity::{IdentityDetail, ReadOptions};
@@ -24,7 +25,7 @@ async fn local_limited_header_projection_preserves_native_file_epoch_and_bounded
                 "native mapping authority unavailable: {:?}",
                 initial.unavailable()
             );
-            let address = PageAddress { database: initial.database_id, file: 1, page: 0 };
+            let address = PageAddress { database: initial.authority.database_id, file: 1, page: 0 };
             let selected = BTreeSet::from([address]);
             let before = reader.page_headers(&selected).await.unwrap();
             let after = reader.page_headers(&selected).await.unwrap();

@@ -30,10 +30,7 @@ pub fn prepare(input: &mut Value, record: &TelemetryRecord, target: &CollectionT
             input["_projection"]["resource_metrics"] = json!(metrics);
         }
         TelemetryRecord::Activity(_) => input["_projection"]["activity"] = input["record"]["data"].clone(),
-        TelemetryRecord::Incident(_) => {
-            input["_projection"]["activity"] = input["record"]["data"]["state"]["observation"].clone();
-        }
-        TelemetryRecord::Operational(row) => fact(input, &row.key)?,
+        TelemetryRecord::Operational(row) => operational(input, row)?,
         TelemetryRecord::Replication(row) => fact(input, &row.fact.key())?,
         TelemetryRecord::Tuning(row) => fact(input, &row.fact.key())?,
         TelemetryRecord::ObjectDefinition(row) => fact(input, &row.key)?,
@@ -64,6 +61,19 @@ fn fact(input: &mut Value, key: &str) -> Result<()> {
     input["_projection"]["fact_key"] = json!(key);
     let details = input["record"]["data"]["fact"]["data"].clone();
     detail(input, details)
+}
+fn operational(input: &mut Value, row: &OperationalObservation) -> Result<()> {
+    if matches!(row.fact, OperationalFact::DiagnosticRevision(_)) {
+        // The authenticated recovery manifest owns private target authority. Warehouse rows retain its hashes
+        // and exact evidence references, not a second copy of endpoint/file/native identity details.
+        input
+            .pointer_mut("/record/data/fact/data/episode/scope")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(invalid)?
+            .remove("target")
+            .ok_or_else(invalid)?;
+    }
+    fact(input, &row.key)
 }
 fn deadlock(input: &mut Value, row: &DeadlockEvent) -> Result<()> {
     input["_projection"]["process_count"] = json!(row.processes.len());

@@ -17,7 +17,7 @@ export function pageWait(session = "42", page = 42): PageWaitObservation {
   return {
     source: PAGE_SOURCE, observed_from: PAGE_FROM, observed_until: PAGE_UNTIL,
     request: {
-      blocking_status: "known", key: { session: { id: session, generation: "native-login-1" }, request: { id: "0", generation: "native-request-1" }, transaction: null },
+      blocking_status: "known", waiting_on_lock: null, key: { session: { id: session, generation: "native-login-1" }, request: { id: "0", generation: "native-request-1" }, transaction: null },
       idle: false, scope: "request-database", state: "suspended", database: "app", command: "SELECT",
       last_request_age_ms: null, open_transactions: 0, elapsed_ms: "100000", transaction_age_ms: null,
       session_counters: { cpu_ms: null, logical_reads: null, physical_reads: null, writes: null },

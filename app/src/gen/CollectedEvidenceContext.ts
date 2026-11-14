@@ -8,4 +8,4 @@ import type { TelemetryStream } from "./TelemetryStream";
 /**
  * Proof and native input for one selected capture. Domain views reference these records instead of cloning them.
  */
-export type CollectedEvidenceContext = { range_id: string, manifest_sha256: string, source: CollectionDescription, capture: CaptureIdentity, collected_from: string, collected_until: string, selected_streams: Array<TelemetryStream>, read_gaps: Array<EvidenceGap>, records: Array<CollectedAnalysisRecord>, };
+export type CollectedEvidenceContext = { range_id: string, recovery_manifest_sha256: string, capture_manifest_sha256: string, source: CollectionDescription, capture: CaptureIdentity, collected_from: string, collected_until: string, selected_streams: Array<TelemetryStream>, read_gaps: Array<EvidenceGap>, records: Array<CollectedAnalysisRecord>, };

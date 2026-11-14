@@ -279,6 +279,9 @@ async fn all_declared_families_are_admitted_and_absent_families_remain_explicit(
     let result = fixture.reader().read_capture(&fixture.range, EvidenceFamily::ALL, budget()).await.unwrap();
     assert_eq!(result.families(), EvidenceFamily::ALL);
     assert_eq!(result.records().len(), 6);
-    assert_eq!(result.gaps().len(), 2);
+    let absent =
+        [TelemetryStream::ResourceSamples, TelemetryStream::OperationalSamples, TelemetryStream::ActivityObservations];
+    assert_eq!(result.gaps().len(), absent.len());
+    assert!(absent.into_iter().all(|stream| result.gaps().iter().any(|gap| gap.stream == Some(stream))));
     assert!(result.gaps().iter().all(|gap| gap.reason == EvidenceGapReason::FamilyNotCaptured));
 }

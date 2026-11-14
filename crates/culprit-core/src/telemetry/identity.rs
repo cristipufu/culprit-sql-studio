@@ -1,11 +1,14 @@
 //! Export identity excludes delivery attempts, redaction, endpoint aliases and observation timestamps.
-use super::{CaptureIdentity, CollectionDescription, TelemetryRecord, TelemetryStream};
+use super::{
+    CaptureIdentity, CollectionDescription, NativeRecordIdentity, SourceObservation, TelemetryRecord, TelemetryStream,
+    valid_key,
+};
 use crate::{DatabaseIdentity, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 16;
+pub const EXPORT_FORMAT_VERSION: u32 = 17;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -29,15 +32,26 @@ impl CollectionDescription {
         target_scoped_id("logical-source-v1", &self.target, &self.source, &())
     }
     pub fn scoped_id(&self, domain: &str, identity: &impl Serialize) -> Result<String> {
-        match self.observation.activity() {
-            Some(snapshot) => target_scoped_id(domain, &self.target, &self.source, &(&snapshot.epoch, identity)),
-            None => target_scoped_id(domain, &self.target, &self.source, identity),
+        match &self.observation {
+            SourceObservation::Activity(snapshot) => target_scoped_id(
+                domain,
+                &self.target,
+                &self.source,
+                &(&snapshot.epoch, snapshot.population, snapshot.scope, identity),
+            ),
+            SourceObservation::FocusedPageWait { result, .. } => {
+                target_scoped_id(domain, &self.target, &self.source, &(result.focus.key()?, identity))
+            }
+            SourceObservation::Diagnostics(description) => {
+                target_scoped_id(domain, &self.target, &self.source, &(description.work_key()?, identity))
+            }
+            _ => target_scoped_id(domain, &self.target, &self.source, identity),
         }
     }
     pub fn captured_range(&self) -> Result<super::CapturedRange> {
         Ok(super::CapturedRange {
             scope_id: self.scoped_id("outbox-source-v1", &())?,
-            range: self.observation.range().canonical()?,
+            range: self.observation.range()?.canonical()?,
         })
     }
 }
@@ -105,6 +119,11 @@ pub struct ExportedRecord {
 }
 
 impl ExportedRecord {
+    /// Digest of the canonical exported record, excluding its NDJSON line terminator.
+    pub fn payload_sha256(&self) -> Result<String> {
+        serde_json::to_vec(self).map(|bytes| digest(&bytes)).map_err(|_| super::CollectionStop::InvalidPage.error())
+    }
+
     pub fn new(source: &CollectionDescription, capture: &CaptureIdentity, record: TelemetryRecord) -> Result<Self> {
         let record = record.for_export(source)?;
         let interval = source
@@ -138,15 +157,11 @@ impl ExportedRecord {
             TelemetryRecord::Activity(row) => {
                 Some(source.scoped_id("activity-observation-v1", &(&capture.observation_id, &row.key))?)
             }
-            TelemetryRecord::Blocking(row) => {
-                Some(source.scoped_id("blocking-observation-v1", &(&capture.observation_id, &row.waiter, &row.owner))?)
-            }
             TelemetryRecord::Deadlock(row) => {
                 Some(source.scoped_id("deadlock-event-v1", &(&row.position, row.graph_ordinal))?)
             }
-            TelemetryRecord::Incident(row) => Some(row.id.clone()),
-            TelemetryRecord::ActivityCheckpoint(row) => {
-                Some(source.scoped_id("activity-checkpoint-v1", &(&capture.observation_id, &row.id))?)
+            TelemetryRecord::DiagnosticCheckpoint(row) => {
+                Some(source.scoped_id("diagnostic-checkpoint-v1", &(&capture.observation_id, &row.id))?)
             }
             TelemetryRecord::Operational(row) => {
                 Some(source.scoped_id("state-observation-v1", &(&capture.observation_id, &row.source, &row.key))?)
@@ -181,6 +196,47 @@ impl ExportedRecord {
             record_id,
             record,
         })
+    }
+}
+
+impl NativeRecordIdentity {
+    pub fn stream(&self) -> TelemetryStream {
+        match self {
+            Self::Runtime(_) => TelemetryStream::QueryRuntime,
+            Self::Waits { .. } => TelemetryStream::QueryWaits,
+            Self::QueryDefinition(_) => TelemetryStream::QueryDefinitions,
+            Self::PlanDefinition(_) => TelemetryStream::PlanDefinitions,
+            Self::ResourceSample { .. } => TelemetryStream::ResourceSamples,
+            Self::Activity(_) => TelemetryStream::ActivityObservations,
+            Self::DiagnosticCheckpoint(_) => TelemetryStream::DiagnosticCheckpoints,
+            Self::Deadlock { .. } => TelemetryStream::DeadlockEvents,
+            Self::Operational { .. } => TelemetryStream::OperationalSamples,
+            Self::WaitCounter { .. } => TelemetryStream::WaitCounterSamples,
+            Self::Replication { .. } => TelemetryStream::ReplicationSamples,
+            Self::Setting { .. } => TelemetryStream::SettingObservations,
+            Self::Tuning { .. } => TelemetryStream::TuningObservations,
+            Self::ObjectDefinition { .. } => TelemetryStream::ObjectDefinitions,
+        }
+    }
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Runtime(key) => key.is_valid(),
+            Self::Waits { key, category } => key.is_valid() && valid_key(category),
+            Self::Activity(key) => key.is_valid(),
+            Self::QueryDefinition(key) | Self::PlanDefinition(key) | Self::DiagnosticCheckpoint(key) => {
+                valid_digest(key)
+            }
+            Self::ResourceSample { at, replica_id } => {
+                valid_utc_instant(at) && replica_id.as_deref().is_none_or(valid_key)
+            }
+            Self::Deadlock { position, .. } => valid_key(position),
+            Self::Operational { source, key }
+            | Self::Replication { source, key }
+            | Self::Tuning { source, key }
+            | Self::ObjectDefinition { source, key } => valid_key(source) && valid_key(key),
+            Self::WaitCounter { source, wait_type } => valid_key(source) && valid_key(wait_type),
+            Self::Setting { source, namespace, name } => valid_key(source) && valid_key(namespace) && valid_key(name),
+        }
     }
 }
 

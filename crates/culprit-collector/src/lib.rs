@@ -8,6 +8,7 @@ use culprit_read::durable_fs;
 pub mod outbox;
 
 pub mod delivery;
+pub mod diagnostics;
 pub mod fleet;
 pub mod health;
 pub mod service;

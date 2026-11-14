@@ -1,91 +1,52 @@
-//! Shared frozen-frame delivery over PostgreSQL's native activity reader.
+//! An unfiltered metadata baseline. Optional blocker/SQL reads belong to a later investigation.
 use super::*;
 use crate::native::activity;
 use culprit_read::{FrozenObservation, FrozenSource, ObservationReader};
-use std::collections::BTreeSet;
-struct ActivityReader {
-    io: ReadSession,
+#[cfg(test)]
+mod tests;
+
+const MAX_BASELINE_ROWS: u32 = 500;
+const MAX_BASELINE_QUERIES: u32 = 4; // Owned session setup, before/after metadata and one activity projection.
+fn bounded_request(request: &CollectionRequest) -> CollectionRequest {
+    let mut request = request.clone();
+    request.budget.max_snapshot_rows = request.budget.max_snapshot_rows.min(MAX_BASELINE_ROWS);
+    request.budget.page_rows = request.budget.page_rows.min(MAX_BASELINE_ROWS);
+    request.budget.max_queries = request.budget.max_queries.min(MAX_BASELINE_QUERIES);
+    request.budget.statement_timeout_ms = request.budget.statement_timeout_ms.min(1_000);
+    request.budget.total_timeout_ms = request.budget.total_timeout_ms.min(5_000);
+    request
+}
+struct ActivityReader<R = ReadSession> {
+    io: R,
     host: String,
     port: u16,
-    metadata: Option<Metadata>,
+    verified: Option<CollectionDescription>,
 }
 pub(super) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
+    request.validate()?;
+    request.subject.require_database()?;
+    if request.collection() != TelemetryCollection::Activity {
+        return Err(native::invalid());
+    }
+    let request = bounded_request(request);
     let reader = ActivityReader {
         host: connector.host.clone(),
         port: connector.port,
         io: ReadSession::new(connector, request.budget.clone()),
-        metadata: None,
+        verified: None,
     };
-    Ok(Box::new(FrozenSource::new(reader, request)?))
+    Ok(Box::new(FrozenSource::new(reader, &request)?))
 }
 #[async_trait::async_trait]
-impl ObservationReader for ActivityReader {
+impl<R: crate::read::NativeRead> ObservationReader for ActivityReader<R> {
     async fn observe(&mut self, request: &CollectionRequest) -> Result<FrozenObservation> {
-        let policy = request.activity_policy().ok_or_else(native::invalid)?;
-        let meta = metadata::read(&mut self.io, &self.host, self.port).await?;
-        if meta.version < 140_000 {
-            return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
-        }
-        if !meta.full_visibility {
-            return Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source")));
-        }
-        let mut frame = activity::observe(&mut self.io, &meta, &request.budget).await?;
-        if !frame.fully_visible(&meta) {
-            return Err(CollectionStop::SourceUnavailable.error());
-        }
-        activity::blockers(
-            &mut self.io,
-            &mut frame,
-            activity::BlockingReadOptions {
-                minimum_request_age_ms: policy.blocked_after_ms,
-                scope: activity::ActivityScope::CurrentDatabase,
-                version: meta.version,
-                database_oid: &meta.database_oid,
-                max_snapshot_rows: request.budget.max_snapshot_rows as usize,
-            },
-        )
-        .await?;
-        let native_rows = frame.records.len() as u32;
-        let selected = ActivityEvidence::select(&frame.observations(), policy)?;
-        let keys: BTreeSet<_> = selected.observations.iter().map(|row| row.key.clone()).collect();
-        let cap = (request.budget.page_bytes as usize / keys.len().max(1))
-            .saturating_sub(1024)
-            .min(request.budget.max_sql_bytes as usize)
-            .min(16 * 1024);
-        let details = activity::enrich(&mut self.io, &mut frame, &keys, cap, false).await?;
-        let observations: Vec<_> =
-            frame.records.into_iter().filter_map(|row| row.facts).filter(|row| keys.contains(&row.key)).collect();
-        let description = CollectionDescription {
-            target: meta.database.clone().into(),
-            source: "pg_stat_activity".into(),
-            continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Activity(ActivitySnapshotDescription {
-                epoch: digest(
-                    format!("{}|{}|{}|pg-activity-v1", meta.database_oid, meta.started_at, meta.version).as_bytes(),
-                ),
-                at: frame.at,
-                scope: culprit_core::MeasurementScope::Database,
-                complete_scope: true,
-                policy: policy.clone(),
-                native_rows,
-                qualifying: selected.conditions.len() as u32,
-                uncertain: selected.uncertain.len() as u32,
-                observations: observations.len() as u32,
-                blocking_edges: selected.blocking.len() as u32,
-                details,
-            }),
-        };
-        self.metadata = Some(meta);
-        let records = observations
-            .into_iter()
-            .map(TelemetryRecord::Activity)
-            .chain(selected.blocking.into_iter().map(TelemetryRecord::Blocking))
-            .collect();
-        Ok(FrozenObservation { description, records })
+        let capture = capture(&mut self.io, &self.host, self.port, request).await?;
+        self.verified = Some(capture.description.clone());
+        Ok(capture)
     }
-    async fn verify(&mut self, _: &CollectionDescription) -> Result<bool> {
-        let after = metadata::read(&mut self.io, &self.host, self.port).await?;
-        Ok(self.metadata.as_ref().is_some_and(|before| before.same_source(&after)))
+    async fn verify(&mut self, description: &CollectionDescription) -> Result<bool> {
+        // Required source checks already bracket the frozen native observation. Paging performs no more SQL.
+        Ok(self.verified.as_ref() == Some(description))
     }
     fn query_count(&self) -> u32 {
         self.io.queries()
@@ -96,4 +57,65 @@ impl ObservationReader for ActivityReader {
     async fn close(&mut self) -> SourceShutdown {
         self.io.close().await
     }
+}
+
+async fn capture<R: crate::read::QueryRead>(
+    reader: &mut R,
+    host: &str,
+    port: u16,
+    request: &CollectionRequest,
+) -> Result<FrozenObservation> {
+    let before = metadata::activity(reader, host, port).await?;
+    if before.version < 120_000 {
+        return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+    }
+    let read = activity::observe_baseline_rows(
+        reader,
+        &activity::query(before.version, request.budget.max_snapshot_rows as usize + 1),
+        &before.database_oid,
+        &request.budget,
+    )
+    .await?;
+    let after = metadata::activity(reader, host, port).await?;
+    if !before.same_activity_source(&after) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    let visible = before.full_visibility && after.full_visibility && read.frame.fully_visible_for(&before.database_oid);
+    let mut observations = read.frame.observations();
+    for row in &mut observations {
+        row.blocking_status = ActivityBlockingStatus::Unknown;
+    }
+    let source = "pg_stat_activity";
+    let mut coverage =
+        StateSourceCoverage::observed(source.into(), observations.len() as u32, visible && !read.limited);
+    if !before.full_visibility || !after.full_visibility {
+        coverage.error_code = Some(ErrorCode::PermissionDenied);
+    }
+    if read.limited {
+        coverage.stopped = Some(CollectionStop::RowLimit);
+    } else if !visible {
+        coverage.stopped = Some(CollectionStop::SourceUnavailable);
+    }
+    let description = CollectionDescription {
+        target: before.database.clone().into(),
+        source: source.into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::Activity(ActivitySnapshotDescription {
+            epoch: Some(digest(
+                format!("{}|{}|{}|pg-activity-v1", before.database_oid, before.started_at, before.version).as_bytes(),
+            )),
+            observed_from: canonical_time(&before.at)?,
+            observed_until: canonical_time(&after.at)?,
+            at: read.frame.at,
+            scope: culprit_core::MeasurementScope::Database,
+            population: ActivityPopulation::ClientBackends,
+            native_rows: read.native_rows,
+            observations: observations.len() as u32,
+            coverage,
+        }),
+    };
+    if !description.observation.activity().is_some_and(ActivitySnapshotDescription::is_valid) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    Ok(FrozenObservation { description, records: observations.into_iter().map(TelemetryRecord::from).collect() })
 }

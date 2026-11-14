@@ -7,7 +7,9 @@ use culprit_collector::{
 use culprit_core::telemetry::*;
 use serde_json::json;
 
+mod activity;
 mod cached_runtime;
+mod diagnostics;
 mod observations;
 mod queries;
 mod waits;
@@ -30,7 +32,7 @@ impl Fixture {
         let scratch = tempfile::tempdir().unwrap();
         let encoder = BatchEncoder::new(catalog.clone(), recovery.clone(), scratch.path()).unwrap();
         let mut rows = vec![];
-        for batch in &range.manifest().batches {
+        for batch in range.manifest().batches.iter().filter(|batch| batch.delivery_required) {
             let encoded = encoder.encode(&range, &batch.batch_id).await.unwrap();
             indexes.put(&encoded.index_key, &encoded.digests).await.unwrap();
             let schema = catalog.get(batch.stream).unwrap();

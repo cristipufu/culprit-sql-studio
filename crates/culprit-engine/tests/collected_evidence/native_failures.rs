@@ -50,7 +50,7 @@ async fn shared_native_errors_reuse_scan_diagnoses_without_provider_credentials_
         assert_eq!(serde_json::to_value(&result.report).unwrap(), serde_json::to_value(expected).unwrap());
         assert_eq!(result.context.source, source);
         assert!(result.context.source.target.database().is_none());
-        assert_eq!(result.context.manifest_sha256, fixture.range.manifest_digest());
+        assert_eq!(result.context.recovery_manifest_sha256, fixture.range.manifest_digest());
         assert_eq!(result.context.records.len(), records.len());
         assert_eq!(
             result.report.entries.iter().map(|entry| entry.position).collect::<Vec<_>>(),

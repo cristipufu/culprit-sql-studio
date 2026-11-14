@@ -108,6 +108,10 @@ fn invalid_wire_counts_and_reset_markers_are_rejected() {
 #[test]
 fn categorises_wait_types() {
     assert_eq!(wait_type_category("LCK_M_X"), "Lock");
+    assert!(is_lock_wait_type("LCK_M_X"));
+    assert!(is_lock_wait_type("lck_m_s"));
+    assert!(!is_lock_wait_type("PAGELATCH_EX"));
+    assert!(!is_lock_wait_type("EXTENSION_FUTURE"));
     assert_eq!(wait_type_category("PAGEIOLATCH_SH"), "IO");
     assert_eq!(wait_type_category("WRITELOG"), "Log");
     assert_eq!(wait_type_category("HTREPARTITION"), "Parallelism");
