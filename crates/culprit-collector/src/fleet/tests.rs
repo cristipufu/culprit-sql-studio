@@ -1,6 +1,7 @@
 use super::*;
 use crate::fleet::{
-    scheduler::{Job, state_failed},
+    admission::AdmittedBackend,
+    scheduler::{Job, Work, state_failed},
     work::Checkpoint,
 };
 use culprit_core::{DatabaseIdentity, Engine};
@@ -37,7 +38,13 @@ impl FleetBackend for Backend {
     fn validate_target(&self, _: &str) -> Result<()> {
         Ok(())
     }
-    async fn discover(&self, _: &str, request: &IntervalDiscoveryRequest) -> Result<IntervalDiscoveryPage> {
+    async fn discover(
+        &self,
+        _: &str,
+        request: &IntervalDiscoveryRequest,
+        admission: FleetSourceAdmission,
+    ) -> Result<IntervalDiscoveryPage> {
+        admission.window.check_start()?;
         *self.discoveries.lock().unwrap() += 1;
         let page = IntervalDiscoveryPage {
             database: self.database.lock().unwrap().clone(),
@@ -56,80 +63,90 @@ impl FleetBackend for Backend {
         request: CollectionRequest,
         _: &mut Outbox,
         _: &CollectionCancellation,
-    ) -> Result<CollectionManifest> {
-        self.requests.lock().unwrap().push(request.clone());
-        if let Some(failure) = self.failure.lock().unwrap().take() {
-            return Err(failure.error());
+        admission: FleetSourceAdmission,
+    ) -> FleetCaptureOutcome {
+        let result = async {
+            admission.window.check_start()?;
+            self.requests.lock().unwrap().push(request.clone());
+            if let Some(failure) = self.failure.lock().unwrap().take() {
+                return Err(failure.error());
+            }
+            let observation = match &request.selection {
+                CollectionSelection::QueryHistory { from, .. } => {
+                    SourceObservation::QueryHistory(QueryHistoryDescription {
+                        waits: None,
+                        interval: if work::parse_time(from).unwrap().hour() == 10 {
+                            interval(10)
+                        } else {
+                            interval(11)
+                        },
+                        dimensions: [("replica_group_id".into(), vec!["0".into()])].into(),
+                        native_properties: [
+                            ("capture_mode".into(), "ALL".into()),
+                            ("waits_capture_enabled".into(), (true).to_string()),
+                        ]
+                        .into(),
+                    })
+                }
+                CollectionSelection::Snapshot { dataset } => {
+                    let sources = self
+                        .state_sources
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .unwrap_or_else(|| vec![StateSourceCoverage::collected("fixture".into(), 0)]);
+                    SourceObservation::Snapshot(StateSnapshotDescription {
+                        dataset: *dataset,
+                        observed_from: "2026-11-10T12:00:00Z".into(),
+                        observed_until: "2026-11-10T12:00:01Z".into(),
+                        records: sources.iter().map(|source| source.records).sum(),
+                        sources,
+                    })
+                }
+                CollectionSelection::ResourceHistory { from, until } => {
+                    let (available_from, available_until) =
+                        self.resource_bounds.lock().unwrap().clone().unwrap_or_else(|| (from.clone(), until.clone()));
+                    SourceObservation::RetainedSamples(SampleHistoryDescription {
+                        from: from.clone(),
+                        until: until.clone(),
+                        observed_at: "2026-11-10T12:00:00Z".into(),
+                        available_from: Some(available_from),
+                        available_until: Some(available_until),
+                        expected_samples: 0,
+                        nominal_period_ms: Some(15_000),
+                    })
+                }
+                _ => return Err(state_failed()),
+            };
+            let target = self.target_override.lock().unwrap().clone().unwrap_or_else(|| match &request.subject {
+                CollectionSubject::Database => self.database.lock().unwrap().clone().into(),
+                CollectionSubject::Shared { resource } => CollectionTarget::Shared(resource.clone()),
+            });
+            Ok(CollectionManifest {
+                format_version: EXPORT_FORMAT_VERSION,
+                capture: CaptureIdentity {
+                    observation_id: format!("test-{}", self.requests.lock().unwrap().len()),
+                    revision: None,
+                },
+                started_at: "2026-11-10T12:00:00Z".into(),
+                finished_at: Some("2026-11-10T12:00:01Z".into()),
+                request,
+                description: Some(CollectionDescription {
+                    target,
+                    source: "query_store".into(),
+                    continuity: SourceContinuity::Unverified,
+                    observation,
+                }),
+                status: self.status.lock().unwrap().clone(),
+                source_queries: 1,
+                read_metrics: None,
+                directory_synced: true,
+                files: vec![],
+                references: ReferenceCoverage::default(),
+            })
         }
-        let observation = match &request.selection {
-            CollectionSelection::QueryHistory { from, .. } => {
-                SourceObservation::QueryHistory(QueryHistoryDescription {
-                    waits: None,
-                    interval: if work::parse_time(from).unwrap().hour() == 10 { interval(10) } else { interval(11) },
-                    dimensions: [("replica_group_id".into(), vec!["0".into()])].into(),
-                    native_properties: [
-                        ("capture_mode".into(), "ALL".into()),
-                        ("waits_capture_enabled".into(), (true).to_string()),
-                    ]
-                    .into(),
-                })
-            }
-            CollectionSelection::Snapshot { dataset } => {
-                let sources = self
-                    .state_sources
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .unwrap_or_else(|| vec![StateSourceCoverage::collected("fixture".into(), 0)]);
-                SourceObservation::Snapshot(StateSnapshotDescription {
-                    dataset: *dataset,
-                    observed_from: "2026-11-10T12:00:00Z".into(),
-                    observed_until: "2026-11-10T12:00:01Z".into(),
-                    records: sources.iter().map(|source| source.records).sum(),
-                    sources,
-                })
-            }
-            CollectionSelection::ResourceHistory { from, until } => {
-                let (available_from, available_until) =
-                    self.resource_bounds.lock().unwrap().clone().unwrap_or_else(|| (from.clone(), until.clone()));
-                SourceObservation::RetainedSamples(SampleHistoryDescription {
-                    from: from.clone(),
-                    until: until.clone(),
-                    observed_at: "2026-11-10T12:00:00Z".into(),
-                    available_from: Some(available_from),
-                    available_until: Some(available_until),
-                    expected_samples: 0,
-                    nominal_period_ms: Some(15_000),
-                })
-            }
-            _ => return Err(state_failed()),
-        };
-        let target = self.target_override.lock().unwrap().clone().unwrap_or_else(|| match &request.subject {
-            CollectionSubject::Database => self.database.lock().unwrap().clone().into(),
-            CollectionSubject::Shared { resource } => CollectionTarget::Shared(resource.clone()),
-        });
-        Ok(CollectionManifest {
-            format_version: EXPORT_FORMAT_VERSION,
-            capture: CaptureIdentity {
-                observation_id: format!("test-{}", self.requests.lock().unwrap().len()),
-                revision: None,
-            },
-            started_at: "2026-11-10T12:00:00Z".into(),
-            finished_at: Some("2026-11-10T12:00:01Z".into()),
-            request,
-            description: Some(CollectionDescription {
-                target,
-                source: "query_store".into(),
-                continuity: SourceContinuity::Unverified,
-                observation,
-            }),
-            status: self.status.lock().unwrap().clone(),
-            source_queries: 1,
-            read_metrics: None,
-            directory_synced: true,
-            files: vec![],
-            references: ReferenceCoverage::default(),
-        })
+        .await;
+        FleetCaptureOutcome { result, source_work: SourceWorkState::Quiescent }
     }
 }
 use chrono::Timelike;
@@ -158,8 +175,15 @@ fn inventory(collection: ScheduledCollection) -> FleetInventory {
         }],
     }
 }
+fn periodic_job(work: Work) -> Job {
+    let Work::Scheduled(job) = work else { panic!("expected a configured periodic job") };
+    job
+}
+fn admitted(backend: &dyn FleetBackend) -> AdmittedBackend<'_> {
+    AdmittedBackend::new(backend, tokio::time::Instant::now())
+}
 fn job(inventory: &FleetInventory) -> Job {
-    Scheduler::new(inventory, "one").unwrap().take(Duration::ZERO).unwrap().unwrap()
+    periodic_job(Scheduler::new(inventory, "one").unwrap().take(Duration::ZERO).unwrap().unwrap())
 }
 fn now() -> chrono::DateTime<chrono::Utc> {
     work::parse_time("2026-11-10T12:00:00Z").unwrap()
@@ -188,9 +212,9 @@ fn database_and_pool_inventory() -> FleetInventory {
 
 fn subject_jobs(inventory: &FleetInventory) -> [Job; 2] {
     let mut scheduler = Scheduler::new(inventory, "one").unwrap();
-    let database = scheduler.take(Duration::ZERO).unwrap().unwrap();
+    let database = periodic_job(scheduler.take(Duration::ZERO).unwrap().unwrap());
     scheduler.finish(Duration::ZERO, scheduler::Outcome::Complete).unwrap();
-    let pool = scheduler.take(Duration::from_secs(60)).unwrap().unwrap();
+    let pool = periodic_job(scheduler.take(Duration::from_secs(60)).unwrap().unwrap());
     [database, pool]
 }
 
@@ -215,7 +239,7 @@ async fn complete_snapshot_operations_keep_unavailable_partial_and_empty_native_
     ] {
         *backend.state_sources.lock().unwrap() = Some(sources);
         let result = work::execute(
-            &backend,
+            &admitted(&backend),
             &journal,
             &mut CaptureStorage::local(&mut outbox),
             &job,
@@ -231,7 +255,7 @@ async fn complete_snapshot_operations_keep_unavailable_partial_and_empty_native_
 
         *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::RowLimit);
         let interrupted = work::execute(
-            &backend,
+            &admitted(&backend),
             &journal,
             &mut CaptureStorage::local(&mut outbox),
             &job,
@@ -268,7 +292,7 @@ async fn one_connection_keeps_subject_requests_checkpoints_and_retention_gaps_se
     *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:59:00Z".into(), "2026-11-10T12:00:00Z".into()));
     for job in &jobs {
         let result = work::execute(
-            &backend,
+            &admitted(&backend),
             &journal,
             &mut CaptureStorage::local(&mut outbox),
             job,
@@ -308,7 +332,7 @@ async fn a_wrong_native_pool_result_cannot_pin_or_advance_the_expected_subject()
     resource.native = NativeIdentity::new("unrelated-pool");
     *backend.target_override.lock().unwrap() = Some(CollectionTarget::Shared(resource));
     let result = work::execute(
-        &backend,
+        &admitted(&backend),
         &journal,
         &mut CaptureStorage::local(&mut outbox),
         &job,
@@ -335,9 +359,16 @@ async fn an_unobserved_tail_retries_the_exact_window_until_native_samples_close_
     *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::SourceNotReady);
     *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:30:00Z".into(), "2026-11-10T11:59:50Z".into()));
     let cancellation = CollectionCancellation::default();
-    let result = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
-        .await
-        .unwrap();
+    let result = work::execute(
+        &admitted(&backend),
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &cancellation,
+        now(),
+    )
+    .await
+    .unwrap();
     assert_eq!(result.event.status, CollectionStatus::Incomplete(CollectionStop::SourceNotReady));
     assert!(matches!(result.outcome, scheduler::Outcome::More));
     let pending = journal.load(&job.key).await.unwrap();
@@ -345,17 +376,31 @@ async fn an_unobserved_tail_retries_the_exact_window_until_native_samples_close_
     assert!(pending.pending.is_some());
     assert!(journal.gaps(None, 10).await.unwrap().gaps.is_empty());
     *backend.failure.lock().unwrap() = Some(CollectionStop::SourceNotReady);
-    let retry = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
-        .await
-        .unwrap();
+    let retry = work::execute(
+        &admitted(&backend),
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &cancellation,
+        now(),
+    )
+    .await
+    .unwrap();
     assert_eq!(retry.event.status, CollectionStatus::Incomplete(CollectionStop::SourceNotReady));
     assert!(matches!(retry.outcome, scheduler::Outcome::More));
     *backend.status.lock().unwrap() = CollectionStatus::Complete;
     *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:30:00Z".into(), "2026-11-10T12:00:00Z".into()));
     let later = now() + chrono::TimeDelta::minutes(5);
-    let result = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, later)
-        .await
-        .unwrap();
+    let result = work::execute(
+        &admitted(&backend),
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &cancellation,
+        later,
+    )
+    .await
+    .unwrap();
     assert_eq!(result.event.status, CollectionStatus::Complete);
     {
         let requests = backend.requests.lock().unwrap();
@@ -379,7 +424,7 @@ async fn an_incorrect_retention_gap_cannot_skip_an_unobserved_tail() {
     *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::RetentionGap);
     *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:30:00Z".into(), "2026-11-10T11:59:50Z".into()));
     let result = work::execute(
-        &backend,
+        &admitted(&backend),
         &journal,
         &mut CaptureStorage::local(&mut outbox),
         &job,
@@ -405,22 +450,36 @@ async fn history_discovery_failed_captures_and_remaining_intervals_survive_resta
     let state = root.path().join("state");
     let journal = FleetJournal::open(&state, &inventory, "one").await.unwrap();
     let mut outbox = outbox(&root.path().join("outbox")).await;
-    let first = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
-        .await
-        .unwrap();
+    let first = work::execute(
+        &admitted(&backend),
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &cancellation,
+        now(),
+    )
+    .await
+    .unwrap();
     assert_eq!(first.event.work, FleetWork::DiscoverIntervals);
     assert_eq!(*backend.discoveries.lock().unwrap(), 1);
     *backend.failure.lock().unwrap() = Some(CollectionStop::TimedOut);
-    let failed = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
-        .await
-        .unwrap();
+    let failed = work::execute(
+        &admitted(&backend),
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &cancellation,
+        now(),
+    )
+    .await
+    .unwrap();
     assert_eq!(failed.event.status, CollectionStatus::Incomplete(CollectionStop::TimedOut));
-    work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
+    work::execute(&admitted(&backend), &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
         .await
         .unwrap();
     drop(journal);
     let reopened = FleetJournal::open(&state, &inventory, "one").await.unwrap();
-    work::execute(&backend, &reopened, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
+    work::execute(&admitted(&backend), &reopened, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
         .await
         .unwrap();
     let requests = backend.requests.lock().unwrap().clone();
@@ -475,15 +534,22 @@ async fn a_database_recreated_during_a_history_scan_cannot_inherit_the_old_curso
     let backend = Backend::new();
     let job = job(&inventory);
     let cancellation = CollectionCancellation::default();
-    work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
+    work::execute(&admitted(&backend), &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
         .await
         .unwrap();
     let before = serde_json::to_value(journal.load(&job.key).await.unwrap()).unwrap();
     backend.database.lock().unwrap().incarnation = Some("new-generation".into());
     assert!(
-        work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
-            .await
-            .is_err()
+        work::execute(
+            &admitted(&backend),
+            &journal,
+            &mut CaptureStorage::local(&mut outbox),
+            &job,
+            &cancellation,
+            now()
+        )
+        .await
+        .is_err()
     );
     assert_eq!(serde_json::to_value(journal.load(&job.key).await.unwrap()).unwrap(), before);
 }
@@ -534,12 +600,12 @@ async fn failed_windows_retry_identically_and_unrecoverable_retention_advances_o
         .unwrap();
     let cancellation = CollectionCancellation::default();
     *backend.failure.lock().unwrap() = Some(CollectionStop::TimedOut);
-    work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
+    work::execute(&admitted(&backend), &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
         .await
         .unwrap();
     assert_eq!(journal.load(&job.key).await.unwrap().last_until.as_deref(), Some("2026-10-01T00:00:00Z"));
     assert!(journal.gaps(None, 10).await.unwrap().gaps.is_empty());
-    work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
+    work::execute(&admitted(&backend), &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
         .await
         .unwrap();
     let requests = backend.requests.lock().unwrap().clone();
@@ -549,9 +615,16 @@ async fn failed_windows_retry_identically_and_unrecoverable_retention_advances_o
     assert_eq!(gap.gaps[0].reason, FleetGapReason::BackfillLimit);
     *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::RetentionGap);
     *backend.resource_bounds.lock().unwrap() = Some(("2026-11-10T11:59:00Z".into(), "2026-11-10T12:00:00Z".into()));
-    let result = work::execute(&backend, &journal, &mut CaptureStorage::local(&mut outbox), &job, &cancellation, now())
-        .await
-        .unwrap();
+    let result = work::execute(
+        &admitted(&backend),
+        &journal,
+        &mut CaptureStorage::local(&mut outbox),
+        &job,
+        &cancellation,
+        now(),
+    )
+    .await
+    .unwrap();
     assert_eq!(result.event.status, CollectionStatus::Incomplete(CollectionStop::RetentionGap));
     assert_ne!(journal.load(&job.key).await.unwrap().last_until, before);
     assert_eq!(journal.gaps(Some(&gap.cursor), 10).await.unwrap().gaps[0].reason, FleetGapReason::NativeRetention);

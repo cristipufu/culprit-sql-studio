@@ -1,6 +1,7 @@
 use super::*;
 mod planning;
 mod recovery;
+mod transition;
 use crate::{
     analytical::test_support::{activity_evidence_cases, activity_observation},
     capture::{SourceFactory, collect},
@@ -128,7 +129,8 @@ impl Harness {
             SourceObservation::FocusedPageWait { result, .. } => {
                 CollectionSelection::FocusedPageWait { focus: Box::new(result.focus.clone()) }
             }
-            _ => panic!("the controller fixture captures native baselines and focused results only"),
+            SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },
+            _ => panic!("the controller fixture captures frozen observations only"),
         };
         let request = CollectionRequest {
             subject: CollectionSubject::Database,

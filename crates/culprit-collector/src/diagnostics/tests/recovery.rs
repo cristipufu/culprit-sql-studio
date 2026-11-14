@@ -7,6 +7,7 @@ use crate::delivery::{
     recovery::*,
     sink::PublishedRange,
 };
+use crate::outbox::DiagnosticInputState;
 use culprit_core::{ErrorCode, ErrorDetail};
 use std::{
     pin::Pin,
@@ -120,13 +121,16 @@ async fn assert_missing_parent(outbox: &Outbox, parent: &DiagnosticEvidenceRef) 
 #[derive(Default)]
 struct Reads {
     eof: tokio::sync::Notify,
+    metadata: AtomicU32,
     opened: AtomicU32,
     active: AtomicU32,
 }
-struct StalledRecovery {
+struct RecoveryProbe {
     store: Arc<FileRecoveryStore>,
     object: String,
     reads: Arc<Reads>,
+    advertised: Option<RangeManifest>,
+    stall_at_eof: bool,
 }
 struct EofStall {
     input: RecoveryReader,
@@ -159,20 +163,31 @@ impl Drop for EofStall {
     }
 }
 #[async_trait::async_trait]
-impl RecoveryStore for StalledRecovery {
+impl RecoveryStore for RecoveryProbe {
     fn id(&self) -> &str {
         self.store.id()
     }
     async fn capture_manifest(&self, capture: &CaptureIdentity) -> Result<RangeManifest> {
-        self.store.capture_manifest(capture).await
+        self.reads.metadata.fetch_add(1, Ordering::SeqCst);
+        match &self.advertised {
+            Some(manifest) => {
+                assert_eq!(&manifest.capture, capture);
+                Ok(manifest.clone())
+            }
+            None => self.store.capture_manifest(capture).await,
+        }
     }
     async fn load(&self, range_id: &str) -> Result<RangeManifest> {
+        self.reads.metadata.fetch_add(1, Ordering::SeqCst);
         self.store.load(range_id).await
     }
     async fn open_object(&self, batch: &PayloadObject) -> Result<RecoveryReader> {
         assert_eq!(batch.object, self.object, "hydrate only the exact archived parent payload");
         let input = self.store.open_object(batch).await?;
         self.reads.opened.fetch_add(1, Ordering::SeqCst);
+        if !self.stall_at_eof {
+            return Ok(input);
+        }
         self.reads.active.fetch_add(1, Ordering::SeqCst);
         Ok(Box::pin(EofStall { input, reads: self.reads.clone(), stalled: false }))
     }
@@ -253,8 +268,13 @@ async fn an_archived_already_analyzed_parent_is_hydrated_exactly_without_requeue
 async fn cancelling_a_cold_parent_read_at_eof_keeps_the_input_pending_and_never_caches_unverified_bytes() {
     let cold = ColdCapture::new().await;
     let reads = Arc::new(Reads::default());
-    let recovery =
-        StalledRecovery { store: cold.store.clone(), object: cold.payload_object.clone(), reads: reads.clone() };
+    let recovery = RecoveryProbe {
+        store: cold.store.clone(),
+        object: cold.payload_object.clone(),
+        reads: reads.clone(),
+        advertised: None,
+        stall_at_eof: true,
+    };
     let cancellation = CollectionCancellation::default();
     let stop = cancellation.clone();
     let processing = tokio::spawn(async move {
@@ -274,8 +294,13 @@ async fn cancelling_a_cold_parent_read_at_eof_keeps_the_input_pending_and_never_
 async fn the_cold_parent_read_deadline_preserves_pending_input_and_drops_its_owned_transport() {
     let cold = ColdCapture::new().await;
     let reads = Arc::new(Reads::default());
-    let recovery =
-        StalledRecovery { store: cold.store.clone(), object: cold.payload_object.clone(), reads: reads.clone() };
+    let recovery = RecoveryProbe {
+        store: cold.store.clone(),
+        object: cold.payload_object.clone(),
+        reads: reads.clone(),
+        advertised: None,
+        stall_at_eof: true,
+    };
     let processing = tokio::spawn(async move {
         let mut cold = cold;
         let result = analyze_pending(
@@ -297,5 +322,331 @@ async fn the_cold_parent_read_deadline_preserves_pending_input_and_drops_its_own
     assert_eq!(error.code, ErrorCode::Timeout);
     assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Storage)));
     assert_eq!(reads.active.load(Ordering::SeqCst), 0, "deadline drops its owned read transport");
+    cold.assert_untouched().await;
+}
+
+struct ArchivedCost {
+    harness: Harness,
+    store: Arc<FileRecoveryStore>,
+    committed: CommittedRange,
+    reference: DiagnosticEvidenceRef,
+    original: (CollectionDescription, ExportedRecord),
+    archive: tempfile::TempDir,
+    _owner: FileOwnership,
+}
+impl ArchivedCost {
+    async fn new() -> Self {
+        let archive = tempfile::tempdir().unwrap();
+        let contract = Contract::new(
+            "pipeline".into(),
+            "shard".into(),
+            "file:warehouse".into(),
+            digest(b"qualification-artifact-schema"),
+        )
+        .unwrap();
+        let store = Arc::new(FileRecoveryStore::create(&archive.path().join("recovery"), contract.clone()).unwrap());
+        let owner = store.acquire().await.unwrap();
+        let proof = crate::analytical::test_support::investigation_fixture();
+        let first = proof.record.record;
+        let mut second = first.clone();
+        let TelemetryRecord::Operational(observation) = &mut second else { panic!() };
+        let OperationalFact::CounterSet(counters) = &mut observation.fact else { panic!() };
+        counters.identity.id = "second-native-cost-observation".into();
+        observation.key = counters.key().unwrap();
+        let mut source = proof.source;
+        let SourceObservation::Snapshot(snapshot) = &mut source.observation else { panic!() };
+        snapshot.records = 2;
+        snapshot.sources = vec![StateSourceCoverage::collected(source.source.clone(), 2)];
+        let frame = Frame { source, records: vec![first, second] };
+        let mut harness = Harness::with_recovery_store(Some(store.id())).await;
+        harness.outbox.begin_remote_epoch(owner.fence(), 0).await.unwrap();
+        let capture = harness.capture(frame.clone()).await;
+        let committed = archive_capture(&harness.outbox, store.as_ref(), owner.fence(), &contract, &capture).await;
+        let row = ExportedRecord::new(&frame.source, &capture, frame.records[0].clone()).unwrap();
+        let reference =
+            DiagnosticEvidenceRef::from_export(&frame.source, &committed.manifest().capture_manifest_sha256, &row, 0)
+                .unwrap();
+        let original = (frame.source, row);
+        Self { harness, store, committed, reference, original, archive, _owner: owner }
+    }
+    async fn evict(&self) {
+        let delivery = self.harness.outbox.delivery();
+        delivery.mark_archived(&self.committed).await.unwrap();
+        assert!(delivery.evict(&self.committed).await.unwrap());
+        assert_missing_parent(&self.harness.outbox, &self.reference).await;
+    }
+    fn payload_path(&self) -> PathBuf {
+        self.archive.path().join("recovery").join(&self.committed.manifest().batches[0].object)
+    }
+}
+
+#[tokio::test]
+async fn a_local_qualification_artifact_is_authoritative_and_archived_operational_evidence_stays_transient() {
+    let mut artifact = ArchivedCost::new().await;
+    assert_eq!(
+        resolve_evidence(
+            &mut artifact.harness.outbox,
+            "fixture",
+            &artifact.reference,
+            None,
+            &CollectionCancellation::default(),
+        )
+        .await
+        .unwrap(),
+        Some(artifact.original.clone())
+    );
+    let calls = artifact.harness.calls.counts();
+    artifact.evict().await;
+    let resolved = resolve_evidence(
+        &mut artifact.harness.outbox,
+        "fixture",
+        &artifact.reference,
+        Some(artifact.store.as_ref()),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(resolved, Some(artifact.original));
+    assert_missing_parent(&artifact.harness.outbox, &artifact.reference).await;
+    assert!(artifact.harness.outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
+    assert_eq!(artifact.harness.calls.counts(), calls, "exact evidence resolution opens no source");
+    assert_eq!(
+        artifact
+            .harness
+            .outbox
+            .diagnostic_input_state(&artifact.reference.capture_ref(), DIAGNOSTIC_CONTROLLER_VERSION)
+            .await
+            .unwrap(),
+        DiagnosticInputState::Missing,
+    );
+}
+
+#[tokio::test]
+async fn a_nonzero_receipt_position_resolves_the_exact_native_record_in_its_committed_batch() {
+    let mut artifact = ArchivedCost::new().await;
+    let bytes = std::fs::read(artifact.payload_path()).unwrap();
+    let row: ExportedRecord = serde_json::from_slice(bytes.split(|byte| *byte == b'\n').nth(1).unwrap()).unwrap();
+    let reference =
+        DiagnosticEvidenceRef::from_export(&artifact.original.0, &artifact.reference.manifest_sha256, &row, 1).unwrap();
+    assert_ne!(reference.record_id, artifact.reference.record_id);
+    artifact.evict().await;
+    assert_eq!(
+        resolve_evidence(
+            &mut artifact.harness.outbox,
+            "fixture",
+            &reference,
+            Some(artifact.store.as_ref()),
+            &CollectionCancellation::default(),
+        )
+        .await
+        .unwrap(),
+        Some((artifact.original.0, row))
+    );
+}
+
+#[tokio::test]
+async fn a_recovered_activity_parent_can_be_pinned_without_becoming_consumed_or_requeued_work() {
+    let mut cold = ColdCapture::new().await;
+    let pending = cold.harness.outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap();
+    let resolved = resolve_evidence(
+        &mut cold.harness.outbox,
+        "fixture",
+        &cold.focus.parent,
+        Some(cold.store.as_ref()),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(resolved, Some(cold.original.clone()));
+    assert_eq!(
+        cold.harness
+            .outbox
+            .diagnostic_input_state(&cold.focus.parent.capture_ref(), DIAGNOSTIC_CONTROLLER_VERSION)
+            .await
+            .unwrap(),
+        DiagnosticInputState::EvidenceOnly,
+        "evidence-only acknowledgement prevents enqueueing; it does not prove committed analysis"
+    );
+    assert_eq!(
+        cold.harness.outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap().parent,
+        pending.parent
+    );
+    assert_eq!(cold.harness.outbox.status(10, None).await.unwrap().captures, 0);
+    let intent = digest(b"newly-validated-question-for-recovered-original");
+    cold.harness.outbox.pin_investigation_parent(&intent, &cold.focus).await.unwrap();
+    assert_eq!(
+        cold.harness.outbox.investigation_parent_keys().await.unwrap().as_slice(),
+        std::slice::from_ref(&intent)
+    );
+    cold.harness.outbox.release_investigation_parent(&intent).await.unwrap();
+    assert_eq!(cold.harness.calls.counts(), [2, 2, 2, 2]);
+}
+
+#[tokio::test]
+async fn wrong_manifest_position_hash_or_native_identity_cannot_hydrate_an_archived_parent() {
+    let mut cold = ColdCapture::new().await;
+    for mismatch in ["manifest", "ordinal", "payload", "record", "scope", "native"] {
+        let mut reference = cold.focus.parent.clone();
+        match mismatch {
+            "manifest" => reference.manifest_sha256 = digest(b"another original manifest"),
+            "ordinal" => reference.row_ordinal += 1,
+            "payload" => reference.payload_sha256 = digest(b"another original row"),
+            "record" => reference.record_id = digest(b"another record identity"),
+            "scope" => reference.source_scope_id = digest(b"another native scope"),
+            _ => {
+                let NativeRecordIdentity::Activity(key) = &mut reference.native_key else { panic!() };
+                key.session.id = "another-native-session".into();
+            }
+        }
+        let error = resolve_evidence(
+            &mut cold.harness.outbox,
+            "fixture",
+            &reference,
+            Some(cold.store.as_ref()),
+            &CollectionCancellation::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{mismatch}");
+        cold.assert_untouched().await;
+    }
+}
+
+#[tokio::test]
+async fn archived_payload_truncation_is_rejected_even_when_the_selected_row_was_already_decoded() {
+    let mut artifact = ArchivedCost::new().await;
+    artifact.evict().await;
+    let path = artifact.payload_path();
+    let mut bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.pop(), Some(b'\n'), "remove only final framing, leaving valid selected-row JSON");
+    std::fs::write(path, bytes).unwrap();
+    let error = resolve_evidence(
+        &mut artifact.harness.outbox,
+        "fixture",
+        &artifact.reference,
+        Some(artifact.store.as_ref()),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    assert_missing_parent(&artifact.harness.outbox, &artifact.reference).await;
+    assert!(artifact.harness.outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn cancellation_at_an_operational_artifacts_eof_withholds_the_row_without_creating_cache_or_work() {
+    let artifact = ArchivedCost::new().await;
+    artifact.evict().await;
+    let reads = Arc::new(Reads::default());
+    let recovery = RecoveryProbe {
+        store: artifact.store.clone(),
+        object: artifact.committed.manifest().batches[0].object.clone(),
+        reads: reads.clone(),
+        advertised: None,
+        stall_at_eof: true,
+    };
+    let cancellation = CollectionCancellation::default();
+    let stop = cancellation.clone();
+    let processing = tokio::spawn(async move {
+        let mut artifact = artifact;
+        let result =
+            resolve_evidence(&mut artifact.harness.outbox, "fixture", &artifact.reference, Some(&recovery), &stop)
+                .await;
+        (artifact, result)
+    });
+    reach_stalled_eof(&reads).await;
+    cancellation.cancel();
+    let (artifact, result) = tokio::time::timeout(Duration::from_secs(1), processing).await.unwrap().unwrap();
+    assert!(result.unwrap().is_none());
+    assert_eq!(reads.active.load(Ordering::SeqCst), 0);
+    assert_missing_parent(&artifact.harness.outbox, &artifact.reference).await;
+    assert!(artifact.harness.outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_corrupt_local_evidence_cache_is_never_hidden_by_an_archive_read() {
+    let mut cold = ColdCapture::new().await;
+    resolve_evidence(
+        &mut cold.harness.outbox,
+        "fixture",
+        &cold.focus.parent,
+        Some(cold.store.as_ref()),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let connection = rusqlite::Connection::open(cold.harness.path.join("journal.sqlite3")).unwrap();
+    connection
+        .execute(
+            "UPDATE diagnostic_inputs SET restored_sha=?1 WHERE observation_id=?2",
+            rusqlite::params![digest(b"altered cached evidence"), cold.focus.parent.capture.observation_id],
+        )
+        .unwrap();
+    let reads = Arc::new(Reads::default());
+    let recovery = RecoveryProbe {
+        store: cold.store.clone(),
+        object: cold.payload_object.clone(),
+        reads: reads.clone(),
+        advertised: None,
+        stall_at_eof: true,
+    };
+    let error = resolve_evidence(
+        &mut cold.harness.outbox,
+        "fixture",
+        &cold.focus.parent,
+        Some(&recovery),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::Outbox(OutboxProblem::Integrity)));
+    assert_eq!(reads.metadata.load(Ordering::SeqCst), 0);
+    assert_eq!(reads.opened.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn archive_identity_and_advertised_manifest_changes_cannot_replace_the_exact_parent() {
+    let mut cold = ColdCapture::new().await;
+    let other_directory = tempfile::tempdir().unwrap();
+    let other = FileRecoveryStore::create(
+        &other_directory.path().join("different-store"),
+        cold.store.capture_manifest(&cold.focus.parent.capture).await.unwrap().contract,
+    )
+    .unwrap();
+    let error = resolve_evidence(
+        &mut cold.harness.outbox,
+        "fixture",
+        &cold.focus.parent,
+        Some(&other),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::DestinationChanged)));
+    cold.assert_untouched().await;
+
+    let mut changed = cold.store.capture_manifest(&cold.focus.parent.capture).await.unwrap();
+    changed.collected_from = "2001-01-01T00:00:00Z".into();
+    changed.validate().unwrap();
+    let reads = Arc::new(Reads::default());
+    let recovery = RecoveryProbe {
+        store: cold.store.clone(),
+        object: cold.payload_object.clone(),
+        reads,
+        advertised: Some(changed),
+        stall_at_eof: false,
+    };
+    let error = resolve_evidence(
+        &mut cold.harness.outbox,
+        "fixture",
+        &cold.focus.parent,
+        Some(&recovery),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Integrity)));
     cold.assert_untouched().await;
 }

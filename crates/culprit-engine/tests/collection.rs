@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use culprit_collector::capture::CollectionCancellation;
 use culprit_core::telemetry::{
     MeasurementValue, NativeDefinitionReference, NativeIdentity, RuntimeMetric, RuntimeMetricKey, RuntimeMetricUnit,
-    StatementReferences,
+    SourceWorkState, StatementReferences,
 };
 use culprit_core::{
     AuthKind, DatabaseIdentity, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Provider, Result, ResultSet,
@@ -715,16 +715,35 @@ async fn dropping_resource_discovery_preserves_admission_debt_and_blocks_a_repla
 
 #[tokio::test]
 async fn fleet_capture_uses_the_same_outbox_and_native_shutdown_fence_as_one_off_collection() {
-    use culprit_collector::{fleet::FleetBackend, outbox::Outbox};
+    use culprit_collector::{
+        capture::CollectionAdmissionWindow,
+        fleet::{FleetBackend, FleetSourceAdmission},
+        outbox::Outbox,
+    };
     for scenario in [Scenario::Success, Scenario::Unconfirmed] {
         let dir = TestDirectory::new();
         let state = State::new(scenario);
         let ws = dir.workspace(state.clone());
         let mut outbox = Outbox::create(&dir.0.path().join("outbox"), Default::default()).unwrap();
         outbox.recover().await.unwrap();
-        let manifest = FleetBackend::capture(&ws, "pilot", request(), &mut outbox, &CollectionCancellation::default())
-            .await
-            .unwrap();
+        let collection = request();
+        let admission = FleetSourceAdmission {
+            window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
+            route_revision: FleetBackend::route_revision(&ws, "pilot").unwrap(),
+            investigation: None,
+        };
+        let outcome =
+            FleetBackend::capture(&ws, "pilot", collection, &mut outbox, &CollectionCancellation::default(), admission)
+                .await;
+        assert_eq!(
+            outcome.source_work,
+            if matches!(scenario, Scenario::Unconfirmed) {
+                SourceWorkState::Unconfirmed
+            } else {
+                SourceWorkState::Quiescent
+            }
+        );
+        let manifest = outcome.result.unwrap();
         assert!(manifest.capture.revision.is_some());
         if matches!(scenario, Scenario::Unconfirmed) {
             assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::CancellationUnconfirmed));
@@ -1894,4 +1913,154 @@ async fn cumulative_statement_counters_survive_durable_outbox_restart_and_replay
     assert_eq!(sample.reset, culprit_core::ResetMarker::Unknown);
     assert_eq!(sample.totals[0].total, MeasurementValue::Integer("9007199254740993".into()));
     assert_eq!(sample.totals.len(), 3, "unknown CPU measurements stay absent");
+}
+
+#[tokio::test]
+async fn fleet_owner_receipt_after_restart_never_calls_an_older_durable_native_debt_quiet() {
+    use culprit_collector::{
+        capture::CollectionAdmissionWindow,
+        fleet::{FleetBackend, FleetSourceAdmission},
+        outbox::Outbox,
+    };
+    use culprit_core::telemetry::SourceWorkState;
+    let dir = TestDirectory::new();
+    let state = State::new(Scenario::Unconfirmed);
+    let workspace = dir.workspace(state.clone());
+    let outbox_path = dir.0.path().join("outbox");
+    let mut outbox = Outbox::create(&outbox_path, Default::default()).unwrap();
+    outbox.recover().await.unwrap();
+    let collection = request();
+    let admitted = FleetSourceAdmission {
+        window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
+        route_revision: FleetBackend::route_revision(&workspace, "pilot").unwrap(),
+        investigation: None,
+    };
+    let original = FleetBackend::capture(
+        &workspace,
+        "pilot",
+        collection,
+        &mut outbox,
+        &CollectionCancellation::default(),
+        admitted,
+    )
+    .await;
+    assert_eq!(original.source_work, SourceWorkState::Unconfirmed);
+    let original = original.result.unwrap();
+    assert_eq!(original.status, CollectionStatus::Incomplete(CollectionStop::CancellationUnconfirmed));
+    let previous_debt = workspace.collection_admission_status().await.unwrap();
+    assert!(previous_debt.source_quiescence_required);
+    assert_eq!(state.factories.load(Ordering::SeqCst), 1);
+    drop(workspace);
+    drop(outbox);
+
+    let fresh = State::new(Scenario::Success);
+    let provider = fresh.clone();
+    let restarted = Workspace::open_in(dir.0.path().join("workspace")).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(
+            Arc::new(move |_| {
+                provider.factories.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(TestProvider(provider.clone())))
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    let mut outbox = Outbox::open(&outbox_path).unwrap();
+    let collection = request();
+    let admitted = FleetSourceAdmission {
+        window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
+        route_revision: FleetBackend::route_revision(&restarted, "pilot").unwrap(),
+        investigation: None,
+    };
+    let outcome = FleetBackend::capture(
+        &restarted,
+        "pilot",
+        collection,
+        &mut outbox,
+        &CollectionCancellation::default(),
+        admitted,
+    )
+    .await;
+    assert_eq!(
+        outcome.source_work,
+        SourceWorkState::NotStarted,
+        "a new gate is no closure proof for an older owner's durable debt"
+    );
+    assert_eq!(CollectionStop::from_error(&outcome.result.unwrap_err()), CollectionStop::CancellationUnconfirmed);
+    assert_eq!(fresh.factories.load(Ordering::SeqCst), 0);
+    assert_eq!(fresh.polls.load(Ordering::SeqCst), 0);
+    assert_eq!(fresh.calls.load(Ordering::SeqCst), 0);
+    assert!(!fresh.closed.load(Ordering::SeqCst));
+    let remaining_debt = restarted.collection_admission_status().await.unwrap();
+    assert!(remaining_debt.source_quiescence_required);
+    assert_eq!(remaining_debt.observation_id, previous_debt.observation_id);
+    assert_eq!(remaining_debt.connection, previous_debt.connection);
+    let status = outbox.status(10, None).await.unwrap();
+    assert_eq!((status.captures, status.source_debts, status.ready), (1, 1, 0));
+    assert_eq!(status.entries[0].capture, original.capture);
+    assert_eq!(status.entries[0].source_work, SourceWorkState::Unconfirmed);
+}
+
+#[tokio::test]
+async fn fleet_owner_receipt_retains_confirmed_close_and_partial_native_evidence_when_capture_fails() {
+    use culprit_collector::{
+        capture::CollectionAdmissionWindow,
+        fleet::{FleetBackend, FleetSourceAdmission},
+        outbox::Outbox,
+    };
+    use culprit_core::telemetry::{CollectionManifest, ExportedRecord, OutboxCaptureState, SourceWorkState};
+    let dir = TestDirectory::new();
+    let state = State::new(Scenario::LateFailure);
+    let workspace = dir.workspace(state.clone());
+    let outbox_path = dir.0.path().join("outbox");
+    let mut outbox = Outbox::create(&outbox_path, Default::default()).unwrap();
+    outbox.recover().await.unwrap();
+    let collection = request();
+    let admitted = FleetSourceAdmission {
+        window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &collection.budget).unwrap(),
+        route_revision: FleetBackend::route_revision(&workspace, "pilot").unwrap(),
+        investigation: None,
+    };
+    let outcome = FleetBackend::capture(
+        &workspace,
+        "pilot",
+        collection,
+        &mut outbox,
+        &CollectionCancellation::default(),
+        admitted,
+    )
+    .await;
+    assert_eq!(outcome.source_work, SourceWorkState::Quiescent, "native closure is independent of the capture result");
+    assert_eq!(outcome.result.unwrap_err().code, ErrorCode::QueryFailed);
+    assert!(state.closed.load(Ordering::SeqCst));
+    assert!(!state.active.load(Ordering::SeqCst));
+    assert!(!workspace.collection_admission_status().await.unwrap().source_quiescence_required);
+    let status = outbox.status(10, None).await.unwrap();
+    assert_eq!((status.captures, status.source_debts, status.ready), (1, 0, 0));
+    let entry = &status.entries[0];
+    assert_eq!(entry.source_work, SourceWorkState::Quiescent);
+    assert_eq!(entry.state, OutboxCaptureState::Incomplete);
+    let capture_directory = outbox_path.join("captures").join(&entry.capture.observation_id);
+    let manifest: CollectionManifest =
+        serde_json::from_slice(&std::fs::read(capture_directory.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest.capture, entry.capture);
+    assert!(matches!(manifest.status, CollectionStatus::Incomplete(_)));
+    assert!(!manifest.references.complete, "a retained prefix must not become complete workload evidence");
+    let runtime = manifest.files.iter().find(|file| file.stream == TelemetryStream::QueryRuntime).unwrap();
+    assert!(matches!(runtime.status, CollectionStatus::Incomplete(_)));
+    assert_eq!(runtime.rows, 1);
+    assert_eq!(runtime.file, "runtime.ndjson.part");
+    let raw = std::fs::read_to_string(capture_directory.join(&runtime.file)).unwrap();
+    let rows = raw.lines().map(|line| serde_json::from_str::<ExportedRecord>(line).unwrap()).collect::<Vec<_>>();
+    let expected = ExportedRecord::new(manifest.description.as_ref().unwrap(), &entry.capture, measurement(1)).unwrap();
+    assert_eq!(rows, vec![expected], "the established first native measurement survives the later failure exactly");
+    let definitions = manifest
+        .files
+        .iter()
+        .filter(|file| matches!(file.stream, TelemetryStream::QueryDefinitions | TelemetryStream::PlanDefinitions))
+        .collect::<Vec<_>>();
+    assert_eq!(definitions.len(), 2);
+    assert!(definitions.iter().all(|file| file.status == CollectionStatus::Complete));
+    assert!(state.calls.load(Ordering::SeqCst) >= 2, "the test must actually fail after positive native evidence");
 }

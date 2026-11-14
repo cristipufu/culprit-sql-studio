@@ -275,8 +275,12 @@ analysis debt. Revisions are separate operational facts; the full working-set ch
 commit atomically in a derived capture. There are no inline blocker, activity-incident or activity-checkpoint streams.
 Missing or partial observations preserve uncertainty. Absence-based recovery is scoped to the native source,
 epoch, population and measurement scope; a different native epoch cannot resolve the old source.
-The current implementation can express and analyze an explicit page-wait focus; automatic native focus scheduling
-is not yet enabled. A declared recipe is not a production-cost qualification or completed root-cause analysis.
+One-off page-wait investigations use the existing durable fleet scheduler, resource admission and cooldowns.
+Periodic work takes precedence; a focused attempt must fit its start window, native deadline, shutdown and resource
+gap before the next periodic deadline. A fresh baseline binds the selected saved route to its native source, epoch
+and population. Authentication uses the same frozen saved metadata and cannot start native work after admission
+expires. The capture owner returns native settlement independently of success or failure; interrupted ownership
+remains unconfirmed after restart. Built-in recipes remain cost-unqualified and do not enable automatic extra reads.
 
 `Workspace::monitor_activity` owns a single-target loop, cancellation and bounded failure backoff. It schedules the
 next poll after completion, at least one minute later. It invokes that same worker and reports active and uncertain
@@ -296,6 +300,14 @@ selector/subject ownership. Collector-derived diagnostics cannot be advertised a
 establishes neither native permissions nor production work-cost qualification. Descriptors apply source-owned clamps
 to the validated protocol ceiling; actual requests intersect that envelope with their caller's limits. Caller defaults
 remain defaults, so a catalog cannot silently turn a 500-row default into a hard ceiling for larger valid requests.
+
+A measured investigation receipt names an exact reader version/revision, native scope, tested budget and native-cost
+artifact. The collector authenticates that artifact's manifest membership and row receipt before the selected
+registration's pure verifier interprets it. Settled client timing and row accounting alone do not establish native
+CPU or I/O cost. The tested budget must fit the current caller and recipe unchanged; reducing it does not inherit
+the original experiment's qualification. Queue deduplication is per episode/stage, independent of later baselines.
+Completed focused captures retain their admitted recipe, budget and qualification lineage in private recovery;
+the warehouse projection includes approved identifiers and recovery references without the private target or SQL.
 
 The package layout distinguishes independent extension roles:
 

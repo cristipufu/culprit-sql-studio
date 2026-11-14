@@ -11,7 +11,7 @@ fn backfill_job(inventory: &FleetInventory) -> Job {
     let mut scheduler = Scheduler::new(inventory, "one").unwrap();
     scheduler.take(Duration::ZERO).unwrap().unwrap();
     scheduler.finish(Duration::ZERO, scheduler::Outcome::Complete).unwrap();
-    scheduler.take(Duration::from_secs(60)).unwrap().unwrap()
+    periodic_job(scheduler.take(Duration::from_secs(60)).unwrap().unwrap())
 }
 fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contract) -> PreparedRange {
     let capture = CaptureIdentity {
@@ -94,11 +94,11 @@ async fn remote_receipt_skips_an_old_native_interval_after_local_payload_and_rec
     let journal = FleetJournal::open(&root.path().join("state"), &inventory, "one").await.unwrap();
     let cancellation = CollectionCancellation::default();
     let now = work::parse_time("2026-11-10T14:00:00Z").unwrap();
-    work::execute(&backend, &journal, &mut storage, &job, &cancellation, now).await.unwrap();
-    let result = work::execute(&backend, &journal, &mut storage, &job, &cancellation, now).await.unwrap();
+    work::execute(&admitted(&backend), &journal, &mut storage, &job, &cancellation, now).await.unwrap();
+    let result = work::execute(&admitted(&backend), &journal, &mut storage, &job, &cancellation, now).await.unwrap();
     assert_eq!(result.event.work, FleetWork::SkipCommitted);
     assert!(backend.requests.lock().unwrap().is_empty());
-    work::execute(&backend, &journal, &mut storage, &job, &cancellation, now).await.unwrap();
+    work::execute(&admitted(&backend), &journal, &mut storage, &job, &cancellation, now).await.unwrap();
     assert_eq!(
         backend.requests.lock().unwrap().len(),
         1,
@@ -123,9 +123,10 @@ async fn receipt_storage_failure_retains_the_pending_interval_without_falling_ba
     let journal = FleetJournal::open(&root.path().join("state"), &inventory, "one").await.unwrap();
     let cancellation = CollectionCancellation::default();
     let now = work::parse_time("2026-11-10T14:00:00Z").unwrap();
-    work::execute(&backend, &journal, &mut storage, &job, &cancellation, now).await.unwrap();
+    work::execute(&admitted(&backend), &journal, &mut storage, &job, &cancellation, now).await.unwrap();
     for _ in 0..2 {
-        let result = work::execute(&backend, &journal, &mut storage, &job, &cancellation, now).await.unwrap();
+        let result =
+            work::execute(&admitted(&backend), &journal, &mut storage, &job, &cancellation, now).await.unwrap();
         assert_eq!(result.event.work, FleetWork::SkipCommitted);
         assert!(matches!(result.event.status, CollectionStatus::Incomplete(_)));
     }

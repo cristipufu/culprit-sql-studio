@@ -4,7 +4,9 @@ mod artifacts;
 mod eviction;
 mod investigations;
 mod journal;
-pub use investigations::{DiagnosticCheckpointPage, DiagnosticInput, DiagnosticInputRow, DiagnosticUpdate};
+pub use investigations::{
+    DiagnosticCheckpointPage, DiagnosticInput, DiagnosticInputRow, DiagnosticInputState, DiagnosticUpdate,
+};
 mod runtime;
 pub use runtime::{CaptureLease, Outbox, OutboxDelivery};
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use super::*;
 use culprit_core::telemetry::*;
 use std::sync::Arc;
+mod admission_window;
 
 #[derive(Default)]
 struct Lifecycle {
@@ -85,10 +86,9 @@ async fn cancellation_closes_native_work_before_waiting_for_stalled_artifact_io(
     let factory = Factory(state.clone());
     let cancellation = CollectionCancellation::default();
     let stop = cancellation.clone();
-    let capture =
-        tokio::spawn(
-            async move { collect_prepared(&SourceGate::default(), &factory, request, files, &stop, None).await },
-        );
+    let capture = tokio::spawn(async move {
+        collect_prepared(&SourceGate::default(), &factory, request, files, &stop, None, None).await
+    });
     state.entered.notified().await;
     cancellation.cancel();
     tokio::time::timeout(Duration::from_millis(500), state.closed.notified())

@@ -138,6 +138,85 @@ fn discovery_request() -> culprit_core::telemetry::IntervalDiscoveryRequest {
         budget: Default::default(),
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn admitted_discovery_times_out_on_an_occupied_permit_without_authentication_or_clearing_other_work() {
+    struct NoAuthentication(AtomicUsize);
+    #[async_trait]
+    impl culprit_auth::DatabaseAuthentication for NoAuthentication {
+        fn auth_kind(&self) -> AuthKind {
+            AuthKind::Entra
+        }
+        async fn credential(
+            &self,
+            _: &culprit_core::ConnectionSpec,
+            _: &dyn culprit_auth::SecretStore,
+        ) -> Result<culprit_auth::DatabaseCredential> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(unused())
+        }
+    }
+    let home = tempfile::tempdir().unwrap();
+    let state = Arc::new(State::default());
+    let authentication = Arc::new(NoAuthentication(AtomicUsize::new(0)));
+    let workspace = configured(home.path(), &state).with_authentication_provider(authentication.clone());
+    workspace
+        .store
+        .update("pilot", |stored| {
+            stored.auth = AuthKind::Entra;
+            stored.host = "fixture.postgres.database.azure.com".into();
+        })
+        .unwrap();
+    let mut occupied = workspace.source_gate.acquire().await.unwrap();
+    occupied.begin().unwrap();
+    let admitted = culprit_collector::fleet::FleetSourceAdmission {
+        window: culprit_collector::capture::CollectionAdmissionWindow::new(
+            tokio::time::Instant::now(),
+            &Default::default(),
+        )
+        .unwrap(),
+        route_revision: Some(workspace.connection_service().route_revision("pilot").unwrap()),
+        investigation: None,
+    };
+    let error = workspace.discover_intervals_admitted("pilot", &discovery_request(), &admitted).await.unwrap_err();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::TimedOut);
+    assert!(tokio::time::Instant::now() >= admitted.window.start_before());
+    assert_eq!(authentication.0.load(Ordering::SeqCst), 0);
+    assert_eq!(state.factories.load(Ordering::SeqCst), 0);
+    assert!(
+        !workspace.source_gate.is_closed(),
+        "timing out a ready permit waiter cannot settle or fence its current owner"
+    );
+    assert!(
+        !workspace.collection_admission_status().await.unwrap().source_quiescence_required,
+        "the waiter did not start native admission"
+    );
+    occupied.settle(SourceShutdown::Quiescent).unwrap();
+    drop(occupied);
+    drop(workspace.source_gate.acquire().await.unwrap());
+
+    // A separate persisted debt is refused, never cleared by a new admitted operation's setup failure.
+    let journal = SourceAdmission::acquire(workspace.collection_admission_path()).await.unwrap();
+    let original = culprit_read::admission::observation_identity().unwrap();
+    journal.started(original.observation_id.clone(), "pilot".into()).await.unwrap();
+    drop(journal);
+    let fresh = culprit_collector::fleet::FleetSourceAdmission {
+        window: culprit_collector::capture::CollectionAdmissionWindow::new(
+            tokio::time::Instant::now(),
+            &Default::default(),
+        )
+        .unwrap(),
+        route_revision: Some(workspace.connection_service().route_revision("pilot").unwrap()),
+        investigation: None,
+    };
+    let error = workspace.discover_intervals_admitted("pilot", &discovery_request(), &fresh).await.unwrap_err();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
+    let debt = workspace.collection_admission_status().await.unwrap();
+    assert!(debt.source_quiescence_required);
+    assert_eq!(debt.observation_id.as_deref(), Some(original.observation_id.as_str()));
+    assert_eq!(authentication.0.load(Ordering::SeqCst), 0);
+    assert_eq!(state.factories.load(Ordering::SeqCst), 0);
+}
 #[tokio::test]
 async fn discovery_validates_before_authentication_and_clears_ownership_only_after_a_valid_native_result() {
     let home = tempfile::tempdir().unwrap();

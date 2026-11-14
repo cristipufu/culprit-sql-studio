@@ -61,6 +61,98 @@ fn pin(files: &Files, owner: &str) -> bool {
         .query_row("SELECT EXISTS(SELECT 1 FROM diagnostic_pins WHERE owner=?1)", [owner], |row| row.get(0))
         .unwrap()
 }
+
+#[test]
+fn queued_investigation_parent_is_authenticated_idempotent_and_preserved_across_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("outbox");
+    let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
+    baseline(&mut files, vec![page_activity()], true, 0);
+    let first = files.next_diagnostic_input(1).unwrap().unwrap();
+    let question = focus(&first);
+    let key = digest(b"immutable-investigation-intent");
+    let mut substituted = question.clone();
+    substituted.original.elapsed_ms = Some("90001".into());
+    assert!(files.pin_investigation_parent(&key, &substituted).is_err());
+    assert!(files.investigation_parent_keys().unwrap().is_empty());
+    files.pin_investigation_parent(&key, &question).unwrap();
+    files.pin_investigation_parent(&key, &question).unwrap();
+    assert_eq!(files.investigation_parent_keys().unwrap().as_slice(), std::slice::from_ref(&key));
+
+    let newer = baseline(&mut files, vec![page_activity()], true, 10);
+    let newer = files.diagnostic_input(&newer.observation_id, 1).unwrap();
+    assert!(
+        files.pin_investigation_parent(&key, &focus(&newer)).is_err(),
+        "an immutable queued key cannot silently change its original parent"
+    );
+    drop(files);
+    let mut files = Files::open(&path).unwrap();
+    files.recover().unwrap();
+    assert_eq!(files.investigation_parent_keys().unwrap().as_slice(), std::slice::from_ref(&key));
+    files.pin_investigation_parent(&key, &question).unwrap();
+    files.release_investigation_parent(&key).unwrap();
+    files.release_investigation_parent(&key).unwrap();
+    assert!(files.investigation_parent_keys().unwrap().is_empty());
+    assert!(
+        super::super::journal::is_pinned(&files.journal.conn, &first.parent.capture.observation_id).unwrap(),
+        "releasing a queued owner preserves the baseline's independent pending-input owner"
+    );
+}
+
+#[test]
+fn releasing_a_queued_parent_never_clears_unconfirmed_native_focus_pins_or_source_debt() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("outbox");
+    let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
+    baseline(&mut files, vec![page_activity()], true, 0);
+    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let question = focus(&input);
+    let key = digest(b"queued-stage");
+    files.pin_investigation_parent(&key, &question).unwrap();
+    let reservation = files.reserve("fixture", &request(question.clone())).unwrap();
+    let id = reservation.entry.identity.observation_id.clone();
+    let native_owner = format!("focus:{id}");
+    files.journal.source_work(&reservation.entry, SourceWorkState::Active).unwrap();
+    drop(files);
+    let mut files = Files::open(&path).unwrap();
+    assert_eq!(files.recover().unwrap().source_debts, 1);
+    files.release_investigation_parent(&key).unwrap();
+    assert!(pin(&files, &native_owner));
+    assert_eq!(files.journal.debts().unwrap(), 1);
+    assert!(files.reserve("fixture", &request(question)).is_err());
+    files.acknowledge_source_quiescence(&id).unwrap();
+    assert!(!pin(&files, &native_owner));
+    assert_eq!(files.journal.debts().unwrap(), 0);
+}
+
+#[test]
+fn queued_parent_inventory_is_complete_and_capacity_never_drops_an_existing_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
+    baseline(&mut files, vec![page_activity()], true, 0);
+    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let transaction = files.journal.conn.transaction().unwrap();
+    for index in 0..MAX_DIAGNOSTIC_EPISODES {
+        let key = digest(format!("queued-intent:{index}").as_bytes());
+        transaction
+            .execute(
+                "INSERT INTO diagnostic_pins VALUES(?1,?2)",
+                params![format!("investigation:{key}"), input.parent.capture.observation_id],
+            )
+            .unwrap();
+    }
+    transaction.commit().unwrap();
+    let retained = files.investigation_parent_keys().unwrap();
+    assert_eq!(retained.len(), MAX_DIAGNOSTIC_EPISODES);
+    let overflow = digest(b"one-extra-intent");
+    assert!(files.pin_investigation_parent(&overflow, &focus(&input)).is_err());
+    assert_eq!(files.investigation_parent_keys().unwrap(), retained);
+    files.release_investigation_parent(&retained[0]).unwrap();
+    files.pin_investigation_parent(&overflow, &focus(&input)).unwrap();
+    let owners = files.investigation_parent_keys().unwrap();
+    assert_eq!(owners.len(), MAX_DIAGNOSTIC_EPISODES);
+    assert!(owners.contains(&overflow));
+}
 #[test]
 fn focus_reservation_authenticates_parent_before_creating_a_native_attempt_and_releases_never_started_work() {
     let root = tempfile::tempdir().unwrap();
@@ -268,8 +360,12 @@ async fn parent_pin_survives_checkpoint_eviction_race_and_transfers_until_result
     let initial_commit =
         stage_and_commit(&store, owner.fence(), Some(&native_commit.manifest().range_id), &prepared).await.unwrap();
     let requested = request(question.clone());
+    let queued_key = digest(b"queued-parent-handoff");
+    files.pin_investigation_parent(&queued_key, &question).unwrap();
     let reservation = files.reserve("fixture", &requested).unwrap();
     let focus_owner = format!("focus:{}", reservation.entry.identity.observation_id);
+    files.release_investigation_parent(&queued_key).unwrap();
+    assert!(pin(&files, &focus_owner), "native reservation owns its parent before queued ownership is released");
     files.journal.source_work(&reservation.entry, SourceWorkState::Active).unwrap();
     files.mark_archived(&initial_commit).unwrap();
     assert!(!files.evict(&native_commit).unwrap(), "archiving the old head cannot evict an in-flight focus parent");

@@ -146,6 +146,54 @@ pub struct RecoveredDiagnosticInput {
     range: CommittedRange,
     rows: Vec<ExportedRecord>,
 }
+/// One exact immutable row authenticated by the recovery manifest and bounded payload reader.
+/// Loading it never installs or acknowledges a diagnostic input obligation.
+pub struct RecoveredDiagnosticEvidence {
+    range: CommittedRange,
+    record: ExportedRecord,
+}
+impl RecoveredDiagnosticEvidence {
+    pub fn source(&self) -> &CollectionDescription {
+        &self.range.manifest().source
+    }
+    pub fn record(&self) -> &ExportedRecord {
+        &self.record
+    }
+    pub fn into_parts(self) -> (CollectionDescription, ExportedRecord) {
+        (self.range.manifest().source.clone(), self.record)
+    }
+}
+
+/// Resolve an artifact by exact receipt, including operational qualification evidence outside the work queue.
+pub async fn load_diagnostic_evidence(
+    store: &dyn RecoveryStore,
+    reference: &DiagnosticEvidenceRef,
+) -> Result<RecoveredDiagnosticEvidence> {
+    if !reference.is_valid() {
+        return Err(invalid());
+    }
+    let advertised = store.capture_manifest(&reference.capture).await?;
+    verify_reference(&advertised, reference)?;
+    let advertised_digest = advertised.digest()?;
+    let range = recovery::reopen(store, &advertised.range_id).await?;
+    if range.manifest_digest() != advertised_digest || capture_reference(range.manifest())? != reference.capture_ref() {
+        return Err(invalid());
+    }
+    let rows = read_rows(store, range.manifest(), Some(reference.stream)).await?;
+    // A validated range has one batch per stream. EOF authenticates the entire selected batch before its
+    // exact receipt position is returned, including when the requested row occurs near the start.
+    let record = rows.into_iter().nth(reference.row_ordinal as usize).ok_or_else(invalid)?;
+    let candidate = DiagnosticEvidenceRef::from_export(
+        &range.manifest().source,
+        &reference.manifest_sha256,
+        &record,
+        reference.row_ordinal,
+    )?;
+    if candidate != *reference {
+        return Err(invalid());
+    }
+    Ok(RecoveredDiagnosticEvidence { range, record })
+}
 impl RecoveredDiagnosticInput {
     pub fn range(&self) -> &CommittedRange {
         &self.range

@@ -29,16 +29,46 @@ impl ObservedProvider<'_> {
 }
 impl<'a> Connections<'a> {
     pub(crate) async fn observed_provider(&self, name: &str) -> Result<ObservedProvider<'a>> {
-        let operation = self.source_operation(name).await?;
+        let operation = self.source_operation(name, None).await?;
         match self.provider(name).await {
             Ok(provider) => Ok(ObservedProvider { provider, operation }),
             Err(error) => operation.finish(Err(error), SourceShutdown::Quiescent).await,
         }
     }
-    async fn source_operation(&self, name: &str) -> Result<SourceOperation<'a>> {
+    #[cfg(feature = "collector")]
+    pub(crate) async fn observed_provider_admitted(
+        &self,
+        name: &str,
+        admission: &culprit_collector::fleet::FleetSourceAdmission,
+    ) -> Result<ObservedProvider<'a>> {
+        admission.window.check_start()?;
+        let operation = self.source_operation(name, Some(admission.window.start_before())).await?;
+        let result = match admission.window.check_start() {
+            Ok(()) => self.provider_admitted(name, admission).await,
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(provider) => Ok(ObservedProvider { provider, operation }),
+            Err(error) => operation.finish(Err(error), SourceShutdown::Quiescent).await,
+        }
+    }
+    async fn source_operation(
+        &self,
+        name: &str,
+        admitted_start_before: Option<tokio::time::Instant>,
+    ) -> Result<SourceOperation<'a>> {
         self.connection(name)?;
         let journal = SourceAdmission::acquire(admission_path(self.paths)).await?;
-        let mut permit = self.source_gate.acquire().await?;
+        let mut permit = match admitted_start_before {
+            Some(deadline) => tokio::time::timeout_at(deadline, self.source_gate.acquire())
+                .await
+                .map_err(|_| CollectionStop::TimedOut.error())??,
+            None => self.source_gate.acquire().await?,
+        };
+        // A simultaneously released permit cannot turn an expired reservation into durable native authority.
+        if admitted_start_before.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            return Err(CollectionStop::TimedOut.error());
+        }
         journal.started(culprit_read::admission::observation_identity()?.observation_id, name.to_owned()).await?;
         permit.begin()?;
         Ok(SourceOperation { journal, permit })

@@ -1,6 +1,6 @@
 //! Closed intervals are discovered once per bounded scan; cursors and unconsumed intervals survive restarts.
 use super::{
-    FleetBackend,
+    admission::AdmittedBackend,
     journal::FleetJournal,
     scheduler::{Job, Outcome, state_failed},
     storage::CaptureStorage,
@@ -29,7 +29,7 @@ pub(super) struct Policy {
     pub reconcile_seconds: u32,
 }
 pub(super) async fn step(
-    backend: &dyn FleetBackend,
+    backend: &AdmittedBackend<'_>,
     journal: &FleetJournal,
     storage: &mut CaptureStorage<'_>,
     job: &Job,
@@ -87,7 +87,7 @@ pub(super) async fn step(
     };
     let manifest = match backend.capture(&job.connection, request.clone(), storage.outbox, cancellation).await {
         Ok(manifest) => manifest,
-        Err(error) => return work::failure(job, FleetWork::Capture, error, None),
+        Err(error) => return work::capture_failure(job, error, None, backend.source_work()),
     };
     if let Some(description) = &manifest.description {
         checkpoint.pin_target(&description.target)?;
@@ -139,7 +139,7 @@ impl Scan {
     }
 }
 async fn discover(
-    backend: &dyn FleetBackend,
+    backend: &AdmittedBackend<'_>,
     journal: &FleetJournal,
     job: &Job,
     checkpoint: &mut Checkpoint,
@@ -183,6 +183,7 @@ fn advance(checkpoint: &mut Checkpoint) -> Result<bool> {
 }
 fn metadata_result(job: &Job, work: FleetWork, more: bool) -> WorkResult {
     WorkResult {
+        source: None,
         event: FleetCollectionEvent {
             target: job.target.clone(),
             connection: job.connection.clone(),

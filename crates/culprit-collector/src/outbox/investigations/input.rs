@@ -14,7 +14,51 @@ struct StoredDiagnosticInput {
     evidence_only: bool,
 }
 
+struct StoredDiagnosticAcknowledgement {
+    parent: String,
+    source: String,
+    controller_version: u32,
+    acknowledged: bool,
+    evidence_only: bool,
+}
+
 impl Files {
+    pub(in crate::outbox) fn diagnostic_input_state(
+        &self,
+        reference: &DiagnosticCaptureRef,
+        controller_version: u32,
+    ) -> Result<DiagnosticInputState> {
+        if !reference.is_valid() || controller_version == 0 {
+            return Err(integrity());
+        }
+        let stored = self.journal.conn.query_row(
+            "SELECT parent_json,source_json,controller_version,acknowledged,evidence_only FROM diagnostic_inputs WHERE observation_id=?1",
+            [&reference.capture.observation_id],
+            |row| Ok(StoredDiagnosticAcknowledgement {
+                parent: row.get(0)?, source: row.get(1)?, controller_version: row.get(2)?,
+                acknowledged: row.get(3)?, evidence_only: row.get(4)?,
+            }),
+        ).optional().map_err(storage)?;
+        let Some(stored) = stored else { return Ok(DiagnosticInputState::Missing) };
+        let parent: DiagnosticCaptureRef = decode(&stored.parent)?;
+        let source: CollectionDescription = decode(&stored.source)?;
+        if parent != *reference
+            || stored.controller_version != controller_version
+            || stored.evidence_only && !stored.acknowledged
+            || source.captured_range().map_err(|_| integrity())?.scope_id != parent.source_scope_id
+            || !matches!(source.observation, SourceObservation::Activity(_) | SourceObservation::FocusedPageWait { .. })
+        {
+            return Err(integrity());
+        }
+        Ok(if stored.evidence_only {
+            DiagnosticInputState::EvidenceOnly
+        } else if stored.acknowledged {
+            DiagnosticInputState::Consumed
+        } else {
+            DiagnosticInputState::Pending
+        })
+    }
+
     pub(in crate::outbox) fn next_diagnostic_input(
         &mut self,
         controller_version: u32,

@@ -4,10 +4,14 @@ use crate::{blocking_state::BlockingState, durable_fs};
 use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
+mod investigations;
 mod scheduler;
+#[cfg(test)]
+pub(in crate::fleet) use investigations::FocusedSettlement;
+pub(in crate::fleet) use investigations::FocusedStage;
 
 const MAX_CHECKPOINT_BYTES: usize = 256 * 1024;
-const JOURNAL_VERSION: i64 = 2;
+const JOURNAL_VERSION: i64 = 3;
 
 pub struct FleetJournal {
     files: BlockingState<Files>,
@@ -105,11 +109,15 @@ impl Files {
             .map_err(|_| state_failed())?;
         if created {
             let transaction = connection.unchecked_transaction().map_err(|_| state_failed())?;
-            transaction.execute_batch("PRAGMA user_version=2; CREATE TABLE assignment(id TEXT NOT NULL); CREATE TABLE jobs(id TEXT PRIMARY KEY,state_json TEXT NOT NULL); CREATE TABLE gaps(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,event_json TEXT NOT NULL);
+            transaction.execute_batch("PRAGMA user_version=3; CREATE TABLE assignment(id TEXT NOT NULL); CREATE TABLE jobs(id TEXT PRIMARY KEY,state_json TEXT NOT NULL); CREATE TABLE gaps(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,event_json TEXT NOT NULL);
                 CREATE TABLE admission_clock(id INTEGER PRIMARY KEY CHECK(id=1),state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
                 CREATE TABLE admission_jobs(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
                 CREATE TABLE admission_resources(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
-                CREATE TABLE admission_families(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));")
+                CREATE TABLE admission_families(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
+                CREATE TABLE admission_focused(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
+                CREATE TABLE admission_focus_families(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
+                CREATE TABLE investigation_intents(id TEXT PRIMARY KEY,episode_id TEXT UNIQUE NOT NULL,stage_key TEXT UNIQUE NOT NULL,intent_json TEXT NOT NULL CHECK(length(intent_json)<=262144),intent_sha TEXT NOT NULL);
+                CREATE TABLE investigation_receipts(id TEXT PRIMARY KEY,episode_id TEXT UNIQUE NOT NULL,stage_key TEXT UNIQUE NOT NULL,receipt_json TEXT NOT NULL CHECK(length(receipt_json)<=4096));")
                 .map_err(|_| state_failed())?;
             transaction.execute("INSERT INTO assignment VALUES(?1)", [assignment]).map_err(|_| state_failed())?;
             transaction.commit().map_err(|_| state_failed())?;

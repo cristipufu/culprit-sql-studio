@@ -1,5 +1,7 @@
 //! Offline analysis runs on sealed evidence. This module has no provider, credential or native query dependency.
 mod planning;
+mod transition;
+pub(crate) use transition::set_analysis;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -141,27 +143,8 @@ async fn verify_focus_parent(
     recovery: Option<&dyn RecoveryStore>,
     cancellation: &CollectionCancellation,
 ) -> Result<bool> {
-    let (source, row) = match outbox.diagnostic_evidence(&focus.parent).await {
-        Ok(evidence) => evidence,
-        Err(error) if error.detail == Some(ErrorDetail::Outbox(OutboxProblem::MissingCapture)) => {
-            let Some(recovery) = recovery else {
-                return Err(error);
-            };
-            if outbox.recovery_store_id() != Some(recovery.id()) {
-                return Err(DeliveryProblem::DestinationChanged.error());
-            }
-            // These reads own no database work and have not started a cache/journal mutation. Retiring them on
-            // shutdown leaves the input pending; once the atomic cache write starts, its owner must finish.
-            let recovered = tokio::select! { biased;
-                _ = cancellation.cancelled() => return Ok(false),
-                result = tokio::time::timeout(RECOVERY_READ_TIMEOUT, recover_focus_parent(recovery, focus)) =>
-                    result.map_err(|_| Error::new(ErrorCode::Timeout, culprit_core::t!("delivery.storage"))
-                        .with_detail(ErrorDetail::Delivery(DeliveryProblem::Storage)))??,
-            };
-            outbox.cache_diagnostic_evidence(connection, recovered).await?;
-            outbox.diagnostic_evidence(&focus.parent).await?
-        }
-        Err(error) => return Err(error),
+    let Some((source, row)) = resolve_evidence(outbox, connection, &focus.parent, recovery, cancellation).await? else {
+        return Ok(false);
     };
     let TelemetryRecord::Activity(original) = &row.record else {
         return Err(CollectionStop::InvalidPage.error());
@@ -172,16 +155,78 @@ async fn verify_focus_parent(
     Ok(true)
 }
 
-async fn recover_focus_parent(
+/// Authenticate exact local evidence first. Only a genuinely absent capture permits bounded archive recovery.
+/// Activity parents are cached as evidence only, so a later native reservation can pin the same original row.
+/// Other artifacts remain transient. Neither path installs or acknowledges native work.
+pub(crate) async fn resolve_evidence(
+    outbox: &mut Outbox,
+    connection: &str,
+    reference: &DiagnosticEvidenceRef,
+    recovery: Option<&dyn RecoveryStore>,
+    cancellation: &CollectionCancellation,
+) -> Result<Option<(CollectionDescription, ExportedRecord)>> {
+    if cancellation.is_cancelled() {
+        return Ok(None);
+    }
+    let evidence = match outbox.diagnostic_evidence(reference).await {
+        Ok(evidence) => evidence,
+        Err(error) if error.detail == Some(ErrorDetail::Outbox(OutboxProblem::MissingCapture)) => {
+            let Some(recovery) = recovery else {
+                return Err(error);
+            };
+            if outbox.recovery_store_id() != Some(recovery.id()) {
+                return Err(DeliveryProblem::DestinationChanged.error());
+            }
+            if reference.stream == TelemetryStream::ActivityObservations {
+                let Some(recovered) =
+                    read_recovery(recover_activity_evidence(recovery, reference), cancellation).await?
+                else {
+                    return Ok(None);
+                };
+                // Cache mutation owns its transaction even if cancellation arrives after the read has settled.
+                outbox.cache_diagnostic_evidence(connection, recovered).await?;
+                outbox.diagnostic_evidence(reference).await?
+            } else {
+                let Some(recovered) =
+                    read_recovery(diagnostic_recovery::load_diagnostic_evidence(recovery, reference), cancellation)
+                        .await?
+                else {
+                    return Ok(None);
+                };
+                recovered.into_parts()
+            }
+        }
+        Err(error) => return Err(error),
+    };
+    Ok(Some(evidence))
+}
+
+async fn recover_activity_evidence(
     recovery: &dyn RecoveryStore,
-    focus: &ActivityWaitFocus,
+    reference: &DiagnosticEvidenceRef,
 ) -> Result<diagnostic_recovery::RecoveredDiagnosticInput> {
-    let manifest = recovery.capture_manifest(&focus.parent.capture).await?;
-    if diagnostic_recovery::capture_reference(&manifest)? != focus.parent.capture_ref() {
+    let advertised = recovery.capture_manifest(&reference.capture).await?;
+    diagnostic_recovery::verify_reference(&advertised, reference)?;
+    let advertised_digest = advertised.digest()?;
+    let recovered = diagnostic_recovery::load_diagnostic_input(recovery, &advertised.range_id).await?;
+    if recovered.range().manifest_digest() != advertised_digest {
         return Err(DeliveryProblem::Integrity.error());
     }
-    diagnostic_recovery::verify_reference(&manifest, &focus.parent)?;
-    diagnostic_recovery::load_diagnostic_input(recovery, &manifest.range_id).await
+    diagnostic_recovery::verify_reference(recovered.range().manifest(), reference)?;
+    Ok(recovered)
+}
+
+async fn read_recovery<T>(
+    read: impl std::future::Future<Output = Result<T>>,
+    cancellation: &CollectionCancellation,
+) -> Result<Option<T>> {
+    // No source or cache mutation has started. Dropping this read on shutdown leaves every obligation untouched.
+    tokio::select! { biased;
+        _ = cancellation.cancelled() => Ok(None),
+        result = tokio::time::timeout(RECOVERY_READ_TIMEOUT, read) =>
+            result.map_err(|_| Error::new(ErrorCode::Timeout, culprit_core::t!("delivery.storage"))
+                .with_detail(ErrorDetail::Delivery(DeliveryProblem::Storage)))?.map(Some),
+    }
 }
 
 fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) -> Result<DiagnosticUpdate> {

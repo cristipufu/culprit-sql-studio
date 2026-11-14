@@ -14,6 +14,8 @@ use crate::{
     secrets::SecretStore,
     store::{self, Paths, Store, StoredConnection},
 };
+#[cfg(feature = "collector")]
+mod route;
 
 /// Conventional SQLite file suffixes, also exposed by the public workspace API.
 pub const DATABASE_FILE_EXTENSIONS: [&str; 4] = ["db", "sqlite", "sqlite3", "db3"];
@@ -543,18 +545,57 @@ impl Connections<'_> {
         self.provider_from_saved(name, &stored, stored.ssh.clone()).await
     }
 
+    #[cfg(feature = "collector")]
+    pub(crate) fn route_revision(&self, name: &str) -> Result<String> {
+        route::revision(&self.store.get(name)?)
+    }
+
+    /// Validate the same immutable saved metadata that will supply authentication and native construction.
+    #[cfg(feature = "collector")]
+    pub(crate) async fn provider_admitted(
+        &self,
+        name: &str,
+        admission: &culprit_collector::fleet::FleetSourceAdmission,
+    ) -> Result<Box<dyn Provider>> {
+        admission.window.check_start()?;
+        let stored = self.store.get(name)?;
+        let current = route::revision(&stored)?;
+        if admission.route_revision.as_deref().is_some_and(|expected| expected != current) {
+            return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+        }
+        admission.window.check_start()?;
+        let spec = tokio::time::timeout_at(
+            admission.window.start_before(),
+            self.saved_spec(name, &stored, stored.ssh.clone()),
+        )
+        .await
+        .map_err(|_| culprit_core::telemetry::CollectionStop::TimedOut.error())??;
+        admission.window.check_start()?;
+        self.open_provider(&spec)
+    }
+
     async fn provider_from_saved(
         &self,
         name: &str,
         stored: &StoredConnection,
         ssh: Option<culprit_core::SshConfig>,
     ) -> Result<Box<dyn Provider>> {
+        let spec = self.saved_spec(name, stored, ssh).await?;
+        self.open_provider(&spec)
+    }
+
+    async fn saved_spec(
+        &self,
+        name: &str,
+        stored: &StoredConnection,
+        ssh: Option<culprit_core::SshConfig>,
+    ) -> Result<ConnectionSpec> {
         let mut spec = stored.spec();
         spec.ssh = ssh;
         self.ssh.attach(&mut spec)?;
         self.resolve_secrets(name, stored, &mut spec).await?;
         self.materialize_certificates(&mut spec)?;
-        self.open_provider(&spec)
+        Ok(spec)
     }
 
     pub(crate) async fn test_ssh(&self, name: &str, ssh: Option<culprit_core::SshConfig>) -> Result<ServerInfo> {

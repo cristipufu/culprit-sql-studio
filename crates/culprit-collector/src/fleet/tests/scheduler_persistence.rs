@@ -12,7 +12,7 @@ async fn initialize(journal: &FleetJournal, scheduler: &mut Scheduler) {
     scheduler.persisted(journal.initialize_scheduler(state).await.unwrap()).unwrap();
 }
 async fn reserve(journal: &FleetJournal, scheduler: &mut Scheduler, elapsed: u64, wall: i64) -> Job {
-    let job = scheduler.take(Duration::from_secs(elapsed)).unwrap().unwrap();
+    let job = periodic_job(scheduler.take(Duration::from_secs(elapsed)).unwrap().unwrap());
     let state = scheduler.admission_checkpoint(Duration::from_secs(elapsed), clock(wall)).unwrap();
     scheduler.persisted(journal.update_scheduler(state).await.unwrap()).unwrap();
     job
@@ -52,14 +52,14 @@ async fn a_mid_admission_restart_keeps_timeout_shutdown_cadence_and_physical_res
         + crate::capture::SOURCE_SHUTDOWN_TIMEOUT
         + Duration::from_secs(60);
     assert!(resumed.take(reserved - Duration::from_millis(1)).unwrap().is_none());
-    assert_eq!(resumed.take(reserved).unwrap().unwrap().target, "same-physical-resource");
+    assert_eq!(periodic_job(resumed.take(reserved).unwrap().unwrap()).target, "same-physical-resource");
     let mut restarted_again = restore(&reopened, &inventory, 3_601).await;
     assert!(
         restarted_again.take(reserved - Duration::from_secs(2)).unwrap().is_none(),
         "the first restart must durably rebase the old in-progress reservation"
     );
     assert_eq!(
-        restarted_again.take(reserved - Duration::from_secs(1)).unwrap().unwrap().target,
+        periodic_job(restarted_again.take(reserved - Duration::from_secs(1)).unwrap().unwrap()).target,
         "same-physical-resource"
     );
 }
@@ -115,7 +115,7 @@ async fn restarting_preserves_pressure_backoff_and_serves_an_independent_resourc
     assert_eq!(reserve(&reopened, &mut again, 60, 150).await.target, "independent");
     complete(&reopened, &mut again, 60, 150, Outcome::Complete).await;
     assert!(again.take(Duration::from_secs(109)).unwrap().is_none());
-    assert_eq!(again.take(Duration::from_secs(110)).unwrap().unwrap().target, "fixture");
+    assert_eq!(periodic_job(again.take(Duration::from_secs(110)).unwrap().unwrap()).target, "fixture");
 }
 
 #[tokio::test]
@@ -207,10 +207,33 @@ async fn skipped_committed_work_restores_its_original_native_resource_admission(
     reserve(&journal, &mut scheduler, 0, 0).await;
     complete(&journal, &mut scheduler, 0, 0, Outcome::Skipped { more: true }).await;
     let saved = journal.scheduler().await.unwrap().unwrap();
-    assert_eq!(serde_json::to_value(&saved.resources).unwrap(), serde_json::to_value(&before.resources).unwrap());
+    let before_resource = serde_json::to_value(&before.resources["pool"]).unwrap();
+    let saved_resource = serde_json::to_value(&saved.resources["pool"]).unwrap();
+    assert_eq!(
+        saved_resource["delay"], before_resource["delay"],
+        "committed metadata does not impose a native resource delay"
+    );
+    assert_eq!(saved_resource["pressure_failures"], before_resource["pressure_failures"]);
+    assert_eq!(
+        saved_resource["attempts"].as_u64(),
+        Some(before_resource["attempts"].as_u64().unwrap() + 1),
+        "lifetime admission history includes a turn that proved it needed no native call"
+    );
+    assert_eq!(
+        saved_resource["max_reservation_ms"].as_u64(),
+        Some(
+            (ADMISSION_START_WINDOW
+                + Duration::from_millis(inventory.targets[0].schedules[0].budget.total_timeout_ms.into())
+                + crate::capture::SOURCE_SHUTDOWN_TIMEOUT)
+                .as_millis() as u64
+        )
+    );
     assert_eq!(serde_json::to_value(&saved.families).unwrap(), serde_json::to_value(&before.families).unwrap());
     let mut resumed = restore(&journal, &inventory, 0).await;
-    assert!(resumed.take(Duration::ZERO).unwrap().is_some(), "metadata-only progress does not charge native work");
+    assert!(
+        resumed.take(Duration::ZERO).unwrap().is_some(),
+        "committed metadata does not delay the next native admission"
+    );
 }
 
 #[tokio::test]

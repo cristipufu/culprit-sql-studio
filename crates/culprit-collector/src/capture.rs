@@ -4,8 +4,9 @@ use crate::outbox::CaptureLease;
 use culprit_core::{
     Error, Result,
     telemetry::{
-        CaptureIdentity, CollectionManifest, CollectionRead, CollectionRequest, CollectionStatus, CollectionStop,
-        SourceShutdown, TelemetrySource, TelemetryStream,
+        CaptureIdentity, CollectionBudget, CollectionManifest, CollectionRead, CollectionRequest, CollectionSelection,
+        CollectionStatus, CollectionStop, DiagnosticInvestigationIntent, DiagnosticInvestigationLineage,
+        SourceObservation, SourceShutdown, TelemetrySource, TelemetryStream,
     },
 };
 use culprit_read::admission::SourceGate;
@@ -14,6 +15,43 @@ use tokio::{sync::watch, time::Instant};
 use writer::ObservationWriter;
 
 pub(crate) const SOURCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+pub const SOURCE_ADMISSION_START_WINDOW: Duration = Duration::from_secs(5);
+
+/// An already persisted fleet reservation. Slow storage/authentication cannot move its native work window.
+#[derive(Clone, Copy, Debug)]
+pub struct CollectionAdmissionWindow {
+    start_before: Instant,
+    finish_before: Instant,
+    settle_before: Instant,
+}
+impl CollectionAdmissionWindow {
+    pub fn new(admitted_at: Instant, budget: &CollectionBudget) -> Result<Self> {
+        budget.validate()?;
+        let start_before =
+            admitted_at.checked_add(SOURCE_ADMISSION_START_WINDOW).ok_or_else(|| CollectionStop::TimedOut.error())?;
+        let finish_before = start_before
+            .checked_add(Duration::from_millis(budget.total_timeout_ms.into()))
+            .ok_or_else(|| CollectionStop::TimedOut.error())?;
+        let settle_before =
+            finish_before.checked_add(SOURCE_SHUTDOWN_TIMEOUT).ok_or_else(|| CollectionStop::TimedOut.error())?;
+        Ok(Self { start_before, finish_before, settle_before })
+    }
+    pub fn check_start(&self) -> Result<()> {
+        if Instant::now() >= self.start_before {
+            return Err(CollectionStop::TimedOut.error());
+        }
+        Ok(())
+    }
+    pub fn start_before(&self) -> Instant {
+        self.start_before
+    }
+    pub fn finish_before(&self) -> Instant {
+        self.finish_before
+    }
+    pub fn settle_before(&self) -> Instant {
+        self.settle_before
+    }
+}
 
 #[derive(Clone)]
 pub struct CollectionCancellation {
@@ -39,6 +77,14 @@ impl CollectionCancellation {
 
 #[async_trait::async_trait]
 pub trait SourceFactory: Send + Sync {
+    /// Manual captures have no fleet reservation. An admitted factory retains its original absolute bounds.
+    fn admission_window(&self) -> Option<CollectionAdmissionWindow> {
+        None
+    }
+    /// Only the admitting controller supplies automatic provenance; a source cannot approve its own dispatch.
+    fn investigation_intent(&self) -> Option<&DiagnosticInvestigationIntent> {
+        None
+    }
     /// Authenticate and configure a lazy source. Native database work belongs to describe/read/verify, where the
     /// controller owns admission and durable cancellation state; opening a factory must not issue database queries.
     async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>>;
@@ -65,8 +111,16 @@ pub async fn collect(
     lease: Option<&mut CaptureLease<'_>>,
 ) -> Result<CollectionManifest> {
     request.validate()?;
+    if let Some(intent) = factory.investigation_intent()
+        && (!intent.is_valid()
+            || request.budget != intent.budget
+            || !matches!(&request.selection, CollectionSelection::FocusedPageWait { focus } if focus.as_ref() == &intent.focus))
+    {
+        return Err(CollectionStop::InvalidPage.error());
+    }
+    let window = factory.admission_window();
     let files = ObservationWriter::create(output.to_owned(), request.clone(), capture).await?;
-    collect_prepared(admission, factory, request, files, cancellation, lease).await
+    collect_prepared(admission, factory, request, files, cancellation, lease, window).await
 }
 
 async fn collect_prepared(
@@ -76,12 +130,15 @@ async fn collect_prepared(
     files: ObservationWriter,
     cancellation: &CollectionCancellation,
     mut lease: Option<&mut CaptureLease<'_>>,
+    window: Option<CollectionAdmissionWindow>,
 ) -> Result<CollectionManifest> {
-    let deadline = Instant::now() + Duration::from_millis(request.budget.total_timeout_ms.into());
+    let relative_deadline = Instant::now() + Duration::from_millis(request.budget.total_timeout_ms.into());
+    let deadline = window.map_or(relative_deadline, |window| relative_deadline.min(window.finish_before()));
+    let opening_deadline = window.map_or(deadline, |window| deadline.min(window.start_before()));
     let permit = tokio::select! {
         biased;
         _=cancellation.cancelled()=>return files.finish(0,None,Some(CollectionStop::Cancelled)).await,
-        _=tokio::time::sleep_until(deadline)=>return files.finish(0,None,Some(CollectionStop::TimedOut)).await,
+        _=tokio::time::sleep_until(opening_deadline)=>return files.finish(0,None,Some(CollectionStop::TimedOut)).await,
         permit=admission.acquire()=>match permit {
             Ok(permit)=>permit,
             Err(_)=>{ files.finish(0,None,Some(CollectionStop::CancellationUnconfirmed)).await?; return Err(CollectionStop::CancellationUnconfirmed.error()); }
@@ -91,7 +148,7 @@ async fn collect_prepared(
     let provider = tokio::select! {
         biased;
         _=cancellation.cancelled()=>return files.finish(0,None,Some(CollectionStop::Cancelled)).await,
-        _=tokio::time::sleep_until(deadline)=>return files.finish(0,None,Some(CollectionStop::TimedOut)).await,
+        _=tokio::time::sleep_until(opening_deadline)=>return files.finish(0,None,Some(CollectionStop::TimedOut)).await,
         provider=factory.open(&request)=>provider,
     };
     let mut source = match provider {
@@ -105,11 +162,14 @@ async fn collect_prepared(
         lease.source_started().await?;
     }
     admission.begin()?;
-    let result = tokio::select! {
-        biased;
-        _=cancellation.cancelled()=>Err(CollectionStop::Cancelled.error()),
-        _=tokio::time::sleep_until(deadline)=>Err(CollectionStop::TimedOut.error()),
-        result=observe(source.as_mut(),&files,&request)=>result,
+    let result = match window.map(|window| window.check_start()).transpose() {
+        Err(error) => Err(error),
+        Ok(_) => tokio::select! {
+            biased;
+            _=cancellation.cancelled()=>Err(CollectionStop::Cancelled.error()),
+            _=tokio::time::sleep_until(deadline)=>Err(CollectionStop::TimedOut.error()),
+            result=observe(source.as_mut(),&files,&request,factory.investigation_intent())=>result,
+        },
     };
     let mut shutdown =
         tokio::time::timeout(SOURCE_SHUTDOWN_TIMEOUT, source.close()).await.unwrap_or(SourceShutdown::Unconfirmed);
@@ -148,8 +208,23 @@ async fn observe(
     source: &mut dyn TelemetrySource,
     files: &ObservationWriter,
     request: &CollectionRequest,
+    intent: Option<&DiagnosticInvestigationIntent>,
 ) -> Result<Option<Error>> {
-    let description = source.describe().await?;
+    let mut description = source.describe().await?;
+    if let SourceObservation::FocusedPageWait { result, .. } = &mut description.observation {
+        // The provider describes native observations. The capture owner attaches its immutable admitted policy.
+        if result.lineage.is_some() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        if let Some(intent) = intent {
+            if result.focus != intent.focus {
+                return Err(CollectionStop::InvalidPage.error());
+            }
+            result.lineage = Some(DiagnosticInvestigationLineage::from_intent(intent)?);
+        }
+    } else if intent.is_some() {
+        return Err(CollectionStop::InvalidPage.error());
+    }
     files.apply(move |files| files.describe(description)).await?;
     let mut failure = None;
     for (index, stream) in request.collection().source_streams().iter().copied().enumerate() {

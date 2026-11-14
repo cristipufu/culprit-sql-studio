@@ -4,6 +4,7 @@ mod tests;
 use crate::Workspace;
 use culprit_collector::{
     capture::{self, CollectionCancellation, SourceFactory},
+    fleet::{FleetCaptureOutcome, FleetSourceAdmission},
     outbox::Outbox,
 };
 use culprit_core::{
@@ -20,12 +21,30 @@ struct AuthenticatedSource<'a> {
     name: &'a str,
     admission: &'a SourceAdmission,
     observation_id: &'a str,
+    admitted: Option<&'a FleetSourceAdmission>,
 }
 #[async_trait::async_trait]
 impl SourceFactory for AuthenticatedSource<'_> {
+    fn admission_window(&self) -> Option<capture::CollectionAdmissionWindow> {
+        self.admitted.map(|admitted| admitted.window)
+    }
+    fn investigation_intent(&self) -> Option<&culprit_core::telemetry::DiagnosticInvestigationIntent> {
+        self.admitted.and_then(|admitted| admitted.investigation.as_ref())
+    }
     async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
+        if let Some(admitted) = self.admitted {
+            admitted.window.check_start()?;
+        }
         self.admission.started(self.observation_id.to_owned(), self.name.to_owned()).await?;
-        self.workspace.connection_service().provider(self.name).await?.telemetry_source(request)
+        let connections = self.workspace.connection_service();
+        let provider = match self.admitted {
+            Some(admitted) => connections.provider_admitted(self.name, admitted).await?,
+            None => connections.provider(self.name).await?,
+        };
+        if let Some(admitted) = self.admitted {
+            admitted.window.check_start()?;
+        }
+        provider.telemetry_source(request)
     }
 }
 impl Workspace {
@@ -51,9 +70,41 @@ impl Workspace {
         name: &str,
         request: &culprit_core::telemetry::IntervalDiscoveryRequest,
     ) -> Result<culprit_core::telemetry::IntervalDiscoveryPage> {
+        self.discover_intervals_with_admission(name, request, None).await
+    }
+    pub(crate) async fn discover_intervals_admitted(
+        &self,
+        name: &str,
+        request: &culprit_core::telemetry::IntervalDiscoveryRequest,
+        admitted: &FleetSourceAdmission,
+    ) -> Result<culprit_core::telemetry::IntervalDiscoveryPage> {
+        self.discover_intervals_with_admission(name, request, Some(admitted)).await
+    }
+    async fn discover_intervals_with_admission(
+        &self,
+        name: &str,
+        request: &culprit_core::telemetry::IntervalDiscoveryRequest,
+        admitted: Option<&FleetSourceAdmission>,
+    ) -> Result<culprit_core::telemetry::IntervalDiscoveryPage> {
         request.validate()?;
-        let observed = self.connection_service().observed_provider(name).await?;
-        let result = observed.provider().telemetry_intervals(request).await.and_then(|page| {
+        let connections = self.connection_service();
+        let observed = match admitted {
+            Some(admitted) => connections.observed_provider_admitted(name, admitted).await?,
+            None => connections.observed_provider(name).await?,
+        };
+        let result = match admitted {
+            Some(admitted) => match admitted.window.check_start() {
+                Err(error) => Err(error),
+                Ok(()) => tokio::time::timeout_at(
+                    admitted.window.settle_before(),
+                    observed.provider().telemetry_intervals(request),
+                )
+                .await
+                .unwrap_or_else(|_| Err(culprit_core::limits::timeout_error())),
+            },
+            None => observed.provider().telemetry_intervals(request).await,
+        }
+        .and_then(|page| {
             if page.matches_request(request) {
                 Ok(page)
             } else {
@@ -102,6 +153,7 @@ impl Workspace {
             name,
             admission: &admission,
             observation_id: &identity.observation_id,
+            admitted: None,
         };
         let result =
             capture::collect(&self.source_gate, &source, request, output, identity.clone(), cancellation, None).await;
@@ -115,39 +167,76 @@ impl Workspace {
         outbox: &mut Outbox,
         cancellation: &CollectionCancellation,
     ) -> Result<CollectionManifest> {
-        request.validate()?;
-        if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
-            let (source, row) = outbox.diagnostic_evidence(&focus.parent).await?;
-            let TelemetryRecord::Activity(original) = &row.record else {
-                return Err(CollectionStop::InvalidPage.error());
+        self.collect_into_outbox_with_admission(name, request, outbox, cancellation, None).await.result
+    }
+    pub(crate) async fn collect_into_outbox_admitted(
+        &self,
+        name: &str,
+        request: CollectionRequest,
+        outbox: &mut Outbox,
+        cancellation: &CollectionCancellation,
+        admitted: &FleetSourceAdmission,
+    ) -> FleetCaptureOutcome {
+        if let Err(error) = admitted.window.check_start() {
+            return FleetCaptureOutcome {
+                result: Err(error),
+                source_work: culprit_core::telemetry::SourceWorkState::NotStarted,
             };
-            if !focus.matches_parent(&source, original, &focus.parent) {
-                return Err(CollectionStop::InvalidPage.error());
-            }
         }
-        self.connection(name)?;
-        let admission = SourceAdmission::acquire(self.collection_admission_path()).await?;
-        let mut lease = outbox.reserve(name, &request).await?;
-        let directory = lease.directory().to_owned();
-        let identity = lease.identity().clone();
-        let source = AuthenticatedSource {
-            workspace: self,
-            name,
-            admission: &admission,
-            observation_id: &identity.observation_id,
-        };
-        let result = capture::collect(
-            &self.source_gate,
-            &source,
-            request,
-            &directory,
-            identity.clone(),
-            cancellation,
-            Some(&mut lease),
-        )
+        self.collect_into_outbox_with_admission(name, request, outbox, cancellation, Some(admitted)).await
+    }
+    async fn collect_into_outbox_with_admission(
+        &self,
+        name: &str,
+        request: CollectionRequest,
+        outbox: &mut Outbox,
+        cancellation: &CollectionCancellation,
+        admitted: Option<&FleetSourceAdmission>,
+    ) -> FleetCaptureOutcome {
+        use culprit_core::telemetry::SourceWorkState;
+        let mut source_work = SourceWorkState::NotStarted;
+        let result = async {
+            request.validate()?;
+            if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
+                let (source, row) = outbox.diagnostic_evidence(&focus.parent).await?;
+                let TelemetryRecord::Activity(original) = &row.record else {
+                    return Err(CollectionStop::InvalidPage.error());
+                };
+                if !focus.matches_parent(&source, original, &focus.parent) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            self.connection(name)?;
+            let admission = SourceAdmission::acquire(self.collection_admission_path()).await?;
+            let mut lease = outbox.reserve(name, &request).await?;
+            let directory = lease.directory().to_owned();
+            let identity = lease.identity().clone();
+            let source = AuthenticatedSource {
+                workspace: self,
+                name,
+                admission: &admission,
+                observation_id: &identity.observation_id,
+                admitted,
+            };
+            let result = capture::collect(
+                &self.source_gate,
+                &source,
+                request,
+                &directory,
+                identity.clone(),
+                cancellation,
+                Some(&mut lease),
+            )
+            .await;
+            // Observe settlement while this same durable source owner is still held. A new workspace's open gate
+            // cannot prove an older journal debt quiet, and another operation cannot race this receipt.
+            source_work =
+                if self.source_gate.is_closed() { SourceWorkState::Unconfirmed } else { SourceWorkState::Quiescent };
+            self.settle_collection(&admission).await?;
+            lease.finish().await?;
+            result
+        }
         .await;
-        self.settle_collection(&admission).await?;
-        lease.finish().await?;
-        result
+        FleetCaptureOutcome { result, source_work }
     }
 }

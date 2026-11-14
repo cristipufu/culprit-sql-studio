@@ -1,6 +1,7 @@
 //! Destination-independent static fleet collection. The embedding backend retains authentication and native guards.
 mod admission;
 mod history;
+mod investigations;
 mod journal;
 mod scheduler;
 mod storage;
@@ -8,12 +9,29 @@ mod windows;
 mod work;
 pub use journal::FleetJournal;
 
-use crate::{capture::CollectionCancellation, outbox::Outbox};
+use crate::{
+    capture::{CollectionAdmissionWindow, CollectionCancellation},
+    outbox::Outbox,
+};
 use async_trait::async_trait;
 use culprit_core::{Result, telemetry::*};
 use scheduler::Scheduler;
 use std::time::Duration;
 use storage::CaptureStorage;
+
+/// The selected operation retains its persisted window and, when available, a frozen saved-route revision.
+#[derive(Clone, Debug)]
+pub struct FleetSourceAdmission {
+    pub window: CollectionAdmissionWindow,
+    pub route_revision: Option<String>,
+    pub investigation: Option<DiagnosticInvestigationIntent>,
+}
+
+/// The capture owner returns native closure independently of success, storage failures or translated errors.
+pub struct FleetCaptureOutcome {
+    pub result: Result<CollectionManifest>,
+    pub source_work: SourceWorkState,
+}
 
 #[async_trait]
 pub trait FleetBackend: Send + Sync {
@@ -24,8 +42,31 @@ pub trait FleetBackend: Send + Sync {
     fn telemetry_recipes(&self, _connection: &str) -> Result<Vec<RecipeDescriptor>> {
         Ok(Vec::new())
     }
+    /// Fingerprint saved source-routing metadata only; never resolve credentials or open a provider.
+    fn route_revision(&self, _connection: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
+    /// Identify the selected source's qualification authority without resolving credentials or opening it.
+    fn qualification_component(&self, _connection: &str) -> Result<Option<culprit_core::ComponentVersion>> {
+        Ok(None)
+    }
+    /// Interpret an independently authenticated cost artifact. A structural receipt alone grants no permission.
+    fn verify_cost(
+        &self,
+        _connection: &str,
+        _receipt: &RecipeCostReceipt,
+        _source: &CollectionDescription,
+        _record: &ExportedRecord,
+    ) -> Result<bool> {
+        Ok(false)
+    }
     /// Own the entire native lifecycle and report cancellation uncertainty through CollectionStop.
-    async fn discover(&self, connection: &str, request: &IntervalDiscoveryRequest) -> Result<IntervalDiscoveryPage>;
+    async fn discover(
+        &self,
+        connection: &str,
+        request: &IntervalDiscoveryRequest,
+        admission: FleetSourceAdmission,
+    ) -> Result<IntervalDiscoveryPage>;
     /// Reuse the same source admission, authentication, cancellation and outbox path as interactive collection.
     async fn capture(
         &self,
@@ -33,7 +74,8 @@ pub trait FleetBackend: Send + Sync {
         request: CollectionRequest,
         outbox: &mut Outbox,
         cancellation: &CollectionCancellation,
-    ) -> Result<CollectionManifest>;
+        admission: FleetSourceAdmission,
+    ) -> FleetCaptureOutcome;
 }
 
 pub struct FleetRunner<'a> {
@@ -45,6 +87,7 @@ pub struct FleetRunner<'a> {
     initialized: bool,
     stopped: bool,
     diagnostics: crate::diagnostics::DiagnosticPolicies,
+    investigations: investigations::Investigations,
 }
 impl<'a> FleetRunner<'a> {
     pub fn new(
@@ -73,6 +116,7 @@ impl<'a> FleetRunner<'a> {
             initialized: false,
             stopped: false,
             diagnostics,
+            investigations: investigations::Investigations::new(inventory, shard),
         })
     }
     pub fn with_recovery(mut self, recovery: &'a dyn crate::delivery::recovery::RecoveryStore) -> Result<Self> {
@@ -99,7 +143,7 @@ impl<'a> FleetRunner<'a> {
         }
         result
     }
-    async fn initialize(&mut self) -> Result<()> {
+    async fn initialize(&mut self, cancellation: &CollectionCancellation) -> Result<()> {
         if self.initialized {
             return Ok(());
         }
@@ -119,6 +163,9 @@ impl<'a> FleetRunner<'a> {
                 self.scheduler.persisted(clock)?;
             }
         }
+        self.investigations
+            .reconcile(self.backend, self.journal, &mut self.storage, &mut self.scheduler, self.started, cancellation)
+            .await?;
         self.initialized = true;
         Ok(())
     }
@@ -142,32 +189,49 @@ impl<'a> FleetRunner<'a> {
         if cancellation.is_cancelled() {
             return Ok(summary);
         }
-        self.initialize().await?;
+        self.initialize(cancellation).await?;
         while !cancellation.is_cancelled() && max_work.is_none_or(|limit| summary.attempts < limit) {
             self.analyze_pending(cancellation).await?;
             if cancellation.is_cancelled() {
                 break;
             }
-            let admitted_at = self.started.elapsed();
-            let Some(job) = self.scheduler.take(admitted_at)? else {
-                wait(cancellation, self.scheduler.wait(self.started.elapsed())).await;
+            let Some((job, admitted_at)) = self.next_work(cancellation).await? else {
+                wait(cancellation, self.next_delay()).await;
                 continue;
             };
             self.save_admission(admitted_at).await?;
             if cancellation.is_cancelled() {
-                self.scheduler.finish(self.started.elapsed(), scheduler::Outcome::Failed)?;
+                let outcome = match &job {
+                    scheduler::Work::Scheduled(_) => scheduler::Outcome::Failed,
+                    scheduler::Work::Focused(_) => scheduler::Outcome::FocusedRetry {
+                        reason: scheduler::FocusRetry::Failed,
+                        attempt: None,
+                        source_work: SourceWorkState::NotStarted,
+                    },
+                };
+                self.scheduler.finish(self.started.elapsed(), outcome)?;
                 self.save_completion().await?;
                 break;
             }
-            let backend = admission::AdmittedBackend::new(self.backend, self.started + admitted_at);
-            // Let admitted discovery finish under its native budget; dropping it on shutdown would lose its proof.
-            // Capture has its own cancellation-aware controller and also returns only after settling ownership.
-            let result =
-                work::execute(&backend, self.journal, &mut self.storage, &job, cancellation, chrono::Utc::now())
-                    .await?;
+            let maintain_investigations = matches!(&job, scheduler::Work::Focused(_))
+                || matches!(&job, scheduler::Work::Scheduled(job)
+                    if matches!(job.schedule.collection, ScheduledCollection::Activity { .. }));
+            let result = self.execute_work(&job, admitted_at, cancellation).await?;
             self.scheduler.finish(self.started.elapsed(), result.outcome)?;
             self.save_completion().await?;
             self.analyze_pending(cancellation).await?;
+            if maintain_investigations {
+                self.investigations
+                    .reconcile(
+                        self.backend,
+                        self.journal,
+                        &mut self.storage,
+                        &mut self.scheduler,
+                        self.started,
+                        cancellation,
+                    )
+                    .await?;
+            }
             summary.attempts = summary.attempts.checked_add(1).ok_or_else(scheduler::state_failed)?;
             if result.event.status == CollectionStatus::Complete {
                 summary.complete += 1;
@@ -181,6 +245,50 @@ impl<'a> FleetRunner<'a> {
             }
         }
         Ok(summary)
+    }
+    fn next_delay(&self) -> Duration {
+        self.scheduler.wait_allowed(self.started.elapsed(), |job| self.investigations.route_available(job))
+    }
+
+    async fn next_work(
+        &mut self,
+        cancellation: &CollectionCancellation,
+    ) -> Result<Option<(scheduler::Work, Duration)>> {
+        let mut admitted_at = self.started.elapsed();
+        let mut next = self.scheduler.take_allowed(admitted_at, |job| self.investigations.route_available(job))?;
+        if next.is_none() && self.next_delay() >= self.investigations.planning_time() {
+            self.investigations
+                .prepare(self.backend, self.journal, &mut self.storage, &mut self.scheduler, self.started, cancellation)
+                .await?;
+            admitted_at = self.started.elapsed();
+            next = self.scheduler.take_allowed(admitted_at, |job| self.investigations.route_available(job))?;
+        }
+        Ok(next.map(|job| (job, admitted_at)))
+    }
+
+    async fn execute_work(
+        &mut self,
+        job: &scheduler::Work,
+        admitted_at: Duration,
+        cancellation: &CollectionCancellation,
+    ) -> Result<work::WorkResult> {
+        let backend = admission::AdmittedBackend::new(self.backend, self.started + admitted_at);
+        // Discovery retains native ownership until its bounded completion; capture has its own cancellation owner.
+        match job {
+            scheduler::Work::Scheduled(job) => {
+                self.investigations.starting_baseline(job);
+                let result =
+                    work::execute(&backend, self.journal, &mut self.storage, job, cancellation, chrono::Utc::now())
+                        .await?;
+                self.investigations.completed_baseline(job, &result, backend.used_route_revision())?;
+                Ok(result)
+            }
+            scheduler::Work::Focused(job) => {
+                self.investigations
+                    .execute(self.backend, &backend, self.journal, &mut self.storage, job, cancellation)
+                    .await
+            }
+        }
     }
     async fn analyze_pending(&mut self, cancellation: &CollectionCancellation) -> Result<()> {
         crate::diagnostics::analyze_pending(

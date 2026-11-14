@@ -1,7 +1,8 @@
 use super::{
-    FleetBackend, history,
+    admission::AdmittedBackend,
+    history,
     journal::FleetJournal,
-    scheduler::{HistoryLane, Job, Outcome, state_failed},
+    scheduler::{FocusedJob, HistoryLane, Job, Outcome, state_failed},
     storage::CaptureStorage,
     windows,
 };
@@ -21,11 +22,27 @@ pub(super) struct Checkpoint {
 }
 pub(super) struct WorkResult {
     pub event: FleetCollectionEvent,
+    pub source: Option<CollectionDescription>,
     pub outcome: Outcome,
     pub pause_all: bool,
 }
+pub(super) struct WorkIdentity<'a> {
+    target: &'a str,
+    connection: &'a str,
+    schedule: &'a str,
+}
+impl<'a> From<&'a Job> for WorkIdentity<'a> {
+    fn from(job: &'a Job) -> Self {
+        Self { target: &job.target, connection: &job.connection, schedule: &job.schedule.id }
+    }
+}
+impl<'a> From<&'a FocusedJob> for WorkIdentity<'a> {
+    fn from(job: &'a FocusedJob) -> Self {
+        Self { target: &job.target, connection: &job.connection, schedule: &job.recipe_id }
+    }
+}
 pub(super) async fn execute(
-    backend: &dyn FleetBackend,
+    backend: &AdmittedBackend<'_>,
     journal: &FleetJournal,
     storage: &mut CaptureStorage<'_>,
     job: &Job,
@@ -62,7 +79,7 @@ pub(super) async fn execute(
     journal.save(&job.key, &checkpoint).await?;
     let manifest = match backend.capture(&job.connection, request.clone(), storage.outbox, cancellation).await {
         Ok(manifest) => manifest,
-        Err(error) => return failure(job, FleetWork::Capture, error, gap),
+        Err(error) => return capture_failure(job, error, gap, backend.source_work()),
     };
     if let Some(source) = &manifest.description {
         checkpoint.pin_target(&source.target)?;
@@ -135,6 +152,14 @@ pub(super) fn completed(
     gap: Option<TelemetryRange>,
     more: bool,
 ) -> Result<WorkResult> {
+    completed_for(job.into(), manifest, gap, more)
+}
+pub(super) fn completed_for(
+    identity: WorkIdentity<'_>,
+    manifest: CollectionManifest,
+    gap: Option<TelemetryRange>,
+    more: bool,
+) -> Result<WorkResult> {
     if manifest.status == CollectionStatus::Incomplete(CollectionStop::CancellationUnconfirmed) {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
@@ -164,10 +189,11 @@ pub(super) fn completed(
             }
         });
     Ok(WorkResult {
+        source: manifest.description,
         event: FleetCollectionEvent {
-            target: job.target.clone(),
-            connection: job.connection.clone(),
-            schedule: job.schedule.id.clone(),
+            target: identity.target.into(),
+            connection: identity.connection.into(),
+            schedule: identity.schedule.into(),
             work: FleetWork::Capture,
             status: manifest.status,
             native_coverage,
@@ -180,9 +206,28 @@ pub(super) fn completed(
     })
 }
 pub(super) fn failure(job: &Job, work: FleetWork, error: Error, gap: Option<TelemetryRange>) -> Result<WorkResult> {
-    if matches!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::CancellationUnconfirmed)))
+    failure_for(job.into(), work, error, gap, None)
+}
+pub(super) fn capture_failure(
+    job: &Job,
+    error: Error,
+    gap: Option<TelemetryRange>,
+    source_work: SourceWorkState,
+) -> Result<WorkResult> {
+    failure_for(job.into(), FleetWork::Capture, error, gap, Some(source_work))
+}
+pub(super) fn failure_for(
+    identity: WorkIdentity<'_>,
+    work: FleetWork,
+    error: Error,
+    gap: Option<TelemetryRange>,
+    source_work: Option<SourceWorkState>,
+) -> Result<WorkResult> {
+    if matches!(source_work, Some(SourceWorkState::Active | SourceWorkState::Unconfirmed))
+        || matches!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::CancellationUnconfirmed)))
         || error.code == ErrorCode::Timeout
             && error.detail != Some(ErrorDetail::CollectionStopped(CollectionStop::TimedOut))
+            && !matches!(source_work, Some(SourceWorkState::NotStarted | SourceWorkState::Quiescent))
     {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
@@ -194,10 +239,11 @@ pub(super) fn failure(job: &Job, work: FleetWork, error: Error, gap: Option<Tele
     let stopped = CollectionStop::from_error(&error);
     let outcome = retry_outcome(stopped);
     Ok(WorkResult {
+        source: None,
         event: FleetCollectionEvent {
-            target: job.target.clone(),
-            connection: job.connection.clone(),
-            schedule: job.schedule.id.clone(),
+            target: identity.target.into(),
+            connection: identity.connection.into(),
+            schedule: identity.schedule.into(),
             work,
             status: CollectionStatus::Incomplete(stopped),
             native_coverage: None,
@@ -223,6 +269,33 @@ pub(super) fn parse_time(value: &str) -> Result<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_timeout_can_retry_only_after_an_explicit_capture_owner_proves_its_settlement() {
+        for source_work in [
+            None,
+            Some(SourceWorkState::Active),
+            Some(SourceWorkState::Unconfirmed),
+            Some(SourceWorkState::NotStarted),
+            Some(SourceWorkState::Quiescent),
+        ] {
+            let result = failure_for(
+                WorkIdentity { target: "target", connection: "source", schedule: "recipe" },
+                FleetWork::Capture,
+                culprit_core::limits::timeout_error(),
+                None,
+                source_work,
+            );
+            if matches!(source_work, Some(SourceWorkState::NotStarted | SourceWorkState::Quiescent)) {
+                let retry = result.unwrap();
+                assert!(matches!(retry.outcome, Outcome::Failed));
+                assert_ne!(retry.event.status, CollectionStatus::Complete);
+                assert_eq!(retry.event.error_code, Some(ErrorCode::Timeout));
+            } else {
+                assert_eq!(CollectionStop::from_error(&result.err().unwrap()), CollectionStop::CancellationUnconfirmed);
+            }
+        }
+    }
 
     fn pool(namespace: &str) -> CollectionTarget {
         CollectionTarget::Shared(SharedResourceIdentity {

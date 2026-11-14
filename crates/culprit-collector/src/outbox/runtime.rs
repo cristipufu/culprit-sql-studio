@@ -122,6 +122,42 @@ impl Outbox {
             })
             .await
     }
+    /// Authenticate local queue knowledge without interpreting absent metadata or cached evidence as consumption.
+    pub async fn diagnostic_input_state(
+        &self,
+        reference: &DiagnosticCaptureRef,
+        controller_version: u32,
+    ) -> Result<super::DiagnosticInputState> {
+        self.files
+            .run(|| {
+                let reference = reference.clone();
+                move |files| files.diagnostic_input_state(&reference, controller_version)
+            })
+            .await
+    }
+    /// Authenticate and retain the exact original before storing a queued investigation. This grants no native rights.
+    pub async fn pin_investigation_parent(&mut self, key: &str, focus: &ActivityWaitFocus) -> Result<()> {
+        self.files
+            .run(|| {
+                let key = key.to_owned();
+                let focus = focus.clone();
+                move |files| files.pin_investigation_parent(&key, &focus)
+            })
+            .await
+    }
+    /// The caller reconciles this complete bounded inventory with its durable investigation journal after restart.
+    pub async fn investigation_parent_keys(&self) -> Result<Vec<String>> {
+        self.files.run(|| |files| files.investigation_parent_keys()).await
+    }
+    /// Release only the settled journal stage's pin. Native focus/result pins and source-work debt are independent.
+    pub async fn release_investigation_parent(&mut self, key: &str) -> Result<()> {
+        self.files
+            .run(|| {
+                let key = key.to_owned();
+                move |files| files.release_investigation_parent(&key)
+            })
+            .await
+    }
     /// Consume only sealed native evidence; this path never creates a native source session.
     pub async fn next_diagnostic_input(&self, controller_version: u32) -> Result<Option<super::DiagnosticInput>> {
         self.files.run(|| move |files| files.next_diagnostic_input(controller_version)).await

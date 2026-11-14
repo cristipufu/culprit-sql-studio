@@ -1,4 +1,5 @@
 //! Offline diagnostic work uses sealed outbox evidence and the same transactional commit owner as native captures.
+mod focus_pins;
 mod input;
 pub(super) mod journal;
 pub(super) mod retirement;
@@ -21,6 +22,15 @@ const MAX_RESTORED_INPUT_BYTES: usize = 4 * 1024 * 1024;
 pub struct DiagnosticInputRow {
     pub reference: DiagnosticEvidenceRef,
     pub row: ExportedRecord,
+}
+
+/// Local queue knowledge only. Evidence cached from an archive does not establish committed analysis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagnosticInputState {
+    Missing,
+    EvidenceOnly,
+    Pending,
+    Consumed,
 }
 
 /// Rows and their exact receipt references are already verified. Native source work has ended before this value exists.

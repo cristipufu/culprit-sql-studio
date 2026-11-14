@@ -612,9 +612,25 @@ metadata was removed. An older capture still pending in recovery remains admissi
 and owner epoch never substitute for that exact check. A checkpoint from another analysis-controller version cannot
 acknowledge the current version's native obligation.
 
-Page-wait focus has an explicit native request/result contract, but automatic native focus scheduling is not yet
-enabled. Saving an episode or declaring a recipe does not establish a completed root-cause investigation or a
-production-cost qualification. Existing explicit page-target collection remains separately bounded and opt-in.
+Qualified page-wait investigations share the existing fleet scheduler. A durable immutable question owns its original
+evidence pin; repeated baselines cannot enqueue competing work for that episode/stage. Periodic collection takes
+precedence. Focused work must fit its native timeout, shutdown and resource gap before another periodic deadline.
+After restart, a fresh baseline must establish the source behind the saved route before a focused job can run.
+
+Qualification requires an exact measured budget, reader version/revision and independently authenticated native-cost
+artifact, interpreted by the selected provider's pure verifier. Client timing alone is insufficient. The reader
+still rechecks native request, statement and resource identity before enrichment. Resolved incidents can retain
+an owed investigation; the same observer preserves their original recovery proof when later evidence arrives.
+
+The capture owner reports `not-started`, `quiescent` or `unconfirmed` separately from its result. Metadata-only retries
+cannot clear older uncertainty. The scheduler retires a completed question after exact analysis consumption;
+when recovery is configured, its archived result and analysis acknowledgement must also be verified. Cached evidence
+does not count as analysis acknowledgement. Completed captures retain admission lineage, with a separate public
+projection that omits private source targets, original SQL and qualification SQL.
+
+Built-in recipe costs remain unqualified, so this protocol does not enable automatic extra production reads.
+Saving an episode or declaring a recipe does not establish a completed root-cause investigation or measured source
+cost. Existing explicit page-target collection remains separately bounded.
 
 ## PostgreSQL source coverage
 

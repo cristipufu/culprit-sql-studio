@@ -139,6 +139,41 @@ fn update(
     }
 }
 #[test]
+fn only_exact_committed_analysis_acknowledgement_establishes_input_consumption() {
+    let root = tempfile::tempdir().unwrap();
+    let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
+    baseline(&mut files, vec![activity("42")], true, 0);
+    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    assert_eq!(files.diagnostic_input_state(&input.parent, 1).unwrap(), DiagnosticInputState::Pending);
+    let mut wrong = input.parent.clone();
+    wrong.manifest_sha256 = digest(b"another immutable manifest");
+    assert!(files.diagnostic_input_state(&wrong, 1).is_err());
+    assert!(files.diagnostic_input_state(&input.parent, 2).is_err());
+    let mut unknown = input.parent.clone();
+    unknown.capture.observation_id = "never-cached-capture".into();
+    assert_eq!(
+        files.diagnostic_input_state(&unknown, 1).unwrap(),
+        DiagnosticInputState::Missing,
+        "absence is never an analysis acknowledgement"
+    );
+    files.commit_diagnostics(input.clone(), start(&input)).unwrap();
+    assert_eq!(files.diagnostic_input_state(&input.parent, 1).unwrap(), DiagnosticInputState::Consumed);
+    assert!(files.diagnostic_input_state(&wrong, 1).is_err());
+    files
+        .journal
+        .conn
+        .execute(
+            "UPDATE diagnostic_inputs SET source_json='{}' WHERE observation_id=?1",
+            [&input.parent.capture.observation_id],
+        )
+        .unwrap();
+    assert!(
+        files.diagnostic_input_state(&input.parent, 1).is_err(),
+        "even an acknowledged row must retain a valid matching source"
+    );
+}
+
+#[test]
 fn ready_input_and_derived_revision_acknowledgement_are_durable_and_idempotent() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("outbox");
