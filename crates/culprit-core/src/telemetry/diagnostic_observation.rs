@@ -8,6 +8,23 @@ pub struct DiagnosticActivityRow<'a> {
     pub observation: &'a ActivityObservation,
 }
 
+impl DiagnosticActivityRow<'_> {
+    pub(super) fn verify(&self, source: &CollectionDescription, input: &DiagnosticCaptureRef) -> Result<()> {
+        if self.reference.capture_ref() != *input {
+            return Err(invalid());
+        }
+        let exported = ExportedRecord::new(source, &input.capture, TelemetryRecord::from(self.observation.clone()))?;
+        let expected =
+            DiagnosticEvidenceRef::from_export(source, &input.manifest_sha256, &exported, self.reference.row_ordinal)?;
+        if expected != *self.reference
+            || !matches!(&exported.record, TelemetryRecord::Activity(original) if original.as_ref() == self.observation)
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+}
+
 pub struct DiagnosticObservationUpdate {
     pub revisions: Vec<DiagnosticRevision>,
     pub checkpoint: DiagnosticCheckpoint,
@@ -63,11 +80,11 @@ pub fn observe_diagnostic_activity(
     let classified = ActivityEvidence::select(&observations, policy)?;
     let uncertain_blocking = ActivityEvidence::context_for(&observations, &classified.uncertain)?;
     for row in rows {
-        verify_row(source, input, row)?;
+        row.verify(source, input)?;
         if !native_keys.insert(row.observation.key.clone()) {
             return Err(invalid());
         }
-        for (signal, resource) in signals(
+        for signal in signals(
             row.observation,
             classified.conditions.get(&row.observation.key),
             uncertain_blocking.contains(&row.observation.key),
@@ -88,28 +105,13 @@ pub fn observe_diagnostic_activity(
                 None => DiagnosticEpisode::start(scope.clone(), signal, native.at.clone(), row.reference.clone())?,
             };
             observed.insert(episode.id.clone());
-            if let Some(resource) = resource {
-                if let (Some(epoch), Some(statement)) = (&native.epoch, &row.observation.statement_identity) {
-                    let focus = ActivityWaitFocus {
-                        parent: row.reference.clone(),
-                        target: source.target.clone(),
-                        source: source.source.clone(),
-                        epoch: epoch.clone(),
-                        original_observed_at: native.at.clone(),
-                        original: row.observation.clone(),
-                        statement_identity: statement.clone(),
-                        resource,
-                    };
-                    if focus.is_valid() && episode.analysis.needs_work() {
-                        focuses.push((episode.id.clone(), focus));
-                    } else if !focus.is_valid() && episode.analysis.needs_work() {
-                        episode.analysis = DiagnosticAnalysisStatus::Unresolved;
-                        episode.issue = Some(DiagnosticAnalysisIssue::MissingNativeIdentity);
-                    }
-                } else if episode.analysis.needs_work() {
+            match episode.plan_page_wait_focus(source, row.observation, row.reference)? {
+                PageWaitFocusPlan::Ready(focus) => focuses.push((episode.id.clone(), *focus)),
+                PageWaitFocusPlan::Unavailable(issue) => {
                     episode.analysis = DiagnosticAnalysisStatus::Unresolved;
-                    episode.issue = Some(DiagnosticAnalysisIssue::MissingNativeIdentity);
+                    episode.issue = Some(issue);
                 }
+                PageWaitFocusPlan::NotRequired => (),
             }
             record_transition(&mut revisions, before.as_ref(), &mut episode, analyzed_at)?;
             episodes.insert(episode.id.clone(), episode);
@@ -146,29 +148,12 @@ pub fn observe_diagnostic_activity(
     Ok(DiagnosticObservationUpdate { revisions, checkpoint, focuses })
 }
 
-fn verify_row(
-    source: &CollectionDescription,
-    input: &DiagnosticCaptureRef,
-    row: &DiagnosticActivityRow<'_>,
-) -> Result<()> {
-    if row.reference.capture_ref() != *input {
-        return Err(invalid());
-    }
-    let exported = ExportedRecord::new(source, &input.capture, TelemetryRecord::from(row.observation.clone()))?;
-    let expected =
-        DiagnosticEvidenceRef::from_export(source, &input.manifest_sha256, &exported, row.reference.row_ordinal)?;
-    if expected != *row.reference {
-        return Err(invalid());
-    }
-    Ok(())
-}
-
 fn signals(
     row: &ActivityObservation,
     conditions: Option<&Vec<ActivityCondition>>,
     uncertain_blocking: bool,
     policy: &ActivityPolicy,
-) -> Vec<(DiagnosticSignal, Option<crate::ObservedWaitResource>)> {
+) -> Vec<DiagnosticSignal> {
     if matches!(row.scope, ActivityScopeBasis::OtherDatabase | ActivityScopeBasis::BlockingReference) {
         return Vec::new();
     }
@@ -181,16 +166,17 @@ fn signals(
         {
             continue;
         }
-        signals.push((
-            DiagnosticSignal::Activity { key: row.key.clone(), condition: *condition, policy: policy.clone() },
-            None,
-        ));
+        signals.push(DiagnosticSignal::Activity {
+            key: row.key.clone(),
+            condition: *condition,
+            policy: policy.clone(),
+        });
     }
     if row.key.request.is_none() {
         return signals;
     }
     if row.waiting_on_lock == Some(true) {
-        signals.push((DiagnosticSignal::LockWait { key: row.key.clone() }, None));
+        signals.push(DiagnosticSignal::LockWait { key: row.key.clone() });
     }
     for resource in row
         .wait
@@ -198,14 +184,11 @@ fn signals(
         .flat_map(|wait| &wait.identified_resources)
         .filter(|resource| matches!(resource.kind, WaitResourceKind::MemoryPage | WaitResourceKind::PageIo))
     {
-        signals.push((
-            DiagnosticSignal::PageWait {
-                key: row.key.clone(),
-                statement_identity: row.statement_identity.clone(),
-                resource: resource.clone(),
-            },
-            Some(resource.clone()),
-        ));
+        signals.push(DiagnosticSignal::PageWait {
+            key: row.key.clone(),
+            statement_identity: row.statement_identity.clone(),
+            resource: resource.clone(),
+        });
     }
     signals
 }

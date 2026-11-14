@@ -1,6 +1,8 @@
 use super::*;
 use crate::{DatabaseIdentity, Engine, MeasurementScope, ObservedWaitResource};
 
+mod planning;
+
 fn actor() -> ActivityObservation {
     ActivityObservation {
         blocking_status: ActivityBlockingStatus::Known,

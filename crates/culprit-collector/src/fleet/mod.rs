@@ -19,6 +19,11 @@ use storage::CaptureStorage;
 pub trait FleetBackend: Send + Sync {
     /// Validate saved metadata without opening a native connection. No interactive authentication fallback is allowed.
     fn validate_target(&self, connection: &str) -> Result<()>;
+    /// Read the selected provider's declarations without credentials, provider construction or native work.
+    /// An empty catalog is explicitly undeclared; it never inherits another provider's native recipes.
+    fn telemetry_recipes(&self, _connection: &str) -> Result<Vec<RecipeDescriptor>> {
+        Ok(Vec::new())
+    }
     /// Own the entire native lifecycle and report cancellation uncertainty through CollectionStop.
     async fn discover(&self, connection: &str, request: &IntervalDiscoveryRequest) -> Result<IntervalDiscoveryPage>;
     /// Reuse the same source admission, authentication, cancellation and outbox path as interactive collection.
@@ -54,6 +59,11 @@ impl<'a> FleetRunner<'a> {
         for target in inventory.targets.iter().filter(|target| target.shard == shard) {
             backend.validate_target(&target.connection)?;
         }
+        let mut diagnostics = crate::diagnostics::DiagnosticPolicies::from_inventory(inventory, shard)?;
+        let connections = diagnostics.connections().into_iter().map(str::to_owned).collect::<Vec<_>>();
+        for connection in connections {
+            diagnostics = diagnostics.with_recipes(&connection, backend.telemetry_recipes(&connection)?)?;
+        }
         Ok(Self {
             backend,
             journal,
@@ -62,7 +72,7 @@ impl<'a> FleetRunner<'a> {
             started: tokio::time::Instant::now(),
             initialized: false,
             stopped: false,
-            diagnostics: crate::diagnostics::DiagnosticPolicies::from_inventory(inventory, shard)?,
+            diagnostics,
         })
     }
     pub fn with_recovery(mut self, recovery: &'a dyn crate::delivery::recovery::RecoveryStore) -> Result<Self> {

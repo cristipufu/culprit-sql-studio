@@ -22,6 +22,7 @@ impl Workspace {
         let policies = DiagnosticPolicies::for_activity(name, CollectionSubject::Database, options.policy.clone())?;
         drain_pending(outbox, &policies, cancellation, None).await?;
         self.connection(name)?;
+        let policies = policies.with_recipes(name, self.telemetry_recipes(name)?)?;
         let mut summary = ActivityMonitorSummary::default();
         let mut failures = 0u32;
         loop {

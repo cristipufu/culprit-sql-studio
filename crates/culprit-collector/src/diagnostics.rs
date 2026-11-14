@@ -1,4 +1,5 @@
 //! Offline analysis runs on sealed evidence. This module has no provider, credential or native query dependency.
+mod planning;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -12,7 +13,13 @@ use std::time::Duration;
 const RECOVERY_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct DiagnosticPolicies {
-    assignments: Vec<(String, CollectionSubject, ActivityPolicy)>,
+    assignments: Vec<DiagnosticAssignment>,
+}
+struct DiagnosticAssignment {
+    connection: String,
+    subject: CollectionSubject,
+    policy: ActivityPolicy,
+    recipes: Option<Vec<RecipeDescriptor>>,
 }
 impl DiagnosticPolicies {
     pub fn for_activity(connection: &str, subject: CollectionSubject, policy: ActivityPolicy) -> Result<Self> {
@@ -21,7 +28,9 @@ impl DiagnosticPolicies {
         if connection.is_empty() || connection.len() > 256 || connection.chars().any(char::is_control) {
             return Err(CollectionStop::InvalidPage.error());
         }
-        Ok(Self { assignments: vec![(connection.into(), subject, policy)] })
+        Ok(Self {
+            assignments: vec![DiagnosticAssignment { connection: connection.into(), subject, policy, recipes: None }],
+        })
     }
     pub fn from_inventory(inventory: &FleetInventory, shard: &str) -> Result<Self> {
         inventory.validate(shard)?;
@@ -34,18 +43,44 @@ impl DiagnosticPolicies {
                     let ScheduledCollection::Activity { policy } = &schedule.collection else {
                         return None;
                     };
-                    Some((target.connection.clone(), target.subject.clone(), policy.clone()))
+                    Some(DiagnosticAssignment {
+                        connection: target.connection.clone(),
+                        subject: target.subject.clone(),
+                        policy: policy.clone(),
+                        recipes: None,
+                    })
                 })
             })
             .collect();
         Ok(Self { assignments })
     }
+    /// Bind declarations from the selected provider without constructing it or resolving source credentials.
+    /// No declaration authorizes native work or identifies the resource behind a saved route.
+    pub fn with_recipes(mut self, connection: &str, recipes: Vec<RecipeDescriptor>) -> Result<Self> {
+        if !recipe_catalog_is_valid(&recipes) {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        let recipes = planning::canonical_catalog(recipes)?;
+        let mut matched = false;
+        for assignment in self.assignments.iter_mut().filter(|assignment| assignment.connection == connection) {
+            assignment.recipes = Some(recipes.clone());
+            matched = true;
+        }
+        if !matched {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        Ok(self)
+    }
+    pub(crate) fn connections(&self) -> std::collections::BTreeSet<&str> {
+        self.assignments.iter().map(|assignment| assignment.connection.as_str()).collect()
+    }
+    fn assignment(&self, input: &DiagnosticInput) -> Option<&DiagnosticAssignment> {
+        self.assignments.iter().find(|assignment| {
+            assignment.connection == input.connection && assignment.subject.accepts(&input.source.target)
+        })
+    }
     fn for_input(&self, input: &DiagnosticInput) -> ActivityPolicy {
-        self.assignments
-            .iter()
-            .find(|(connection, subject, _)| *connection == input.connection && subject.accepts(&input.source.target))
-            .map(|(_, _, policy)| policy.clone())
-            .unwrap_or_default()
+        self.assignment(input).map(|assignment| assignment.policy.clone()).unwrap_or_default()
         // Recovered evidence can have no current saved route. Its analysis explicitly stores this policy;
         // a policy match never supplies native identity or authorizes a new connection.
     }
@@ -73,7 +108,8 @@ pub async fn analyze_pending(
             break;
         }
         let analyzed_at = chrono::Utc::now().to_rfc3339();
-        let update = analyze(&input, &policies.for_input(&input), &analyzed_at)?;
+        let mut update = analyze(&input, &policies.for_input(&input), &analyzed_at)?;
+        planning::qualify_questions(&input, policies.assignment(&input), &mut update)?;
         outbox.commit_diagnostics(input, update).await?;
         processed += 1;
     }

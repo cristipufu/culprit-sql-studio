@@ -29,6 +29,9 @@ impl FleetBackend for AdmittedBackend<'_> {
     fn validate_target(&self, connection: &str) -> Result<()> {
         self.backend.validate_target(connection)
     }
+    fn telemetry_recipes(&self, connection: &str) -> Result<Vec<RecipeDescriptor>> {
+        self.backend.telemetry_recipes(connection)
+    }
     async fn discover(&self, connection: &str, request: &IntervalDiscoveryRequest) -> Result<IntervalDiscoveryPage> {
         self.check()?;
         self.backend.discover(connection, request).await

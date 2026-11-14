@@ -1,4 +1,5 @@
 use super::*;
+mod planning;
 mod recovery;
 use crate::{
     analytical::test_support::{activity_evidence_cases, activity_observation},

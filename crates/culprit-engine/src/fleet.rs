@@ -5,6 +5,9 @@ use culprit_core::{AuthKind, Error, Result, telemetry::*};
 
 #[async_trait::async_trait]
 impl FleetBackend for Workspace {
+    fn telemetry_recipes(&self, connection: &str) -> Result<Vec<RecipeDescriptor>> {
+        Workspace::telemetry_recipes(self, connection)
+    }
     fn validate_target(&self, connection: &str) -> Result<()> {
         let stored = self.store.get(connection)?;
         let unattended = match stored.auth {

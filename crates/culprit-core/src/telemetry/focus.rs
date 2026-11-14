@@ -2,6 +2,9 @@
 use super::*;
 use crate::{ObservedWaitResource, WaitResourceKind};
 
+mod plan;
+pub use plan::PageWaitFocusPlan;
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
