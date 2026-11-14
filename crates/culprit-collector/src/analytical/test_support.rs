@@ -106,8 +106,16 @@ fn assert_operational_capture(
         let expected = ExportedRecord::new(source, capture.capture(), record.clone()).unwrap();
         let actual = capture.records().iter().find(|row| row.row() == &expected).expect("exact native participant");
         assert!(identities.insert(actual.row().record_id.as_ref()));
+        assert_redacted_definition_payloads(&actual.row().record);
     }
-    assert!(!serde_json::to_string(capture.records()).unwrap().contains("9264"));
+}
+
+fn assert_redacted_definition_payloads(record: &TelemetryRecord) {
+    for definition in record.definition_payloads() {
+        if let DefinitionPayload::Available { text, .. } = definition.payload {
+            assert!(!text.contains("9264"), "unredacted fixture literal in {}", definition.pointer);
+        }
+    }
 }
 
 pub fn fixture() -> (RangeManifest, ExportedRecord) {

@@ -336,3 +336,47 @@ pub fn assert_object_definition_capture(
         assert_eq!(row.version, digest(&serde_json::to_vec(&row.fact).unwrap()));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opaque_native_digests_do_not_count_as_sensitive_definition_text() {
+        let original = "SELECT value FROM @Rows WHERE value = 9264 AND value <> 29";
+        let mut native = cached_definition();
+        native.statement = cached_payload(original, DefinitionPayload::sql);
+        native.context.source_text_bytes = native.statement.source_utf16_bytes.clone();
+        assert!(native.statement.native_sha256.as_ref().unwrap().contains("9264"));
+        let record = TelemetryRecord::ObjectDefinition(
+            ObjectDefinitionRecord::new(
+                "native-object-definitions".into(),
+                ObjectDefinitionFact::MssqlCachedDefinition(Box::new(native)),
+            )
+            .unwrap(),
+        );
+        assert!(record.is_valid());
+        assert!(serde_json::to_string(&record).unwrap().contains("9264"));
+        super::super::assert_redacted_definition_payloads(&record);
+    }
+
+    #[test]
+    #[should_panic(expected = "unredacted fixture literal in /record/data/fact/data/statement/payload")]
+    fn an_available_payload_with_valid_hashes_still_fails_when_its_sensitive_literal_survives() {
+        let mut native = cached_definition();
+        native.statement.payload = DefinitionPayload::Available {
+            text: SQL.into(),
+            sha256: digest(SQL.as_bytes()),
+            redaction_version: REDACTION_VERSION,
+        };
+        let record = TelemetryRecord::ObjectDefinition(
+            ObjectDefinitionRecord::new(
+                "native-object-definitions".into(),
+                ObjectDefinitionFact::MssqlCachedDefinition(Box::new(native)),
+            )
+            .unwrap(),
+        );
+        assert!(record.is_valid());
+        super::super::assert_redacted_definition_payloads(&record);
+    }
+}
