@@ -448,6 +448,7 @@ mod tests {
             limitations: vec!["task incarnations and allocating statements remain unresolved".into()],
             entries: (0..8)
                 .map(|index| culprit_core::TaskSpaceExplanation {
+                    activity: culprit_core::TaskAllocationActivity::Unknown,
                     observation_key: format!("private-proof-{index}"),
                     task: culprit_core::telemetry::TaskSpaceIdentity {
                         session_id: "42".into(),

@@ -31,7 +31,7 @@ export function taskSpaceReport(observations = [taskSpace()]): TaskSpaceReport {
     source_state: "partial", source_reason: "The task read was bounded.",
     title: "Task tempdb activity", summary: `${observations.length} native task observations were retained.`,
     limitations: ["Current request context does not identify the allocating statement."],
-    entries: observations.map((row, index) => ({ observation_key: `opaque-task-${index}`, task: structuredClone(row.task),
+    entries: observations.map((row, index) => ({ observation_key: `opaque-task-${index}`, task: structuredClone(row.task), activity: "mixed",
       title: `Native task ${index}`, explanation: "Allocation and deallocation counts remain independent of current SQL context.",
       investigation: "Measure a representative workload before changing memory settings.",
       verify: "Do not subtract capture-local counters between reads.",
