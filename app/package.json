@@ -22,19 +22,19 @@
     "@tauri-apps/api": "2.12.4",
     "codemirror": "6.0.2",
     "@lezer/highlight": "1.2.5",
-    "lucide-react": "1.68.0",
+    "lucide-react": "1.72.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.4",
+    "@biomejs/biome": "2.6.6",
     "@playwright/test": "1.65.0",
     "@tauri-apps/cli": "2.12.4",
     "@types/bun": "1.4.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "@vitejs/plugin-react": "6.2.1",
+    "@vitejs/plugin-react": "6.3.0",
     "typescript": "7.0.2",
-    "vite": "8.3.5"
+    "vite": "8.3.8"
   }
 }
