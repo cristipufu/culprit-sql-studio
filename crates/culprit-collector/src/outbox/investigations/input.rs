@@ -27,7 +27,8 @@ impl Files {
     pub(in crate::outbox) fn diagnostic_input(&mut self, id: &str, controller_version: u32) -> Result<DiagnosticInput> {
         let (parent, source, connection, version, restored, restored_sha): (String,String,String,u32,Option<String>,Option<String>) = self.journal.conn.query_row(
             "SELECT parent_json,source_json,connection,controller_version,restored_json,restored_sha FROM diagnostic_inputs WHERE observation_id=?1",
-            [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).map_err(storage)?;
+            [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional().map_err(storage)?
+            .ok_or_else(|| DeliveryProblem::Conflict.error())?;
         let parent: DiagnosticCaptureRef = decode(&parent)?;
         let source: CollectionDescription = decode(&source)?;
         if !parent.is_valid()
@@ -189,6 +190,16 @@ impl Files {
     pub(in crate::outbox) fn restore_diagnostic_input(&mut self, input: RestoredInput) -> Result<()> {
         self.install_diagnostic_input(input, InputInstallation::Pending)
     }
+    pub(in crate::outbox) fn restore_diagnostic_input_at_generation(
+        &mut self,
+        input: RestoredInput,
+        generation: i64,
+    ) -> Result<()> {
+        if super::retirement::generation(&self.journal.conn)? != generation {
+            return Err(DeliveryProblem::Conflict.error());
+        }
+        self.restore_diagnostic_input(input)
+    }
     pub(in crate::outbox) fn cache_diagnostic_evidence(&mut self, input: RestoredInput) -> Result<()> {
         self.install_diagnostic_input(input, InputInstallation::EvidenceOnly)
     }
@@ -255,6 +266,7 @@ impl Files {
                         ],
                     )
                     .map_err(storage)?;
+                    pin_restored_focus(&tx, &input)?;
                     tx.commit().map_err(storage)?;
                 }
                 return Ok(());
@@ -299,8 +311,21 @@ impl Files {
             params![format!("input:{}", input.parent.capture.observation_id), input.parent.capture.observation_id],
         )
         .map_err(storage)?;
+        if installation == InputInstallation::Pending {
+            pin_restored_focus(&tx, &input)?;
+        }
         tx.commit().map_err(storage)
     }
+}
+
+fn pin_restored_focus(tx: &Transaction<'_>, input: &RestoredInput) -> Result<()> {
+    if let SourceObservation::FocusedPageWait { result, .. } = &input.source.observation {
+        tx.execute(
+            "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM diagnostic_inputs WHERE observation_id=?3 AND acknowledged=0)",
+            params![format!("focus:{}",input.parent.capture.observation_id),result.focus.parent.capture.observation_id,input.parent.capture.observation_id],
+        ).map_err(storage)?;
+    }
+    Ok(())
 }
 
 impl Files {

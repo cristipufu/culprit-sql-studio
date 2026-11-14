@@ -40,28 +40,27 @@ impl Files {
         if expected.manifest() != manifest || manifest.digest()? != committed.manifest_digest() {
             return Err(problem(OutboxProblem::Integrity));
         }
-        self.journal
-            .conn
-            .execute(
-                "UPDATE captures SET archive_range=?1,archive_digest=?2 WHERE observation_id=?3 AND state=?4",
-                params![
-                    manifest.range_id,
-                    committed.manifest_digest(),
-                    capture.identity.observation_id,
-                    journal::encode(&OutboxCaptureState::Ready)?
-                ],
-            )
-            .map_err(storage)?;
+        let tx = self.journal.conn.transaction().map_err(storage)?;
+        tx.execute(
+            "UPDATE captures SET archive_range=?1,archive_digest=?2 WHERE observation_id=?3 AND state=?4",
+            params![
+                manifest.range_id,
+                committed.manifest_digest(),
+                capture.identity.observation_id,
+                journal::encode(&OutboxCaptureState::Ready)?
+            ],
+        )
+        .map_err(storage)?;
         if capture.request.collection() == TelemetryCollection::Diagnostics {
-            self.journal.conn.execute("DELETE FROM diagnostic_pins WHERE owner IN (SELECT 'head:' || controller_key FROM diagnostic_heads WHERE observation_id=?1)", [&capture.identity.observation_id]).map_err(storage)?;
+            tx.execute("DELETE FROM diagnostic_pins WHERE owner IN (SELECT 'head:' || controller_key FROM diagnostic_heads WHERE observation_id=?1)", [&capture.identity.observation_id]).map_err(storage)?;
         }
-        self.journal
-            .conn
-            .execute(
-                "DELETE FROM diagnostic_pins WHERE owner=?1",
-                [format!("derived:{}", capture.identity.observation_id)],
-            )
-            .map_err(storage)?;
+        tx.execute(
+            "DELETE FROM diagnostic_pins WHERE owner=?1",
+            [format!("derived:{}", capture.identity.observation_id)],
+        )
+        .map_err(storage)?;
+        investigations::retirement::archived(&tx, &capture.identity.observation_id)?;
+        tx.commit().map_err(storage)?;
         self.evict(committed)?;
         Ok(())
     }

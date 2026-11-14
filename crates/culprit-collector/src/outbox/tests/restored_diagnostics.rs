@@ -134,10 +134,11 @@ async fn exact_checkpoint_identity_complete_object_eof_and_restored_input_checks
     let mut outbox =
         Outbox::create_remote(&root.path().join("replacement"), OutboxLimits::default(), store.id()).unwrap();
     outbox.recover().await.unwrap();
-    outbox.restore_diagnostic_input("renamed", recovered).await.unwrap();
+    let reference = checkpoint(&store).await.checkpoint().episodes[0].first.clone();
+    outbox.cache_diagnostic_evidence("renamed", recovered).await.unwrap();
     journal_fault(&outbox, "UPDATE diagnostic_inputs SET restored_json='[]'").await;
     assert!(
-        outbox.next_diagnostic_input(1).await.is_err(),
+        outbox.diagnostic_evidence(&reference).await.is_err(),
         "valid JSON corruption is not an empty successful baseline"
     );
 }

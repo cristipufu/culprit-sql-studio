@@ -1,6 +1,7 @@
 //! Offline diagnostic work uses sealed outbox evidence and the same transactional commit owner as native captures.
 mod input;
 pub(super) mod journal;
+pub(super) mod retirement;
 #[cfg(test)]
 mod tests;
 mod writer;
@@ -41,6 +42,18 @@ pub struct DiagnosticUpdate {
     pub analyzed_at: String,
     pub revisions: Vec<DiagnosticRevision>,
     pub checkpoint: DiagnosticCheckpoint,
+}
+impl DiagnosticUpdate {
+    fn replay_digest(&self) -> Result<String> {
+        if !valid_digest(&self.step_id)
+            || !self.checkpoint.is_valid()
+            || !self.revisions.iter().all(DiagnosticRevision::is_valid)
+        {
+            return Err(integrity());
+        }
+        let revision_ids = self.revisions.iter().map(|revision| &revision.id).collect::<Vec<_>>();
+        Ok(digest(&serde_json::to_vec(&(&self.step_id, &self.checkpoint, revision_ids)).map_err(|_| integrity())?))
+    }
 }
 
 #[derive(Clone, Debug)]

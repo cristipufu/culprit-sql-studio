@@ -79,6 +79,7 @@ impl ColdCapture {
             .restore_diagnostic_input(
                 "fixture",
                 load_diagnostic_input(store.as_ref(), &focused.manifest().range_id).await.unwrap(),
+                store.as_ref(),
             )
             .await
             .unwrap();
@@ -189,6 +190,9 @@ impl RecoveryStore for StalledRecovery {
     }
     async fn pending_diagnostic_inputs(&self, _: Option<&str>, _: u32) -> Result<RecoveryPage> {
         panic!("input is already selected")
+    }
+    async fn diagnostic_input_pending(&self, input: &DiagnosticCaptureRef, version: u32) -> Result<bool> {
+        self.store.diagnostic_input_pending(input, version).await
     }
     async fn diagnostic_heads(&self, _: Option<&str>, _: u32) -> Result<DiagnosticHeadPage> {
         panic!("checkpoint is already restored")

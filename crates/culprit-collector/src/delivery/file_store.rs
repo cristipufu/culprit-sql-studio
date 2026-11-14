@@ -482,6 +482,28 @@ impl RecoveryStore for FileRecoveryStore {
             })
             .await
     }
+    async fn diagnostic_input_pending(
+        &self,
+        input: &culprit_core::telemetry::DiagnosticCaptureRef,
+        controller_version: u32,
+    ) -> Result<bool> {
+        self.files
+            .run(|| {
+                let input = input.clone();
+                move |files| {
+                    let manifest = files.load(&range_id_for(&files.contract, &input.capture)?)?;
+                    super::diagnostic_recovery::validate_pending_input(&manifest, &input, controller_version)?;
+                    let json: String = files
+                        .journal
+                        .query_row("SELECT pending FROM identity", [], |row| row.get(0))
+                        .map_err(storage)?;
+                    let pending: super::pending::PendingRanges =
+                        serde_json::from_str(&json).map_err(|_| integrity())?;
+                    pending.diagnostic_input_pending(&input)
+                }
+            })
+            .await
+    }
     async fn retire(&self, fence: &Fence, publication: &super::sink::PublishedRange) -> Result<()> {
         let range = publication.committed();
         if range.store_id() != self.id {

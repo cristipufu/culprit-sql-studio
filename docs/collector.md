@@ -588,8 +588,30 @@ stream and ordinal instead of copying native evidence into an inline incident st
 an episode. Absence-based recovery requires the matching native source, epoch, population and measurement scope;
 an old epoch is not declared healthy when a different source generation is observed.
 
+The selected provider's static catalog is read without constructing a provider, resolving credentials or opening a
+connection. For a page-wait question from the current baseline, the worker records `deferred` with `cost-unqualified`
+when its native recipe has no production cost qualification, or `unsupported` when no matching recipe is declared.
+An offline worker with no selected catalog preserves pending analysis rather than guessing provider support.
+Catalog ordering does not change the durable analysis identity; changed recipe versions or budget envelopes do.
+
+A focused question can be reconstructed from an authenticated retained baseline after the episode recovers.
+Its native source, population, epoch, actor, statement, wait resource and original observation bounds must match.
+This readiness establishes a question to investigate, not a resource owner, causal explanation or permission to
+execute another native read.
+
 Diagnostic revisions are typed facts in `CulpritOperationalV1`; full working-set checkpoints stay in recovery.
 Both commits consume outbox quota and retain the original input obligation until analysis commits atomically.
+An exact archive acknowledgement compacts a completed diagnostic step to its replay digest and capture receipt.
+Superseded steps and acknowledged input metadata retire through the existing archive/eviction owner only after
+working-set, evidence, focus and native-debt obligations release them. Restored payload bytes and their quota charge
+retire together. Active episodes and resolved episodes with deferred analysis keep their required references.
+
+Cold input restoration checks the exact pending obligation in the configured recovery store and verifies the local
+retirement generation before installation. An already acknowledged input cannot become new work after its local
+metadata was removed. An older capture still pending in recovery remains admissible; capture age, native sequence
+and owner epoch never substitute for that exact check. A checkpoint from another analysis-controller version cannot
+acknowledge the current version's native obligation.
+
 Page-wait focus has an explicit native request/result contract, but automatic native focus scheduling is not yet
 enabled. Saving an episode or declaring a recipe does not establish a completed root-cause investigation or a
 production-cost qualification. Existing explicit page-target collection remains separately bounded and opt-in.

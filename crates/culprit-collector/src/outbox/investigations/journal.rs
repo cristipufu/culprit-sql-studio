@@ -27,16 +27,19 @@ fn complete_step(
     capture: &super::super::journal::Capture,
     validated: &ValidatedCapture,
 ) -> Result<()> {
-    let (input_id, scope, expected, update): (String, String, Option<String>, String) = tx
+    let (input_id, scope, expected, update, update_digest): (String, String, Option<String>, String, String) = tx
         .query_row(
-            "SELECT input_id,controller_key,expected_head,update_json FROM diagnostic_steps WHERE observation_id=?1",
+            "SELECT input_id,controller_key,expected_head,update_json,update_digest FROM diagnostic_steps WHERE observation_id=?1",
             [&capture.identity.observation_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         )
         .map_err(storage)?;
     let update: DiagnosticUpdate = decode(&update)?;
     let checkpoint = validated.diagnostic_checkpoint.as_ref().ok_or_else(integrity)?;
-    if checkpoint != &update.checkpoint || validated.diagnostic_revisions != update.revisions {
+    if checkpoint != &update.checkpoint
+        || validated.diagnostic_revisions != update.revisions
+        || update.replay_digest()? != update_digest
+    {
         return Err(integrity());
     }
     let current: Option<String> = tx
@@ -98,7 +101,7 @@ fn complete_step(
         params![encode(&result)?, capture.identity.observation_id],
     )
     .map_err(storage)?;
-    Ok(())
+    super::retirement::compact(tx)
 }
 
 pub(in crate::outbox) fn validate_transition(

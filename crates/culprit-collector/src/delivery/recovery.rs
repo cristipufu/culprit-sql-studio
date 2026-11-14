@@ -98,6 +98,12 @@ pub trait RecoveryStore: Send + Sync {
     async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage>;
     /// Native inputs still lacking their initial diagnostic checkpoint, including already-published captures.
     async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage>;
+    /// Exact current obligation membership for an authenticated native capture. Sequence maxima prove no absence.
+    async fn diagnostic_input_pending(
+        &self,
+        input: &culprit_core::telemetry::DiagnosticCaptureRef,
+        controller_version: u32,
+    ) -> Result<bool>;
     async fn retire(&self, fence: &Fence, publication: &super::sink::PublishedRange) -> Result<()>;
     /// Latest full diagnostic working set per target and controller scope.
     async fn diagnostic_heads(&self, cursor: Option<&str>, limit: u32) -> Result<DiagnosticHeadPage>;

@@ -37,6 +37,13 @@ impl RecoveryStore for CrashStore {
     async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
         self.inner.pending_diagnostic_inputs(cursor, limit).await
     }
+    async fn diagnostic_input_pending(
+        &self,
+        input: &culprit_core::telemetry::DiagnosticCaptureRef,
+        version: u32,
+    ) -> Result<bool> {
+        self.inner.diagnostic_input_pending(input, version).await
+    }
     async fn retire(&self, fence: &Fence, publication: &PublishedRange) -> Result<()> {
         self.inner.retire(fence, publication).await
     }

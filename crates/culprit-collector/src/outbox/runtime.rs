@@ -54,9 +54,18 @@ impl Outbox {
         &mut self,
         connection: &str,
         recovered: delivery::diagnostic_recovery::RecoveredDiagnosticInput,
+        recovery: &dyn delivery::recovery::RecoveryStore,
     ) -> Result<()> {
         let (range, rows) = recovered.into_parts();
+        if self.recovery_store_id() != Some(recovery.id()) || range.store_id() != recovery.id() {
+            return Err(DeliveryProblem::DestinationChanged.error());
+        }
         let parent = delivery::diagnostic_recovery::capture_reference(range.manifest())?;
+        let generation =
+            self.files.run(|| |files| super::investigations::retirement::generation(&files.journal.conn)).await?;
+        if !recovery.diagnostic_input_pending(&parent, DIAGNOSTIC_CONTROLLER_VERSION).await? {
+            return Ok(());
+        }
         let input = super::investigations::RestoredInput {
             store_id: range.store_id().into(),
             parent,
@@ -64,7 +73,7 @@ impl Outbox {
             connection: connection.into(),
             rows,
         };
-        self.files.run(|| move |files| files.restore_diagnostic_input(input)).await
+        self.files.run(|| move |files| files.restore_diagnostic_input_at_generation(input, generation)).await
     }
     /// Cache authenticated original evidence without adding or acknowledging diagnostic work.
     pub async fn cache_diagnostic_evidence(

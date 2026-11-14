@@ -53,9 +53,8 @@ impl Files {
         if expected.manifest() != manifest || manifest.digest()? != committed.manifest_digest() {
             return Err(problem(OutboxProblem::Integrity));
         }
-        let changed = self
-            .journal
-            .conn
+        let tx = self.journal.conn.transaction().map_err(storage)?;
+        let changed = tx
             .execute(
                 "UPDATE captures SET state=?1 WHERE observation_id=?2 AND state=?3",
                 params![
@@ -68,6 +67,13 @@ impl Files {
         if changed != 1 {
             return Err(problem(OutboxProblem::Integrity));
         }
+        tx.execute(
+            "UPDATE captures SET archive_range=?1,archive_digest=?2 WHERE observation_id=?3",
+            params![manifest.range_id, committed.manifest_digest(), capture.identity.observation_id],
+        )
+        .map_err(storage)?;
+        investigations::retirement::archived(&tx, &capture.identity.observation_id)?;
+        tx.commit().map_err(storage)?;
         self.remove_capture(&capture.identity.observation_id)?;
         Ok(true)
     }
@@ -121,6 +127,7 @@ impl Files {
         if changed != 1 {
             return Err(problem(OutboxProblem::Integrity));
         }
+        investigations::retirement::compact(&tx)?;
         tx.commit().map_err(storage)
     }
 }

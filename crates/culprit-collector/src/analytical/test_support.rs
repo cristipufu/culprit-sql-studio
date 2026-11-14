@@ -341,6 +341,9 @@ impl RecoveryStore for Recovery {
     async fn pending_diagnostic_inputs(&self, _: Option<&str>, _: u32) -> Result<RecoveryPage> {
         unreachable!("not a diagnostic recovery enumeration fixture")
     }
+    async fn diagnostic_input_pending(&self, _: &DiagnosticCaptureRef, _: u32) -> Result<bool> {
+        Err(DeliveryProblem::UnsupportedSchema.error())
+    }
     async fn retire(&self, _: &Fence, _: &crate::delivery::sink::PublishedRange) -> Result<()> {
         unreachable!("not a retirement fixture")
     }

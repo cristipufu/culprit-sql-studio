@@ -1,6 +1,12 @@
 use super::*;
 use crate::collection_files::ObservationFiles;
 
+struct StoredDiagnosticStep {
+    id: String,
+    update_digest: String,
+    result: Option<String>,
+}
+
 fn local_budget() -> CollectionBudget {
     CollectionBudget {
         page_rows: 128,
@@ -22,22 +28,22 @@ impl Files {
         if !self.recovered || !self.journal.unfinished()?.is_empty() {
             self.recover()?;
         }
-        let existing: Option<(String, String, Option<String>)> = self
+        let existing: Option<StoredDiagnosticStep> = self
             .journal
             .conn
             .query_row(
-                "SELECT observation_id,update_json,result_json FROM diagnostic_steps WHERE input_id=?1 AND step_id=?2",
+                "SELECT observation_id,update_digest,result_json FROM diagnostic_steps WHERE input_id=?1 AND step_id=?2",
                 params![input.parent.capture.observation_id, update.step_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok(StoredDiagnosticStep { id: row.get(0)?, update_digest: row.get(1)?, result: row.get(2)? }),
             )
             .optional()
             .map_err(storage)?;
-        if let Some((id, json, result)) = existing {
-            let previous: DiagnosticUpdate = decode(&json)?;
-            if !same_update(&previous, &update) {
+        if let Some(stored) = existing {
+            if !valid_digest(&stored.update_digest) || stored.update_digest != update.replay_digest()? {
                 return Err(DeliveryProblem::Conflict.error());
             }
-            if let Some(result) = result {
+            let id = stored.id;
+            if let Some(result) = stored.result {
                 let receipt: DiagnosticCaptureRef = decode(&result)?;
                 if !receipt.is_valid() || receipt.capture.observation_id != id {
                     return Err(integrity());
@@ -91,14 +97,15 @@ impl Files {
         self.journal
             .conn
             .execute(
-                "INSERT INTO diagnostic_steps VALUES(?1,?2,?3,?4,?5,?6,NULL)",
+                "INSERT INTO diagnostic_steps(observation_id,input_id,controller_key,expected_head,step_id,update_json,update_digest,result_json,archived) VALUES(?1,?2,?3,?4,?5,?6,?7,NULL,0)",
                 params![
                     identity.observation_id,
                     input.parent.capture.observation_id,
                     key,
                     input.expected_head,
                     update.step_id,
-                    encode(&update)?
+                    encode(&update)?,
+                    update.replay_digest()?
                 ],
             )
             .map_err(storage)?;
@@ -133,6 +140,22 @@ impl Files {
             || current.expected_head != input.expected_head
             || current.checkpoint != input.checkpoint
         {
+            return Err(DeliveryProblem::Conflict.error());
+        }
+        let acknowledged: bool = self
+            .journal
+            .conn
+            .query_row(
+                "SELECT acknowledged FROM diagnostic_inputs WHERE observation_id=?1 AND controller_version=?2",
+                params![input.parent.capture.observation_id, input.controller_version],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        if acknowledged
+            && (update.revisions.is_empty()
+                || update.revisions.iter().any(|revision| revision.previous_revision.is_none()))
+        {
+            // Retained evidence can support a later CAS transition, but cannot replay baseline admission.
             return Err(DeliveryProblem::Conflict.error());
         }
         if !valid_digest(&update.step_id)
@@ -247,13 +270,6 @@ impl Files {
     }
 }
 
-fn same_update(left: &DiagnosticUpdate, right: &DiagnosticUpdate) -> bool {
-    right.checkpoint.is_valid()
-        && right.revisions.iter().all(DiagnosticRevision::is_valid)
-        && left.step_id == right.step_id
-        && left.checkpoint == right.checkpoint
-        && left.revisions.iter().map(|row| &row.id).eq(right.revisions.iter().map(|row| &row.id))
-}
 fn write_stream(files: &mut ObservationFiles, index: usize, records: &[TelemetryRecord]) -> Result<()> {
     let mut offset = 0;
     while offset < records.len() {

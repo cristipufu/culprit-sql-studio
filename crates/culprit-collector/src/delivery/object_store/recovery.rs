@@ -153,6 +153,20 @@ impl RecoveryStore for ObjectRecoveryStore {
         }
         Ok(RecoveryPage { ranges, next_cursor, high_sequence: root.high_sequence })
     }
+    async fn diagnostic_input_pending(
+        &self,
+        input: &culprit_core::telemetry::DiagnosticCaptureRef,
+        controller_version: u32,
+    ) -> Result<bool> {
+        let (root, _) = self.root().await?;
+        let index = self
+            .committed_index(&range_id_for(&self.contract, &input.capture)?, &root)
+            .await?
+            .ok_or_else(|| DeliveryProblem::NotReady.error())?;
+        let manifest = self.manifest(&index).await?;
+        super::super::diagnostic_recovery::validate_pending_input(&manifest, input, controller_version)?;
+        root.pending.diagnostic_input_pending(input)
+    }
     async fn retire(&self, fence: &Fence, publication: &super::super::sink::PublishedRange) -> Result<()> {
         let range = publication.committed();
         if range.store_id() != self.id {

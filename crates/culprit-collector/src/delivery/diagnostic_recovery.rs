@@ -180,6 +180,24 @@ pub fn capture_reference(manifest: &RangeManifest) -> Result<DiagnosticCaptureRe
     }
     Ok(reference)
 }
+pub(super) fn validate_pending_input(
+    manifest: &RangeManifest,
+    input: &DiagnosticCaptureRef,
+    controller_version: u32,
+) -> Result<()> {
+    if controller_version != DIAGNOSTIC_CONTROLLER_VERSION {
+        return Err(DeliveryProblem::UnsupportedSchema.error());
+    }
+    if capture_reference(manifest)? != *input
+        || !matches!(
+            manifest.source.observation,
+            SourceObservation::Activity(_) | SourceObservation::FocusedPageWait { .. }
+        )
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
 pub async fn load_diagnostic_input(store: &dyn RecoveryStore, range_id: &str) -> Result<RecoveredDiagnosticInput> {
     let range = recovery::reopen(store, range_id).await?;
     if !matches!(

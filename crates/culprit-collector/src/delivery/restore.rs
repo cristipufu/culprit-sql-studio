@@ -95,7 +95,7 @@ pub async fn restore_diagnostic_inputs_page(
         ) {
             let connection = connection_for(&manifest.source)?;
             outbox
-                .restore_diagnostic_input(&connection, load_diagnostic_input(store, &manifest.range_id).await?)
+                .restore_diagnostic_input(&connection, load_diagnostic_input(store, &manifest.range_id).await?, store)
                 .await?;
         }
     }

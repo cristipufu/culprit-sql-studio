@@ -233,6 +233,10 @@ impl RecoveryStore for ScriptedStore {
         self.calls.lock().unwrap().push(PhaseCall::Inputs(cursor.map(str::to_owned)));
         Ok(self.inputs.lock().unwrap().pop_front().expect("bounded original input page"))
     }
+    async fn diagnostic_input_pending(&self, _: &DiagnosticCaptureRef, _: u32) -> Result<bool> {
+        // These scripted pages contain no native inputs. An unimplemented exact lookup is unknown, not pending.
+        Err(DeliveryProblem::UnsupportedSchema.error())
+    }
     async fn pending_ranges(&self, _: Option<&str>, _: u32, _: RecoveryOrder) -> Result<RecoveryPage> {
         panic!("publication lag is not pending diagnostic work")
     }

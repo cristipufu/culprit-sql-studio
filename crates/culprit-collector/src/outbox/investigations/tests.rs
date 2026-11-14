@@ -1,4 +1,5 @@
 mod focus;
+mod retirement;
 use super::*;
 use crate::{
     collection_files::ObservationFiles,

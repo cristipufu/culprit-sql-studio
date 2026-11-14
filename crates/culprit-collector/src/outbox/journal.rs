@@ -7,7 +7,7 @@ use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 8;
+const JOURNAL_VERSION: i64 = 9;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
 const REQUEST_LIMIT: usize = 4096;
@@ -50,8 +50,8 @@ impl Journal {
         durable_fs::create_file(path).map_err(storage)?.sync_all().map_err(storage)?;
         let conn = open(path, true)?;
         configure_owner(&conn)?;
-        conn.execute_batch("PRAGMA application_id=1129663572; PRAGMA user_version=8;
-          CREATE TABLE metadata(id TEXT PRIMARY KEY, limits_json TEXT NOT NULL, owner_epoch INTEGER NOT NULL, sequence INTEGER NOT NULL);
+        conn.execute_batch("PRAGMA application_id=1129663572; PRAGMA user_version=9;
+          CREATE TABLE metadata(id TEXT PRIMARY KEY, limits_json TEXT NOT NULL, owner_epoch INTEGER NOT NULL, sequence INTEGER NOT NULL,diagnostic_gc_generation INTEGER NOT NULL CHECK(diagnostic_gc_generation>=0));
           CREATE TABLE captures(observation_id TEXT PRIMARY KEY,epoch INTEGER NOT NULL,sequence INTEGER NOT NULL,
             connection TEXT NOT NULL,collection TEXT NOT NULL,request_json TEXT NOT NULL CHECK(length(request_json)<=4096),state TEXT NOT NULL,
             source_work TEXT NOT NULL,charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0),problem TEXT,
@@ -64,10 +64,10 @@ impl Journal {
           CREATE TABLE diagnostic_episodes(controller_key TEXT NOT NULL,episode_id TEXT NOT NULL,revision TEXT NOT NULL,episode_json TEXT NOT NULL,PRIMARY KEY(controller_key,episode_id));
           CREATE TABLE diagnostic_pins(owner TEXT NOT NULL,observation_id TEXT NOT NULL,PRIMARY KEY(owner,observation_id));
           CREATE INDEX diagnostic_pin_capture ON diagnostic_pins(observation_id);
-          CREATE TABLE diagnostic_steps(observation_id TEXT PRIMARY KEY,input_id TEXT NOT NULL,controller_key TEXT NOT NULL,expected_head TEXT,step_id TEXT NOT NULL,update_json TEXT NOT NULL,result_json TEXT,UNIQUE(input_id,step_id));
+          CREATE TABLE diagnostic_steps(observation_id TEXT PRIMARY KEY,input_id TEXT NOT NULL,controller_key TEXT NOT NULL,expected_head TEXT,step_id TEXT NOT NULL,update_json TEXT,update_digest TEXT NOT NULL,result_json TEXT,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)),UNIQUE(input_id,step_id));
           CREATE INDEX capture_state ON captures(state);
           CREATE INDEX capture_collection ON captures(connection,collection,state,epoch DESC,sequence DESC);") .map_err(storage)?;
-        conn.execute("INSERT INTO metadata VALUES(?1,?2,0,0)", params![id, encode(&limits)?]).map_err(storage)?;
+        conn.execute("INSERT INTO metadata VALUES(?1,?2,0,0,0)", params![id, encode(&limits)?]).map_err(storage)?;
         durable_fs::sync_directory(path.parent().ok_or_else(|| problem(OutboxProblem::Storage))?).map_err(storage)?;
         Ok(Self { conn, id: id.into(), limits })
     }

@@ -42,6 +42,9 @@ impl RecoveryStore for Transfers {
     async fn pending_diagnostic_inputs(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
         self.store.pending_diagnostic_inputs(cursor, limit).await
     }
+    async fn diagnostic_input_pending(&self, input: &DiagnosticCaptureRef, version: u32) -> Result<bool> {
+        self.store.diagnostic_input_pending(input, version).await
+    }
     async fn retire(&self, fence: &Fence, publication: &PublishedRange) -> Result<()> {
         self.store.retire(fence, publication).await
     }
@@ -195,13 +198,21 @@ fn empty_query_history(root: &Path) -> PreparedRange {
     PreparedRange::from_validated(&path, &writer.finish(4).unwrap(), contract(), vec![]).unwrap()
 }
 pub(super) fn empty_diagnostics(root: &Path, parent: &super::evidence::RangeManifest, sequence: u64) -> PreparedRange {
+    empty_diagnostics_for_version(root, parent, sequence, DIAGNOSTIC_CONTROLLER_VERSION)
+}
+pub(super) fn empty_diagnostics_for_version(
+    root: &Path,
+    parent: &super::evidence::RangeManifest,
+    sequence: u64,
+    controller_version: u32,
+) -> PreparedRange {
     let parent = super::diagnostic_recovery::capture_reference(parent).unwrap();
     let step_id = digest(format!("step-{sequence}").as_bytes());
     let request = CollectionRequest {
         subject: CollectionSubject::Database,
         selection: CollectionSelection::Diagnostics {
             parent: parent.clone(),
-            controller_version: 1,
+            controller_version,
             step_id: step_id.clone(),
         },
         budget: Default::default(),
@@ -219,7 +230,7 @@ pub(super) fn empty_diagnostics(root: &Path, parent: &super::evidence::RangeMani
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Diagnostics(DiagnosticCaptureDescription {
             parent: parent.clone(),
-            controller_version: 1,
+            controller_version,
             step_id,
             analyzed_at: "2020-01-01T06:03:00Z".into(),
             records: 0,
@@ -228,7 +239,7 @@ pub(super) fn empty_diagnostics(root: &Path, parent: &super::evidence::RangeMani
     };
     let mut part = DiagnosticCheckpointPart {
         id: String::new(),
-        controller_version: 1,
+        controller_version,
         target: source.target.clone(),
         input: parent,
         part: 0,

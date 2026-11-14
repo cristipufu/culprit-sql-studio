@@ -61,6 +61,13 @@ impl PendingRanges {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+    pub fn diagnostic_input_pending(&self, input: &culprit_core::telemetry::DiagnosticCaptureRef) -> Result<bool> {
+        self.validate()?;
+        if !input.is_valid() {
+            return Err(DeliveryProblem::Integrity.error());
+        }
+        Ok(self.0.values().any(|entry| entry.diagnostic_input.as_ref() == Some(input)))
+    }
     pub fn latest_order(&self) -> u64 {
         self.0.last_key_value().map_or(0, |(order, _)| *order)
     }
@@ -87,7 +94,7 @@ impl PendingRanges {
         self.0.retain(|_, entry| entry.publication_pending || entry.diagnostic_input.is_some());
     }
     pub fn observe(&mut self, order: u64, manifest: &super::evidence::RangeManifest) -> Result<()> {
-        use culprit_core::telemetry::{DiagnosticCaptureRef, SourceObservation};
+        use culprit_core::telemetry::{DIAGNOSTIC_CONTROLLER_VERSION, DiagnosticCaptureRef, SourceObservation};
         self.insert(order, &manifest.range_id)?;
         if matches!(
             manifest.source.observation,
@@ -100,7 +107,9 @@ impl PendingRanges {
             };
             self.0.get_mut(&order).ok_or_else(|| DeliveryProblem::Integrity.error())?.diagnostic_input = Some(input);
         }
-        if let SourceObservation::Diagnostics(description) = &manifest.source.observation {
+        if let SourceObservation::Diagnostics(description) = &manifest.source.observation
+            && description.controller_version == DIAGNOSTIC_CONTROLLER_VERSION
+        {
             for pending in self.0.values_mut() {
                 if pending.diagnostic_input.as_ref() == Some(&description.parent) {
                     pending.diagnostic_input = None;
@@ -264,5 +273,30 @@ mod phase_tests {
             pending.page(None, 1, &store, 2, RecoveryOrder::OldestFirst).unwrap().0,
             vec![derived.manifest().range_id.clone()]
         );
+    }
+
+    #[test]
+    fn another_controller_version_cannot_acknowledge_the_current_native_obligation() {
+        use culprit_core::telemetry::{DIAGNOSTIC_CONTROLLER_VERSION, digest};
+        let root = tempfile::tempdir().unwrap();
+        let native = crate::delivery::batch_tests::quiet_activity(root.path());
+        let other_version = crate::delivery::batch_tests::empty_diagnostics_for_version(
+            root.path(),
+            native.manifest(),
+            2,
+            DIAGNOSTIC_CONTROLLER_VERSION + 1,
+        );
+        let current = crate::delivery::batch_tests::empty_diagnostics(root.path(), native.manifest(), 3);
+        let reference = crate::delivery::diagnostic_recovery::capture_reference(native.manifest()).unwrap();
+        let store = digest(b"store");
+        let mut pending = PendingRanges::default();
+        pending.observe(1, native.manifest()).unwrap();
+        pending.observe(2, other_version.manifest()).unwrap();
+        assert!(pending.diagnostic_input_pending(&reference).unwrap());
+        pending.retire(&native.manifest().range_id);
+        assert_eq!(pending.diagnostic_page(None, 1, &store, 2).unwrap().0, [native.manifest().range_id.clone()]);
+        pending.observe(3, current.manifest()).unwrap();
+        assert!(!pending.diagnostic_input_pending(&reference).unwrap());
+        assert!(pending.diagnostic_page(None, 1, &store, 3).unwrap().0.is_empty());
     }
 }
