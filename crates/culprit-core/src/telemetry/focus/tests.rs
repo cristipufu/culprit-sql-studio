@@ -88,6 +88,7 @@ fn focus_identity_binds_original_receipt_and_client_without_a_warehouse_range_re
 #[test]
 fn source_mismatch_or_disappeared_wait_never_authorizes_page_lookup() {
     let mut result = ActivityWaitFocusResult {
+        lineage: None,
         focus: focus(),
         observed_from: "2020-01-01T00:00:01Z".into(),
         observed_until: "2020-01-01T00:00:02Z".into(),
@@ -115,6 +116,7 @@ fn source_mismatch_or_disappeared_wait_never_authorizes_page_lookup() {
 #[test]
 fn later_lookup_bounds_cannot_move_the_original_native_observation_forward() {
     let mut result = ActivityWaitFocusResult {
+        lineage: None,
         focus: focus(),
         observed_from: "2019-12-31T23:59:59Z".into(),
         observed_until: "2020-01-01T00:00:01Z".into(),

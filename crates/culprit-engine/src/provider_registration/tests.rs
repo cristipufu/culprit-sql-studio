@@ -6,6 +6,8 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+mod qualification;
+
 fn recipe(id: &str) -> RecipeDescriptor {
     RecipeDescriptor {
         id: id.into(),

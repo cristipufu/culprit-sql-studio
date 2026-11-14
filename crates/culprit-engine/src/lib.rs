@@ -72,7 +72,7 @@ pub use import::{ImportCandidate, ImportSource};
 pub use marks::Mark;
 pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
-pub use provider_registration::ProviderRegistration;
+pub use provider_registration::{ProviderRegistration, RecipeCostVerifier};
 pub use reports::ReportSummary;
 use secrets::SecretStore;
 pub use share::{export_diff, export_plan};
@@ -245,6 +245,20 @@ impl Workspace {
     /// opening an SSH route, invoking a provider factory or making native requests. Empty means undeclared support.
     pub fn telemetry_recipes(&self, name: &str) -> Result<Vec<culprit_core::telemetry::RecipeDescriptor>> {
         self.connection_service().telemetry_recipes(name)
+    }
+    /// Selected source qualification metadata, without credentials, native connections or provider construction.
+    pub fn telemetry_qualification_component(&self, name: &str) -> Result<Option<culprit_core::ComponentVersion>> {
+        self.connection_service().qualification_component(name)
+    }
+    /// The caller must authenticate immutable artifact membership before asking the selected source's pure verifier.
+    pub fn verify_telemetry_cost(
+        &self,
+        name: &str,
+        receipt: &culprit_core::telemetry::RecipeCostReceipt,
+        source: &culprit_core::telemetry::CollectionDescription,
+        record: &culprit_core::telemetry::ExportedRecord,
+    ) -> Result<bool> {
+        self.connection_service().verify_telemetry_cost(name, receipt, source, record)
     }
 
     /// Plug in a check from outside Culprit. It runs, ranks and locks exactly like a built-in check.

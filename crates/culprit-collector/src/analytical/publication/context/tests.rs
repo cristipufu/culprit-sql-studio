@@ -50,6 +50,7 @@ fn focused_source() -> CollectionDescription {
         resource,
     };
     let result = ActivityWaitFocusResult {
+        lineage: None,
         focus,
         observed_from: "2020-01-01T12:00:01Z".into(),
         observed_until: "2020-01-01T12:00:02Z".into(),
@@ -143,5 +144,43 @@ fn diagnostic_analysis_time_remains_typed_context_and_never_becomes_a_native_obs
     assert_eq!(context["diagnostic"], serde_json::to_value(description).unwrap());
     for field in ["observed_at", "observed_from", "observed_until", "interval_from", "interval_until"] {
         assert!(context.get(field).is_none(), "{field}");
+    }
+}
+
+#[test]
+fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sql() {
+    let mut source = focused_source();
+    let SourceObservation::FocusedPageWait { result, .. } = &mut source.observation else { panic!() };
+    let mut intent = test_support::investigation_fixture().intent;
+    intent.focus = result.focus.clone();
+    intent.qualification.scope.target = intent.focus.target.clone();
+    intent.qualification.scope.source = intent.focus.source.clone();
+    intent.qualification.scope.native_epoch = Some(intent.focus.epoch.clone());
+    intent.qualification.read_metrics.templates[0].statement = DefinitionPayload::sql(
+        "SELECT private_qualification_query FROM private_cost_observer WHERE label='private-client'",
+        Engine::Mssql,
+    );
+    assert!(intent.is_valid());
+    result.lineage = Some(DiagnosticInvestigationLineage::from_intent(&intent).unwrap());
+    let public = observation(&source.observation).unwrap();
+    let lineage = &public["data"]["result"]["lineage"];
+    assert_eq!(lineage["intent_key"], intent.key().unwrap());
+    assert_eq!(lineage["recipe_id"], intent.recipe_id);
+    assert_eq!(lineage["qualification_key"], intent.qualification.key().unwrap());
+    assert_eq!(lineage["cost_evidence"], serde_json::to_value(intent.qualification.evidence).unwrap());
+    assert_eq!(lineage["budget"], serde_json::to_value(intent.budget).unwrap());
+    for omitted in ["scope", "target", "qualification", "read_metrics"] {
+        assert!(lineage.get(omitted).is_none(), "{omitted}");
+    }
+    let json = serde_json::to_string(&public).unwrap();
+    for canary in [
+        "private-target-db",
+        "private-endpoint.invalid",
+        "private-native-guid",
+        "private-client",
+        "private_original_query",
+        "private_qualification_query",
+    ] {
+        assert!(!json.contains(canary), "{canary}");
     }
 }

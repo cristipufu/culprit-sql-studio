@@ -77,12 +77,15 @@ impl RecipeSubject {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum RecipeCostQualification {
     /// Bounded rows, read-only SQL and a passing local fixture are not production work-cost qualification.
     Unqualified,
+    /// Source-issued approval for one exact native context. Authentication and the selected source's pure
+    /// native-cost verifier are mandatory; structural receipt/accounting validity never grants native admission.
+    Measured(Box<RecipeCostReceipt>),
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,7 +96,7 @@ pub enum RecipePurpose {
     Investigation,
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct RecipeDescriptor {
@@ -116,6 +119,10 @@ impl RecipeDescriptor {
             && self.subjects.len() <= 8
             && self.subjects.iter().enumerate().all(|(index, subject)| !self.subjects[..index].contains(subject))
             && self.budget.validate().is_ok()
+            && match &self.cost {
+                RecipeCostQualification::Unqualified => true,
+                RecipeCostQualification::Measured(receipt) => receipt.matches_recipe(self),
+            }
     }
 
     pub fn accepts(&self, request: &CollectionRequest) -> bool {

@@ -275,6 +275,7 @@ fn missing(focus: ActivityWaitFocus, second: u32) -> Frame {
                     sources: vec![StateSourceCoverage::observed(source, 0, false)],
                 },
                 result: Box::new(ActivityWaitFocusResult {
+                    lineage: None,
                     focus,
                     observed_from: clock(second),
                     observed_until: clock(second + 1),

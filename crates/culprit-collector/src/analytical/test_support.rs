@@ -9,6 +9,8 @@ mod activity;
 pub use activity::{activity_evidence_cases, activity_observation, assert_activity_capture};
 mod diagnostics;
 pub use diagnostics::{assert_diagnostic_capture, diagnostic_evidence_cases};
+mod investigations;
+pub use investigations::{InvestigationFixture, investigation_fixture};
 
 mod queries;
 pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};

@@ -56,6 +56,22 @@ impl Connections<'_> {
         Ok(self.selected_registration(engine)?.telemetry_recipes().to_vec())
     }
 
+    pub(crate) fn qualification_component(&self, name: &str) -> Result<Option<culprit_core::ComponentVersion>> {
+        let engine = self.store.get(name)?.engine;
+        Ok(self.selected_registration(engine)?.qualification_component().cloned())
+    }
+
+    pub(crate) fn verify_telemetry_cost(
+        &self,
+        name: &str,
+        receipt: &culprit_core::telemetry::RecipeCostReceipt,
+        source: &culprit_core::telemetry::CollectionDescription,
+        record: &culprit_core::telemetry::ExportedRecord,
+    ) -> Result<bool> {
+        let engine = self.store.get(name)?.engine;
+        self.selected_registration(engine)?.verify_cost(receipt, source, record)
+    }
+
     pub(crate) fn connections(&self) -> Result<Vec<ConnectionInfo>> {
         self.store.list()?.into_iter().map(|(name, stored)| Ok(self.info(&name, &stored))).collect()
     }

@@ -599,7 +599,7 @@ fn valid_capture(capture: &CaptureIdentity) -> bool {
                 && positive(&revision.sequence).is_some()
         })
 }
-fn positive(value: &str) -> Option<u64> {
+pub(super) fn positive(value: &str) -> Option<u64> {
     value.parse::<u64>().ok().filter(|parsed| *parsed > 0 && parsed.to_string() == value)
 }
 fn digest_value(value: &impl Serialize) -> Result<String> {

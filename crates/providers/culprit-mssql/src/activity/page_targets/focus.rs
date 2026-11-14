@@ -45,6 +45,7 @@ impl<R: NativeRead> ActivityReader<R> {
                 (check.request, check.wait)
             });
         let mut result = ActivityWaitFocusResult {
+            lineage: None,
             focus: focus.clone(),
             observed_from: current.at,
             observed_until: frame.context.at.clone(),

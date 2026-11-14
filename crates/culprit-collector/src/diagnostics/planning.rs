@@ -84,8 +84,10 @@ fn qualification_issue(
     };
     let recipe =
         recipes.iter().find(|recipe| recipe.purpose == RecipePurpose::Investigation && recipe.accepts(&request));
-    match recipe.map(|recipe| recipe.cost) {
+    match recipe.map(|recipe| &recipe.cost) {
         Some(RecipeCostQualification::Unqualified) => DiagnosticAnalysisIssue::CostUnqualified,
+        // A source-issued receipt still needs independent artifact authentication and the selected authority.
+        Some(RecipeCostQualification::Measured(_)) => DiagnosticAnalysisIssue::EvidenceUnavailable,
         None => DiagnosticAnalysisIssue::Unsupported,
     }
 }

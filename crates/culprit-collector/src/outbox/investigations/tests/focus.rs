@@ -176,6 +176,7 @@ fn a_valid_page_report_cannot_be_attached_to_another_native_actor_in_the_same_da
         index_operations: None,
     };
     let result = ActivityWaitFocusResult {
+        lineage: None,
         focus: question.clone(),
         observed_from: page.observed_from.clone(),
         observed_until: page.observed_until.clone(),
@@ -273,6 +274,7 @@ async fn parent_pin_survives_checkpoint_eviction_race_and_transfers_until_result
     files.mark_archived(&initial_commit).unwrap();
     assert!(!files.evict(&native_commit).unwrap(), "archiving the old head cannot evict an in-flight focus parent");
     let result = ActivityWaitFocusResult {
+        lineage: None,
         focus: question,
         observed_from: "2026-11-14T08:00:10Z".into(),
         observed_until: "2026-11-14T08:00:11Z".into(),
