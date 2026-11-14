@@ -269,7 +269,11 @@ fn compilation_lifetime_is_exact_and_never_borrows_the_runtime_window() {
     assert_eq!(exported.memory.unwrap().average_kb, Some(4096.5));
     assert_eq!(exported.memory.unwrap().last_kb, Some(8192.0));
     assert_eq!(exported.memory.unwrap().maximum_kb, Some(16384.0));
-    assert_eq!(exported.first_compile_at, "2020-01-01T06:00:00.153333300Z");
+    assert_eq!(exported.first_compile_at().unwrap(), "2020-01-01T06:00:00.153333300Z");
+    assert_eq!(
+        exported.identity, native.identity,
+        "the archive must retain the same identity used for scan SQL attachment"
+    );
     assert_eq!(native.total_ms(), native.avg_duration_us * native.count as f64 / 1000.0);
     assert!(native.within_window(1));
     let skewed = costs::Compilation::decode(&replace(&compilation_row(), &[("compiling_s", Val::Int(-1))])).unwrap();
@@ -298,6 +302,30 @@ fn compilation_lifetime_is_exact_and_never_borrows_the_runtime_window() {
     ))
     .unwrap();
     assert_eq!(unavailable.memory, None, "unavailable native memory is not a zero allocation");
+}
+
+#[test]
+fn compilation_export_keeps_the_exact_definition_identity_and_distinguishes_reused_query_ids() {
+    let native = compilation_row();
+    let query = replace(
+        &definition_row("SELECT payload FROM dbo.items"),
+        &[("query_initial_compile_at", Val::Text("2020-01-01T06:00:00.1533333Z".into()))],
+    );
+    let identity = decode::query_identity(&query).unwrap();
+    let original = costs::Compilation::decode(&native).unwrap().observation();
+    assert_eq!(original.identity, identity, "scan and collected facts must authorize the same native SQL association");
+    for (column, value) in [
+        ("context_settings_id", Val::Int(6)),
+        ("object_id", Val::Int(1999)),
+        ("query_hash", Val::Text("FEDCBA9876543210".into())),
+        ("query_initial_compile_at", Val::Text("2020-01-01T06:00:01Z".into())),
+    ] {
+        let changed = costs::Compilation::decode(&replace(&native, &[(column, value)])).unwrap().observation();
+        assert!(changed.is_valid());
+        assert_eq!(changed.identity.query_id, original.identity.query_id);
+        assert_ne!(changed.identity, identity, "{column} cannot attach the earlier SQL");
+        assert_ne!(changed.key().unwrap(), original.key().unwrap());
+    }
 }
 
 #[test]

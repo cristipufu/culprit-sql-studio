@@ -573,6 +573,10 @@ async fn compilation_capture_streams_retained_lifetime_totals_through_the_shared
     let TelemetryRecord::Operational(record) = &records[0] else { panic!("operational record") };
     let OperationalFact::MssqlQueryCompilation(compilation) = &record.fact else { panic!("compilation") };
     assert_eq!(record.key, compilation.key().unwrap());
+    assert_eq!(
+        compilation.identity,
+        crate::query_store::decode::query_identity(&crate::query_store::tests::compilation_row()).unwrap()
+    );
     assert_eq!(compilation.compilations, "9007199254740993");
     assert_eq!(compilation.memory.unwrap().maximum_kb, Some(16384.0));
     let exported = ExportedRecord::new(

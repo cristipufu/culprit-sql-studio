@@ -62,8 +62,7 @@ impl Compilation {
     }
     pub fn observation(&self) -> culprit_core::telemetry::MssqlQueryCompilation {
         culprit_core::telemetry::MssqlQueryCompilation {
-            query_id: self.identity.query_id.clone(),
-            first_compile_at: self.first_at.clone(),
+            identity: self.identity.clone(),
             last_compile_at: self.last_at.clone(),
             compilations: self.count.to_string(),
             average_duration_us: self.avg_duration_us,

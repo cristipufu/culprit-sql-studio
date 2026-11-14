@@ -227,7 +227,7 @@ async fn native_compilation_memory(server: &Server, catalog: &SchemaCatalog) {
         Scenario::new(server, test_support::query_compilation(server.client.destination(), catalog.digest())).await;
     scenario.complete().await;
     let text = format!(
-        "SELECT JSONExtractString(ifNull(Details,'{{}}'),'query_id') AS QueryId,JSONExtractString(ifNull(Details,'{{}}'),'compilations') AS Compiles,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','average_kb') AS AverageKb,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','last_kb') AS LastKb,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','maximum_kb') AS MaximumKb FROM {}",
+        "SELECT JSONExtractString(ifNull(Details,'{{}}'),'identity','query_id') AS QueryId,JSONExtractString(ifNull(Details,'{{}}'),'compilations') AS Compiles,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','average_kb') AS AverageKb,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','last_kb') AS LastKb,JSONExtractFloat(ifNull(Details,'{{}}'),'memory','maximum_kb') AS MaximumKb FROM {}",
         server.view("CulpritOperationalV1Current", true)
     );
     let mut parameters = server.scope(&scenario.range);

@@ -529,8 +529,16 @@ pub fn query_compilation(destination: &str, schema: &str) -> Recovery {
         sources: vec![StateSourceCoverage::collected(source.into(), 1)],
     });
     let compilation = MssqlQueryCompilation {
-        query_id: "42".into(),
-        first_compile_at: "2020-01-01T06:00:00.1533333Z".into(),
+        identity: NativeQueryIdentity {
+            query_id: "42".into(),
+            qualifiers: [
+                ("context_settings_id".into(), "5".into()),
+                ("object_id".into(), "0".into()),
+                ("query_hash".into(), "0123456789ABCDEF".into()),
+                ("initial_compile_at".into(), "2020-01-01T06:00:00.153333300Z".into()),
+            ]
+            .into(),
+        },
         last_compile_at: "2020-01-01T11:59:00.1533333Z".into(),
         compilations: "9007199254740993".into(),
         average_duration_us: 1500.5,
