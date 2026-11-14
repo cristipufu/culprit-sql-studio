@@ -6,6 +6,40 @@ use crate::{
 };
 use culprit_core::telemetry::*;
 
+#[test]
+fn runtime_distributions_are_unsupported_at_the_provider_boundary_without_native_work() {
+    use culprit_core::Provider;
+    let provider = crate::MssqlProvider::new(&culprit_core::ConnectionSpec {
+        engine: Some(culprit_core::Engine::Mssql),
+        host: "127.0.0.1".into(),
+        port: Some(1),
+        database: Some("fixture".into()),
+        user: Some("unused".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    for subject in [
+        CollectionSubject::Database,
+        CollectionSubject::Shared {
+            resource: SharedResourceIdentity {
+                engine: culprit_core::Engine::Mssql,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("native-namespace"),
+                native: NativeIdentity::new("native-instance"),
+            },
+        },
+    ] {
+        let request = CollectionRequest {
+            subject,
+            selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::RuntimeDistributions },
+            budget: CollectionBudget::default(),
+        };
+        let error = provider.telemetry_source(&request).err().expect("no distribution source is implemented");
+        assert_eq!(error.code, culprit_core::ErrorCode::Unsupported);
+        assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);
+    }
+}
+
 pub(super) fn request() -> CollectionRequest {
     CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,

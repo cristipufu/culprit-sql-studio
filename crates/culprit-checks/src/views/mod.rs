@@ -14,6 +14,7 @@ pub mod page_waits;
 pub(crate) mod plan_advice;
 pub mod plan_view;
 pub mod request_memory;
+pub mod runtime_distributions;
 pub mod session_memory;
 pub mod sql_lint;
 pub mod statement_work;

@@ -5,6 +5,7 @@ pub(crate) mod native_failures;
 #[cfg(test)]
 mod native_tests;
 mod resources;
+mod runtime_distributions;
 mod session_memory;
 use crate::{
     connect::{Connector, Scope},
@@ -59,10 +60,16 @@ impl Recipe {
         budget: &CollectionBudget,
     ) -> Result<String> {
         match self {
-            Self::Settings => Ok(VariableSet::Configuration.query(&crate::catalog::settings_names(meta.flavor))),
-            Self::Replication => Ok(native::replication::query(meta.flavor, &meta.version).into()),
-            Self::Catalog(kind) => Ok(kind.query(meta.flavor, &meta.version, budget.max_snapshot_rows as usize + 1)),
-            Self::Operational(kind) => Ok(kind.query(meta.flavor, budget.max_snapshot_rows as usize + 1)),
+            Self::Settings => {
+                Ok(VariableSet::Configuration.query(&crate::catalog::settings_names(meta.connection.flavor)))
+            }
+            Self::Replication => {
+                Ok(native::replication::query(meta.connection.flavor, &meta.connection.version).into())
+            }
+            Self::Catalog(kind) => {
+                Ok(kind.query(meta.connection.flavor, &meta.connection.version, budget.max_snapshot_rows as usize + 1))
+            }
+            Self::Operational(kind) => Ok(kind.query(meta.connection.flavor, budget.max_snapshot_rows as usize + 1)),
             Self::Statements | Self::Definitions => layout.ok_or_else(native::invalid)?.query(
                 matches!(self, Self::Definitions),
                 budget.max_snapshot_rows as usize + 1,
@@ -79,12 +86,15 @@ impl Recipe {
         budget: &CollectionBudget,
     ) -> Result<TelemetryRecord> {
         match self {
-            Self::Catalog(kind) => kind.decode(row, &meta.database_name),
+            Self::Catalog(kind) => kind.decode(row, &meta.connection.database_name),
             Self::Replication => native::replication::decode(row),
-            Self::Operational(kind) => kind.decode(row, &meta.database_name),
+            Self::Operational(kind) => kind.decode(row, &meta.connection.database_name),
             Self::Statements => {
-                let sample =
-                    native::statements::counters(row, layout.ok_or_else(native::invalid)?, &meta.database_name)?;
+                let sample = native::statements::counters(
+                    row,
+                    layout.ok_or_else(native::invalid)?,
+                    &meta.connection.database_name,
+                )?;
                 Ok(TelemetryRecord::Operational(OperationalObservation {
                     source: self.source().into(),
                     key: sample.key()?,
@@ -95,7 +105,7 @@ impl Recipe {
                 self.source().into(),
                 ObjectDefinitionFact::Statement(Box::new(native::statements::definition(
                     row,
-                    &meta.database_name,
+                    &meta.connection.database_name,
                     source,
                     budget.max_sql_bytes as usize,
                 )?)),
@@ -122,6 +132,9 @@ impl Recipe {
 }
 pub(crate) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
+    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::RuntimeDistributions) {
+        return runtime_distributions::source(connector, request);
+    }
     if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures) {
         return native_failures::source(connector, request);
     }
@@ -215,7 +228,7 @@ impl SnapshotReader for MysqlSnapshotReader {
     async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
         let meta = metadata::read(&mut self.io, &self.connector).await?;
         if self.declared.iter().any(|recipe| matches!(recipe, Recipe::Statements | Recipe::Definitions)) {
-            if !meta.performance_schema {
+            if !meta.connection.performance_schema {
                 return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
             }
             let layout = native::statements::Layout::read(&mut self.io).await?;
@@ -223,12 +236,12 @@ impl SnapshotReader for MysqlSnapshotReader {
             self.layout = Some(layout);
         }
         let description = CollectionDescription {
-            target: meta.database.clone().into(),
+            target: meta.connection.database.clone().into(),
             source: format!("mysql-{}", self.declared[0].source()),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
                 dataset: self.declared[0].dataset(),
-                observed_from: meta.at.clone(),
+                observed_from: meta.connection.at.clone(),
                 sources: self.declared.iter().map(|recipe| recipe.source().into()).collect(),
             }),
         };
@@ -239,11 +252,11 @@ impl SnapshotReader for MysqlSnapshotReader {
         let meta = self.metadata.as_ref().ok_or_else(native::invalid)?;
         for &recipe in &self.declared {
             if matches!(recipe, Recipe::Catalog(native::catalog::Kind::Histograms))
-                && meta.flavor == crate::connect::Flavor::Mysql
-                && !culprit_core::version_at_least(&meta.version, [8, 0, 0])
+                && meta.connection.flavor == crate::connect::Flavor::Mysql
+                && !culprit_core::version_at_least(&meta.connection.version, [8, 0, 0])
             {
                 self.not_applicable.insert(recipe.source().into());
-            } else if matches!(recipe, Recipe::Operational(kind) if kind.requires_instrumentation() && !meta.performance_schema)
+            } else if matches!(recipe, Recipe::Operational(kind) if kind.requires_instrumentation() && !meta.connection.performance_schema)
             {
                 self.unavailable.insert(recipe.source().into(), ErrorCode::Unsupported);
             } else {
@@ -259,7 +272,8 @@ impl SnapshotReader for MysqlSnapshotReader {
                 let meta = self.metadata.as_ref().ok_or_else(native::invalid)?;
                 let scoped = matches!(recipe, Recipe::Statements | Recipe::Definitions | Recipe::Catalog(_))
                     || matches!(recipe, Recipe::Operational(kind) if kind.database_scoped());
-                let parameters = if scoped { native::statements::parameters(&meta.database_name) } else { vec![] };
+                let parameters =
+                    if scoped { native::statements::parameters(&meta.connection.database_name) } else { vec![] };
                 self.io
                     .begin_stream(
                         &recipe.query(meta, self.layout.as_ref(), &self.budget)?,
@@ -321,7 +335,7 @@ impl SnapshotReader for MysqlSnapshotReader {
             && layout_after.as_ref().is_none_or(|layout| layout.overflow_calls == 0);
         Ok(SnapshotRecheck {
             unchanged: before.same_source(&after) && compatible_layout,
-            observed_until: after.at,
+            observed_until: after.connection.at,
             scopes: self
                 .declared
                 .iter()

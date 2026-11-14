@@ -1,6 +1,47 @@
 use super::*;
 
 #[tokio::test]
+async fn runtime_distributions_preserve_native_bounds_independent_clocks_and_per_source_coverage() {
+    for (source, records) in test_support::runtime_distribution_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let capture = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..budget() },
+            )
+            .await
+            .unwrap();
+        test_support::assert_runtime_distribution_capture(&capture, &source, &records);
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        if let Some(first) = fixture.rows.first() {
+            let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+            let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+            for (pointer, value) in [
+                ("/observed_at", json!("2020-01-01T12:00:00.900000000Z")),
+                ("/distribution/p99/upper/value", json!("1")),
+            ] {
+                let mut tampered = first.clone();
+                let mut details: Value = serde_json::from_str(tampered[column].as_str().unwrap()).unwrap();
+                let Some(field) = details.pointer_mut(pointer) else { continue };
+                *field = value;
+                tampered[column] = json!(serde_json::to_string(&details).unwrap());
+                fixture.replies(vec![vec![tampered]]);
+                let error = fixture
+                    .reader()
+                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+                assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn task_space_reads_preserve_exact_counters_context_checks_and_empty_source_coverage() {
     for (source, records) in test_support::task_space_evidence_cases() {
         let fixture = Fixture::new(source.clone(), records.clone()).await;

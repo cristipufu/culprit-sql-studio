@@ -1,14 +1,18 @@
 use culprit_core::{
-    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, SourceState, StatementWorkReport, TaskSpaceReport,
-    format, t,
+    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, RuntimeDistributionReport, SourceOutcome,
+    SourceState, StatementWorkReport, TaskSpaceReport, format, t,
 };
 
 struct Summary<'a> {
     title: &'a str,
     summary: &'a str,
-    source_state: Option<SourceState>,
-    source_reason: Option<&'a str>,
+    source: SourceQualification<'a>,
     limitations: &'a [String],
+}
+
+enum SourceQualification<'a> {
+    Single { state: Option<SourceState>, reason: Option<&'a str> },
+    Multiple(&'a [SourceOutcome]),
 }
 
 pub(crate) fn retained(report: &RetainedFailureReport) -> String {
@@ -16,8 +20,7 @@ pub(crate) fn retained(report: &RetainedFailureReport) -> String {
         Summary {
             title: &report.title,
             summary: &report.summary,
-            source_state: report.source_state,
-            source_reason: report.source_reason.as_deref(),
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
         report.entries.iter().map(|entry| entry.title.as_str()),
@@ -29,8 +32,7 @@ pub(crate) fn participants(report: &MemoryParticipantsReport) -> String {
         Summary {
             title: &report.title,
             summary: &report.summary,
-            source_state: report.source_state,
-            source_reason: report.source_reason.as_deref(),
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
         report.entries.iter().map(|entry| entry.title.as_str()),
@@ -42,8 +44,7 @@ pub(crate) fn task_space(report: &TaskSpaceReport) -> String {
         Summary {
             title: &report.title,
             summary: &report.summary,
-            source_state: report.source_state,
-            source_reason: report.source_reason.as_deref(),
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
         report.entries.iter().map(|entry| entry.title.as_str()),
@@ -68,8 +69,7 @@ pub(crate) fn page_waits(report: &PageWaitReport) -> String {
         Summary {
             title: &report.title,
             summary: &report.summary,
-            source_state: report.source_state,
-            source_reason: report.source_reason.as_deref(),
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
         titles.iter().map(String::as_str),
@@ -99,8 +99,7 @@ pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
         Summary {
             title: &report.title,
             summary: &report.summary,
-            source_state: report.source_state,
-            source_reason: report.source_reason.as_deref(),
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
         titles.iter().map(String::as_str),
@@ -109,15 +108,9 @@ pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
 
 fn render<'a>(report: Summary<'_>, titles: impl Iterator<Item = &'a str>) -> String {
     let mut text = format!("{}\n{}", report.title, report.summary);
-    let qualification = match report.source_state {
-        Some(SourceState::Collected | SourceState::Empty) => None,
-        Some(SourceState::Partial) => Some(t!("evidence.cli.source_partial")),
-        Some(SourceState::Unavailable | SourceState::NotApplicable) => Some(t!("evidence.cli.source_unavailable")),
-        None => Some(t!("evidence.cli.source_unknown")),
-    };
-    for line in qualification.iter().map(String::as_str).chain(report.source_reason) {
-        text.push('\n');
-        text.push_str(line);
+    match report.source {
+        SourceQualification::Single { state, reason } => append_single_source(&mut text, state, reason),
+        SourceQualification::Multiple(sources) => append_native_sources(&mut text, sources),
     }
     super::append_brief_titles(&mut text, titles);
     // Pure views put their general observation qualification first; words never drive a decision here.
@@ -128,9 +121,109 @@ fn render<'a>(report: Summary<'_>, titles: impl Iterator<Item = &'a str>) -> Str
     text
 }
 
+pub(crate) fn runtime_distributions(report: &RuntimeDistributionReport) -> String {
+    render(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Multiple(&report.sources),
+            limitations: &report.limitations,
+        },
+        report.entries.iter().map(|entry| entry.title.as_str()),
+    )
+}
+
+fn append_single_source(text: &mut String, state: Option<SourceState>, reason: Option<&str>) {
+    let qualification = match state {
+        Some(SourceState::Collected | SourceState::Empty) => None,
+        Some(SourceState::Partial) => Some(t!("evidence.cli.source_partial")),
+        Some(SourceState::Unavailable | SourceState::NotApplicable) => Some(t!("evidence.cli.source_unavailable")),
+        None => Some(t!("evidence.cli.source_unknown")),
+    };
+    for line in qualification.iter().map(String::as_str).chain(reason) {
+        text.push('\n');
+        text.push_str(line);
+    }
+}
+
+fn append_native_sources(text: &mut String, sources: &[SourceOutcome]) {
+    if sources.is_empty() {
+        append_single_source(text, None, None);
+    }
+    for source in sources {
+        let message = match source.state {
+            SourceState::Collected => culprit_core::key!("evidence.cli.native_source.collected"),
+            SourceState::Empty => culprit_core::key!("evidence.cli.native_source.empty"),
+            SourceState::Partial => culprit_core::key!("evidence.cli.native_source.partial"),
+            SourceState::Unavailable => culprit_core::key!("evidence.cli.native_source.unavailable"),
+            SourceState::NotApplicable => culprit_core::key!("evidence.cli.native_source.not_applicable"),
+        };
+        text.push('\n');
+        text.push_str(&culprit_core::i18n::t(message, &[("source", source.source.as_str().into())]));
+        if let Some(reason) = &source.reason {
+            text.push('\n');
+            text.push_str(reason);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distribution_output_keeps_independent_source_coverage_and_bounds_details() {
+        let mut report = RuntimeDistributionReport {
+            sources: vec![
+                SourceOutcome {
+                    source: "native-summary".into(),
+                    state: SourceState::Collected,
+                    reason: None,
+                    reason_message: None,
+                },
+                SourceOutcome {
+                    source: "native-histogram".into(),
+                    state: SourceState::Unavailable,
+                    reason: Some("Histogram visibility was not established.".into()),
+                    reason_message: None,
+                },
+            ],
+            title: "Recorded distributions".into(),
+            summary: "The summary and histogram have separate populations.".into(),
+            limitations: vec!["These points establish neither a complete history nor a cause.".into()],
+            entries: (0..8)
+                .map(|index| culprit_core::RuntimeDistributionExplanation {
+                    observation_key: format!("private-record-{index}"),
+                    identity: culprit_core::telemetry::NativeIdentity::new("private-native-identity"),
+                    observed_at: "2026-11-14T00:00:00Z".into(),
+                    reset: culprit_core::ResetMarker::Unknown,
+                    title: "x".repeat(1000),
+                    explanation: "private detailed evidence".into(),
+                    metrics: vec![],
+                    investigation: "private investigation details".into(),
+                    verify: "private verification details".into(),
+                })
+                .collect(),
+        };
+        let text = runtime_distributions(&report);
+        assert!(text.contains(&culprit_core::i18n::t(
+            "evidence.cli.native_source.collected",
+            &[("source", "native-summary".into())]
+        )));
+        assert!(text.contains(&culprit_core::i18n::t(
+            "evidence.cli.native_source.unavailable",
+            &[("source", "native-histogram".into())]
+        )));
+        assert!(text.contains(report.sources[1].reason.as_deref().unwrap()));
+        assert!(text.contains(&report.limitations[0]));
+        assert_eq!(text.matches('•').count(), super::super::BRIEF_FINDING_LIMIT);
+        assert!(!text.contains("private-"));
+        assert!(!text.contains("private detailed"));
+
+        report.sources.clear();
+        assert!(runtime_distributions(&report).contains(&t!("evidence.cli.source_unknown")));
+    }
+
     #[test]
     fn concise_retained_output_preserves_native_source_qualification_and_reason() {
         let mut report = RetainedFailureReport {

@@ -202,6 +202,7 @@ impl ActivityTuning {
 #[derive(Clone, Copy, ValueEnum)]
 enum CollectionChoice {
     StatementCounters,
+    RuntimeDistributions,
     StatementDefinitions,
     Sequences,
     Cleanup,
@@ -244,6 +245,7 @@ impl CollectionChoice {
         use culprit_core::telemetry::SnapshotDataset;
         Some(match self {
             Self::StatementCounters => SnapshotDataset::StatementCounters,
+            Self::RuntimeDistributions => SnapshotDataset::RuntimeDistributions,
             Self::StatementDefinitions => SnapshotDataset::StatementDefinitions,
             Self::Sequences => SnapshotDataset::Sequences,
             Self::Cleanup => SnapshotDataset::Cleanup,
@@ -484,6 +486,7 @@ mod tests {
         use culprit_core::telemetry::{SnapshotDataset, TelemetryCollection};
         for (name, dataset) in [
             ("statement-counters", SnapshotDataset::StatementCounters),
+            ("runtime-distributions", SnapshotDataset::RuntimeDistributions),
             ("statement-definitions", SnapshotDataset::StatementDefinitions),
             ("sequences", SnapshotDataset::Sequences),
             ("cleanup", SnapshotDataset::Cleanup),

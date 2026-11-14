@@ -128,6 +128,7 @@ impl OperationalFact {
             | Self::FileIo(_)
             | Self::Counter(_)
             | Self::StatementCounters(_)
+            | Self::RuntimeDistribution(_)
             | Self::CounterSet(_)
             | Self::Retention(_)
             | Self::RetentionCoverage(_)

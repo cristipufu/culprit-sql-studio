@@ -8,17 +8,15 @@ pub(super) struct CapturedState<'a> {
 }
 impl<'a> CapturedState<'a> {
     pub fn new(capture: &'a EvidenceCapture, dataset: SnapshotDataset) -> Result<Self> {
-        let SourceObservation::Snapshot(native) = &capture.source().observation else {
-            return Err(DeliveryProblem::UnsupportedSchema.error());
-        };
-        if native.dataset != dataset || !capture.families().contains(&EvidenceFamily::OperationalSamples) {
-            return Err(DeliveryProblem::UnsupportedSchema.error());
-        }
+        let native = native_state(capture, dataset)?;
         let [coverage] = native.sources.as_slice() else { return Err(invalid()) };
-        if !capture.source().target.is_valid() || !native.is_valid() {
-            return Err(invalid());
-        }
         Ok(Self { capture, native, coverage })
+    }
+
+    /// Independent native sources retain their individual coverage within one authenticated capture.
+    pub fn sources(capture: &'a EvidenceCapture, dataset: SnapshotDataset) -> Result<Vec<Self>> {
+        let native = native_state(capture, dataset)?;
+        Ok(native.sources.iter().map(|coverage| Self { capture, native, coverage }).collect())
     }
 
     pub fn shared(&self, kinds: &[SharedResourceKind]) -> Result<&'a SharedResourceIdentity> {
@@ -43,14 +41,14 @@ impl<'a> CapturedState<'a> {
         self.capture
             .records()
             .iter()
-            .map(|record| {
+            .filter_map(|record| {
                 let TelemetryRecord::Operational(observation) = &record.row().record else {
-                    return Err(invalid());
+                    return Some(Err(invalid()));
                 };
-                if observation.source != self.coverage.source || !observation.is_valid() {
-                    return Err(invalid());
+                if observation.source != self.coverage.source {
+                    return None;
                 }
-                Ok(observation)
+                Some(Ok(observation))
             })
             .collect()
     }
@@ -59,7 +57,12 @@ impl<'a> CapturedState<'a> {
         if rows > self.coverage.records as usize {
             return Err(invalid());
         }
-        let incomplete_read = !self.capture.is_read_complete() || rows != self.coverage.records as usize;
+        // A warehouse gap cannot turn an explicitly unavailable native source into a partially read population.
+        let readable = match self.coverage.state {
+            SourceState::Collected | SourceState::Empty | SourceState::Partial => true,
+            SourceState::Unavailable | SourceState::NotApplicable => false,
+        };
+        let incomplete_read = readable && (!self.capture.is_read_complete() || rows != self.coverage.records as usize);
         Ok(SourceOutcome {
             source: self.coverage.source.clone(),
             state: if incomplete_read { SourceState::Partial } else { self.coverage.state },
@@ -68,4 +71,23 @@ impl<'a> CapturedState<'a> {
                 .then(|| culprit_core::message!("engine.collected_resources.incomplete_read")),
         })
     }
+}
+
+fn native_state(capture: &EvidenceCapture, dataset: SnapshotDataset) -> Result<&StateSnapshotDescription> {
+    let SourceObservation::Snapshot(native) = &capture.source().observation else {
+        return Err(DeliveryProblem::UnsupportedSchema.error());
+    };
+    if native.dataset != dataset || !capture.families().contains(&EvidenceFamily::OperationalSamples) {
+        return Err(DeliveryProblem::UnsupportedSchema.error());
+    }
+    if !capture.source().target.is_valid() || !native.is_valid() {
+        return Err(invalid());
+    }
+    for record in capture.records() {
+        let TelemetryRecord::Operational(observation) = &record.row().record else { return Err(invalid()) };
+        if !observation.is_valid() || !native.sources.iter().any(|source| source.source == observation.source) {
+            return Err(invalid());
+        }
+    }
+    Ok(native)
 }

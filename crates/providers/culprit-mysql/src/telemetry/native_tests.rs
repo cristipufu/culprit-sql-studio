@@ -14,6 +14,190 @@ fn fixture() -> crate::MysqlProvider {
     .unwrap()
 }
 
+async fn native_runtime_bins(admin: &mut mysql_async::Conn, digest: &str) -> Vec<(u64, u64, u64)> {
+    use mysql_async::prelude::Queryable;
+    admin
+        .exec(
+            "/* culprit */ SELECT BUCKET_TIMER_LOW,BUCKET_TIMER_HIGH,COUNT_BUCKET
+         FROM performance_schema.events_statements_histogram_by_digest
+         WHERE SCHEMA_NAME=? AND DIGEST=? AND COUNT_BUCKET>0 ORDER BY BUCKET_NUMBER LIMIT 513",
+            ("culprit_smoke", digest),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires the owned MySQL 8.0.31+ fixture"]
+async fn runtime_distribution_source_preserves_real_native_populations_without_borrowing_counter_cohorts() {
+    use mysql_async::prelude::Queryable;
+    use std::time::Instant;
+
+    const TABLE: &str = "culprit_runtime_distribution_probe";
+    const CALLS: u64 = 12;
+    let provider = fixture();
+    let mut admin = provider.connector.connect(crate::connect::Scope::Database).await.unwrap();
+    if provider.connector.flavor() != crate::connect::Flavor::Mysql
+        || !culprit_core::version_at_least(provider.connector.version().unwrap(), [8, 0, 31])
+    {
+        eprintln!("runtime-distribution proof requires owned MySQL 8.0.31+; this fixture is not qualified");
+        admin.disconnect().await.unwrap();
+        return;
+    }
+    admin.query_drop("/* culprit */ SET SESSION TRANSACTION READ WRITE").await.unwrap();
+    let fixture_started = Instant::now();
+    admin
+        .query_drop(format!("/* culprit */ CREATE TABLE {TABLE}(id INT PRIMARY KEY, value INT NOT NULL)"))
+        .await
+        .unwrap();
+    let values = (1..=64).map(|id| format!("({id},{})", id * 3)).collect::<Vec<_>>().join(",");
+    admin.query_drop(format!("/* culprit */ INSERT INTO {TABLE} VALUES {values}")).await.unwrap();
+    let setup_elapsed = fixture_started.elapsed();
+    let workload_started = Instant::now();
+    for _ in 0..CALLS {
+        let value: Option<u64> =
+            admin.query_first(format!("SELECT SUM(value) FROM {TABLE} WHERE id<=32")).await.unwrap();
+        assert_eq!(value, Some(1584));
+    }
+    let workload_elapsed = workload_started.elapsed();
+
+    let observer_started = Instant::now();
+    let observed: Vec<(String, u64, Option<u64>, Option<u64>)> = admin
+        .exec(
+            "/* culprit */ SELECT DIGEST,COUNT_STAR,QUANTILE_95,QUANTILE_99
+         FROM performance_schema.events_statements_summary_by_digest
+         WHERE SCHEMA_NAME=? AND DIGEST_TEXT LIKE ? AND DIGEST_TEXT LIKE 'SELECT%' LIMIT 2",
+            ("culprit_smoke", format!("%{TABLE}%")),
+        )
+        .await
+        .unwrap();
+    assert_eq!(observed.len(), 1, "one synthetic statement digest");
+    let (digest, calls, p95, p99) = &observed[0];
+    assert_eq!(*calls, CALLS);
+    assert!(p95.is_some() && p99.is_some());
+    let native_bins = native_runtime_bins(&mut admin, digest).await;
+    assert!(!native_bins.is_empty() && native_bins.len() <= 512);
+    assert_eq!(native_bins.iter().map(|(_, _, count)| count).sum::<u64>(), CALLS);
+    let before_observer_elapsed = observer_started.elapsed();
+
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::RuntimeDistributions },
+        budget: CollectionBudget { page_rows: 1, ..Default::default() },
+    };
+    let mut source = provider.telemetry_source(&request).unwrap();
+    assert_eq!(source.query_count(), 0, "construction performs no native work");
+    let source_started = Instant::now();
+    let description = source.describe().await.unwrap();
+    let initial_queries = source.query_count();
+    let mut cursor = None;
+    let mut records = Vec::new();
+    loop {
+        let CollectionRead::Page { records: page, next_cursor } =
+            source.read_page(TelemetryStream::OperationalSamples, cursor.as_deref()).await.unwrap()
+        else {
+            panic!("frozen native populations")
+        };
+        assert_eq!(source.query_count(), initial_queries, "paging must not query the source");
+        assert!(page.len() <= 1);
+        records.extend(page);
+        cursor = next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+    let observer_queries = source.query_count();
+    let metrics = source.read_metrics();
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);
+    let source_elapsed = source_started.elapsed();
+
+    let after_started = Instant::now();
+    let after_bins = native_runtime_bins(&mut admin, digest).await;
+    let after_summary: Option<(u64, Option<u64>, Option<u64>)> = admin
+        .exec_first(
+            "/* culprit */ SELECT COUNT_STAR,QUANTILE_95,QUANTILE_99
+         FROM performance_schema.events_statements_summary_by_digest WHERE SCHEMA_NAME=? AND DIGEST=?",
+            ("culprit_smoke", digest),
+        )
+        .await
+        .unwrap();
+    let after_observer_elapsed = after_started.elapsed();
+    admin.query_drop(format!("/* culprit */ DROP TABLE {TABLE}")).await.unwrap();
+    admin.disconnect().await.unwrap();
+    assert_eq!(native_bins, after_bins, "only this owned statement is quiescent during the comparison");
+    assert_eq!(after_summary, Some((*calls, *p95, *p99)));
+    let native = description.observation.snapshot().unwrap();
+    let bounds = ObservationBounds::new(&native.observed_from, &native.observed_until).unwrap();
+    assert!(native.sources.iter().all(|coverage| !coverage.complete_scope));
+    let points = records
+        .iter()
+        .filter_map(|record| {
+            let TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::RuntimeDistribution(point),
+                ..
+            }) = record
+            else {
+                panic!("typed native population")
+            };
+            (point.identity.id == *digest).then_some(point.as_ref())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(points.len(), 2, "summary and histogram remain independent native points");
+    for point in &points {
+        assert_eq!(point.scope, MeasurementScope::Database);
+        assert_eq!(point.identity.qualifiers.get("schema").map(String::as_str), Some("culprit_smoke"));
+        assert!(bounds.contains(&point.observed_at));
+        assert_eq!(point.reset, culprit_core::ResetMarker::Unknown);
+    }
+    let summary =
+        points.iter().find(|point| point.distribution.source == native::runtime_distributions::SUMMARY).unwrap();
+    let histogram =
+        points.iter().find(|point| point.distribution.source == native::runtime_distributions::HISTOGRAM).unwrap();
+    assert_eq!(summary.distribution.population.sample_count(), None);
+    assert_ne!(summary.observed_at, histogram.observed_at, "each SELECT supplies its own native UTC clock");
+    for (value, observed) in [
+        (p95.unwrap(), summary.distribution.p95.as_ref().unwrap()),
+        (p99.unwrap(), summary.distribution.p99.as_ref().unwrap()),
+    ] {
+        assert_eq!(
+            observed,
+            &culprit_core::RuntimeQuantile::HistogramUpperBound {
+                lower: None,
+                upper: culprit_core::RuntimeDuration::Picoseconds { value: value.to_string() },
+            }
+        );
+    }
+    let captured_bins = histogram
+        .distribution
+        .histogram
+        .iter()
+        .map(|bin| {
+            let (
+                culprit_core::RuntimeDuration::Picoseconds { value: low },
+                culprit_core::RuntimeDuration::Picoseconds { value: high },
+            ) = (&bin.lower, &bin.upper)
+            else {
+                panic!("exact native picoseconds")
+            };
+            (low.parse::<u64>().unwrap(), high.parse::<u64>().unwrap(), bin.samples.parse::<u64>().unwrap())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(captured_bins, native_bins);
+    assert_eq!(histogram.distribution.population.sample_count(), Some(CALLS));
+    eprintln!(
+        "runtime-distribution proof fixture_rows=64 fixture_calls={CALLS} setup_ms={:.3} workload_ms={:.3} independent_before_ms={:.3} independent_after_ms={:.3} source_ms={:.3} source_queries={observer_queries} native_bins={} metrics={}; bounded local evidence is not production work-cost qualification",
+        setup_elapsed.as_secs_f64() * 1000.0,
+        workload_elapsed.as_secs_f64() * 1000.0,
+        before_observer_elapsed.as_secs_f64() * 1000.0,
+        after_observer_elapsed.as_secs_f64() * 1000.0,
+        source_elapsed.as_secs_f64() * 1000.0,
+        native_bins.len(),
+        serde_json::to_string(&metrics).unwrap()
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires the owned MySQL/MariaDB fixture"]
 async fn routine_namespaces_and_index_visibility_are_shared_with_scans() {

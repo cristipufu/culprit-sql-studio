@@ -13,6 +13,8 @@ pub(crate) struct Read {
     pub shutdown: Option<SourceShutdown>,
     query_limit: Option<u32>,
     initial_queries: u32,
+    native_phases: bool,
+    charged_phases: u32,
 }
 
 impl Read {
@@ -24,13 +26,24 @@ impl Read {
         self.initial_queries = initial_queries;
         self
     }
+    /// Native parameterized reads charge PREPARE and EXECUTE separately, including a cached PREPARE attempt.
+    pub fn with_native_phases(mut self) -> Self {
+        self.native_phases = true;
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl QueryRead for Read {
     async fn read(&mut self, sql: &str, parameters: Vec<Value>, row_limit: usize) -> Result<Vec<Rec>> {
-        if self.query_limit.is_some_and(|limit| self.query_count() >= limit) {
-            return Err(CollectionStop::QueryLimit.error());
+        let phases = if self.native_phases && !parameters.is_empty() { 2 } else { 1 };
+        for _ in 0..phases {
+            if self.query_limit.is_some_and(|limit| self.query_count() >= limit) {
+                return Err(CollectionStop::QueryLimit.error());
+            }
+            if self.native_phases {
+                self.charged_phases += 1;
+            }
         }
         self.queries.push((sql.into(), parameters, row_limit));
         self.replies.pop_front().expect("unexpected source SQL")
@@ -43,7 +56,7 @@ impl QueryRead for Read {
 #[async_trait::async_trait]
 impl OwnedRead for Read {
     fn query_count(&self) -> u32 {
-        self.initial_queries + self.queries.len() as u32
+        self.initial_queries + if self.native_phases { self.charged_phases } else { self.queries.len() as u32 }
     }
     fn read_metrics(&self) -> Option<ReadWorkMetrics> {
         None

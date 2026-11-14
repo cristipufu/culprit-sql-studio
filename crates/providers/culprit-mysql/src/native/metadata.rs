@@ -4,7 +4,7 @@ use culprit_core::{DatabaseIdentity, Engine};
 use mysql_async::Value;
 
 #[derive(Clone, Debug)]
-pub(crate) struct Metadata {
+pub(crate) struct ConnectionContext {
     pub database: DatabaseIdentity,
     pub database_name: String,
     pub server_id: u64,
@@ -16,12 +16,8 @@ pub(crate) struct Metadata {
     pub at: String,
     pub performance_schema: bool,
     pub read_only: bool,
-    pub database_wide: bool,
-    pub process_wide: bool,
-    /// Server process lifetime only. Never a reset marker for independently reset digest/table/status counters.
-    pub started_second: Option<u64>,
 }
-impl Metadata {
+impl ConnectionContext {
     pub(crate) fn same_source(&self, other: &Self) -> bool {
         self.database == other.database
             && self.database_name == other.database_name
@@ -29,9 +25,24 @@ impl Metadata {
             && self.server_name == other.server_name
             && self.connection_id == other.connection_id
             && self.version == other.version
+            && self.flavor == other.flavor
             && self.login == other.login
             && self.performance_schema == other.performance_schema
             && self.read_only == other.read_only
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Metadata {
+    pub connection: ConnectionContext,
+    pub database_wide: bool,
+    pub process_wide: bool,
+    /// Server process lifetime only. Never a reset marker for independently reset digest/table/status counters.
+    pub started_second: Option<u64>,
+}
+impl Metadata {
+    pub(crate) fn same_source(&self, other: &Self) -> bool {
+        self.connection.same_source(&other.connection)
             && self.database_wide == other.database_wide
             && self.process_wide == other.process_wide
             && self.started_second == other.started_second
@@ -44,6 +55,35 @@ pub(crate) async fn activity<R: QueryRead>(reader: &mut R, connector: &Connector
     read_identity(reader, connector, true).await
 }
 async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, process_epoch: bool) -> Result<Metadata> {
+    let connection = connection_context(reader, connector).await?;
+    let started_second = if process_epoch && connection.performance_schema {
+        // The native process clock is independent of resets of digest/table/status counters.
+        Some(process_started_second(reader, connection.flavor).await?)
+    } else {
+        None
+    };
+    let (user, host) = connection.login.rsplit_once('@').ok_or_else(invalid)?;
+    let grantee = format!("'{}'@'{}'", user.replace('\'', "''"), host.replace('\'', "''"));
+    // Direct global/schema privileges are sufficient proof. Role-only grants remain unverified rather than
+    // interpreting server-specific role expansion or silently claiming an inventory is database-wide.
+    let visibility = one(reader, "SELECT
+        (EXISTS(SELECT 1 FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=? AND PRIVILEGE_TYPE='SELECT')
+          OR EXISTS(SELECT 1 FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE=? AND TABLE_SCHEMA=? AND PRIVILEGE_TYPE='SELECT')) AS database_wide,
+        EXISTS(SELECT 1 FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=? AND PRIVILEGE_TYPE='PROCESS') AS process_wide",
+        vec![Value::from(grantee.clone()),Value::from(grantee.clone()),Value::from(connection.database_name.clone()),Value::from(grantee)]).await?;
+    Ok(Metadata {
+        connection,
+        database_wide: flag(&visibility, "database_wide")?,
+        process_wide: flag(&visibility, "process_wide")?,
+        started_second,
+    })
+}
+
+/// Native connection/database identity and its own UTC clock, without inventing unqueried visibility facts.
+pub(crate) async fn connection_context<R: QueryRead>(
+    reader: &mut R,
+    connector: &Connector,
+) -> Result<ConnectionContext> {
     let database = crate::probe::database_of(connector)?;
     let row = one(
         reader,
@@ -60,28 +100,7 @@ async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, proc
     })?;
     let version = text(&row, "version")?;
     let flavor = Flavor::of_version(&version);
-    let performance_schema = flag(&row, "performance_schema")?;
-    let started_second = if process_epoch && performance_schema {
-        // Both native implementations calculate Uptime = query-start seconds - server_start_time. Reading the
-        // timestamp and status inside ONE statement recovers that process marker without two-query clock skew.
-        // https://github.com/mysql/mysql-server/blob/8.4/sql/mysqld.cc (show_starttime)
-        // https://github.com/MariaDB/server/blob/11.8/sql/mysqld.cc (show_starttime)
-        // This does not establish when any digest, table or global counter was flushed or evicted.
-        Some(process_started_second(reader, flavor).await?)
-    } else {
-        None
-    };
-    let login = text(&row, "login")?;
-    let (user, host) = login.rsplit_once('@').ok_or_else(invalid)?;
-    let grantee = format!("'{}'@'{}'", user.replace('\'', "''"), host.replace('\'', "''"));
-    // Direct global/schema privileges are sufficient proof. Role-only grants remain unverified rather than
-    // interpreting server-specific role expansion or silently claiming an inventory is database-wide.
-    let visibility = one(reader, "SELECT
-        (EXISTS(SELECT 1 FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=? AND PRIVILEGE_TYPE='SELECT')
-          OR EXISTS(SELECT 1 FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE=? AND TABLE_SCHEMA=? AND PRIVILEGE_TYPE='SELECT')) AS database_wide,
-        EXISTS(SELECT 1 FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=? AND PRIVILEGE_TYPE='PROCESS') AS process_wide",
-        vec![Value::from(grantee.clone()),Value::from(grantee.clone()),Value::from(database_name.clone()),Value::from(grantee)]).await?;
-    Ok(Metadata {
+    Ok(ConnectionContext {
         database: DatabaseIdentity::server(Engine::Mysql, &database_name, &connector.host, connector.port, None),
         database_name,
         server_id: integer(&row, "server_id")?,
@@ -89,17 +108,17 @@ async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, proc
         connection_id: integer(&row, "connection_id")?,
         flavor,
         version,
-        login,
+        login: text(&row, "login")?,
         at: text(&row, "observed_at")?,
-        performance_schema,
+        performance_schema: flag(&row, "performance_schema")?,
         read_only: flag(&row, "read_only")?,
-        database_wide: flag(&visibility, "database_wide")?,
-        process_wide: flag(&visibility, "process_wide")?,
-        started_second,
     })
 }
 
 /// A native server-process marker, independently of any selected database or resettable statement counters.
+/// Native Uptime is query-start seconds minus server start; reading both in one statement avoids clock skew.
+/// https://github.com/mysql/mysql-server/blob/8.4/sql/mysqld.cc (show_starttime)
+/// https://github.com/MariaDB/server/blob/11.8/sql/mysqld.cc (show_starttime)
 pub(crate) async fn process_started_second<R: QueryRead>(reader: &mut R, flavor: Flavor) -> Result<u64> {
     let status = match flavor {
         Flavor::Mysql => "performance_schema.global_status",

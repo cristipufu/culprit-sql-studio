@@ -33,7 +33,7 @@ use culprit_core::PlanSampleSource as SampleFrom;
 
 const PICOS_PER_MS: f64 = 1e9;
 
-mod distributions;
+use crate::native::runtime_distributions as distributions;
 
 pub(crate) async fn collect_workload(
     conn: &mut impl crate::read::QueryRead,
@@ -50,6 +50,7 @@ pub(crate) async fn collect_workload(
     let available = crate::native::statements::columns(conn).await?;
     let has = |c: &str| available.iter().any(|a| a == c);
     let optional = |c: &str| if has(c) { c.to_string() } else { format!("NULL AS {c}") };
+    let [p95, p99] = distributions::summary_projection(&available);
     // Rows examined stands in for "logical reads": MySQL counts rows the storage engine handed to the server, not pages.
     // EXPLAINs and ANALYZEs are Culprit's own planning; `SELECT @@…` digests are driver handshakes, never actionable.
     let sql = format!(
@@ -65,8 +66,8 @@ pub(crate) async fn collect_workload(
             AND DIGEST_TEXT NOT LIKE 'SHOW EXPLAIN%' AND DIGEST_TEXT NOT LIKE 'SELECT @@%'",
         cpu = optional("SUM_CPU_TIME"),
         sample = optional("QUERY_SAMPLE_TEXT"),
-        p95 = optional("QUANTILE_95"),
-        p99 = optional("QUANTILE_99"),
+        p95 = p95,
+        p99 = p99,
         affected = optional("SUM_ROWS_AFFECTED"),
         lock = optional(crate::native::statements::LOCK_TIME_COLUMN),
         temporary = crate::native::statements::temporary_projection(&available),
@@ -278,19 +279,11 @@ async fn attach_histograms(conn: &mut impl crate::read::QueryRead, database: &st
     if digests.is_empty() {
         return;
     }
-    let marks = vec!["?"; digests.len()].join(", ");
-    let sql = format!(
-        "SELECT DIGEST AS digest, BUCKET_TIMER_LOW AS low_ps, BUCKET_TIMER_HIGH AS high_ps, COUNT_BUCKET AS runs
-           FROM performance_schema.events_statements_histogram_by_digest
-          WHERE SCHEMA_NAME = ? AND DIGEST IN ({marks}) AND COUNT_BUCKET > 0
-          ORDER BY DIGEST, BUCKET_NUMBER"
-    );
-    let mut params = vec![Value::from(database.to_string())];
-    params.extend(digests.iter().cloned().map(Value::from));
-    let mut by_digest = match query_with(conn, &sql, params).await {
-        Ok(rows) => distributions::histograms(&rows, &digests),
-        Err(_) => distributions::unavailable(&digests, culprit_core::RuntimeDistributionIssue::ReadUnavailable),
-    };
+    let mut by_digest =
+        match distributions::read_histograms(conn, database, &digests, distributions::MAX_TOTAL_BINS).await {
+            Ok(observations) => observations.into_iter().map(|point| (point.digest, point.distribution)).collect(),
+            Err(_) => distributions::unavailable(&digests, culprit_core::RuntimeDistributionIssue::ReadUnavailable),
+        };
     for d in kept.iter_mut() {
         let Some(observed) = d.stat.query_hash.as_ref().and_then(|h| by_digest.remove(h)) else { continue };
         let spread = d.stat.spread.get_or_insert_with(Spread::default);

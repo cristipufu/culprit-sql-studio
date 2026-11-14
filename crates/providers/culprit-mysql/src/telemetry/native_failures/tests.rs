@@ -47,22 +47,22 @@ async fn constructing_a_native_failure_capture_does_not_connect_or_run_setup() {
 #[tokio::test]
 async fn final_verification_cannot_bypass_the_caller_budget_after_owned_setup() {
     const SETUP_QUERIES: u32 = 7;
-    for limit in [24, 16] {
+    for limit in [24, 17] {
         let mut requested = request();
         requested.budget.max_queries = limit;
         let limits = native_failures::bounded_budget(&requested.budget);
         let mut reader = reader(1);
-        reader.io = reader.io.with_query_budget(limits.max_queries, SETUP_QUERIES);
+        reader.io = reader.io.with_query_budget(limits.max_queries, SETUP_QUERIES).with_native_phases();
         let mut source = FrozenSource::new(reader, &requested).unwrap();
         source.describe().await.unwrap();
-        assert_eq!(source.query_count(), 14);
+        assert_eq!(source.query_count(), 15);
         let _ = source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap();
         if limit == 24 {
             assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
-            assert_eq!(source.query_count(), 17);
+            assert_eq!(source.query_count(), 18);
         } else {
             assert_eq!(CollectionStop::from_error(&source.finish().await.unwrap_err()), CollectionStop::QueryLimit);
-            assert_eq!(source.query_count(), 16);
+            assert_eq!(source.query_count(), 17);
         }
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }

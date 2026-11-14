@@ -19,7 +19,7 @@ pub(crate) async fn observe<R: QueryRead>(
     budget: &CollectionBudget,
     policy: &ActivityPolicy,
 ) -> Result<Frame> {
-    if !meta.performance_schema || !meta.process_wide {
+    if !meta.connection.performance_schema || !meta.process_wide {
         return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
     }
     let consumers = reader
@@ -33,7 +33,8 @@ pub(crate) async fn observe<R: QueryRead>(
     if consumers.len() != 3 || consumers.iter().any(|row| row.text("enabled").as_deref() != Some("YES")) {
         return Err(CollectionStop::SourceUnavailable.error());
     }
-    let mut rows = sessions(reader, Some(&meta.database_name), &[], budget.max_snapshot_rows as usize + 1).await?;
+    let mut rows =
+        sessions(reader, Some(&meta.connection.database_name), &[], budget.max_snapshot_rows as usize + 1).await?;
     if rows.len() > budget.max_snapshot_rows as usize {
         return Err(CollectionStop::RowLimit.error());
     }
@@ -246,7 +247,7 @@ async fn lock_pairs<R: QueryRead>(
     ids: &[String],
     limit: usize,
 ) -> Result<Vec<locks::LockPair>> {
-    let layout = locks::row_waits(meta.flavor, &meta.version);
+    let layout = locks::row_waits(meta.connection.flavor, &meta.connection.version);
     let (sql, alias) = (layout.sql, layout.session_column);
     let mut rows = reader
         .read(&format!("{sql} WHERE {alias} IN ({}) LIMIT {limit}", placeholders(ids.len())?), numeric_ids(ids)?, limit)

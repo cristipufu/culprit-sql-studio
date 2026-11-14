@@ -183,6 +183,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     SnapshotDataset::MissingIndexes => "missing-index-state",
                     SnapshotDataset::Tuning => "tuning-state",
                     SnapshotDataset::StatementCounters
+                    | SnapshotDataset::RuntimeDistributions
                     | SnapshotDataset::StatementDefinitions
                     | SnapshotDataset::Sequences
                     | SnapshotDataset::Cleanup

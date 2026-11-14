@@ -113,6 +113,7 @@ enum Analysis {
     PageWaits,
     TaskSpace,
     StatementWork,
+    RuntimeDistributions,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
@@ -129,7 +130,8 @@ impl Analysis {
             | Self::SessionMemory
             | Self::PageWaits
             | Self::TaskSpace
-            | Self::StatementWork => {
+            | Self::StatementWork
+            | Self::RuntimeDistributions => {
                 vec![EvidenceFamily::OperationalSamples]
             }
         }
@@ -207,6 +209,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::StatementWork) => {
             let analysis = culprit_engine::collected_resources::statement_work(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::statement_work(&analysis.report))?;
+        }
+        Some(Analysis::RuntimeDistributions) => {
+            let analysis = culprit_engine::collected_resources::runtime_distributions(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::runtime_distributions(&analysis.report))?;
         }
     }
     if !complete && out.format() == Format::Text {

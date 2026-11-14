@@ -62,6 +62,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         SnapshotDataset::Replication => vec![Family::Replication],
         SnapshotDataset::Settings => crate::settings::Kind::ALL.into_iter().map(Family::Settings).collect(),
         SnapshotDataset::StatementCounters
+        | SnapshotDataset::RuntimeDistributions
         | SnapshotDataset::StatementDefinitions
         | SnapshotDataset::Sequences
         | SnapshotDataset::Cleanup

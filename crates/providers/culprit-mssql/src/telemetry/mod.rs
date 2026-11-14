@@ -63,6 +63,7 @@ pub(crate) fn source(
     match request.collection() {
         culprit_core::telemetry::TelemetryCollection::Snapshot(
             SnapshotDataset::StatementCounters
+            | SnapshotDataset::RuntimeDistributions
             | SnapshotDataset::StatementDefinitions
             | SnapshotDataset::Sequences
             | SnapshotDataset::Cleanup

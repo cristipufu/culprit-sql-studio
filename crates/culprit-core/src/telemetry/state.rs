@@ -7,6 +7,7 @@ use crate::{FileKind, FileScope, SourceState, operations::SequenceCapacity};
 #[ts(export)]
 pub enum SnapshotDataset {
     StatementCounters,
+    RuntimeDistributions,
     StatementDefinitions,
     Sequences,
     Cleanup,
@@ -46,6 +47,7 @@ impl SnapshotDataset {
     pub fn streams(self) -> &'static [TelemetryStream] {
         match self {
             Self::StatementCounters
+            | Self::RuntimeDistributions
             | Self::Sequences
             | Self::Cleanup
             | Self::Operational
@@ -436,6 +438,7 @@ pub enum OperationalFact {
     MysqlErrorLog(Box<MysqlErrorLogObservation>),
     PostgresLog(Box<PostgresLogFailureObservation>),
     StatementCounters(Box<StatementCounterSample>),
+    RuntimeDistribution(Box<StatementRuntimeDistribution>),
     Queue(QueueSample),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
@@ -469,6 +472,7 @@ impl OperationalFact {
             Self::MysqlErrorLog(observation) => observation.key(),
             Self::PostgresLog(observation) => observation.key(),
             Self::StatementCounters(counters) => counters.key(),
+            Self::RuntimeDistribution(observation) => observation.key(),
             Self::MssqlStatementGrants(grants) => grants.context.identity.key(),
             Self::MssqlIndexOperations(index) => index.identity.key(),
             Self::MssqlTable(table) => table.identity.key(),
@@ -506,6 +510,7 @@ impl OperationalFact {
             | Self::FileIo(_)
             | Self::Counter(_)
             | Self::StatementCounters(_)
+            | Self::RuntimeDistribution(_)
             | Self::CounterSet(_)
             | Self::Retention(_)
             | Self::RetentionCoverage(_)
@@ -548,6 +553,7 @@ impl OperationalFact {
             Self::FileIo(counters) => counters.is_valid(),
             Self::Counter(counter) => counter.is_valid(),
             Self::StatementCounters(counters) => counters.is_valid(),
+            Self::RuntimeDistribution(observation) => observation.is_valid(),
             Self::CounterSet(counters) => counters.is_valid(),
             Self::CatalogCounters(counters) => counters.is_valid(),
             Self::Retention(retainer) => retainer.is_valid(),
@@ -604,6 +610,7 @@ impl OperationalObservation {
                 OperationalFact::SessionMemory(observation) => observation.source == self.source,
                 OperationalFact::PageWait(observation) => observation.source == self.source,
                 OperationalFact::TaskSpace(observation) => observation.source == self.source,
+                OperationalFact::RuntimeDistribution(observation) => observation.distribution.source == self.source,
                 _ => true,
             }
     }

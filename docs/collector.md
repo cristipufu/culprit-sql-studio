@@ -132,6 +132,8 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis statement-work --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis task-space --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis runtime-distributions --json
 ```
 
 `memory-failures` selects the retained SQL Server OOM analysis; `native-failures` selects native structured
@@ -163,6 +165,12 @@ clocks and reset qualification, and shares the scan's temporary-work explanation
 block traffic and recorded I/O timing from internal-table and sort-pass counts. Exact integer counters survive
 readback; missing metrics remain unknown. A point does not establish an interval or safe delta, and matching a
 query ID does not attach SQL from a separately captured definition. No mode reconnects to the monitored database.
+
+`runtime-distributions` inspects a database-target `runtime-distributions` capture. Every distribution retains its
+own native statement identity, observation clock, source, reset qualification and population. Native histogram
+bounds and counts remain exact; an approximate percentile is not an individual execution time. Separate source
+outcomes remain visible when a summary can be read but its histogram cannot. This mode does not construct a
+synthetic workload, attach separately captured SQL or establish parameter-sensitive plan reuse.
 
 `task-space` explains database-target task allocation/deallocation captures from `operational-samples`. It retains
 exact page counters, native task tuples, request-check clocks and source coverage. The same pure view serves
@@ -614,8 +622,17 @@ projection; production load qualification and the live ADX round trip remain sep
 
 MySQL and MariaDB retain exact picosecond counters. Digest entry eviction and independent resets remain unknown
 unless native evidence establishes them. Disabled instrumentation, insufficient visibility and digest overflow
-prevent complete coverage. Histogram export contains metadata, never histogram values. The deadlock source can
-miss overwritten reports between polls; repeated reads do not create new historical events.
+prevent complete coverage. Column-statistics histogram export contains metadata, never histogram values. The
+deadlock source can miss overwritten reports between polls; repeated reads do not create new historical events.
+
+MySQL's separate `runtime-distributions` selection reads existing digest-summary quantiles and duration histograms
+through the scan's native projection and decoder. Its fixed ceilings are 128 selected digests, 4,096 native bins,
+256 exported distribution points, 24 owned query phases (including setup, prepare and execute), two seconds per
+statement and ten seconds overall, with stricter caller limits preserved. SQL text is not fetched and application
+work is not executed. Summary and histogram clocks come from their own native reads, and their counters remain
+independently resettable. The bounded subset
+is neither a complete workload nor a top-query inventory. Unsupported native sources remain unavailable.
+These row/time/byte limits do not qualify native server cost under representative production load.
 
 Yugabyte exports node scope, not fabricated cluster totals or PostgreSQL heap/buffer statistics. Native fan-out
 is capped before expensive distributed lookups. ASH is sampled task activity, not CPU time. QPM is an independently

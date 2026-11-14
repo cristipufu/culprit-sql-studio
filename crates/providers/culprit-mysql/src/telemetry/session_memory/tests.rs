@@ -41,22 +41,22 @@ async fn constructing_a_session_memory_capture_does_not_connect_or_run_setup() {
 #[tokio::test]
 async fn the_final_owner_check_uses_the_remaining_caller_allowance_after_owned_setup() {
     const SETUP_QUERIES: u32 = 7;
-    for limit in [24, 20] {
+    for limit in [24, 22] {
         let mut requested = request();
         requested.budget.max_queries = limit;
         let limits = session_memory::bounded_budget(&requested.budget);
         let mut reader = reader();
-        reader.io = reader.io.with_query_budget(limits.max_queries, SETUP_QUERIES);
+        reader.io = reader.io.with_query_budget(limits.max_queries, SETUP_QUERIES).with_native_phases();
         let mut source = FrozenSource::new(reader, &requested).unwrap();
         source.describe().await.unwrap();
-        assert_eq!(source.query_count(), 17);
+        assert_eq!(source.query_count(), 19);
         retained_page(&mut source).await;
         if limit == 24 {
             assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
-            assert_eq!(source.query_count(), 21);
+            assert_eq!(source.query_count(), 23);
         } else {
             assert_eq!(CollectionStop::from_error(&source.finish().await.unwrap_err()), CollectionStop::QueryLimit);
-            assert_eq!(source.query_count(), 20);
+            assert_eq!(source.query_count(), 22);
         }
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }

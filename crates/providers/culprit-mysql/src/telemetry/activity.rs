@@ -31,21 +31,21 @@ impl ObservationReader for ActivityReader {
             .min(16 * 1024);
         native::activity::enrich(&mut self.io, &mut evidence.observations, cap).await?;
         let description = CollectionDescription {
-            target: meta.database.clone().into(),
+            target: meta.connection.database.clone().into(),
             source: "mysql-persistent-activity".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Activity(ActivitySnapshotDescription {
                 epoch: digest(
                     format!(
                         "{}|{}|{}|{}",
-                        meta.server_id,
-                        meta.server_name,
-                        meta.version,
+                        meta.connection.server_id,
+                        meta.connection.server_name,
+                        meta.connection.version,
                         meta.started_second.ok_or_else(native::invalid)?
                     )
                     .as_bytes(),
                 ),
-                at: meta.at.clone(),
+                at: meta.connection.at.clone(),
                 scope: MeasurementScope::Database,
                 complete_scope: frame.complete,
                 policy: policy.clone(),

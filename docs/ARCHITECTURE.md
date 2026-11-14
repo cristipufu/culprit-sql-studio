@@ -668,6 +668,11 @@ not borrow a statement summary's count, reset, mean or extrema. Checks compare b
 population, while the UI presents independent observations separately. A bad or unavailable distribution does not
 erase valid statement statistics or another usable observation.
 
+`StatementRuntimeDistribution` adds a native identity, scope, source clock and reset qualification to exactly one
+such population. Both stores retain it as an existing operational fact; the authenticated collected-resource
+analyzer calls the same pure explanation as other consumers. Per-source coverage and warehouse read gaps remain
+separate. These point facts supply neither query definitions, application ownership nor a causal runtime diagnosis.
+
 Native query-variant metadata belongs to an identity-checked `QueryDefinition`. Both warehouse adapters preserve
 the same logical projection and original row proof; the archived analyzer carries the metadata into its scoped
 query group without manufacturing dispatcher runtime. A plan-average difference remains an informational candidate

@@ -43,7 +43,7 @@ impl ObservationReader for Reader {
                 return Err(CollectionStop::SourceUnavailable.error());
             }
             let databases = crate::deadlocks::native_databases(buffer)?;
-            if databases.contains(&meta.database_name) {
+            if databases.contains(&meta.connection.database_name) {
                 for (ordinal, graph) in crate::deadlocks::parse_innodb_status(buffer, true).into_iter().enumerate() {
                     let at = graph.at.ok_or_else(native::invalid)?;
                     let instant = culprit_core::format::epoch_seconds(&at).ok_or_else(native::invalid)?;
@@ -76,13 +76,13 @@ impl ObservationReader for Reader {
             return Err(CollectionStop::SourceChanged.error());
         }
         let description = CollectionDescription {
-            target: meta.database.clone().into(),
+            target: meta.connection.database.clone().into(),
             source: "innodb-latest-deadlock".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::RetainedEvents(EventHistoryDescription {
                 from: from.clone(),
                 until: until.clone(),
-                observed_at: after.at,
+                observed_at: after.connection.at,
                 retained_from: None,
                 history_complete: false,
             }),

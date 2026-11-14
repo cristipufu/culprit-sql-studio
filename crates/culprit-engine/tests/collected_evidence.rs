@@ -8,6 +8,7 @@ mod memory_failures;
 mod native_failures;
 mod page_waits;
 mod request_memory;
+mod runtime_distributions;
 mod session_memory;
 mod statement_work;
 mod task_space;

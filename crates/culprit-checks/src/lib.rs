@@ -24,8 +24,8 @@ mod views;
 pub(crate) use checks::{config, deadlocks, index_health, indexes, pressure, queries, signals, tuning};
 pub(crate) use views::{advisor, brief, digest};
 pub use views::{
-    dashboard, drift, memory_failures, native_failures, page_waits, request_memory, session_memory, statement_work,
-    task_space, temporary_work, waits,
+    dashboard, drift, memory_failures, native_failures, page_waits, request_memory, runtime_distributions,
+    session_memory, statement_work, task_space, temporary_work, waits,
 };
 
 use std::sync::Arc;
