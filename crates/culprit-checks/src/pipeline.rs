@@ -256,6 +256,7 @@ impl Pipeline {
         let session_memory = explained_session_memory(&mut snapshot);
         let page_waits = explained_page_waits(&mut snapshot);
         let task_space = explained_task_space(&mut snapshot);
+        let query_compilation = explained_compilation(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
         let mut assessments = Vec::new();
@@ -364,6 +365,7 @@ impl Pipeline {
             session_memory,
             page_waits,
             task_space,
+            query_compilation,
         }
     }
 }
@@ -442,6 +444,26 @@ fn explained_task_space(snapshot: &mut Snapshot) -> Option<culprit_core::TaskSpa
     admit_explanation(snapshot, source_id, culprit_core::message!("view.task_space.invalid_capture"), result)
 }
 
+fn explained_compilation(snapshot: &mut Snapshot) -> Option<culprit_core::CompilationReport> {
+    let captured = snapshot.operations.query_compilation.as_ref()?;
+    let mut source = snapshot.sources.iter().find(|source| source.source == captured.source).cloned();
+    // The source can also expose database-wide totals. The validated point independently establishes its own
+    // selected row set, including an empty one; a failed or partial read is never upgraded by that projection.
+    if captured.observations.is_empty()
+        && let Some(source) = source.as_mut().filter(|source| source.state == culprit_core::SourceState::Collected)
+    {
+        source.state = culprit_core::SourceState::Empty;
+    }
+    let result = if captured.is_valid() {
+        let rows: Vec<_> = captured.observations.iter().collect();
+        crate::compilation::explain(&rows, source.as_ref())
+    } else {
+        Err(culprit_core::Error::invalid(culprit_core::t!("view.compilation.invalid")))
+    };
+    let source_id = captured.source.clone();
+    admit_explanation(snapshot, source_id, culprit_core::message!("view.compilation.invalid"), result)
+}
+
 fn admit_explanation<R>(
     snapshot: &mut Snapshot,
     source_id: String,
@@ -491,6 +513,159 @@ fn rank(findings: &mut [Finding]) {
 mod tests {
     use super::*;
     use culprit_core::{Capability, Engine, WaitStat};
+
+    fn compilation_snapshot() -> Snapshot {
+        use culprit_core::{CompilationMemory, ResetMarker, SourceOutcome, SourceState, telemetry::*};
+        let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+        let source = "embedded.compilation-observations";
+        let native = MssqlQueryCompilation {
+            identity: NativeQueryIdentity {
+                query_id: "42".into(),
+                qualifiers: [
+                    ("context_settings_id".into(), "5".into()),
+                    ("object_id".into(), "1999".into()),
+                    ("query_hash".into(), "0123456789ABCDEF".into()),
+                    ("initial_compile_at".into(), "2020-01-01T06:00:00.1533333Z".into()),
+                ]
+                .into(),
+            },
+            compilations: "9007199254740993".into(),
+            last_compile_at: "2020-01-01T11:59:00.1533333Z".into(),
+            average_duration_us: 1500.5,
+            memory: Some(CompilationMemory { average_kb: Some(2048.5), last_kb: Some(0.0), maximum_kb: Some(16384.0) }),
+            seconds_since_first_compile: 21600,
+            reset: ResetMarker::Unknown,
+        };
+        snapshot.operations.query_compilation = Some(CompilationSnapshot {
+            source: source.into(),
+            observed_from: "2026-11-13T10:00:00Z".into(),
+            observed_until: "2026-11-13T10:00:01Z".into(),
+            observations: vec![OperationalObservation {
+                source: source.into(),
+                key: native.key().unwrap(),
+                fact: OperationalFact::MssqlQueryCompilation(Box::new(native)),
+            }],
+        });
+        snapshot.sources.push(SourceOutcome {
+            source: source.into(),
+            state: SourceState::Collected,
+            reason: Some("independently retained database compilation totals".into()),
+            reason_message: None,
+        });
+        snapshot
+    }
+
+    #[test]
+    fn compilation_replay_uses_the_same_pure_report_and_keeps_native_lifetimes_outside_read_bounds() {
+        use culprit_core::telemetry::ObservationBounds;
+        let snapshot = compilation_snapshot();
+        let native = snapshot.operations.query_compilation.as_ref().unwrap();
+        let source = snapshot.sources.iter().find(|source| source.source == native.source).unwrap();
+        assert!(native.is_valid());
+        let point = ObservationBounds::new(&native.observed_from, &native.observed_until).unwrap();
+        let culprit_core::telemetry::OperationalFact::MssqlQueryCompilation(compilation) = &native.observations[0].fact
+        else {
+            panic!()
+        };
+        assert!(!point.contains(&compilation.first_compile_at().unwrap()));
+        assert!(!point.contains(&compilation.last_compile_at));
+        let expected =
+            crate::compilation::explain(&native.observations.iter().collect::<Vec<_>>(), Some(source)).unwrap();
+        let original = native.clone();
+        let report = crate::analyze(snapshot);
+        assert_eq!(
+            serde_json::to_value(report.query_compilation.as_ref().unwrap()).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(report.snapshot.operations.query_compilation.as_ref(), Some(&original));
+        let entry = &report.query_compilation.as_ref().unwrap().entries[0];
+        assert!(
+            entry.metrics.iter().any(|metric| metric.is("view.compilation.metric.count")
+                && metric.text.as_deref() == Some("9007199254740993"))
+        );
+        assert!(entry.metrics.iter().any(|metric| metric.is("common.metric.compile_memory_last") && metric.text.as_deref() == Some("0 KiB")));
+    }
+
+    #[test]
+    fn a_validated_empty_compilation_point_does_not_rewrite_collected_global_totals() {
+        use culprit_core::SourceState;
+        let mut snapshot = compilation_snapshot();
+        snapshot.operations.query_compilation.as_mut().unwrap().observations.clear();
+        let native = snapshot.operations.query_compilation.clone().unwrap();
+        let original_source = snapshot.sources.iter().find(|source| source.source == native.source).cloned().unwrap();
+        let report = crate::analyze(snapshot);
+        let explanation = report.query_compilation.as_ref().unwrap();
+        assert_eq!(explanation.source_state, Some(SourceState::Empty));
+        assert!(explanation.entries.is_empty());
+        assert_eq!(explanation.source_reason, original_source.reason);
+        assert_eq!(
+            report.snapshot.sources.iter().find(|source| source.source == native.source),
+            Some(&original_source)
+        );
+        assert_eq!(report.snapshot.operations.query_compilation, Some(native));
+    }
+
+    #[test]
+    fn partial_unavailable_and_unknown_compilation_visibility_are_not_upgraded_by_replay() {
+        use culprit_core::SourceState;
+        for (state, empty) in [
+            (Some(SourceState::Partial), false),
+            (Some(SourceState::Partial), true),
+            (Some(SourceState::Unavailable), true),
+            (None, false),
+        ] {
+            let mut snapshot = compilation_snapshot();
+            let native = snapshot.operations.query_compilation.as_mut().unwrap();
+            if empty {
+                native.observations.clear();
+            }
+            let source_name = native.source.clone();
+            if let Some(state) = state {
+                snapshot.sources.iter_mut().find(|source| source.source == source_name).unwrap().state = state;
+            } else {
+                snapshot.sources.retain(|source| source.source != source_name);
+            }
+            let original = snapshot.operations.query_compilation.clone();
+            let report = crate::analyze(snapshot);
+            let explanation = report.query_compilation.as_ref().unwrap();
+            assert_eq!(explanation.source_state, state);
+            assert_eq!(explanation.entries.is_empty(), empty);
+            assert_eq!(
+                report.snapshot.sources.iter().find(|source| source.source == source_name).map(|source| source.state),
+                state
+            );
+            assert_eq!(report.snapshot.operations.query_compilation, original);
+        }
+    }
+
+    #[test]
+    fn invalid_compilation_clocks_duplicate_keys_and_foreign_native_keys_withhold_only_the_explanation() {
+        use culprit_core::{SourceState, telemetry::*};
+        for defect in ["clock", "duplicate", "native-key"] {
+            let mut snapshot = compilation_snapshot();
+            let native = snapshot.operations.query_compilation.as_mut().unwrap();
+            match defect {
+                "clock" => native.observed_until = "2026-11-13T09:59:59Z".into(),
+                "duplicate" => {
+                    let mut repeated = native.observations[0].clone();
+                    let OperationalFact::MssqlQueryCompilation(compilation) = &mut repeated.fact else { panic!() };
+                    compilation.compilations = "9007199254740994".into();
+                    assert!(repeated.is_valid());
+                    native.observations.push(repeated);
+                }
+                "native-key" => native.observations[0].key = digest(b"different native compilation identity"),
+                _ => unreachable!(),
+            }
+            let original = native.clone();
+            let report = crate::analyze(snapshot);
+            assert!(report.query_compilation.is_none(), "{defect}");
+            assert_eq!(report.snapshot.operations.query_compilation.as_ref(), Some(&original), "{defect}");
+            let failed = report.snapshot.sources.iter().find(|source| source.source == original.source).unwrap();
+            assert_eq!(failed.state, SourceState::Unavailable);
+            assert_eq!(failed.reason.as_deref(), Some(t!("view.compilation.invalid").as_str()));
+            assert!(report.snapshot.notes.iter().any(|note| note.collector == original.source));
+        }
+    }
 
     #[test]
     fn task_space_replay_keeps_empty_custom_source_coverage_and_withholds_invalid_clocks() {

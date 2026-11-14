@@ -4,6 +4,7 @@
 
 pub(crate) mod advisor;
 pub(crate) mod brief;
+pub mod compilation;
 pub mod dashboard;
 pub(crate) mod digest;
 pub mod drift;
@@ -16,6 +17,7 @@ pub mod plan_view;
 pub mod request_memory;
 pub mod runtime_distributions;
 pub mod session_memory;
+mod source_coverage;
 pub mod sql_lint;
 pub mod statement_work;
 pub mod task_space;

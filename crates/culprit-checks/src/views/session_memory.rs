@@ -1,5 +1,5 @@
 //! Tracked session allocations and independently observed statement context never establish an allocating query.
-use super::memory_participants;
+use super::{memory_participants, source_coverage};
 use culprit_core::{
     Error, MemoryParticipantExplanation, MemoryParticipantsReport, Result, SourceOutcome, format, key, t,
     telemetry::{MAX_SESSION_MEMORY_OBSERVATIONS, SessionMemoryObservation},
@@ -51,7 +51,7 @@ fn validate<'a>(
     source: Option<&SourceOutcome>,
 ) -> Result<Vec<Participant<'a>>> {
     if observations.len() > MAX_SESSION_MEMORY_OBSERVATIONS
-        || !memory_participants::consistent_source(source, observations.iter().map(|row| row.source.as_str()))
+        || !source_coverage::consistent_source(source, observations.iter().map(|row| row.source.as_str()))
     {
         return Err(invalid());
     }

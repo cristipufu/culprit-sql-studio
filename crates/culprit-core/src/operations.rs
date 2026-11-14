@@ -49,6 +49,9 @@ pub struct OperationalStats {
     pub task_space: Option<crate::telemetry::TaskSpaceSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub query_compilation: Option<crate::telemetry::CompilationSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub node_resources: Option<NodeResources>,
 }
 
@@ -121,6 +124,7 @@ impl OperationalStats {
             session_memory: _,
             page_waits: _,
             task_space: _,
+            query_compilation: _,
             node_resources: _,
         } = self;
         Counters { log_failures, spaces, counters, sequences, multixacts, sqlite, cluster }

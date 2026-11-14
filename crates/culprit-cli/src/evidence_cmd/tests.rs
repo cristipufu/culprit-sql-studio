@@ -74,6 +74,7 @@ fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_sel
         "task-space",
         "statement-work",
         "runtime-distributions",
+        "compilation",
     ] {
         let parsed = crate::Cli::try_parse_from([
             "culprit",

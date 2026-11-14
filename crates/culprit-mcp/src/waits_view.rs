@@ -3,6 +3,8 @@
 use culprit_core::{FileIo, Report, Signal, WaitSample, format};
 use serde_json::{Value, json};
 
+const COMPILATION_ENTRIES: usize = 5;
+
 fn signal(s: &Signal) -> Value {
     json!({
         "key": s.key,
@@ -86,6 +88,17 @@ pub fn report(report: &Report) -> Value {
             "session": t.session, "open_for": format::duration(t.seconds * 1000.0), "state": t.state_words(), "program": t.program,
         })),
     });
+    if let Some(compilation) = &report.query_compilation {
+        response["query_compilation"] = json!({
+            "title": compilation.title,
+            "summary": compilation.summary,
+            "source_state": compilation.source_state,
+            "source_reason": compilation.source_reason,
+            "entries_retained": compilation.entries.len(),
+            "entries": compilation.entries.iter().take(COMPILATION_ENTRIES).collect::<Vec<_>>(),
+            "limitations": compilation.limitations,
+        });
+    }
     if let Some(activity) = activity {
         response["activity"] = activity;
     }
@@ -138,6 +151,139 @@ pub fn sample(s: &WaitSample) -> Value {
 mod tests {
     use super::*;
     use culprit_core::{Engine, SignalScope, SignalUnit};
+
+    fn compilation_report_data(entries: usize) -> Report {
+        use culprit_core::{
+            CompilationExplanation, CompilationMemory, CompilationReport, Metric, ResetMarker, key, t, telemetry::*,
+        };
+        let mut data: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        let source = "private-raw-compilation-source-canary";
+        let observations = (0..entries)
+            .map(|index| {
+                let native = MssqlQueryCompilation {
+                    identity: NativeQueryIdentity {
+                        query_id: (index + 100).to_string(),
+                        qualifiers: [
+                            ("context_settings_id".into(), "5".into()),
+                            ("object_id".into(), "1999".into()),
+                            ("query_hash".into(), "0123456789ABCDEF".into()),
+                            ("initial_compile_at".into(), "2020-01-01T06:00:00.1533333Z".into()),
+                        ]
+                        .into(),
+                    },
+                    compilations: "9007199254740993".into(),
+                    last_compile_at: "2020-01-01T11:59:00.1533333Z".into(),
+                    average_duration_us: 1500.5,
+                    memory: Some(CompilationMemory {
+                        average_kb: Some(2048.5),
+                        last_kb: Some(0.0),
+                        maximum_kb: Some(16384.0),
+                    }),
+                    seconds_since_first_compile: 21600,
+                    reset: ResetMarker::Unknown,
+                };
+                OperationalObservation {
+                    source: source.into(),
+                    key: native.key().unwrap(),
+                    fact: OperationalFact::MssqlQueryCompilation(Box::new(native)),
+                }
+            })
+            .collect::<Vec<_>>();
+        let explained = observations
+            .iter()
+            .map(|row| {
+                let OperationalFact::MssqlQueryCompilation(native) = &row.fact else { panic!() };
+                CompilationExplanation {
+                    observation_key: row.key.clone(),
+                    identity: native.identity.clone(),
+                    title: t!("view.compilation.entry.title", query = &native.identity.query_id),
+                    explanation: t!("view.compilation.entry.multiple", count = &native.compilations),
+                    metrics: vec![
+                        Metric::said_text(key!("view.compilation.metric.count"), native.compilations.clone()),
+                        Metric::said_text(key!("common.metric.compile_memory_last"), "0 KiB"),
+                        Metric::said_text(key!("common.metric.compile_memory_maximum"), "16384 KiB"),
+                    ],
+                    investigation: t!("view.compilation.investigate.multiple"),
+                    verify: t!("view.compilation.verify"),
+                }
+            })
+            .collect();
+        let raw = CompilationSnapshot {
+            source: source.into(),
+            observed_from: "2026-11-13T10:00:00Z".into(),
+            observed_until: "2026-11-13T10:00:01Z".into(),
+            observations,
+        };
+        assert!(raw.is_valid());
+        data.snapshot.operations.query_compilation = Some(raw);
+        data.snapshot.workload.as_mut().unwrap().queries[0].text =
+            "SELECT private_value FROM compilation_sql_body_canary".into();
+        data.query_compilation = Some(CompilationReport {
+            source_state: None,
+            source_reason: Some("native visibility was not qualified".into()),
+            title: t!("view.compilation.title"),
+            summary: t!("view.compilation.summary.entries", n = entries, count = entries.to_string()),
+            limitations: vec![
+                t!("view.compilation.limit.source_unknown"),
+                t!("check.planning_time.caveat.compile_memory"),
+            ],
+            entries: explained,
+        });
+        data
+    }
+
+    #[test]
+    fn compilation_output_bounds_entries_preserves_exact_metrics_and_omits_raw_native_and_sql_bodies() {
+        let data = compilation_report_data(COMPILATION_ENTRIES + 3);
+        let original = data.query_compilation.as_ref().unwrap();
+        let response = report(&data);
+        let compilation = &response["query_compilation"];
+        assert_eq!(compilation["entries_retained"], original.entries.len());
+        assert_eq!(compilation["entries"].as_array().unwrap().len(), COMPILATION_ENTRIES);
+        assert_eq!(compilation["source_state"], Value::Null);
+        assert_eq!(compilation["source_reason"], "native visibility was not qualified");
+        assert_eq!(compilation["limitations"], serde_json::to_value(&original.limitations).unwrap());
+        for (index, entry) in compilation["entries"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(entry, &serde_json::to_value(&original.entries[index]).unwrap());
+            let metrics = entry["metrics"].as_array().unwrap();
+            assert_eq!(
+                metrics.iter().find(|metric| metric["key"] == "view.compilation.metric.count").unwrap()["text"],
+                "9007199254740993"
+            );
+            assert_eq!(
+                metrics.iter().find(|metric| metric["key"] == "common.metric.compile_memory_last").unwrap()["text"],
+                "0 KiB"
+            );
+            assert!(entry.get("fact").is_none() && entry.get("observations").is_none());
+            assert!(entry.get("memory_owner").is_none() && entry.get("current_memory").is_none());
+        }
+        assert!(response["operations"].get("query_compilation").is_none());
+        let body = serde_json::to_string(compilation).unwrap();
+        assert!(!body.contains("private-raw-compilation-source-canary"));
+        assert!(!body.contains("compilation_sql_body_canary"));
+        assert!(!body.contains("average_duration_us") && !body.contains("seconds_since_first_compile"));
+        assert!(body.len() < 20_000);
+    }
+
+    #[test]
+    fn compact_compilation_output_preserves_empty_partial_and_unavailable_source_qualifications() {
+        for state in [
+            culprit_core::SourceState::Empty,
+            culprit_core::SourceState::Partial,
+            culprit_core::SourceState::Unavailable,
+        ] {
+            let mut data = compilation_report_data(0);
+            let original = data.query_compilation.as_mut().unwrap();
+            original.source_state = Some(state);
+            let response = report(&data);
+            let compilation = &response["query_compilation"];
+            assert_eq!(compilation["source_state"], serde_json::to_value(state).unwrap());
+            assert_eq!(compilation["source_reason"], "native visibility was not qualified");
+            assert_eq!(compilation["entries_retained"], 0);
+            assert_eq!(compilation["entries"], json!([]));
+            assert!(response["operations"].get("query_compilation").is_none());
+        }
+    }
 
     #[test]
     fn accumulated_parallel_waits_keep_native_totals_without_an_elapsed_share() {

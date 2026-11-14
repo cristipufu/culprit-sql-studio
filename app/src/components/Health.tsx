@@ -20,6 +20,7 @@ import { RequestMemoryParticipants, SessionMemoryParticipants } from "./MemoryPa
 import { ObservationSourceIssue, observationReadIssue } from "./ObservationList";
 import { PageWaitTargets } from "./PageWaitTargets";
 import { TaskSpace } from "./TaskSpace";
+import { QueryCompilation } from "./QueryCompilation";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -100,7 +101,10 @@ export function HealthTab({
   const tasks = report.snapshot.operations.task_space;
   const taskReport = report.task_space;
   const taskIssue = observationReadIssue(tasks?.source ?? "task space", report.snapshot.sources ?? [], report.snapshot.options?.collect_task_space === true);
-  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue && !(requests && requestReport) && !requestIssue && !(sessions && sessionReport) && !sessionIssue && !(pageWaits && pageReport) && !pageIssue && !(tasks && taskReport) && !taskIssue) {
+  const compilation = report.snapshot.operations.query_compilation;
+  const compilationReport = report.query_compilation;
+  const compilationIssue = observationReadIssue(compilation?.source ?? "query compilation", report.snapshot.sources ?? []);
+  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue && !(requests && requestReport) && !requestIssue && !(sessions && sessionReport) && !sessionIssue && !(pageWaits && pageReport) && !pageIssue && !(tasks && taskReport) && !taskIssue && !(compilation && compilationReport) && !compilationIssue) {
     return (
       <div className="waits-empty">
         <h3>{t("ui.health.empty")}</h3>
@@ -151,6 +155,8 @@ export function HealthTab({
       {!(pageWaits && pageReport) && pageIssue && <ObservationSourceIssue source={pageIssue} title={t("view.page_waits.title")} />}
       {tasks && taskReport && <TaskSpace key={tasks.observed_until} evidence={tasks} report={taskReport} />}
       {!(tasks && taskReport) && taskIssue && <ObservationSourceIssue source={taskIssue} title={t("view.task_space.title")} />}
+      {compilation && compilationReport && <QueryCompilation key={compilation.observed_until} evidence={compilation} report={compilationReport} />}
+      {!(compilation && compilationReport) && compilationIssue && <ObservationSourceIssue source={compilationIssue} title={t("view.compilation.title")} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
     </div>
   );

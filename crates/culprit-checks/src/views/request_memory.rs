@@ -1,5 +1,5 @@
 //! Current execution reservations identify participants, never the statement that acquired them or a causal owner.
-use super::memory_participants;
+use super::{memory_participants, source_coverage};
 use culprit_core::{
     Error, MemoryParticipantExplanation, MemoryParticipantsReport, Result, SourceOutcome, format, t,
     telemetry::{
@@ -50,7 +50,7 @@ fn validate<'a>(
     source: Option<&SourceOutcome>,
 ) -> Result<Vec<Participant<'a>>> {
     if observations.len() > MAX_REQUEST_MEMORY_OBSERVATIONS
-        || !memory_participants::consistent_source(source, observations.iter().map(|row| row.source.as_str()))
+        || !source_coverage::consistent_source(source, observations.iter().map(|row| row.source.as_str()))
     {
         return Err(invalid());
     }

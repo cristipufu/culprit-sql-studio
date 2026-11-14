@@ -1,6 +1,7 @@
 use culprit_core::{
-    CachedPlanEntry, CachedPlanReport, MemoryParticipantsReport, PageWaitReport, RetainedFailureReport,
-    RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport, TaskSpaceReport, format, t,
+    CachedPlanEntry, CachedPlanReport, CompilationReport, MemoryParticipantsReport, PageWaitReport,
+    RetainedFailureReport, RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport, TaskSpaceReport,
+    format, t,
 };
 
 struct Summary<'a> {
@@ -13,6 +14,18 @@ struct Summary<'a> {
 enum SourceQualification<'a> {
     Single { state: Option<SourceState>, reason: Option<&'a str> },
     Multiple(&'a [SourceOutcome]),
+}
+
+pub(crate) fn compilation(report: &CompilationReport) -> String {
+    render(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
+            limitations: &report.limitations,
+        },
+        report.entries.iter().map(|entry| entry.title.as_str()),
+    )
 }
 
 pub(crate) fn cached_plans(report: &CachedPlanReport) -> String {

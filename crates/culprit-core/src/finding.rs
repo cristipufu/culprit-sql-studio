@@ -400,6 +400,10 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub task_space: Option<crate::TaskSpaceReport>,
+    /// Native compilation lifetimes and working-memory observations, independent of execution and current ownership.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub query_compilation: Option<crate::CompilationReport>,
     pub snapshot: Snapshot,
     pub findings: Vec<Finding>,
     pub locked: Vec<LockedCheck>,

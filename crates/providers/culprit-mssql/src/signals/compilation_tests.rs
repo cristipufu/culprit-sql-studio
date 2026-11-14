@@ -42,7 +42,13 @@ async fn matching_native_identity_retains_compile_history_without_borrowing_runt
     assert!(costs.plan_ms.is_none() && costs.plans.is_none());
     assert_eq!(history.memory.unwrap().last_kb, Some(8192.0));
     assert_eq!(queries[0].text, original_sql);
-    assert_eq!(signals.len(), 2);
+    assert_eq!(signals.signals.len(), 2);
+    let captured = signals.snapshot.unwrap();
+    assert!(captured.is_valid());
+    let [row] = captured.observations.as_slice() else { panic!("one native compilation") };
+    let culprit_core::telemetry::OperationalFact::MssqlQueryCompilation(native) = &row.fact else { panic!() };
+    assert_eq!(native.identity, compilation_identities()["3"]);
+    assert_eq!(native.compilations, "5");
     assert_eq!(coverage.outcomes()[0].state, SourceState::Collected);
 }
 
@@ -69,7 +75,8 @@ async fn recycled_native_query_qualifiers_cannot_attach_compilation_to_earlier_s
         assert_compilation_withheld(&queries[0]);
         assert_eq!(queries[0].text, original_sql);
         assert_eq!(coverage.outcomes()[0].state, SourceState::Partial, "{field}");
-        assert_eq!(signals.len(), 2, "independent database totals remain their own measured context");
+        assert_eq!(signals.signals.len(), 2, "independent database totals remain their own measured context");
+        assert!(signals.snapshot.is_some(), "the independent native incarnation stays available without old SQL");
     }
 }
 
@@ -126,7 +133,8 @@ async fn native_timeout_or_cancellation_prevents_followup_sql_and_clears_unadmit
             &mut coverage,
         )
         .await;
-        assert!(signals.is_empty());
+        assert!(signals.signals.is_empty());
+        assert!(signals.snapshot.is_none());
         assert_compilation_withheld(&queries[0]);
         assert_eq!(coverage.outcomes()[0].state, SourceState::Unavailable);
     }

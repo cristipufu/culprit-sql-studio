@@ -5,6 +5,7 @@ use culprit_engine::collected_evidence;
 
 mod cached_plans;
 mod cohorts;
+mod compilation;
 mod fixture;
 mod memory_failures;
 mod native_failures;

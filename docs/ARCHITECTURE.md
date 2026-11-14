@@ -166,6 +166,13 @@ cannot publish complete data. Missing CPU or other metrics remain absent. Metric
 page size. Cumulative statement totals are current point facts with reset evidence, not native interval aggregates;
 unknown resets never authorize a delta. Destination schemas preserve these contracts without provider-specific field
 interpretation. Provider extensions that retain native engine structures remain explicitly named.
+
+A source can explicitly declare a plan-independent runtime cohort. The source owns which native dimensions
+establish comparable populations; common analysis never strips native qualifiers to guess them. Exact query
+references, cohorts and capture intervals bound plan comparison, and every original measurement key remains
+available. Without a cohort, grouping retains exact plan references and all native qualifiers. A wait needs a
+matching positive-runtime plan population. Unknown forcing remains distinct from an observed unforced plan.
+
 The shared export boundary canonicalizes runtime UTC instants without changing their nanosecond value. Equivalent
 offset or fractional spellings produce the same authenticated payload; oversized or subnanosecond values are
 rejected rather than truncated. Opaque native generation timestamps remain unchanged.
@@ -198,6 +205,11 @@ than supplying a different source's denominator. Outcome and log-volume sufficie
 summary rows. A reset can preserve native identity, interval and execution count while replacing the executions;
 later rows cannot replace that original cost population. Mutable open intervals are still separate native
 observations, not an atomic snapshot. Compilation history retains its independent lifetime.
+
+The bounded compilation reader also retains its exact native records in `CompilationSnapshot` after confirmed
+native shutdown. `culprit_checks::compilation::explain` serves scans, archive analysis, CLI, MCP and the Health
+panel. Read clocks, native lifetimes and source outcomes remain separate. Counts and compile-memory measurements
+do not identify a current compiler or allocation owner; invalid evidence cannot produce a derived report.
 
 Deadlock history uses one bounded native event reader and the existing graph parser. Native file/buffer positions,
 event digests and fractional timestamps identify exported events independently of redaction or retry. Interactive

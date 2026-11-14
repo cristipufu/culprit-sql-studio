@@ -71,6 +71,14 @@ impl Compilation {
             reset: culprit_core::ResetMarker::Unknown,
         }
     }
+    pub fn record(&self) -> Result<culprit_core::telemetry::OperationalObservation> {
+        let observed = self.observation();
+        Ok(culprit_core::telemetry::OperationalObservation {
+            source: crate::sources::QUERY_COMPILATION.name.into(),
+            key: observed.key()?,
+            fact: culprit_core::telemetry::OperationalFact::MssqlQueryCompilation(Box::new(observed)),
+        })
+    }
     pub fn within_window(&self, minutes: u32) -> bool {
         self.count > 0 && self.seconds_since_first >= 0 && self.seconds_since_first <= i64::from(minutes) * 60
     }

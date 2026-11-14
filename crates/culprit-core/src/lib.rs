@@ -8,6 +8,7 @@ pub mod cloud;
 pub mod collected_analysis;
 pub mod collected_resource_analysis;
 pub mod compilation;
+pub mod compilation_report;
 pub mod connection;
 pub mod connection_security;
 pub mod coverage;
@@ -76,6 +77,7 @@ pub use cloud::{
     CloudLimitKind, CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, ThrottleEpisode, ThrottleKind,
 };
 pub use compilation::CompilationMemory;
+pub use compilation_report::{CompilationExplanation, CompilationReport};
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
     aws_iam_host_allowed, aws_region_valid, entra_host_allowed, expand_home, is_local_host, transport_error,

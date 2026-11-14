@@ -1,5 +1,33 @@
 //! Retained Query Store compilation totals have their own lifetime, independent of runtime intervals.
 use super::*;
+use std::collections::BTreeSet;
+
+pub const MAX_QUERY_COMPILATION_OBSERVATIONS: usize = 10_000;
+
+/// A read of retained query compilation entries. Acquisition bounds do not replace the entries' native lifetimes.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct CompilationSnapshot {
+    pub source: String,
+    pub observed_from: String,
+    pub observed_until: String,
+    pub observations: Vec<OperationalObservation>,
+}
+
+impl CompilationSnapshot {
+    pub fn is_valid(&self) -> bool {
+        let mut keys = BTreeSet::new();
+        valid_key(&self.source)
+            && ObservationBounds::new(&self.observed_from, &self.observed_until).is_some()
+            && self.observations.len() <= MAX_QUERY_COMPILATION_OBSERVATIONS
+            && self.observations.iter().all(|row| {
+                matches!(&row.fact, OperationalFact::MssqlQueryCompilation(_))
+                    && row.is_valid()
+                    && row.source == self.source
+                    && keys.insert(&row.key)
+            })
+    }
+}
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
@@ -153,5 +181,93 @@ mod tests {
         assert_eq!(restored, row);
         assert_eq!(restored.first_compile_at().unwrap(), "2020-01-01T06:00:00.153333300Z");
         assert_eq!(restored.key().unwrap(), row.key().unwrap());
+    }
+
+    fn captured() -> CompilationSnapshot {
+        let native = observation();
+        let source = "query compilations";
+        CompilationSnapshot {
+            source: source.into(),
+            observed_from: "2020-01-01T12:00:00Z".into(),
+            observed_until: "2020-01-01T12:00:01Z".into(),
+            observations: vec![OperationalObservation {
+                source: source.into(),
+                key: native.key().unwrap(),
+                fact: OperationalFact::MssqlQueryCompilation(Box::new(native)),
+            }],
+        }
+    }
+
+    #[test]
+    fn retained_compilation_lifetime_stays_independent_of_the_snapshot_read_bounds() {
+        let value = captured();
+        assert!(value.is_valid(), "retained compilation clocks precede the acquisition interval");
+        let restored: CompilationSnapshot = serde_json::from_value(serde_json::to_value(&value).unwrap()).unwrap();
+        assert_eq!(restored, value);
+        let mut skewed = value.clone();
+        let OperationalFact::MssqlQueryCompilation(native) = &mut skewed.observations[0].fact else { panic!() };
+        native.last_compile_at = "2020-01-01T12:00:02Z".into();
+        native.seconds_since_first_compile = -1;
+        assert!(skewed.is_valid(), "native clock skew remains recorded, not replaced by the collector clock");
+        let operations = crate::operations::OperationalStats { query_compilation: Some(value), ..Default::default() };
+        assert!(serde_json::to_value(&operations).unwrap().get("query_compilation").is_some());
+        assert!(serde_json::to_value(operations.counters_only()).unwrap().get("query_compilation").is_none());
+    }
+
+    #[test]
+    fn compilation_snapshots_reject_foreign_sources_keys_and_non_compilation_facts() {
+        let value = captured();
+        let mut changed = value.clone();
+        changed.observations[0].source = "different source".into();
+        assert!(changed.observations[0].is_valid());
+        assert!(!changed.is_valid());
+        changed = value.clone();
+        changed.observations[0].key = digest(b"foreign native key");
+        assert!(!changed.is_valid());
+        changed = value.clone();
+        let mut later = changed.observations[0].clone();
+        let OperationalFact::MssqlQueryCompilation(native) = &mut later.fact else { panic!() };
+        native.compilations = "9007199254740994".into();
+        assert!(later.is_valid());
+        changed.observations.push(later);
+        assert!(!changed.is_valid(), "changing measurements does not create another native query incarnation");
+        let counters = NativeCounterSet {
+            identity: NativeIdentity::new("compiler gateway"),
+            scope: crate::MeasurementScope::Server,
+            counters: vec![NativeCounterSample::gauge(
+                "waiting",
+                2,
+                CounterUnit::Count,
+                crate::MeasurementScope::Server,
+                "gateway",
+                "waiter_count",
+            )],
+            properties: Default::default(),
+        };
+        changed = value;
+        changed.observations[0].key = counters.key().unwrap();
+        changed.observations[0].fact = OperationalFact::CounterSet(Box::new(counters));
+        assert!(changed.observations[0].is_valid());
+        assert!(!changed.is_valid(), "shared compiler admission is a different native fact");
+    }
+
+    #[test]
+    fn compilation_snapshot_bounds_and_population_are_bounded_without_inventing_empty_history() {
+        let value = captured();
+        for (from, until) in
+            [("2020-01-01T12:00:00", "2020-01-01T12:00:01Z"), ("2020-01-01T12:00:02Z", "2020-01-01T12:00:01Z")]
+        {
+            let mut changed = value.clone();
+            changed.observed_from = from.into();
+            changed.observed_until = until.into();
+            assert!(!changed.is_valid());
+        }
+        let mut changed = value.clone();
+        changed.observations = vec![value.observations[0].clone(); MAX_QUERY_COMPILATION_OBSERVATIONS + 1];
+        assert!(!changed.is_valid());
+        changed.observations.clear();
+        assert!(changed.is_valid(), "source coverage determines what an empty successful read means");
+        changed.source.clear();
+        assert!(!changed.is_valid());
     }
 }

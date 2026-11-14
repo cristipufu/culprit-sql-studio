@@ -18,11 +18,6 @@ impl SnapshotRecipe for QueryCompilation {
         costs::compilation_snapshot_sql()
     }
     fn decode(&self, row: &Rec, _: &()) -> Result<TelemetryRecord> {
-        let compilation = costs::Compilation::decode(row)?.observation();
-        Ok(TelemetryRecord::Operational(OperationalObservation {
-            source: Self::SOURCE.name.into(),
-            key: compilation.key()?,
-            fact: OperationalFact::MssqlQueryCompilation(Box::new(compilation)),
-        }))
+        Ok(TelemetryRecord::Operational(costs::Compilation::decode(row)?.record()?))
     }
 }

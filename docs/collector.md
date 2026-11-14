@@ -65,9 +65,19 @@ is opened.
 With the engine's `collector` feature, `culprit_engine::collected_evidence::analyze` feeds one verified query-history
 capture through the existing pure checks. It returns `CollectedQueryAnalysis`, with authenticated native inputs,
 findings, unavailable assessments and explicit limitations. It does not open a database or manufacture a current
-server snapshot. Runtime groups join only exact native query/plan references within that capture; missing runtime
-rows withhold the workload denominator. Available statements can still be analyzed when unrelated definitions are
-missing, using the complete captured runtime totals. Unsupported metrics remain in the native context.
+server snapshot. Sources can declare a plan-independent native cohort for comparable runtime fragments. Analysis
+groups only the same exact query reference and declared cohort within one source interval; native execution
+outcomes, replica identities, contexts and generations remain separate. Without that declaration, exact plan
+references and all native qualifiers remain part of the grouping. Shared code never removes provider qualifiers
+to infer comparability. Every input measurement retains its original identity and references.
+
+Plans within a declared cohort retain execution-weighted costs and their own bounds. Missing extrema, CPU or
+compiled context remain unknown; fragment standard deviations are not pooled without sufficient statistics.
+Recorded variation can justify investigating inputs, estimates, waits and resource demand. It does not prove
+parameter sniffing, current plan use, overlapping plan lifetimes or a safe plan to force. Unobserved forcing status
+is unknown rather than false. Waits join only the exact plan population with positive runtime in that cohort.
+Missing runtime rows withhold the workload denominator. Available statements can still be analyzed when unrelated
+definitions are missing, using the complete captured runtime totals. Unsupported metrics remain in the native context.
 Known monitoring and engine-internal statements are excluded from application totals as well as application
 recommendations. Unresolved definitions keep their known runtime in the conservative denominator.
 
@@ -85,8 +95,9 @@ joins and a declaration that the source measures that class. Partial captures ca
 Aggregate waits do not identify which executions were slow or rule out parameter-sensitive behavior.
 
 This consumer does not combine captures, estimate database health from absent measurements or expose a warehouse
-connection in the desktop app. Missing current metadata, schema and settings prevent executable fix SQL; the
-finding's explanation and verification remain available. Analysis provenance identifies archived telemetry explicitly.
+connection in the desktop app. Missing current metadata, schema and settings prevent executable fix SQL in both
+findings and nested plan insights, after the normal analysis pipeline has annotated the plans. The explanation,
+verification and original native evidence remain available. Analysis provenance identifies archived telemetry explicitly.
 
 `EvidenceReadBudget` bounds rows, queries, proof bytes and caller wait. Its per-response and total byte limits cover
 complete native query response bodies, including metadata and completion frames; HTTP headers, TLS and
@@ -145,6 +156,8 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis task-space --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis runtime-distributions --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis compilation --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis cached-plans --json
 ```
@@ -206,6 +219,13 @@ own native statement identity, observation clock, source, reset qualification an
 bounds and counts remain exact; an approximate percentile is not an individual execution time. Separate source
 outcomes remain visible when a summary can be read but its histogram cannot. This mode does not construct a
 synthetic workload, attach separately captured SQL or establish parameter-sensitive plan reuse.
+
+`compilation` explains a database-target `query-compilation` capture through the same pure view used by scans,
+the Health panel and MCP output. Exact counts and separate average, last and maximum compile-memory measurements
+retain the complete native query identity and its lifetime. Collector read bounds do not replace native compilation
+clocks. These records do not establish a current compiler, a memory owner, the reason for recompilation or a
+selected-window compilation rate. Partial, unavailable and complete-empty evidence stay distinct; an empty
+per-query selection cannot erase separately collected database-wide compilation totals.
 
 `task-space` explains database-target task allocation/deallocation captures from `operational-samples`. It retains
 exact page counters, native task tuples, request-check clocks and source coverage. The same pure view serves
@@ -781,7 +801,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **19**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **20**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 ## Recovery and activation

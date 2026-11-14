@@ -28,6 +28,7 @@ pub(crate) async fn collect(
     snapshot: &mut Snapshot,
 ) {
     let mut coverage = Coverage::default();
+    snapshot.operations.query_compilation = None;
     if let Some(workload) =
         snapshot.workload.as_mut().filter(|workload| workload.kind() == Some(culprit_core::WorkloadKind::QueryStore))
     {
@@ -39,8 +40,9 @@ pub(crate) async fn collect(
             &mut coverage,
         )
         .await;
+        snapshot.operations.query_compilation = compiles.snapshot;
         culprit_core::signals::fill_row_bytes(&mut workload.queries);
-        snapshot.pressure.get_or_insert_with(Pressure::default).signals.extend(compiles);
+        snapshot.pressure.get_or_insert_with(Pressure::default).signals.extend(compiles.signals);
     }
     if probe.can_read_dmvs() {
         crate::index_operations::collect(pool.clone(), probe, snapshot).await;
@@ -122,6 +124,12 @@ pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -
     ]
 }
 
+#[derive(Default)]
+struct CompilationRead {
+    signals: Vec<Signal>,
+    snapshot: Option<culprit_core::telemetry::CompilationSnapshot>,
+}
+
 /// Compilation lifetimes stay independent of runtime sampling and publish only after their own confirmed shutdown.
 async fn collect_query_compilations<R: NativeRead>(
     mut reader: Reader<R>,
@@ -129,14 +137,15 @@ async fn collect_query_compilations<R: NativeRead>(
     queries: &mut [culprit_core::QueryStat],
     query_identities: &HashMap<String, NativeQueryIdentity>,
     coverage: &mut Coverage,
-) -> Vec<Signal> {
+) -> CompilationRead {
+    let observed_from = chrono::Utc::now().to_rfc3339();
     clear_compilations(queries);
     let ids: Vec<String> = queries.iter().map(|query| query.id.clone()).collect();
     let compilations = match reader.compilations(&ids).await {
         Err(error) if crate::read::stops_remaining_reads(&error) => {
             let _ = reader.close().await;
             coverage.source_failed(&sources::QUERY_COMPILATION, &error);
-            return vec![];
+            return CompilationRead::default();
         }
         result => result,
     };
@@ -144,10 +153,13 @@ async fn collect_query_compilations<R: NativeRead>(
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
         coverage.source_failed(&sources::QUERY_COMPILATION, &error);
-        return vec![];
+        return CompilationRead::default();
     }
-    let complete = coverage
-        .read(&sources::QUERY_COMPILATION, compilations)
+    let observed_until = chrono::Utc::now().to_rfc3339();
+    let compilations = coverage.read(&sources::QUERY_COMPILATION, compilations);
+    let captured = compilations.as_ref().map(|rows| compilation_snapshot(rows, observed_from, observed_until));
+    let snapshot = captured.and_then(|result| coverage.read(&sources::QUERY_COMPILATION, result));
+    let complete = compilations
         .is_none_or(|compilations| attach_compilations(queries, compilations, query_identities, window_minutes));
     let signals = coverage.read(&sources::QUERY_COMPILATION, database).unwrap_or_default();
     if !complete {
@@ -156,7 +168,24 @@ async fn collect_query_compilations<R: NativeRead>(
             culprit_core::message!("provider.mssql.compilation.identity_unverified"),
         );
     }
-    signals
+    CompilationRead { signals, snapshot }
+}
+
+fn compilation_snapshot(
+    compilations: &[Compilation],
+    observed_from: String,
+    observed_until: String,
+) -> culprit_core::Result<culprit_core::telemetry::CompilationSnapshot> {
+    let snapshot = culprit_core::telemetry::CompilationSnapshot {
+        source: sources::QUERY_COMPILATION.name.into(),
+        observed_from,
+        observed_until,
+        observations: compilations.iter().map(Compilation::record).collect::<culprit_core::Result<_>>()?,
+    };
+    if !snapshot.is_valid() {
+        return Err(crate::read::invalid_data());
+    }
+    Ok(snapshot)
 }
 
 /// Compilation history keeps its own lifetime even when runtime costs are unavailable.
@@ -381,7 +410,8 @@ mod tests {
                     .await;
             if shutdown == culprit_core::telemetry::SourceShutdown::Unconfirmed {
                 assert!(queries[0].costs.is_none(), "unsettled native work cannot publish fresh per-query evidence");
-                assert!(signals.is_empty());
+                assert!(signals.signals.is_empty());
+                assert!(signals.snapshot.is_none());
                 assert!(
                     coverage.outcomes().iter().all(|outcome| outcome.state == culprit_core::SourceState::Unavailable)
                 );
@@ -389,7 +419,10 @@ mod tests {
                 let costs = queries[0].costs.as_ref().unwrap();
                 assert!(costs.failed.is_none() && costs.aborted.is_none());
                 assert_eq!(costs.compile_history.as_ref().unwrap().memory.unwrap().last_kb, Some(8192.0));
-                assert_eq!(signals.len(), 2);
+                assert_eq!(signals.signals.len(), 2);
+                let captured = signals.snapshot.as_ref().unwrap();
+                assert!(captured.is_valid());
+                assert_eq!(captured.observations.len(), 1);
             }
         }
     }

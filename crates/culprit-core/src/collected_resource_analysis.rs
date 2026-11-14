@@ -47,3 +47,10 @@ pub struct CollectedRuntimeDistributionAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: RuntimeDistributionReport,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedCompilationAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::CompilationReport,
+}
