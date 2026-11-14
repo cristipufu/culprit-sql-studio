@@ -12,6 +12,7 @@ async fn activity_readback_preserves_exact_originals_unknowns_empty_populations_
                 &fixture.range,
                 &[EvidenceFamily::ActivityObservations],
                 EvidenceReadBudget { page_rows: 1, ..Default::default() },
+                None,
             )
             .await
             .unwrap();
@@ -37,6 +38,7 @@ async fn activity_readback_preserves_exact_originals_unknowns_empty_populations_
                         &fixture.range,
                         &[EvidenceFamily::ActivityObservations],
                         EvidenceReadBudget::default(),
+                        None,
                     )
                     .await
                     .unwrap_err();

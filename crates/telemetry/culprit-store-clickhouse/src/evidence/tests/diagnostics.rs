@@ -13,7 +13,7 @@ async fn diagnostic_revisions_keep_private_targets_out_of_warehouse_rows_and_res
         fixture.replies(vec![fixture.rows.clone()]);
         let captured = fixture
             .reader
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
             .await
             .unwrap();
         test_support::assert_diagnostic_capture(&captured, &source, &records);
@@ -26,7 +26,7 @@ async fn diagnostic_revisions_keep_private_targets_out_of_warehouse_rows_and_res
         fixture.replies(vec![vec![injected]]);
         let error = fixture
             .reader
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
             .await
             .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));

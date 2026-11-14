@@ -1,6 +1,6 @@
 //! Diagnostic recovery retains the entire working set and exact original receipt references, not one latest episode.
 use super::{
-    evidence::{RangeManifest, RowReceipt, range_id_for},
+    evidence::{RangeManifest, range_id_for},
     recovery::{self, CommittedRange, RecoveryRecords, RecoveryStore},
 };
 use culprit_core::{Result, telemetry::*};
@@ -461,13 +461,7 @@ async fn read_rows(
         let mut records = RecoveryRecords::open(store, batch).await?;
         let mut ordinal = 0;
         while let Some(row) = records.next().await? {
-            if row.capture != manifest.capture
-                || !row.record.is_valid()
-                || ExportedRecord::new(&manifest.source, &manifest.capture, row.record.clone())? != row
-                || batch.rows.get(ordinal) != Some(&RowReceipt::from_export(&row)?)
-            {
-                return Err(invalid());
-            }
+            batch.validate_row(&manifest.source, &manifest.capture, ordinal + 1, &row)?;
             output.push(row);
             ordinal += 1;
         }

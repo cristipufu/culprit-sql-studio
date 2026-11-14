@@ -85,7 +85,7 @@ fn plan_from_retained(read: retained::Read) -> Result<Plan> {
         ) => return Err(no_matching_plan()),
         crate::query_store::payload::Payload::Unavailable(_) => return Err(not_kept()),
     };
-    let mut plan = plan_xml::parse_statement(&xml, row.context.query_hash.as_deref())?;
+    let mut plan = plan_xml::parse_cached_statement(&xml, &row.context, None, None)?;
     if plan.kind != PlanKind::Actual {
         return Err(not_kept());
     }
@@ -95,7 +95,7 @@ fn plan_from_retained(read: retained::Read) -> Result<Plan> {
 }
 
 // Lightweight profiling keeps row counts for past runs, not time. Withdraw its placeholder zeros in both models.
-fn clear_unrecorded_times(plan: &mut Plan) {
+pub(crate) fn clear_unrecorded_times(plan: &mut Plan) {
     let facts = plan.facts_mut();
     if facts.elapsed_ms == Some(0.0) {
         facts.elapsed_ms = None;

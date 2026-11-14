@@ -11,6 +11,7 @@ async fn activity_readback_preserves_exact_originals_unknowns_empty_populations_
                 &fixture.range,
                 &[EvidenceFamily::ActivityObservations],
                 EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
             )
             .await
             .unwrap();
@@ -32,7 +33,7 @@ async fn activity_readback_preserves_exact_originals_unknowns_empty_populations_
                 fixture.replies(vec![vec![changed]]);
                 let error = fixture
                     .reader()
-                    .read_capture(&fixture.range, &[EvidenceFamily::ActivityObservations], budget())
+                    .read_capture(&fixture.range, &[EvidenceFamily::ActivityObservations], budget(), None)
                     .await
                     .unwrap_err();
                 assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));

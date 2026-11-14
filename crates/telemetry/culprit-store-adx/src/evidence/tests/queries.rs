@@ -12,7 +12,7 @@ async fn native_variant_metadata_round_trips_without_requiring_or_synthesizing_p
     let (source, records) = test_support::query_variant_evidence();
     let fixture = Fixture::new(source.clone(), records.clone()).await;
     fixture.reply_families(FAMILIES, 250);
-    let captured = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+    let captured = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap();
     assert!(captured.is_read_complete(), "{:?}", captured.gaps());
     assert_eq!(captured.records().len(), records.len());
     for expected in &records {
@@ -50,7 +50,7 @@ async fn changed_variant_parent_dispatcher_or_incarnation_fails_the_original_pro
         fixture.replies(vec![rows]);
         let error = fixture
             .reader()
-            .read_capture(&fixture.range, &[EvidenceFamily::QueryDefinitions], budget())
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryDefinitions], budget(), None)
             .await
             .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -69,8 +69,11 @@ async fn temporary_space_average_or_page_unit_tampering_fails_the_original_commi
         *metrics.pointer_mut(pointer).unwrap() = replacement;
         rows[0][column] = json!(serde_json::to_string(&metrics).unwrap());
         fixture.replies(vec![rows]);
-        let error =
-            fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::QueryRuntime], budget()).await.unwrap_err();
+        let error = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryRuntime], budget(), None)
+            .await
+            .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
     }
 }
@@ -82,7 +85,7 @@ async fn query_reads_preserve_exact_references_outcomes_metrics_scope_and_redact
     fixture.reply_families(FAMILIES, 1);
     let result = fixture
         .reader()
-        .read_capture(&fixture.range, FAMILIES, EvidenceReadBudget { page_rows: 1, ..budget() })
+        .read_capture(&fixture.range, FAMILIES, EvidenceReadBudget { page_rows: 1, ..budget() }, None)
         .await
         .unwrap();
     assert!(result.is_read_complete());
@@ -137,7 +140,7 @@ async fn missing_query_definition_is_not_replaced_by_identical_sql_from_another_
         fixture.rows_for(EvidenceFamily::QueryRuntime),
         fixture.rows_for(EvidenceFamily::QueryWaits),
     ]);
-    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap();
     assert!(!result.is_read_complete());
     assert_eq!(result.gaps().len(), 1);
     assert_eq!(result.gaps()[0].stream, Some(TelemetryStream::QueryDefinitions));
@@ -171,7 +174,7 @@ async fn changed_plan_parent_identity_or_source_scope_fails_against_the_committe
             _ => json!(digest(b"another-native-scope-or-parent")),
         };
         fixture.replies(vec![fixture.rows_for(EvidenceFamily::QueryDefinitions), plans]);
-        let error = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap_err();
+        let error = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
     }
 }
@@ -191,7 +194,7 @@ async fn conflicting_sql_with_the_same_definition_id_and_native_hash_is_rejected
     conflict[column] = json!(serde_json::to_string(&payloads).unwrap());
     queries.push(conflict);
     fixture.replies(vec![queries]);
-    let error = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap_err();
+    let error = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
 }
 
@@ -219,7 +222,7 @@ async fn truncated_sql_and_plan_payloads_remain_explicit_recovery_gaps_with_refe
             .record_id;
         let fixture = Fixture::new(source, records).await;
         fixture.reply_families(FAMILIES, 250);
-        let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+        let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap();
         assert!(!result.is_read_complete());
         assert_eq!(result.gaps().len(), 1);
         assert_eq!(result.gaps()[0].stream, Some(stream));
@@ -240,7 +243,7 @@ async fn native_unavailable_payloads_are_preserved_as_source_facts_without_inven
     plan.plan = DefinitionPayload::Unavailable { reason: PayloadUnavailable::Encrypted };
     let fixture = Fixture::new(source, records).await;
     fixture.reply_families(FAMILIES, 250);
-    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap();
     assert!(result.is_read_complete());
     for record in result.records() {
         match &record.row().record {
@@ -264,7 +267,7 @@ async fn verified_timestamp_rounding_never_becomes_an_exact_runtime_measurement(
     runtime.first_execution_at = Some("2020-01-01T06:00:00.123456001Z".into());
     let fixture = Fixture::new(source, records).await;
     fixture.reply_families(FAMILIES, 250);
-    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap();
     assert!(!result.is_read_complete());
     assert_eq!(result.gaps().len(), 1);
     assert_eq!(result.gaps()[0].stream, Some(TelemetryStream::QueryRuntime));
@@ -276,11 +279,14 @@ async fn all_declared_families_are_admitted_and_absent_families_remain_explicit(
     let (source, records) = test_support::query_evidence();
     let fixture = Fixture::new(source, records).await;
     fixture.reply_families(EvidenceFamily::ALL, 250);
-    let result = fixture.reader().read_capture(&fixture.range, EvidenceFamily::ALL, budget()).await.unwrap();
+    let result = fixture.reader().read_capture(&fixture.range, EvidenceFamily::ALL, budget(), None).await.unwrap();
     assert_eq!(result.families(), EvidenceFamily::ALL);
     assert_eq!(result.records().len(), 6);
-    let absent =
-        [TelemetryStream::ResourceSamples, TelemetryStream::OperationalSamples, TelemetryStream::ActivityObservations];
+    let absent = EvidenceFamily::ALL
+        .iter()
+        .map(|family| family.stream())
+        .filter(|stream| !fixture.range.manifest().batches.iter().any(|batch| batch.stream == *stream))
+        .collect::<Vec<_>>();
     assert_eq!(result.gaps().len(), absent.len());
     assert!(absent.into_iter().all(|stream| result.gaps().iter().any(|gap| gap.stream == Some(stream))));
     assert!(result.gaps().iter().all(|gap| gap.reason == EvidenceGapReason::FamilyNotCaptured));

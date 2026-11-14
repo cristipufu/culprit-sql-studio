@@ -10,6 +10,7 @@ use serde_json::json;
 mod activity;
 mod cached_runtime;
 mod diagnostics;
+mod object_definitions;
 mod observations;
 mod queries;
 mod waits;
@@ -83,8 +84,11 @@ async fn read_only_pool_evidence_preserves_unknowns_and_never_rereads_native_pay
     let (source, record) = test_support::pool_history();
     let fixture = Fixture::new(source, vec![record]).await;
     fixture.replies(vec![fixture.rows.clone()]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(result.is_read_complete());
     assert_eq!(result.source(), &fixture.range.manifest().source);
     assert_eq!(result.capture(), &fixture.range.manifest().capture);
@@ -115,6 +119,7 @@ async fn native_counter_pages_keep_exact_values_reset_epochs_and_nullable_field_
             &fixture.range,
             &[EvidenceFamily::OperationalSamples],
             EvidenceReadBudget { page_rows: 1, ..budget() },
+            None,
         )
         .await
         .unwrap();
@@ -147,8 +152,11 @@ async fn complete_readback_preserves_partial_and_unavailable_native_source_cover
     let expected_source = source.clone();
     let fixture = Fixture::new(source, records).await;
     fixture.replies(vec![fixture.rows.clone()]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(result.is_read_complete());
     assert_eq!(result.records().len(), 2);
     assert_eq!(result.source(), &expected_source);
@@ -164,8 +172,11 @@ async fn shared_operational_reads_reconstruct_counter_sets_scalars_and_unknown_t
     let (source, records) = test_support::shared_operational();
     let fixture = Fixture::new(source, records).await;
     fixture.replies(vec![fixture.rows.clone()]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(result.is_read_complete());
     assert_eq!(result.records().len(), 4);
     let mut kinds = std::collections::BTreeSet::new();
@@ -218,7 +229,7 @@ async fn corrupt_operational_shapes_or_counter_units_cannot_hide_behind_the_nati
         fixture.replies(vec![rows]);
         let error = fixture
             .reader()
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
             .await
             .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -230,8 +241,11 @@ async fn conflicting_rows_or_completion_heads_are_rejected_but_identical_retries
     let (source, record) = test_support::pool_history();
     let fixture = Fixture::new(source, vec![record]).await;
     fixture.replies(vec![vec![fixture.rows[0].clone(), fixture.rows[0].clone()]]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(result.is_read_complete());
     assert_eq!(result.records().len(), 1);
     let mut wrong = fixture.rows[0].clone();
@@ -239,15 +253,24 @@ async fn conflicting_rows_or_completion_heads_are_rejected_but_identical_retries
     let column = schema.columns().iter().position(|column| column.name == "Metrics").unwrap();
     wrong[column] = json!("[]");
     fixture.replies(vec![vec![fixture.rows[0].clone(), wrong]]);
-    let error =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget()).await.unwrap_err();
+    let error = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
+        .await
+        .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
     let mut wrong = fixture.publication.clone();
     let sequence =
         fixture.catalog.publication().columns().iter().position(|column| column.name == "CaptureSequence").unwrap();
     wrong[sequence] = json!(99);
     fixture.query.replies.lock().unwrap().push_back(Reply::Rows(vec![fixture.publication.clone(), wrong]));
-    assert!(fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget()).await.is_err());
+    assert!(
+        fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -255,19 +278,25 @@ async fn missing_rows_proofs_and_publication_are_explicit_unavailability() {
     let (source, record) = test_support::pool_history();
     let fixture = Fixture::new(source, vec![record]).await;
     fixture.query.replies.lock().unwrap().push_back(Reply::Rows(vec![]));
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(!result.is_read_complete());
     assert_eq!(result.gaps()[0].reason, EvidenceGapReason::NotPublished);
     fixture.replies(vec![vec![]]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
+        .await
+        .unwrap();
     assert_eq!(result.gaps()[0].reason, EvidenceGapReason::MissingRows);
     fixture.replies(vec![]);
     let empty_proofs = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
     let result = super::new(fixture.query.clone(), empty_proofs)
         .unwrap()
-        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget())
+        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
         .await
         .unwrap();
     assert_eq!(result.gaps()[0].reason, EvidenceGapReason::ProjectionProofUnavailable);
@@ -280,8 +309,11 @@ async fn native_nanosecond_precision_cannot_be_reconstructed_from_a_verified_rou
     sample.at = "2020-01-01T06:00:15.000000001Z".into();
     let fixture = Fixture::new(source, vec![record]).await;
     fixture.replies(vec![fixture.rows.clone()]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::ResourceSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(!result.is_read_complete());
     assert!(result.records().is_empty());
     assert_eq!(result.gaps()[0].reason, EvidenceGapReason::NativeRepresentationRequired);
@@ -297,6 +329,7 @@ async fn row_budgets_are_checked_before_querying_and_query_failures_never_become
             &fixture.range,
             &[EvidenceFamily::OperationalSamples],
             EvidenceReadBudget { max_rows: 1, ..budget() },
+            None,
         )
         .await
         .unwrap_err();
@@ -304,7 +337,11 @@ async fn row_budgets_are_checked_before_querying_and_query_failures_never_become
     assert!(fixture.query.requests.lock().unwrap().is_empty());
     fixture.query.replies.lock().unwrap().push_back(Reply::Failure);
     assert!(
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget()).await.is_err()
+        fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
+            .await
+            .is_err()
     );
 }
 
@@ -331,8 +368,11 @@ async fn verified_large_details_require_recovery_instead_of_silently_dropping_co
         .collect();
     let fixture = Fixture::new(source, records).await;
     fixture.replies(vec![fixture.rows.clone()]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(!result.is_read_complete());
     assert!(result.records().is_empty());
     assert_eq!(result.gaps()[0].reason, EvidenceGapReason::DetailInRecovery);
@@ -358,6 +398,7 @@ async fn a_stalled_read_has_a_whole_operation_deadline_and_cannot_claim_empty_co
             &fixture.range,
             &[EvidenceFamily::ResourceSamples],
             EvidenceReadBudget { timeout_ms: 10, ..budget() },
+            None,
         )
         .await
         .unwrap_err();
@@ -379,6 +420,7 @@ async fn publication_audit_and_data_queries_share_one_cumulative_wire_budget() {
             &fixture.range,
             &[EvidenceFamily::ResourceSamples],
             EvidenceReadBudget { page_bytes: limit as u32, max_bytes: limit as u64, ..budget() },
+            None,
         )
         .await
         .unwrap();
@@ -406,6 +448,7 @@ async fn an_oversized_decoded_response_is_rejected_even_if_a_transport_ignores_i
             &fixture.range,
             &[EvidenceFamily::ResourceSamples],
             EvidenceReadBudget { page_bytes: 1024 * 1024, max_bytes: 1024 * 1024, ..budget() },
+            None,
         )
         .await
         .unwrap_err();

@@ -7,7 +7,7 @@ async fn authenticated_wait_metadata_preserves_empty_unknown_ignored_and_unavail
     for (source, records) in test_support::query_wait_evidence_cases() {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         fixture.reply_families(FAMILIES, 250);
-        let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+        let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap();
         assert!(result.is_read_complete(), "{:?}", result.gaps());
         assert_eq!(result.source(), &source);
         let expected =
@@ -36,7 +36,7 @@ async fn a_missing_wait_row_is_a_read_gap_even_with_an_authenticated_enabled_dic
     history.waits = Some(test_support::wait_semantics(WaitCaptureState::Enabled));
     let fixture = Fixture::new(source.clone(), records).await;
     fixture.replies(vec![vec![]]);
-    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+    let result = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap();
     assert!(!result.is_read_complete());
     assert_eq!(result.source(), &source);
     assert!(result.records().is_empty());
@@ -69,7 +69,7 @@ async fn a_changed_published_dictionary_cannot_supply_another_meaning_for_the_co
         }
         fixture.publication[column] = json!(serde_json::to_string(&description).unwrap());
         fixture.reply_families(FAMILIES, 250);
-        let error = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap_err();
+        let error = fixture.reader().read_capture(&fixture.range, FAMILIES, budget(), None).await.unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
     }
 }

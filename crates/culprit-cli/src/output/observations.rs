@@ -1,6 +1,6 @@
 use culprit_core::{
-    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, RuntimeDistributionReport, SourceOutcome,
-    SourceState, StatementWorkReport, TaskSpaceReport, format, t,
+    CachedPlanEntry, CachedPlanReport, MemoryParticipantsReport, PageWaitReport, RetainedFailureReport,
+    RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport, TaskSpaceReport, format, t,
 };
 
 struct Summary<'a> {
@@ -13,6 +13,46 @@ struct Summary<'a> {
 enum SourceQualification<'a> {
     Single { state: Option<SourceState>, reason: Option<&'a str> },
     Multiple(&'a [SourceOutcome]),
+}
+
+pub(crate) fn cached_plans(report: &CachedPlanReport) -> String {
+    let titles = report
+        .entries
+        .iter()
+        .take(super::BRIEF_FINDING_LIMIT)
+        .map(|entry| {
+            t!(
+                "evidence.cli.cached_plan_entry",
+                definition = entry.definition_key.as_str(),
+                observations = cached_plan_observations(entry)
+            )
+        })
+        .collect::<Vec<_>>();
+    render(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Multiple(&report.sources),
+            limitations: &report.limitations,
+        },
+        titles.iter().map(String::as_str),
+    )
+}
+
+fn cached_plan_observations(entry: &CachedPlanEntry) -> String {
+    let Some(plan) = &entry.plan else {
+        return entry
+            .limitations
+            .first()
+            .map(|limitation| limitation.explanation.clone())
+            .unwrap_or_else(|| t!("evidence.cli.cached_plan_unavailable"));
+    };
+    let titles = plan
+        .insights
+        .as_ref()
+        .map(|insights| insights.items.iter().map(|item| item.title.clone()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if titles.is_empty() { t!("evidence.cli.cached_plan_unremarkable") } else { format::list(&titles) }
 }
 
 pub(crate) fn retained(report: &RetainedFailureReport) -> String {
@@ -170,6 +210,40 @@ fn append_native_sources(text: &mut String, sources: &[SourceOutcome]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_plan_output_bounds_entries_and_keeps_unavailable_plan_and_source_reasons() {
+        let report = CachedPlanReport {
+            title: "Captured plan evidence".into(),
+            summary: "Retained definitions inspected: 8.".into(),
+            sources: vec![SourceOutcome {
+                source: "native-definitions".into(),
+                state: SourceState::Partial,
+                reason: Some("Original native visibility was incomplete.".into()),
+                reason_message: None,
+            }],
+            limitations: vec!["Retained evidence has its own lifetime.".into()],
+            entries: (0..8)
+                .map(|id| CachedPlanEntry {
+                    source: "native-definitions".into(),
+                    definition_key: format!("definition-{id}"),
+                    definition_version: "version".into(),
+                    identity: None,
+                    plan: None,
+                    limitations: vec![culprit_core::CachedPlanLimitation {
+                        reason: culprit_core::CachedPlanLimit::UnusablePlan,
+                        explanation: "No unambiguous native statement was retained.".into(),
+                    }],
+                })
+                .collect(),
+        };
+        let text = cached_plans(&report);
+        assert_eq!(text.matches('•').count(), super::super::BRIEF_FINDING_LIMIT);
+        assert!(text.contains("Original native visibility was incomplete."));
+        assert!(text.contains("No unambiguous native statement was retained."));
+        assert!(text.contains("Retained evidence has its own lifetime."));
+        assert!(!text.contains("definition-7"));
+    }
 
     #[test]
     fn distribution_output_keeps_independent_source_coverage_and_bounds_details() {

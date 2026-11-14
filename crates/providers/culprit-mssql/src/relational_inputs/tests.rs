@@ -238,7 +238,16 @@ fn annotation_requires_the_selected_statement_hash_and_exact_native_parameter_sp
     assert_eq!(parsed_input(&case, &context, &parameters, "SELECT * FROM @rows"), RelationalInputKind::Unknown);
     let mut changed = context.clone();
     changed.query_hash = Some("0x0000000000000001".into());
-    assert_eq!(parsed_input(VARIABLE_PLAN, &changed, &parameters, "SELECT * FROM @rows"), RelationalInputKind::Unknown);
+    assert!(
+        crate::plan_xml::parse_cached_statement(
+            VARIABLE_PLAN,
+            &changed,
+            Some(&parameters),
+            Some("SELECT * FROM @rows")
+        )
+        .is_err(),
+        "a mismatched native hash cannot substitute another statement's plan"
+    );
 }
 
 #[test]

@@ -97,7 +97,7 @@ async fn empty_capture(
         Arc::new(EmptyStore { catalog, published }),
         Arc::new(ProjectionIndexes::new(Arc::new(test_support::Blobs::default()))),
     );
-    let result = reader.read_capture(&range, families, EvidenceReadBudget::default()).await.unwrap();
+    let result = reader.read_capture(&range, families, EvidenceReadBudget::default(), None).await.unwrap();
     assert_eq!(result.source(), &source);
     assert!(result.records().is_empty());
     assert_eq!(result.metrics().pages, 0);

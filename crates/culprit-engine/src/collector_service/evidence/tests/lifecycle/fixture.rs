@@ -22,12 +22,17 @@ use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,
     path::Path,
+    pin::Pin,
     sync::{
         Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
+    task::{Context, Poll},
 };
-use tokio::io::AsyncReadExt;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, ReadBuf},
+    sync::Notify,
+};
 
 #[derive(Default)]
 pub(super) struct Objects {
@@ -36,7 +41,10 @@ pub(super) struct Objects {
     readonly: AtomicBool,
     pub(super) reads: Mutex<Vec<String>>,
     pub(super) stall: AtomicBool,
-    pub(super) active: AtomicUsize,
+    pub(super) allow_payloads: AtomicBool,
+    pub(super) stall_payload_body: AtomicBool,
+    pub(super) payload_started: Arc<Notify>,
+    pub(super) active: Arc<AtomicUsize>,
 }
 impl Objects {
     pub(super) fn snapshot(&self) -> BTreeMap<String, (Vec<u8>, String)> {
@@ -60,12 +68,37 @@ impl Drop for PendingRead<'_> {
         self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
+struct StalledPayload {
+    active: Arc<AtomicUsize>,
+    started: Arc<Notify>,
+    reading: bool,
+}
+impl AsyncRead for StalledPayload {
+    fn poll_read(mut self: Pin<&mut Self>, _: &mut Context<'_>, _: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        if !self.reading {
+            self.reading = true;
+            self.active.fetch_add(1, Ordering::SeqCst);
+            self.started.notify_one();
+        }
+        Poll::Pending
+    }
+}
+impl Drop for StalledPayload {
+    fn drop(&mut self) {
+        if self.reading {
+            self.active.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
 #[async_trait]
 impl ObjectTransport for Objects {
     async fn get(&self, key: &str) -> Result<Option<ObjectRead>> {
         self.reads.lock().unwrap().push(key.into());
         if self.readonly.load(Ordering::SeqCst) {
-            assert!(!key.starts_with("payloads/"), "investigation must not reread raw native payloads");
+            assert!(
+                !key.starts_with("payloads/") || self.allow_payloads.load(Ordering::SeqCst),
+                "investigation must not reread raw native payloads without opt-in"
+            );
         }
         if self.stall.load(Ordering::SeqCst) {
             self.active.fetch_add(1, Ordering::SeqCst);
@@ -75,7 +108,15 @@ impl ObjectTransport for Objects {
         Ok(self.entries.lock().unwrap().get(key).map(|(bytes, etag)| ObjectRead {
             etag: etag.clone(),
             bytes: bytes.len() as u64,
-            body: Box::pin(std::io::Cursor::new(bytes.clone())),
+            body: if key.starts_with("payloads/") && self.stall_payload_body.load(Ordering::SeqCst) {
+                Box::pin(StalledPayload {
+                    active: self.active.clone(),
+                    started: self.payload_started.clone(),
+                    reading: false,
+                })
+            } else {
+                Box::pin(std::io::Cursor::new(bytes.clone()))
+            },
         }))
     }
     async fn put(&self, key: &str, bytes: Vec<u8>, condition: WriteCondition<'_>) -> Result<ObjectWrite> {

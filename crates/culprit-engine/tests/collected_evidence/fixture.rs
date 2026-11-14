@@ -5,7 +5,7 @@ use culprit_collector::{
         ProjectionCatalog, RowProjection,
         catalog::PhysicalCatalog,
         encoding::BatchEncoder,
-        evidence::{EvidenceCapture, EvidenceFamily, EvidenceReadBudget, EvidenceReader},
+        evidence::{EvidenceCapture, EvidenceFamily, EvidenceReadBudget, EvidenceReader, RecoveryPayloadBudget},
         indexes::ProjectionIndexes,
         publication,
         read_store::{AnalyticalReadPage, AnalyticalReadStore},
@@ -17,7 +17,7 @@ use culprit_core::{Result, telemetry::*};
 use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::Ordering},
 };
 
 struct Store {
@@ -60,6 +60,7 @@ pub(super) struct Fixture {
     pub range: CommittedRange,
     store: Arc<Store>,
     reader: EvidenceReader,
+    recovery: Arc<Recovery>,
     _scratch: tempfile::TempDir,
 }
 impl Fixture {
@@ -95,7 +96,7 @@ impl Fixture {
         let store = Arc::new(Store { catalog, rows: Mutex::new(rows), publication: Mutex::new(Some(publication)) });
         let reader = EvidenceReader::new(store.clone(), indexes);
         *recovery.fault.lock().unwrap() = Fault::Stall;
-        Self { range, store, reader, _scratch: scratch }
+        Self { range, store, reader, recovery, _scratch: scratch }
     }
     pub fn remove_family(&self, stream: TelemetryStream) {
         let batch = self.range.manifest().batches.iter().find(|batch| batch.stream == stream).unwrap();
@@ -121,7 +122,26 @@ impl Fixture {
         .await
     }
     pub async fn read_families(&self, families: &[EvidenceFamily]) -> EvidenceCapture {
-        self.reader.read_capture(&self.range, families, EvidenceReadBudget::default()).await.unwrap()
+        self.reader.read_capture(&self.range, families, EvidenceReadBudget::default(), None).await.unwrap()
+    }
+    pub fn recovery_object_reads(&self) -> usize {
+        self.recovery.object_reads.load(Ordering::SeqCst)
+    }
+    pub async fn read_families_with_recovery(
+        &self,
+        families: &[EvidenceFamily],
+        recovery_budget: RecoveryPayloadBudget,
+    ) -> EvidenceCapture {
+        *self.recovery.fault.lock().unwrap() = Fault::None;
+        self.reader
+            .read_capture(
+                &self.range,
+                families,
+                EvidenceReadBudget { recovery_payloads: Some(recovery_budget), ..Default::default() },
+                Some(self.recovery.as_ref()),
+            )
+            .await
+            .unwrap()
     }
 }
 

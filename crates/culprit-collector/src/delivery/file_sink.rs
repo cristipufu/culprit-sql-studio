@@ -104,10 +104,9 @@ impl TelemetrySink for FileTelemetrySink {
             .ok_or_else(integrity)?;
         let mut records = super::recovery::RecoveryRecords::open(self.recovery.as_ref(), batch).await?;
         while let Some(row) = records.next().await? {
-            if row.capture != range.manifest().capture || row.batch_id != batch.batch_id {
-                return Err(integrity());
-            }
-            receipts.push(RowReceipt::from_export(&row)?);
+            let receipt =
+                batch.validate_row(&range.manifest().source, &range.manifest().capture, receipts.len() + 1, &row)?;
+            receipts.push(receipt);
             if receipts.len() > MAX_RANGE_RECORDS {
                 return Err(DeliveryProblem::Capacity.error());
             }

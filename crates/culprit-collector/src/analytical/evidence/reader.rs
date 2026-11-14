@@ -9,7 +9,10 @@ use crate::{
         publication,
         read_store::{AnalyticalReadPage, AnalyticalReadStore},
     },
-    delivery::{evidence::BatchManifest, recovery::CommittedRange},
+    delivery::{
+        evidence::BatchManifest,
+        recovery::{CommittedRange, RecoveryStore},
+    },
 };
 use culprit_core::{Result, telemetry::*};
 use serde_json::Value;
@@ -29,8 +32,16 @@ impl EvidenceReader {
         range: &CommittedRange,
         families: &[EvidenceFamily],
         budget: EvidenceReadBudget,
+        recovery: Option<&dyn RecoveryStore>,
     ) -> Result<EvidenceCapture> {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(u64::from(budget.timeout_ms));
         budget.validate()?;
+        if budget.recovery_payloads.is_some() {
+            let recovery = recovery.ok_or_else(|| DeliveryProblem::InvalidContract.error())?;
+            if recovery.id() != range.store_id() {
+                return Err(DeliveryProblem::DestinationChanged.error());
+            }
+        }
         range.manifest().validate()?;
         if families.is_empty()
             || families.len() > EvidenceFamily::ALL.len()
@@ -54,12 +65,15 @@ impl EvidenceReader {
         if rows > budget.max_rows as usize {
             return Err(capacity());
         }
-        tokio::time::timeout(
-            Duration::from_millis(u64::from(budget.timeout_ms)),
-            self.read(range, families, budget, catalog),
-        )
-        .await
-        .map_err(|_| CollectionStop::TimedOut.error())?
+        let capture = tokio::time::timeout_at(deadline, self.read(range, families, budget, catalog, recovery))
+            .await
+            .map_err(|_| CollectionStop::TimedOut.error())??;
+        // Timeout polls its inner future first. A synchronous parse/validation overrun must not return success
+        // merely because the inner future completed before the timer received another poll.
+        if tokio::time::Instant::now() >= deadline {
+            return Err(CollectionStop::TimedOut.error());
+        }
+        Ok(capture)
     }
 
     async fn read(
@@ -68,6 +82,7 @@ impl EvidenceReader {
         families: &[EvidenceFamily],
         budget: EvidenceReadBudget,
         catalog: Arc<dyn ProjectionCatalog>,
+        recovery: Option<&dyn RecoveryStore>,
     ) -> Result<EvidenceCapture> {
         let manifest = range.manifest();
         let mut capture = EvidenceCapture {
@@ -126,6 +141,10 @@ impl EvidenceReader {
             for batch in batches {
                 self.batch(range, batch, catalog.as_ref(), &mut state, &mut capture.records, &mut capture.gaps).await?;
             }
+        }
+        if let Some(budget) = budget.recovery_payloads {
+            let recovery = recovery.ok_or_else(|| DeliveryProblem::InvalidContract.error())?;
+            super::hydration::restore(range, recovery, budget, &mut capture).await?;
         }
         capture
             .records

@@ -35,7 +35,7 @@ separate consumer; this service does not add an ADX-backed desktop connection.
 Embedders can read a specifically selected committed capture through
 `culprit_collector::analytical::evidence::EvidenceReader`; the store crates expose `evidence::AdxReadStore` and
 `evidence::ClickHouseReadStore`. The reader accepts an authenticated `CommittedRange`, selected evidence families and a read budget.
-`EvidenceFamily::ALL` declares the supported families: resource samples, native activity observations, inline typed operational facts, query and
+`EvidenceFamily::ALL` declares the supported families: resource samples, native activity observations, inline typed operational facts, object, query and
 plan definitions, interval query runtime and query waits. Runtime and waits retain native identities, dimensions,
 outcomes, exact execution counters, units and query/plan references. Definitions retain native context and plan-to-query
 parents; an available SQL or plan payload is reconstructed only when the stored preview is complete and verified.
@@ -48,9 +48,19 @@ independent: a fully retrieved capture can still contain partial or unavailable 
 Reads need warehouse query access, without an ingestion identity, plus the independently configured recovery
 identity for the committed manifest and immutable projection indexes. Reopening the manifest and checking those indexes does not reread every native
 payload. Keep validation indexes for as long as these warehouse investigations are required. Missing publication,
-rows or proof indexes remain explicit gaps; conflicting content is rejected. Large recovery-only details and native
-timestamp precision absent from a warehouse projection require native recovery and cannot be reported as complete.
-The initial read API reports those requirements without downloading the raw payload or connecting to the database.
+rows or proof indexes remain explicit gaps; conflicting content is rejected. By default, incomplete 1 KiB SQL/plan
+previews, larger fact details and native representation precision absent from the warehouse remain explicit recovery
+gaps. The reader does not download native payload bodies unless `EvidenceReadBudget.recovery_payloads` is set and
+the matching recovery store is supplied. That opt-in can reconstruct only verified preview and native-representation
+gaps. It cannot repair missing warehouse rows, publication or proof indexes, nor replace unavailable native data.
+
+`RecoveryPayloadBudget` limits the complete read to 8 native objects and 64 MiB by default; accepted limits are
+1–128 objects and 1 byte–256 MiB. Each admitted object is a complete native batch, so its whole byte length counts even
+when only one row needs reconstruction. All required batches must fit before any payload body is opened; otherwise
+the read fails with a capacity error. Payload bytes, EOF, native row identities and original receipts are verified before reconstructed records
+are returned. Recovery objects and bytes are reported alongside warehouse queries, responses and proof bytes.
+The existing caller deadline and cancellation own these read-only bodies; no source connection or archive writer
+is opened.
 
 With the engine's `collector` feature, `culprit_engine::collected_evidence::analyze` feeds one verified query-history
 capture through the existing pure checks. It returns `CollectedQueryAnalysis`, with authenticated native inputs,
@@ -135,6 +145,8 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis task-space --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis runtime-distributions --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis cached-plans --json
 ```
 
 `memory-failures` selects the retained SQL Server OOM analysis; `native-failures` selects native structured
@@ -160,6 +172,28 @@ Before/after clocks distinguish a matching statement, a changed request and a wa
 Statement links require matching statement checks and trusted source context; plan links require matching native
 plans too. Unresolved context outside the database remains unowned. Equal page metadata does not establish
 continuous physical identity, a latch holder or an exact causal share.
+Verified SQL Server headers distinguish PFS, GAM, SGAM and IAM maps from heap and index pages. Their next steps
+address the observed allocation mechanism; page-I/O waits retain storage guidance. These classes do not establish
+which writer caused contention or qualify an application-database reader to inspect shared tempdb.
+
+`cached-plans` analyzes `cached-definitions` or `retained-plans` captures from `object-definitions`. It reuses the native
+plan parsers and existing plan insights. SQL Server statement selection requires one matching native hash, or one
+unambiguous statement when the hash is unavailable. Original module metadata can establish a cached TVP input;
+another capture's module header cannot supply missing historical metadata. Estimated rows, actual rows and cache
+execution counters remain separate. Yugabyte node-cache counters retain node scope and use the Yugabyte parser.
+The derived report references exact definitions and omits duplicate SQL/XML and executable change SQL. Truncated
+warehouse previews remain explicit recovery gaps; this mode does not fetch the missing native body automatically.
+Add `--with-recovery-payloads` to either `read` or `analyze` to permit bounded native recovery reads. For example:
+
+```sh
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis cached-plans --with-recovery-payloads --max-recovery-objects 2 --max-recovery-bytes 16777216
+```
+
+The optional object and byte limit flags require `--with-recovery-payloads`. Limits apply across all selected
+families and native batches in this command, independently of warehouse response and projection-proof budgets.
+Invalid limits fail before configuration or credential resolution. A recovery budget too small for the required
+batches fails the command without downloading a partial selection or presenting truncated bodies as complete.
 
 `statement-work` reads database-target `statement-counters` captures. It preserves native query identities, point
 clocks and reset qualification, and shares the scan's temporary-work explanation. Typed native metrics distinguish
@@ -747,7 +781,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **17**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **19**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 ## Recovery and activation

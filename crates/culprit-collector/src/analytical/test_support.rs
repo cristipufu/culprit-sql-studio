@@ -33,6 +33,11 @@ mod runtime_distributions;
 pub use runtime_distributions::runtime_distribution_evidence_cases;
 mod task_space;
 pub use task_space::{assert_task_space_capture, task_space_evidence_cases};
+mod object_definitions;
+pub use object_definitions::{
+    assert_object_definition_capture, object_definition_evidence_cases, object_definition_hydration_evidence,
+    object_definition_recovery_only_evidence,
+};
 mod projection;
 pub use projection::JsonProjection;
 mod native_failures;
@@ -226,7 +231,10 @@ use std::{
     collections::BTreeMap,
     path::Path,
     pin::Pin,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, ReadBuf};
@@ -263,6 +271,7 @@ pub struct Recovery {
     pub manifest: RangeManifest,
     objects: BTreeMap<String, Vec<u8>>,
     pub fault: Mutex<Fault>,
+    pub object_reads: AtomicUsize,
 }
 impl Recovery {
     pub fn make_empty(&mut self) {
@@ -328,7 +337,7 @@ impl Recovery {
             })
             .collect();
         manifest.validate().unwrap();
-        Self { manifest, objects, fault: Mutex::new(Fault::None) }
+        Self { manifest, objects, fault: Mutex::new(Fault::None), object_reads: AtomicUsize::new(0) }
     }
 }
 #[async_trait]
@@ -382,6 +391,7 @@ impl RecoveryStore for Recovery {
         unreachable!()
     }
     async fn open_object(&self, batch: &PayloadObject) -> Result<RecoveryReader> {
+        self.object_reads.fetch_add(1, Ordering::SeqCst);
         let fault = *self.fault.lock().unwrap();
         let mut bytes = self.objects.get(&batch.object).unwrap().clone();
         match fault {

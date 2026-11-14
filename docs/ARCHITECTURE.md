@@ -362,7 +362,18 @@ it in an owned native fixture. Push-only metrics/APM endpoints cannot claim this
 `culprit-collector::analytical::evidence` owns read-only capture reconstruction over injected warehouse queries and
 independent recovery proofs. It verifies publication, exact membership, normalized projections and native receipts
 before exposing typed records. Both stores share that reader; source coverage remains distinct from successful
-retrieval. Incomplete SQL/plan previews and precision absent from a store remain explicit recovery requirements.
+retrieval. Incomplete SQL/plan previews and precision absent from a store remain explicit recovery requirements
+by default. An explicit recovery-payload budget allows the same reader to verify complete native batches from
+the matching recovery store and reconstruct those gaps. Object and cumulative whole-batch byte limits are separate
+from warehouse and proof budgets; the engine owns one deadline and cancellation for the entire read. Missing
+publication, warehouse rows or projection proofs remain gaps. Native unavailable values remain unavailable.
+Read metrics retain native recovery objects and bytes in both raw captures and derived analysis contexts.
+Object definitions use that same reader, payload inventory and native-version verification as operational facts.
+The `collected_resources::cached_plans` consumer reuses point-capture validation and existing source-owned parsers;
+it has no source factory or authentication dependency. Native format availability and authenticated-source parser
+selection live in the plan dispatcher, including plain PostgreSQL-shaped Yugabyte plans. SQL Server scans and
+archive analysis share strict native statement selection and original module binding. Derived plans retain insights
+without duplicate SQL/XML or executable changes that require current schema, indexes and settings.
 
 `CollectorRuntime::evidence` composes a query-only `EvidenceService` from independent warehouse and recovery
 credentials. Its configuration has no source connection, fleet inventory, staging target or writer policy. Reading

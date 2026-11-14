@@ -11,6 +11,7 @@ async fn runtime_distributions_preserve_native_bounds_independent_clocks_and_per
                 &fixture.range,
                 &[EvidenceFamily::OperationalSamples],
                 EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
             )
             .await
             .unwrap();
@@ -31,7 +32,7 @@ async fn runtime_distributions_preserve_native_bounds_independent_clocks_and_per
                 fixture.replies(vec![vec![tampered]]);
                 let error = fixture
                     .reader()
-                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
                     .await
                     .unwrap_err();
                 assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -52,6 +53,7 @@ async fn task_space_reads_preserve_exact_counters_context_checks_and_empty_sourc
                 &fixture.range,
                 &[EvidenceFamily::OperationalSamples],
                 EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
             )
             .await
             .unwrap();
@@ -72,7 +74,7 @@ async fn task_space_reads_preserve_exact_counters_context_checks_and_empty_sourc
                 fixture.replies(vec![vec![tampered]]);
                 let error = fixture
                     .reader()
-                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
                     .await
                     .unwrap_err();
                 assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -93,6 +95,7 @@ async fn statement_work_points_preserve_typed_native_counts_zeros_and_read_cover
                 &fixture.range,
                 &[EvidenceFamily::OperationalSamples],
                 EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
             )
             .await
             .unwrap();
@@ -109,7 +112,7 @@ async fn statement_work_points_preserve_typed_native_counts_zeros_and_read_cover
             fixture.replies(vec![vec![tampered]]);
             let error = fixture
                 .reader()
-                .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+                .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
                 .await
                 .unwrap_err();
             assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -128,6 +131,7 @@ async fn page_wait_reads_preserve_original_requests_mapping_failures_and_exact_n
                 &fixture.range,
                 &[EvidenceFamily::OperationalSamples],
                 EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
             )
             .await
             .unwrap();
@@ -145,7 +149,7 @@ async fn page_wait_reads_preserve_original_requests_mapping_failures_and_exact_n
                 fixture.replies(vec![vec![tampered]]);
                 let error = fixture
                     .reader()
-                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
                     .await
                     .unwrap_err();
                 assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -167,6 +171,7 @@ async fn memory_participants_preserve_scope_exact_values_unknowns_and_zero_row_c
                 &fixture.range,
                 &[EvidenceFamily::OperationalSamples],
                 EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
             )
             .await
             .unwrap();
@@ -182,7 +187,7 @@ async fn memory_participants_preserve_scope_exact_values_unknowns_and_zero_row_c
             fixture.replies(vec![vec![tampered]]);
             let error = fixture
                 .reader()
-                .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+                .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
                 .await
                 .unwrap_err();
             assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -201,6 +206,7 @@ async fn native_failure_formats_keep_exact_context_partial_coverage_and_proof_me
                 &fixture.range,
                 &[EvidenceFamily::OperationalSamples],
                 EvidenceReadBudget { page_rows: 1, ..budget() },
+                None,
             )
             .await
             .unwrap();
@@ -228,7 +234,7 @@ async fn native_failure_formats_keep_exact_context_partial_coverage_and_proof_me
         fixture.replies(vec![vec![tampered]]);
         let error = fixture
             .reader()
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
             .await
             .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -248,6 +254,7 @@ async fn retained_memory_failures_keep_duplicate_native_rows_signed_values_and_u
             &fixture.range,
             &[EvidenceFamily::OperationalSamples],
             EvidenceReadBudget { page_rows: 1, ..budget() },
+            None,
         )
         .await
         .unwrap();
@@ -290,7 +297,7 @@ async fn retained_memory_failures_keep_duplicate_native_rows_signed_values_and_u
     fixture.replies(vec![vec![tampered]]);
     let error = fixture
         .reader()
-        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
         .await
         .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
@@ -318,7 +325,7 @@ async fn exact_operational_reads_keep_nested_request_sql_grant_unknowns_and_rete
         fixture.replies(vec![fixture.rows.clone()]);
         let result = fixture
             .reader()
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
             .await
             .unwrap();
         assert!(result.is_read_complete(), "{:?}", result.gaps());
@@ -397,8 +404,11 @@ async fn a_truncated_nested_request_statement_requires_recovery_without_fetching
         test_support::request_memory_evidence(DefinitionPayload::sql(&sql, culprit_core::Engine::Mssql), true);
     let fixture = Fixture::new(source, records).await;
     fixture.replies(vec![fixture.rows.clone()]);
-    let result =
-        fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget()).await.unwrap();
+    let result = fixture
+        .reader()
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
+        .await
+        .unwrap();
     assert!(!result.is_read_complete());
     assert!(result.records().is_empty());
     assert_eq!(result.gaps()[0].reason, EvidenceGapReason::DetailInRecovery);
@@ -426,7 +436,7 @@ async fn changed_payload_inventory_pointer_type_or_digest_cannot_hide_behind_a_n
         fixture.replies(vec![rows]);
         let error = fixture
             .reader()
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
             .await
             .unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));

@@ -5,11 +5,13 @@
 
 #[cfg(any(feature = "postgres", feature = "mysql", feature = "yugabyte"))]
 use culprit_core::PlanKind;
-use culprit_core::{Error, Plan, PlanNode, Result, t};
+use culprit_core::{Engine, Error, Plan, PlanNode, Result, t};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use ts_rs::TS;
 
+#[cfg(test)]
+mod availability_tests;
 mod pg_text;
 
 /// The largest SQL Server plans run to a few megabytes; anything far beyond that is not a plan.
@@ -30,6 +32,18 @@ pub enum PlanFormat {
 }
 
 impl PlanFormat {
+    /// Whether this build includes the parser for this format; availability performs no native work.
+    pub fn is_available(self) -> bool {
+        match self {
+            Self::ShowplanXml => cfg!(feature = "mssql"),
+            Self::PostgresJson | Self::PostgresText => cfg!(feature = "postgres"),
+            Self::YugabyteJson => cfg!(feature = "yugabyte"),
+            Self::MysqlJson | Self::MysqlTree => cfg!(feature = "mysql"),
+            Self::SqliteText => cfg!(feature = "sqlite"),
+            Self::Culprit => true,
+        }
+    }
+
     pub fn label(self) -> String {
         match self {
             PlanFormat::ShowplanXml => t!("engine.plans.format.showplan_xml"),
@@ -80,8 +94,29 @@ pub fn detect(text: &str) -> Option<PlanFormat> {
     detect_clean(text.trim())
 }
 
+/// A verified native source selects its engine's parser when multiple engines share a serialization format.
+pub fn detect_native(text: &str, engine: Engine) -> Option<PlanFormat> {
+    detect(text).map(|format| native_format(format, engine))
+}
+
+fn native_format(format: PlanFormat, engine: Engine) -> PlanFormat {
+    match (format, engine) {
+        (PlanFormat::PostgresJson, Engine::Yugabyte) => PlanFormat::YugabyteJson,
+        _ => format,
+    }
+}
+
 /// Read a plan from text in any supported format. The plan keeps the text it came from in `raw` so it can be saved again.
 pub fn parse_plan(input: &str) -> Result<Plan> {
+    read_plan(input, None)
+}
+
+/// Parse retained native evidence using its authenticated engine, without relabeling another engine's tree.
+pub fn parse_native_plan(input: &str, engine: Engine) -> Result<Plan> {
+    read_plan(input, Some(engine))
+}
+
+fn read_plan(input: &str, source_engine: Option<Engine>) -> Result<Plan> {
     if input.len() > MAX_PLAN_BYTES {
         return Err(too_large(input.len()));
     }
@@ -96,7 +131,8 @@ pub fn parse_plan(input: &str) -> Result<Plan> {
     if text.is_empty() {
         return Err(Error::invalid(t!("engine.plans.empty")));
     }
-    let format = detect_clean(text).ok_or_else(|| unrecognized(text))?;
+    let detected = detect_clean(text).ok_or_else(|| unrecognized(text))?;
+    let format = source_engine.map_or(detected, |engine| native_format(detected, engine));
     let unreadable = |e: Error| Error::invalid(t!("engine.plans.unreadable", format = format.label(), why = e.message));
     let mut plan = match format {
         PlanFormat::ShowplanXml => showplan(text),
@@ -109,6 +145,9 @@ pub fn parse_plan(input: &str) -> Result<Plan> {
         PlanFormat::Culprit => culprit_json(text),
     }
     .map_err(unreadable)?;
+    if source_engine.is_some_and(|engine| engine != plan.engine) {
+        return Err(Error::invalid(t!("engine.plans.source_engine_mismatch")));
+    }
     // Before anything walks the tree: a deeper one would make the scan or file it's saved in unreadable.
     if plan.depth() > culprit_core::plan::MAX_PLAN_DEPTH {
         return Err(unreadable(culprit_core::plan::too_deep()));

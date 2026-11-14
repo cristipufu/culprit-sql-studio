@@ -1,5 +1,5 @@
 use super::*;
-use culprit_collector::analytical::evidence::EvidenceGapReason;
+use culprit_collector::analytical::evidence::{EvidenceGapReason, RecoveryPayloadBudget};
 use culprit_core::{ErrorDetail, SourceState, telemetry::*};
 use std::sync::atomic::Ordering;
 
@@ -112,6 +112,68 @@ async fn archive_read_uses_committed_proofs_and_existing_analysis_without_source
 }
 
 #[tokio::test]
+async fn explicit_recovery_payload_reads_restore_exact_native_details_and_report_their_cost_without_writes() {
+    let (source, records) = culprit_collector::analytical::test_support::object_definition_recovery_only_evidence();
+    let original = records[0].clone();
+    let mut fixture = Fixture::capture(source.clone(), records).await;
+    fixture.request.families = vec![EvidenceFamily::ObjectDefinitions];
+    let before = fixture.objects.snapshot();
+    let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
+    assert!(capture.records().is_empty());
+    assert_eq!(capture.gaps()[0].reason, EvidenceGapReason::DetailInRecovery);
+    assert_eq!(capture.metrics().recovery_objects, 0);
+    assert_eq!(capture.metrics().recovery_bytes, 0);
+    assert!(fixture.objects.reads.lock().unwrap().iter().all(|key| !key.starts_with("payloads/")));
+
+    fixture.request.budget.recovery_payloads = Some(RecoveryPayloadBudget { max_objects: 1, max_bytes: 1 });
+    let error = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Capacity)));
+    assert!(fixture.objects.reads.lock().unwrap().iter().all(|key| !key.starts_with("payloads/")));
+
+    fixture.objects.allow_payloads.store(true, Ordering::SeqCst);
+    fixture.request.budget.recovery_payloads = Some(RecoveryPayloadBudget::default());
+    let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
+    assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+    assert_eq!(capture.records().len(), 1);
+    assert_eq!(capture.records()[0].row(), &ExportedRecord::new(&source, capture.capture(), original).unwrap());
+    assert_eq!(capture.metrics().recovery_objects, 1);
+    let expected_bytes = before
+        .iter()
+        .filter(|(key, _)| key.starts_with("payloads/"))
+        .map(|(_, (bytes, _))| bytes.len() as u64)
+        .sum::<u64>();
+    assert_eq!(capture.metrics().recovery_bytes, expected_bytes);
+    assert!(expected_bytes > 1024);
+    let analysis = crate::collected_resources::cached_plans(&capture).unwrap();
+    assert_eq!(
+        serde_json::to_value(&analysis.context.metrics).unwrap(),
+        serde_json::to_value(capture.metrics()).unwrap()
+    );
+    assert_eq!(analysis.context.records.len(), 1);
+    assert_eq!(fixture.objects.snapshot(), before);
+    assert_eq!(*fixture.profiles.0.lock().unwrap(), ["bearer:archive-reader", "bearer:warehouse-reader"]);
+}
+
+#[tokio::test]
+async fn recovery_opt_in_does_not_replace_missing_rows_or_publication_with_raw_history() {
+    let mut fixture = Fixture::new().await;
+    fixture.request.budget.recovery_payloads = Some(RecoveryPayloadBudget::default());
+    fixture.store.omit_first_row();
+    let before = fixture.objects.snapshot();
+    let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
+    assert_eq!(capture.records().len(), 1);
+    assert_eq!(capture.gaps()[0].reason, EvidenceGapReason::MissingRows);
+    assert_eq!(capture.metrics().recovery_objects, 0);
+    fixture.store.publication.lock().unwrap().take();
+    let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
+    assert!(capture.records().is_empty());
+    assert_eq!(capture.gaps()[0].reason, EvidenceGapReason::NotPublished);
+    assert_eq!(capture.metrics().recovery_objects, 0);
+    assert!(fixture.objects.reads.lock().unwrap().iter().all(|key| !key.starts_with("payloads/")));
+    assert_eq!(fixture.objects.snapshot(), before);
+}
+
+#[tokio::test]
 async fn partial_rows_and_missing_projection_proofs_preserve_explicit_read_gaps() {
     let fixture = Fixture::new().await;
     fixture.store.omit_first_row();
@@ -182,6 +244,18 @@ async fn namespace_binding_and_request_budgets_fail_before_unnecessary_warehouse
     assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Capacity)));
 }
 
+#[tokio::test]
+async fn invalid_recovery_budget_is_rejected_before_archive_or_warehouse_access() {
+    let mut fixture = Fixture::new().await;
+    fixture.request.budget.recovery_payloads = Some(RecoveryPayloadBudget { max_objects: 0, max_bytes: 1 });
+    let before = fixture.objects.snapshot();
+    let error = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Capacity)));
+    assert!(fixture.objects.reads.lock().unwrap().is_empty());
+    assert_eq!(fixture.store.requests.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.objects.snapshot(), before);
+}
+
 #[tokio::test(start_paused = true)]
 async fn caller_cancellation_and_deadline_drop_owned_recovery_reads_without_changing_history() {
     let mut fixture = Fixture::new().await;
@@ -200,6 +274,35 @@ async fn caller_cancellation_and_deadline_drop_owned_recovery_reads_without_chan
     let cancellation = CollectionCancellation::default();
     let (result, _) = tokio::join!(fixture.service.read(&fixture.request, &cancellation), async {
         tokio::task::yield_now().await;
+        cancellation.cancel();
+    });
+    assert_eq!(result.unwrap_err().detail, Some(ErrorDetail::CollectionStopped(CollectionStop::Cancelled)));
+    assert_eq!(fixture.objects.active.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.objects.snapshot(), before);
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancellation_and_deadline_drop_the_raw_payload_body_without_changing_history() {
+    let (source, records) = culprit_collector::analytical::test_support::object_definition_recovery_only_evidence();
+    let mut fixture = Fixture::capture(source, records).await;
+    fixture.request.families = vec![EvidenceFamily::ObjectDefinitions];
+    fixture.request.budget.recovery_payloads = Some(RecoveryPayloadBudget::default());
+    fixture.objects.allow_payloads.store(true, Ordering::SeqCst);
+    fixture.objects.stall_payload_body.store(true, Ordering::SeqCst);
+    let before = fixture.objects.snapshot();
+    fixture.request.budget.timeout_ms = 1;
+    let error = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::TimedOut)));
+    assert!(fixture.store.requests.load(Ordering::SeqCst) > 0);
+    assert_eq!(fixture.objects.active.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.objects.reads.lock().unwrap().iter().filter(|key| key.starts_with("payloads/")).count(), 1);
+    fixture.objects.payload_started.notified().await;
+
+    fixture.request.budget.timeout_ms = 1000;
+    let cancellation = CollectionCancellation::default();
+    let (result, _) = tokio::join!(fixture.service.read(&fixture.request, &cancellation), async {
+        fixture.objects.payload_started.notified().await;
+        assert_eq!(fixture.objects.active.load(Ordering::SeqCst), 1);
         cancellation.cancel();
     });
     assert_eq!(result.unwrap_err().detail, Some(ErrorDetail::CollectionStopped(CollectionStop::Cancelled)));

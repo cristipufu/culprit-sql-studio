@@ -3,20 +3,30 @@ use super::*;
 
 pub(super) struct CapturedState<'a> {
     capture: &'a EvidenceCapture,
+    family: EvidenceFamily,
     pub native: &'a StateSnapshotDescription,
     pub coverage: &'a StateSourceCoverage,
 }
 impl<'a> CapturedState<'a> {
     pub fn new(capture: &'a EvidenceCapture, dataset: SnapshotDataset) -> Result<Self> {
-        let native = native_state(capture, dataset)?;
+        let family = EvidenceFamily::OperationalSamples;
+        let native = native_state(capture, dataset, family)?;
         let [coverage] = native.sources.as_slice() else { return Err(invalid()) };
-        Ok(Self { capture, native, coverage })
+        Ok(Self { capture, family, native, coverage })
     }
 
     /// Independent native sources retain their individual coverage within one authenticated capture.
     pub fn sources(capture: &'a EvidenceCapture, dataset: SnapshotDataset) -> Result<Vec<Self>> {
-        let native = native_state(capture, dataset)?;
-        Ok(native.sources.iter().map(|coverage| Self { capture, native, coverage }).collect())
+        Self::sources_for(capture, dataset, EvidenceFamily::OperationalSamples)
+    }
+
+    pub fn sources_for(
+        capture: &'a EvidenceCapture,
+        dataset: SnapshotDataset,
+        family: EvidenceFamily,
+    ) -> Result<Vec<Self>> {
+        let native = native_state(capture, dataset, family)?;
+        Ok(native.sources.iter().map(|coverage| Self { capture, family, native, coverage }).collect())
     }
 
     pub fn shared(&self, kinds: &[SharedResourceKind]) -> Result<&'a SharedResourceIdentity> {
@@ -38,6 +48,9 @@ impl<'a> CapturedState<'a> {
     }
 
     pub fn rows(&self) -> Result<Vec<&'a OperationalObservation>> {
+        if self.family != EvidenceFamily::OperationalSamples {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
         self.capture
             .records()
             .iter()
@@ -49,6 +62,22 @@ impl<'a> CapturedState<'a> {
                     return None;
                 }
                 Some(Ok(observation))
+            })
+            .collect()
+    }
+
+    pub fn definitions(&self) -> Result<Vec<&'a ObjectDefinitionRecord>> {
+        if self.family != EvidenceFamily::ObjectDefinitions {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        self.capture
+            .records()
+            .iter()
+            .filter_map(|record| {
+                let TelemetryRecord::ObjectDefinition(definition) = &record.row().record else {
+                    return Some(Err(invalid()));
+                };
+                (definition.source == self.coverage.source).then_some(Ok(definition))
             })
             .collect()
     }
@@ -73,19 +102,35 @@ impl<'a> CapturedState<'a> {
     }
 }
 
-fn native_state(capture: &EvidenceCapture, dataset: SnapshotDataset) -> Result<&StateSnapshotDescription> {
+fn native_state(
+    capture: &EvidenceCapture,
+    dataset: SnapshotDataset,
+    family: EvidenceFamily,
+) -> Result<&StateSnapshotDescription> {
     let SourceObservation::Snapshot(native) = &capture.source().observation else {
         return Err(DeliveryProblem::UnsupportedSchema.error());
     };
-    if native.dataset != dataset || !capture.families().contains(&EvidenceFamily::OperationalSamples) {
+    if native.dataset != dataset || dataset.stream() != family.stream() || !capture.families().contains(&family) {
         return Err(DeliveryProblem::UnsupportedSchema.error());
     }
     if !capture.source().target.is_valid() || !native.is_valid() {
         return Err(invalid());
     }
     for record in capture.records() {
-        let TelemetryRecord::Operational(observation) = &record.row().record else { return Err(invalid()) };
-        if !observation.is_valid() || !native.sources.iter().any(|source| source.source == observation.source) {
+        let source = match (&record.row().record, family) {
+            (TelemetryRecord::Operational(observation), EvidenceFamily::OperationalSamples)
+                if observation.is_valid() =>
+            {
+                &observation.source
+            }
+            (TelemetryRecord::ObjectDefinition(definition), EvidenceFamily::ObjectDefinitions)
+                if definition.is_valid() =>
+            {
+                &definition.source
+            }
+            _ => return Err(invalid()),
+        };
+        if !native.sources.iter().any(|coverage| &coverage.source == source) {
             return Err(invalid());
         }
     }

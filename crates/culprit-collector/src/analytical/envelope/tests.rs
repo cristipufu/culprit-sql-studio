@@ -66,3 +66,18 @@ fn unexpected_rows_wrong_ordinals_and_native_payload_changes_are_rejected() {
     assert!(envelope.input(1, &changed).is_err());
     assert!(Envelope::new(&manifest, &"a".repeat(64)).is_err());
 }
+
+#[test]
+fn a_valid_receipt_cannot_bind_a_foreign_database_or_a_forged_native_record_id() {
+    let (mut manifest, mut row) = fixture();
+    let CollectionTarget::Database(database) = &mut manifest.source.target else { unreachable!() };
+    database.database = "a-different-database".into();
+    let envelope = Envelope::new(&manifest, &row.batch_id).unwrap();
+    assert!(envelope.input(1, &row).is_err(), "the receipt alone cannot supply native source identity");
+
+    let (mut manifest, _) = fixture();
+    row.record_id = Some("a".repeat(64));
+    manifest.batches[0].rows[0] = crate::delivery::evidence::RowReceipt::from_export(&row).unwrap();
+    let envelope = Envelope::new(&manifest, &row.batch_id).unwrap();
+    assert!(envelope.input(1, &row).is_err(), "rebuilding receipts cannot authorize a non-native record id");
+}

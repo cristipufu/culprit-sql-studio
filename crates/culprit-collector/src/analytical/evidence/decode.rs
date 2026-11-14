@@ -27,15 +27,12 @@ pub(super) fn record(
     let native = match stream {
         TelemetryStream::ResourceSamples => Decoded::Record(Box::new(resources(values)?)),
         TelemetryStream::ActivityObservations => activity(values, &payloads)?,
-        TelemetryStream::OperationalSamples => {
-            if text(values, "DetailState")? != "inline" {
-                return Ok(Decoded::Unavailable(EvidenceGapReason::DetailInRecovery));
-            }
-            let mut details = match payloads::details(values, &payloads)? {
+        TelemetryStream::OperationalSamples | TelemetryStream::ObjectDefinitions => {
+            let mut details = match fact_details(values, &payloads)? {
                 Decoded::Record(details) => details,
                 Decoded::Unavailable(reason) => return Ok(Decoded::Unavailable(reason)),
             };
-            if text(values, "FactKind")? == "diagnostic-revision" {
+            if stream == TelemetryStream::OperationalSamples && text(values, "FactKind")? == "diagnostic-revision" {
                 let scope = details.pointer_mut("/episode/scope").and_then(Value::as_object_mut).ok_or_else(invalid)?;
                 if scope.contains_key("target") {
                     return Err(invalid());
@@ -45,17 +42,7 @@ pub(super) fn record(
                     serde_json::to_value(&range.manifest().source.target).map_err(|_| invalid())?,
                 );
             }
-            let fact = match serde_json::from_value::<OperationalFact>(json!({
-                "kind": text(values, "FactKind")?, "data": details,
-            })) {
-                Ok(fact) => fact,
-                Err(_) => return Ok(Decoded::Unavailable(EvidenceGapReason::NativeRepresentationRequired)),
-            };
-            Decoded::Record(Box::new(TelemetryRecord::Operational(OperationalObservation {
-                source: text(values, "NativeSource")?.into(),
-                key: text(values, "FactKey")?.into(),
-                fact,
-            })))
+            fact_record(stream, values, *details)?
         }
         TelemetryStream::QueryDefinitions
         | TelemetryStream::PlanDefinitions
@@ -75,6 +62,32 @@ pub(super) fn record(
         return Ok(Decoded::Unavailable(EvidenceGapReason::NativeRepresentationRequired));
     }
     Ok(Decoded::Record(Box::new(row)))
+}
+
+fn fact_details(values: &Map<String, Value>, references: &payloads::References<'_>) -> Result<Decoded<Value>> {
+    if text(values, "DetailState")? != "inline" {
+        return Ok(Decoded::Unavailable(EvidenceGapReason::DetailInRecovery));
+    }
+    payloads::details(values, references)
+}
+
+fn fact_record(
+    stream: TelemetryStream,
+    values: &Map<String, Value>,
+    details: Value,
+) -> Result<Decoded<TelemetryRecord>> {
+    let mut data = json!({
+        "source": text(values, "NativeSource")?,
+        "key": text(values, "FactKey")?,
+        "fact": { "kind": text(values, "FactKind")?, "data": details },
+    });
+    if stream == TelemetryStream::ObjectDefinitions {
+        data["version"] = json!(text(values, "DefinitionVersion")?);
+    }
+    Ok(match serde_json::from_value(json!({"stream": stream, "data": data})) {
+        Ok(record) => Decoded::Record(Box::new(record)),
+        Err(_) => Decoded::Unavailable(EvidenceGapReason::NativeRepresentationRequired),
+    })
 }
 
 fn resources(values: &Map<String, Value>) -> Result<TelemetryRecord> {

@@ -76,6 +76,29 @@ pub struct BatchManifest {
     pub rows: Vec<RowReceipt>,
     pub delivery_required: bool,
 }
+impl BatchManifest {
+    /// Verify a one-based row position against both its native source and its exact committed receipt.
+    pub(crate) fn validate_row(
+        &self,
+        source: &CollectionDescription,
+        capture: &CaptureIdentity,
+        ordinal: usize,
+        row: &ExportedRecord,
+    ) -> Result<RowReceipt> {
+        let invalid = || DeliveryProblem::Integrity.error();
+        let expected = ordinal.checked_sub(1).and_then(|index| self.rows.get(index)).ok_or_else(invalid)?;
+        let receipt = RowReceipt::from_export(row)?;
+        if row.capture != *capture
+            || row.batch_id != self.batch_id
+            || row.record.stream() != self.stream
+            || ExportedRecord::new(source, capture, row.record.clone())? != *row
+            || *expected != receipt
+        {
+            return Err(invalid());
+        }
+        Ok(receipt)
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct StreamAdvance {

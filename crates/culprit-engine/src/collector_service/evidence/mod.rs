@@ -83,7 +83,7 @@ impl EvidenceService {
         let reading = async {
             let recovery = ObjectRecoveryStore::open(self.recovery.clone(), self.contract.clone()).await?;
             let range = reopen(&recovery, &request.range_id).await?;
-            self.reader.read_capture(&range, &request.families, request.budget).await
+            self.reader.read_capture(&range, &request.families, request.budget, Some(&recovery)).await
         };
         tokio::select! {
             biased;

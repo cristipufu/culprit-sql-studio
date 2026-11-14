@@ -3,7 +3,7 @@ use super::projection::ScalarType::*;
 use super::schema::Field;
 #[cfg(test)]
 mod tests;
-use crate::delivery::evidence::{BatchManifest, RangeManifest, RowReceipt};
+use crate::delivery::evidence::{BatchManifest, RangeManifest};
 use crate::delivery::recovery::CommittedRange;
 use culprit_core::{
     Result,
@@ -73,11 +73,7 @@ impl<'a> Envelope<'a> {
         Ok(Self { manifest, batch, context })
     }
     pub fn input(&self, ordinal: usize, row: &ExportedRecord) -> Result<Value> {
-        let expected = ordinal.checked_sub(1).and_then(|index| self.batch.rows.get(index)).ok_or_else(invalid)?;
-        let receipt = RowReceipt::from_export(row)?;
-        if expected != &receipt || row.capture != self.manifest.capture || row.record.stream() != self.batch.stream {
-            return Err(invalid());
-        }
+        let receipt = self.batch.validate_row(&self.manifest.source, &self.manifest.capture, ordinal, row)?;
         let mut context = self.context.clone();
         context["row_ordinal"] = json!(ordinal);
         context["native_digest"] = json!(receipt.payload_digest);

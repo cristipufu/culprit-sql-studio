@@ -5,7 +5,7 @@ use crate::{
 };
 use clap::{Args, Subcommand, ValueEnum};
 use culprit_collector::{
-    analytical::evidence::{EvidenceFamily, EvidenceReadBudget},
+    analytical::evidence::{EvidenceFamily, EvidenceReadBudget, RecoveryPayloadBudget},
     capture::CollectionCancellation,
 };
 use culprit_core::{Result, format, t};
@@ -66,6 +66,12 @@ struct Budget {
     max_proof_bytes: u64,
     #[arg(long,default_value_t=EvidenceReadBudget::default().timeout_ms,help=culprit_core::t!("evidence.cli.timeout"))]
     timeout_ms: u32,
+    #[arg(long,help=culprit_core::t!("evidence.cli.with_recovery_payloads"))]
+    with_recovery_payloads: bool,
+    #[arg(long,requires="with_recovery_payloads",help=culprit_core::t!("evidence.cli.max_recovery_objects", default=format::count(RecoveryPayloadBudget::default().max_objects as f64)))]
+    max_recovery_objects: Option<u32>,
+    #[arg(long,requires="with_recovery_payloads",help=culprit_core::t!("evidence.cli.max_recovery_bytes", default=format::digits(RecoveryPayloadBudget::default().max_bytes.to_string())))]
+    max_recovery_bytes: Option<u64>,
 }
 impl Budget {
     fn read_budget(&self) -> EvidenceReadBudget {
@@ -77,6 +83,13 @@ impl Budget {
             max_bytes: self.max_bytes,
             max_proof_bytes: self.max_proof_bytes,
             timeout_ms: self.timeout_ms,
+            recovery_payloads: self.with_recovery_payloads.then(|| {
+                let defaults = RecoveryPayloadBudget::default();
+                RecoveryPayloadBudget {
+                    max_objects: self.max_recovery_objects.unwrap_or(defaults.max_objects),
+                    max_bytes: self.max_recovery_bytes.unwrap_or(defaults.max_bytes),
+                }
+            }),
         }
     }
 }
@@ -85,6 +98,8 @@ impl Budget {
 enum Family {
     ResourceSamples,
     OperationalSamples,
+    ActivityObservations,
+    ObjectDefinitions,
     QueryDefinitions,
     PlanDefinitions,
     QueryRuntime,
@@ -95,6 +110,8 @@ impl From<Family> for EvidenceFamily {
         match family {
             Family::ResourceSamples => Self::ResourceSamples,
             Family::OperationalSamples => Self::OperationalSamples,
+            Family::ActivityObservations => Self::ActivityObservations,
+            Family::ObjectDefinitions => Self::ObjectDefinitions,
             Family::QueryDefinitions => Self::QueryDefinitions,
             Family::PlanDefinitions => Self::PlanDefinitions,
             Family::QueryRuntime => Self::QueryRuntime,
@@ -114,10 +131,12 @@ enum Analysis {
     TaskSpace,
     StatementWork,
     RuntimeDistributions,
+    CachedPlans,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
         match self {
+            Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
                 EvidenceFamily::PlanDefinitions,
@@ -213,6 +232,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::RuntimeDistributions) => {
             let analysis = culprit_engine::collected_resources::runtime_distributions(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::runtime_distributions(&analysis.report))?;
+        }
+        Some(Analysis::CachedPlans) => {
+            let analysis = culprit_engine::collected_resources::cached_plans(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::cached_plans(&analysis.report))?;
         }
     }
     if !complete && out.format() == Format::Text {

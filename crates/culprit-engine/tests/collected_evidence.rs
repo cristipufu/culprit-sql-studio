@@ -3,6 +3,7 @@ use culprit_core::{
 };
 use culprit_engine::collected_evidence;
 
+mod cached_plans;
 mod fixture;
 mod memory_failures;
 mod native_failures;

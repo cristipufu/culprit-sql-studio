@@ -19,12 +19,13 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
     let reader =
         crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
             .unwrap();
-    let unpublished = reader.read_capture(&scenario.range, &[EvidenceFamily::ResourceSamples], budget).await.unwrap();
+    let unpublished =
+        reader.read_capture(&scenario.range, &[EvidenceFamily::ResourceSamples], budget, None).await.unwrap();
     assert!(!unpublished.is_read_complete());
     assert_eq!(unpublished.gaps()[0].reason, EvidenceGapReason::NotPublished);
     scenario.complete().await;
     *scenario.recovery.fault.lock().unwrap() = Fault::Stall;
-    let result = reader.read_capture(&scenario.range, &[EvidenceFamily::ResourceSamples], budget).await.unwrap();
+    let result = reader.read_capture(&scenario.range, &[EvidenceFamily::ResourceSamples], budget, None).await.unwrap();
     assert!(result.is_read_complete());
     let TelemetryRecord::ResourceSample(sample) = &result.records()[0].row().record else { panic!() };
     assert_eq!(sample.at, "2020-01-01T06:00:15.000000001Z");
@@ -47,6 +48,7 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
             &scenario.range,
             &[EvidenceFamily::OperationalSamples],
             EvidenceReadBudget { page_rows: 1, ..budget },
+            None,
         )
         .await
         .unwrap();
@@ -107,8 +109,10 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
         EvidenceFamily::QueryRuntime,
         EvidenceFamily::QueryWaits,
     ];
-    let result =
-        reader.read_capture(&scenario.range, &families, EvidenceReadBudget { page_rows: 1, ..budget }).await.unwrap();
+    let result = reader
+        .read_capture(&scenario.range, &families, EvidenceReadBudget { page_rows: 1, ..budget }, None)
+        .await
+        .unwrap();
     assert!(result.is_read_complete());
     assert_eq!(result.source(), &source);
     assert_eq!(result.records().len(), records.len());
@@ -125,7 +129,7 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
         digest(b"another-native-query-parent"),
         scenario.range.manifest().range_id,
     ));
-    let error = reader.read_capture(&scenario.range, &families, budget).await.unwrap_err();
+    let error = reader.read_capture(&scenario.range, &families, budget, None).await.unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
 
     let sql =
@@ -171,7 +175,8 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
         let reader =
             crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
                 .unwrap();
-        let result = reader.read_capture(&scenario.range, &[EvidenceFamily::OperationalSamples], budget).await.unwrap();
+        let result =
+            reader.read_capture(&scenario.range, &[EvidenceFamily::OperationalSamples], budget, None).await.unwrap();
         assert!(result.is_read_complete(), "{:?}", result.gaps());
         assert_eq!(result.source(), &source);
         assert_eq!(result.records().len(), records.len());
@@ -202,6 +207,7 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
                 &scenario.range,
                 &[EvidenceFamily::ActivityObservations],
                 EvidenceReadBudget { page_rows: 1, ..budget },
+                None,
             )
             .await
             .unwrap();
@@ -220,7 +226,8 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
     let reader =
         crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
             .unwrap();
-    let result = reader.read_capture(&scenario.range, &[EvidenceFamily::OperationalSamples], budget).await.unwrap();
+    let result =
+        reader.read_capture(&scenario.range, &[EvidenceFamily::OperationalSamples], budget, None).await.unwrap();
     assert!(!result.is_read_complete());
     assert!(result.records().is_empty());
     assert_eq!(result.gaps()[0].reason, EvidenceGapReason::DetailInRecovery);

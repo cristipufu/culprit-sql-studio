@@ -5,7 +5,9 @@ use culprit_core::{
 };
 use roxmltree::{Document, Node};
 
+mod cached_definitions;
 mod relational_inputs;
+pub use cached_definitions::{parse_cached_definition, parse_retained_definition};
 
 /// RelOp children that describe the operator rather than being the operator itself.
 const RELOP_METADATA: &[&str] =
@@ -89,7 +91,7 @@ fn empty_showplan(doc: &Document) -> bool {
 pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
     culprit_core::xml::read(xml, |doc| {
         let doc = doc.map_err(unreadable)?;
-        read_statement(&doc, xml, query_hash, None)
+        read_statement(&doc, xml, StatementSelection::Pasted(query_hash), None)
     })
 }
 
@@ -107,6 +109,9 @@ pub(crate) fn parse_cached_statement(
     parameters: Option<&culprit_core::telemetry::MssqlModuleParameters>,
     statement: Option<&str>,
 ) -> Result<Plan> {
+    if !context.is_valid() || !context.identity.has_plan_handle() || !context.identity.has_sql_handle() {
+        return Err(crate::read::invalid_data());
+    }
     culprit_core::xml::read(xml, |doc| {
         let doc = doc.map_err(unreadable)?;
         let module = parameters.zip(statement).map(|(parameters, statement)| CachedModuleInput {
@@ -114,7 +119,7 @@ pub(crate) fn parse_cached_statement(
             parameters,
             statement,
         });
-        read_statement(&doc, xml, context.query_hash.as_deref(), module)
+        read_statement(&doc, xml, StatementSelection::Native(context.query_hash.as_deref()), module)
     })
 }
 
@@ -123,10 +128,15 @@ fn unreadable(error: impl std::fmt::Display) -> Error {
     Error::internal(culprit_core::t!("provider.mssql.plan.unreadable", error = error.to_string()))
 }
 
+enum StatementSelection<'a> {
+    Pasted(Option<&'a str>),
+    Native(Option<&'a str>),
+}
+
 fn read_statement(
     doc: &Document,
     xml: &str,
-    query_hash: Option<&str>,
+    selection: StatementSelection<'_>,
     module: Option<CachedModuleInput<'_>>,
 ) -> Result<Plan> {
     fn query_plan_of<'a, 'input>(n: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
@@ -139,15 +149,32 @@ fn read_statement(
         }
     }
     let candidates = || doc.descendants().filter(|n| query_plan_of(*n).is_some());
-    let matching = query_hash.and_then(|hash| {
-        candidates().find(|n| n.attribute("QueryHash").is_some_and(|h| h.eq_ignore_ascii_case(hash.trim())))
-    });
-    let statement = matching
-        .or_else(|| {
-            candidates()
-                .max_by(|a, b| attr_f64(*a, "StatementSubTreeCost").total_cmp(&attr_f64(*b, "StatementSubTreeCost")))
-        })
-        .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_statement")))?;
+    let statement = match selection {
+        StatementSelection::Native(hash) => {
+            let mut matching = candidates().filter(|node| {
+                hash.is_none_or(|hash| {
+                    node.attribute("QueryHash").is_some_and(|native| native.eq_ignore_ascii_case(hash.trim()))
+                })
+            });
+            let statement = matching.next().ok_or_else(crate::read::invalid_data)?;
+            if matching.next().is_some() {
+                return Err(crate::read::invalid_data());
+            }
+            statement
+        }
+        StatementSelection::Pasted(hash) => hash
+            .and_then(|hash| {
+                candidates().find(|node| {
+                    node.attribute("QueryHash").is_some_and(|native| native.eq_ignore_ascii_case(hash.trim()))
+                })
+            })
+            .or_else(|| {
+                candidates().max_by(|a, b| {
+                    attr_f64(*a, "StatementSubTreeCost").total_cmp(&attr_f64(*b, "StatementSubTreeCost"))
+                })
+            })
+            .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_statement")))?,
+    };
     let query_plan = query_plan_of(statement).expect("filtered on QueryPlan above");
     let root_op = child(query_plan, "RelOp")
         .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_operators")))?;

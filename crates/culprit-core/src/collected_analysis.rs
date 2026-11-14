@@ -38,6 +38,19 @@ pub struct CollectedAnalysisRecord {
     pub row: ExportedRecord,
 }
 
+/// Work performed by this archive read, independently of native source coverage.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedEvidenceMetrics {
+    pub queries: u32,
+    pub pages: u32,
+    pub returned_rows: u32,
+    pub response_bytes: u64,
+    pub proof_bytes: u64,
+    pub recovery_objects: u32,
+    pub recovery_bytes: u64,
+}
+
 /// Proof and native input for one selected capture. Domain views reference these records instead of cloning them.
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
@@ -51,6 +64,7 @@ pub struct CollectedEvidenceContext {
     pub collected_until: String,
     pub selected_streams: Vec<TelemetryStream>,
     pub read_gaps: Vec<EvidenceGap>,
+    pub metrics: CollectedEvidenceMetrics,
     pub records: Vec<CollectedAnalysisRecord>,
 }
 

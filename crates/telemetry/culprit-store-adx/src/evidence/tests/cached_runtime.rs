@@ -7,7 +7,7 @@ async fn completed_native_spill_pages_keep_exact_cache_identity_zero_and_unknown
         fixture.reply_families(&[EvidenceFamily::OperationalSamples], 250);
         let captured = fixture
             .reader()
-            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
             .await
             .unwrap();
         assert!(captured.is_read_complete(), "{:?}", captured.gaps());
@@ -31,7 +31,7 @@ async fn a_changed_spill_page_distribution_cannot_pass_the_committed_native_proj
     fixture.replies(vec![rows]);
     let error = fixture
         .reader()
-        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget())
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], budget(), None)
         .await
         .unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));

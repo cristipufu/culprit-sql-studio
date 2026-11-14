@@ -26,7 +26,7 @@ async fn authenticated_wait_meanings_preserve_empty_unknown_and_missing_native_e
         let reader =
             crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
                 .unwrap();
-        let result = reader.read_capture(&scenario.range, &families, budget).await.unwrap();
+        let result = reader.read_capture(&scenario.range, &families, budget, None).await.unwrap();
         assert!(result.is_read_complete(), "{:?}", result.gaps());
         assert_eq!(result.source(), &source);
         let expected =
@@ -53,7 +53,7 @@ async fn authenticated_wait_meanings_preserve_empty_unknown_and_missing_native_e
         if index == 0 {
             let waits = crate::schema::quote(catalog.get(TelemetryStream::QueryWaits).unwrap().table());
             server.execute(&format!("ALTER TABLE {waits} DELETE WHERE RangeId='{range}' SETTINGS mutations_sync=2"));
-            let missing = reader.read_capture(&scenario.range, &families, budget).await.unwrap();
+            let missing = reader.read_capture(&scenario.range, &families, budget, None).await.unwrap();
             assert!(!missing.is_read_complete());
             assert_eq!(missing.source(), &source);
             assert_eq!(missing.gaps().len(), 1);
@@ -79,7 +79,7 @@ async fn authenticated_wait_meanings_preserve_empty_unknown_and_missing_native_e
         }
         let changed = serde_json::to_string(&description).unwrap().replace('\'', "''");
         server.execute(&format!("INSERT INTO {publication} SELECT * REPLACE('{changed}' AS SourceDescription) FROM {publication} WHERE RangeId='{range}' LIMIT 1"));
-        let error = reader.read_capture(&scenario.range, &families, budget).await.unwrap_err();
+        let error = reader.read_capture(&scenario.range, &families, budget, None).await.unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
     }
 }

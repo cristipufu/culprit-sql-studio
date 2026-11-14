@@ -1,4 +1,5 @@
 use super::*;
+use culprit_collector::analytical::evidence::RecoveryPayloadBudget;
 
 mod lifecycle;
 mod profiles;
@@ -23,4 +24,16 @@ fn evidence_requests_require_exact_range_identity_distinct_families_and_valid_bu
     request.range_id = culprit_core::telemetry::digest(b"committed-capture");
     request.budget.page_rows = 0;
     assert!(request.validate().is_err());
+    request.budget.page_rows = 1;
+    for limits in [
+        RecoveryPayloadBudget { max_objects: 0, max_bytes: 1 },
+        RecoveryPayloadBudget { max_objects: 129, max_bytes: 1 },
+        RecoveryPayloadBudget { max_objects: 1, max_bytes: 0 },
+        RecoveryPayloadBudget { max_objects: 1, max_bytes: 256 * 1024 * 1024 + 1 },
+    ] {
+        request.budget.recovery_payloads = Some(limits);
+        assert!(request.validate().is_err());
+    }
+    request.budget.recovery_payloads = Some(RecoveryPayloadBudget::default());
+    assert!(request.validate().is_ok());
 }

@@ -2,12 +2,40 @@ pub use culprit_core::collected_analysis::{EvidenceGap, EvidenceGapReason};
 use culprit_core::{Result, telemetry::*};
 use serde::{Deserialize, Serialize};
 
+const DEFAULT_RECOVERY_PAYLOAD_OBJECTS: u32 = 8;
+const DEFAULT_RECOVERY_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RECOVERY_PAYLOAD_OBJECTS: u32 = 128;
+const MAX_RECOVERY_PAYLOAD_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Whole immutable recovery objects, not the size of one requested SQL/plan preview.
+#[derive(Clone, Copy, Debug)]
+pub struct RecoveryPayloadBudget {
+    pub max_objects: u32,
+    pub max_bytes: u64,
+}
+impl Default for RecoveryPayloadBudget {
+    fn default() -> Self {
+        Self { max_objects: DEFAULT_RECOVERY_PAYLOAD_OBJECTS, max_bytes: DEFAULT_RECOVERY_PAYLOAD_BYTES }
+    }
+}
+impl RecoveryPayloadBudget {
+    pub fn validate(&self) -> Result<()> {
+        if !(1..=MAX_RECOVERY_PAYLOAD_OBJECTS).contains(&self.max_objects)
+            || !(1..=MAX_RECOVERY_PAYLOAD_BYTES).contains(&self.max_bytes)
+        {
+            return Err(DeliveryProblem::Capacity.error());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EvidenceFamily {
     ResourceSamples,
     OperationalSamples,
     ActivityObservations,
+    ObjectDefinitions,
     QueryDefinitions,
     PlanDefinitions,
     QueryRuntime,
@@ -18,6 +46,7 @@ impl EvidenceFamily {
         Self::ResourceSamples,
         Self::OperationalSamples,
         Self::ActivityObservations,
+        Self::ObjectDefinitions,
         Self::QueryDefinitions,
         Self::PlanDefinitions,
         Self::QueryRuntime,
@@ -29,6 +58,7 @@ impl EvidenceFamily {
             Self::ResourceSamples => TelemetryStream::ResourceSamples,
             Self::OperationalSamples => TelemetryStream::OperationalSamples,
             Self::ActivityObservations => TelemetryStream::ActivityObservations,
+            Self::ObjectDefinitions => TelemetryStream::ObjectDefinitions,
             Self::QueryDefinitions => TelemetryStream::QueryDefinitions,
             Self::PlanDefinitions => TelemetryStream::PlanDefinitions,
             Self::QueryRuntime => TelemetryStream::QueryRuntime,
@@ -49,6 +79,8 @@ pub struct EvidenceReadBudget {
     pub max_proof_bytes: u64,
     /// Maximum caller wait for the whole read; native transports retain their own server/HTTP ceilings.
     pub timeout_ms: u32,
+    /// Opt-in native payload reads from the independently authorized recovery store. None reads projections only.
+    pub recovery_payloads: Option<RecoveryPayloadBudget>,
 }
 impl Default for EvidenceReadBudget {
     fn default() -> Self {
@@ -60,11 +92,15 @@ impl Default for EvidenceReadBudget {
             max_bytes: 32 * 1024 * 1024,
             max_proof_bytes: 4 * 1024 * 1024,
             timeout_ms: 60_000,
+            recovery_payloads: None,
         }
     }
 }
 impl EvidenceReadBudget {
     pub fn validate(&self) -> Result<()> {
+        if let Some(recovery) = self.recovery_payloads {
+            recovery.validate()?;
+        }
         if !(1..=10_000).contains(&self.page_rows)
             || !(1024..=12 * 1024 * 1024).contains(&self.page_bytes)
             || !(1..=100_000).contains(&self.max_rows)
@@ -88,6 +124,8 @@ pub struct EvidenceReadMetrics {
     pub returned_rows: u32,
     pub response_bytes: u64,
     pub proof_bytes: u64,
+    pub recovery_objects: u32,
+    pub recovery_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
