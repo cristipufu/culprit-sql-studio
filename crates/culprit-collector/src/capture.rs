@@ -13,7 +13,7 @@ use std::{collections::HashSet, path::Path, time::Duration};
 use tokio::{sync::watch, time::Instant};
 use writer::ObservationWriter;
 
-const SOURCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const SOURCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 pub struct CollectionCancellation {

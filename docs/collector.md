@@ -401,6 +401,13 @@ missed-work metrics and qualify the combined workload before adding targets or s
 activity threshold is 30 seconds for blocking and 60 seconds for running requests, with a three-minute poll period.
 Transient activity between polls is not a complete event history.
 
+The existing schedule journal persists due times, retry and pressure counters, fairness and resource/family
+cooldowns. A reservation commits before a backend call can start; slow journal I/O cannot authorize a late start.
+After an interrupted turn, its conservative reservation is restored without crediting downtime and rebased
+durably before another admission. Completed schedules can credit valid elapsed wall time; a backward clock never
+shortens their saved delays. Missing/corrupt scheduler rows and stale writers stop admission. This protects
+restart behavior; it does not replace the existing native shutdown fence or implement automatic signal escalation.
+
 ## Database and shared subjects
 
 A saved connection is a route. Each capture separately selects the database or an exact native shared resource.

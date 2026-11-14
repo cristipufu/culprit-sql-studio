@@ -1,9 +1,16 @@
 //! Fair, serial source admission. A completed read schedules future work from completion, never from missed ticks.
 use culprit_core::{Result, telemetry::*};
 use std::{collections::BTreeMap, time::Duration};
+mod checkpoint;
+pub(super) use checkpoint::{
+    Delay, JobState, MAX_SCHEDULE_FAMILIES, MAX_SCHEDULED_JOBS, ResourceState, ScheduleClock, ScheduleState,
+    ScheduleUpdate,
+};
 
 const RESOURCE_GAP: Duration = Duration::from_secs(60);
 const MAX_FAILURE_DELAY: Duration = Duration::from_secs(900);
+/// A slow durability write must not let native work start after its saved crash reservation has aged out.
+pub(super) const ADMISSION_START_WINDOW: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub(super) struct Job {
@@ -21,6 +28,7 @@ pub(super) enum HistoryLane {
     Current,
     Backfill,
 }
+#[derive(Clone)]
 struct ScheduledJob {
     job: Job,
     due: Duration,
@@ -35,7 +43,7 @@ pub(super) enum Outcome {
     Pressure,
     Skipped { more: bool },
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct ResourceAdmission {
     due: Duration,
     pressure_failures: u32,
@@ -46,6 +54,13 @@ pub(super) struct Scheduler {
     families: BTreeMap<String, Duration>,
     sequence: u64,
     active: Option<usize>,
+    completed: Option<usize>,
+    clock: Option<ScheduleClock>,
+}
+struct Completion {
+    job: ScheduledJob,
+    resource: Option<ResourceAdmission>,
+    family_due: Option<Duration>,
 }
 impl Scheduler {
     pub fn new(inventory: &FleetInventory, shard: &str) -> Result<Self> {
@@ -87,10 +102,13 @@ impl Scheduler {
             }
         }
         let sequence = jobs.len() as u64;
-        Ok(Self { jobs, resources: BTreeMap::new(), families: BTreeMap::new(), sequence, active: None })
+        let resources =
+            jobs.iter().map(|pending| (pending.job.resource.clone(), ResourceAdmission::default())).collect();
+        let families = jobs.iter().map(|pending| (pending.job.family.clone(), Duration::ZERO)).collect();
+        Ok(Self { jobs, resources, families, sequence, active: None, completed: None, clock: None })
     }
     pub fn take(&mut self, now: Duration) -> Result<Option<Job>> {
-        if self.active.is_some() {
+        if self.active.is_some() || self.clock.as_ref().is_some_and(|clock| clock.pending_job.is_some()) {
             return Err(state_failed());
         }
         let selected = self
@@ -113,7 +131,19 @@ impl Scheduler {
     }
     pub fn finish(&mut self, now: Duration, outcome: Outcome) -> Result<()> {
         let index = self.active.take().ok_or_else(state_failed)?;
-        let pending = &mut self.jobs[index];
+        let completion = self.completion(index, now, outcome);
+        if let Some(resource) = completion.resource {
+            self.resources.insert(completion.job.job.resource.clone(), resource);
+        }
+        if let Some(due) = completion.family_due {
+            self.families.insert(completion.job.job.family.clone(), due);
+        }
+        self.jobs[index] = completion.job;
+        self.completed = Some(index);
+        Ok(())
+    }
+    fn completion(&self, index: usize, now: Duration, outcome: Outcome) -> Completion {
+        let mut pending = self.jobs[index].clone();
         pending.attempts = pending.attempts.saturating_add(1);
         pending.failures =
             if matches!(outcome, Outcome::Failed | Outcome::Pressure) { pending.failures.saturating_add(1) } else { 0 };
@@ -123,9 +153,8 @@ impl Scheduler {
             failure_delay(pending.job.schedule.every_seconds, pending.failures) + jitter(&pending.job, pending.attempts)
         };
         pending.due = now.saturating_add(delay);
-        if !matches!(outcome, Outcome::Skipped { .. }) {
-            self.families.insert(pending.job.family.clone(), pending.due);
-            let resource = self.resources.entry(pending.job.resource.clone()).or_default();
+        let resource = if !matches!(outcome, Outcome::Skipped { .. }) {
+            let mut resource = self.resources.get(&pending.job.resource).cloned().unwrap_or_default();
             let resource_delay = match outcome {
                 Outcome::Pressure => {
                     resource.pressure_failures = resource.pressure_failures.saturating_add(1);
@@ -138,8 +167,12 @@ impl Scheduler {
                 _ => RESOURCE_GAP,
             };
             resource.due = now.saturating_add(resource_delay);
-        }
-        Ok(())
+            Some(resource)
+        } else {
+            None
+        };
+        let family_due = resource.as_ref().map(|_| pending.due);
+        Completion { job: pending, resource, family_due }
     }
     pub fn wait(&self, now: Duration) -> Duration {
         self.jobs

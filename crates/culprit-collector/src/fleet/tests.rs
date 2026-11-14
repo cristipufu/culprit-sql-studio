@@ -6,6 +6,7 @@ use crate::fleet::{
 use culprit_core::{DatabaseIdentity, Engine};
 use std::sync::Mutex;
 mod remote_receipts;
+mod scheduler_persistence;
 
 struct Backend {
     requests: Mutex<Vec<CollectionRequest>>,
