@@ -8,6 +8,8 @@ mod state;
 use state::CapturedState;
 mod cached_plans;
 pub use cached_plans::cached_plans;
+mod cleanup;
+pub use cleanup::cleanup;
 mod compilation;
 pub use compilation::compilation;
 mod request_memory;

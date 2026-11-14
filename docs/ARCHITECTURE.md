@@ -211,6 +211,14 @@ native shutdown. `culprit_checks::compilation::explain` serves scans, archive an
 panel. Read clocks, native lifetimes and source outcomes remain separate. Counts and compile-memory measurements
 do not identify a current compiler or allocation owner; invalid evidence cannot produce a derived report.
 
+Cleanup explanations consume existing typed retention populations or native operational facts. SQL Server retains
+PVS and oldest-transaction facts through separate `CleanupSnapshot` reads, with independent acquisition bounds;
+PostgreSQL keeps its existing `RetentionSnapshot` once. One pure cleanup view serves scans and both warehouse
+readers. Positive retainers survive missing qualification metadata, while complete-boundary claims require native
+visibility, declared horizon coverage and comparable distances. Database capture admission rejects foreign or
+unsupported holder scopes. Session context, native transaction numbers and separate PVS reads never establish
+an originating SQL owner by themselves.
+
 Deadlock history uses one bounded native event reader and the existing graph parser. Native file/buffer positions,
 event digests and fractional timestamps identify exported events independently of redaction or retry. Interactive
 system_health reads can merge the ring buffer for freshness; Azure export reads an explicitly configured, bounded

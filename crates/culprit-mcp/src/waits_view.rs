@@ -4,6 +4,8 @@ use culprit_core::{FileIo, Report, Signal, WaitSample, format};
 use serde_json::{Value, json};
 
 const COMPILATION_ENTRIES: usize = 5;
+const CLEANUP_ENTRIES: usize = 5;
+const CLEANUP_BOUNDARY_REFERENCES: usize = 5;
 
 fn signal(s: &Signal) -> Value {
     json!({
@@ -101,6 +103,22 @@ pub fn report(report: &Report) -> Value {
     }
     if let Some(activity) = activity {
         response["activity"] = activity;
+    }
+    if let Some(cleanup) = &report.cleanup {
+        response["cleanup"] = json!({
+            "title": cleanup.title,
+            "summary": cleanup.summary,
+            "sources": cleanup.sources,
+            "entries_retained": cleanup.entries.len(),
+            "entries": cleanup.entries.iter().take(CLEANUP_ENTRIES).collect::<Vec<_>>(),
+            "boundaries": cleanup.boundaries.iter().map(|boundary| json!({
+                "horizon": boundary.horizon,
+                "complete": boundary.complete,
+                "oldest_observed_retained": boundary.oldest_observed.len(),
+                "oldest_observed": boundary.oldest_observed.iter().take(CLEANUP_BOUNDARY_REFERENCES).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "limitations": cleanup.limitations,
+        });
     }
     if let Some(resources) = &snapshot.operations.node_resources {
         response["node_resources"] = json!({
@@ -282,6 +300,156 @@ mod tests {
             assert_eq!(compilation["entries_retained"], 0);
             assert_eq!(compilation["entries"], json!([]));
             assert!(response["operations"].get("query_compilation").is_none());
+        }
+    }
+
+    #[test]
+    fn cleanup_output_bounds_entries_and_tied_boundary_references_without_repeating_raw_context() {
+        use culprit_core::{
+            CleanupBoundary, CleanupExplanation, CleanupMechanism, CleanupReference, CleanupReport, Metric,
+            SourceOutcome, SourceState, t, telemetry::*,
+        };
+        let mut data: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        let references = (0..1000)
+            .map(|index| CleanupReference {
+                source: "native-retainer-source".into(),
+                observation_key: digest(format!("native-holder-{index}").as_bytes()),
+                identity: Some(
+                    NativeIdentity::new(format!("holder-{index}")).qualified("generation", "native-generation"),
+                ),
+            })
+            .collect::<Vec<_>>();
+        let entries = references
+            .iter()
+            .take(CLEANUP_ENTRIES + 3)
+            .map(|reference| CleanupExplanation {
+                reference: reference.clone(),
+                mechanisms: vec![CleanupMechanism::ReplicationSlotHorizon],
+                title: t!("view.cleanup.retainer.title", name = reference.identity.as_ref().unwrap().id.as_str()),
+                explanation: t!("view.cleanup.retainer.slot"),
+                metrics: vec![
+                    Metric::text("Native transaction distance", "9007199254740993").keyed("native-distance:xmin"),
+                ],
+                investigation: t!("view.cleanup.retainer.investigate"),
+                verify: t!("view.cleanup.retainer.verify"),
+            })
+            .collect::<Vec<_>>();
+        data.cleanup = Some(CleanupReport {
+            sources: vec![SourceOutcome {
+                source: "native-retainer-source".into(),
+                state: SourceState::Partial,
+                reason: Some("Native visibility remains partial.".into()),
+                reason_message: None,
+            }],
+            title: t!("view.cleanup.title"),
+            summary: t!("view.cleanup.summary.entries", n = entries.len(), count = entries.len().to_string()),
+            limitations: vec![t!("view.cleanup.limit.ownership"), t!("view.cleanup.limit.horizon_units")],
+            boundaries: vec![CleanupBoundary {
+                horizon: CleanupHorizon::Data,
+                complete: false,
+                oldest_observed: references,
+            }],
+            entries,
+        });
+        data.snapshot.operations.cleanup = vec![CleanupSnapshot {
+            source: "private-cleanup-body-source-canary".into(),
+            observed_from: "2026-11-13T10:00:00Z".into(),
+            observed_until: "2026-11-13T10:00:01Z".into(),
+            observations: vec![OperationalObservation {
+                source: "private-cleanup-body-source-canary".into(),
+                key: "oldest-cleanup-transaction".into(),
+                fact: OperationalFact::MssqlCleanupHorizon(MssqlCleanupHorizon {
+                    oldest_confirmed: Some(Box::new(MssqlCleanupTransaction {
+                        session: NativeActivityIdentity {
+                            id: "62".into(),
+                            generation: "private-session-generation-canary".into(),
+                        },
+                        transaction: NativeActivityIdentity {
+                            id: "42".into(),
+                            generation: "2026-11-13T09:00:00.003".into(),
+                        },
+                        observed_time_without_offset: "2026-11-13T10:00:00.003".into(),
+                        age_seconds: Some("3600".into()),
+                        program: Some("private-cleanup-program-canary".into()),
+                        native_status: None,
+                        log_record_count: Some("1".into()),
+                        log_bytes_used: None,
+                        begin_lsn: None,
+                        row_version_participant: false,
+                        snapshot_isolation: None,
+                        transaction_sequence_number: None,
+                        versioning_age_seconds: None,
+                    })),
+                    oldest_unattributed_versioning: None,
+                }),
+            }],
+        }];
+        assert!(data.snapshot.operations.cleanup[0].is_valid());
+        data.snapshot.workload.as_mut().unwrap().queries[0].text =
+            "SELECT private_value FROM cleanup_sql_body_canary".into();
+        let original = data.cleanup.as_ref().unwrap();
+        let response = report(&data);
+        let cleanup = &response["cleanup"];
+        assert_eq!(cleanup["entries_retained"], CLEANUP_ENTRIES + 3);
+        assert_eq!(cleanup["entries"].as_array().unwrap().len(), CLEANUP_ENTRIES);
+        assert_eq!(cleanup["sources"], serde_json::to_value(&original.sources).unwrap());
+        assert_eq!(cleanup["limitations"], serde_json::to_value(&original.limitations).unwrap());
+        let boundary = &cleanup["boundaries"][0];
+        assert_eq!(boundary["complete"], false);
+        assert_eq!(boundary["oldest_observed_retained"], 1000);
+        assert_eq!(boundary["oldest_observed"].as_array().unwrap().len(), CLEANUP_BOUNDARY_REFERENCES);
+        assert_eq!(
+            boundary["oldest_observed"][0],
+            serde_json::to_value(&original.boundaries[0].oldest_observed[0]).unwrap()
+        );
+        for (index, entry) in cleanup["entries"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(entry, &serde_json::to_value(&original.entries[index]).unwrap());
+            assert_eq!(entry["metrics"][0]["text"], "9007199254740993");
+        }
+        assert!(response["operations"].get("cleanup").is_none());
+        for field in ["observations", "snapshot", "operations", "oldest_confirmed"] {
+            assert!(cleanup.get(field).is_none(), "compact cleanup must omit the raw {field} container");
+        }
+        let compact = serde_json::to_string(cleanup).unwrap();
+        for canary in [
+            "private-cleanup-body-source-canary",
+            "private-session-generation-canary",
+            "private-cleanup-program-canary",
+            "cleanup_sql_body_canary",
+        ] {
+            assert!(!compact.contains(canary), "compact cleanup must omit raw payload canary {canary}");
+        }
+        assert!(compact.len() < 20_000, "tied references must not expand compact output without a bound");
+    }
+
+    #[test]
+    fn compact_cleanup_preserves_empty_partial_and_unavailable_source_qualifications() {
+        use culprit_core::{CleanupReport, SourceOutcome, SourceState, t};
+        for state in [SourceState::Partial, SourceState::Unavailable, SourceState::Empty] {
+            let mut data: Report =
+                serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+            data.cleanup = Some(CleanupReport {
+                sources: vec![SourceOutcome {
+                    source: "explicit-native-cleanup-source".into(),
+                    state,
+                    reason: Some("Native source qualification.".into()),
+                    reason_message: None,
+                }],
+                title: t!("view.cleanup.title"),
+                summary: t!("view.cleanup.summary.empty"),
+                limitations: vec![t!("view.cleanup.limit.point")],
+                boundaries: vec![],
+                entries: vec![],
+            });
+            let response = report(&data);
+            let cleanup = &response["cleanup"];
+            assert_eq!(cleanup["sources"], serde_json::to_value(&data.cleanup.as_ref().unwrap().sources).unwrap());
+            assert_eq!(cleanup["sources"][0]["state"], serde_json::to_value(state).unwrap());
+            assert_eq!(cleanup["sources"][0]["reason"], "Native source qualification.");
+            assert_eq!(cleanup["entries_retained"], 0);
+            assert_eq!(cleanup["entries"], json!([]));
+            assert_eq!(cleanup["boundaries"], json!([]));
+            assert!(response["operations"].get("cleanup").is_none());
         }
     }
 

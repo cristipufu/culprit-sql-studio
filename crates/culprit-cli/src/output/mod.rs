@@ -22,9 +22,27 @@ pub(crate) const BRIEF_FINDING_LIMIT: usize = 3;
 pub(crate) const BRIEF_TITLE_CHARS: usize = 160;
 
 pub(crate) fn append_brief_titles<'a>(text: &mut String, titles: impl Iterator<Item = &'a str>) {
-    for title in titles.take(BRIEF_FINDING_LIMIT) {
+    append_brief_items(text, titles.map(|title| title.chars().take(BRIEF_TITLE_CHARS).collect()));
+}
+
+pub(crate) fn append_brief_details<'a>(text: &mut String, details: impl Iterator<Item = &'a str>, max_chars: usize) {
+    append_brief_items(
+        text,
+        details.map(|detail| {
+            let mut chars = detail.chars();
+            let mut displayed: String = chars.by_ref().take(max_chars).collect();
+            if chars.next().is_some() {
+                displayed.push('…');
+            }
+            displayed
+        }),
+    );
+}
+
+fn append_brief_items(text: &mut String, items: impl Iterator<Item = String>) {
+    for item in items.take(BRIEF_FINDING_LIMIT) {
         text.push_str("\n• ");
-        text.extend(title.chars().take(BRIEF_TITLE_CHARS));
+        text.push_str(&item);
     }
 }
 

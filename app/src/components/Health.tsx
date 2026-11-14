@@ -21,6 +21,7 @@ import { ObservationSourceIssue, observationReadIssue } from "./ObservationList"
 import { PageWaitTargets } from "./PageWaitTargets";
 import { TaskSpace } from "./TaskSpace";
 import { QueryCompilation } from "./QueryCompilation";
+import { CleanupEvidence } from "./CleanupEvidence";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -104,7 +105,16 @@ export function HealthTab({
   const compilation = report.snapshot.operations.query_compilation;
   const compilationReport = report.query_compilation;
   const compilationIssue = observationReadIssue(compilation?.source ?? "query compilation", report.snapshot.sources ?? []);
-  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue && !(requests && requestReport) && !requestIssue && !(sessions && sessionReport) && !sessionIssue && !(pageWaits && pageReport) && !pageIssue && !(tasks && taskReport) && !taskIssue && !(compilation && compilationReport) && !compilationIssue) {
+  const cleanup = report.cleanup;
+  const cleanupReads = report.snapshot.operations.cleanup ?? [];
+  const retention = pressure?.retention ?? null;
+  const cleanupSources = new Set(["persistent version store", "open transactions", ...cleanupReads.map((read) => read.source), ...(retention?.sources.map((source) => source.source) ?? [])]);
+  const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
+  const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
+  const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, cleanup, cleanupUnexplained].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue].some(Boolean) || cleanupIssues.length > 0;
+  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
         <h3>{t("ui.health.empty")}</h3>
@@ -157,6 +167,11 @@ export function HealthTab({
       {!(tasks && taskReport) && taskIssue && <ObservationSourceIssue source={taskIssue} title={t("view.task_space.title")} />}
       {compilation && compilationReport && <QueryCompilation key={compilation.observed_until} evidence={compilation} report={compilationReport} />}
       {!(compilation && compilationReport) && compilationIssue && <ObservationSourceIssue source={compilationIssue} title={t("view.compilation.title")} />}
+      {cleanup && <CleanupEvidence key={report.snapshot.id} reads={cleanupReads} retention={retention} report={cleanup} />}
+      {!cleanup && cleanupIssues.length > 0 && <ObservationSourceIssue sources={cleanupIssues} title={t("view.cleanup.title")} />}
+      {cleanupUnexplained && cleanupIssues.length === 0 && <section className="operational-health observation-list" aria-label={t("view.cleanup.title")}>
+        <h3>{t("view.cleanup.title")}</h3><p>{t("view.cleanup.invalid")}</p>
+      </section>}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
     </div>
   );

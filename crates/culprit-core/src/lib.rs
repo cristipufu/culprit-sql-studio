@@ -4,6 +4,7 @@ pub mod blocking;
 pub mod cached_plan_report;
 pub mod changes;
 pub mod check;
+pub mod cleanup_report;
 pub mod cloud;
 pub mod collected_analysis;
 pub mod collected_resource_analysis;
@@ -73,6 +74,7 @@ pub use cached_plan_report::{
 };
 pub use changes::{ChangeStatus, Changes, Period, PeriodStats, PlanSwitch, QueryChange};
 pub use check::{Check, CheckAssessment, CheckEvidence, CheckStatus, Diagnosis};
+pub use cleanup_report::{CleanupBoundary, CleanupExplanation, CleanupMechanism, CleanupReference, CleanupReport};
 pub use cloud::{
     CloudLimitKind, CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, ThrottleEpisode, ThrottleKind,
 };

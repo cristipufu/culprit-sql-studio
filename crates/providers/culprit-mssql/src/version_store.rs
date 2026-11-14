@@ -3,8 +3,8 @@ use crate::read::{NativeRead, ReadError, integer, invalid_data, optional_integer
 use culprit_core::{
     Coverage, MeasurementScope, Result,
     telemetry::{
-        CollectionBudget, CollectionStop, CounterNature, CounterUnit, NativeCounterSample, OperationalFact,
-        OperationalObservation, SourceShutdown,
+        CleanupSnapshot, CollectionBudget, CollectionStop, CounterNature, CounterUnit, NativeCounterSample,
+        OperationalFact, OperationalObservation, SourceShutdown,
     },
 };
 
@@ -52,13 +52,22 @@ pub(crate) fn bytes(sample: &NativeCounterSample) -> Option<f64> {
 }
 pub(crate) struct StoreContext {
     pub tempdb_bytes: Option<f64>,
-    pub persistent: Option<culprit_core::telemetry::MssqlPersistentVersionStore>,
+    pub persistent: Option<CleanupSnapshot>,
     adr_enabled: Option<bool>,
 }
 impl StoreContext {
     pub fn tempdb_cleanup_context(&self) -> Option<f64> {
         // ADR moves row versions into the database. Tempdb allocation cannot measure that transaction's context.
         self.tempdb_bytes.filter(|_| self.adr_enabled == Some(false))
+    }
+
+    pub fn persistent_signal(&self) -> Option<culprit_core::Signal> {
+        let OperationalFact::MssqlPersistentVersionStore(sample) =
+            &self.persistent.as_ref()?.observations.first()?.fact
+        else {
+            return None;
+        };
+        persistent::signal(sample)
     }
 }
 pub(crate) async fn application(
@@ -67,19 +76,30 @@ pub(crate) async fn application(
     coverage: &mut Coverage,
 ) -> StoreContext {
     let mut reader = crate::read::ReadSession::new(pool, CollectionBudget::default());
-    let tempdb = read(&mut reader).await;
-    let persistent = persistent::read(&mut reader).await;
+    application_with(&mut reader, coverage, &probe.grant_hint()).await
+}
+
+async fn application_with<R: NativeRead>(reader: &mut R, coverage: &mut Coverage, grant_hint: &str) -> StoreContext {
+    let tempdb = read(reader).await;
+    let observed_from = chrono::Utc::now().to_rfc3339();
+    let persistent = if let Err(error) = &tempdb
+        && crate::read::stops_remaining_reads(error)
+    {
+        Err(error.clone())
+    } else {
+        persistent::read(reader).await
+    };
+    let observed_until = chrono::Utc::now().to_rfc3339();
+    let terminal_error = persistent.as_ref().err().filter(|error| crate::read::stops_remaining_reads(error));
     let (tempdb, persistent) = if reader.close().await == SourceShutdown::Unconfirmed {
         (Err(CollectionStop::CancellationUnconfirmed.error()), Err(CollectionStop::CancellationUnconfirmed.error()))
+    } else if let Some(error) = terminal_error {
+        (Err(error.clone()), Err(error.clone()))
     } else {
         (tempdb, persistent)
     };
     let permission = |error: culprit_core::Error| {
-        if error.code == culprit_core::ErrorCode::PermissionDenied {
-            error.with_hint(probe.grant_hint())
-        } else {
-            error
-        }
+        if error.code == culprit_core::ErrorCode::PermissionDenied { error.with_hint(grant_hint) } else { error }
     };
     let tempdb_bytes =
         coverage.read(&crate::sources::VERSION_STORE, tempdb.map_err(permission)).as_ref().and_then(bytes);
@@ -94,7 +114,13 @@ pub(crate) async fn application(
         result => {
             let sample = coverage.read(&crate::sources::PERSISTENT_VERSION_STORE, result.map_err(permission)).flatten();
             let adr_enabled = sample.as_ref().map(|_| true);
-            (sample, adr_enabled)
+            let snapshot = sample.map(|sample| CleanupSnapshot {
+                source: crate::sources::PERSISTENT_VERSION_STORE.name.into(),
+                observed_from,
+                observed_until,
+                observations: vec![persistent::observation(sample)],
+            });
+            (snapshot, adr_enabled)
         }
     };
     StoreContext { tempdb_bytes, persistent, adr_enabled }

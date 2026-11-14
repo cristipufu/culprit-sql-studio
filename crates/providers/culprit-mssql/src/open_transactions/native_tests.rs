@@ -60,7 +60,7 @@ async fn native_cleanup_horizon_distinguishes_read_only_logged_and_snapshot_work
         "a transaction can have native XSN membership from another database while merely reading this one"
     );
     let mut coverage = Coverage::default();
-    assert!(record_application_result(&mut coverage, Ok(ambiguous), None).is_none());
+    assert!(record_application_result(&mut coverage, Ok(&ambiguous), None).is_none());
     assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Partial);
     let mut writer =
         crate::test_support::connect(&config(port, &database, &password, "cleanup-writer"), SessionKind::User)

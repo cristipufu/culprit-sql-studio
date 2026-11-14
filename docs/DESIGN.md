@@ -115,6 +115,12 @@ Health colors are assessments, never thresholds on an isolated ratio or size. CP
 
 Planner cost constants stay visible as settings; a default alone supplies no measured reason to change one. A saved statistics warning describes the plan's compilation, not current statistics: index seek keys do not prove that each column has a histogram or that a refresh is needed. Frequent empty calls can be polling or request-driven checks, and statement counts do not reveal transaction boundaries. Advice names these possibilities and asks for the evidence needed to choose a change.
 
+Cleanup and row-version retention appear in Health as a short explanation with source qualifications. Native records
+start collapsed and page in bounded groups. The detail distinguishes a recorded cleanup mechanism from size,
+missing coverage and unresolved ownership. It keeps original session/transaction references and current versus
+previous statement context; preparation time stays separate from transaction begin time. Failed acquisition or an
+unavailable explanation remains visible instead of falling through to a healthy empty state.
+
 YugabyteDB's **Recorded activity** shows retained ASH task observations, with the source's own dates, node and role
 scope. Percentages are shares of sample weight; YSQL and DocDB components can overlap, so they are not elapsed query
 time or CPU utilization. Event groups are paginated, query links use matching identities without borrowing runtime

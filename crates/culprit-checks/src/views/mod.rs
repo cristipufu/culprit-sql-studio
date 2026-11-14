@@ -4,6 +4,7 @@
 
 pub(crate) mod advisor;
 pub(crate) mod brief;
+pub mod cleanup;
 pub mod compilation;
 pub mod dashboard;
 pub(crate) mod digest;

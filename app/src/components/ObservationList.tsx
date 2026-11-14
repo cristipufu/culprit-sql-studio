@@ -5,19 +5,19 @@ import { t } from "../lib/i18n";
 
 const PAGE_SIZE = 10;
 
+type ReadSource = { source: string; state: SourceOutcome["state"] | null; reason?: string | null };
+
 type ObservationReport<Entry> = {
   title: string;
   summary: string;
-  source_state: SourceOutcome["state"] | null;
-  source_reason: string | null;
   limitations: string[];
   entries: Entry[];
-};
+} & ({ source_state: SourceOutcome["state"] | null; source_reason: string | null } | { sources: SourceOutcome[] });
 
 /** Shared presentation owns read qualification and paging; each native format owns its evidence renderer. */
 export function ObservationList<Entry>({ source, time, report, scope, renderEntry, collapseEntries = false, entriesLabel }: {
   source: string;
-  time: ReactNode;
+  time?: ReactNode;
   report: ObservationReport<Entry>;
   scope: string;
   renderEntry: (entry: Entry) => ReactNode;
@@ -28,7 +28,7 @@ export function ObservationList<Entry>({ source, time, report, scope, renderEntr
   const lastPage = Math.max(0, Math.ceil(report.entries.length / PAGE_SIZE) - 1);
   const currentPage = Math.min(page, lastPage);
   const first = currentPage * PAGE_SIZE;
-  const qualification = readQualification(report.source_state);
+  const sources = "sources" in report ? report.sources : [{ source, state: report.source_state, reason: report.source_reason }];
   const observations = <>
     <div className="operational-grid observation-grid">
       {report.entries.slice(first, first + PAGE_SIZE).map(renderEntry)}
@@ -43,11 +43,11 @@ export function ObservationList<Entry>({ source, time, report, scope, renderEntr
     <h3>{report.title}</h3>
     <p>{report.summary}</p>
     <p className="muted">{source} · {scope}</p>
-    <p className="muted">{time}</p>
-    {qualification && <p className="muted">{qualification}</p>}
+    {time != null && <p className="muted">{time}</p>}
+    <ReadQualifications sources={sources} />
     <details>
       <summary>{t("ui.memory_failures.limitations")}</summary>
-      {report.source_reason && <p className="muted">{report.source_reason}</p>}
+      <ReadReasons sources={sources} />
       {report.limitations.map((limitation, index) => <p className="muted" key={index}>{limitation}</p>)}
     </details>
     {collapseEntries && report.entries.length > 0 ? <details>
@@ -68,15 +68,30 @@ export function observationReadIssue(source: string, sources: SourceOutcome[], r
   ) ? outcome : undefined;
 }
 
-export function ObservationSourceIssue({ source, title }: { source: SourceOutcome; title: string }) {
-  return <section className="operational-health observation-list" aria-label={title}>
-    <h3>{title}</h3>
-    <p className="muted">{readQualification(source.state)}</p>
+export function ObservationSourceIssue(props: { title: string } & ({ source: SourceOutcome } | { sources: SourceOutcome[] })) {
+  const sources = "sources" in props ? props.sources : [props.source];
+  return <section className="operational-health observation-list" aria-label={props.title}>
+    <h3>{props.title}</h3>
+    <ReadQualifications sources={sources} />
     <details>
       <summary>{t("ui.memory_failures.limitations")}</summary>
-      <p>{source.reason ?? t("ui.observation_list.source_unknown")}</p>
+      <ReadReasons sources={sources} showUnknown />
     </details>
   </section>;
+}
+
+function ReadQualifications({ sources }: { sources: ReadSource[] }) {
+  return sources.map((source) => {
+    const qualification = readQualification(source.state);
+    return qualification && <p className="muted" key={source.source}>{sources.length > 1 && <>{source.source} · </>}{qualification}</p>;
+  });
+}
+
+function ReadReasons({ sources, showUnknown = false }: { sources: ReadSource[]; showUnknown?: boolean }) {
+  return sources.map((source) => {
+    const reason = source.reason ?? (showUnknown ? t("ui.observation_list.source_unknown") : null);
+    return reason && <p className="muted" key={source.source}>{sources.length > 1 && <>{source.source} · </>}{reason}</p>;
+  });
 }
 
 function readQualification(state: SourceOutcome["state"] | null): string | null {

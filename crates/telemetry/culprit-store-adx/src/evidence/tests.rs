@@ -9,6 +9,7 @@ use serde_json::json;
 
 mod activity;
 mod cached_runtime;
+mod cleanup;
 mod diagnostics;
 mod object_definitions;
 mod observations;

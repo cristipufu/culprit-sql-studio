@@ -61,6 +61,7 @@ struct SchemaPart {
 #[derive(Default)]
 struct MiscPart {
     pressure: Option<culprit_core::Pressure>,
+    cleanup: Vec<culprit_core::telemetry::CleanupSnapshot>,
     query_families: Vec<culprit_core::QueryFamily>,
     plan_cache: Option<culprit_core::PlanCacheUse>,
     tuning: Option<culprit_core::TuningAdvice>,
@@ -333,10 +334,11 @@ async fn collect_misc(
     let dmv = probe.can_read_dmvs();
     let grant = || probe.grant_hint();
     if dmv {
-        let (pressure, waits, read) = pressure::collect(provider.pool.clone(), probe).await;
-        part.outcome.merge(read);
-        part.waits = waits;
-        part.pressure = Some(pressure);
+        let collected = pressure::collect(provider.pool.clone(), probe).await;
+        part.outcome.merge(collected.coverage);
+        part.waits = collected.waits;
+        part.pressure = Some(collected.pressure);
+        part.cleanup = collected.cleanup;
     } else {
         server_state_unreadable(&mut part.outcome, probe);
     }
@@ -484,7 +486,7 @@ pub(crate) async fn snapshot(
         contention_before: None,
         evictions_before: None,
         sizes_before: None,
-        operations: Default::default(),
+        operations: culprit_core::operations::OperationalStats { cleanup: misc_part.cleanup, ..Default::default() },
     };
     let mut client = ReadSession::application(provider.pool.clone());
     signals::collect(

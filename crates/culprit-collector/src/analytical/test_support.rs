@@ -20,7 +20,11 @@ pub use query_cohorts::{
 };
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
+mod cleanup;
 mod observations;
+pub use cleanup::{
+    CleanupCase, assert_cleanup_capture, cleanup_evidence, cleanup_evidence_cases, cleanup_tamper_cases,
+};
 pub use observations::{
     memory_failure_evidence, memory_failure_observation, request_memory_evidence, retention_coverage_only_evidence,
     retention_evidence,

@@ -1,5 +1,6 @@
 use super::*;
 mod activity;
+mod cleanup;
 mod diagnostics;
 mod object_definitions;
 mod queries;

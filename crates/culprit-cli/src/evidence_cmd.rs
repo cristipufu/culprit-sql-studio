@@ -133,6 +133,7 @@ enum Analysis {
     RuntimeDistributions,
     CachedPlans,
     Compilation,
+    Cleanup,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
@@ -152,7 +153,8 @@ impl Analysis {
             | Self::TaskSpace
             | Self::StatementWork
             | Self::RuntimeDistributions
-            | Self::Compilation => {
+            | Self::Compilation
+            | Self::Cleanup => {
                 vec![EvidenceFamily::OperationalSamples]
             }
         }
@@ -242,6 +244,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::Compilation) => {
             let analysis = culprit_engine::collected_resources::compilation(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::compilation(&analysis.report))?;
+        }
+        Some(Analysis::Cleanup) => {
+            let analysis = culprit_engine::collected_resources::cleanup(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::cleanup(&analysis.report))?;
         }
     }
     if !complete && out.format() == Format::Text {

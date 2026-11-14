@@ -69,10 +69,11 @@ async fn a_successful_empty_horizon_is_a_measurement_and_a_failure_is_unavailabl
     assert!(empty.oldest_confirmed.is_none());
     assert!(observation(empty.clone()).is_valid());
     let mut coverage = Coverage::default();
-    assert!(record_application_result(&mut coverage, Ok(empty), None).is_none());
+    assert!(record_application_result(&mut coverage, Ok(&empty), None).is_none());
     assert_eq!(coverage.outcomes()[0].state, SourceState::Empty);
     let mut coverage = Coverage::default();
-    assert!(record_application_result(&mut coverage, read(&mut reader, Selection::Application).await, None).is_none());
+    let failed = read(&mut reader, Selection::Application).await;
+    assert!(record_application_result(&mut coverage, failed.as_ref().map_err(Clone::clone), None).is_none());
     assert_eq!(coverage.outcomes()[0].state, SourceState::Unavailable);
 }
 #[tokio::test]
@@ -82,7 +83,7 @@ async fn future_native_begin_time_does_not_turn_a_clock_jump_into_a_healthy_zero
     let raw = read(&mut reader, Selection::Application).await.unwrap();
     assert_eq!(raw.oldest_confirmed.as_ref().unwrap().age_seconds, None);
     let mut coverage = Coverage::default();
-    assert!(record_application_result(&mut coverage, Ok(raw), None).is_none());
+    assert!(record_application_result(&mut coverage, Ok(&raw), None).is_none());
     assert_eq!(coverage.outcomes()[0].state, SourceState::Partial);
 }
 #[tokio::test]
@@ -136,6 +137,88 @@ async fn global_versioning_membership_without_database_cleanup_evidence_is_retai
     assert!(horizon.oldest_confirmed.is_none());
     assert!(horizon.oldest_unattributed_versioning.is_some());
     let mut coverage = Coverage::default();
-    assert!(record_application_result(&mut coverage, Ok(horizon), None).is_none());
+    assert!(record_application_result(&mut coverage, Ok(&horizon), None).is_none());
     assert_eq!(coverage.outcomes()[0].state, SourceState::Partial);
+}
+
+#[tokio::test]
+async fn scan_retains_confirmed_and_unattributed_native_transactions_separately_after_shutdown() {
+    let unknown = replace(
+        &row(),
+        &[
+            ("confirmed", Val::Int(0)),
+            ("session_id", Val::Text("43".into())),
+            ("transaction_id", Val::Text("9007199254740994".into())),
+            ("snapshot_isolation", Val::Int(0)),
+        ],
+    );
+    let mut io = FakeRead::new(vec![Ok(vec![row(), unknown])]);
+    let before = chrono::Utc::now();
+    let mut coverage = Coverage::default();
+    let context = collect_with(&mut io, &mut coverage, None, "test grant").await;
+    let after = chrono::Utc::now();
+    assert_eq!(io.closed, 1);
+    assert_eq!(io.calls.len(), 1, "the application and raw fact share the existing oldest-holder SELECT");
+    assert_eq!(context.oldest.as_ref().unwrap().session, "42");
+    assert_eq!(context.oldest.as_ref().unwrap().held_bytes, None, "PVS bytes are not transaction-owned bytes");
+    assert_eq!(coverage.outcomes()[0].state, SourceState::Partial);
+    let snapshot = context.cleanup.unwrap();
+    assert!(snapshot.is_valid());
+    assert_eq!(snapshot.source, crate::sources::OPEN_TRANSACTIONS.name);
+    let start = chrono::DateTime::parse_from_rfc3339(&snapshot.observed_from).unwrap();
+    let end = chrono::DateTime::parse_from_rfc3339(&snapshot.observed_until).unwrap();
+    assert!(before <= start && start <= end && end <= after);
+    let [OperationalObservation { fact: OperationalFact::MssqlCleanupHorizon(horizon), .. }] =
+        snapshot.observations.as_slice()
+    else {
+        panic!("one native horizon")
+    };
+    assert_eq!(horizon.oldest_confirmed.as_ref().unwrap().transaction.id, "9007199254740993");
+    let unowned = horizon.oldest_unattributed_versioning.as_ref().unwrap();
+    assert_eq!(unowned.session.id, "43");
+    assert_eq!(unowned.transaction.id, "9007199254740994");
+    assert_eq!(unowned.transaction_sequence_number.as_deref(), Some("9007199254740993"));
+    assert_eq!(unowned.observed_time_without_offset, "2020-01-01T08:00:00.1533333");
+}
+
+#[tokio::test]
+async fn successful_empty_or_unusable_age_retains_raw_cleanup_visibility_instead_of_silently_disappearing() {
+    let future = replace(&row(), &[("transaction_generation", Val::Text("2020-01-01T08:00:00.1533334".into()))]);
+    for (rows, expected) in [(vec![], SourceState::Empty), (vec![future], SourceState::Partial)] {
+        let mut io = FakeRead::new(vec![Ok(rows)]);
+        let mut coverage = Coverage::default();
+        let context = collect_with(&mut io, &mut coverage, None, "test grant").await;
+        assert!(context.oldest.is_none());
+        let snapshot = context.cleanup.unwrap();
+        assert!(snapshot.is_valid());
+        assert_eq!(snapshot.observations.len(), 1);
+        assert_eq!(coverage.outcomes()[0].state, expected);
+        assert_eq!(io.closed, 1);
+    }
+}
+
+#[tokio::test]
+async fn canceled_failed_or_unconfirmed_cleanup_reads_publish_no_raw_or_derived_transaction() {
+    for error in [
+        ReadError::Stopped(CollectionStop::Cancelled),
+        ReadError::Stopped(CollectionStop::TimedOut),
+        ReadError::Source(culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "test denied")),
+    ] {
+        let mut io = FakeRead::new(vec![Err(error)]);
+        let mut coverage = Coverage::default();
+        let context = collect_with(&mut io, &mut coverage, Some(1024.0), "test grant").await;
+        assert!(context.oldest.is_none());
+        assert!(context.cleanup.is_none());
+        assert_eq!(io.closed, 1);
+        assert_eq!(io.calls.len(), 1);
+        assert_eq!(coverage.outcomes()[0].state, SourceState::Unavailable);
+    }
+    let mut io = FakeRead::new(vec![Ok(vec![row()])]);
+    io.shutdown = SourceShutdown::Unconfirmed;
+    let mut coverage = Coverage::default();
+    let context = collect_with(&mut io, &mut coverage, Some(1024.0), "test grant").await;
+    assert!(context.oldest.is_none());
+    assert!(context.cleanup.is_none());
+    assert_eq!(io.closed, 1);
+    assert_eq!(coverage.outcomes()[0].state, SourceState::Unavailable);
 }

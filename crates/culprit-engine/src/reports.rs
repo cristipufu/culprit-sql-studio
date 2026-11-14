@@ -40,6 +40,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         task_space: &'a Option<culprit_core::TaskSpaceReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         query_compilation: &'a Option<culprit_core::CompilationReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
         snapshot,
@@ -57,6 +59,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         task_space,
         query_compilation,
         evidence: _,
+        cleanup,
     } = report;
     View {
         snapshot,
@@ -73,6 +76,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         page_waits,
         task_space,
         query_compilation,
+        cleanup,
     }
 }
 

@@ -62,3 +62,92 @@ fn tempdb_context_cannot_measure_adr_versions_or_an_unknown_recovery_configurati
         assert_eq!(context.tempdb_cleanup_context(), if adr == Some(false) { Some(1024.0) } else { None });
     }
 }
+
+fn application_reader(tempdb: crate::read::ReadResult<Vec<Rec>>) -> FakeRead {
+    FakeRead::new(vec![
+        tempdb,
+        Ok(vec![persistent::tests::layout(3, 16, 1, 1)]),
+        Ok(vec![Rec::of(&[("adr", Val::Int(1))])]),
+        Ok(vec![persistent::tests::row()]),
+    ])
+}
+
+#[tokio::test]
+async fn scan_retains_original_pvs_facts_and_its_own_read_bounds_after_confirmed_shutdown() {
+    let mut reader = application_reader(Ok(vec![row()]));
+    let before = chrono::Utc::now();
+    let mut coverage = Coverage::default();
+    let context = application_with(&mut reader, &mut coverage, "test grant").await;
+    let after = chrono::Utc::now();
+    assert_eq!(reader.closed, 1);
+    assert_eq!(reader.calls.len(), 4);
+    assert_eq!(context.tempdb_bytes, Some(0.0));
+    assert_eq!(context.tempdb_cleanup_context(), None, "ADR PVS is not measured by tempdb bytes");
+    assert!(context.persistent_signal().is_some());
+    let snapshot = context.persistent.unwrap();
+    assert!(snapshot.is_valid());
+    assert_eq!(snapshot.source, crate::sources::PERSISTENT_VERSION_STORE.name);
+    assert_eq!(snapshot.observations.len(), 1);
+    let start = chrono::DateTime::parse_from_rfc3339(&snapshot.observed_from).unwrap();
+    let end = chrono::DateTime::parse_from_rfc3339(&snapshot.observed_until).unwrap();
+    assert!(before <= start && start <= end && end <= after);
+    let OperationalFact::MssqlPersistentVersionStore(sample) = &snapshot.observations[0].fact else { panic!() };
+    assert_eq!(sample.off_row_kibibytes.as_deref(), Some("9007199254740993"));
+    assert_eq!(sample.minimum_transaction_timestamp.as_deref(), Some("-1"));
+    assert_eq!(sample.off_row_cleanup.started_without_offset.as_deref(), Some("2020-01-01T07:58:30.1533333"));
+    assert!(coverage.outcomes().iter().all(|outcome| outcome.state == culprit_core::SourceState::Collected));
+}
+
+#[tokio::test]
+async fn independent_source_failures_preserve_other_confirmed_measurements_without_fabricating_a_pvs_size() {
+    let denied = || culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "test denied");
+    let mut io = application_reader(Err(ReadError::Source(denied())));
+    let mut coverage = Coverage::default();
+    let context = application_with(&mut io, &mut coverage, "test grant").await;
+    assert_eq!(context.tempdb_bytes, None);
+    assert!(context.persistent.is_some());
+    assert_eq!(io.calls.len(), 4);
+    assert_eq!(io.closed, 1);
+    assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Unavailable);
+    assert_eq!(coverage.outcomes()[1].state, culprit_core::SourceState::Collected);
+
+    let mut io = FakeRead::new(vec![Ok(vec![row()]), Err(ReadError::Source(denied()))]);
+    let mut coverage = Coverage::default();
+    let context = application_with(&mut io, &mut coverage, "test grant").await;
+    assert_eq!(context.tempdb_bytes, Some(0.0));
+    assert!(context.persistent.is_none());
+    assert!(context.persistent_signal().is_none());
+    assert_eq!(context.tempdb_cleanup_context(), None, "an unreadable ADR setting is not disabled ADR");
+    assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Collected);
+    assert_eq!(coverage.outcomes()[1].state, culprit_core::SourceState::Unavailable);
+}
+
+#[tokio::test]
+async fn canceled_or_unconfirmed_store_reads_publish_no_fresh_raw_facts_or_size_signals() {
+    for stop in [CollectionStop::Cancelled, CollectionStop::TimedOut, CollectionStop::CancellationUnconfirmed] {
+        for failure_at_first_read in [true, false] {
+            let replies = if failure_at_first_read {
+                vec![Err(ReadError::Stopped(stop))]
+            } else {
+                vec![Ok(vec![row()]), Err(ReadError::Stopped(stop))]
+            };
+            let mut io = FakeRead::new(replies);
+            let mut coverage = Coverage::default();
+            let context = application_with(&mut io, &mut coverage, "test grant").await;
+            assert_eq!(context.tempdb_bytes, None);
+            assert!(context.persistent.is_none());
+            assert!(context.persistent_signal().is_none());
+            assert_eq!(io.closed, 1);
+            assert_eq!(io.calls.len(), if failure_at_first_read { 1 } else { 2 });
+            assert!(coverage.outcomes().iter().all(|outcome| outcome.state == culprit_core::SourceState::Unavailable));
+        }
+    }
+    let mut io = application_reader(Ok(vec![row()]));
+    io.shutdown = SourceShutdown::Unconfirmed;
+    let mut coverage = Coverage::default();
+    let context = application_with(&mut io, &mut coverage, "test grant").await;
+    assert!(context.persistent.is_none());
+    assert_eq!(context.tempdb_bytes, None);
+    assert_eq!(io.closed, 1);
+    assert!(coverage.outcomes().iter().all(|outcome| outcome.state == culprit_core::SourceState::Unavailable));
+}

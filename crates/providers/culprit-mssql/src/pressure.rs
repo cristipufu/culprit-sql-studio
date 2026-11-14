@@ -130,10 +130,14 @@ pub(crate) fn resource_signals(summary: &crate::resources::Summary) -> Vec<Signa
 
 /// Signals, grants and the oldest open transaction. Each read is independent, through `sources::read`: a failure is a
 /// note in the coverage returned.
-pub(crate) async fn collect(
-    pool: std::sync::Arc<crate::conn::Pool>,
-    probe: &Probe,
-) -> (Pressure, Vec<WaitStat>, Coverage) {
+pub(crate) struct CollectedPressure {
+    pub pressure: Pressure,
+    pub waits: Vec<WaitStat>,
+    pub coverage: Coverage,
+    pub cleanup: Vec<culprit_core::telemetry::CleanupSnapshot>,
+}
+
+pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Probe) -> CollectedPressure {
     let azure = probe.is_azure_sql_database();
     let uptime = uptime_hours(probe);
     let mut p = Pressure { uptime_hours: uptime, ..Pressure::default() };
@@ -188,13 +192,15 @@ pub(crate) async fn collect(
     if let Some(bytes) = version_store.tempdb_bytes {
         p.signals.push(version_store_signal(bytes));
     }
-    p.signals.extend(version_store.persistent.as_ref().and_then(crate::version_store::persistent::signal));
-    p.oldest_transaction =
+    p.signals.extend(version_store.persistent_signal());
+    let transactions =
         crate::open_transactions::collect(pool, probe, &mut coverage, version_store.tempdb_cleanup_context()).await;
+    p.oldest_transaction = transactions.oldest;
     if let Some(transaction) = &p.oldest_transaction {
         p.signals.push(oldest_transaction_signal(transaction.seconds));
     }
-    (p, categories, coverage)
+    let cleanup = version_store.persistent.into_iter().chain(transactions.cleanup).collect();
+    CollectedPressure { pressure: p, waits: categories, coverage, cleanup }
 }
 
 /// Both consumers use one native wait snapshot; no second reading can silently describe a different instant.

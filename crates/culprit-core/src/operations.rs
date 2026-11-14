@@ -50,6 +50,8 @@ pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub query_compilation: Option<crate::telemetry::CompilationSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleanup: Vec<crate::telemetry::CleanupSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub node_resources: Option<NodeResources>,
@@ -125,6 +127,7 @@ impl OperationalStats {
             page_waits: _,
             task_space: _,
             query_compilation: _,
+            cleanup: _,
             node_resources: _,
         } = self;
         Counters { log_failures, spaces, counters, sequences, multixacts, sqlite, cluster }

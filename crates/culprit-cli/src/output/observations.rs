@@ -4,6 +4,8 @@ use culprit_core::{
     format, t,
 };
 
+const CLEANUP_DETAIL_CHARS: usize = 1024;
+
 struct Summary<'a> {
     title: &'a str,
     summary: &'a str,
@@ -14,6 +16,24 @@ struct Summary<'a> {
 enum SourceQualification<'a> {
     Single { state: Option<SourceState>, reason: Option<&'a str> },
     Multiple(&'a [SourceOutcome]),
+}
+
+pub(crate) fn cleanup(report: &culprit_core::CleanupReport) -> String {
+    let entries = report
+        .entries
+        .iter()
+        .take(super::BRIEF_FINDING_LIMIT)
+        .map(|entry| t!("evidence.cli.cleanup_entry", title = &entry.title, explanation = &entry.explanation))
+        .collect::<Vec<_>>();
+    render_summary(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Multiple(&report.sources),
+            limitations: &report.limitations,
+        },
+        |text| super::append_brief_details(text, entries.iter().map(String::as_str), CLEANUP_DETAIL_CHARS),
+    )
 }
 
 pub(crate) fn compilation(report: &CompilationReport) -> String {
@@ -160,12 +180,16 @@ pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
 }
 
 fn render<'a>(report: Summary<'_>, titles: impl Iterator<Item = &'a str>) -> String {
+    render_summary(report, |text| super::append_brief_titles(text, titles))
+}
+
+fn render_summary(report: Summary<'_>, append_entries: impl FnOnce(&mut String)) -> String {
     let mut text = format!("{}\n{}", report.title, report.summary);
     match report.source {
         SourceQualification::Single { state, reason } => append_single_source(&mut text, state, reason),
         SourceQualification::Multiple(sources) => append_native_sources(&mut text, sources),
     }
-    super::append_brief_titles(&mut text, titles);
+    append_entries(&mut text);
     // Pure views put their general observation qualification first; words never drive a decision here.
     if let Some(limitation) = report.limitations.first() {
         text.push('\n');
@@ -223,6 +247,53 @@ fn append_native_sources(text: &mut String, sources: &[SourceOutcome]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleanup_text_keeps_native_mechanisms_and_source_failures_with_a_bounded_entry_list() {
+        let mut report = culprit_core::CleanupReport {
+            title: "Cleanup evidence".into(),
+            summary: "Eight native observations.".into(),
+            sources: vec![SourceOutcome {
+                source: "cleanup-source".into(),
+                state: SourceState::Partial,
+                reason: Some("Original native visibility was incomplete.".into()),
+                reason_message: None,
+            }],
+            boundaries: vec![],
+            limitations: vec!["This observation has no qualified rate window.".into()],
+            entries: (0..8)
+                .map(|id| culprit_core::CleanupExplanation {
+                    reference: culprit_core::CleanupReference {
+                        source: "cleanup-source".into(),
+                        observation_key: format!("row-{id}"),
+                        identity: None,
+                    },
+                    mechanisms: vec![culprit_core::CleanupMechanism::LongSnapshotScan],
+                    title: format!("Native cleanup record {id}"),
+                    explanation: "Recorded snapshot-scan pages: 9007199254740993.".into(),
+                    metrics: vec![],
+                    investigation: String::new(),
+                    verify: String::new(),
+                })
+                .collect(),
+        };
+        let text = cleanup(&report);
+        assert_eq!(text.matches('•').count(), super::super::BRIEF_FINDING_LIMIT);
+        assert!(text.contains("Recorded snapshot-scan pages: 9007199254740993."));
+        assert!(!text.contains("9007199254740992"));
+        assert!(text.contains("Original native visibility was incomplete."));
+        assert!(text.contains("This observation has no qualified rate window."));
+        assert!(!text.contains("Native cleanup record 7"));
+        // A title-sized cutoff would hide the mechanism behind the leading native qualification.
+        report.entries[0].explanation = format!("{} Recorded pages: 9007199254740993.", "qualification ".repeat(20));
+        let detailed = cleanup(&report);
+        assert!(detailed.contains("Recorded pages: 9007199254740993."));
+        report.entries[0].explanation = "é".repeat(CLEANUP_DETAIL_CHARS * 2);
+        let bounded = cleanup(&report);
+        let first = bounded.lines().find(|line| line.starts_with('•')).unwrap();
+        assert!(first.ends_with('…'));
+        assert!(first.chars().count() <= CLEANUP_DETAIL_CHARS + 3);
+    }
 
     #[test]
     fn cached_plan_output_bounds_entries_and_keeps_unavailable_plan_and_source_reasons() {

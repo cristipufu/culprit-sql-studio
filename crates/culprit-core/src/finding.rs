@@ -404,6 +404,9 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub query_compilation: Option<crate::CompilationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cleanup: Option<crate::CleanupReport>,
     pub snapshot: Snapshot,
     pub findings: Vec<Finding>,
     pub locked: Vec<LockedCheck>,

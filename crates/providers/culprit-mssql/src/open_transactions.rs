@@ -120,31 +120,50 @@ pub(crate) async fn collect(
     probe: &crate::probe::Probe,
     coverage: &mut Coverage,
     version_store_bytes: Option<f64>,
-) -> Option<OpenTransaction> {
+) -> TransactionContext {
     let mut reader = ReadSession::new(pool, CollectionBudget::default());
-    let result = read(&mut reader, Selection::Application).await;
+    collect_with(&mut reader, coverage, version_store_bytes, &probe.grant_hint()).await
+}
+
+pub(crate) struct TransactionContext {
+    pub oldest: Option<OpenTransaction>,
+    pub cleanup: Option<CleanupSnapshot>,
+}
+
+async fn collect_with<R: NativeRead>(
+    reader: &mut R,
+    coverage: &mut Coverage,
+    version_store_bytes: Option<f64>,
+    grant_hint: &str,
+) -> TransactionContext {
+    let observed_from = chrono::Utc::now().to_rfc3339();
+    let result = read(reader, Selection::Application).await;
+    let observed_until = chrono::Utc::now().to_rfc3339();
     let result = if reader.close().await == SourceShutdown::Unconfirmed {
         Err(CollectionStop::CancellationUnconfirmed.error())
     } else {
         result
     };
     let result = result.map_err(|error| {
-        if error.code == culprit_core::ErrorCode::PermissionDenied {
-            error.with_hint(probe.grant_hint())
-        } else {
-            error
-        }
+        if error.code == culprit_core::ErrorCode::PermissionDenied { error.with_hint(grant_hint) } else { error }
     });
-    record_application_result(coverage, result, version_store_bytes)
+    let oldest = record_application_result(coverage, result.as_ref().map_err(Clone::clone), version_store_bytes);
+    let cleanup = result.ok().map(|horizon| CleanupSnapshot {
+        source: crate::sources::OPEN_TRANSACTIONS.name.into(),
+        observed_from,
+        observed_until,
+        observations: vec![observation(horizon)],
+    });
+    TransactionContext { oldest, cleanup }
 }
 fn record_application_result(
     coverage: &mut Coverage,
-    result: Result<MssqlCleanupHorizon>,
+    result: Result<&MssqlCleanupHorizon>,
     version_store_bytes: Option<f64>,
 ) -> Option<OpenTransaction> {
     let horizon = coverage.read(&crate::sources::OPEN_TRANSACTIONS, result)?;
     coverage.completed(&crate::sources::OPEN_TRANSACTIONS, usize::from(horizon.oldest_confirmed.is_some()));
-    let value = application(&horizon, version_store_bytes);
+    let value = application(horizon, version_store_bytes);
     if horizon.oldest_unattributed_versioning.is_some() {
         coverage.partial(
             &crate::sources::OPEN_TRANSACTIONS,

@@ -4,6 +4,7 @@ use culprit_core::{
 use culprit_engine::collected_evidence;
 
 mod cached_plans;
+mod cleanup;
 mod cohorts;
 mod compilation;
 mod fixture;

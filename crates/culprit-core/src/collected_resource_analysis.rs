@@ -8,6 +8,13 @@ use ts_rs::TS;
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedCleanupAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::CleanupReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedRetainedFailureAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: RetainedFailureReport,

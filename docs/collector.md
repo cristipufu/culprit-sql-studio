@@ -159,6 +159,8 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis compilation --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis cleanup --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis cached-plans --json
 ```
 
@@ -226,6 +228,24 @@ retain the complete native query identity and its lifetime. Collector read bound
 clocks. These records do not establish a current compiler, a memory owner, the reason for recompilation or a
 selected-window compilation rate. Partial, unavailable and complete-empty evidence stay distinct; an empty
 per-query selection cannot erase separately collected database-wide compilation totals.
+
+`cleanup` explains retained cleanup horizons and version-store observations through the scan's pure view.
+PostgreSQL `cleanup` captures retain sessions, prepared transactions and replication slots, their separate data
+and catalog horizons, comparable transaction distances and ties. Missing coverage metadata does not discard
+positive holder observations; it withholds a qualified complete boundary. A previous statement or session label
+does not identify the code that opened the retaining transaction.
+
+SQL Server `operational` captures retain independent oldest-transaction and ADR/PVS observations. Native skipped-page
+counters distinguish readable-secondary retention, the oldest active transaction, long snapshot scans, online
+index rebuilds and the oldest aborted transaction where those columns are available. The separate
+`transaction_not_cleaned` counter is threshold context, not evidence explaining large PVS. Off-row KiB excludes
+in-row versions, native sequence values are not wall clocks, and skipped pages cannot be added into a retained
+footprint or cleanup rate. See [Microsoft's PVS field definitions][pvs-fields].
+
+The existing native queries also serve scans; no extra query is needed to retain these fields. Each scan source
+keeps its own read bounds and publishes facts only after confirmed shutdown. An archive report uses its captured
+acquisition bounds without inventing per-source clocks. Separate PVS and transaction reads cannot establish a
+SQL owner by matching transaction numbers. Both warehouse paths retain the original source outcomes and facts.
 
 `task-space` explains database-target task allocation/deallocation captures from `operational-samples`. It retains
 exact page counters, native task tuples, request-check clocks and source coverage. The same pure view serves
@@ -801,8 +821,10 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **20**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **21**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
+
+[pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats
 
 ## Recovery and activation
 
