@@ -3,6 +3,26 @@ use super::*;
 use culprit_collector::capture::{CollectionCancellation, SourceFactory, collect_once};
 use culprit_core::{ConnectionSpec, Engine, Provider};
 use culprit_read::admission::SourceGate;
+
+#[test]
+fn task_space_is_explicitly_unsupported_without_connecting_or_starting_a_runtime() {
+    let provider = crate::PostgresProvider::new(&ConnectionSpec {
+        engine: Some(Engine::Postgres),
+        host: "fixture.invalid".into(),
+        port: Some(9),
+        database: Some("fixture".into()),
+        user: Some("monitor".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::TaskSpace },
+        budget: CollectionBudget::default(),
+    };
+    assert_eq!(provider.telemetry_source(&request).err().unwrap().code, culprit_core::ErrorCode::Unsupported);
+}
+
 fn spec() -> ConnectionSpec {
     let database = std::env::var("CULPRIT_PREVIEW_PG_DATABASE").unwrap();
     assert!(matches!(database.as_str(), "culprit_smoke" | "culprit_timescale"));

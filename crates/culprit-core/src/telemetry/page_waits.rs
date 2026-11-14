@@ -149,6 +149,68 @@ pub struct MappedPageTarget {
     pub object: Option<PageWaitObject>,
 }
 
+/// Index-wide point counters are independent of the request's short-lived wait and the page's later mapping.
+/// Equal endpoint catalog observations do not establish a continuous counter epoch or an individual latch owner.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum PageIndexOperationRelation {
+    CheckedTarget,
+    ChangedTarget,
+    UnverifiedTarget,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum PageIndexOperations {
+    Observed {
+        observed_at: String,
+        counters: Box<MssqlIndexOperations>,
+        partition_id: Option<String>,
+        object: Option<NativeIdentity>,
+        relation: PageIndexOperationRelation,
+    },
+    Missing,
+    PermissionDenied,
+    Unavailable,
+}
+
+impl PageIndexOperations {
+    /// Structural equality is necessary for a link, but the provider must also qualify source/catalog bounds.
+    pub fn matches_target(&self, target: &MappedPageTarget) -> bool {
+        let Self::Observed { counters, partition_id, object, .. } = self else { return false };
+        let identity = &counters.identity;
+        target.header.database_id == identity.database_id
+            && target.header.object_id.as_deref().and_then(|id| id.parse::<u32>().ok()) == Some(identity.object_id)
+            && target.header.index_id.as_deref().and_then(|id| id.parse::<u32>().ok()) == Some(identity.index_id)
+            && partition_id.is_some()
+            && target.header.partition_id == *partition_id
+            && object.is_some()
+            && target.object.as_ref().map(|target| &target.native) == object.as_ref()
+    }
+
+    fn fits_observation(&self, observation: &PageWaitObservation, bounds: &ObservationBounds) -> bool {
+        let Some(address) = observation.observed_address else { return false };
+        if observation.request.scope != ActivityScopeBasis::RequestDatabase {
+            return false;
+        }
+        let Self::Observed { observed_at, counters, partition_id, object, relation } = self else { return true };
+        let identity = &counters.identity;
+        counters.is_valid()
+            && identity.database_id == address.database_id
+            && identity.database_id <= i16::MAX as u32
+            && identity.object_id <= i32::MAX as u32
+            && identity.index_id <= i32::MAX as u32
+            && identity.partition_number <= i32::MAX as u32
+            && bounds.contains(observed_at)
+            && partition_id.as_deref().is_none_or(|id| id.len() <= 21 && id.parse::<i64>().is_ok_and(|id| id > 0))
+            && object.as_ref().is_none_or(|object| object.is_valid() && object.id == identity.object_id.to_string())
+            && (*relation != PageIndexOperationRelation::CheckedTarget
+                || observation.target.as_ref().is_some_and(|target| self.matches_target(target)))
+    }
+}
+
 impl MappedPageTarget {
     pub fn is_valid(&self) -> bool {
         self.database.is_valid()
@@ -193,6 +255,10 @@ pub struct PageWaitObservation {
     pub observed_address: Option<PageWaitAddress>,
     pub resolution: PageWaitResolution,
     pub target: Option<Box<MappedPageTarget>>,
+    /// Independently observed index counters remain available when a later page/catalog check cannot link them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub index_operations: Option<PageIndexOperations>,
 }
 
 impl PageWaitObservation {
@@ -238,6 +304,7 @@ impl PageWaitObservation {
                     && self.request.scope == ActivityScopeBasis::RequestDatabase
                     && self.observed_address.as_ref().is_some_and(|address| address.matches_header(&target.header))
             })
+            && self.index_operations.as_ref().is_none_or(|point| point.fits_observation(self, &bounds))
     }
 
     pub fn redact(&mut self, engine: crate::Engine) {

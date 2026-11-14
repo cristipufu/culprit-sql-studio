@@ -1,6 +1,7 @@
 //! One database-scoped native relation supplies scan projections and streamed index observations.
 mod layout;
 mod projection;
+pub(crate) mod targeted;
 use crate::{
     read::{
         NativeRead, Parameter, ReadError, integer, invalid_data, optional_boolean, optional_integer, optional_text,

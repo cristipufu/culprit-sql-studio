@@ -392,6 +392,7 @@ fn storage_connections_replication_and_failures_say_what_they_saw() {
     p.uptime_hours = Some(48.0);
     p.files = vec![
         FileIo {
+            context: culprit_core::FileIoContext::STORAGE,
             name: "relation".into(),
             kind: FileKind::Data,
             database: None,
@@ -407,6 +408,7 @@ fn storage_connections_replication_and_failures_say_what_they_saw() {
             write_operation: None,
         },
         FileIo {
+            context: culprit_core::FileIoContext::STORAGE,
             name: "wal".into(),
             kind: FileKind::Log,
             database: None,
@@ -563,6 +565,7 @@ fn postgres_storage_waits_and_plan_counts_keep_their_own_meaning() {
     let mut r = report("pg-demo");
     r.snapshot.server.version = "15.17".into();
     let f = |name: &str, kind, reset: &str| FileIo {
+        context: culprit_core::FileIoContext::STORAGE,
         name: name.into(),
         kind,
         database: None,

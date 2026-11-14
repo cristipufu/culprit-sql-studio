@@ -36,6 +36,11 @@ When `performance_schema` is unavailable, a readable slow query log table (`log_
 
 A normalized `WHERE id = ?` text is not itself executable parameter evidence. A captured plan remains available when the provider cannot safely plan that normalized text again.
 
+Statement-summary quantiles, a later native histogram and retained slow-log runs are separate observations. Each
+keeps its own sample count and source; native bucket bounds are not exact execution times. Counts, means and extrema
+are not borrowed between reads, and bucket estimates are not clamped to an earlier statement maximum. A runtime
+tail can support an investigation without establishing parameter sensitivity or the cost of its slow executions.
+
 ## Live activity and waits
 
 Live combines `PROCESSLIST`, transaction metadata and available lock-wait views. MySQL 8 uses `performance_schema.data_lock_waits`; older versions use `INNODB_LOCK_WAITS`. Statement-history consumers can identify a blocking transaction's earlier statement when the current process-list text is empty.
@@ -88,7 +93,8 @@ measurements unknown; missing current-event permission preserves readable alloca
 coverage. Source identity and instrumentation settings are rechecked before confirmed close and publication.
 
 Performance Schema's native container iteration is not an index seek, and a row limit does not bound all its work.
-The profile has statement, overall, row and byte admission limits and defaults off; representative high-volume
+Scans and collector captures share 24-query, two-second statement, ten-second total, 1 MiB page and 8 MiB total-byte
+ceilings, preserving stricter caller bounds. The profile defaults off; representative high-volume
 qualification remains required. MariaDB has no qualified route for this profile. Culprit does not fall back to its
 process-list memory view, which can enumerate and lock threads before applying a filter or limit.
 
@@ -110,7 +116,8 @@ atomic event history; logging filters, eviction and restart affect visibility. E
 positions remain separate, and an empty buffer never establishes the absence of failures. Exact native OOM/resource
 codes select investigations; arbitrary messages and client numeric error codes do not supply that classification.
 
-Collection has its own statement, overall, row and byte limits. These are admission bounds, not a production-load
+Scans and collector captures share the same 24-query, two-second statement, ten-second total, 1 MiB page and 8 MiB
+total-byte ceilings, preserving stricter caller bounds. These are admission bounds, not a production-load
 qualification. See the [native error-log reference](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-error-log-table.html)
 and [server log-code vocabulary](https://dev.mysql.com/doc/mysql-errors/8.4/en/server-error-reference.html).
 

@@ -414,6 +414,7 @@ fn schema_and_setting_changes_really_verify_with_natural_assessments() {
 fn sharing_file_evidence_keeps_finding_links_without_the_path() {
     let mut s = snapshot();
     s.pressure.get_or_insert_default().files = vec![culprit_core::signals::FileIo {
+        context: culprit_core::FileIoContext::STORAGE,
         name: "/private/file-path-canary/data.db".into(),
         kind: culprit_core::FileKind::Data,
         database: Some(s.server.database.clone()),
@@ -429,9 +430,20 @@ fn sharing_file_evidence_keeps_finding_links_without_the_path() {
     }];
     let original = culprit_checks::analyze(s.clone());
     let finding = original.findings.iter().find(|f| f.check == "slow-storage").unwrap();
-    let shared = culprit_checks::analyze(culprit_core::redact::redact_snapshot(&s));
-    assert!(shared.findings.iter().any(|f| f.id == finding.id), "shared links still open the original finding");
+    let redacted = culprit_core::redact::redact_snapshot(&s);
+    let shared = culprit_checks::analyze(redacted.clone());
+    let linked =
+        shared.findings.iter().find(|f| f.id == finding.id).expect("shared links still open the original finding");
+    let reference = shared.snapshot.pressure.as_ref().unwrap().files[0].reference();
+    assert!(
+        linked.facts.storage_files.contains(&reference),
+        "shared finding evidence still refers to its displayed source row"
+    );
+    assert_eq!(reference.key().unwrap(), s.pressure.as_ref().unwrap().files[0].reference().key().unwrap());
+    let shared_again = culprit_checks::analyze(culprit_core::redact::redact_snapshot(&redacted));
+    assert!(shared_again.findings.iter().any(|f| f.id == finding.id), "repeated sharing preserves the link");
     assert!(!serde_json::to_string(&shared).unwrap().contains("file-path-canary"));
+    assert!(!serde_json::to_string(&shared_again).unwrap().contains("file-path-canary"));
 }
 
 #[test]
@@ -694,4 +706,52 @@ fn negative_wait_assessments_require_the_requested_class_even_when_positive_wait
 
     crate::record(&mut s, source_id::QUERY_WAITS, SourceState::Partial, Some("Wait source is partial"));
     assert!(matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)));
+}
+
+#[test]
+fn missing_unavailable_and_independent_quantile_populations_never_become_clean_variation_assessments() {
+    use culprit_core::{
+        DistributionPopulation, RuntimeDistribution, RuntimeDistributionIssue, RuntimeDistributionOrigin,
+        RuntimeQuantile, Spread, source_id,
+    };
+    let mut s = snapshot();
+    crate::record(&mut s, source_id::WORKLOAD, SourceState::Collected, None);
+    let queries = &mut s.workload.as_mut().unwrap().queries;
+    queries.truncate(1);
+    queries[0].plans.clear();
+    queries[0].spread = Some(Spread { lock_ms: Some(100.0), ..Default::default() });
+    let requirement = Requirement::Query(QueryMeasure::ParameterSpread);
+    assert!(matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)));
+    let spread = s.workload.as_mut().unwrap().queries[0].spread.as_mut().unwrap();
+    spread.distributions.push(RuntimeDistribution::unavailable(
+        "native.histogram",
+        RuntimeDistributionOrigin::NativeHistogram,
+        RuntimeDistributionIssue::ReadUnavailable,
+    ));
+    assert!(matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)));
+    let observed = RuntimeDistribution {
+        source: "retained.runs".into(),
+        origin: RuntimeDistributionOrigin::CapturedRuns,
+        population: DistributionPopulation::CapturedSamples { sample_count: "100".into() },
+        p50: Some(RuntimeQuantile::sample(1.0)),
+        p95: None,
+        p99: Some(RuntimeQuantile::sample(2.0)),
+        histogram: Vec::new(),
+        issue: None,
+    };
+    s.workload.as_mut().unwrap().queries[0].spread.as_mut().unwrap().distributions.push(observed);
+    assert!(
+        matches!(assess(&[requirement], &s), CheckEvidence::Queries { assessed, reason: None } if assessed.len() == 1)
+    );
+    let distribution = &mut s.workload.as_mut().unwrap().queries[0].spread.as_mut().unwrap().distributions[1];
+    distribution.p50 = None;
+    let mut separate = distribution.clone();
+    separate.source = "other.retained.runs".into();
+    separate.p50 = Some(RuntimeQuantile::sample(1.0));
+    separate.p99 = None;
+    s.workload.as_mut().unwrap().queries[0].spread.as_mut().unwrap().distributions.push(separate);
+    assert!(
+        matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)),
+        "quantiles may not be joined across observations"
+    );
 }

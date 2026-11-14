@@ -85,6 +85,7 @@ async fn collect_with_base(
         .map(|r| {
             Ok(QueryStat {
                 plan_history: None,
+                variant_family: None,
                 resolved_write_target: None,
                 requests: None,
                 id: r.string("id"),

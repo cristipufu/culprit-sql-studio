@@ -175,6 +175,10 @@ pub struct FleetCollectionEvent {
     pub schedule: String,
     pub work: FleetWork,
     pub status: CollectionStatus,
+    /// Qualified native snapshot population, separate from capture/publication success. None is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub native_coverage: Option<crate::SourceState>,
     pub capture: Option<CaptureIdentity>,
     pub error_code: Option<ErrorCode>,
     /// Failed or missed work remains visible even when no rows arrived at a destination.

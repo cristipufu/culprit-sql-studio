@@ -659,6 +659,22 @@ mod tests {
     }
 
     #[test]
+    fn spill_comparison_reports_captured_warnings_without_proving_a_clean_execution_or_cause() {
+        let mut actual = plan(node("Sort", NodeKind::Sort, None, None, 10_000.0, vec![]), crate::PlanFacts::default());
+        actual.kind = PlanKind::Actual;
+        actual.root.act_rows = Some(10_000.0);
+        actual.root.warnings.push(PlanWarning::Spill);
+        let estimated = plan(node("Sort", NodeKind::Sort, None, None, 10_000.0, vec![]), crate::PlanFacts::default());
+        let diff = plan_diff_in(&actual, "Actual", &estimated, "Estimated", &CompareContext::default());
+        let spill = diff.scenarios.iter().find(|scenario| scenario.kind == ScenarioKind::Memory).unwrap();
+        assert!(spill.title.contains("records a spill warning"));
+        let detail = spill.detail.as_deref().unwrap();
+        assert!(detail.contains("does not establish a spill-free execution"));
+        assert!(detail.contains("elapsed cost or cause"));
+        assert!(!detail.contains("underestimated"));
+    }
+
+    #[test]
     fn different_parameter_values_are_named() {
         let a = plan(
             node("Index Seek", NodeKind::Seek, Some("dbo.orders"), Some("ix_status"), 12.0, vec![]),

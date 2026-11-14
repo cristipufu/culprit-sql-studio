@@ -4,6 +4,7 @@ import type { PlanHistory } from "./PlanHistory";
 import type { PlanVariant } from "./PlanVariant";
 import type { QueryCosts } from "./QueryCosts";
 import type { QueryTrend } from "./QueryTrend";
+import type { QueryVariantFamily } from "./QueryVariantFamily";
 import type { QueryWaitCoverage } from "./QueryWaitCoverage";
 import type { RequestEvidence } from "./RequestEvidence";
 import type { Spread } from "./Spread";
@@ -22,7 +23,12 @@ parameters: string | null, object_name: string | null, executions: number, total
 /**
  * Native statement resource work with explicit units and meaning; this is not a measured spill-time share.
  */
-temporary_work: StatementTemporaryWork | null, first_seen: string | null, last_seen: string | null, plans: Array<PlanVariant>, plan: Plan | null, waits: Array<WaitStat>, 
+temporary_work: StatementTemporaryWork | null, first_seen: string | null, last_seen: string | null, plans: Array<PlanVariant>, 
+/**
+ * A native child-query relationship. Its plans and counters remain this child's own runtime population;
+ * the dispatcher and parent are metadata, not additional executions or proof of harmful plan reuse.
+ */
+variant_family?: QueryVariantFamily, plan: Plan | null, waits: Array<WaitStat>, 
 /**
  * Classes this source measured for this query and whether their observation is complete. Positive rows alone
  * cannot establish that another class was zero. Missing coverage remains unknown.

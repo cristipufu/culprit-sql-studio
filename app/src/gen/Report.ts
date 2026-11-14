@@ -10,6 +10,7 @@ import type { ReportEvidence } from "./ReportEvidence";
 import type { RetainedFailureReport } from "./RetainedFailureReport";
 import type { Snapshot } from "./Snapshot";
 import type { Summary } from "./Summary";
+import type { TaskSpaceReport } from "./TaskSpaceReport";
 
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
@@ -34,4 +35,8 @@ session_memory?: MemoryParticipantsReport,
 /**
  * Observed waiting participants and bounded page metadata remain separate from latch-owner evidence.
  */
-page_waits?: PageWaitReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+page_waits?: PageWaitReport, 
+/**
+ * Capture-local task counters and independently qualified request context, never allocator ownership.
+ */
+task_space?: TaskSpaceReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

@@ -42,6 +42,8 @@ pub enum RuntimeMetricKey {
     /// Per-execution peak memory; an average of peaks is distinct from average resident memory.
     PeakMemory,
     LogBytes,
+    /// Per-execution average temporary-space use, in native bytes or pages. Weighting it by executions yields
+    /// used-space observations, never write traffic, simultaneous allocation or a measured peak.
     TemporaryStorage,
     TemporaryBlocksRead,
     TemporaryBlocksWritten,

@@ -9,8 +9,22 @@ use crate::{
 use culprit_core::{Coverage, Result, telemetry::*};
 use std::sync::Arc;
 
-const MAX_SCAN_ROWS: u32 = 200;
-const MAX_SCAN_QUERIES: u32 = 5; // Initial context, columns, grants, guarded current SQL, final context.
+const MAX_ROWS: u32 = 200;
+const MAX_QUERIES: u32 = 5; // Initial context, columns, grants, guarded current SQL, final context.
+
+pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    CollectionBudget {
+        max_snapshot_rows: requested.max_snapshot_rows.min(MAX_ROWS),
+        page_rows: requested.page_rows.min(MAX_ROWS),
+        max_queries: requested.max_queries.min(MAX_QUERIES),
+        page_bytes: requested.page_bytes.min(4 * 1024 * 1024),
+        total_bytes: requested.total_bytes.min(64 * 1024 * 1024),
+        max_sql_bytes: requested.max_sql_bytes.min(16 * 1024),
+        statement_timeout_ms: requested.statement_timeout_ms.min(3_000),
+        total_timeout_ms: requested.total_timeout_ms.min(10_000),
+        ..requested.clone()
+    }
+}
 
 pub(crate) async fn collect(
     pool: Arc<Pool>,
@@ -26,14 +40,7 @@ pub(crate) async fn collect(
         );
         return (None, coverage);
     }
-    let budget = CollectionBudget {
-        max_snapshot_rows: MAX_SCAN_ROWS,
-        page_rows: MAX_SCAN_ROWS,
-        max_queries: MAX_SCAN_QUERIES,
-        statement_timeout_ms: 3_000,
-        total_timeout_ms: 10_000,
-        ..Default::default()
-    };
+    let budget = bounded_budget(&CollectionBudget::default());
     let options = ReadOptions { budget, scope: ActivityScope::CurrentDatabase, identity: IdentityDetail::Endpoint };
     match ActivityReader::open(pool, options, host, port) {
         Ok(mut reader) => collect_from(&mut reader).await,

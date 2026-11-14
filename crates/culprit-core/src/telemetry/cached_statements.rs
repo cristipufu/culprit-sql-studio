@@ -31,7 +31,11 @@ impl CachedStatementIdentity {
     }
     /// Zero native handles do not qualify the DMV's placeholder counters as measured work.
     pub fn has_plan_handle(&self) -> bool {
-        self.plan_handle.strip_prefix("0x").is_some_and(|hex| hex.bytes().any(|byte| byte != b'0'))
+        nonzero_handle(&self.plan_handle)
+    }
+    /// A zero text token cannot establish original batch or module provenance.
+    pub fn has_sql_handle(&self) -> bool {
+        nonzero_handle(&self.sql_handle)
     }
     pub(super) fn is_valid(&self) -> bool {
         let handle = |value: &str| {
@@ -53,6 +57,10 @@ impl CachedStatementIdentity {
                     && (self.statement_end_bytes as u32).is_multiple_of(2)
                     && self.statement_end_bytes as u32 >= self.statement_start_bytes)
     }
+}
+
+fn nonzero_handle(value: &str) -> bool {
+    value.strip_prefix("0x").is_some_and(|hex| hex.bytes().any(|byte| byte != b'0'))
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -93,9 +101,11 @@ pub enum CachedRuntimeMetric {
     PhysicalReads,
     LogicalWrites,
     Rows,
+    /// Native 8 KiB pages spilled by completed executions, not allocated task space or elapsed spill time.
+    SpilledPages,
 }
 impl CachedRuntimeMetric {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::WorkerMicroseconds,
         Self::ElapsedMicroseconds,
         Self::ClrMicroseconds,
@@ -103,7 +113,11 @@ impl CachedRuntimeMetric {
         Self::PhysicalReads,
         Self::LogicalWrites,
         Self::Rows,
+        Self::SpilledPages,
     ];
+    pub const fn is_required(self) -> bool {
+        !matches!(self, Self::SpilledPages)
+    }
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
@@ -140,10 +154,11 @@ impl CachedStatementRuntime {
             && self.executions.as_deref().is_none_or(valid_counter)
             && self.executions.is_some() == self.measured()
             && if self.measured() {
-                self.counters.len() == CachedRuntimeMetric::ALL.len()
-                    && CachedRuntimeMetric::ALL
-                        .iter()
-                        .all(|metric| self.counters.get(metric).is_some_and(CachedCounterDistribution::is_valid))
+                CachedRuntimeMetric::ALL
+                    .iter()
+                    .filter(|metric| metric.is_required())
+                    .all(|metric| self.counters.contains_key(metric))
+                    && self.counters.values().all(CachedCounterDistribution::is_valid)
             } else {
                 self.counters.is_empty()
             }

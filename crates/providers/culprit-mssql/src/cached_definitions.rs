@@ -27,6 +27,7 @@ impl Limits {
 }
 pub(crate) fn select_sql(limits: &Limits) -> String {
     let context = cached_statements::context_columns_from("qs", "qs", "qs.compilation_database_id");
+    let module = crate::relational_inputs::module_columns("qs");
     let selected = cached_statements::selected_statements();
     let statement = cached_statements::statement_expression("qs", "qs.text");
     let sql =
@@ -35,15 +36,17 @@ pub(crate) fn select_sql(limits: &Limits) -> String {
     let plan_read = cached_statements::statement_plan_relation("qs", "qp");
     format!(
         r#"WITH selected AS ({selected})
-SELECT {context},qs.encrypted,CONVERT(varchar(18),qs.query_plan_hash,1) AS query_plan_hash,{sql},{plan}
+SELECT {context},{module},qs.encrypted,CONVERT(varchar(18),qs.query_plan_hash,1) AS query_plan_hash,{sql},{plan}
 FROM selected qs OUTER APPLY(SELECT {statement} AS statement_text) body
 {plan_read}
 OPTION(MAXDOP 1)"#
     )
 }
 pub(crate) fn decode(row: &Rec, limits: &Limits) -> Result<MssqlCachedDefinition> {
+    let context = cached_statements::context(row)?;
+    let module_parameters = crate::relational_inputs::parameters(row, &context)?;
     let value = MssqlCachedDefinition {
-        context: cached_statements::context(row)?,
+        context,
         query_plan_hash: optional_text(row, "query_plan_hash")?,
         statement: cached_payload::decode(
             row,
@@ -53,6 +56,7 @@ pub(crate) fn decode(row: &Rec, limits: &Limits) -> Result<MssqlCachedDefinition
             DefinitionPayload::sql,
         )?,
         estimated_plan: cached_payload::decode(row, "plan_bytes", "query_plan", limits.plan, DefinitionPayload::plan)?,
+        module_parameters,
     };
     if !value.is_valid() {
         return Err(invalid_data());

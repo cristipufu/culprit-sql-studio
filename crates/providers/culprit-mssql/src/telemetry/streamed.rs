@@ -17,6 +17,16 @@ pub(super) trait SnapshotRecipe: Send + Sync {
     async fn layout<R: NativeRead>(&self, reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>>;
     fn query(&self, layout: &Self::Layout) -> String;
     fn decode(&self, row: &Rec, layout: &Self::Layout) -> Result<TelemetryRecord>;
+    /// Retain bounded native witnesses while rows stream. The reader owns this state; decoders keep a read-only
+    /// layout view. No additional SQL may run while the native stream is active.
+    fn observe_batch(&self, _rows: &[Rec], _layout: &mut Self::Layout) -> Result<()> {
+        Ok(())
+    }
+    /// Independent post-EOF proof required by a recipe's native relationships. Publication still requires the
+    /// common target recheck and confirmed shutdown. A failure must stop before later source SQL.
+    async fn recheck<R: NativeRead>(&self, _reader: &mut R, _layout: &Self::Layout) -> Result<()> {
+        Ok(())
+    }
     fn complete_record_scope(&self, _record: &TelemetryRecord) -> bool {
         true
     }
@@ -95,7 +105,10 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         if self.layout.is_none() {
             return Ok(culprit_read::ReadBatch { rows: vec![], complete: true });
         }
-        self.io.next_batch().await.map_err(ReadError::into_error)
+        let batch = self.io.next_batch().await.map_err(ReadError::into_error)?;
+        let layout = self.layout.as_mut().ok_or_else(invalid_data)?;
+        self.recipe.observe_batch(&batch.rows, layout)?;
+        Ok(batch)
     }
     fn decode(&self, row: &Rec, _: &CollectionDescription) -> Result<culprit_read::SnapshotRecord> {
         let layout = self.layout.as_ref().ok_or_else(invalid_data)?;
@@ -107,6 +120,9 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         })
     }
     async fn recheck(&mut self, initial: &CollectionDescription) -> Result<culprit_read::SnapshotRecheck> {
+        if let Some(layout) = &self.layout {
+            self.recipe.recheck(&mut self.io, layout).await?;
+        }
         let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
         if initial.target.database() != Some(&database) || self.physical.as_ref() != Some(&physical) {
             return Ok(culprit_read::SnapshotRecheck {

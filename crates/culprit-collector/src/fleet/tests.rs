@@ -15,6 +15,7 @@ struct Backend {
     target_override: Mutex<Option<CollectionTarget>>,
     resource_bounds: Mutex<Option<(String, String)>>,
     status: Mutex<CollectionStatus>,
+    state_sources: Mutex<Option<Vec<StateSourceCoverage>>>,
 }
 impl Backend {
     fn new() -> Self {
@@ -26,6 +27,7 @@ impl Backend {
             target_override: Mutex::new(None),
             resource_bounds: Mutex::new(None),
             status: Mutex::new(CollectionStatus::Complete),
+            state_sources: Mutex::new(None),
         }
     }
 }
@@ -71,13 +73,21 @@ impl FleetBackend for Backend {
                     .into(),
                 })
             }
-            CollectionSelection::Snapshot { dataset } => SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: *dataset,
-                observed_from: "2026-11-10T12:00:00Z".into(),
-                observed_until: "2026-11-10T12:00:01Z".into(),
-                records: 0,
-                sources: vec![StateSourceCoverage::collected("fixture".into(), 0)],
-            }),
+            CollectionSelection::Snapshot { dataset } => {
+                let sources = self
+                    .state_sources
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| vec![StateSourceCoverage::collected("fixture".into(), 0)]);
+                SourceObservation::Snapshot(StateSnapshotDescription {
+                    dataset: *dataset,
+                    observed_from: "2026-11-10T12:00:00Z".into(),
+                    observed_until: "2026-11-10T12:00:01Z".into(),
+                    records: sources.iter().map(|source| source.records).sum(),
+                    sources,
+                })
+            }
             CollectionSelection::ResourceHistory { from, until } => {
                 let (available_from, available_until) =
                     self.resource_bounds.lock().unwrap().clone().unwrap_or_else(|| (from.clone(), until.clone()));
@@ -181,6 +191,65 @@ fn subject_jobs(inventory: &FleetInventory) -> [Job; 2] {
     scheduler.finish(Duration::ZERO, scheduler::Outcome::Complete).unwrap();
     let pool = scheduler.take(Duration::from_secs(60)).unwrap().unwrap();
     [database, pool]
+}
+
+#[tokio::test]
+async fn complete_snapshot_operations_keep_unavailable_partial_and_empty_native_coverage_distinct() {
+    use culprit_core::SourceState;
+    let root = tempfile::tempdir().unwrap();
+    let inventory = inventory(ScheduledCollection::Snapshot { dataset: SnapshotDataset::Operational });
+    let job = job(&inventory);
+    let journal = FleetJournal::open(&root.path().join("state"), &inventory, "one").await.unwrap();
+    let mut outbox = outbox(&root.path().join("outbox")).await;
+    let backend = Backend::new();
+    for (sources, expected) in [
+        (
+            vec![StateSourceCoverage::unavailable("native".into(), culprit_core::ErrorCode::PermissionDenied, None)],
+            SourceState::Unavailable,
+        ),
+        (vec![StateSourceCoverage::not_applicable("native".into())], SourceState::NotApplicable),
+        (vec![StateSourceCoverage::observed("native".into(), 0, false)], SourceState::Partial),
+        (vec![StateSourceCoverage::collected("native".into(), 0)], SourceState::Empty),
+        (vec![StateSourceCoverage::collected("native".into(), 1)], SourceState::Collected),
+    ] {
+        *backend.state_sources.lock().unwrap() = Some(sources);
+        let result = work::execute(
+            &backend,
+            &journal,
+            &mut CaptureStorage::local(&mut outbox),
+            &job,
+            &CollectionCancellation::default(),
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.event.status, CollectionStatus::Complete);
+        assert_eq!(result.event.native_coverage, Some(expected));
+        assert!(!result.pause_all);
+        assert!(journal.load(&job.key).await.unwrap().pending.is_none());
+
+        *backend.status.lock().unwrap() = CollectionStatus::Incomplete(CollectionStop::RowLimit);
+        let interrupted = work::execute(
+            &backend,
+            &journal,
+            &mut CaptureStorage::local(&mut outbox),
+            &job,
+            &CollectionCancellation::default(),
+            now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(interrupted.event.status, CollectionStatus::Incomplete(CollectionStop::RowLimit));
+        assert_eq!(
+            interrupted.event.native_coverage,
+            Some(match expected {
+                SourceState::Collected | SourceState::Empty => SourceState::Partial,
+                other => other,
+            }),
+            "interrupted capture must retain known source unavailability or inapplicability"
+        );
+        *backend.status.lock().unwrap() = CollectionStatus::Complete;
+    }
 }
 
 #[tokio::test]

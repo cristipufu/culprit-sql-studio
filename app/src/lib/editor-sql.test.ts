@@ -86,7 +86,6 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc
       max_time_ms: 20,
       stddev_time_ms: null,
       compiled: "@par0 = N'tenant-1', @par1 = (42)",
-      variant_query: null,
       cpu_time_ms: 50,
       logical_reads: 100,
     }],

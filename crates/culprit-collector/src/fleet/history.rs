@@ -189,6 +189,7 @@ fn metadata_result(job: &Job, work: FleetWork, more: bool) -> WorkResult {
             schedule: job.schedule.id.clone(),
             work,
             status: CollectionStatus::Complete,
+            native_coverage: None,
             capture: None,
             error_code: None,
             gap: None,

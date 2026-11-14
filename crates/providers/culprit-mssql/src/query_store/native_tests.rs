@@ -129,7 +129,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     let mut reader = Reader::open(pool.clone());
     let summary = reader.summary(60).await.unwrap();
     assert!(!summary.is_empty());
-    let ids = summary.iter().map(|row| row.query_id.clone()).collect::<Vec<_>>();
+    let ids = summary.iter().map(|row| row.identity.query_id.clone()).collect::<Vec<_>>();
     let definitions = reader.definitions(&ids, definitions::Kind::Query, 256 * 1024).await.unwrap();
     let definition = definitions
         .iter()
@@ -138,7 +138,8 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     assert_eq!(definition.payload.text(), Some(sql));
     let query_id = definition.id.clone();
     let query_identity = definition.query.clone().expect("original native query identity");
-    let selected = summary.iter().filter(|row| row.query_id == query_id).collect::<Vec<_>>();
+    let selected = summary.iter().filter(|row| row.identity.query_id == query_id).collect::<Vec<_>>();
+    assert!(selected.iter().all(|row| row.identity == query_identity));
     assert_eq!(selected.iter().map(|row| row.moments.executions).sum::<u64>(), 4);
     let intervals = reader
         .read_rows("SELECT /* culprit */ runtime_stats_interval_id AS id FROM sys.query_store_runtime_stats_interval")
@@ -164,7 +165,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
                 assert_eq!(definition.origin, culprit_core::telemetry::StatementOrigin::CulpritMonitoring);
                 let rows = reader
                     .read(
-                        catalog_sql::QUERY_DEFINITIONS,
+                        &catalog_sql::query_definitions(false),
                         vec![
                             reader::ids_parameter(std::slice::from_ref(&definition.id)).unwrap(),
                             Parameter::Integer(256 * 1024),
@@ -212,12 +213,8 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     near(cpu_us, selected.iter().map(|row| row.moments.cpu_us).sum());
     near(reads, selected.iter().map(|row| row.moments.logical_reads).sum());
     let plans = selected.iter().map(|row| row.plan_id.clone()).collect::<Vec<_>>();
-    let costs = reader.costs(60, std::slice::from_ref(&query_id)).await.unwrap();
-    assert_eq!(costs.len(), 1);
-    assert_eq!(costs[0].identity, query_identity);
-    assert_eq!((costs[0].aborted, costs[0].failed), (0, 0));
-    assert!(costs[0].log_bytes.is_some());
-    assert!(costs[0].total_log_bytes.is_some());
+    assert!(selected.iter().all(|row| row.costs.aborted == 0 && row.costs.failed == 0));
+    assert!(selected.iter().all(|row| row.costs.log_bytes.is_some()));
     let compilations = reader.compilations(std::slice::from_ref(&query_id)).await.unwrap();
     assert_eq!(compilations.len(), 1);
     assert_eq!(compilations[0].identity, query_identity);
@@ -360,7 +357,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     };
     let recent = Period { start: baseline.end.clone(), end: now.to_rfc3339() };
     crate::periods::collect(&mut reader, &baseline, &recent).await.unwrap();
-    reader.window_rows(&variants_sql::variants_sql(&query_id), 60).await.unwrap();
+    reader.definitions(std::slice::from_ref(&query_id), definitions::Kind::Query, 256 * 1024).await.unwrap();
     let shutdown = reader.close().await;
     assert_eq!(shutdown, SourceShutdown::Quiescent);
     let mut tuning_coverage = culprit_core::Coverage::default();

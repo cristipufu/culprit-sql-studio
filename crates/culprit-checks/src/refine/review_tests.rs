@@ -129,27 +129,39 @@ fn scan_causality_uses_the_recorded_plan_transition() {
 }
 
 #[test]
-fn plan_story_preserves_sensitivity_impact_and_unrelated_query_evidence() {
+fn native_recommendations_remain_independent_from_observed_plan_population_differences() {
     let s = snapshot();
     let (id, other) = (&s.queries()[0].id, &s.queries()[1].id);
-    let mut rec = finding("tuning-advice", &format!("force:{id}"), &[id]);
-    rec.facts.recommended_plan =
+    let mut recommendation = finding("tuning-advice", &format!("force:{id}"), &[id]);
+    recommendation.facts.recommended_plan =
         Some(culprit_core::FindingPlanRecommendation { plan: "42".into(), cpu_saved_share: Some(0.5) });
-    rec.impact.db_time_share = Some(0.8);
-    let mut sensitive = finding("parameter-sensitive", id, &[id]);
-    sensitive.impact.db_time_share = Some(0.1);
-    sensitive.facts.usual_fast_plan = Some("43".into());
+    recommendation.impact.db_time_share = Some(0.8);
+    recommendation.severity = Severity::Medium;
+    recommendation.actionability = culprit_core::Actionability::NeedsAttention;
+    recommendation.fix = Some(culprit_core::Fix {
+        summary: "native recommendation".into(),
+        sql: Some("native authorized fix".into()),
+        cost: None,
+    });
+    let mut observation = finding("parameter-sensitive", id, &[id]);
+    observation.actionability = culprit_core::Actionability::Information;
+    observation.impact.db_time_share = Some(0.1);
+    observation.facts.runtime_variation = Some(culprit_core::FindingRuntimeVariation::PlanAverages {
+        faster_plan: "43".into(),
+        slower_plan: "44".into(),
+    });
     let grouped = finding("regression", "grouped", &[id, other]);
-    let mut findings = vec![rec, sensitive, grouped];
+    let mut findings = vec![recommendation, observation, grouped];
     let trace = queries::Rule(queries::Policy::PlanStory).refine_traced(&s, &mut findings);
-    assert_eq!(trace.len(), 1);
-    assert_eq!(findings.len(), 2);
-    assert_eq!(findings[0].impact.db_time_share, Some(0.1));
-    assert!(
-        findings[0].caveats[0]
-            .contains("forcing plan 42 (estimated 50% less CPU per run), while most calls run fast with plan 43")
-    );
-    assert_eq!(findings[1].queries.len(), 2);
+    assert!(trace.is_empty(), "query identity alone does not establish a shared cause");
+    assert_eq!(findings.len(), 3);
+    assert_eq!(findings[0].severity, Severity::Medium);
+    assert_eq!(findings[0].actionability, culprit_core::Actionability::NeedsAttention);
+    assert_eq!(findings[0].fix.as_ref().unwrap().sql.as_deref(), Some("native authorized fix"));
+    assert_eq!(findings[0].impact.db_time_share, Some(0.8));
+    assert_eq!(findings[1].impact.db_time_share, Some(0.1));
+    assert_eq!(findings[1].actionability, culprit_core::Actionability::Information);
+    assert_eq!(findings[2].queries.len(), 2);
 }
 
 #[test]

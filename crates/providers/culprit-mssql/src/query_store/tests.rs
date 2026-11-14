@@ -8,8 +8,21 @@ use culprit_core::telemetry::*;
 pub(crate) fn summary_row() -> Rec {
     Rec::of(&[
         ("query_id", Val::Int(3)),
+        ("context_settings_id", Val::Int(5)),
+        ("object_id", Val::Int(0)),
+        ("query_hash", Val::Text("0123456789ABCDEF".into())),
+        ("query_initial_compile_at", Val::Text("2020-01-01T06:00:00Z".into())),
         ("plan_id", Val::Int(4)),
+        ("definition_plan_id", Val::Int(4)),
+        ("plan_hash", Val::Text("0011223344556677".into())),
+        ("plan_initial_compile_at", Val::Text("2020-01-01T06:00:00Z".into())),
         ("executions", Val::Int(2)),
+        ("known_executions", Val::Int(2)),
+        ("aborted", Val::Int(0)),
+        ("aborted_us", Val::Float(0.0)),
+        ("failed", Val::Int(1)),
+        ("log_bytes", Val::Null),
+        ("log_complete", Val::Int(1)),
         ("duration_us", Val::Float(4000.0)),
         ("cpu_us", Val::Float(3000.0)),
         ("logical_reads", Val::Float(10.0)),
@@ -24,7 +37,7 @@ pub(crate) fn summary_row() -> Rec {
         ("is_forced", Val::Int(0)),
     ])
 }
-fn runtime_row(duration: i64) -> Rec {
+pub(crate) fn runtime_row(duration: i64) -> Rec {
     Rec::of(&[
         ("row_id", Val::Int(duration)),
         ("plan_id", Val::Int(4)),
@@ -52,7 +65,12 @@ fn runtime_row(duration: i64) -> Rec {
 #[tokio::test]
 async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_counts() {
     let mut reader = Reader::new(FakeRead::new(vec![
-        Ok(vec![Rec::of(&[("tempdb", Val::Int(0)), ("waits", Val::Int(1))])]),
+        Ok(vec![Rec::of(&[
+            ("tempdb", Val::Int(0)),
+            ("log_bytes", Val::Int(0)),
+            ("waits", Val::Int(1)),
+            ("variants", Val::Int(1)),
+        ])]),
         Ok(vec![super::window_sql::tests::row()]),
         Ok(vec![summary_row()]),
     ]));
@@ -98,9 +116,10 @@ fn unknown_and_invalid_native_fields_never_become_measured_zero() {
         .is_err()
     );
 }
-fn definition_row(sql: &str) -> Rec {
+pub(crate) fn definition_row(sql: &str) -> Rec {
     Rec::of(&[
         ("id", Val::Int(3)),
+        ("family_variant_id", Val::Null),
         ("query_id", Val::Int(3)),
         ("context_settings_id", Val::Int(5)),
         ("object_id", Val::Int(0)),
@@ -111,6 +130,23 @@ fn definition_row(sql: &str) -> Rec {
         ("restricted", Val::Bool(false)),
         ("payload", Val::Text(sql.into())),
     ])
+}
+
+pub(crate) fn variant_definition_row(sql: &str) -> Rec {
+    let base = replace(&definition_row(sql), &[("family_variant_id", Val::Int(3))]);
+    let mut fields = base.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    fields.extend([
+        ("parent_query_id", Val::Int(1)),
+        ("parent_context_settings_id", Val::Int(5)),
+        ("parent_object_id", Val::Int(0)),
+        ("parent_query_hash", Val::Text("0123456789ABCDEF".into())),
+        ("parent_query_initial_compile_at", Val::Text("2020-01-01T06:00:00Z".into())),
+        ("dispatcher_query_id", Val::Int(1)),
+        ("dispatcher_definition_plan_id", Val::Int(2)),
+        ("dispatcher_plan_hash", Val::Text("AABBCC0011223344".into())),
+        ("dispatcher_plan_initial_compile_at", Val::Text("2020-01-01T06:00:00Z".into())),
+    ]);
+    Rec::of(&fields)
 }
 #[tokio::test]
 async fn definitions_read_complete_bounded_native_text_and_keep_private_literals_until_export() {
@@ -140,7 +176,12 @@ async fn missing_or_changed_definition_identity_cannot_supply_text_for_a_differe
 #[tokio::test]
 async fn source_budget_and_cancellation_errors_are_not_retried_as_schema_fallbacks() {
     let mut reader = Reader::new(FakeRead::new(vec![
-        Ok(vec![Rec::of(&[("tempdb", Val::Int(1)), ("waits", Val::Int(1))])]),
+        Ok(vec![Rec::of(&[
+            ("tempdb", Val::Int(1)),
+            ("log_bytes", Val::Int(0)),
+            ("waits", Val::Int(1)),
+            ("variants", Val::Int(1)),
+        ])]),
         Err(ReadError::Stopped(CollectionStop::TimedOut)),
     ]));
     let error = reader.summary(60).await.err().unwrap();
@@ -161,16 +202,6 @@ fn negative_native_wait_totals_are_rejected_instead_of_wrapping_into_a_large_mea
         ("wait_ms", Val::Int(-1)),
     ]);
     assert!(waits::Summary::decode(&row, false).is_err());
-}
-
-#[tokio::test]
-async fn cost_timeout_is_not_retried_as_an_older_database_layout() {
-    let mut reader = Reader::new(FakeRead::new(vec![
-        Ok(vec![Rec::of(&[("log_bytes", Val::Int(1))])]),
-        Err(ReadError::Stopped(CollectionStop::TimedOut)),
-    ]));
-    let error = reader.costs(60, &["3".into()]).await.err().unwrap();
-    assert_eq!(CollectionStop::from_error(&error), CollectionStop::TimedOut);
 }
 
 #[test]

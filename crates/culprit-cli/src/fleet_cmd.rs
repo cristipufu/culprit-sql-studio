@@ -65,9 +65,31 @@ fn invalid_inventory() -> Error {
 pub(crate) fn print(event: &FleetCollectionEvent, out: &Out) -> Result<()> {
     let line = if out.format() == Format::Json {
         serde_json::to_string(event).map_err(|_| Error::internal(culprit_core::t!("collection.manifest_failed")))?
-    } else if event.status == CollectionStatus::Complete {
+    } else {
+        description(event)
+    };
+    writeln!(std::io::stdout().lock(), "{line}")
+        .map_err(|_| Error::internal(culprit_core::t!("activity.cli.output_failed")))
+}
+
+fn description(event: &FleetCollectionEvent) -> String {
+    if event.status == CollectionStatus::Complete {
         match event.work {
             FleetWork::Capture => {
+                let state = match event.native_coverage {
+                    Some(culprit_core::SourceState::Partial) => Some("partial"),
+                    Some(culprit_core::SourceState::Unavailable) => Some("unavailable"),
+                    Some(culprit_core::SourceState::NotApplicable) => Some("not-applicable"),
+                    Some(culprit_core::SourceState::Collected | culprit_core::SourceState::Empty) | None => None,
+                };
+                if let Some(state) = state {
+                    return culprit_core::t!(
+                        "fleet.cli.native_coverage",
+                        connection = &event.connection,
+                        schedule = &event.schedule,
+                        state = state
+                    );
+                }
                 culprit_core::t!("fleet.cli.complete", connection = &event.connection, schedule = &event.schedule)
             }
             FleetWork::DiscoverIntervals => {
@@ -79,13 +101,12 @@ pub(crate) fn print(event: &FleetCollectionEvent, out: &Out) -> Result<()> {
         }
     } else {
         culprit_core::t!("fleet.cli.incomplete", connection = &event.connection, schedule = &event.schedule)
-    };
-    writeln!(std::io::stdout().lock(), "{line}")
-        .map_err(|_| Error::internal(culprit_core::t!("activity.cli.output_failed")))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use clap::Parser;
     #[test]
     fn a_fleet_requires_explicit_inventory_owner_outbox_and_state() {
@@ -110,5 +131,36 @@ mod tests {
         };
         assert_eq!(args.shard, "alpha");
         assert!(crate::Cli::try_parse_from(["culprit", "collect", "fleet", "--inventory", "inventory.json"]).is_err());
+    }
+
+    #[test]
+    fn a_completed_operation_reports_native_coverage_gaps_without_claiming_a_failed_transfer() {
+        let mut event = FleetCollectionEvent {
+            target: "database".into(),
+            connection: "shop".into(),
+            schedule: "health".into(),
+            work: FleetWork::Capture,
+            status: CollectionStatus::Complete,
+            native_coverage: None,
+            capture: None,
+            error_code: None,
+            gap: None,
+        };
+        let complete = description(&event);
+        for state in [
+            culprit_core::SourceState::Partial,
+            culprit_core::SourceState::Unavailable,
+            culprit_core::SourceState::NotApplicable,
+        ] {
+            event.native_coverage = Some(state);
+            let text = description(&event);
+            assert_ne!(text, complete);
+            assert!(text.contains("shop") && text.contains("health"));
+            let json = serde_json::to_value(&event).unwrap();
+            assert_eq!(json["native_coverage"], serde_json::to_value(state).unwrap());
+            assert_eq!(event.status, CollectionStatus::Complete);
+        }
+        event.native_coverage = Some(culprit_core::SourceState::Empty);
+        assert_eq!(description(&event), complete);
     }
 }

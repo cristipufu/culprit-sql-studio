@@ -3,6 +3,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod relational_input;
+pub use relational_input::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct PlanFacts {
@@ -133,6 +136,11 @@ pub enum ExecutionProtection {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct PlanNodeFacts {
+    /// The input's native kind and how it was established. A variable-shaped name alone does not distinguish a
+    /// procedure's table-valued parameter from a local table variable.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "relational_input::deserialize")]
+    #[ts(optional)]
+    pub relational_input: Option<RelationalInput>,
     #[serde(default, skip_serializing_if = "is_false")]
     #[ts(as = "Option<bool>", optional)]
     pub estimated_rows_unavailable: bool,

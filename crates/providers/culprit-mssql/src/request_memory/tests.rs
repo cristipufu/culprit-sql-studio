@@ -10,6 +10,48 @@ fn state(coverage: &Coverage) -> SourceState {
     coverage.outcomes().into_iter().find(|source| source.source == sources::CURRENT_REQUEST_MEMORY.name).unwrap().state
 }
 
+#[test]
+fn native_profile_caps_default_and_expanded_requests_without_widening_stricter_callers() {
+    for requested in [
+        CollectionBudget::default(),
+        CollectionBudget {
+            max_snapshot_rows: 10_000,
+            page_rows: 1000,
+            max_queries: 1000,
+            page_bytes: 8 * 1024 * 1024,
+            total_bytes: 1024 * 1024 * 1024,
+            statement_timeout_ms: 60_000,
+            total_timeout_ms: 120_000,
+            ..Default::default()
+        },
+    ] {
+        let actual = bounded_budget(&requested);
+        actual.validate().unwrap();
+        assert_eq!(actual.max_snapshot_rows, 200);
+        assert_eq!(actual.page_rows, 200);
+        assert_eq!(actual.max_queries, 5);
+        assert_eq!(actual.page_bytes, 4 * 1024 * 1024);
+        assert_eq!(actual.total_bytes, 64 * 1024 * 1024);
+        assert_eq!(actual.max_sql_bytes, 16 * 1024);
+        assert_eq!(actual.statement_timeout_ms, 3000);
+        assert_eq!(actual.total_timeout_ms, 10_000);
+    }
+    let strict = CollectionBudget {
+        max_snapshot_rows: 1,
+        page_rows: 1,
+        max_queries: 1,
+        page_bytes: 1024,
+        total_bytes: 2048,
+        max_sql_bytes: 1024,
+        max_plan_bytes: 1024,
+        max_pages: 1,
+        statement_timeout_ms: 1,
+        total_timeout_ms: 2,
+    };
+    strict.validate().unwrap();
+    assert_eq!(bounded_budget(&strict), strict);
+}
+
 #[tokio::test]
 async fn default_scan_policy_does_not_open_a_session_or_read_current_grants() {
     let pool = Arc::new(Pool::new(crate::test_support::config(1, "not-a-database", "not-a-password", "culprit"), None));
@@ -24,7 +66,7 @@ async fn an_explicit_scan_stages_grants_through_identity_verification_and_confir
     let (rows, coverage) = collect_from(&mut reader).await;
     assert_eq!(rows.unwrap().observations.len(), 1);
     assert_eq!(state(&coverage), SourceState::Collected);
-    assert_eq!(reader.query_count(), MAX_SCAN_QUERIES);
+    assert_eq!(reader.query_count(), MAX_QUERIES);
     assert_eq!(closed(&reader), 1);
 }
 

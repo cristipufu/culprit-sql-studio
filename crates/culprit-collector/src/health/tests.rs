@@ -42,10 +42,41 @@ fn event(status: CollectionStatus) -> FleetCollectionEvent {
         schedule: "private-schedule-canary".into(),
         work: FleetWork::Capture,
         status,
+        native_coverage: None,
         capture: None,
         error_code: None,
         gap: None,
     }
+}
+
+#[test]
+fn the_largest_supported_schedule_population_can_report_all_native_observations() {
+    let health = health();
+    let schedules = MAX_FLEET_TARGETS * MAX_TARGET_SCHEDULES;
+    health
+        .with(|state| {
+            let mut template = state.schedules.values().next().unwrap().clone();
+            let observed = Instant::now();
+            template.last_attempt = Some(observed);
+            template.last_complete = Some(observed);
+            template.last_native_observation = Some(observed);
+            template.native_coverage = Some(SourceState::Unavailable);
+            template.attempts = u64::MAX;
+            template.complete = u64::MAX;
+            template.incomplete = u64::MAX;
+            state.schedules.clear();
+            for ordinal in 0..schedules {
+                let mut schedule = template.clone();
+                schedule.id = digest(&ordinal.to_le_bytes());
+                state.schedules.insert((ordinal.to_string(), "work".into()), schedule);
+            }
+        })
+        .unwrap();
+    let reply = health.reply().unwrap();
+    assert!(reply.metrics.len() < MAX_METRICS_BYTES);
+    let metrics = String::from_utf8(reply.metrics).unwrap();
+    assert_eq!(metrics.matches("culprit_collector_schedule_native_coverage{").count(), schedules);
+    assert!(!metrics.contains("private-connection-canary"));
 }
 
 #[test]
@@ -82,6 +113,7 @@ fn database_and_pool_jobs_on_one_connection_keep_independent_health() {
         schedule: "health".into(),
         work: FleetWork::Capture,
         status: CollectionStatus::Complete,
+        native_coverage: None,
         capture: None,
         error_code: None,
         gap: None,
@@ -230,4 +262,63 @@ fn delivery_only_disables_source_expectations_without_hiding_native_debt_or_fenc
     health.outbox(&status(0)).unwrap();
     health.source_paused().unwrap();
     assert!(!health.ready().unwrap());
+}
+
+#[test]
+fn successful_capture_operations_do_not_claim_unavailable_native_sources_are_healthy() {
+    let health = health();
+    health.initialized().unwrap();
+    health.outbox(&status(0)).unwrap();
+    let mut captured = event(CollectionStatus::Complete);
+    captured.native_coverage = Some(SourceState::Unavailable);
+    health.collection(&captured).unwrap();
+    assert!(health.ready().unwrap(), "the process can keep running and report a native coverage gap");
+    let metrics = String::from_utf8(health.reply().unwrap().metrics).unwrap();
+    assert!(
+        metrics
+            .lines()
+            .any(|line| line.starts_with("culprit_collector_schedule_completed_operations_total{")
+                && line.ends_with(" 1"))
+    );
+    assert!(metrics.lines().any(|line| line.starts_with("culprit_collector_schedule_native_coverage{")
+        && line.contains("state=\"unavailable\"")));
+    assert!(!metrics.contains("state=\"collected\""));
+    assert!(!metrics.contains("private-connection-canary"));
+}
+
+#[test]
+fn metadata_operations_cannot_refresh_or_replace_native_population_qualification() {
+    let health = health();
+    let mut captured = event(CollectionStatus::Complete);
+    captured.native_coverage = Some(SourceState::Partial);
+    health.collection(&captured).unwrap();
+    health
+        .with(|state| {
+            state.schedules.values_mut().next().unwrap().last_native_observation =
+                Some(Instant::now() - Duration::from_secs(3600));
+        })
+        .unwrap();
+    let mut metadata = event(CollectionStatus::Complete);
+    metadata.work = FleetWork::SkipCommitted;
+    metadata.native_coverage = Some(SourceState::Collected);
+    health.collection(&metadata).unwrap();
+    let metrics = String::from_utf8(health.reply().unwrap().metrics).unwrap();
+    assert!(metrics.contains("state=\"partial\""));
+    assert!(!metrics.contains("state=\"collected\""));
+    assert!(
+        metrics.lines().any(|line| line.starts_with("culprit_collector_schedule_last_native_observation_age_seconds{")
+            && line.ends_with(" 3600"))
+    );
+}
+
+#[test]
+fn missing_native_evidence_on_a_later_capture_is_unknown_instead_of_reusing_old_healthy_scope() {
+    let health = health();
+    let mut captured = event(CollectionStatus::Complete);
+    captured.native_coverage = Some(SourceState::Collected);
+    health.collection(&captured).unwrap();
+    health.collection(&event(CollectionStatus::Incomplete(CollectionStop::SourceUnavailable))).unwrap();
+    let metrics = String::from_utf8(health.reply().unwrap().metrics).unwrap();
+    assert!(!metrics.lines().any(|line| line.starts_with("culprit_collector_schedule_native_coverage{")));
+    assert!(metrics.contains("last_native_observation_age_seconds"), "the original observation clock remains visible");
 }

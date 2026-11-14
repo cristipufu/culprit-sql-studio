@@ -1,5 +1,6 @@
 use super::*;
 use crate::Engine;
+mod index_operations;
 
 const SOURCE: &str = crate::source_id::PAGE_WAIT_TARGETS;
 
@@ -71,6 +72,7 @@ fn observation() -> PageWaitObservation {
         observed_address: Some(PageWaitAddress { database_id: 5, file_id: 1, page_id: 42 }),
         resolution: PageWaitResolution::ObservedAtBothBounds,
         target: Some(Box::new(target())),
+        index_operations: None,
     }
 }
 

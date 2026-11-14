@@ -150,6 +150,7 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
     .chain(test_support::request_memory_evidence_cases())
     .chain(test_support::session_memory_evidence_cases())
     .chain(test_support::page_wait_evidence_cases())
+    .chain(test_support::task_space_evidence_cases())
     .chain(test_support::statement_work_evidence_cases())
     .enumerate()
     {

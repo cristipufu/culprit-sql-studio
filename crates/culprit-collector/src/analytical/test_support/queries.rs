@@ -51,6 +51,7 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
             monitoring_template_id: None,
             context: [("native-option".into(), "enabled".into())].into(),
             context_available: true,
+            variant_family: None,
             source_text_bytes: Some(sql.len().to_string()),
             sql: DefinitionPayload::sql(sql, source.target.engine()),
         }),
@@ -87,6 +88,11 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
                     RuntimeMetricUnit::Pages { bytes_per_page: 16384 },
                     7.0,
                 ),
+                RuntimeMetric::average(
+                    RuntimeMetricKey::TemporaryStorage,
+                    RuntimeMetricUnit::Pages { bytes_per_page: 16384 },
+                    1.25,
+                ),
             ],
             first_execution_at: Some("2020-01-01T06:00:00.123456000Z".into()),
             last_execution_at: Some("2020-01-01T06:59:59.999999000Z".into()),
@@ -104,6 +110,27 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
         minimum: Some(MeasurementValue::Integer("0".into())),
         maximum: None,
     }));
+    (source, records)
+}
+
+/// The selected child retains routing metadata without a parent runtime or dispatcher payload.
+pub fn query_variant_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (source, mut records) = query_evidence();
+    let TelemetryRecord::QueryDefinition(query) = &mut records[0] else { panic!("query definition") };
+    let parent = NativeQueryIdentity {
+        query_id: "native-parent-6".into(),
+        qualifiers: [("context".into(), "parent-context-1".into())].into(),
+    };
+    query.variant_family = Some(culprit_core::QueryVariantFamily {
+        variant: query.identity.clone(),
+        parent: parent.clone(),
+        dispatcher: NativePlanIdentity {
+            query: parent,
+            plan_id: "native-dispatcher-9".into(),
+            qualifiers: [("generation".into(), "2".into())].into(),
+        },
+    });
+    assert!(query.is_valid());
     (source, records)
 }
 

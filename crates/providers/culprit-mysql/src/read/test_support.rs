@@ -11,17 +11,27 @@ pub(crate) struct Read {
     pub queries: Vec<(String, Vec<Value>, usize)>,
     pub closed: usize,
     pub shutdown: Option<SourceShutdown>,
+    query_limit: Option<u32>,
+    initial_queries: u32,
 }
 
 impl Read {
     pub fn with(replies: Vec<Result<Vec<Rec>>>) -> Self {
         Self { replies: replies.into(), ..Default::default() }
     }
+    pub fn with_query_budget(mut self, limit: u32, initial_queries: u32) -> Self {
+        self.query_limit = Some(limit);
+        self.initial_queries = initial_queries;
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl QueryRead for Read {
     async fn read(&mut self, sql: &str, parameters: Vec<Value>, row_limit: usize) -> Result<Vec<Rec>> {
+        if self.query_limit.is_some_and(|limit| self.query_count() >= limit) {
+            return Err(CollectionStop::QueryLimit.error());
+        }
         self.queries.push((sql.into(), parameters, row_limit));
         self.replies.pop_front().expect("unexpected source SQL")
     }
@@ -33,7 +43,7 @@ impl QueryRead for Read {
 #[async_trait::async_trait]
 impl OwnedRead for Read {
     fn query_count(&self) -> u32 {
-        self.queries.len() as u32
+        self.initial_queries + self.queries.len() as u32
     }
     fn read_metrics(&self) -> Option<ReadWorkMetrics> {
         None

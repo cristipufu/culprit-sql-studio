@@ -74,6 +74,7 @@ fn definition(
                 ("monitoring_template_id", "MonitoringTemplateId"),
                 ("context", "CompilationContext"),
                 ("context_available", "CompilationContextAvailable"),
+                ("variant_family", "QueryVariantFamily"),
             ] {
                 fields.insert(key.into(), field(values, column)?.clone());
             }

@@ -175,7 +175,6 @@ pub(super) fn short_rule(rule: &str, position: culprit_core::i18n::LabelPosition
         "leading-wildcard" => t!("view.dashboard.plans.rule.leading_wildcard", position = position),
         "not-in" => t!("view.dashboard.plans.rule.not_in", position = position),
         "scalar-udf" => t!("view.dashboard.plans.rule.scalar_udf", position = position),
-        "table-variable" => t!("view.dashboard.plans.rule.table_variable", position = position),
         "parallelism-blocked" => t!("view.dashboard.plans.rule.parallelism_blocked", position = position),
         "parallel-skew" => t!("view.dashboard.plans.rule.parallel_skew", position = position),
         "eager-spool" => t!("view.dashboard.plans.rule.eager_spool", position = position),

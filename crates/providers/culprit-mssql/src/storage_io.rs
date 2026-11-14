@@ -7,6 +7,8 @@ use culprit_core::{
 };
 use std::collections::BTreeSet;
 
+mod context;
+
 const MAX_NATIVE_FILES: usize = 10_000;
 const MAX_DISPLAY_FILES: usize = 24;
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -23,7 +25,10 @@ fn sql(selection: Selection) -> String {
     // Filter the native function itself: enumerating every database and filtering afterwards needlessly visits them.
     let current = format!(
         "SELECT {COUNTERS}, DB_NAME() AS database_name, df.name AS file_name,
-CAST(df.type AS varchar(16)) AS native_type, CAST(0 AS int) AS shared
+CAST(df.type AS varchar(16)) AS native_type, CAST(0 AS int) AS shared, CAST(0 AS int) AS cache,
+CASE WHEN @engine_edition IN (2,3,4,8) AND DB_ID() = 2 THEN 1 ELSE 0 END AS temporary,
+@engine_edition AS engine_edition, @database_edition AS database_edition,
+@replica_id AS replica_id, @updateability AS updateability
 FROM sys.dm_io_virtual_file_stats(DB_ID(), NULL) vfs
 LEFT JOIN sys.database_files df ON df.file_id = vfs.file_id
 WHERE vfs.database_id = DB_ID()"
@@ -31,7 +36,9 @@ WHERE vfs.database_id = DB_ID()"
     let tempdb = if selection == Selection::DatabaseAndSharedTempdb {
         format!(
             " UNION ALL SELECT {COUNTERS}, N'tempdb' AS database_name, mf.name AS file_name,
-CAST(mf.type AS varchar(16)) AS native_type, CAST(1 AS int) AS shared
+CAST(mf.type AS varchar(16)) AS native_type, CAST(1 AS int) AS shared, CAST(0 AS int) AS cache,
+CAST(1 AS int) AS temporary, @engine_edition AS engine_edition, @database_edition AS database_edition,
+@replica_id AS replica_id, @updateability AS updateability
 FROM sys.dm_io_virtual_file_stats(2, NULL) vfs
 LEFT JOIN sys.master_files mf ON mf.database_id = 2 AND mf.file_id = vfs.file_id
 WHERE vfs.database_id = 2 AND DB_ID() <> 2"
@@ -39,7 +46,32 @@ WHERE vfs.database_id = 2 AND DB_ID() <> 2"
     } else {
         String::new()
     };
-    format!("{current}{tempdb} OPTION(MAXDOP 1)")
+    // database_id=0 is a Hyperscale-specific interface. On conventional SQL Server it must never be called on the
+    // assumption that a WHERE predicate will prevent execution. Use a control-flow branch qualified by native
+    // properties; unknown editions retain only the explicitly targeted database counters.
+    let cache = format!(
+        "SELECT {COUNTERS}, CAST(NULL AS nvarchar(128)) AS database_name,
+CAST(NULL AS nvarchar(128)) AS file_name, CAST(NULL AS varchar(16)) AS native_type,
+CAST(0 AS int) AS shared, CAST(1 AS int) AS cache, CAST(0 AS int) AS temporary,
+@engine_edition AS engine_edition, @database_edition AS database_edition,
+@replica_id AS replica_id, @updateability AS updateability
+FROM sys.dm_io_virtual_file_stats(0, NULL) vfs WHERE vfs.database_id = 0"
+    );
+    format!(
+        "DECLARE @engine_edition int = CONVERT(int, SERVERPROPERTY('EngineEdition'));
+DECLARE @database_edition nvarchar(64) = CONVERT(nvarchar(64), DATABASEPROPERTYEX(DB_NAME(), 'Edition'));
+DECLARE @replica_id nvarchar(36) = CONVERT(nvarchar(36), TRY_CONVERT(uniqueidentifier,
+  CONVERT(nvarchar(128), DATABASEPROPERTYEX(DB_NAME(), 'ReplicaID'))));
+DECLARE @updateability nvarchar(60) = CONVERT(nvarchar(60), DATABASEPROPERTYEX(DB_NAME(), 'Updateability'));
+IF @engine_edition = 5 AND (@database_edition = N'Hyperscale' OR @replica_id IS NOT NULL)
+BEGIN
+{current} UNION ALL {cache} OPTION(MAXDOP 1);
+END
+ELSE
+BEGIN
+{current}{tempdb} OPTION(MAXDOP 1);
+END"
+    )
 }
 
 pub(crate) async fn read<R: NativeRead>(
@@ -53,9 +85,15 @@ pub(crate) async fn read<R: NativeRead>(
         return Err(CollectionStop::RowLimit.error());
     }
     let mut identities = BTreeSet::new();
+    let mut native_context = None;
     rows.iter()
         .map(|row| {
-            let counters = decode(row)?;
+            let context = context::NativeContext::decode(row)?;
+            if native_context.as_ref().is_some_and(|previous| previous != &context) {
+                return Err(invalid_data());
+            }
+            let counters = decode(row, &context)?;
+            native_context = Some(context);
             if !identities.insert((counters.native_database_id.clone(), counters.file_id.clone())) {
                 return Err(invalid_data());
             }
@@ -63,7 +101,7 @@ pub(crate) async fn read<R: NativeRead>(
         })
         .collect()
 }
-fn decode(row: &Rec) -> Result<FileIoCounters> {
+fn decode(row: &Rec, context: &context::NativeContext) -> Result<FileIoCounters> {
     let native_type = optional_text(row, "native_type")?;
     if native_type.as_ref().is_some_and(|value| value.parse::<u32>().is_err()) {
         return Err(invalid_data());
@@ -73,20 +111,23 @@ fn decode(row: &Rec) -> Result<FileIoCounters> {
         1 => true,
         _ => return Err(invalid_data()),
     };
-    let kind = match (native_type.as_deref(), shared) {
+    let temporary = crate::read::boolean(row, "temporary")?;
+    let cache = crate::read::boolean(row, "cache")?;
+    let kind = match (native_type.as_deref(), temporary) {
         (Some("1"), _) => FileKind::Log,
         (Some("0"), true) => FileKind::Temp,
         (Some("0"), false) => FileKind::Data,
         _ => FileKind::Other,
     };
     let counters = FileIoCounters {
+        context: context.accounting(row, kind)?,
         native_database_id: integer(row, "database_id")?.to_string(),
         database: optional_text(row, "database_name")?,
         file_id: integer(row, "file_id")?.to_string(),
         native_name: optional_text(row, "file_name")?,
         native_type,
         kind,
-        scope: if shared { FileScope::Server } else { FileScope::Database },
+        scope: if shared || cache { FileScope::Server } else { FileScope::Database },
         reset: ResetMarker::Unknown,
         reads: integer(row, "reads")?.to_string(),
         read_ms: Some(integer(row, "read_ms")?.to_string()),
@@ -97,9 +138,6 @@ fn decode(row: &Rec) -> Result<FileIoCounters> {
         size_on_disk_bytes: Some(integer(row, "size_on_disk_bytes")?.to_string()),
         sample_uptime_ms: Some(integer(row, "sample_ms")?.to_string()),
     };
-    if counters.native_database_id == "0" || counters.file_id == "0" {
-        return Err(invalid_data());
-    }
     if !counters.is_valid() {
         return Err(invalid_data());
     }
@@ -120,6 +158,7 @@ pub(crate) fn display(rows: &[FileIoCounters]) -> Vec<FileIo> {
         .iter()
         .filter(|row| row.reads != "0" || row.writes != "0")
         .map(|row| FileIo {
+            context: row.context.clone(),
             name: row.native_name.clone().unwrap_or_else(|| row.file_id.clone()),
             kind: row.kind,
             database: row.database.clone(),
@@ -129,7 +168,7 @@ pub(crate) fn display(rows: &[FileIoCounters]) -> Vec<FileIo> {
             writes: number(&row.writes),
             write_ms: row.write_ms.as_deref().map(number),
             write_bytes: row.write_bytes.as_deref().map(number),
-            scope: row.database.as_ref().map(|_| row.scope),
+            scope: Some(row.scope),
             stats_reset: None,
             write_operation: None,
         })

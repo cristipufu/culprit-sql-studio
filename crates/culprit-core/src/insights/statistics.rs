@@ -17,8 +17,6 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
             n.children.iter().for_each(|c| c.walk(&mut below));
             !below.iter().any(|b| found.contains_key(&b.id))
         })
-        // A table variable estimated at one row is the table-variable rule's: no statistics to refresh.
-        .filter(|n| !(table_variable_of(n).is_some() && n.est_rows_total() <= 1.5))
         .copied()
         .collect();
     let mut causes = causes;
@@ -37,7 +35,7 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
             let table = n.object.clone().or_else(|| (n.op == "Filter").then(|| first_object(n)).flatten());
             let subject = table.clone().unwrap_or_else(|| n.op.clone());
             let mut above = 0.0;
-            // A sort or hash above that ran out of memory was sized for the wrong number of rows.
+            // An ancestor's spill is co-occurring evidence, not proof that this mismatch caused it.
             let mut spill_above = false;
             // What was planned from this estimate: joins, sorts, aggregates, spools, parallelism above it.
             let mut consumers = false;
@@ -70,31 +68,28 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
             let on_expression = cond.split([' ', '(', ')']).any(|t| matches!(t, "%" | "+" | "-" | "*" | "/"))
                 || wrapped_column(&cond, cx.engine()).is_some();
             let cols: Vec<String> = if on_expression { Vec::new() } else { filter_columns(&cond) };
-            let mut detail = vec![if !consumers {
+            let input = relational_input_kind(n);
+            let mut detail = vec![if let Some(input) = input {
+                t!("insight.misestimate.detail.relational_input", kind = input_key(input))
+            } else if !consumers {
                 t!("insight.misestimate.detail.unused")
             } else if spill_above {
                 t!("insight.misestimate.detail.planned_spilled")
             } else {
                 t!("insight.misestimate.detail.planned")
             }];
-            if cols.len() >= 2 {
+            if input.is_none() && cols.len() >= 2 {
                 detail.push(t!("insight.misestimate.detail.correlated", columns = format::list(&cols)));
-            } else if on_expression {
+            } else if input.is_none() && on_expression {
                 detail.push(t!("insight.misestimate.detail.expression"));
             }
             d.detail = detail.join(" ");
             let mysql_histograms = !cx.plan.facts().server_version.as_deref()
                 .is_some_and(|v| !v.contains("MariaDB") && !crate::version_at_least(v, [8, 0, 0]));
-            let (fix, sql) = match (cx.engine(), &table) {
-                // Table variables have no statistics, and a temporary table's belong to the session that filled it:
-                // nothing Culprit could hand over to run would reach them.
-                (Engine::Mssql, Some(t)) if table_variable_of(n).is_some() => {
-                    (t!("insight.misestimate.fix.table_variable", table = table_leaf(t)), None)
-                }
-                (Engine::Mssql, Some(t)) if table_leaf(t).starts_with('#') => {
-                    (t!("insight.misestimate.fix.temporary_table", table = table_leaf(t)), None)
-                }
-                (Engine::Mssql, Some(t)) => (
+            let (fix, sql) = match (input, cx.engine(), &table) {
+                // A copied command cannot refresh session-local inputs; unknown kinds cannot authorize it either.
+                (Some(kind), _, _) => (relational_input_advice(kind, &table_leaf(&subject)), None),
+                (None, Engine::Mssql, Some(t)) => (
                     if cols.len() >= 2 {
                         t!("insight.misestimate.fix.mssql_columns", table = table_leaf(t))
                     } else {
@@ -106,11 +101,11 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
                         format!("UPDATE STATISTICS {} WITH FULLSCAN;", qualified(Engine::Mssql, t))
                     }),
                 ),
-                (Engine::Yugabyte, Some(t)) => (
+                (None, Engine::Yugabyte, Some(t)) => (
                     t!("insight.misestimate.fix.yugabyte", table = table_leaf(t)),
                     Some(Engine::Yugabyte.dialect().refresh_statistics(&qualified(Engine::Yugabyte, t))),
                 ),
-                (Engine::Postgres, Some(t)) => (
+                (None, Engine::Postgres, Some(t)) => (
                     if cols.len() >= 2 {
                         t!("insight.misestimate.fix.postgres_columns", table = table_leaf(t))
                     } else if on_expression {
@@ -125,23 +120,23 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
                     }),
                 ),
                 // MariaDB collects histograms with its engine-independent statistics; MySQL has them from 8.0.
-                (Engine::Mysql, Some(t)) if cx.mariadb() && !cols.is_empty() => (
+                (None, Engine::Mysql, Some(t)) if cx.mariadb() && !cols.is_empty() => (
                     t!("insight.misestimate.fix.mariadb_columns", table = table_leaf(t), columns = format::list(&cols)),
                     Some(format!("ANALYZE TABLE {} PERSISTENT FOR COLUMNS ({}) INDEXES ();", qualified(Engine::Mysql, t), cols.iter().map(|c| quote(Engine::Mysql, c)).collect::<Vec<_>>().join(", "))),
                 ),
-                (Engine::Mysql, Some(t)) if mysql_histograms && !cols.is_empty() => (
+                (None, Engine::Mysql, Some(t)) if mysql_histograms && !cols.is_empty() => (
                     t!("insight.misestimate.fix.mysql_columns", table = table_leaf(t), columns = format::list(&cols)),
                     Some(format!("ANALYZE TABLE {} UPDATE HISTOGRAM ON {};", qualified(Engine::Mysql, t), cols.iter().map(|c| quote(Engine::Mysql, c)).collect::<Vec<_>>().join(", "))),
                 ),
-                (Engine::Mysql, Some(t)) => (
+                (None, Engine::Mysql, Some(t)) => (
                     t!("insight.misestimate.fix.refresh", table = table_leaf(t)),
                     Some(Engine::Mysql.dialect().refresh_statistics(&qualified(Engine::Mysql, t))),
                 ),
-                (Engine::Sqlite, Some(t)) => (
+                (None, Engine::Sqlite, Some(t)) => (
                     t!("insight.misestimate.fix.refresh", table = table_leaf(t)),
                     Some(Engine::Sqlite.dialect().refresh_statistics(&qualified(Engine::Sqlite, t))),
                 ),
-                (_, None) => (t!("insight.misestimate.fix.below"), None),
+                (None, _, None) => (t!("insight.misestimate.fix.below"), None),
             };
             d.fix = fix;
             d.fix_sql = sql;
@@ -169,18 +164,46 @@ pub(super) fn missing_statistics(cx: &Cx) -> Vec<Draft> {
                 Some(context) => stale_index_statistics_detail(&context, None),
                 None => t!("insight.missing_statistics.detail"),
             };
-            d.fix = t!("insight.missing_statistics.fix");
-            d.fix_sql = Some("SELECT name, is_auto_create_stats_on, is_read_only\n  FROM sys.databases\n WHERE database_id = DB_ID();".into());
+            if let Some(kind) = relational_input_kind(n) {
+                d.fix = relational_input_advice(kind, &what(n));
+            } else {
+                d.fix = t!("insight.missing_statistics.fix");
+                d.fix_sql = Some("SELECT name, is_auto_create_stats_on, is_read_only\n  FROM sys.databases\n WHERE database_id = DB_ID();".into());
+            }
             d.verify = t!("insight.missing_statistics.verify");
             d
         })
         .collect()
 }
 
-/// An operator SQL Server warned has no statistics on some columns. A table variable never has statistics; the
-/// table-variable rule says what to do about it.
+/// Known TVPs and local table variables have no column statistics to enable. An unresolved kind must not be
+/// rewritten as either one; a native missing-statistics warning remains useful, with investigation-only advice.
 fn warns_of_no_statistics(n: &PlanNode) -> bool {
-    n.warnings.contains(&PlanWarning::MissingStatistics) && table_variable_of(n).is_none()
+    use crate::plan_facts::RelationalInputKind::*;
+    n.warnings.contains(&PlanWarning::MissingStatistics)
+        && !matches!(relational_input_kind(n), Some(LocalTableVariable | TableValuedParameter))
+}
+
+fn input_key(kind: crate::plan_facts::RelationalInputKind) -> &'static str {
+    use crate::plan_facts::RelationalInputKind::*;
+    match kind {
+        TableValuedParameter => "tvp",
+        LocalTableVariable => "local",
+        TemporaryTable => "temporary",
+        TableValuedFunction => "tvf",
+        Unknown => "unknown",
+    }
+}
+
+fn relational_input_advice(kind: crate::plan_facts::RelationalInputKind, table: &str) -> String {
+    use crate::plan_facts::RelationalInputKind::*;
+    match kind {
+        TableValuedParameter => t!("insight.misestimate.fix.tvp", table = table),
+        LocalTableVariable => t!("insight.misestimate.fix.local_table_variable", table = table),
+        TemporaryTable => t!("insight.misestimate.fix.temporary_table", table = table),
+        TableValuedFunction => t!("insight.misestimate.fix.tvf", table = table),
+        Unknown => t!("insight.misestimate.fix.unknown_relational_input", table = table),
+    }
 }
 
 /// Seek-key context for ColumnsWithNoStatistics. The legacy name does not imply a current staleness verdict: a

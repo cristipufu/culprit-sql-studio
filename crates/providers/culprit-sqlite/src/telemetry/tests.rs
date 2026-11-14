@@ -1,6 +1,22 @@
 use super::*;
 use culprit_core::{ConnectionSpec, Provider};
 use rusqlite::Connection;
+
+#[test]
+fn unsupported_task_space_is_refused_before_opening_the_native_file() {
+    let provider = crate::SqliteProvider::new(&ConnectionSpec {
+        database: Some(std::env::temp_dir().join("culprit-unopened-task-space.sqlite").to_string_lossy().into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::TaskSpace },
+        budget: CollectionBudget::default(),
+    };
+    assert_eq!(provider.telemetry_source(&request).err().unwrap().code, ErrorCode::Unsupported);
+}
+
 struct Fixture(PathBuf);
 impl Fixture {
     fn new(journal: &str) -> Self {

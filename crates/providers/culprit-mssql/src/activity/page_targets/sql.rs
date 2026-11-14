@@ -49,7 +49,8 @@ SELECT /* culprit */
  CONVERT(varchar(40),CAST(o.create_date AS datetime2),126) AS object_created_without_offset,
  CONVERT(varchar(40),CAST(o.modify_date AS datetime2),126) AS object_modified_without_offset,
  i.index_id AS catalog_index_id,i.name AS index_name,i.type AS index_type,
- part.partition_id AS catalog_partition_id,part.hobt_id AS catalog_hobt_id
+ part.partition_id AS catalog_partition_id,part.hobt_id AS catalog_hobt_id,
+ part.partition_number AS catalog_partition_number
 FROM @targets.nodes('/pages/page') t(n)
 CROSS APPLY(SELECT t.n.value('@ordinal[1]','int') AS ordinal,t.n.value('@database[1]','int') AS database_id,
  t.n.value('@file[1]','int') AS file_id,t.n.value('@page[1]','int') AS page_id) a
@@ -64,19 +65,3 @@ OPTION(MAXDOP 1,LOOP JOIN)"#,
         header = fields::projection()
     )
 }
-
-pub(super) const PARTICIPANTS: &str = r#"
-DECLARE /* culprit */ @targets xml=CAST(@P1 AS xml),@at datetime2=SYSUTCDATETIME();
-SELECT /* culprit */ a.ordinal,CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
- r.session_id AS checked_session_id,CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS checked_session_generation,
- r.request_id AS checked_request_id,CONVERT(varchar(40),CAST(r.start_time AS datetime2),126) AS checked_request_generation,
- CONVERT(varchar(128),r.sql_handle,2) AS checked_sql_handle,r.statement_start_offset AS checked_begin,r.statement_end_offset AS checked_end,
- r.database_id AS checked_database_id,r.wait_type AS checked_wait_type,r.wait_resource AS checked_wait_resource,
- CONVERT(varchar(128),r.plan_handle,2) AS checked_plan_handle,CONVERT(varchar(16),r.query_hash,2) AS checked_query_hash,
- CONVERT(varchar(16),r.query_plan_hash,2) AS checked_plan_hash
-FROM @targets.nodes('/activity/row') t(n)
-CROSS APPLY(SELECT t.n.value('@ordinal[1]','int') AS ordinal,t.n.value('@session[1]','int') AS session_id,
- t.n.value('@request[1]','int') AS request_id) a
-LEFT JOIN sys.dm_exec_sessions s ON s.session_id=a.session_id
-LEFT JOIN sys.dm_exec_requests r ON r.session_id=a.session_id AND r.request_id=a.request_id
-OPTION(MAXDOP 1,LOOP JOIN)"#;

@@ -113,15 +113,30 @@ fn a_fast_plan_that_came_later_is_not_a_regression() {
 }
 
 #[test]
-fn plans_used_side_by_side_are_sensitivity_not_a_regression() {
+fn overlapping_plan_populations_are_observed_variation_without_a_parameter_cause_or_mutating_fix() {
     let s = with_plans(vec![
         plan("8", 900.0, 9.0, "2026-10-11T07:44:00Z", "2026-10-11T12:12:00Z"),
         plan("47", 100.0, 300.0, "2026-10-11T07:50:00Z", "2026-10-11T12:13:00Z"),
     ]);
     let report = analyze(s);
     assert!(find(&report.findings, "plan-regression:8").is_none(), "plans that overlap aren't a plan change");
-    let f = find(&report.findings, "parameter-sensitive:8").expect("two plans side by side");
-    assert!(f.title.contains("for most calls"), "{}", f.title);
+    let f = find(&report.findings, "parameter-sensitive:8").expect("recorded plan averages differ");
+    assert_eq!(f.actionability, culprit_core::Actionability::Information);
+    assert_eq!(f.confidence, culprit_core::Confidence::Medium);
+    assert!(matches!(
+        &f.facts.runtime_variation,
+        Some(culprit_core::FindingRuntimeVariation::PlanAverages { faster_plan, slower_plan })
+            if faster_plan == "8" && slower_plan == "47"
+    ));
+    assert_eq!(f.queries[0].id, "8");
+    assert_eq!(
+        f.metrics.iter().find(|m| m.is("check.parameter_sensitive.metric.slower_plan_time")).unwrap().value,
+        30_000.0
+    );
+    assert!(f.caveats.iter().any(|c| c.contains("does not establish harmful parameter-sensitive plan reuse")));
+    let fix = f.fix.as_ref().unwrap();
+    assert!(fix.sql.is_none());
+    assert!(fix.cost.is_none());
 }
 
 #[test]
@@ -491,17 +506,25 @@ fn a_heavy_statements_title_says_its_cost_in_another_language() {
 }
 
 #[test]
-fn sql_servers_recommendation_is_a_caveat_on_plans_used_side_by_side() {
+fn native_plan_recommendations_keep_their_authorized_fix_beside_an_unresolved_variation_candidate() {
     let mut s = with_plans(vec![
         plan("8", 900.0, 9.0, "2026-10-11T07:44:00Z", "2026-10-11T12:12:00Z"),
         plan("47", 100.0, 300.0, "2026-10-11T07:50:00Z", "2026-10-11T12:13:00Z"),
     ]);
     s.tuning = Some(recommend("8", "47", "8"));
     let report = analyze(s);
-    assert!(find(&report.findings, "tuning-advice:force:8").is_none());
-    let f = find(&report.findings, "parameter-sensitive:8").unwrap();
-    let caveat = f.caveats.iter().find(|c| c.contains("recommends forcing plan 47")).expect("the recommendation");
-    assert!(caveat.contains("most calls run fast with plan 8"), "{caveat}");
+    let recommendation =
+        find(&report.findings, "tuning-advice:force:8").expect("native recommendation remains visible");
+    assert_eq!(recommendation.queries[0].id, "8");
+    assert_eq!(recommendation.facts.recommended_plan.as_ref().unwrap().plan, "47");
+    assert!(recommendation.fix.as_ref().unwrap().sql.as_deref().unwrap().contains("@plan_id = 47"));
+    assert_eq!(recommendation.actionability, culprit_core::Actionability::NeedsAttention);
+    let candidate = find(&report.findings, "parameter-sensitive:8").expect("observed populations remain visible");
+    assert_eq!(candidate.actionability, culprit_core::Actionability::Information);
+    assert!(candidate.fix.as_ref().unwrap().sql.is_none());
+    assert!(
+        matches!(&candidate.facts.runtime_variation, Some(culprit_core::FindingRuntimeVariation::PlanAverages { faster_plan, slower_plan }) if faster_plan == "8" && slower_plan == "47")
+    );
 }
 
 // ── unstable-query ───────────────────────────────────────────────────────────────────────────────
@@ -836,7 +859,20 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
         Queries whose duration swings wildly between runs with the same plan, a sign of parameter sensitivity or blocking."
     );
     const PG: &str = "3432126458605143571";
-    let said = |s: Snapshot, id: &str| said_by("unstable-query", &s, &format!("unstable-query:{id}"));
+    let said = |s: Snapshot, id: &str| {
+        let findings = crate::run("unstable-query", &s);
+        let finding =
+            findings.iter().find(|f| f.id == format!("unstable-query:{id}")).expect("recorded unstable runtimes");
+        assert_eq!(finding.queries[0].id, id);
+        if let Some(sql) = &finding.fix.as_ref().unwrap().sql {
+            assert_eq!(
+                sql,
+                "ALTER SYSTEM SET log_lock_waits = 'on';\nSELECT pg_reload_conf();\nALTER SYSTEM SET log_min_duration_statement = '2s';\nSELECT pg_reload_conf();",
+                "only the existing rare-event logging setup is authorized in these cases"
+            );
+        }
+        crate::words(finding)
+    };
     let pg = || swinging(snapshot("postgres-demo.json"), PG, (9_900.0, 2.0), (100.0, 5_000.0));
     let mut undated = pg();
     query(&mut undated, PG).first_seen = None;
@@ -886,7 +922,6 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
     (q.first_seen, q.last_seen) =
         (Some(iso_from_epoch(end - 72.0 * 3600.0)), Some(iso_from_epoch(end - 48.0 * 3600.0)));
     let mut actual = Vec::<String>::new();
-    let mut expected = Vec::<&str>::new();
     actual.extend([
         said(pg(), PG),
         said(undated, PG),
@@ -900,162 +935,7 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
         said(totals_only, PG),
         said(stopped_read, PG),
     ]);
-    expected.extend(
-        [
-            "A read from customers averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: First see what differs: plan the statement with a value from a slow call and one from a fast call. If a generic plan is reused for very different values, plan per call for the application's role; if one column's values are very uneven, give the planner finer statistics for it.\n\
-                sql: -- Compare a slow and a fast value (outside production, ANALYZE runs the statement):\n\
-                EXPLAIN (ANALYZE, BUFFERS) <the statement with a slow value>;\n\n\
-                -- Plan every call for its own values (for the role the application connects as):\n\
-                ALTER ROLE <app_role> SET plan_cache_mode = force_custom_plan;\n\n\
-                -- Finer statistics for an uneven column, then refresh them:\n\
-                ALTER TABLE <table> ALTER COLUMN <column> SET STATISTICS 1000;\n\
-                ANALYZE <table>;\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.",
-            "A read from customers averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: First see what differs: plan the statement with a value from a slow call and one from a fast call. If a generic plan is reused for very different values, plan per call for the application's role; if one column's values are very uneven, give the planner finer statistics for it.\n\
-                sql: -- Compare a slow and a fast value (outside production, ANALYZE runs the statement):\n\
-                EXPLAIN (ANALYZE, BUFFERS) <the statement with a slow value>;\n\n\
-                -- Plan every call for its own values (for the role the application connects as):\n\
-                ALTER ROLE <app_role> SET plan_cache_mode = force_custom_plan;\n\n\
-                -- Finer statistics for an uneven column, then refresh them:\n\
-                ALTER TABLE <table> ALTER COLUMN <column> SET STATISTICS 1000;\n\
-                ANALYZE <table>;\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement in the 5 hours since statistics were reset, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.",
-            "An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan shows no read, but each run looks its key up in order_items_order_product_key to see whether a row already has it, and its foreign keys on product_id and order_id check each row it inserts against products and orders: the referenced row is looked up and share-locked (FOR KEY SHARE). 75% of its runs found their key already there and inserted nothing. Its recorded data-file I/O took 86 ms in all, against at least 8 min of extra time in the slow runs. I/O timing may not cover every historical run, so this does not rule out storage delays. The slow runs may have been waiting for a transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders, for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                metric: Data-file reads and writes\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Another transaction inserting the same key holds this one until it commits or rolls back, and so does one that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders: keep those transactions short. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-            "An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · Low · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan shows no read, but each run looks its key up in order_items_order_product_key to see whether a row already has it, and its foreign keys on product_id and order_id check each row it inserts against products and orders: the referenced row is looked up and share-locked (FOR KEY SHARE). 75% of its runs found their key already there and inserted nothing. Its recorded data-file I/O took 86 ms in all, against at least 8 min of extra time in the slow runs. I/O timing may not cover every historical run, so this does not rule out storage delays. The slow runs may have been waiting for a transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders, for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                metric: Data-file reads and writes\n\
-                fix: The extra time can come from as few as 100 slow runs in the 1250 days since statistics were reset, too few to count on catching one while it happens. Have the next ones logged instead. Set log_lock_waits to on and log_min_duration_statement to 2s and reload the configuration (settings marked as needing a restart take effect after one). log_lock_waits then logs each lock wait longer than deadlock_timeout (1 s by default) with the process holding the lock, and log_min_duration_statement each statement slower than 2s (any statement, not only this one) with its duration. Another transaction inserting the same key holds this one until it commits or rolls back, and so does one that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders: keep those transactions short. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                sql: ALTER SYSTEM SET log_lock_waits = 'on';\n\
-                SELECT pg_reload_conf();\n\
-                ALTER SYSTEM SET log_min_duration_statement = '2s';\n\
-                SELECT pg_reload_conf();\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-            "An insert into events averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks the table (a migration's, say) holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-            "An insert into app_salts averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Another transaction inserting the same key holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-            "An insert into events averaged 52 ms per run, but some runs took far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: This statement no longer runs. Query 2885972271926804069, an insert into events too, still runs and may have replaced it. Its slowest recorded run took 88 ms. These historical outliers do not establish a current problem in its replacement or justify a logging change. If slow runs recur, collect their durations and waits and inspect trigger and constraint work before choosing a fix.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 10, 06:00 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-            "An insert into events averaged 52 ms per run, but some runs took far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: This statement no longer runs. These historical outliers do not establish a current problem in its replacement or justify a logging change. If slow runs recur, collect their durations and waits and inspect trigger and constraint work before choosing a fix.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 10, 06:00 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-            "A read from customers averages 10 ms per run, but some runs take far longer (up to 5.0 s) · Low · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more, together, than its average of 52 ms a run over the 40 days since statistics were reset (10 ms over 36 hours of Culprit's scans). Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average over Culprit's scans\n\
-                metric: Average over the 40 days since statistics were reset\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time over the 40 days since statistics were reset (at least)\n\
-                fix: First see what differs: plan the statement with a value from a slow call and one from a fast call. If a generic plan is reused for very different values, plan per call for the application's role; if one column's values are very uneven, give the planner finer statistics for it.\n\
-                sql: -- Compare a slow and a fast value (outside production, ANALYZE runs the statement):\n\
-                EXPLAIN (ANALYZE, BUFFERS) <the statement with a slow value>;\n\n\
-                -- Plan every call for its own values (for the role the application connects as):\n\
-                ALTER ROLE <app_role> SET plan_cache_mode = force_custom_plan;\n\n\
-                -- Finer statistics for an uneven column, then refresh them:\n\
-                ALTER TABLE <table> ALTER COLUMN <column> SET STATISTICS 1000;\n\
-                ANALYZE <table>;\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Sep 1, 11:54 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.",
-            "A read from customers averages 52 ms per run, but some runs take far longer (up to 5.0 s) · Low · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together over the 40 days since statistics were reset. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average over Culprit's scans\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time over the 40 days since statistics were reset (at least)\n\
-                fix: First see what differs: plan the statement with a value from a slow call and one from a fast call. If a generic plan is reused for very different values, plan per call for the application's role; if one column's values are very uneven, give the planner finer statistics for it.\n\
-                sql: -- Compare a slow and a fast value (outside production, ANALYZE runs the statement):\n\
-                EXPLAIN (ANALYZE, BUFFERS) <the statement with a slow value>;\n\n\
-                -- Plan every call for its own values (for the role the application connects as):\n\
-                ALTER ROLE <app_role> SET plan_cache_mode = force_custom_plan;\n\n\
-                -- Finer statistics for an uneven column, then refresh them:\n\
-                ALTER TABLE <table> ALTER COLUMN <column> SET STATISTICS 1000;\n\
-                ANALYZE <table>;\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Sep 1, 11:54 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.",
-            "A read from customers averaged 52 ms per run, but some runs took far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: First see what differs: plan the statement with a value from a slow call and one from a fast call. If a generic plan is reused for very different values, plan per call for the application's role; if one column's values are very uneven, give the planner finer statistics for it.\n\
-                sql: -- Compare a slow and a fast value (outside production, ANALYZE runs the statement):\n\
-                EXPLAIN (ANALYZE, BUFFERS) <the statement with a slow value>;\n\n\
-                -- Plan every call for its own values (for the role the application connects as):\n\
-                ALTER ROLE <app_role> SET plan_cache_mode = force_custom_plan;\n\n\
-                -- Finer statistics for an uneven column, then refresh them:\n\
-                ALTER TABLE <table> ALTER COLUMN <column> SET STATISTICS 1000;\n\
-                ANALYZE <table>;\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 8, 11:54 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.",
-        ]
-    );
+
     let mssql = |waits: Vec<WaitStat>| {
         let mut s = swinging(snapshot("mssql-demo.json"), "10", (7_990.0, 1.2), (10.0, 1_100.0));
         query(&mut s, "10").waits = waits;
@@ -1088,118 +968,7 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
         said(commit, "6"),
         said(rare_commit, "6"),
     ]);
-    expected.extend(
-        [
-            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 20% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                \n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the last 5 hours, more than the 10.9 s its slow calls cost, so it comes last.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 20% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                \n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the last 5 hours, more than the 10.9 s its slow calls cost, so it comes last.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. At least 10.0 s of lock waits were recorded by Query Store, against at least 10.9 s of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 20% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                \n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the last 5 hours, more than the 10.9 s its slow calls cost, so it comes last.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. At least 1.0 s of lock waits were recorded by Query Store, against at least 10.9 s of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 20% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                \n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the last 5 hours, more than the 10.9 s its slow calls cost, so it comes last.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 20% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                \n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the last 5 hours, more than the 10.9 s its slow calls cost, so it comes last.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 20% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                \n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the 5 hours since statistics were reset, more than the 10.9 s its slow calls cost, so it comes last.\n\
-                verify: On a test copy, capture actual execution plans and duration samples for representative parameter values before and after the change, under comparable load. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. Plan cache keeps running totals, so its cached maximum and standard deviation do not isolate runs after the change; compare the new execution samples instead.",
-            "An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign keys on order_id and product_id check each row it inserts against orders and products: the referenced row is looked up and share-locked. The slow runs may have been waiting for a transaction that locks, updates or deletes the referenced row of orders and products, for a lock on the table (a migration's, say), or on storage (the log flush at commit, when it commits on its own, or a checkpoint). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 88% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks, updates or deletes the referenced row of orders and products holds this one until it commits or rolls back: keep those transactions short. Compare log and storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-            "An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · Medium · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign keys on order_id and product_id check each row it inserts against orders and products: the referenced row is looked up and share-locked. The slow runs may have been waiting for a transaction that locks, updates or deletes the referenced row of orders and products, for a lock on the table (a migration's, say), or on storage (the log flush at commit, when it commits on its own, or a checkpoint). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 88% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: The extra time can come from as few as 100 slow runs in the last 1250 days, too few to count on catching one while it happens. Query Store keeps this query's waits for each interval (sys.query_store_wait_stats): the intervals of its slowest runs say what they waited on. A transaction that locks, updates or deletes the referenced row of orders and products holds this one until it commits or rolls back: keep those transactions short. Compare log and storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-        ]
-    );
+
     const MY: &str = "c7b5ac9bb4bcecfe";
     let mysql = |lock_ms: Option<f64>| {
         let mut s = swinging(snapshot("mysql-demo.json"), MY, (1_980.0, 2.0), (20.0, 10_000.0));
@@ -1215,92 +984,13 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
         said(yugabyte, "8345917977273313509"),
         said(sqlite, "c1b0de997fac4faa"),
     ]);
-    expected.extend(
-        [
-            "A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium\n\
-                Same statement, very different run times: the slow runs took at least 3 min more than the average, together. At least 4 min of lock waits were recorded by MySQL, against at least 3 min of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 81% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Capture slow runs in the slow query log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. performance_schema keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.",
-            "A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium\n\
-                Same statement, very different run times: the slow runs took at least 3 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 81% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Capture slow runs in the slow query log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. performance_schema keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.",
-            r#"A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium
-Same statement, very different run times: the slow runs took at least 3 min more than the average, together. At least 1.0 s of lock waits were recorded by MySQL, against at least 3 min of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.
-impact: 81% of logged-run time in slow runs
-metric: Average
-metric: Slowest
-metric: Std deviation
-metric: Slow runs' extra time (at least)
-fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.
-sql: -- Give the optimizer the distribution of an uneven column:
-ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;
-verify: Collect equal-length query-log samples before and after the change, keeping the same logging threshold and a representative workload. Include only runs whose timestamps fall in their respective period. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent."#,
-            "A read from orders averages 108 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium\n\
-                Same statement, very different run times: the slow runs took at least 3 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 91% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Compare slow and fast values using measured YSQL plans, including DocDB rows, RPCs and retries. Check tablet placement and contention before attributing the spread to parameter sensitivity.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. YSQL pg_stat_statements (node 3d2d9e10555b4ae2a683a8402505e416) keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: YugabyteDB keeps one minimum, average, maximum and standard deviation per statement in the 1 minute since statistics were reset, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.",
-            "A read from orders averages 108 ms per run, but some runs take far longer (up to 10.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 3 min more than the average, together. Either some values match far more rows than the plan expects, or some runs wait for the file's write lock (up to the application's busy_timeout). Compare the slow runs' values in the log.\n\
-                impact: 83% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Compare a slow and a fast value with EXPLAIN QUERY PLAN. If some values match far more rows, an index that narrows them, or ANALYZE, lets SQLite choose better.\n\
-                sql: ANALYZE;\n\
-                verify: Collect equal-length query-log samples before and after the change, keeping the same logging threshold and a representative workload. Include only runs whose timestamps fall in their respective period. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-        ]
-    );
+
     // One foreign key; a unique key the insert sets, and none.
     actual.extend([
         said(insert("INSERT INTO orders (customer_id, status) VALUES ($1, $2)", "public.orders"), PG),
         said(insert("INSERT INTO products (sku, name) VALUES ($1, $2)", "public.products"), PG),
     ]);
-    expected.extend(
-        [
-            "An insert into orders averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign key on customer_id checks each row it inserts against customers: the referenced row is looked up and share-locked (FOR KEY SHARE). The slow runs may have been waiting for a transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of customers, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of customers holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-            "An insert into products averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan shows no read, but each run looks its key up in products_sku_key to see whether a row already has it: one lookup whatever the values, the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 73% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Another transaction inserting the same key holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.\n\
-                caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
-        ]
-    );
+
     // SQL Server: an insert whose one foreign key checks each row, and waits Query Store recorded on CPU alone.
     let mut one_key = swinging(snapshot("mssql-demo.json"), "6", (9_900.0, 2.0), (100.0, 5_000.0));
     let q = query(&mut one_key, "6");
@@ -1309,35 +999,308 @@ verify: Collect equal-length query-log samples before and after the change, keep
     (plan.engine, plan.root.object) = (culprit_core::Engine::Mssql, Some("[shop].[orders]".into()));
     q.plan = Some(plan);
     actual.extend([said(one_key, "6"), said(mssql(vec![wait("CPU", "CPU", 500.0)]), "10")]);
-    expected.extend(
-        [
-            "An insert into orders averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign key on customer_id checks each row it inserts against customers: the referenced row is looked up and share-locked. The slow runs may have been waiting for a transaction that locks, updates or deletes the referenced row of customers, for a lock on the table (a migration's, say), or on storage (the log flush at commit, when it commits on its own, or a checkpoint). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
-                impact: 88% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks, updates or deletes the referenced row of customers holds this one until it commits or rolls back: keep those transactions short. Compare log and storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
-                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 20% of DB time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                \n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the last 5 hours, more than the 10.9 s its slow calls cost, so it comes last.\n\
-                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
-        ]
-    );
-    assert_eq!(actual, expected);
+
+    const PINNED: &str = r###"A read from customers averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.
+
+A read from customers averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement in the 5 hours since statistics were reset, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.
+
+An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan shows no read, but each run looks its key up in order_items_order_product_key to see whether a row already has it, and its foreign keys on product_id and order_id check each row it inserts against products and orders: the referenced row is looked up and share-locked (FOR KEY SHARE). 75% of its runs found their key already there and inserted nothing. Its recorded data-file I/O took 86 ms in all, against at least 8 min of extra time in the slow runs. I/O timing may not cover every historical run, so this does not rule out storage delays. The slow runs may have been waiting for a transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders, for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+metric: Data-file reads and writes
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Another transaction inserting the same key holds this one until it commits or rolls back, and so does one that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders: keep those transactions short. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · Low · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan shows no read, but each run looks its key up in order_items_order_product_key to see whether a row already has it, and its foreign keys on product_id and order_id check each row it inserts against products and orders: the referenced row is looked up and share-locked (FOR KEY SHARE). 75% of its runs found their key already there and inserted nothing. Its recorded data-file I/O took 86 ms in all, against at least 8 min of extra time in the slow runs. I/O timing may not cover every historical run, so this does not rule out storage delays. The slow runs may have been waiting for a transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders, for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+metric: Data-file reads and writes
+fix: The extra time can come from as few as 100 slow runs in the 1250 days since statistics were reset, too few to count on catching one while it happens. Have the next ones logged instead. Set log_lock_waits to on and log_min_duration_statement to 2s and reload the configuration (settings marked as needing a restart take effect after one). log_lock_waits then logs each lock wait longer than deadlock_timeout (1 s by default) with the process holding the lock, and log_min_duration_statement each statement slower than 2s (any statement, not only this one) with its duration. Another transaction inserting the same key holds this one until it commits or rolls back, and so does one that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of products and orders: keep those transactions short. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+sql: ALTER SYSTEM SET log_lock_waits = 'on';
+SELECT pg_reload_conf();
+ALTER SYSTEM SET log_min_duration_statement = '2s';
+SELECT pg_reload_conf();
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+An insert into events averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks the table (a migration's, say) holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+An insert into app_salts averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Another transaction inserting the same key holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+An insert into events averaged 52 ms per run, but some runs took far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: This statement no longer runs. Query 2885972271926804069, an insert into events too, still runs and may have replaced it. Its slowest recorded run took 88 ms. These historical outliers do not establish a current problem in its replacement or justify a logging change. If slow runs recur, collect their durations and waits and inspect trigger and constraint work before choosing a fix.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 10, 06:00 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+An insert into events averaged 52 ms per run, but some runs took far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: This statement no longer runs. These historical outliers do not establish a current problem in its replacement or justify a logging change. If slow runs recur, collect their durations and waits and inspect trigger and constraint work before choosing a fix.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 10, 06:00 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+A read from customers averages 10 ms per run, but some runs take far longer (up to 5.0 s) · Low · Medium
+Same statement, very different run times: the slow runs took at least 8 min more, together, than its average of 52 ms a run over the 40 days since statistics were reset (10 ms over 36 hours of Culprit's scans). Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 73% of DB time in slow runs
+metric: Average over Culprit's scans
+metric: Average over the 40 days since statistics were reset
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time over the 40 days since statistics were reset (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Sep 1, 11:54 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.
+
+A read from customers averages 52 ms per run, but some runs take far longer (up to 5.0 s) · Low · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together over the 40 days since statistics were reset. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 73% of DB time in slow runs
+metric: Average over Culprit's scans
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time over the 40 days since statistics were reset (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Sep 1, 11:54 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.
+
+A read from customers averaged 52 ms per run, but some runs took far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 8, 11:54 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.
+
+A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium
+Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 20% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium
+Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 20% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium
+Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. At least 10.0 s of lock waits were recorded by Query Store, against at least 10.9 s of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 20% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium
+Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. At least 1.0 s of lock waits were recorded by Query Store, against at least 10.9 s of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 20% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium
+Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 20% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium
+Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 20% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: On a test copy, capture actual execution plans and duration samples for representative parameter values before and after the change, under comparable load. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. Plan cache keeps running totals, so its cached maximum and standard deviation do not isolate runs after the change; compare the new execution samples instead.
+
+An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same query, same plan, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign keys on order_id and product_id check each row it inserts against orders and products: the referenced row is looked up and share-locked. The slow runs may have been waiting for a transaction that locks, updates or deletes the referenced row of orders and products, for a lock on the table (a migration's, say), or on storage (the log flush at commit, when it commits on its own, or a checkpoint). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 88% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks, updates or deletes the referenced row of orders and products holds this one until it commits or rolls back: keep those transactions short. Compare log and storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+An insert into order_items averages 52 ms per run, but some runs take far longer (up to 5.0 s) · Medium · Medium
+Same query, same plan, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign keys on order_id and product_id check each row it inserts against orders and products: the referenced row is looked up and share-locked. The slow runs may have been waiting for a transaction that locks, updates or deletes the referenced row of orders and products, for a lock on the table (a migration's, say), or on storage (the log flush at commit, when it commits on its own, or a checkpoint). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 88% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: The extra time can come from as few as 100 slow runs in the last 1250 days, too few to count on catching one while it happens. Query Store keeps this query's waits for each interval (sys.query_store_wait_stats): the intervals of its slowest runs say what they waited on. A transaction that locks, updates or deletes the referenced row of orders and products holds this one until it commits or rolls back: keep those transactions short. Compare log and storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium
+Same statement, very different run times: the slow runs took at least 3 min more than the average, together. At least 4 min of lock waits were recorded by MySQL, against at least 3 min of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 81% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the slow query log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. performance_schema keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+
+A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium
+Same statement, very different run times: the slow runs took at least 3 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 81% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the slow query log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. performance_schema keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+
+A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium
+Same statement, very different run times: the slow runs took at least 3 min more than the average, together. At least 1.0 s of lock waits were recorded by MySQL, against at least 3 min of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 81% of logged-run time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Collect equal-length query-log samples before and after the change, keeping the same logging threshold and a representative workload. Include only runs whose timestamps fall in their respective period. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from orders averages 108 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium
+Same statement, very different run times: the slow runs took at least 3 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 91% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. YSQL pg_stat_statements (node 3d2d9e10555b4ae2a683a8402505e416) keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: YugabyteDB keeps one minimum, average, maximum and standard deviation per statement in the 1 minute since statistics were reset, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell which values were slow or how many calls were.
+
+A read from orders averages 108 ms per run, but some runs take far longer (up to 10.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 3 min more than the average, together. Either some values match far more rows than the plan expects, or some runs wait for the file's write lock (up to the application's busy_timeout). Compare the slow runs' values in the log.
+impact: 83% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Collect equal-length query-log samples before and after the change, keeping the same logging threshold and a representative workload. Include only runs whose timestamps fall in their respective period. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+An insert into orders averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign key on customer_id checks each row it inserts against customers: the referenced row is looked up and share-locked (FOR KEY SHARE). The slow runs may have been waiting for a transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of customers, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks (SELECT … FOR UPDATE), deletes or changes the key of the referenced row of customers holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+An insert into products averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same statement, very different run times: the slow runs took at least 8 min more than the average, together. Its plan shows no read, but each run looks its key up in products_sku_key to see whether a row already has it: one lookup whatever the values, the captured plan does not show all work in triggers, constraints or called functions. The slow runs may have been waiting for another transaction inserting the same key, for a lock on the table (a migration's, say), or on storage (writing WAL or data pages while a checkpoint runs). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 73% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Another transaction inserting the same key holds this one until it commits or rolls back: keep those transactions short. Compare storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Capture slow runs in the server log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. pg_stat_statements keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.
+caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.
+
+An insert into orders averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium
+Same query, same plan, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign key on customer_id checks each row it inserts against customers: the referenced row is looked up and share-locked. The slow runs may have been waiting for a transaction that locks, updates or deletes the referenced row of customers, for a lock on the table (a migration's, say), or on storage (the log flush at commit, when it commits on its own, or a checkpoint). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.
+impact: 88% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks, updates or deletes the referenced row of customers holds this one until it commits or rolls back: keep those transactions short. Compare log and storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.
+
+A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium
+Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 20% of DB time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent."###;
+    crate::pins::pin_text("unstable-query-words", &actual.join("\n\n"), PINNED);
 }
 
 // ── stopped running ──────────────────────────────────────────────────────────────────────────────
@@ -2472,20 +2435,47 @@ fn slow_log_shares_remain_of_logged_runs_even_with_a_current_zero_threshold() {
     assert!(!f.title.contains("of database time"));
 }
 
+fn retained_distribution(median: f64, p99: f64, samples: u64, bins: &[[f64; 3]]) -> culprit_core::RuntimeDistribution {
+    use culprit_core::{
+        DistributionPopulation, RuntimeDistribution, RuntimeDistributionOrigin, RuntimeDuration,
+        RuntimeHistogramBucket, RuntimeQuantile,
+    };
+    RuntimeDistribution {
+        source: "mysql.slow_log".into(),
+        origin: RuntimeDistributionOrigin::CapturedRuns,
+        population: DistributionPopulation::CapturedSamples { sample_count: samples.to_string() },
+        p50: Some(RuntimeQuantile::sample(median)),
+        p95: None,
+        p99: Some(RuntimeQuantile::sample(p99)),
+        histogram: bins
+            .iter()
+            .map(|[lower, upper, count]| RuntimeHistogramBucket {
+                lower: RuntimeDuration::Milliseconds { value: *lower },
+                upper: RuntimeDuration::Milliseconds { value: *upper },
+                samples: (*count as u64).to_string(),
+            })
+            .collect(),
+        issue: None,
+    }
+}
+
 #[test]
 fn a_slow_log_tail_says_it_is_of_logged_runs_and_needs_several() {
     let mut s = slow_log(snapshot("mysql-demo.json"));
     let q = query(&mut s, "c7b5ac9bb4bcecfe");
     q.executions = 80.0;
     q.spread = Some(Spread {
-        p50_ms: Some(150.0),
-        p99_ms: Some(4000.0),
-        histogram: vec![[100.0, 200.0, 70.0], [200.0, 400.0, 7.0], [2000.0, 5000.0, 3.0]],
+        distributions: vec![retained_distribution(
+            150.0,
+            4000.0,
+            80,
+            &[[100.0, 200.0, 70.0], [200.0, 400.0, 7.0], [2000.0, 5000.0, 3.0]],
+        )],
         ..Default::default()
     });
     let report = analyze(s.clone());
     let f = find(&report.findings, "parameter-sensitive:c7b5ac9bb4bcecfe").expect("three slow logged runs");
-    assert!(f.title.starts_with("Logged runs of a read from orders usually take 150 ms"), "{}", f.title);
+    assert!(f.title.starts_with("Recorded run times for a read from orders: median 150 ms"), "{}", f.title);
     assert!(
         f.summary.contains(
             "long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established"
@@ -2493,37 +2483,45 @@ fn a_slow_log_tail_says_it_is_of_logged_runs_and_needs_several() {
         "{}",
         f.summary
     );
-    assert!(!f.summary.contains("99 in 100"), "80 runs have no 1-in-100: {}", f.summary);
+    assert!(f.summary.contains("3 of 80 recorded histogram samples"), "{}", f.summary);
+    assert_eq!(
+        f.metrics.iter().find(|m| m.is("check.parameter_sensitive.metric.histogram_samples")).unwrap().value,
+        80.0
+    );
+    assert_eq!(
+        f.metrics.iter().find(|m| m.is("check.parameter_sensitive.metric.slow_runs")).unwrap().value,
+        3.0 / 80.0
+    );
+    assert!(f.fix.as_ref().unwrap().sql.is_none());
     // Two slow runs are not a tail.
-    query(&mut s, "c7b5ac9bb4bcecfe").spread.as_mut().unwrap().histogram[2][2] = 2.0;
+    query(&mut s, "c7b5ac9bb4bcecfe").spread.as_mut().unwrap().distributions[0] =
+        retained_distribution(150.0, 4000.0, 79, &[[100.0, 200.0, 70.0], [200.0, 400.0, 7.0], [2000.0, 5000.0, 2.0]]);
     assert!(find(&analyze(s).findings, "parameter-sensitive:c7b5ac9bb4bcecfe").is_none());
 }
 
-/// What `id` of check `check` says of `s` on its own, before the report refines it.
-fn said_by(check: &str, s: &Snapshot, id: &str) -> String {
-    let found = crate::run(check, s);
-    crate::words(
-        found
-            .iter()
-            .find(|f| f.id == id)
-            .unwrap_or_else(|| panic!("{id} in {:?}", found.iter().map(|f| &f.id).collect::<Vec<_>>())),
-    )
-}
-
-// What parameter-sensitive says, word for word: SQL Server's plans side by side (one fast plan or several, compiled
-// for values, with each rung of its fix ladder: forcing, a Query Store hint or the application's, parameter-sensitive
-// plans, compiling on every call when it costs less or more than the slow calls), and MySQL's long tails (its
-// histogram, the slow query log keeping every run or only slow ones, locks, MariaDB, a statement that stopped). Its
-// messages come from locales/en.json.
+// Recorded plan means and runtime tails retain their measured populations and compilation context. Settings,
+// engine versions, native lock totals and compile costs alone do not authorize a mutation or identify the cause.
 #[test]
-fn parameter_sensitivity_says_what_the_values_do_in_english() {
+fn recorded_runtime_variation_words_preserve_populations_and_keep_causes_unresolved() {
     use culprit_core::format::{epoch_seconds, iso_from_epoch};
     assert_eq!(
         crate::info("parameter-sensitive"),
-        "Queries that are fast for most calls and slow for some\n\
-        Statements whose run time depends heavily on the values they run with: two plans used side by side, one fast and one slow (SQL Server Query Store), or a long tail in the run-time histogram (MySQL). Single-plan variance on any engine is `unstable-query`."
+        "Recorded query runtime differences\n\
+        Different plan averages or a long runtime tail identify statements worth investigating. They do not establish input-dependent plan reuse; the cause requires further evidence."
     );
-    let said = |s: Snapshot, id: &str| said_by("parameter-sensitive", &s, &format!("parameter-sensitive:{id}"));
+    let said = |s: Snapshot, id: &str| {
+        let findings = crate::run("parameter-sensitive", &s);
+        let finding =
+            findings.iter().find(|f| f.id == format!("parameter-sensitive:{id}")).expect("recorded variation");
+        assert_eq!(finding.actionability, culprit_core::Actionability::Information);
+        assert_eq!(finding.confidence, culprit_core::Confidence::Medium);
+        assert!(finding.facts.runtime_variation.is_some());
+        assert_eq!(finding.queries[0].id, id);
+        let fix = finding.fix.as_ref().expect("bounded investigation");
+        assert!(fix.sql.is_none(), "{id}: a population difference is not mutation authority");
+        assert!(fix.cost.is_none(), "{id}: compile counters do not price a hypothetical remedy");
+        crate::words(finding)
+    };
     let side_by_side = || {
         with_plans(vec![
             plan("8", 900.0, 9.0, "2026-10-11T07:44:00Z", "2026-10-11T12:12:00Z"),
@@ -2535,12 +2533,11 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
         plan("9", 450.0, 3.0, "2026-10-11T07:45:00Z", "2026-10-11T12:11:00Z"),
         plan("47", 100.0, 300.0, "2026-10-11T07:50:00Z", "2026-10-11T12:13:00Z"),
     ]);
-    // Compiles that cost more than the slow calls, values each plan was compiled for, and automatic plan correction.
     let mut costly = side_by_side();
     let q = query(&mut costly, "8");
     q.costs = Some(culprit_core::QueryCosts { plan_ms: Some(4_000.0), plans: Some(1.0), ..Default::default() });
-    for p in &mut q.plans {
-        p.compiled = Some(format!("@P1 = ({})", p.id));
+    for plan in &mut q.plans {
+        plan.compiled = Some(format!("@P1 = ({})", plan.id));
     }
     costly.tuning = Some(TuningAdvice {
         automatic_tuning: vec![culprit_core::AutomaticTuningOption {
@@ -2556,306 +2553,305 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
     query(&mut sql2019, "8").plan.as_mut().unwrap().facts_mut().compile_ms = None;
     let mut psp_off = side_by_side();
     set(&mut psp_off, "PARAMETER_SENSITIVE_PLAN_OPTIMIZATION", "OFF");
-    // The statement stopped (its slow plan's runs are the last it had).
     let mut stopped = side_by_side();
     let q = query(&mut stopped, "8");
     let end = epoch_seconds("2026-10-11T12:13:47Z").unwrap();
     (q.first_seen, q.last_seen) =
         (Some(iso_from_epoch(end - 72.0 * 3600.0)), Some(iso_from_epoch(end - 48.0 * 3600.0)));
-    assert_eq!(
-        [
-            said(side_by_side(), "8"),
-            said(several_fast, "8"),
-            said(costly, "8"),
-            said(sql2019, "8"),
-            said(psp_off, "8"),
-            said(stopped, "8"),
-        ],
-        [
-            "A read from orders runs in 9.0 ms for most calls but 300 ms for 10% of them · Medium · High\n\
-                SQL Server runs this statement with two plans side by side. Plan 8 handles 90% of the calls and averages 9.0 ms, compiled for `@P2 = 1, @P1 = 0`; plan 47 averages 300 ms and handled 100 calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.\n\
-                impact: 33× slower for some calls\n\
-                metric: Fast plan\n\
-                metric: Slow plan\n\
-                metric: Calls on the slow plan\n\
-                metric: Plan most calls use: 8\n\
-                fix: Pick the lightest option that works: force the plan most calls run fast with, plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan):\n\
-                EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\n\
-                -- 2. Or in the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\n\
-                -- 3. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 8, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: Forcing a plan pins it for every value until you unforce it: try a value from a slow call under it first. RECOMPILE spends a compile on every call: about 73 ms each, 1 min over its 1.0K runs in the last 5 hours, more than the 29.1 s its slow calls cost, so it comes last.\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders runs in 3.0 ms or less for most calls but 300 ms for 10% of them · Medium · High\n\
-                SQL Server runs this statement with 3 plans side by side. 2 plans that average 3.0 ms or less handle 90% of the calls (plan 8 the most, 48% of them at 2.0 ms, compiled for `@P2 = 1, @P1 = 0`); plan 47 averages 300 ms and handled 100 calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.\n\
-                impact: 100× slower for some calls\n\
-                metric: Fast plan\n\
-                metric: Slow plan\n\
-                metric: Calls on the slow plan\n\
-                fix: Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 8, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: RECOMPILE spends a compile on every call: about 73 ms each, 1 min over its 1.1K runs in the last 5 hours, more than the 29.7 s its slow calls cost, so it comes last.\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders runs in 9.0 ms for most calls but 300 ms for 10% of them · Medium · High\n\
-                SQL Server runs this statement with two plans side by side. Plan 8 handles 90% of the calls and averages 9.0 ms, compiled for `@P1 = 8`; plan 47 averages 300 ms, compiled for `@P1 = 47` and handled 100 calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.\n\
-                impact: 33× slower for some calls\n\
-                metric: Fast plan\n\
-                metric: Slow plan\n\
-                metric: Calls on the slow plan\n\
-                metric: Plan most calls use: 8\n\
-                fix: Pick the lightest option that works: force the plan most calls run fast with, plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan):\n\
-                EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\n\
-                -- 2. Or in the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\n\
-                -- 3. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 8, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: Forcing a plan pins it for every value until you unforce it: try a value from a slow call under it first. Automatic plan correction (FORCE_LAST_GOOD_PLAN) is on for this database: SQL Server forces the last good plan itself once it is sure a regression costs enough (sys.dm_db_tuning_recommendations lists the ones it found), and unforces a plan it forced that turns out slower. A plan forced by hand stays forced until someone unforces it, whatever changes after. RECOMPILE spends a compile on every call: about 4.0 s each, 1 h 7 min over its 1.0K runs in the last 5 hours, more than the 29.1 s its slow calls cost, so it comes last.\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders runs in 9.0 ms for most calls but 300 ms for 10% of them · Medium · High\n\
-                SQL Server runs this statement with two plans side by side. Plan 8 handles 90% of the calls and averages 9.0 ms, compiled for `@P2 = 1, @P1 = 0`; plan 47 averages 300 ms and handled 100 calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.\n\
-                impact: 33× slower for some calls\n\
-                metric: Fast plan\n\
-                metric: Slow plan\n\
-                metric: Calls on the slow plan\n\
-                metric: Plan most calls use: 8\n\
-                fix: Pick the lightest option that works: force the plan most calls run fast with, plan per call for this statement only or plan for the typical value. Each is reversible.\n\
-                sql: -- 1. Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan):\n\
-                EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call), in the application:\n\
-                --    append OPTION (RECOMPILE) to the statement\n\n\
-                -- 3. Or in the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                cost: Forcing a plan pins it for every value until you unforce it: try a value from a slow call under it first. RECOMPILE spends a compile on every call.\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders runs in 9.0 ms for most calls but 300 ms for 10% of them · Medium · High\n\
-                SQL Server runs this statement with two plans side by side. Plan 8 handles 90% of the calls and averages 9.0 ms, compiled for `@P2 = 1, @P1 = 0`; plan 47 averages 300 ms and handled 100 calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.\n\
-                impact: 33× slower for some calls\n\
-                metric: Fast plan\n\
-                metric: Slow plan\n\
-                metric: Calls on the slow plan\n\
-                metric: Plan most calls use: 8\n\
-                fix: Pick the lightest option that works: force the plan most calls run fast with, let SQL Server keep several plans, plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan):\n\
-                EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\n\
-                -- 2. Or let SQL Server keep a plan per range of values:\n\
-                ALTER DATABASE SCOPED CONFIGURATION SET PARAMETER_SENSITIVE_PLAN_OPTIMIZATION = ON;\n\n\
-                -- 3. Or in the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\n\
-                -- 4. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 8, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: Forcing a plan pins it for every value until you unforce it: try a value from a slow call under it first. RECOMPILE spends a compile on every call: about 73 ms each, 1 min over its 1.0K runs in the last 5 hours, more than the 29.1 s its slow calls cost, so it comes last.\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders ran in 9.0 ms for most calls but 300 ms for 10% of them · Medium · High\n\
-                SQL Server runs this statement with two plans side by side. Plan 8 handles 90% of the calls and averages 9.0 ms, compiled for `@P2 = 1, @P1 = 0`; plan 47 averages 300 ms and handled 100 calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.\n\
-                impact: 33× slower for some calls\n\
-                metric: Fast plan\n\
-                metric: Slow plan\n\
-                metric: Calls on the slow plan\n\
-                metric: Plan most calls use: 8\n\
-                fix: Pick the lightest option that works: force the plan most calls run fast with, plan for the typical value or plan per call for this statement only. Each is reversible.\n\
-                sql: -- 1. Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan):\n\
-                EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\n\
-                -- 2. Or in the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\n\
-                -- 3. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 8, @query_hints = N'OPTION (RECOMPILE)';\n\
-                cost: Forcing a plan pins it for every value until you unforce it: try a value from a slow call under it first. RECOMPILE spends a compile on every call: about 73 ms each, 1 min over its 1.0K runs in the last 5 hours, more than the 29.1 s its slow calls cost, so it comes last.\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-        ]
-    );
-    let id = "c7b5ac9bb4bcecfe";
+    let plans = [
+        said(side_by_side(), "8"),
+        said(several_fast, "8"),
+        said(costly, "8"),
+        said(sql2019, "8"),
+        said(psp_off, "8"),
+        said(stopped, "8"),
+    ];
+    const PLANS: &str = r###"Recorded plan averages for a read from orders: 9 ms versus 300 ms · Low · Medium
+Plan 8 averaged 9 ms across 900 recorded executions; plan 47 averaged 300 ms across 100 recorded executions. Their execution conditions are not established as equivalent.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Faster recorded plan average
+metric: Slower recorded plan average
+metric: Recorded slower-plan time
+metric: Recorded slower-plan executions
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded plan averages for a read from orders: 2 ms versus 300 ms · Low · Medium
+Plan 8 averaged 2 ms across 500 recorded executions; plan 47 averaged 300 ms across 100 recorded executions. Their execution conditions are not established as equivalent.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Faster recorded plan average
+metric: Slower recorded plan average
+metric: Recorded slower-plan time
+metric: Recorded slower-plan executions
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded plan averages for a read from orders: 9 ms versus 300 ms · Low · Medium
+Plan 8 averaged 9 ms across 900 recorded executions; plan 47 averaged 300 ms across 100 recorded executions. Their execution conditions are not established as equivalent.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Faster recorded plan average
+metric: Slower recorded plan average
+metric: Recorded slower-plan time
+metric: Recorded slower-plan executions
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Plan 8 has recorded compilation context `@P1 = (8)`; it does not establish the inputs of its recorded executions.
+caveat: Plan 47 has recorded compilation context `@P1 = (47)`; it does not establish the inputs of its recorded executions.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded plan averages for a read from orders: 9 ms versus 300 ms · Low · Medium
+Plan 8 averaged 9 ms across 900 recorded executions; plan 47 averaged 300 ms across 100 recorded executions. Their execution conditions are not established as equivalent.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Faster recorded plan average
+metric: Slower recorded plan average
+metric: Recorded slower-plan time
+metric: Recorded slower-plan executions
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded plan averages for a read from orders: 9 ms versus 300 ms · Low · Medium
+Plan 8 averaged 9 ms across 900 recorded executions; plan 47 averaged 300 ms across 100 recorded executions. Their execution conditions are not established as equivalent.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Faster recorded plan average
+metric: Slower recorded plan average
+metric: Recorded slower-plan time
+metric: Recorded slower-plan executions
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded plan averages for a read from orders: 9 ms versus 300 ms · Low · Medium
+Plan 8 averaged 9 ms across 900 recorded executions; plan 47 averaged 300 ms across 100 recorded executions. Their execution conditions are not established as equivalent.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Faster recorded plan average
+metric: Slower recorded plan average
+metric: Recorded slower-plan time
+metric: Recorded slower-plan executions
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse."###;
+    crate::pins::pin_text("parameter-variation-plans", &plans.join("\n\n"), PLANS);
+
+    const ID: &str = "c7b5ac9bb4bcecfe";
     let tail = |mut s: Snapshot, runs: f64, histogram: bool| {
-        let q = query(&mut s, id);
+        use culprit_core::{
+            DistributionPopulation, RuntimeDistribution, RuntimeDistributionOrigin, RuntimeDuration,
+            RuntimeHistogramBucket, RuntimeQuantile,
+        };
+        let captured = s.workload.as_ref().unwrap().kind == Some(culprit_core::WorkloadKind::SlowLog);
+        let bins = if histogram {
+            vec![[0.0, 2.0, runs * 0.6], [2.0, 4.0, runs * 0.37], [500.0, 1000.0, runs * 0.03]]
+        } else {
+            Vec::new()
+        };
+        let distribution = if captured {
+            retained_distribution(2.0, 900.0, runs as u64, &bins)
+        } else if histogram {
+            RuntimeDistribution::native_histogram(
+                "performance_schema.events_statements_histogram_by_digest",
+                bins.iter()
+                    .map(|[lower, upper, count]| RuntimeHistogramBucket {
+                        lower: RuntimeDuration::Milliseconds { value: *lower },
+                        upper: RuntimeDuration::Milliseconds { value: *upper },
+                        samples: (*count as u64).to_string(),
+                    })
+                    .collect(),
+            )
+        } else {
+            RuntimeDistribution {
+                source: "performance_schema.events_statements_summary_by_digest".into(),
+                origin: RuntimeDistributionOrigin::StatementSummary,
+                population: DistributionPopulation::NativeCounters { sample_count: None },
+                p50: None,
+                p95: None,
+                p99: Some(RuntimeQuantile::HistogramUpperBound {
+                    lower: None,
+                    upper: RuntimeDuration::Milliseconds { value: 900.0 },
+                }),
+                histogram: Vec::new(),
+                issue: None,
+            }
+        };
+        let q = query(&mut s, ID);
         q.executions = runs;
-        q.spread = Some(Spread {
-            p50_ms: Some(2.0),
-            p99_ms: Some(900.0),
-            histogram: if histogram {
-                vec![[0.0, 2.0, runs * 0.6], [2.0, 4.0, runs * 0.37], [500.0, 1000.0, runs * 0.03]]
-            } else {
-                Vec::new()
-            },
-            ..Default::default()
-        });
+        q.spread = Some(Spread { distributions: vec![distribution], ..Default::default() });
         s
     };
-    // Three days since the server started: a tail of a few runs is the values', not a cold start's.
     let mysql = || {
         let mut s = snapshot("mysql-demo.json");
-        s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(72.0);
+        // Uptime does not establish why a recorded run was slow.
+        s.pressure.get_or_insert_default().uptime_hours = Some(72.0);
         s
     };
-    let mut current_zero_threshold = slow_log(tail(mysql(), 1000.0, true));
+    let mut current_zero_threshold = tail(slow_log(mysql()), 1000.0, true);
     set(&mut current_zero_threshold, "long_query_time", "0.000000");
-    let mut no_threshold = slow_log(tail(mysql(), 1000.0, true));
+    let mut no_threshold = tail(slow_log(mysql()), 1000.0, true);
     no_threshold.settings.retain(|s| s.name != "long_query_time");
     let mut locked = tail(mysql(), 1000.0, true);
-    let q = query(&mut locked, id);
+    let q = query(&mut locked, ID);
     q.spread.as_mut().unwrap().lock_ms = Some(q.total_time_ms * 0.4);
     let mut mariadb = tail(mysql(), 1000.0, true);
     (mariadb.server.product, mariadb.server.version) = ("MariaDB 10.11.8".into(), "10.11.8-MariaDB".into());
     let mut stopped = tail(mysql(), 1000.0, false);
     let end = epoch_seconds(stopped.workload.as_ref().unwrap().window_end.as_deref().unwrap()).unwrap();
-    let q = query(&mut stopped, id);
+    let q = query(&mut stopped, ID);
     (q.first_seen, q.last_seen, q.max_time_ms) =
         (Some(iso_from_epoch(end - 72.0 * 3600.0)), Some(iso_from_epoch(end - 48.0 * 3600.0)), None);
-    assert_eq!(
-        [
-            said(tail(mysql(), 1000.0, true), id),
-            said(tail(mysql(), 400.0, false), id),
-            said(current_zero_threshold, id),
-            said(no_threshold, id),
-            said(locked, id),
-            said(mariadb, id),
-            said(stopped, id),
-        ],
-        [
-            "A read from orders usually takes 2.0 ms but 3% of its runs take over 20 ms · Low · High\n\
-                MySQL's run-time histogram for this statement: half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-                impact: 450× slower for some runs\n\
-                metric: Typical run\n\
-                metric: 1 in 100 runs\n\
-                metric: Slow runs\n\
-                fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders usually takes 2.0 ms but 1 in 100 takes over 900 ms · Low · High\n\
-                MySQL's run-time histogram for this statement: half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-                impact: 450× slower for some runs\n\
-                metric: Typical run\n\
-                metric: 1 in 100 runs\n\
-                fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            r#"Logged runs of a read from orders usually take 2.0 ms but 3% of them take over 20 ms · Low · Medium
-Among the retained logged runs of this statement (long_query_time is currently 0 ms; historical thresholds, filters and coverage are not established): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.
-impact: 450× slower for some runs
-metric: Typical logged run
-metric: 1 in 100 runs
-metric: Slow runs
-fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.
-sql: -- Give the optimizer the distribution of an uneven column:
-ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;
-verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).
-verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one."#,
-            "Logged runs of a read from orders usually take 2.0 ms but 3% of them take over 20 ms · Low · Medium\n\
-                Among the retained logged runs of this statement (logging thresholds, filters and retention may omit other executions): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-                impact: 450× slower for some runs\n\
-                metric: Typical logged run\n\
-                metric: 1 in 100 runs\n\
-                metric: Slow runs\n\
-                fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders usually takes 2.0 ms but 3% of its runs take over 20 ms · Low · High\n\
-                MySQL's run-time histogram for this statement: half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks. 40% of its time is spent waiting for locks, so start with what holds them (the fix says how to find it).\n\
-                impact: 450× slower for some runs\n\
-                metric: Typical run\n\
-                metric: 1 in 100 runs\n\
-                metric: Slow runs\n\
-                fix: The slow runs mostly wait for row locks. Find what holds the locks while it waits (Live shows the blocking chain). Keep the transactions that touch these rows short.\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders usually takes 2.0 ms but 3% of its runs take over 20 ms · Low · High\n\
-                MariaDB's run-time histogram for this statement: half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MariaDB plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-                impact: 450× slower for some runs\n\
-                metric: Typical run\n\
-                metric: 1 in 100 runs\n\
-                metric: Slow runs\n\
-                fix: Compare a slow and a fast value with ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MariaDB choose a better plan for each.\n\
-                sql: -- Collect a histogram for an uneven column (used with the default use_stat_tables):\n\
-                ANALYZE TABLE <table> PERSISTENT FOR COLUMNS (<column>) INDEXES ();\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders usually took 2.0 ms but 1 in 100 took over 900 ms · Low · High\n\
-                MySQL's run-time histogram for this statement: half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took longer. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-                impact: 450× slower for some runs\n\
-                metric: Typical run\n\
-                metric: 1 in 100 runs\n\
-                fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-        ]
-    );
-    // Compiles cheaper than the slow calls; the slow query log over its threshold, with too few runs for a 1 in 100.
+    let native_quantile = tail(mysql(), 400.0, false);
+    for unknown_population in [&native_quantile, &stopped] {
+        assert!(
+            crate::run("parameter-sensitive", unknown_population)
+                .iter()
+                .all(|finding| finding.id != format!("parameter-sensitive:{ID}")),
+            "a native upper estimate without its own count/median/lower bound cannot establish a tail"
+        );
+    }
+    let tails = [
+        said(tail(mysql(), 1000.0, true), ID),
+        said(current_zero_threshold, ID),
+        said(no_threshold, ID),
+        said(locked, ID),
+        said(mariadb, ID),
+    ];
+    const TAILS: &str = r###"Recorded histogram bounds for a read from orders: p50 up to 2 ms, p99 500 ms–1.0 s · Low · Medium
+Native distribution from performance_schema.events_statements_histogram_by_digest: the recorded p50 bucket ends at 2 ms; the p99 bucket spans 500 ms to 1.0 s. These are bucket bounds, not exact execution durations. 30 of 1.0K recorded histogram samples have bucket lower bounds at or above 20 ms.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Recorded median bucket upper bound
+metric: Recorded p99 bucket upper bound
+metric: Recorded histogram samples
+metric: Samples in slow histogram buckets
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: This native distribution was observed independently. Its reset and sample population are not established as the statement-summary population; statement totals provide context rather than the cost of this tail.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded run times for a read from orders: median 2 ms, 99th percentile 900 ms · Low · Medium
+Among the retained logged runs of this statement (long_query_time is currently 0 ms; historical thresholds, filters and coverage are not established): the recorded median is 2 ms and the 99th percentile is 900 ms. 30 of 1.0K recorded histogram samples have bucket lower bounds at or above 20 ms.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Recorded median
+metric: Recorded 99th percentile
+metric: Recorded histogram samples
+metric: Samples in slow histogram buckets
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded run times for a read from orders: median 2 ms, 99th percentile 900 ms · Low · Medium
+Among the retained logged runs of this statement (logging thresholds, filters and retention may omit other executions): the recorded median is 2 ms and the 99th percentile is 900 ms. 30 of 1.0K recorded histogram samples have bucket lower bounds at or above 20 ms.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Recorded median
+metric: Recorded 99th percentile
+metric: Recorded histogram samples
+metric: Samples in slow histogram buckets
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded histogram bounds for a read from orders: p50 up to 2 ms, p99 500 ms–1.0 s · Low · Medium
+Native distribution from performance_schema.events_statements_histogram_by_digest: the recorded p50 bucket ends at 2 ms; the p99 bucket spans 500 ms to 1.0 s. These are bucket bounds, not exact execution durations. 30 of 1.0K recorded histogram samples have bucket lower bounds at or above 20 ms.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Recorded median bucket upper bound
+metric: Recorded p99 bucket upper bound
+metric: Recorded histogram samples
+metric: Samples in slow histogram buckets
+metric: Recorded lock timing
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: This native distribution was observed independently. Its reset and sample population are not established as the statement-summary population; statement totals provide context rather than the cost of this tail.
+caveat: Recorded lock timing does not identify which calls waited or establish that locks explain this tail.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded histogram bounds for a read from orders: p50 up to 2 ms, p99 500 ms–1.0 s · Low · Medium
+Native distribution from performance_schema.events_statements_histogram_by_digest: the recorded p50 bucket ends at 2 ms; the p99 bucket spans 500 ms to 1.0 s. These are bucket bounds, not exact execution durations. 30 of 1.0K recorded histogram samples have bucket lower bounds at or above 20 ms.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Recorded median bucket upper bound
+metric: Recorded p99 bucket upper bound
+metric: Recorded histogram samples
+metric: Samples in slow histogram buckets
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: This native distribution was observed independently. Its reset and sample population are not established as the statement-summary population; statement totals provide context rather than the cost of this tail.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse."###;
+    crate::pins::pin_text("parameter-variation-tails", &tails.join("\n\n"), TAILS);
+
     let mut cheap = side_by_side();
     query(&mut cheap, "8").costs =
         Some(culprit_core::QueryCosts { plan_ms: Some(1.0), plans: Some(1.0), ..Default::default() });
     let mut few = slow_log(mysql());
-    let q = query(&mut few, id);
+    let q = query(&mut few, ID);
     q.executions = 80.0;
     q.spread = Some(Spread {
-        p50_ms: Some(150.0),
-        p99_ms: Some(4000.0),
-        histogram: vec![[100.0, 200.0, 70.0], [200.0, 400.0, 7.0], [2000.0, 5000.0, 3.0]],
+        distributions: vec![retained_distribution(
+            150.0,
+            4000.0,
+            80,
+            &[[100.0, 200.0, 70.0], [200.0, 400.0, 7.0], [2000.0, 5000.0, 3.0]],
+        )],
         ..Default::default()
     });
-    // And the slow query log's tail without a histogram: 1 in 100 of the logged runs.
-    assert_eq!(
-        said(slow_log(tail(mysql(), 400.0, false)), id),
-        "Logged runs of a read from orders usually take 2.0 ms but 1 in 100 takes over 900 ms · Low · Medium\n\
-        Among the retained logged runs of this statement (long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-        impact: 450× slower for some runs\n\
-        metric: Typical logged run\n\
-        metric: 1 in 100 runs\n\
-        fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-        sql: -- Give the optimizer the distribution of an uneven column:\n\
-        ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-        verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-        verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one."
-    );
-    assert_eq!(
-        [said(cheap, "8"), said(few, id)],
-        [
-            "A read from orders runs in 9.0 ms for most calls but 300 ms for 10% of them · Medium · High\n\
-                SQL Server runs this statement with two plans side by side. Plan 8 handles 90% of the calls and averages 9.0 ms, compiled for `@P2 = 1, @P1 = 0`; plan 47 averages 300 ms and handled 100 calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.\n\
-                impact: 33× slower for some calls\n\
-                metric: Fast plan\n\
-                metric: Slow plan\n\
-                metric: Calls on the slow plan\n\
-                metric: Plan most calls use: 8\n\
-                fix: Pick the lightest option that works: force the plan most calls run fast with, plan per call for this statement only or plan for the typical value. Each is reversible.\n\
-                sql: -- 1. Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan):\n\
-                EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\n\
-                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
-                EXEC sys.sp_query_store_set_hints @query_id = 8, @query_hints = N'OPTION (RECOMPILE)';\n\n\
-                -- 3. Or in the application, plan for the typical value instead of the first one seen:\n\
-                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\
-                cost: Forcing a plan pins it for every value until you unforce it: try a value from a slow call under it first. RECOMPILE spends a compile on every call (about 1 ms each).\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "Logged runs of a read from orders usually take 150 ms but 4% of them take over 1.5 s · Low · Medium\n\
-                Among the retained logged runs of this statement (long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established): half finished within 150 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-                impact: 27× slower for some runs\n\
-                metric: Typical logged run\n\
-                metric: Slow runs\n\
-                fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-        ]
-    );
+    let followup = [said(tail(slow_log(mysql()), 400.0, false), ID), said(cheap, "8"), said(few, ID)];
+    const FOLLOWUP: &str = r###"Recorded run times for a read from orders: median 2 ms, 99th percentile 900 ms · Low · Medium
+Among the retained logged runs of this statement (long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established): the recorded median is 2 ms and the 99th percentile is 900 ms.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Recorded median
+metric: Recorded 99th percentile
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded plan averages for a read from orders: 9 ms versus 300 ms · Low · Medium
+Plan 8 averaged 9 ms across 900 recorded executions; plan 47 averaged 300 ms across 100 recorded executions. Their execution conditions are not established as equivalent.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Faster recorded plan average
+metric: Slower recorded plan average
+metric: Recorded slower-plan time
+metric: Recorded slower-plan executions
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse.
+
+Recorded run times for a read from orders: median 150 ms, 99th percentile 4.0 s · Low · Medium
+Among the retained logged runs of this statement (long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established): the recorded median is 150 ms and the 99th percentile is 4.0 s. 3 of 80 recorded histogram samples have bucket lower bounds at or above 1.5 s.
+impact: Recorded statement workload
+metric: Recorded statement time
+metric: Recorded median
+metric: Recorded 99th percentile
+metric: Recorded histogram samples
+metric: Samples in slow histogram buckets
+fix: Compare representative fast and slow executions of this statement for equivalent input classes and work. Obtain available actual rows, access paths, waits and concurrent resource context. Establish the mechanism before changing parameterization, plan reuse, statistics or indexes.
+verify: In an owned test environment, compare representative input classes under equivalent work and concurrency. Check latency, CPU, reads, waits and compilation costs against the predicted mechanism.
+verify: Re-scan after an evidenced change and compare matching execution populations in Queries → Runtime spread; a faster average caused by a different input mix does not verify the fix.
+caveat: Different input sizes or distributions, statistics or schema changes, cache state, blocking, I/O and concurrency can explain these differences. The captured evidence does not establish harmful parameter-sensitive plan reuse."###;
+    crate::pins::pin_text("parameter-variation-followup", &followup.join("\n\n"), FOLLOWUP);
 }
 
 // ── plan-warnings: no join predicate ─────────────────────────────────────────────────────────────

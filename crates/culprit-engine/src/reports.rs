@@ -36,6 +36,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         session_memory: &'a Option<culprit_core::MemoryParticipantsReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         page_waits: &'a Option<culprit_core::PageWaitReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        task_space: &'a Option<culprit_core::TaskSpaceReport>,
     }
     let Report {
         snapshot,
@@ -50,6 +52,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         request_memory,
         session_memory,
         page_waits,
+        task_space,
         evidence: _,
     } = report;
     View {
@@ -65,6 +68,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         request_memory,
         session_memory,
         page_waits,
+        task_space,
     }
 }
 

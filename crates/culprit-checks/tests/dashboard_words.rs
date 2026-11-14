@@ -1176,21 +1176,23 @@ fn storage_connections_replication_failures_and_statistics_say_what_they_said() 
     same(&out.join("\n"), SIGNALS);
 }
 
-const SIGNALS: &str = r#"Storage Info Storage: Recorded storage averages: reads average 3 ms, log flushes 500 µs.
-  detail: WAL: whole server, over an unknown statistics period; tables and indexes: whole server, over an unknown statistics period; temporary files: whole server, over an unknown statistics period
-  metric Avg read: 3 ms
+const SIGNALS: &str = r#"Storage Info Storage: Recorded storage averages: log flushes 500 µs.
+  detail: temporary files: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; WAL: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; tables and indexes: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
   metric Avg log flush: 500 µs
   item temporary files (whole server): 3 ms per read
   item WAL (whole server): 500 µs per flush
   item tables and indexes (whole server): 20 µs per read
-Storage Info Storage: Too little I/O since startup to judge storage speed.
-  detail: WAL: whole server, over an unknown statistics period; tables and indexes: whole server, over an unknown statistics period; temporary files: whole server, over an unknown statistics period
-Storage Info Storage: Recorded storage averages: reads average 40 µs, log writes 632 µs.
-  detail: culprit_demo log: this database, over the recorded history; culprit_demo: this database, over the recorded history; tempdb log: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history
-  metric Avg read: 40 µs
-  metric Avg log write: 632 µs
+Storage Info Storage: Too few measured storage operations for a storage-speed assessment.
+  detail: temporary files: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; WAL: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; tables and indexes: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
+  item temporary files (whole server): 3 ms per read
+  item WAL (whole server): 500 µs per flush
+  item tables and indexes (whole server): 20 µs per read
+Storage Info Storage: Native I/O timings are recorded; their accounting does not establish physical storage speed.
+  detail: tempdb log: tempdb, over an unknown statistics period Native accounting: reads count storage operations; writes count non-durable log work.; culprit_demo log: this database, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; culprit_demo: this database, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; tempdb: tempdb, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
+  item tempdb log: Native average: 2.2 ms (non-durable log work).
   item culprit_demo log (this database): 632 µs per write
   item culprit_demo (this database): 40 µs per read
+  item tempdb: 31 µs per read
 Storage Unavailable Storage: This scan has no storage timings.
 Connections Info Connections: The whole server recorded 12.5 new connections a second on average.
   metric New per second: 12.5

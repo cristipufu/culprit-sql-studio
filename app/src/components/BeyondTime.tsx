@@ -11,6 +11,7 @@ import { evidencePresentation, constraintLabel, serverName, statementMetrics } f
 import { bytes, count, duration, percent, rowCount, storageLatency, when } from "../lib/format";
 import { key, t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
+import { fileIoKey, ioContext, storageAverage } from "../lib/file-io";
 import { querySignalStatus, replicaState, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
 import { SignalTile } from "./Health";
 
@@ -224,7 +225,8 @@ function kindLabel(kind: FileIo["kind"]): string {
 }
 
 function avg(ms: number | null, n: number): number | null {
-  return ms != null && n > 0 ? ms / n : null;
+  const average = ms != null && Number.isFinite(ms) && ms >= 0 && Number.isFinite(n) && n > 0 ? ms / n : null;
+  return average != null && Number.isFinite(average) ? average : null;
 }
 
 function fileName(f: FileIo): string {
@@ -244,11 +246,11 @@ function storageLead(files: FileIo[], engine: Engine, report: Report): { text: s
     const finding = worstFinding(report, (f) => f.check === "slow-storage");
     return { text: finding ? t("ui.beyond_time.finding_lead", { title: finding.title }) : t("ui.beyond_time.storage.recorded", { file: fileName(f) }), status: slow.s };
   }
-  const reads = files.filter((f) => f.kind !== "log" && f.read_ms != null).reduce((a, f) => ({ ms: a.ms + (f.read_ms ?? 0), n: a.n + f.reads }), { ms: 0, n: 0 });
-  const logs = files.filter((f) => f.kind === "log" && f.write_ms != null).reduce((a, f) => ({ ms: a.ms + (f.write_ms ?? 0), n: a.n + f.writes }), { ms: 0, n: 0 });
-  const kind = files.some((f) => f.kind === "log" && f.write_operation === "flush") ? "flushes" : "writes";
-  const read = reads.n > 0 ? storageLatency(reads.ms / reads.n) : null;
-  const log = logs.n > 0 ? storageLatency(logs.ms / logs.n) : null;
+  const reads = storageAverage(files.filter((file) => file.kind === "data" || file.kind === "temp"), false);
+  const logs = storageAverage(files.filter((file) => file.kind === "log"), true);
+  const kind = logs?.kind ?? "writes";
+  const read = reads == null ? null : storageLatency(reads.ms);
+  const log = logs == null ? null : storageLatency(logs.ms);
   const text =
     read != null && log != null
       ? t("ui.beyond_time.storage.reads_and_log", { reads: read, kind, log })
@@ -256,16 +258,17 @@ function storageLead(files: FileIo[], engine: Engine, report: Report): { text: s
         ? t("ui.beyond_time.storage.reads", { reads: read })
         : log != null
           ? t("ui.beyond_time.storage.log", { kind, log })
-          : t("ui.beyond_time.storage.none_timed");
+          : t(files.some((file) => file.context.read !== "storage-operation" || file.context.write !== "storage-operation")
+            ? "view.dashboard.storage.native" : "view.dashboard.storage.mixed");
   return { text, status: "info" };
 }
 
 /** One file's average time for one kind of operation (`reads`, `writes` or `flushes`), with how many it averages. */
 function Latency({ ms, n, kind }: { ms: number | null; n: number; kind: "reads" | "writes" | "flushes" }) {
-  if (n <= 0) return <span className="io-cell muted">—</span>;
+  if (!Number.isFinite(n) || n <= 0) return <span className="io-cell muted">—</span>;
   const a = avg(ms, n);
   return (
-    <span className="io-cell" title={ms != null ? t("ui.beyond_time.latency_total", { n, count: count(n), kind, total: duration(ms) }) : t("ui.beyond_time.latency_untimed", { n, count: count(n), kind })}>
+    <span className="io-cell" title={a != null && ms != null ? t("ui.beyond_time.latency_total", { n, count: count(n), kind, total: duration(ms) }) : t("ui.beyond_time.latency_untimed", { n, count: count(n), kind })}>
       <b>{a == null ? t("ui.beyond_time.untimed") : storageLatency(a)}</b>
       <span className="muted"> × {count(n)}</span>
     </span>
@@ -285,7 +288,7 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
         <div className="io-head">
           <h4>{t("ui.beyond_time.storage.title")}</h4>
           <span className="muted">
-            {t(evidencePresentation(engine).storage_about)}
+            {t("ui.beyond_time.storage.about")}
           </span>
         </div>
       )}
@@ -297,13 +300,16 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
           <IoHeader>{writeHeading}</IoHeader>
         </IoRow>
         {files.slice(0, compact ? 8 : 12).map((f) => (
-          <IoRow key={`${f.database ?? ""}:${f.name}`}>
-            <span className="io-name" role="cell">
-              <i className={`sig-dot ${storageStatus(report, f)}`} aria-hidden />
-              <span className="io-file" title={f.stats_reset ? t("ui.beyond_time.stats_since", { file: fileName(f), reset: f.stats_reset }) : t("ui.beyond_time.stats_unrecorded", { file: fileName(f) })}>
-                {fileName(f)}
+          <IoRow key={fileIoKey(f)}>
+            <span className="io-source" role="cell">
+              <span className="io-name">
+                <i className={`sig-dot ${storageStatus(report, f)}`} aria-hidden />
+                <span className="io-file" title={f.stats_reset ? t("ui.beyond_time.stats_since", { file: fileName(f), reset: f.stats_reset }) : t("ui.beyond_time.stats_unrecorded", { file: fileName(f) })}>
+                  {fileName(f)}
+                </span>
+                <span className={`io-kind ${f.kind}`}>{kindLabel(f.kind)}</span>
               </span>
-              <span className={`io-kind ${f.kind}`}>{kindLabel(f.kind)}</span>
+              <span className="io-context muted">{ioContext(f)}</span>
             </span>
             <Latency ms={f.read_ms} n={f.reads} kind="reads" />
             <Latency ms={f.write_ms} n={f.writes} kind={f.write_operation === "flush" ? "flushes" : "writes"} />

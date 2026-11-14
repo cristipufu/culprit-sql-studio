@@ -4,17 +4,17 @@ use culprit_core::{Result, Source, telemetry::*};
 pub(super) struct CachedRuntime;
 #[async_trait::async_trait]
 impl SnapshotRecipe for CachedRuntime {
-    type Layout = ();
+    type Layout = cached_runtime::Layout;
     const DATASET: SnapshotDataset = SnapshotDataset::CachedRuntime;
     const NAME: &'static str = "statement-runtime-cache";
     const SOURCE: &'static Source = &crate::sources::PLAN_CACHE;
-    async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<()>> {
-        Ok(Some(()))
+    async fn layout<R: NativeRead>(&self, reader: &mut R, _budget: &CollectionBudget) -> Result<Option<Self::Layout>> {
+        cached_runtime::Layout::read(reader).await.map(Some)
     }
-    fn query(&self, _: &()) -> String {
-        cached_runtime::select_sql()
+    fn query(&self, layout: &Self::Layout) -> String {
+        cached_runtime::select_sql(layout)
     }
-    fn decode(&self, row: &Rec, _: &()) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, _: &Self::Layout) -> Result<TelemetryRecord> {
         let runtime = cached_runtime::decode(row)?;
         Ok(TelemetryRecord::Operational(OperationalObservation {
             source: Self::SOURCE.name.into(),

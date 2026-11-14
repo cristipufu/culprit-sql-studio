@@ -114,6 +114,10 @@ impl OperationalFact {
                 .request
                 .as_ref()
                 .map(|request| reference("/record/data/fact/data/request/statement", &request.statement)),
+            Self::TaskSpace(value) => value
+                .request
+                .as_ref()
+                .map(|request| reference("/record/data/fact/data/request/statement", &request.statement)),
             Self::PageWait(value) => {
                 Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
             }

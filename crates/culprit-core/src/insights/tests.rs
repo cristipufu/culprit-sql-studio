@@ -1,3 +1,6 @@
+mod relational_inputs;
+mod spills;
+
 #[test]
 fn timescale_chunk_advice_targets_the_hypertable_with_native_ddl() {
     let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
@@ -682,6 +685,7 @@ fn spills_and_misestimates_explain_each_other() {
     assert!(spill.detail.contains("underestimated"));
     let mis = found.iter().find(|i| i.rule == "misestimate").unwrap();
     assert!(mis.title.starts_with("Expected 248 rows from customers, got 50K"), "{}", mis.title);
+    assert!(mis.detail.contains("observations alone do not establish"));
     assert!(
         mis.fix_sql.as_deref().unwrap().contains("CREATE STATISTICS"),
         "two filtered columns → extended statistics"
@@ -840,18 +844,19 @@ fn misestimate_advice_fits_the_table_and_the_server() {
         actual(Engine::Mssql, join, 400.0)
     };
     let fix = |p: &Plan| insights(p).into_iter().find(|i| i.rule == "misestimate").expect("misestimate");
-    // A table variable estimated at one row is the table-variable rule's; never UPDATE STATISTICS on it.
+    // A variable-shaped name does not establish local/TVP kind. The measured estimate stays useful, and cannot
+    // authorize UPDATE STATISTICS or deferred-compilation advice.
     let mut one = scan("@t");
     one.root.children[0].est_rows = 1.0;
-    assert!(!rules(&one).contains(&"misestimate".to_string()));
-    assert!(rules(&one).contains(&"table-variable".to_string()));
+    assert!(rules(&one).contains(&"misestimate".to_string()));
+    assert!(!rules(&one).contains(&"table-variable".to_string()));
     let tv = fix(&scan("@t"));
     assert_eq!(tv.fix_sql, None);
-    assert!(tv.fix.contains("table variable"), "{}", tv.fix);
+    assert!(tv.fix.contains("native input kind"), "{}", tv.fix);
     assert_eq!(fix(&scan("#work")).fix_sql, None, "a temporary table's statistics belong to its session");
     assert!(fix(&scan("dbo.orders")).fix_sql.unwrap().starts_with("UPDATE STATISTICS [dbo].[orders]"));
-    // No spill above the operator, so no "ran out of memory as a result".
-    assert!(!fix(&scan("dbo.orders")).detail.contains("out of memory"));
+    // A mismatch without an ancestor spill must not acquire spill context.
+    assert!(!fix(&scan("dbo.orders")).detail.contains("also recorded a spill"));
 
     let mysql = |flavor: Option<&str>, version: Option<&str>| {
         let mut s = measured(1, "Table scan", NodeKind::Scan, 10.0, 50_000.0, 1.0);
@@ -1488,12 +1493,22 @@ fn smaller_rules_hold_for_this_plan() {
     let i = insights(&plan(Engine::Mssql, remote)).into_iter().find(|i| i.rule == "remote-query").unwrap();
     assert!(i.title.starts_with("Sends 5,000 rows") || i.title.starts_with("Sends 5.0K"), "{}", i.title);
 
-    // A table variable never has statistics: missing-statistics leaves it to table-variable.
+    // Only a positively identified local table variable can suppress a native missing-statistics warning.
     let mut tv = node(0, "Table Scan", NodeKind::Scan);
     tv.object = Some("@t".into());
     tv.warnings = vec![PlanWarning::MissingStatistics];
+    let unresolved = insights(&plan(Engine::Mssql, tv.clone()))
+        .into_iter()
+        .find(|i| i.rule == "missing-statistics")
+        .expect("unknown input retains the native warning");
+    assert!(unresolved.fix_sql.is_none(), "no configuration/statistics prescription for an unresolved input");
+    tv.facts_mut().relational_input = Some(crate::plan_facts::RelationalInput {
+        kind: crate::plan_facts::RelationalInputKind::LocalTableVariable,
+        provenance: crate::plan_facts::RelationalInputProvenance::NativeDeclaration,
+    });
     assert!(!rules(&plan(Engine::Mssql, tv.clone())).contains(&"missing-statistics".to_string()));
     tv.object = Some("dbo.orders".into());
+    tv.facts_mut().relational_input = None;
     let stats = insights(&plan(Engine::Mssql, tv)).into_iter().find(|i| i.rule == "missing-statistics").unwrap();
     assert!(stats.fix_sql.unwrap().starts_with("SELECT name, is_auto_create_stats_on"));
 
@@ -2797,22 +2812,20 @@ const RARELY_SAID: &str = r##"== automatic index, no columns
   fix: Remove the need for order at that exchange (an ORDER BY or merge join above it that an index or a hash join could serve), and check whether one value holds most of the rows; comparing a run with OPTION (MAXDOP 1) shows what parallelism costs here.
   verify: Run with an actual plan: no ExchangeSpillDetails on the Parallelism operator.
 == tempdb spill, no size
-[spill] Sort ran out of memory and wrote to tempdb
-  detail: The memory granted to Sort was too small for the rows it got, so part of the work went to disk in tempdb.
-  fix: Fix the row estimate first (update statistics on the tables feeding it); an index that returns rows in the needed order removes the sort altogether. SQL Server 2019+ also grows the grant on later runs (memory grant feedback, compatibility level 150).
-  verify: Run with an actual plan: no spill warning on that operator.
+[spill] Sort spilled to tempdb
+  detail: Sort used tempdb for part of this execution’s work. The spill alone does not establish its elapsed cost or underlying cause.
+  fix: Compare input rows and width with estimates, then inspect requested, granted and used memory, applicable limits and concurrent demand. Reduce unnecessary input work where possible; check native memory grant feedback eligibility and status before relying on it. For this sort, test whether an access path can supply the required order.
+  verify: Compare representative runs under equivalent load: spill warnings or volume, elapsed time, CPU and grant waiting. Fewer spills alone do not establish a better result; a larger grant can increase concurrency pressure.
 == merge passes, underestimated
 [misestimate] Expected 2 rows from orders, got 30K (15K× more)
-  detail: Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism (here a sort or hash above it ran out of memory as a result).
+  detail: An operator above it also recorded a spill. The row-estimate mismatch can affect planning, but these observations alone do not establish the spill’s cause or elapsed cost.
   fix: Refresh the statistics on orders.
   sql: ANALYZE TABLE `shop`.`orders`;
   verify: Run with actual rows again: the estimate is within about 10× of the actual count.
-[spill] The sort needed 3 merge passes through temporary files because it didn't fit in sort_buffer_size
+[spill] The sort recorded 3 merge passes through temporary files
   detail: Each merge pass writes the sorted runs to a temporary file and reads them back. The rows feeding it were badly underestimated.
-  fix: Raise sort_buffer_size for the session that runs it rather than server-wide (it's allocated per sort), or add an index that returns rows already in order so the sort disappears.
-  sql: -- Try it in your session first:
-       SET SESSION sort_buffer_size = 8 * 1024 * 1024;
-  verify: Run ANALYZE again: r_sort_passes is 0.
+  fix: Inspect the sort’s input rows and width and the session’s sort_buffer_size. Reduce unnecessary sorting work where possible; test any session-memory change under representative concurrency before choosing a value. For this sort, test whether an access path can supply the required order.
+  verify: Compare equivalent input and concurrency: merge passes or temporary-file work, latency and CPU. Measure the effect of any session-memory change; a zero pass count is not required for a better result.
 == temporary table, grouping
 [temp-table-sort] Collects 50K rows in an internal temporary table
   detail: The rows don't arrive in the order the GROUP BY / DISTINCT needs, so MySQL builds a temporary table (on disk once it outgrows tmp_table_size) and sorts the result.
@@ -2861,7 +2874,6 @@ rule non-sargable [Mssql, Postgres, Yugabyte, Mysql]: A function or cast around 
 rule leading-wildcard [Mssql, Postgres, Yugabyte, Mysql]: LIKE '%…' that can't use an index
 rule not-in [Mssql, Postgres, Yugabyte, Mysql]: NOT IN that checks the subquery row by row
 rule scalar-udf [Mssql]: A scalar function called once per row
-rule table-variable [Mssql]: A table variable estimated at one row
 rule parallelism-blocked [Mssql]: An expensive plan that can't go parallel
 rule parallel-skew [Mssql, Postgres]: One thread or worker doing most of the work
 rule eager-spool [Mssql]: A temporary index built on every run

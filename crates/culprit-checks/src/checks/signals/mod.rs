@@ -162,15 +162,6 @@ fn ran_phrase(snapshot: &Snapshot, q: &QueryStat) -> String {
         .unwrap_or_else(|| window_phrase(snapshot))
 }
 
-/// "since SQL Server started 3 days ago", for server counters.
-fn since_start(snapshot: &Snapshot) -> String {
-    let name = engine_name(snapshot);
-    match snapshot.pressure.as_ref().and_then(|p| p.uptime_hours) {
-        Some(h) => t!("common.signals.since_start.ago", engine = name, ago = format::duration(h * 3_600_000.0)),
-        None => t!("common.signals.since_start.unknown", engine = name),
-    }
-}
-
 /// The statement's verb, a `WITH` list resolved to the statement it leads to.
 fn verb(text: &str) -> String {
     main_statement(text).split(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("").to_ascii_lowercase()

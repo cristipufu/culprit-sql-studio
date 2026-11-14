@@ -213,6 +213,11 @@ pub const PAGE_WAIT_TARGETS: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.page_wait_targets"),
     delivers: &[],
 };
+pub const TASK_SPACE: Source = Source {
+    name: source_id::TASK_SPACE,
+    reads: culprit_core::key!("provider.mssql.source.task_space"),
+    delivers: &[],
+};
 pub const WORKER_QUEUE: Source = Source {
     name: source_id::WORKER_QUEUE,
     reads: culprit_core::key!("provider.mssql.source.worker_queue"),
@@ -363,6 +368,7 @@ pub const ALL: &[Source] = &[
     MEMORY_FAILURES,
     CURRENT_REQUEST_MEMORY,
     PAGE_WAIT_TARGETS,
+    TASK_SPACE,
     REPLICATION,
     LOG_CAPACITY,
     FILE_CAPACITY,

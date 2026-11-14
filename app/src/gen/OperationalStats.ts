@@ -12,6 +12,7 @@ import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
 import type { SqliteFileHealth } from "./SqliteFileHealth";
+import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, node_resources?: NodeResources, };
+export type OperationalStats = { log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, task_space?: TaskSpaceSnapshot, node_resources?: NodeResources, };

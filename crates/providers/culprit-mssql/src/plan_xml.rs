@@ -5,6 +5,8 @@ use culprit_core::{
 };
 use roxmltree::{Document, Node};
 
+mod relational_inputs;
+
 /// RelOp children that describe the operator rather than being the operator itself.
 const RELOP_METADATA: &[&str] =
     &["OutputList", "Warnings", "MemoryFractions", "RunTimeInformation", "RunTimePartitionSummary", "InternalInfo"];
@@ -87,7 +89,32 @@ fn empty_showplan(doc: &Document) -> bool {
 pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
     culprit_core::xml::read(xml, |doc| {
         let doc = doc.map_err(unreadable)?;
-        read_statement(&doc, xml, query_hash)
+        read_statement(&doc, xml, query_hash, None)
+    })
+}
+
+struct CachedModuleInput<'a> {
+    context: &'a culprit_core::telemetry::CachedStatementContext,
+    parameters: &'a culprit_core::telemetry::MssqlModuleParameters,
+    statement: &'a str,
+}
+
+/// Parse once and qualify declarations while the exact native statement/scope still exists. A detached Plan tree
+/// or a variable-shaped display name cannot establish which module owns an input introduced by inlined code.
+pub(crate) fn parse_cached_statement(
+    xml: &str,
+    context: &culprit_core::telemetry::CachedStatementContext,
+    parameters: Option<&culprit_core::telemetry::MssqlModuleParameters>,
+    statement: Option<&str>,
+) -> Result<Plan> {
+    culprit_core::xml::read(xml, |doc| {
+        let doc = doc.map_err(unreadable)?;
+        let module = parameters.zip(statement).map(|(parameters, statement)| CachedModuleInput {
+            context,
+            parameters,
+            statement,
+        });
+        read_statement(&doc, xml, context.query_hash.as_deref(), module)
     })
 }
 
@@ -96,7 +123,12 @@ fn unreadable(error: impl std::fmt::Display) -> Error {
     Error::internal(culprit_core::t!("provider.mssql.plan.unreadable", error = error.to_string()))
 }
 
-fn read_statement(doc: &Document, xml: &str, query_hash: Option<&str>) -> Result<Plan> {
+fn read_statement(
+    doc: &Document,
+    xml: &str,
+    query_hash: Option<&str>,
+    module: Option<CachedModuleInput<'_>>,
+) -> Result<Plan> {
     fn query_plan_of<'a, 'input>(n: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
         if n.has_tag_name_local("StmtSimple") {
             child(n, "QueryPlan")
@@ -121,6 +153,16 @@ fn read_statement(doc: &Document, xml: &str, query_hash: Option<&str>) -> Result
         .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_operators")))?;
 
     let mut root = parse_relop(root_op, 1)?;
+    relational_inputs::qualify_local_declarations(&mut root, statement);
+    if let Some(module) = module {
+        relational_inputs::qualify_module_parameters(
+            &mut root,
+            statement,
+            module.context,
+            module.parameters,
+            module.statement,
+        );
+    }
     let total_cost =
         statement.attribute("StatementSubTreeCost").and_then(|v| v.parse().ok()).unwrap_or(root.subtree_cost);
     let is_actual = query_plan.descendants().any(|n| n.has_tag_name_local("RunTimeInformation"));
@@ -362,6 +404,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
     let table_rows = relop.attribute("TableCardinality").and_then(|v| v.parse().ok());
 
     let mut facts = culprit_core::PlanNodeFacts {
+        relational_input: operator.and_then(relational_inputs::from_operator),
         estimated_row_bytes: relop
             .attribute("AvgRowSize")
             .and_then(|v| v.parse::<f64>().ok())

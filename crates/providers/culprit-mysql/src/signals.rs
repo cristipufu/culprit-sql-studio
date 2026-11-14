@@ -223,6 +223,7 @@ async fn files(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<V
             // A zero timer with operations means the instrument isn't timed, not that the disk is instant.
             let timed = |ps: Option<f64>, n: f64| ps.filter(|p| *p > 0.0 || n == 0.0).map(|p| p / PICOS_PER_MS);
             FileIo {
+                context: culprit_core::FileIoContext::STORAGE,
                 name: short_path(&path),
                 kind: file_kind(&r.string("event_name"), &path),
                 database: None,

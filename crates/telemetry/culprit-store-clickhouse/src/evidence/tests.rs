@@ -68,17 +68,22 @@ struct Fixture {
 }
 impl Fixture {
     async fn new(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+        Self::new_for_stream(source, records, TelemetryStream::OperationalSamples).await
+    }
+    async fn new_for_stream(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        stream: TelemetryStream,
+    ) -> Self {
         let catalog = Arc::new(SchemaCatalog::new().unwrap());
-        let schema = catalog.get(TelemetryStream::OperationalSamples).unwrap();
-        assert_eq!(schema.table(), "CulpritOperationalV1");
+        let schema = catalog.get(stream).unwrap();
         let recovery = Arc::new(Recovery::capture("clickhouse:test", catalog.digest(), source, records, 140_000));
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
-        assert_eq!(range.manifest().batches.len(), 1);
-        assert_eq!(range.manifest().batches[0].stream, TelemetryStream::OperationalSamples);
         let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
         let scratch = tempfile::tempdir().unwrap();
         let encoder = BatchEncoder::new(catalog.clone(), recovery.clone(), scratch.path()).unwrap();
-        let encoded = encoder.encode(&range, &range.manifest().batches[0].batch_id).await.unwrap();
+        let batch = range.manifest().batches.iter().find(|batch| batch.stream == stream).unwrap();
+        let encoded = encoder.encode(&range, &batch.batch_id).await.unwrap();
         indexes.put(&encoded.index_key, &encoded.digests).await.unwrap();
         let rows: Vec<_> = std::fs::read_to_string(encoded.path())
             .unwrap()
@@ -101,6 +106,181 @@ impl Fixture {
         replies.push_back(vec![self.publication.clone()]);
         replies.push_back(vec![vec![json!(0)]]);
         replies.extend(pages);
+    }
+}
+
+#[tokio::test]
+async fn completed_spill_pages_preserve_exact_native_cache_counters_and_unknown_values() {
+    for (source, records) in test_support::cached_runtime_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let captured = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+            .await
+            .unwrap();
+        assert!(captured.is_read_complete(), "{:?}", captured.gaps());
+        assert_eq!(captured.records().len(), 1);
+        let expected = ExportedRecord::new(&source, captured.capture(), records[0].clone()).unwrap();
+        assert_eq!(captured.records()[0].row(), &expected);
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+    }
+}
+
+#[tokio::test]
+async fn changed_spill_pages_fail_the_original_native_projection_digest() {
+    let (source, records) = test_support::cached_runtime_evidence_cases().pop().unwrap();
+    let fixture = Fixture::new(source, records).await;
+    let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+    let mut rows = fixture.rows.clone();
+    let mut native: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+    native["counters"]["spilled-pages"]["total"] = json!("0");
+    rows[0][column] = json!(serde_json::to_string(&native).unwrap());
+    fixture.replies(vec![rows]);
+    let error = fixture
+        .reader
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+        .await
+        .unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+}
+
+#[tokio::test]
+async fn native_variant_metadata_keeps_child_identity_without_a_parent_runtime_or_plan_payload() {
+    for with_family in [false, true] {
+        let (source, records) =
+            if with_family { test_support::query_variant_evidence() } else { test_support::query_evidence() };
+        let expected = records.iter().find(|row| matches!(row, TelemetryRecord::QueryDefinition(_))).unwrap().clone();
+        let fixture = Fixture::new_for_stream(source.clone(), records, TelemetryStream::QueryDefinitions).await;
+        fixture.replies(vec![fixture.rows.clone()]);
+        let captured = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryDefinitions], EvidenceReadBudget::default())
+            .await
+            .unwrap();
+        assert!(captured.is_read_complete(), "{:?}", captured.gaps());
+        assert_eq!(captured.records().len(), 1);
+        let expected = ExportedRecord::new(&source, captured.capture(), expected).unwrap();
+        assert_eq!(captured.records()[0].row(), &expected);
+        let TelemetryRecord::QueryDefinition(query) = &captured.records()[0].row().record else { panic!() };
+        assert_eq!(query.variant_family.is_some(), with_family);
+        if let Some(family) = &query.variant_family {
+            assert_eq!(family.variant, query.identity);
+            assert_ne!(family.parent, family.variant);
+            assert_eq!(family.dispatcher.query, family.parent);
+        }
+    }
+}
+
+#[tokio::test]
+async fn changed_native_variant_relationships_cannot_pass_the_committed_projection() {
+    let (source, records) = test_support::query_variant_evidence();
+    let fixture = Fixture::new_for_stream(source, records, TelemetryStream::QueryDefinitions).await;
+    let schema = fixture.catalog.get(TelemetryStream::QueryDefinitions).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "QueryVariantFamily").unwrap();
+    for pointer in
+        ["/variant/qualifiers/context", "/parent/query_id", "/dispatcher/plan_id", "/dispatcher/qualifiers/generation"]
+    {
+        let mut rows = fixture.rows.clone();
+        let mut family: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+        *family.pointer_mut(pointer).unwrap() = json!("another-native-incarnation");
+        rows[0][column] = json!(serde_json::to_string(&family).unwrap());
+        fixture.replies(vec![rows]);
+        let error = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryDefinitions], EvidenceReadBudget::default())
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}
+
+#[tokio::test]
+async fn query_runtime_keeps_typed_temporary_space_units_averages_and_exact_native_execution_counts() {
+    let (source, records) = test_support::query_evidence();
+    let expected =
+        records.iter().filter(|row| row.stream() == TelemetryStream::QueryRuntime).cloned().collect::<Vec<_>>();
+    let fixture = Fixture::new_for_stream(source.clone(), records, TelemetryStream::QueryRuntime).await;
+    fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+    let result = fixture
+        .reader
+        .read_capture(
+            &fixture.range,
+            &[EvidenceFamily::QueryRuntime],
+            EvidenceReadBudget { page_rows: 1, ..Default::default() },
+        )
+        .await
+        .unwrap();
+    assert!(result.is_read_complete(), "{:?}", result.gaps());
+    assert_eq!(result.source(), &source);
+    assert_eq!(result.records().len(), expected.len());
+    assert_eq!(result.metrics().pages as usize, expected.len());
+    for row in expected {
+        let expected = ExportedRecord::new(&source, result.capture(), row).unwrap();
+        let actual = result.records().iter().find(|row| row.row() == &expected).unwrap();
+        let TelemetryRecord::QueryRuntime(runtime) = &actual.row().record else { panic!() };
+        let space = runtime.metric(&RuntimeMetricKey::TemporaryStorage).unwrap();
+        assert_eq!(space.unit, RuntimeMetricUnit::Pages { bytes_per_page: 16384 });
+        assert_eq!(space.average, 1.25);
+        assert_eq!(runtime.executions, "9007199254740993");
+    }
+    assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+    let schema = fixture.catalog.get(TelemetryStream::QueryRuntime).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "Metrics").unwrap();
+    for (pointer, replacement) in [("/2/average", json!(99.0)), ("/2/unit/bytes_per_page", json!(8192))] {
+        let mut rows = fixture.rows.clone();
+        let mut metrics: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+        *metrics.pointer_mut(pointer).unwrap() = replacement;
+        rows[0][column] = json!(serde_json::to_string(&metrics).unwrap());
+        fixture.replies(vec![rows]);
+        let error = fixture
+            .reader
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryRuntime], EvidenceReadBudget::default())
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}
+
+#[tokio::test]
+async fn task_space_reads_preserve_exact_counters_context_checks_and_empty_source_coverage() {
+    for (source, records) in test_support::task_space_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let result = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..Default::default() },
+            )
+            .await
+            .unwrap();
+        test_support::assert_task_space_capture(&result, &source, &records);
+        assert_eq!(result.metrics().pages as usize, records.len());
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        assert_eq!(schema.table(), "CulpritOperationalV1");
+        if let Some(first) = fixture.rows.first() {
+            let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+            for (pointer, value) in
+                [("/task/execution_context_id", json!("99")), ("/after_check/state", json!("changed"))]
+            {
+                let mut tampered = first.clone();
+                let mut details: Value = serde_json::from_str(tampered[column].as_str().unwrap()).unwrap();
+                *details.pointer_mut(pointer).unwrap() = value;
+                tampered[column] = json!(serde_json::to_string(&details).unwrap());
+                fixture.replies(vec![vec![tampered]]);
+                let error = fixture
+                    .reader
+                    .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+                assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+            }
+        }
     }
 }
 
@@ -160,15 +340,9 @@ async fn page_wait_reads_preserve_original_requests_mapping_failures_and_exact_n
         assert_eq!(schema.table(), "CulpritOperationalV1");
         if let Some(first) = fixture.rows.first() {
             let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
-            for (pointer, value) in [
-                ("/target/header/page_id", json!(999)),
-                ("/observed_address/page_id", json!(999)),
-                ("/after_check/wait", json!("no-longer-observed")),
-                ("/before_check/observed_at", json!("2020-01-01T12:00:00.400000000Z")),
-            ] {
+            let original: Value = serde_json::from_str(first[column].as_str().unwrap()).unwrap();
+            for details in test_support::page_wait_tamper_cases(&original) {
                 let mut tampered = first.clone();
-                let mut details: Value = serde_json::from_str(tampered[column].as_str().unwrap()).unwrap();
-                *details.pointer_mut(pointer).unwrap() = value;
                 tampered[column] = json!(serde_json::to_string(&details).unwrap());
                 fixture.replies(vec![vec![tampered]]);
                 let error = fixture

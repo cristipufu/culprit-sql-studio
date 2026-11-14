@@ -37,4 +37,8 @@ collect_session_memory?: boolean,
 /**
  * Explicit opt-in to bounded page-header metadata for already observed waits; separate cost qualification.
  */
-collect_page_wait_targets?: boolean, };
+collect_page_wait_targets?: boolean, 
+/**
+ * Explicit opt-in to current task allocation/deallocation counters, without inferring their allocating SQL.
+ */
+collect_task_space?: boolean, };

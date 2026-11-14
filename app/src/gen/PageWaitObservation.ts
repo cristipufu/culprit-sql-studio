@@ -3,6 +3,7 @@ import type { ActivityObservation } from "./ActivityObservation";
 import type { MappedPageTarget } from "./MappedPageTarget";
 import type { NativeIdentity } from "./NativeIdentity";
 import type { ObservedWaitResource } from "./ObservedWaitResource";
+import type { PageIndexOperations } from "./PageIndexOperations";
 import type { PageWaitAddress } from "./PageWaitAddress";
 import type { PageWaitRecheck } from "./PageWaitRecheck";
 import type { PageWaitResolution } from "./PageWaitResolution";
@@ -24,4 +25,8 @@ statement_identity?: NativeIdentity, plan_identity?: NativeIdentity, resource: O
  * None means the original raw wait could not be decoded into qualified page coordinates. It remains visible
  * as unresolved evidence and cannot acquire a mapped header.
  */
-observed_address?: PageWaitAddress, resolution: PageWaitResolution, target: MappedPageTarget | null, };
+observed_address?: PageWaitAddress, resolution: PageWaitResolution, target: MappedPageTarget | null, 
+/**
+ * Independently observed index counters remain available when a later page/catalog check cannot link them.
+ */
+index_operations?: PageIndexOperations, };

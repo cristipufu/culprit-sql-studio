@@ -15,10 +15,18 @@ pub(crate) fn context_columns() -> String {
     context_columns_from("qs", "st", "pa.value")
 }
 pub(crate) fn context_columns_from(cache: &str, text: &str, database: &str) -> String {
+    context_columns_with_hash(cache, text, database, true)
+}
+pub(crate) fn context_columns_without_hash_from(cache: &str, text: &str, database: &str) -> String {
+    context_columns_with_hash(cache, text, database, false)
+}
+fn context_columns_with_hash(cache: &str, text: &str, database: &str, include_hash: bool) -> String {
+    let hash =
+        if include_hash { format!("CONVERT(varchar(18),{cache}.query_hash,1) AS query_hash,") } else { String::new() };
     format!(
         r#"{cache}.plan_handle,{cache}.sql_handle,{cache}.statement_start_offset,{cache}.statement_end_offset,
  CONVERT(varchar(40),{cache}.creation_time,126) AS creation_time,{cache}.plan_generation_num,
- CAST({database} AS int) AS database_id,CONVERT(varchar(18),{cache}.query_hash,1) AS query_hash,
+ CAST({database} AS int) AS database_id,{hash}
  CAST(DATALENGTH({text}.text) AS bigint) AS source_text_bytes,
  CASE WHEN {text}.text IS NULL THEN NULL WHEN DATALENGTH({text}.text)<={prefix_bytes} THEN 1 ELSE 0 END AS text_complete,
  SUBSTRING({text}.text,1,{prefix_chars}) AS text_prefix,
@@ -42,7 +50,7 @@ pub(crate) fn statement_plan_relation(cache: &str, plan: &str) -> String {
 /// Select the bounded native statement set before optional plan payload functions are requested.
 pub(crate) fn selected_statements() -> String {
     format!(
-        "SELECT TOP (@P1) qs.plan_handle,qs.sql_handle,qs.statement_start_offset,qs.statement_end_offset,qs.creation_time,qs.plan_generation_num,qs.query_hash,qs.query_plan_hash,qs.execution_count,qs.last_execution_time,CAST(pa.value AS int) AS compilation_database_id,st.text,st.dbid,st.objectid,st.encrypted {} WHERE {}",
+        "SELECT TOP (@P1) qs.plan_handle,qs.sql_handle,qs.statement_start_offset,qs.statement_end_offset,qs.creation_time,qs.plan_generation_num,qs.query_hash,qs.query_plan_hash,qs.execution_count,qs.last_execution_time,CAST(pa.value AS int) AS compilation_database_id,st.text,st.dbid,st.objectid,st.number,st.encrypted {} WHERE {}",
         relation(),
         DATABASE_PREDICATE
     )

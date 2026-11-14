@@ -15,6 +15,7 @@ pub(crate) struct FakeRead {
     pub closed: u32,
     pub shutdown: SourceShutdown,
     pause_at: Option<usize>,
+    query_limit: Option<u32>,
 }
 impl FakeRead {
     pub(crate) fn new(replies: Vec<ReadResult<Vec<Rec>>>) -> Self {
@@ -24,6 +25,7 @@ impl FakeRead {
             closed: 0,
             shutdown: SourceShutdown::Quiescent,
             pause_at: None,
+            query_limit: None,
         }
     }
     pub(crate) fn pause_on_query(mut self, position: usize) -> Self {
@@ -31,10 +33,17 @@ impl FakeRead {
         self.pause_at = Some(position);
         self
     }
+    pub(crate) fn with_query_limit(mut self, limit: u32) -> Self {
+        self.query_limit = Some(limit);
+        self
+    }
 }
 #[async_trait::async_trait]
 impl NativeRead for FakeRead {
     async fn query(&mut self, sql: &str, parameters: Vec<Parameter>, row_limit: usize) -> ReadResult<Vec<Rec>> {
+        if self.query_limit.is_some_and(|limit| self.calls.len() >= limit as usize) {
+            return Err(crate::read::ReadError::Stopped(culprit_core::telemetry::CollectionStop::QueryLimit));
+        }
         self.calls.push(Call { sql: sql.to_owned(), parameters, limit: row_limit });
         if self.pause_at == Some(self.calls.len()) {
             std::future::pending::<()>().await;

@@ -17,22 +17,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-async fn qualify_cost_plan(
-    client: &mut crate::conn::MsClient,
-    window: &super::super::window_sql::FrozenWindow,
-    ids: &[String],
-) {
-    let sql = super::super::costs::runs_sql(true);
+async fn qualify_runtime_plan(client: &mut crate::conn::MsClient, window: &super::super::window_sql::FrozenWindow) {
+    let sql = super::super::runtime::summary_sql(false, true);
     batch(client, "SET STATISTICS XML ON").await;
     let mut query = tiberius::Query::new(&sql);
     let Parameter::Text(scope) = window.parameter() else { panic!("native interval scope") };
-    let Parameter::Text(queries) = super::super::reader::ids_parameter(ids).unwrap() else { panic!("query IDs") };
     query.bind(scope.as_str());
-    query.bind(queries.as_str());
     let rows = query.query(&mut *client).await.unwrap().into_results().await.unwrap();
     batch(client, "SET STATISTICS XML OFF").await;
     let mut plans = 0;
-    let mut selected_groups = 0;
     for result in rows {
         for row in result {
             let row = Rec::from_row(&row);
@@ -53,7 +46,7 @@ async fn qualify_cost_plan(
                     for node in document.descendants().filter(|node| node.is_element()) {
                         assert!(
                             !matches!(node.attribute("PhysicalOp"), Some("Window Spool" | "Window Aggregate")),
-                            "cost source must not materialize all-query window groups: {xml}"
+                            "runtime summary must not materialize an all-query window spool: {xml}"
                         );
                         if node.tag_name().name() == "MemoryGrantInfo"
                             && let Some(value) =
@@ -72,44 +65,15 @@ async fn qualify_cost_plan(
                             logical_reads_per_operator_max =
                                 Some(logical_reads_per_operator_max.unwrap_or(0).max(value));
                         }
-                        if node.tag_name().name() == "RelOp" && node.attribute("LogicalOp") == Some("Aggregate") {
-                            // Native views expose internal Union/Expr keys. Identify this operator's non-scalar
-                            // grouping directly, rather than infer SQL aliases or inspect a descendant's aggregate.
-                            let selected = node
-                                .children()
-                                .flat_map(|operator| operator.children())
-                                .filter(|child| matches!(child.tag_name().name(), "GroupBy" | "HashKeysBuild"))
-                                .any(|group| {
-                                    group.descendants().any(|column| column.tag_name().name() == "ColumnReference")
-                                });
-                            if selected {
-                                selected_groups += 1;
-                                let actual = node
-                                    .children()
-                                    .find(|child| child.tag_name().name() == "RunTimeInformation")
-                                    .unwrap();
-                                let rows = actual
-                                    .children()
-                                    .filter_map(|thread| thread.attribute("ActualRows"))
-                                    .map(|rows| rows.parse::<f64>().unwrap())
-                                    .sum::<f64>();
-                                assert!(
-                                    rows <= ids.len() as f64,
-                                    "selected aggregate produced {rows} groups for {} IDs",
-                                    ids.len()
-                                );
-                            }
-                        }
                     }
                     eprintln!(
-                        "owned cost actual plan: selected IDs={}, granted workspace KiB={granted_kib:?}, CPU ms={cpu_ms:?}, maximum reported operator logical reads={logical_reads_per_operator_max:?}",
-                        ids.len()
+                        "owned single-population runtime actual plan: granted workspace KiB={granted_kib:?}, CPU ms={cpu_ms:?}, maximum reported operator logical reads={logical_reads_per_operator_max:?}"
                     );
                 });
             }
         }
     }
-    assert!(plans > 0 && selected_groups > 0, "actual selected-group qualification was not returned");
+    assert!(plans > 0, "native runtime summary actual plan was not returned");
 }
 
 #[tokio::test]
@@ -163,18 +127,18 @@ async fn native_query_store_wait_ids_semantics_and_scan_totals_agree_without_his
 
         let mut reader = Reader::open(pool.clone());
         let summary = reader.summary(60).await.unwrap();
-        let ids = summary.iter().map(|row|row.query_id.clone()).collect::<Vec<_>>();
+        let ids = summary.iter().map(|row|row.identity.query_id.clone()).collect::<Vec<_>>();
         let definitions = reader.definitions(&ids,definitions::Kind::Query,256*1024).await.unwrap();
         let query = definitions.iter().find(|definition|definition.payload.text().is_some_and(|text|text.contains("culprit_wait_native_proof"))).unwrap();
         let other = definitions.iter().find(|definition|definition.payload.text().is_some_and(|text|text.contains("culprit_unselected_native_proof"))).unwrap();
         assert_ne!(query.id,other.id,"the fixture must contain an actual unselected workload query");
-        let plans = summary.iter().filter(|row|row.query_id==query.id).map(|row|row.plan_id.clone()).collect::<Vec<_>>();
+        let plans = summary.iter().filter(|row|row.identity.query_id==query.id).map(|row|row.plan_id.clone()).collect::<Vec<_>>();
         let window = reader.window(60).await.unwrap();
         let metadata = semantics(window.capture);
         assert_eq!(metadata.capture,WaitCaptureState::Enabled);
         assert_eq!(metadata.coverage,WaitCaptureCoverage::Unverified);
         assert!(metadata.is_valid());
-        qualify_cost_plan(&mut setup,&window,std::slice::from_ref(&query.id)).await;
+        qualify_runtime_plan(&mut setup,&window).await;
         let observed = reader.waits(60,Some(&plans)).await.unwrap();
         let mut analytical_native_totals = BTreeMap::<u8,u64>::new();
         for row in &observed {

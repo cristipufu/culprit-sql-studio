@@ -7,6 +7,7 @@ use culprit_collector::{
 use culprit_core::telemetry::*;
 use serde_json::json;
 
+mod cached_runtime;
 mod observations;
 mod queries;
 mod waits;

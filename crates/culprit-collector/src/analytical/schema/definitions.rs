@@ -6,6 +6,7 @@ const QUERY: &[Field] = &[
     Field::required("DefinitionId", "/record/data/id", String),
     Field::required("NativeQueryId", "/record/data/identity/query_id", String),
     Field::required("NativeIdentity", "/record/data/identity", JsonContainer),
+    Field::optional("QueryVariantFamily", "/record/data/variant_family", JsonContainer),
     Field::required("StatementOrigin", "/record/data/origin", String),
     Field::optional("MonitoringTemplateId", "/record/data/monitoring_template_id", String),
     Field::required("CompilationContext", "/record/data/context", JsonContainer),

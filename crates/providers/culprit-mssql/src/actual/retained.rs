@@ -7,16 +7,19 @@ use crate::{
     query_store::payload::Payload,
     read::{NativeRead, Parameter, ReadError, integer, invalid_data, optional_integer, optional_text},
 };
-use culprit_core::{Result, telemetry::CachedStatementContext};
+use culprit_core::{
+    Result,
+    telemetry::{CachedStatementContext, PayloadUnavailable},
+};
 
 pub(crate) struct RetainedPlan {
+    /// Native statement-counter context observed alongside the lookup. The XML and these counters are separate
+    /// point observations; a checked module token does not prove one execution or counter generation.
     pub context: CachedStatementContext,
     pub payload: Payload,
     pub source_utf16_bytes: Option<usize>,
     pub executions: String,
     pub last_start_without_offset: Option<String>,
-    /// Existing interactive estimate, not a native UTC event timestamp.
-    pub last_start_utc_estimate: Option<String>,
 }
 pub(crate) struct Read {
     pub setting_on: Option<bool>,
@@ -46,16 +49,31 @@ pub(crate) async fn read<R: NativeRead>(
             2,
         )
         .await
-        .map_err(|error| {
-            let error = error.into_error();
-            if error.code == culprit_core::ErrorCode::PermissionDenied { super::cache_unreadable() } else { error }
-        })?;
-    let plan = match rows.as_slice() {
+        .map_err(ReadError::into_error)
+        .map_err(cache_error)?;
+    let mut plan = match rows.as_slice() {
         [] => None,
         [row] => Some(decode(row, maximum_bytes)?),
         _ => return Err(invalid_data()),
     };
+    if let Some(plan) = &mut plan
+        && plan.payload.text().is_some()
+    {
+        let mut bindings = crate::relational_inputs::Bindings::default();
+        let unavailable = if !bindings.admit(&plan.context)? {
+            Some(PayloadUnavailable::NotCollected)
+        } else {
+            let verified = bindings.verify(reader).await.map_err(cache_error)?;
+            (!verified.contains(&plan.context)).then_some(PayloadUnavailable::SourceUnavailable)
+        };
+        if let Some(reason) = unavailable {
+            plan.payload = Payload::Unavailable(reason);
+        }
+    }
     Ok(Read { setting_on, plan })
+}
+fn cache_error(error: culprit_core::Error) -> culprit_core::Error {
+    if error.code == culprit_core::ErrorCode::PermissionDenied { super::cache_unreadable() } else { error }
 }
 pub(crate) async fn setting<R: NativeRead>(reader: &mut R) -> Result<Option<bool>> {
     let rows = match reader.query(super::SETTING_SQL, vec![], 2).await {
@@ -84,11 +102,7 @@ pub(crate) fn decode(row: &crate::value::Rec, maximum_bytes: usize) -> Result<Re
         last_start_without_offset: optional_text(row, "last_start_without_offset")?
             .map(|at| crate::sql_time::native_time(&at))
             .transpose()?,
-        last_start_utc_estimate: optional_text(row, "last_start_utc_estimate")?,
     };
-    if plan.last_start_without_offset.is_some() != plan.last_start_utc_estimate.is_some() {
-        return Err(invalid_data());
-    }
     Ok(plan)
 }
 fn sql() -> String {
@@ -110,7 +124,7 @@ pub(crate) fn projection(context: String, encrypted: &str, maximum: &str) -> Str
     let payload =
         crate::cached_payload::columns("CONVERT(nvarchar(max),ps.query_plan)", "plan_bytes", "query_plan", maximum);
     format!(
-        "{context},{encrypted} AS encrypted,{payload},qs.execution_count,CONVERT(varchar(40),qs.last_execution_time,126) AS last_start_without_offset,CONVERT(varchar(40),DATEADD(minute,DATEDIFF(minute,GETDATE(),GETUTCDATE()),qs.last_execution_time),126)+'Z' AS last_start_utc_estimate"
+        "{context},{encrypted} AS encrypted,{payload},qs.execution_count,CONVERT(varchar(40),qs.last_execution_time,126) AS last_start_without_offset"
     )
 }
 

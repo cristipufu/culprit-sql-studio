@@ -70,7 +70,7 @@ impl Layout {
     pub async fn read<R: NativeRead>(reader: &mut R) -> Result<Self> {
         let presence=COUNTERS.iter().map(|(_,column)|*column).chain(["database_id","object_id","index_id","partition_number","hobt_id"]).map(|column|format!("CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'{RELATION}') AND name=N'{column}') THEN 1 ELSE 0 END AS {column}")).collect::<Vec<_>>().join(",");
         let sql = format!(
-            "SELECT HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility, CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.indexes') AND name=N'optimize_for_sequential_key') THEN 1 ELSE 0 END AS sequential_option,{presence} OPTION(MAXDOP 1)"
+            "SELECT /* culprit */ HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility, CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.indexes') AND name=N'optimize_for_sequential_key') THEN 1 ELSE 0 END AS sequential_option,{presence} OPTION(MAXDOP 1)"
         );
         let rows = reader.query(&sql, vec![], 2).await.map_err(ReadError::into_error)?;
         let [row] = rows.as_slice() else { return Err(invalid_data()) };
@@ -136,24 +136,31 @@ impl Layout {
     }
 }
 pub(crate) fn select_sql(layout: &Layout) -> String {
+    format!(
+        "SELECT TOP(@P1) {} FROM sys.dm_db_index_operational_stats(DB_ID(),NULL,NULL,NULL) s {} WHERE s.database_id=DB_ID() OPTION(MAXDOP 1)",
+        projection(layout),
+        catalog_joins()
+    )
+}
+pub(super) fn projection(layout: &Layout) -> String {
     let fields = layout.counters().map(|(_, column)| format!("s.{column}")).collect::<Vec<_>>();
     let hobt = if layout.columns.contains("hobt_id") { "s.hobt_id" } else { "CAST(NULL AS bigint)" };
     let sequential =
         if layout.sequential_option { "CONVERT(int,i.optimize_for_sequential_key)" } else { "CAST(NULL AS int)" };
     let counters = if fields.is_empty() { String::new() } else { format!(",{}", fields.join(",")) };
     format!(
-        r#"SELECT TOP(@P1) s.database_id,s.object_id,s.index_id,s.partition_number,{hobt} AS hobt_id,
+        r#"s.database_id,s.object_id,s.index_id,s.partition_number,{hobt} AS hobt_id,
  sch.name AS schema_name,o.name AS object_name,i.name AS index_name,RTRIM(o.type) AS object_type,
  CONVERT(int,o.is_ms_shipped) AS engine_internal,CONVERT(int,c.is_identity) AS leading_identity,
  CASE WHEN DATALENGTH(d.definition)<=8192 THEN d.definition ELSE NULL END AS leading_default,
- {sequential} AS optimize_sequential{counters}
- FROM sys.dm_db_index_operational_stats(DB_ID(),NULL,NULL,NULL) s
- LEFT JOIN sys.objects o ON o.object_id=s.object_id
+ {sequential} AS optimize_sequential{counters}"#
+    )
+}
+pub(super) fn catalog_joins() -> &'static str {
+    r#"LEFT JOIN sys.objects o ON o.object_id=s.object_id
  LEFT JOIN sys.schemas sch ON sch.schema_id=o.schema_id
  LEFT JOIN sys.indexes i ON i.object_id=s.object_id AND i.index_id=s.index_id
  LEFT JOIN sys.index_columns ic ON ic.object_id=s.object_id AND ic.index_id=s.index_id AND ic.key_ordinal=1
  LEFT JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id
- LEFT JOIN sys.default_constraints d ON d.object_id=c.default_object_id
- WHERE s.database_id=DB_ID() OPTION(MAXDOP 1)"#
-    )
+ LEFT JOIN sys.default_constraints d ON d.object_id=c.default_object_id"#
 }

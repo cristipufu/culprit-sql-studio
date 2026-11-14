@@ -19,6 +19,7 @@ async fn local_concurrent_insert_patterns_map_real_targets_without_blaming_an_un
         let mut checked=0;let mut mapped=0;let mut plans=0;let mut observations=0;
         let mut resolutions=BTreeMap::<String,usize>::new();let mut relations=BTreeMap::<String,usize>::new();
         let mut native_queries=0;
+        let mut linked_index_points=0;let mut unlinked_index_points=0;let mut point_for_cost=None;
         for _ in 0..32 {
             if fixture.workers_finished(){break;}
             let (capture,metrics)=fixture.inspect().await?;
@@ -35,6 +36,15 @@ async fn local_concurrent_insert_patterns_map_real_targets_without_blaming_an_un
                 mapped+=1;
                 let Some(object)=&target.object else {continue};
                 if object.name!="page_fixture_hot" {continue;}
+                if let Some(point @ PageIndexOperations::Observed { relation,counters,.. })=&row.index_operations {
+                    if *relation==PageIndexOperationRelation::CheckedTarget {
+                        if !row.index_operations.as_ref().unwrap().matches_target(target) {return Err(invalid("native index point escaped its checked object/partition mapping"));}
+                        linked_index_points+=1;
+                        if counters.counter(MssqlIndexCounter::PageLatchWaits).is_some_and(|count|count.parse::<u64>().is_ok_and(|count|count>0)) {
+                            point_for_cost=Some(point.clone());
+                        }
+                    } else { unlinked_index_points+=1; }
+                }
                 let application=row.request.client.as_ref().and_then(|client|client.application.as_deref());
                 if application==Some("page-fixture-unrelated-select") {return Err(invalid("unrelated SELECT was mapped to the writers' hot index"));}
                 if row.statement_identity.is_none(){continue;}
@@ -71,9 +81,12 @@ async fn local_concurrent_insert_patterns_map_real_targets_without_blaming_an_un
             "completed_inserts":inserts,"native_index_inserts":counters.inserts,"native_latch_waits":counters.latch_waits,
             "native_accumulated_latch_ms":counters.latch_ms,"observed_wait_rows":observations,"mapped_current_headers":mapped,
             "checked_write_associations":checked,"native_plan_references":plans,"observed_patterns":participants,
-            "header_resolutions":resolutions,"later_request_wait_checks":relations,"diagnostic_native_tasks":native_queries}));
+            "header_resolutions":resolutions,"later_request_wait_checks":relations,"diagnostic_native_tasks":native_queries,
+            "linked_index_counter_points":linked_index_points,"unlinked_index_counter_points":unlinked_index_points}));
         if counters.inserts!=inserts || counters.latch_waits==0 {return Err(invalid("bounded workload did not establish its native index insert/latch signal"));}
         if participants!=BTreeSet::from(["a","b"]) {return Err(invalid("bounded native run did not qualify both actual write patterns; no attribution proof"));}
+        let point=point_for_cost.ok_or_else(||invalid("bounded native run did not retain a genuine positive checked index-counter point"))?;
+        fixture.qualify_index_point(&point).await?;
         Ok(())
     }) }).await;
 }

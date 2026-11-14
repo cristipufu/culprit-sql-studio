@@ -17,13 +17,21 @@ struct PageWaitReader<R: NativeRead> {
 }
 impl PageWaitSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
+        let request = bounded_request(request)?;
         let options = ReadOptions {
             budget: request.budget.clone(),
             scope: ActivityScope::CurrentDatabase,
             identity: IdentityDetail::Endpoint,
         };
-        Self::from_reader(ActivityReader::open(pool, options, host, port)?, request)
+        Self::from_reader(ActivityReader::open(pool, options, host, port)?, &request)
     }
+}
+fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
+    request.validate()?;
+    let mut bounded = request.clone();
+    bounded.budget = crate::page_waits::bounded_budget(&request.budget);
+    bounded.budget.validate()?;
+    Ok(bounded)
 }
 impl<R: NativeRead> PageWaitSource<R> {
     pub(super) fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {

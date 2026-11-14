@@ -59,3 +59,66 @@ pub(crate) async fn query_store_ready(client: &mut crate::conn::MsClient) {
         tokio::time::sleep(READINESS_POLL).await;
     }
 }
+
+pub(crate) async fn assert_no_execution_grant(
+    client: &mut MsClient,
+    sql: &str,
+    parameters: Vec<crate::read::Parameter>,
+) -> Vec<String> {
+    // Actual plan instrumentation is confined to the owned fixture and runs only Culprit's metadata statements.
+    batch(client, "SET STATISTICS XML ON").await;
+    let mut query = tiberius::Query::new(sql);
+    for parameter in &parameters {
+        match parameter {
+            crate::read::Parameter::Integer(value) => {
+                query.bind(*value);
+            }
+            crate::read::Parameter::Text(value) => {
+                query.bind(value.as_str());
+            }
+        }
+    }
+    let results = query.query(&mut *client).await.unwrap().into_results().await.unwrap();
+    batch(client, "SET STATISTICS XML OFF").await;
+    let mut plans = Vec::new();
+    for rows in results {
+        for row in rows {
+            let row = crate::value::Rec::from_row(&row);
+            for (_, value) in row.columns() {
+                let crate::value::Val::Text(value) = value else { continue };
+                if !value.contains("<ShowPlanXML") {
+                    continue;
+                }
+                culprit_core::xml::read(value, |document| {
+                    let document = document.unwrap();
+                    assert_eq!(document.root_element().tag_name().name(), "ShowPlanXML");
+                    for node in document.descendants().filter(|node| node.is_element()) {
+                        assert!(
+                            !matches!(node.attribute("PhysicalOp"), Some("Hash Match" | "Sort")),
+                            "grant-bearing operator in metadata diagnostic: {value}"
+                        );
+                        if node.tag_name().name() == "MemoryGrantInfo" {
+                            for name in [
+                                "GrantedMemory",
+                                "RequestedMemory",
+                                "RequiredMemory",
+                                "DesiredMemory",
+                                "SerialRequiredMemory",
+                                "SerialDesiredMemory",
+                                "MaxUsedMemory",
+                            ] {
+                                assert!(
+                                    node.attribute(name).is_none_or(|value| value.parse::<u64>() == Ok(0)),
+                                    "{name} in diagnostic actual plan: {value}"
+                                );
+                            }
+                        }
+                    }
+                });
+                plans.push(value.clone());
+            }
+        }
+    }
+    assert!(!plans.is_empty(), "actual metadata plan was not returned");
+    plans
+}

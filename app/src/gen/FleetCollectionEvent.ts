@@ -3,9 +3,14 @@ import type { CaptureIdentity } from "./CaptureIdentity";
 import type { CollectionStatus } from "./CollectionStatus";
 import type { ErrorCode } from "./ErrorCode";
 import type { FleetWork } from "./FleetWork";
+import type { SourceState } from "./SourceState";
 import type { TelemetryRange } from "./TelemetryRange";
 
-export type FleetCollectionEvent = { target: string, connection: string, schedule: string, work: FleetWork, status: CollectionStatus, capture: CaptureIdentity | null, error_code: ErrorCode | null, 
+export type FleetCollectionEvent = { target: string, connection: string, schedule: string, work: FleetWork, status: CollectionStatus, 
+/**
+ * Qualified native snapshot population, separate from capture/publication success. None is unknown.
+ */
+native_coverage?: SourceState, capture: CaptureIdentity | null, error_code: ErrorCode | null, 
 /**
  * Failed or missed work remains visible even when no rows arrived at a destination.
  */

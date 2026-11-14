@@ -134,27 +134,13 @@
     },
     {
       "assessed_queries": [
-        "7",
-        "9",
-        "10",
         "8",
-        "6",
-        "5",
-        "35",
-        "146",
-        "138",
-        "143",
-        "161",
-        "246",
-        "249",
-        "255",
-        "263",
-        "264"
+        "146"
       ],
       "check": "parameter-sensitive",
-      "reason": null,
-      "status": "assessed",
-      "title": "Queries that are fast for most calls and slow for some"
+      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
+      "status": "insufficient-evidence",
+      "title": "Recorded query runtime differences"
     },
     {
       "assessed_queries": [
@@ -372,8 +358,8 @@
     },
     {
       "check": "slow-storage",
-      "reason": null,
-      "status": "assessed",
+      "reason": "Some native I/O populations lack qualified storage-operation accounting, timing or enough operations for a storage-speed assessment.",
+      "status": "insufficient-evidence",
       "title": "Storage that's slow to read or write"
     },
     {
@@ -562,8 +548,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -640,8 +625,7 @@
         },
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -709,7 +693,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -787,7 +770,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -934,8 +916,7 @@
         },
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -1057,7 +1038,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -1135,7 +1115,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -1269,8 +1248,7 @@
           "from": "8",
           "to": "47"
         },
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -1367,8 +1345,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "shop.ticket_events had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
@@ -1432,7 +1409,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -1523,8 +1499,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -1601,8 +1576,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 26.5 MB.",
@@ -1664,8 +1638,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 648 KB.",
@@ -1850,8 +1823,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -1991,7 +1963,6 @@
         "plan_change": null,
         "recommended_plan": null,
         "table": "shop.orders",
-        "usual_fast_plan": null,
         "workload_dependency": "independent"
       },
       "fix": {
@@ -2086,8 +2057,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -2211,8 +2181,7 @@
         },
         "nothing_to_check": "gone",
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -3479,7 +3448,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 3,
+    "format": 4,
     "histograms": null,
     "id": "20261011T121347.162Z",
     "identity": {
@@ -4170,6 +4139,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080
@@ -4179,6 +4149,11 @@
       "cpus": null,
       "files": [
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "culprit_demo",
           "kind": "log",
           "name": "culprit_demo_log",
@@ -4191,6 +4166,11 @@
           "writes": 26035.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "culprit_demo",
           "kind": "data",
           "name": "culprit_demo",
@@ -4203,6 +4183,11 @@
           "writes": 1164.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "non-durable-log"
+          },
           "database": "tempdb",
           "kind": "log",
           "name": "templog",
@@ -4215,6 +4200,11 @@
           "writes": 148.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev",
@@ -4227,6 +4217,11 @@
           "writes": 84.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev2",
@@ -4239,6 +4234,11 @@
           "writes": 63.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev3",
@@ -4251,6 +4251,11 @@
           "writes": 62.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev5",
@@ -4263,6 +4268,11 @@
           "writes": 63.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev6",
@@ -4275,6 +4285,11 @@
           "writes": 63.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev4",
@@ -4287,6 +4302,11 @@
           "writes": 63.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev7",
@@ -4299,6 +4319,11 @@
           "writes": 60.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": "tempdb",
           "kind": "temp",
           "name": "tempdev8",
@@ -6165,8 +6190,7 @@
               "mean_time_ms": 18.470993333333332,
               "min_time_ms": 17.495,
               "stddev_time_ms": 0.7882754897894857,
-              "total_time_ms": 22165.192,
-              "variant_query": null
+              "total_time_ms": 22165.192
             }
           ],
           "query_hash": "0xE9B9B9AEF7209B51",
@@ -6175,12 +6199,9 @@
           "rows": 1200.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 17.495,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 17.495
           },
           "stddev_time_ms": 0.7882754897894857,
           "temporary_work": {
@@ -6588,8 +6609,7 @@
               "mean_time_ms": 11.237656666666666,
               "min_time_ms": 6.029,
               "stddev_time_ms": 5.616261453910221,
-              "total_time_ms": 6742.594,
-              "variant_query": null
+              "total_time_ms": 6742.594
             }
           ],
           "query_hash": "0xBBCBE1D0C08154BC",
@@ -6598,12 +6618,9 @@
           "rows": 906.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 6.029,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 6.029
           },
           "stddev_time_ms": 5.616261453910221,
           "temporary_work": {
@@ -7053,8 +7070,7 @@
               "mean_time_ms": 1.4473511221945137,
               "min_time_ms": 0.507,
               "stddev_time_ms": 17.49761392102848,
-              "total_time_ms": 5803.878,
-              "variant_query": null
+              "total_time_ms": 5803.878
             }
           ],
           "query_hash": "0xFEBD637132E1276E",
@@ -7063,12 +7079,9 @@
           "rows": 3900000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.507,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.507
           },
           "stddev_time_ms": 17.49761392102848,
           "temporary_work": {
@@ -7504,8 +7517,7 @@
               "mean_time_ms": 32.35602150537635,
               "min_time_ms": null,
               "stddev_time_ms": null,
-              "total_time_ms": 3009.11,
-              "variant_query": null
+              "total_time_ms": 3009.11
             },
             {
               "compiled": "@P2 = (1), @P1 = (0)",
@@ -7520,8 +7532,7 @@
               "mean_time_ms": 9.520144927536233,
               "min_time_ms": 8.738,
               "stddev_time_ms": 4.8133084203694985,
-              "total_time_ms": 1970.67,
-              "variant_query": null
+              "total_time_ms": 1970.67
             }
           ],
           "query_hash": "0x11CC33E7EA9F4952",
@@ -7530,12 +7541,9 @@
           "rows": 984960.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 8.738,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 8.738
           },
           "stddev_time_ms": 4.8133084203694985,
           "temporary_work": {
@@ -7828,8 +7836,7 @@
               "mean_time_ms": 0.01370395,
               "min_time_ms": 0.006,
               "stddev_time_ms": 0.006748578541708695,
-              "total_time_ms": 822.237,
-              "variant_query": null
+              "total_time_ms": 822.237
             }
           ],
           "query_hash": "0xBD30C1112C2A5560",
@@ -7838,12 +7845,9 @@
           "rows": 60000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.006,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.006
           },
           "stddev_time_ms": 0.006748578541708695,
           "temporary_work": {
@@ -8345,8 +8349,7 @@
               "mean_time_ms": 0.05814425,
               "min_time_ms": 0.024,
               "stddev_time_ms": 0.06775048598026806,
-              "total_time_ms": 232.577,
-              "variant_query": null
+              "total_time_ms": 232.577
             }
           ],
           "query_hash": "0x1C16A4743BB078B3",
@@ -8355,12 +8358,9 @@
           "rows": 20016.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.024,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.024
           },
           "stddev_time_ms": 0.06775048598026806,
           "temporary_work": {
@@ -8633,8 +8633,7 @@
               "mean_time_ms": 0.1685,
               "min_time_ms": 0.114,
               "stddev_time_ms": 0.05069078373388554,
-              "total_time_ms": 0.337,
-              "variant_query": null
+              "total_time_ms": 0.337
             }
           ],
           "query_hash": "0x80E844211996BFCC",
@@ -8643,12 +8642,9 @@
           "rows": 0.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.114,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.114
           },
           "stddev_time_ms": 0.05069078373388554,
           "temporary_work": {
@@ -8734,8 +8730,7 @@
               "mean_time_ms": 10.27628685258964,
               "min_time_ms": 8.254,
               "stddev_time_ms": 3.579715210739535,
-              "total_time_ms": 2579.348,
-              "variant_query": null
+              "total_time_ms": 2579.348
             },
             {
               "compiled": "@c = NULL, @t = (2)",
@@ -8750,8 +8745,7 @@
               "mean_time_ms": 0.022509615384615385,
               "min_time_ms": 0.012,
               "stddev_time_ms": 0.03466779839686109,
-              "total_time_ms": 11.705,
-              "variant_query": null
+              "total_time_ms": 11.705
             }
           ],
           "query_hash": "0x4139ABA55C1459B3",
@@ -8760,12 +8754,9 @@
           "rows": 771.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.012,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.012
           },
           "stddev_time_ms": 5.2209070520776315,
           "temporary_work": {
@@ -9295,8 +9286,7 @@
               "mean_time_ms": 28743.0075,
               "min_time_ms": 0.473,
               "stddev_time_ms": 17682.814172870185,
-              "total_time_ms": 114972.03,
-              "variant_query": null
+              "total_time_ms": 114972.03
             }
           ],
           "query_hash": "0x2E60BD5F2B1B322C",
@@ -9305,12 +9295,9 @@
           "rows": 4.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.473,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.473
           },
           "stddev_time_ms": 17682.814172870185,
           "temporary_work": {
@@ -9540,8 +9527,7 @@
               "mean_time_ms": 23899.592333333338,
               "min_time_ms": 0.239,
               "stddev_time_ms": 17974.577463416757,
-              "total_time_ms": 71698.777,
-              "variant_query": null
+              "total_time_ms": 71698.777
             }
           ],
           "query_hash": "0xBFDD28B1F8A5DB44",
@@ -9550,12 +9536,9 @@
           "rows": 3.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.239,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.239
           },
           "stddev_time_ms": 17974.577463416757,
           "temporary_work": {
@@ -9771,8 +9754,7 @@
               "mean_time_ms": 601.31325,
               "min_time_ms": 0.193,
               "stddev_time_ms": 1040.7493898728394,
-              "total_time_ms": 2405.253,
-              "variant_query": null
+              "total_time_ms": 2405.253
             }
           ],
           "query_hash": "0x70DEB9137DC844BA",
@@ -9781,12 +9763,9 @@
           "rows": 3.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.193,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.193
           },
           "stddev_time_ms": 1040.7493898728394,
           "temporary_work": {
@@ -9851,8 +9830,7 @@
               "mean_time_ms": 0.04556,
               "min_time_ms": 0.003,
               "stddev_time_ms": 0.3909658471443936,
-              "total_time_ms": 9.112,
-              "variant_query": null
+              "total_time_ms": 9.112
             }
           ],
           "query_hash": "0xDF29AECD4582DE17",
@@ -9861,12 +9839,9 @@
           "rows": 150.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.003,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.003
           },
           "stddev_time_ms": 0.3909658471443936,
           "temporary_work": {
@@ -11289,8 +11264,7 @@
               "mean_time_ms": 45.29762666666666,
               "min_time_ms": 18.257,
               "stddev_time_ms": 30.44940285063075,
-              "total_time_ms": 13589.288,
-              "variant_query": null
+              "total_time_ms": 13589.288
             }
           ],
           "query_hash": "0xE5DE7151675598B3",
@@ -11299,12 +11273,9 @@
           "rows": 300.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 18.257,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 18.257
           },
           "stddev_time_ms": 30.44940285063075,
           "temporary_work": {
@@ -11687,8 +11658,7 @@
               "mean_time_ms": 528.407,
               "min_time_ms": 528.407,
               "stddev_time_ms": null,
-              "total_time_ms": 528.407,
-              "variant_query": null
+              "total_time_ms": 528.407
             }
           ],
           "query_hash": "0xAC0F7C57637DD3EA",
@@ -11697,12 +11667,9 @@
           "rows": 30000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 528.407,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 528.407
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -12533,8 +12500,7 @@
               "mean_time_ms": 15015.279166666667,
               "min_time_ms": 15008.227,
               "stddev_time_ms": 3.4840133242784823,
-              "total_time_ms": 90091.675,
-              "variant_query": null
+              "total_time_ms": 90091.675
             }
           ],
           "query_hash": "0xCE8A3BF747BC6C47",
@@ -12543,12 +12509,9 @@
           "rows": 0.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 15008.227,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 15008.227
           },
           "stddev_time_ms": 3.4840133242784823,
           "temporary_work": {
@@ -12619,8 +12582,7 @@
               "mean_time_ms": 13.16272,
               "min_time_ms": 4.837,
               "stddev_time_ms": 18.253915434229445,
-              "total_time_ms": 329.068,
-              "variant_query": null
+              "total_time_ms": 329.068
             }
           ],
           "query_hash": "0x5DA4E11A569A7C0C",
@@ -12629,12 +12591,9 @@
           "rows": 500000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 4.837,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 4.837
           },
           "stddev_time_ms": 18.253915434229445,
           "temporary_work": {

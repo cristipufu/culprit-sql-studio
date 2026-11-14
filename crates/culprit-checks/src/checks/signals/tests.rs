@@ -225,6 +225,7 @@ fn with_pressure(engine: Engine, f: impl FnOnce(&mut Pressure)) -> Snapshot {
 #[test]
 fn slow_tempdb_and_log() {
     let file = |name: &str, db: &str, kind, reads: f64, read_ms: f64, writes: f64, write_ms: f64| FileIo {
+        context: culprit_core::FileIoContext::STORAGE,
         name: name.into(),
         kind,
         database: Some(db.into()),

@@ -198,8 +198,38 @@ fn histogram(sorted: &[f64]) -> Vec<[f64; 3]> {
         let i = (((ms.max(0.001).ln() - lo) / width) as usize).min(n - 1);
         buckets[i][2] += 1.0;
     }
+    buckets[0][0] = low;
+    buckets[n - 1][1] = high.max(buckets[n - 1][0] + f64::EPSILON);
     buckets.retain(|b| b[2] > 0.0);
     buckets
+}
+
+fn captured_distribution(sorted: &[f64]) -> culprit_core::RuntimeDistribution {
+    use culprit_core::{
+        DistributionPopulation, RuntimeDistribution, RuntimeDistributionOrigin, RuntimeDuration,
+        RuntimeHistogramBucket, RuntimeQuantile,
+    };
+    let mut observed = RuntimeDistribution {
+        source: "mysql.slow_log".into(),
+        origin: RuntimeDistributionOrigin::CapturedRuns,
+        population: DistributionPopulation::CapturedSamples { sample_count: sorted.len().to_string() },
+        p50: percentile(sorted, 0.5).map(RuntimeQuantile::sample),
+        p95: percentile(sorted, 0.95).map(RuntimeQuantile::sample),
+        p99: percentile(sorted, 0.99).map(RuntimeQuantile::sample),
+        histogram: histogram(sorted)
+            .into_iter()
+            .map(|[lower, upper, count]| RuntimeHistogramBucket {
+                lower: RuntimeDuration::Milliseconds { value: lower },
+                upper: RuntimeDuration::Milliseconds { value: upper },
+                samples: (count as u64).to_string(),
+            })
+            .collect(),
+        issue: None,
+    };
+    if !observed.is_valid() {
+        observed.issue = Some(culprit_core::RuntimeDistributionIssue::InvalidNativeValues);
+    }
+    observed
 }
 
 pub struct Collected {
@@ -253,6 +283,7 @@ pub fn workload(
             let trend = timeline.as_ref().map(|(t, _)| query_trend(runs, &prints, &g.key, t));
             QueryStat {
                 plan_history: None,
+                variant_family: None,
                 resolved_write_target: None,
                 requests: None,
                 id: id.clone(),
@@ -282,10 +313,7 @@ pub fn workload(
                 plan_id: None,
                 spread: Some(Spread {
                     min_ms: sorted.first().copied(),
-                    p50_ms: percentile(&sorted, 0.5),
-                    p95_ms: percentile(&sorted, 0.95),
-                    p99_ms: percentile(&sorted, 0.99),
-                    histogram: histogram(&sorted),
+                    distributions: vec![captured_distribution(&sorted)],
                     lock_ms: g.lock_ms,
                 }),
             }
@@ -592,8 +620,19 @@ mod tests {
         assert_eq!(lookup.text, "SELECT * FROM t WHERE id = ?");
         assert_eq!(lookup.executions, 40.0);
         let spread = lookup.spread.as_ref().unwrap();
-        assert_eq!((spread.min_ms, spread.p50_ms, spread.p99_ms), (Some(100.0), Some(119.0), Some(139.0)));
-        assert!(!spread.histogram.is_empty());
+        let observed = &spread.distributions[0];
+        assert!(observed.is_usable());
+        assert_eq!(
+            (
+                spread.min_ms,
+                observed.p50.as_ref().and_then(|q| q.upper_ms()),
+                observed.p99.as_ref().and_then(|q| q.upper_ms())
+            ),
+            (Some(100.0), Some(119.0), Some(139.0))
+        );
+        assert_eq!(observed.population.sample_count(), Some(40));
+        assert!(matches!(observed.population, culprit_core::DistributionPopulation::CapturedSamples { .. }));
+        assert!(!observed.histogram.is_empty());
         let timeline = w.timeline.as_ref().unwrap();
         assert_eq!(timeline.source, TimelineSource::SlowLog);
         assert_eq!(timeline.executions.iter().sum::<f64>(), 41.0);

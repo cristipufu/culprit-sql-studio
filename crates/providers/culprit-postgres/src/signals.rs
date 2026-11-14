@@ -398,6 +398,7 @@ async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<Fi
             let timed =
                 |ms: Option<f64>| if kind == FileKind::Log { ms.filter(|m| *m > 0.0) } else { ms.filter(|_| timing) };
             out.push(FileIo {
+                context: culprit_core::FileIoContext::STORAGE,
                 name: name.into(),
                 kind,
                 database: None,
@@ -422,6 +423,7 @@ async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<Fi
             && let Some(reads) = r.number("blks_read").filter(|n| *n > 0.0)
         {
             out.push(FileIo {
+                context: culprit_core::FileIoContext::STORAGE,
                 name: "Tables and indexes".into(),
                 kind: FileKind::Data,
                 database: None,
@@ -450,6 +452,7 @@ async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<Fi
         && let Some(syncs) = r.number("wal_sync").filter(|n| *n > 0.0)
     {
         out.push(FileIo {
+            context: culprit_core::FileIoContext::STORAGE,
             name: "WAL".into(),
             kind: FileKind::Log,
             database: None,

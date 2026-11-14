@@ -3926,6 +3926,17 @@ table.grid th.col-query {
   white-space: nowrap;
 }
 
+.rs-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+}
+
+.rs-population {
+  overflow-wrap: anywhere;
+}
+
 .rs-track {
   position: relative;
   height: 34px;
@@ -3986,6 +3997,11 @@ table.grid th.col-query {
   color: var(--text-3);
   border-bottom: 6px solid color-mix(in srgb, var(--lane) 60%, transparent);
   line-height: 10px;
+  white-space: nowrap;
+}
+
+.rs-q-tick {
+  width: 2px;
 }
 
 .rs-values {
@@ -12115,6 +12131,19 @@ button.as-callout:hover {
 
 .io-row.repl {
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.4fr);
+}
+
+.io-source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.io-context {
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .io-name {

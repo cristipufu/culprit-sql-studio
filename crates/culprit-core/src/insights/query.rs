@@ -393,36 +393,6 @@ pub(super) fn scalar_udf(cx: &Cx) -> Vec<Draft> {
     out
 }
 
-pub(super) fn table_variable(cx: &Cx) -> Vec<Draft> {
-    if cx.engine() != Engine::Mssql {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for n in cx.nodes.iter().filter(|n| table_variable_of(n).is_some()) {
-        let name = table_variable_of(n).unwrap_or_default();
-        let actual = n.act_rows;
-        if n.est_rows_total() > 1.5 && actual.is_none_or(|a| a < 10.0 * n.est_rows_for_runs()) {
-            continue;
-        }
-        let mut d = Draft::new("table-variable", InsightArea::Query, cx.subtree(n), vec![n.id]);
-        match actual {
-            Some(a) if a >= 1_000.0 => {
-                d.floor = Severity::Medium;
-                d.title = t!("insight.table_variable.title_held", name = &name, held = format::count(a));
-            }
-            _ => {
-                d.cap = Severity::Low;
-                d.title = t!("insight.table_variable.title", name = &name);
-            }
-        }
-        d.detail = t!("insight.table_variable.detail");
-        d.fix = t!("insight.table_variable.fix", name = &name, temporary = name.trim_start_matches('@'));
-        d.verify = t!("insight.table_variable.verify");
-        out.push(d);
-    }
-    out
-}
-
 pub(super) fn nested_loops(cx: &Cx) -> Vec<Draft> {
     let cross = cross_joins(cx);
     let not_in_ids: Vec<u32> = not_in(cx).iter().flat_map(|d| d.nodes.clone()).collect();

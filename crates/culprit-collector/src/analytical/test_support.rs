@@ -6,7 +6,9 @@ use crate::delivery::{
 use culprit_core::telemetry::*;
 
 mod queries;
-pub use queries::{query_evidence, query_wait_evidence_cases, wait_semantics};
+pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};
+mod cached_runtime;
+pub use cached_runtime::cached_runtime_evidence_cases;
 mod observations;
 pub use observations::{
     memory_failure_evidence, memory_failure_observation, request_memory_evidence, retention_coverage_only_evidence,
@@ -17,9 +19,11 @@ pub use request_memory::request_memory_evidence_cases;
 mod session_memory;
 pub use session_memory::session_memory_evidence_cases;
 mod page_waits;
-pub use page_waits::page_wait_evidence_cases;
+pub use page_waits::{page_wait_evidence_cases, page_wait_tamper_cases};
 mod statement_work;
 pub use statement_work::statement_work_evidence_cases;
+mod task_space;
+pub use task_space::{assert_task_space_capture, task_space_evidence_cases};
 mod projection;
 pub use projection::JsonProjection;
 mod native_failures;
@@ -425,6 +429,7 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
         maximum: None,
     });
     let query = TelemetryRecord::QueryDefinition(QueryDefinition {
+        variant_family: None,
         id: identity.definition_id(&source).unwrap(),
         identity,
         origin: StatementOrigin::Application,

@@ -289,14 +289,14 @@ fn plan_warnings_say_what_the_plan_warned_in_english() {
                 note: Implicit conversion\n\
                 fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(200). Changing a column rewrites it and the indexes on it.\n\
                 verify: Re-scan after the change; the warning should be gone from this query's plan.",
-            "A read from customers runs out of memory and spills to disk · Medium · High\n\
-                A sort or hash in this plan needed more memory than it was granted and wrote the overflow to disk (tempdb or temp files). Spills usually come from a row estimate that was far too low, or a sort the index could have avoided.\n\
+            "A read from customers: Nested Loops spilled to tempdb · Medium · High\n\
+                Nested Loops used tempdb for part of this execution’s work. The spill alone does not establish its elapsed cost or underlying cause.\n\
                 impact: 54% of DB time\n\
                 metric: Share of DB time\n\
                 metric: Average duration\n\
                 note: Spills to disk\n\
-                fix: Update statistics on the tables involved; if the estimate is still far off, add an index that delivers rows in the needed order so the sort disappears.\n\
-                verify: Re-scan after the change; the warning should be gone from this query's plan.",
+                fix: Compare input rows and width with estimates, then inspect requested, granted and used memory, applicable limits and concurrent demand. Reduce unnecessary input work where possible; check native memory grant feedback eligibility and status before relying on it.\n\
+                verify: Compare representative runs under equivalent load: spill warnings or volume, elapsed time, CPU and grant waiting. Fewer spills alone do not establish a better result; a larger grant can increase concurrency pressure.",
             "A type mismatch on customers.email stopped a read from customers from seeking an index · Medium · High\n\
                 The database has to convert customers.email before comparing it with a parameter of a different type (`CONVERT_IMPLICIT(nvarchar(200),[culprit_demo].[shop].[customers].[email],0)=[@P1]`). SQL Server warns that the conversion keeps it from searching an index, so it reads every row instead. The application declares its parameters as `@P1 nvarchar(4000)`: Unicode strings compared with a non-Unicode column.\n\
                 impact: 54% of DB time\n\
@@ -306,38 +306,38 @@ fn plan_warnings_say_what_the_plan_warned_in_english() {
                 note: Implicit conversion\n\
                 fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(200). Changing a column rewrites it and the indexes on it.\n\
                 verify: Re-scan after the change; the warning should be gone from this query's plan.",
-            "A read from customers ran out of memory and spilled to disk · Medium · High\n\
-                A sort or hash in this plan needed more memory than it was granted and wrote the overflow to disk (tempdb or temp files). Spills usually come from a row estimate that was far too low, or a sort the index could have avoided.\n\
+            "A read from customers: Nested Loops spilled to tempdb · Medium · High\n\
+                Nested Loops used tempdb for part of this execution’s work. The spill alone does not establish its elapsed cost or underlying cause.\n\
                 impact: 54% of DB time\n\
                 metric: Share of DB time\n\
                 metric: Average duration\n\
                 note: Spills to disk\n\
-                fix: Update statistics on the tables involved; if the estimate is still far off, add an index that delivers rows in the needed order so the sort disappears.\n\
-                verify: Re-scan after the change; the warning should be gone from this query's plan.",
-            "A read from orders runs out of memory and spills to disk · Medium · High\n\
-                A sort or hash in this plan needed more memory than it was granted and wrote the overflow to disk (tempdb or temp files). Spills usually come from a row estimate that was far too low, or a sort the index could have avoided.\n\
+                fix: Compare input rows and width with estimates, then inspect requested, granted and used memory, applicable limits and concurrent demand. Reduce unnecessary input work where possible; check native memory grant feedback eligibility and status before relying on it.\n\
+                verify: Compare representative runs under equivalent load: spill warnings or volume, elapsed time, CPU and grant waiting. Fewer spills alone do not establish a better result; a larger grant can increase concurrency pressure.",
+            "A read from orders: Gather Merge recorded temporary-file work · Medium · High\n\
+                This operator recorded temporary work under its native memory policy. Its volume or batch count alone does not establish elapsed cost or a suitable work_mem value.\n\
                 impact: 45% of DB time\n\
                 metric: Share of DB time\n\
                 metric: Average duration\n\
                 note: Spills to disk\n\
-                fix: Raise work_mem for this workload (per role or per session), or add an index that delivers rows in the needed order so the sort disappears.\n\
-                verify: Re-scan after the change; the warning should be gone from this query's plan.",
-            "A read from orders runs out of memory and spills to disk · Low · High\n\
-                A sort or hash in this plan needed more memory than it was granted and wrote the overflow to disk (tempdb or temp files). Spills usually come from a row estimate that was far too low, or a sort the index could have avoided.\n\
+                fix: Compare actual input rows, row width and operator memory use with work_mem and, for hash operations, hash_mem_multiplier. Reduce unnecessary input work where possible; test any session or role memory change under representative concurrency before choosing a value.\n\
+                verify: Compare representative executions under equivalent load: temporary-file use or batches, elapsed time, CPU and waiting. A larger work_mem can multiply memory demand across operators, workers and concurrent executions; fewer spills alone do not establish a better result.",
+            "A read from orders: Query block reported a spill · Low · High\n\
+                The operator reported a spill without a recorded merge-pass count. The warning alone does not establish temporary I/O volume, elapsed cost or the responsible memory setting.\n\
                 impact: 77% of DB time\n\
                 metric: Share of DB time\n\
                 metric: Average duration\n\
                 note: Spills to disk\n\
-                fix: Raise tmp_table_size and max_heap_table_size for this workload so the temporary table stays in memory, or add an index that returns rows already ordered or grouped.\n\
-                verify: Re-scan after the change; the warning should be gone from this query's plan.",
-            "A read from orders runs out of memory and spills to disk · Medium · High\n\
-                A sort or hash in this plan needed more memory than it was granted and wrote the overflow to disk (tempdb or temp files). Spills usually come from a row estimate that was far too low, or a sort the index could have avoided.\n\
+                fix: Identify whether the native spill came from filesort or an internal temporary table. Compare input size and the applicable sort_buffer_size or temporary-table limits before changing session memory, then test equivalent work under concurrency.\n\
+                verify: Compare equivalent input and concurrency: merge passes or temporary-file work, latency and CPU. Measure the effect of any session-memory change; a zero pass count is not required for a better result.",
+            "A read from orders has a recorded spill warning · Medium · High\n\
+                The captured plan reports a spill. This warning alone does not establish its size, elapsed cost or cause.\n\
                 impact: 50% of DB time\n\
                 metric: Share of DB time\n\
                 metric: Average duration\n\
                 note: Spills to disk\n\
-                fix: Give the sort an index that returns rows in the order asked for; otherwise PRAGMA temp_store = MEMORY keeps temporary b-trees in memory, and a larger cache_size helps them fit.\n\
-                verify: Re-scan after the change; the warning should be gone from this query's plan.",
+                fix: Identify the spilling operator and compare actual input rows, row width, memory use and limits for representative executions. Establish the mechanism before changing statistics, indexes or memory settings.\n\
+                verify: Obtain a measured plan in an owned test environment and compare equivalent inputs and concurrency: spill volume, latency, CPU and waiting. A spill need not disappear for the overall result to improve.",
         ]
     );
     let join = |s: Snapshot, text: &str| {

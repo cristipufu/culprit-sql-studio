@@ -1,27 +1,74 @@
-//! Native parameter-sensitive-plan aggregates use the shared runtime relation.
-use crate::sql_time::utc_offset_iso;
-pub(crate) fn variants_sql(ids: &str) -> String {
-    format!(
-        r#"
-{window}
-{relation}
-SELECT v.parent_query_id, v.query_variant_query_id AS variant_id, p.plan_id,
-  SUM(rs.count_executions) AS executions,
-  SUM(rs.culprit_duration_us) / 1000.0 AS total_ms,
-  MIN(rs.min_duration) / 1000.0 AS min_ms, MAX(rs.max_duration) / 1000.0 AS max_ms,
-  {first} AS first_seen, {last} AS last_seen,
-  MAX(CAST(p.is_forced_plan AS int)) AS is_forced
-FROM sys.query_store_query_variant v
-JOIN sys.query_store_plan p ON p.query_id = v.query_variant_query_id
-JOIN culprit_runtime rs ON rs.plan_id = p.plan_id
-JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id = rs.runtime_stats_interval_id
-WHERE {membership} AND v.parent_query_id IN ({ids})
-GROUP BY v.parent_query_id, v.query_variant_query_id, p.plan_id OPTION(MAXDOP 1)
-"#,
-        window = super::window_sql::DECLARATION,
-        membership = super::window_sql::MEMBERSHIP,
-        relation = crate::query_store::runtime::relation(false),
-        first = utc_offset_iso("MIN(rs.first_execution_time)"),
-        last = utc_offset_iso("MAX(rs.last_execution_time)"),
-    )
+//! Query-variant relationships are native metadata, never a second runtime population.
+use super::{catalog_sql, decode};
+use crate::{read::integer, value::Rec};
+use culprit_core::{QueryVariantFamily, Result, telemetry::CollectionStop};
+
+macro_rules! readable {
+    () => {
+        "CASE WHEN OBJECT_ID(N'sys.query_store_query_variant') IS NOT NULL THEN CASE WHEN HAS_PERMS_BY_NAME(N'sys.query_store_query_variant',N'OBJECT',N'SELECT')=1 THEN 1 ELSE 2 END WHEN CAST(SERVERPROPERTY('ProductMajorVersion') AS int)<16 AND CAST(SERVERPROPERTY('EngineEdition') AS int) IN(2,3,4) THEN 0 ELSE 2 END"
+    };
+}
+pub(crate) use readable;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Availability {
+    Unsupported,
+    Readable,
+    Unavailable,
+}
+
+impl Availability {
+    pub(crate) fn decode(row: &Rec, column: &str) -> Result<Self> {
+        match integer(row, column)? {
+            0 => Ok(Self::Unsupported),
+            1 => Ok(Self::Readable),
+            2 => Ok(Self::Unavailable),
+            _ => Err(crate::read::invalid_data()),
+        }
+    }
+    pub(crate) fn native_property(self) -> &'static str {
+        match self {
+            Self::Unsupported => "unsupported_native_version",
+            Self::Readable => "native_view_readable",
+            Self::Unavailable => "visibility_unverified",
+        }
+    }
+}
+
+pub(crate) const COLUMNS: &str = concat!(
+    ",v.query_variant_query_id AS family_variant_id,",
+    catalog_sql::query_identity_columns!("v.parent_query_id", "parent", "parent_"),
+    ",",
+    catalog_sql::plan_identity_columns!("dispatcher", "dispatcher_"),
+    ",dispatcher.query_id AS dispatcher_query_id"
+);
+pub(crate) const JOINS: &str = r#"
+LEFT JOIN sys.query_store_query_variant v ON v.query_variant_query_id=ids.id
+LEFT JOIN sys.query_store_query parent ON parent.query_id=v.parent_query_id
+LEFT JOIN sys.query_store_plan dispatcher ON dispatcher.plan_id=v.dispatcher_plan_id"#;
+
+pub(crate) fn decode(row: &Rec) -> Result<Option<QueryVariantFamily>> {
+    if row.str("family_variant_id").is_none() {
+        if row.columns().any(|(name, _)| {
+            (name.starts_with("parent_") || name.starts_with("dispatcher_")) && row.str(name).is_some()
+        }) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        return Ok(None);
+    }
+    let decode = || {
+        let variant = decode::query_identity(row)?;
+        if variant.query_id != integer(row, "family_variant_id")?.to_string() {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        let parent = decode::prefixed_query_identity(row, "parent_")?;
+        if parent.query_id != integer(row, "dispatcher_query_id")?.to_string() {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        let dispatcher = decode::plan_identity_for_query(row, "dispatcher_", parent.clone())?
+            .ok_or_else(|| CollectionStop::SourceChanged.error())?;
+        let family = QueryVariantFamily { variant, parent, dispatcher };
+        family.is_valid().then_some(family).ok_or_else(|| CollectionStop::SourceChanged.error())
+    };
+    decode().map(Some).map_err(|_| CollectionStop::SourceChanged.error())
 }

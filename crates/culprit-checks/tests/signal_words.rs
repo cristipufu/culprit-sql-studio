@@ -136,7 +136,7 @@ Tables whose pages hold far fewer rows than they could, estimated from row count
 large-rows: Tables whose rows are mostly large values
 Tables whose rows average many kilobytes, most of it in large values kept apart from the rows (SQL Server's LOB pages, PostgreSQL's TOAST): every statement that reads whole rows pulls them in, every write that sets them writes them again. From the catalog's page counts; no data is read.
 slow-storage: Storage that's slow to read or write
-Average read and write latency per database file since startup: sys.dm_io_virtual_file_stats, pg_stat_io (16+, with track_io_timing), performance_schema file I/O.
+Recorded timing per native storage operation, with each source’s scope and reset period. Cache pages, remote page responses and log-service accounting remain separate.
 connection-churn: Applications that connect for every request
 New connections per second since startup (SQL Server logins, PostgreSQL 14+ sessions, MySQL and MariaDB Connections), with how long sessions last and how many came from a pool where the engine says.
 replica-lag: Replicas that fall behind
@@ -1898,6 +1898,7 @@ verify: Re-scan: the columns should have histograms, and EXPLAIN ANALYZE should 
 
 fn file(name: &str, db: &str, kind: FileKind, reads: (f64, f64, f64), writes: (f64, f64)) -> culprit_core::FileIo {
     culprit_core::FileIo {
+        context: culprit_core::FileIoContext::STORAGE,
         name: name.into(),
         kind,
         database: Some(db.into()),
@@ -1950,76 +1951,80 @@ fn slow_storage_on_sql_server() {
     findings.extend(run("slow-storage", &s));
     says(
         &findings,
-        r#"id: slow-storage:culprit_demo:shop_data
+        r#"id: slow-storage:6817c050a7d3951c908203245f9475f6565d092982e50692c483d095d65c10a0
 title: Recorded reads from culprit_demo's data file shop_data averaged 40 ms
-summary: Reads from culprit_demo's data file shop_data took 40 ms on average across 50K reads since SQL Server started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now.
+summary: Reads from culprit_demo's data file shop_data took 40 ms on average across 50K reads (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 40 ms per read
 metric: Average read
 metric: Reads
 metric: File = shop_data
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
+caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:reports:data files
-title: Recorded reads from reports's data files averaged 30 ms, mostly large reads of 500 KB
-summary: Reads from reports's data files took 30 ms on average across 10K reads since SQL Server started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now. These reads average 500 KB each: mostly large sequential reads (backups, CHECKDB, read-ahead of big scans), which take longer each than the page-sized reads queries wait on, so the average overstates what queries see.
+id: slow-storage:3ed8635cc33df80ff687a375f51b0e98b9c7dec535422a907997a015a570cc4a
+title: Recorded reads from reports's data files averaged 30 ms and 500 KB per operation
+summary: Reads from reports's data files took 30 ms on average across 10K reads (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay. These requests average 500 KB each. Large requests can take longer than smaller requests; this counter does not identify a backup, scan or issuing query.
 impact: 30 ms per read
 metric: Average read
 metric: Reads
 metric: Files = other_data, other_2
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:tempdb:tempdev
+id: slow-storage:29df8d6154b1e25c648638d588a4a74a9280e779856f6f9b5c462b050034b08e
 title: Recorded reads from tempdb averaged 30 ms
-summary: Reads from tempdb took 30 ms on average across 5.0K reads since SQL Server started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now.
+summary: Reads from tempdb took 30 ms on average across 5.0K reads (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per read
 metric: Average read
 metric: Reads
 metric: File = tempdev
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:culprit_demo:shop_log
+id: slow-storage:6da3fed4b95948087b29d3b5cf52dd76b9d858586c8e11a635b1376c789a6823
 title: Recorded log writes to culprit_demo's log averaged 20 ms
-summary: Writes to culprit_demo's log took 20 ms on average across 20K writes since SQL Server started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds and log writes in under 2 ms; when it happens during a query it can delay reads that miss memory and every commit. This historical average does not establish a delay now.
+summary: Writes to culprit_demo's log took 20 ms on average across 20K writes (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 20 ms per write
 metric: Average write
 metric: Writes
 metric: File = shop_log
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
+caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:culprit_demo:shop_log
+id: slow-storage:d349ac632071cf96dfa9c7f5feb82b3f34c252d577aec10b338828f207de2924
 title: Recorded log flushes to culprit_demo's log averaged 20 ms
-summary: Flushes to culprit_demo's log took 20 ms on average across 20K flushes since SQL Server started. Healthy SSD storage answers in a few milliseconds and log flushes in under 2 ms; when it happens during a query it can delay reads that miss memory and every commit. This historical average does not establish a delay now.
+summary: Flushes to culprit_demo's log took 20 ms on average across 20K flushes (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 20 ms per flush
 metric: Average flush
 metric: Flushes
 metric: File = shop_log
-fix: In Azure SQL Database the service tier decides this: General Purpose reads from remote storage (5 to 10 ms is normal there), Hyperscale serves most reads from a local cache and the rest from page servers, Business Critical uses local SSDs. Check avg_data_io_percent and avg_log_write_percent in sys.dm_db_resource_stats: near 100% means the tier's I/O limit is throttling, so add vCores or move to a faster tier; well below it, cut the reads instead (indexes, fewer full scans). A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent storage-operation timing with the database’s I/O limits, query waits and application demand. Establish which resource is limiting the work before changing the service tier or reducing query reads. Sample Where time goes → Right now during representative load; the cumulative file average includes older operations.
 verify: Compare two readings after the change with the same source and reset period: divide the additional flush time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
+caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:culprit_demo:shop_log
+id: slow-storage:d349ac632071cf96dfa9c7f5feb82b3f34c252d577aec10b338828f207de2924
 title: Recorded log flushes to culprit_demo's log averaged 20 ms
-summary: Flushes to culprit_demo's log took 20 ms on average across 20K flushes since SQL Server started. Healthy SSD storage answers in a few milliseconds and log flushes in under 2 ms; when it happens during a query it can delay reads that miss memory and every commit. This historical average does not establish a delay now.
+summary: Flushes to culprit_demo's log took 20 ms on average across 20K flushes (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 20 ms per flush
 metric: Average flush
 metric: Flushes
 metric: File = shop_log
-fix: On Managed Instance General Purpose each data and log file is a remote disk whose IOPS and throughput come from the file's size (up to 128 GB about 500 IOPS, up to 512 GB about 2,300, up to 1 TB 5,000): growing a busy file past the next size step raises its limit, and the next-gen General Purpose tier sets IOPS apart from size. Business Critical uses local SSDs. Compare each file's latency in sys.dm_io_virtual_file_stats with its size, and cut the reads too (indexes, fewer full scans). A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the instance’s actual storage tier, file limits and competing load. Verify the applicable file-size and IOPS policy before changing allocation or provisioning. Sample Where time goes → Right now during representative load and investigate the queries that issue the work.
 verify: Compare two readings after the change with the same source and reset period: divide the additional flush time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
-caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences."#,
+caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
+caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits."#,
     );
 }
 
@@ -2066,78 +2071,77 @@ fn slow_storage_on_postgres_and_mysql() {
     findings.extend(run("slow-storage", &s));
     says(
         &findings,
-        r#"id: slow-storage:demo:relation
+        r#"id: slow-storage:bcc9cd4e9ec273c4c234d6c62b597f8449daf49b15da046c64f83870e31e3028
 title: Recorded reads from table and index files averaged 30 ms
-summary: Reads from table and index files took 30 ms on average across 5.0K reads (this database, since 2026-10-01T00:00:00Z). Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now. PostgreSQL's numbers include reads the operating system served from its cache, so reads that reached the disk were slower still.
+summary: Reads from table and index files took 30 ms on average across 5.0K reads (this database, since 2026-10-01T00:00:00Z). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per read
 metric: Average read
 metric: Reads
 metric: File = relation
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
-caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:demo:relation
+id: slow-storage:6616205167519df730d3b9dea72eb416648ff460074a03a05649ad2605bffdd1
 title: Recorded reads from temporary tables averaged 30 ms
-summary: Reads from temporary tables took 30 ms on average across 5.0K reads (whole server, over an unknown statistics period). Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now. PostgreSQL's numbers include reads the operating system served from its cache, so reads that reached the disk were slower still.
+summary: Reads from temporary tables took 30 ms on average across 5.0K reads (whole server, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per read
 metric: Average read
 metric: Reads
 metric: File = relation
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:demo:relation
+id: slow-storage:8167f31d7acfc73263f0c842cb46940e2ebff8e17d8180bc6266f22d9bef1b92
 title: Recorded log writes to WAL averaged 30 ms
-summary: Writes to WAL took 30 ms on average across 5.0K writes (recorded file statistics, over an unknown statistics period). Healthy SSD storage answers in a few milliseconds and log writes in under 2 ms; when it happens during a query it can delay reads that miss memory and every commit. This historical average does not establish a delay now. PostgreSQL's numbers include reads the operating system served from its cache, so reads that reached the disk were slower still.
+summary: Writes to WAL took 30 ms on average across 5.0K writes (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per write
 metric: Average write
 metric: Writes
 metric: File = relation
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:shop:redacted-5fc3de68dedcbae19de6274bd873c094985dac3a6cef0c20d60248884ae2905e
+id: slow-storage:994e1c572d6e342290d29998165ecfee1deee108c7df3679fa1f0bca4d0abaf0
 title: Recorded reads from ./shop/orders.ibd averaged 30 ms
-summary: Reads from ./shop/orders.ibd took 30 ms on average across 5.0K reads since MySQL started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now. The timings include reads the operating system served from its cache unless InnoDB uses O_DIRECT.
+summary: Reads from ./shop/orders.ibd took 30 ms on average across 5.0K reads (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per read
 metric: Average read
 metric: Reads
 metric: File = ./shop/orders.ibd
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:shop:temp files
+id: slow-storage:7d31bff36bb0840966b5acd35ab625daac37fd897347a58686d6d7fdcf9384f5
 title: Recorded reads from temporary files averaged 30 ms
-summary: Reads from temporary files took 30 ms on average across 10K reads since MySQL started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now. The timings include reads the operating system served from its cache unless InnoDB uses O_DIRECT.
+summary: Reads from temporary files took 30 ms on average across 10K reads (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per read
 metric: Average read
 metric: Reads
 metric: Files = ./#innodb_temp/temp_1.ibt, ./#innodb_temp/temp_2.ibt
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:shop:redo log
-title: Recorded log writes to redo log averaged 30 ms
-summary: Writes to redo log took 30 ms on average across 10K writes since MySQL started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds and log writes in under 2 ms; when it happens during a query it can delay reads that miss memory and every commit. This historical average does not establish a delay now. The timings include reads the operating system served from its cache unless InnoDB uses O_DIRECT.
+id: slow-storage:89316c792d9dc3e296d5e2b33eeb157e89723654ebd87781f7939e0488dc5bb2
+title: Recorded log writes to the log files averaged 30 ms
+summary: Writes to the log files took 30 ms on average across 10K writes (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per write
 metric: Average write
 metric: Writes
-metric: File = redo log
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+metric: Files = ./ib_logfile0, ./ib_logfile1
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits."#,
@@ -2161,27 +2165,39 @@ fn slow_storage_of_several_files_on_mysql() {
     );
     says(
         &run("slow-storage", &s),
-        r#"id: slow-storage:shop:data files
+        r#"id: slow-storage:419203d48689c91b9850db148ffc2c2901cf174ea57dd5fde3566e1cc945f342
 title: Recorded reads from data files averaged 30 ms
-summary: Reads from data files took 30 ms on average across 10K reads since MySQL started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds; when it happens during a query it can delay reads that miss memory. This historical average does not establish a delay now. The timings include reads the operating system served from its cache unless InnoDB uses O_DIRECT.
+summary: Reads from data files took 30 ms on average across 10K reads (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per read
 metric: Average read
 metric: Reads
 metric: Files = ./shop/orders.ibd, ./shop/items.ibd
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
 
-id: slow-storage:shop:log files
-title: Recorded log writes to the log files averaged 30 ms
-summary: Writes to the log files took 30 ms on average across 10K writes since MySQL started or its statistics were reset, 3.0 days ago. Healthy SSD storage answers in a few milliseconds and log writes in under 2 ms; when it happens during a query it can delay reads that miss memory and every commit. This historical average does not establish a delay now. The timings include reads the operating system served from its cache unless InnoDB uses O_DIRECT.
+id: slow-storage:26f85266b860b61d3236e18be4f9598b86991fe742257861b5e6825df049ea5b
+title: Recorded log flushes to ./binlog.000001 averaged 30 ms
+summary: Flushes to ./binlog.000001 took 30 ms on average across 5.0K flushes (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
+impact: 30 ms per flush
+metric: Average flush
+metric: Flushes
+metric: File = ./binlog.000001
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
+verify: Compare two readings after the change with the same source and reset period: divide the additional flush time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
+caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
+caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
+
+id: slow-storage:acb75fc831c2bd1ec5c1154d2228de5eb7d8f0a3984452c31851abd97ebafca6
+title: Recorded log writes to ./undo_001 averaged 30 ms
+summary: Writes to ./undo_001 took 30 ms on average across 5.0K writes (recorded file statistics, over an unknown statistics period). These are storage-interface timings and may include cache-served work. Compare recent operations with query waits before attributing a delay to storage; this historical average does not establish a current bottleneck or commit delay.
 impact: 30 ms per write
 metric: Average write
 metric: Writes
-metric: Files = ./binlog.000001, ./undo_001
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
+metric: File = ./undo_001
+fix: Compare recent operations with the volume’s IOPS and throughput limits and other load on that resource. Check for throttling or competing work before changing storage or query access paths. Sample Where time goes → Right now during representative load; an old cumulative average does not establish the current cause.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits."#,

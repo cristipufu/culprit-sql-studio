@@ -14,6 +14,7 @@ pub(super) struct Description {
     pub physical_incarnation: String,
     pub plan_upper_bound: i64,
     pub replica_group_ids: Vec<String>,
+    pub variant_families: crate::query_store::variants_sql::Availability,
 }
 impl Description {
     pub fn waits_supported(&self) -> bool {
@@ -38,7 +39,7 @@ pub(super) async fn read<R: NativeRead>(
     host: &str,
     port: u16,
 ) -> Result<Description> {
-    let (capture_mode, capture) = settings(session).await?;
+    let settings = settings(session).await?;
     let (database, physical_incarnation) = identity(session, host, port).await?;
     let interval = crate::query_store::intervals::exact(session, request).await?;
     let replica_group_ids = replicas(session).await?;
@@ -51,8 +52,12 @@ pub(super) async fn read<R: NativeRead>(
                 culprit_core::telemetry::QueryHistoryDescription {
                     interval,
                     dimensions: [("replica_group_id".into(), replica_group_ids.clone())].into(),
-                    native_properties: [("capture_mode".into(), capture_mode)].into(),
-                    waits: Some(waits::semantics(capture)),
+                    native_properties: [
+                        ("capture_mode".into(), settings.capture_mode),
+                        ("variant_families".into(), settings.variant_families.native_property().into()),
+                    ]
+                    .into(),
+                    waits: Some(waits::semantics(settings.wait_capture)),
                 },
             ),
             continuity: SourceContinuity::Unverified,
@@ -60,16 +65,28 @@ pub(super) async fn read<R: NativeRead>(
         physical_incarnation,
         plan_upper_bound,
         replica_group_ids,
+        variant_families: settings.variant_families,
     })
 }
 
-pub(super) async fn settings<R: NativeRead>(session: &mut R) -> Result<(String, WaitCaptureState)> {
+pub(super) struct Settings {
+    capture_mode: String,
+    wait_capture: WaitCaptureState,
+    variant_families: crate::query_store::variants_sql::Availability,
+}
+
+pub(super) async fn settings<R: NativeRead>(session: &mut R) -> Result<Settings> {
     let rows = session.query(sql::OPTIONS, vec![], 1).await.map_err(ReadError::into_error)?;
     let row = rows.first().ok_or_else(malformed)?;
     if !matches!(text(row, "actual_state_desc")?.as_str(), "READ_WRITE" | "READ_ONLY") {
         return Err(Error::new(ErrorCode::Unsupported, t!("collection.query_store_unavailable")));
     }
-    Ok((text(row, "query_capture_mode_desc")?, waits::capture_state(row)?))
+    let variant_families = crate::query_store::variants_sql::Availability::decode(row, "variant_families")?;
+    Ok(Settings {
+        capture_mode: text(row, "query_capture_mode_desc")?,
+        wait_capture: waits::capture_state(row)?,
+        variant_families,
+    })
 }
 
 pub(super) async fn identity<R: NativeRead>(

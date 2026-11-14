@@ -1,5 +1,7 @@
 //! Cache definitions retain native compilation identity, raw-content fingerprints and explicit payload availability.
 use super::*;
+mod module_parameters;
+pub use module_parameters::MssqlModuleParameters;
 const MAX_CACHED_TEXT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -43,6 +45,11 @@ pub struct MssqlCachedDefinition {
     pub statement: MssqlCachedPayload,
     /// Estimated XML for the native statement offsets, not an arbitrary statement from the batch.
     pub estimated_plan: MssqlCachedPayload,
+    /// Declared parameter kinds from this SQL handle's original module header, with a separately checked native
+    /// plan-to-SQL-handle binding. This point evidence establishes neither input cardinality nor runtime ownership.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub module_parameters: Option<MssqlModuleParameters>,
 }
 impl MssqlCachedDefinition {
     pub fn is_valid(&self) -> bool {
@@ -50,6 +57,7 @@ impl MssqlCachedDefinition {
             && self.query_plan_hash.as_deref().is_none_or(super::cached_statements::native_query_hash)
             && self.statement.is_valid()
             && self.estimated_plan.is_valid()
+            && self.module_parameters.as_ref().is_none_or(|parameters| parameters.is_valid_for(&self.context))
     }
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         self.statement.redact(engine, DefinitionPayload::sql);

@@ -43,6 +43,15 @@ Compilation statistics link to SQL only when their native query identity matches
 including its initial compilation time, query hash and context. A reused query ID or missing definition withholds
 that link and marks collection partial; independently measured database totals retain their own scope.
 
+Execution outcomes and log volume come from the same summary population as the execution counts and elapsed time.
+A later Query Store statistics reset can preserve the query identity and execution count while replacing the runs;
+Culprit therefore does not reread those costs later and attach them to the earlier denominator.
+
+Native parameter-sensitive plan relationships travel with the exact child query definition. A dispatcher can have
+no runtime row; its identity never creates parent executions or adds the child's work twice. Unverified relationship
+visibility retains readable runtime and makes the missing metadata explicit. Different plan averages or runtime
+tails are investigation candidates, rather than proof of harmful parameter sniffing or a safe plan-forcing remedy.
+
 Compiler working memory, cached plan bytes and execution memory grants are separate measurements. A waiting request is affected; it is not a compiler-memory owner. Recent high-memory compilations are linked as investigation candidates, with their native timestamps. Historical peaks do not prove simultaneous use, and gateway counts across tiers must not be summed into a unique compiler count. Retained plan variants, including dispatcher and parameter-sensitive variants, are not by themselves evidence of a compilation problem.
 
 Gateway pool IDs identify native Resource Governor pools, not Azure elastic-pool resource IDs. Their shared scope does not establish which database consumed the compiler budget.
@@ -88,12 +97,19 @@ participant, not the latch holder, allocation owner or query that caused the I/O
 does not exclude page reuse between reads. Request-level observations omit parallel-task waits, so even an empty
 capture remains partial. The app keeps the explanation brief and puts native details behind disclosure.
 
-The scan's native-read budget allows at most 16 query batches, with a one-second statement deadline and a five-second total budget.
+Mapped rowstore targets can also carry an independent index-partition counter point, including page-latch and
+page-I/O waits. The reader deduplicates at most eight exact database/object/index/partition tuples; it never expands
+this lookup to every partition. The catalog lookup also binds the already checked native partition ID alongside
+the object, index and partition-number guards. An ended request or changed page mapping retains the acquired point
+with its own clock and linkage state. Native reset time remains unknown: these partition totals do not measure the original
+page wait, identify a holder or prove last-leaf contention.
+
+Scans and collector captures share a native budget of at most 18 query batches, with a one-second statement deadline
+and a five-second total budget. Stricter caller limits take precedence.
 Azure SQL admission checks native resource pressure before each header phase and stops immediately when pressure
 is high or unavailable. Page headers can still require I/O and latching: these limits do not establish a CPU/I/O
-quota or justify frequent production polling. Local SQL Server 2022 schema and quiet-capture tests pass;
-owned concurrent INSERT attribution and a controlled write-routing comparison also pass. Cold-page, managed-service
-and representative production-load qualification remain required. A deadline can still encounter the documented
+quota or justify frequent production polling. Cold-page, managed-service and representative production-load
+qualification remain required. A deadline can still encounter the documented
 driver cancellation uncertainty; the reader withholds the capture and fences subsequent work.
 
 Query Store's temporary-space metric retains its documented meaning: average used 8-KiB pages, weighted by recorded
@@ -109,6 +125,32 @@ capture clock. Native grant times without an offset remain separate from UTC rea
 A generation-checked request supplies current SQL context. It does not prove that statement acquired the grant,
 that every granted reservation is used, or that a waiting request owns memory. Unresolved associations remain
 unowned evidence. Historical peaks, compilation memory and tracked session allocations are separate measurements.
+
+Both entry points apply the same 200-row, five-query, three-second statement and ten-second total ceilings, with
+stricter caller limits preserved. The output limit does not by itself bound the native DMV traversal cost.
+
+### Task-level temporary-space observations
+
+`culprit scan shop --collect-task-space` opts into `sys.dm_db_task_space_usage`; normal scans and Live add no task
+query. `--collection task-space` uses the same native reader for a database capture. Scans support SQL Server,
+Managed Instance and Azure SQL where the required native metadata is visible; fleet capture currently requires
+the verified Azure SQL primary identity route. Missing authority or permissions is unavailable evidence.
+
+Each retained session/request/execution-context tuple carries four exact native page counters: user allocations,
+user deallocations, internal allocations and internal deallocations. They are kept separately from session totals,
+historical Query Store space averages and spill measurements. Reservations, object caching and deferred cleanup
+limit their interpretation; they are not a current footprint, peak, spill duration or memory-sizing recommendation.
+
+Current request/statement context is checked before and after bounded SQL enrichment using the shared participant
+reader. The task tuple has no native incarnation evidence, and an earlier statement in the same batch may have
+allocated the pages. Checked current SQL is an investigation link, not an allocator verdict or authority for a
+later task-counter subtraction. Missing or changed context retains the counters and withholds the SQL link.
+
+The native cap is 200 task rows plus one truncation witness, with a one-second statement deadline and five-second
+total budget. Acquisition uses at most six native batches; fleet completion adds a seventh context verification.
+The reader does not sort or aggregate task counters, fetch plan XML, read OS task stacks or change instrumentation.
+The output cap does not bound the native DMV traversal cost, so managed-service and representative-load
+qualification remain required before scheduling production polling. See the [native task-counter semantics](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-db-task-space-usage-transact-sql).
 
 ### Azure SQL deadlock events
 
@@ -182,9 +224,22 @@ Background catalog capture shares the scan readers. Exports preserve native obje
 
 `--collection cached-definitions` captures redacted cache SQL and estimated plans for the native statement offsets. `--collection retained-plans` independently captures last-known batch XML where the native facility already exists; it never enables capture or executes an application statement. Both reuse the app's native identity, statement slicing, payload and retained-plan components. Original-text fingerprints distinguish changes hidden by redaction; missing, encrypted, oversized or unredactable bodies have explicit states. Effective per-body limits also reserve space for JSON encoding and record metadata. Retained XML may be simplified and does not establish a measured runtime for every statement. Native statement counts and local start times retain their own meanings; database-scoped capture settings do not imply the state of server trace flags. Cache eviction and concurrent changes can leave references unresolved, so these are bounded observations rather than a complete execution history.
 
+SQL Server can reuse a cache plan handle after a procedure changes. Both paths independently verify its native
+SQL-handle binding after reading the payload; changed or missing bindings withhold plan enrichment. The original
+module text can qualify a READONLY table parameter for an unambiguous direct scan. Ambiguous function, join or
+subquery scopes remain unclassified; a variable name alone never establishes TVP identity. Historical Query Store
+plans need separate compilation provenance and cannot borrow today's module declarations.
+
+An earlier cache-statistics count or last-start estimate does not date the retained XML's execution. Retained
+records preserve those counters separately; an unproved execution timestamp is left unknown.
+
 Compilation capture shares the scan's Query Store decoder. `--collection query-compilation` exports each retained query's exact compilation count, average compile microseconds and first/last compile timestamps. These are lifetime observations, including Culprit's retained queries, rather than costs attributed to a runtime interval. Native reset continuity remains unknown.
 
-`--collection cached-runtime` captures completed statement-cache work without Query Store: exact execution counts and total/last/minimum/maximum CPU, elapsed, CLR, read/write and row counters. The reader shares native statement context and database ownership with the scan and memory-grant capture. Local timestamps retain their missing offset; reset continuity remains unknown. Zero native plan handles leave unqualified counters unavailable. Cache eviction can remove history between observations. [Native counter meanings and limitations](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-query-stats-transact-sql).
+`--collection cached-runtime` captures completed statement-cache work without Query Store: exact execution counts and total/last/minimum/maximum CPU, elapsed, CLR, read/write and row counters. The reader shares native statement context and database ownership with the scan and memory-grant capture.
+
+Where the native columns are available, the same cache read retains total/last/minimum/maximum spilled 8-KiB pages. Column discovery does not add another cache walk; unavailable spill counters remain unknown. These pages are distinct from current task allocations and do not establish spill duration, an operator or a memory setting.
+
+Local timestamps retain their missing offset; reset continuity remains unknown. Zero native plan handles leave unqualified counters unavailable. Cache eviction can remove history between observations. [Native counter meanings and limitations](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-exec-query-stats-transact-sql).
 
 The advisor combines those requests with workload and plan evidence, unindexed foreign keys, and duplicate, overlapping or unused indexes. Disabling an eligible index keeps its definition and stops its maintenance; `ALTER INDEX … REBUILD` restores it. Clustered, unique and constraint-backed indexes are not treated as disposable unused indexes.
 

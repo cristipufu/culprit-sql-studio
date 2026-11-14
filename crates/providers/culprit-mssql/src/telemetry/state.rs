@@ -10,6 +10,15 @@ const CLOCK: &str = r#"SELECT /* culprit */ CONVERT(varchar(40),SYSUTCDATETIME()
  HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DEFINITION') AS metadata_visibility"#;
 const ENVELOPE_ALLOWANCE: usize = 4096;
 const MAX_BUFFERED_FAMILY_ROWS: usize = 10_000;
+const SNAPSHOT_CLOCK_QUERIES: u32 = 2;
+
+fn native_budget(request: &CollectionRequest) -> CollectionBudget {
+    if request.selection == (CollectionSelection::Snapshot { dataset: SnapshotDataset::MemoryFailures }) {
+        crate::memory_failures::bounded_budget(&request.budget, SNAPSHOT_CLOCK_QUERIES)
+    } else {
+        request.budget.clone()
+    }
+}
 
 pub(super) async fn clock<R: NativeRead>(reader: &mut R) -> Result<(String, bool)> {
     let rows = reader.query(CLOCK, vec![], 1).await.map_err(ReadError::into_error)?;
@@ -30,7 +39,7 @@ pub(super) struct StateSource<R = ReadSession> {
 }
 impl StateSource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        Self::with_io(ReadSession::new(pool, request.budget.clone()), request, host, port)
+        Self::with_io(ReadSession::new(pool, native_budget(request)), request, host, port)
     }
 }
 impl<R: NativeRead> StateSource<R> {
@@ -198,7 +207,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     SnapshotDataset::MemoryFailures
                     | SnapshotDataset::NativeFailures
                     | SnapshotDataset::SessionMemory
-                    | SnapshotDataset::PageWaitTargets => return Err(invalid_data()),
+                    | SnapshotDataset::PageWaitTargets
+                    | SnapshotDataset::TaskSpace => return Err(invalid_data()),
                 }
             }
             .into(),

@@ -78,6 +78,9 @@ pub fn redact_resource_identity(identity: &mut crate::telemetry::SharedResourceI
 /// Keep equality and repeat-sharing stability without publishing a physical source's native identity.
 fn redact_native_identity(identity: &mut crate::telemetry::NativeIdentity) {
     identity.id = opaque(&identity.id);
+    redact_native_qualifiers(identity);
+}
+fn redact_native_qualifiers(identity: &mut crate::telemetry::NativeIdentity) {
     for value in identity.qualifiers.values_mut() {
         *value = opaque(value);
     }
@@ -207,6 +210,22 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             if let Some(target) = &mut observation.target {
                 redact_native_identity(&mut target.database);
                 redact_native_identity(&mut target.file);
+                if let Some(object) = &mut target.object {
+                    redact_native_qualifiers(&mut object.native);
+                }
+            }
+            if let Some(crate::telemetry::PageIndexOperations::Observed { object: Some(object), .. }) =
+                &mut observation.index_operations
+            {
+                redact_native_qualifiers(object);
+            }
+        }
+    }
+    if let Some(evidence) = &mut s.operations.task_space {
+        for observation in &mut evidence.observations {
+            observation.redact(engine);
+            if let Some(request) = &mut observation.request {
+                request.client = None;
             }
         }
     }

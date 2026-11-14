@@ -92,18 +92,10 @@
       "title": "Unstable queries"
     },
     {
-      "assessed_queries": [
-        "375c64398248650e",
-        "decf59629e790076",
-        "258e3c9b580f1ecc",
-        "a92bb0be330ac53a",
-        "46db559fdff712fd",
-        "d1f45c9664edccf9"
-      ],
       "check": "parameter-sensitive",
-      "reason": null,
-      "status": "assessed",
-      "title": "Queries that are fast for most calls and slow for some"
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Recorded query runtime differences"
     },
     {
       "assessed_queries": [
@@ -207,8 +199,8 @@
     },
     {
       "check": "slow-storage",
-      "reason": null,
-      "status": "assessed",
+      "reason": "Some native I/O populations lack qualified storage-operation accounting, timing or enough operations for a storage-speed assessment.",
+      "status": "insufficient-evidence",
       "title": "Storage that's slow to read or write"
     },
     {
@@ -249,8 +241,7 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "uncosted_plan_explained": true,
-        "usual_fast_plan": null
+        "uncosted_plan_explained": true
       },
       "fix": {
         "cost": null,
@@ -338,8 +329,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -412,8 +402,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -502,7 +491,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -588,8 +576,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -666,8 +653,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 9.5 MB.",
@@ -729,8 +715,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 432 KB.",
@@ -1562,7 +1547,7 @@
         "table": "order_items"
       }
     ],
-    "format": 3,
+    "format": 4,
     "histograms": null,
     "id": "20261011T160540.394Z",
     "identity": {
@@ -1978,6 +1963,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080
@@ -1987,6 +1973,11 @@
       "cpus": null,
       "files": [
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/order_items.ibd",
@@ -1999,6 +1990,11 @@
           "writes": 4571.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/orders.ibd",
@@ -2011,6 +2007,11 @@
           "writes": 3872.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/customers.ibd",
@@ -2023,6 +2024,11 @@
           "writes": 1255.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/ibdata1",
@@ -2035,6 +2041,11 @@
           "writes": 58.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/undo002",
@@ -2047,6 +2058,11 @@
           "writes": 125.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/undo003",
@@ -2059,6 +2075,11 @@
           "writes": 491.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/slow_log.CSV",
@@ -2071,6 +2092,11 @@
           "writes": 368.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/8f6a0d435752-slow.log",
@@ -2083,6 +2109,11 @@
           "writes": 369.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/proc.MAD",
@@ -2095,6 +2126,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/undo001",
@@ -2107,6 +2143,11 @@
           "writes": 40.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/products.ibd",
@@ -2119,6 +2160,11 @@
           "writes": 135.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "temp",
           "name": "mysql/ibtmp1",
@@ -2131,6 +2177,11 @@
           "writes": 131.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/ddl_recovery.log",
@@ -2143,6 +2194,11 @@
           "writes": 167.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/help_keyword.frm",
@@ -2155,6 +2211,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "performance_schema/db.opt",
@@ -2167,6 +2228,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "sys/x@0024user_summary_by_statement_type.frm",
@@ -2179,6 +2245,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "sys/db.opt",
@@ -2191,6 +2262,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/time_zone_leap_second.MAI",
@@ -2203,6 +2279,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/time_zone_transition.MAI",
@@ -2215,6 +2296,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/general_log.frm",
@@ -2227,6 +2313,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/innodb_index_stats.ibd",
@@ -2239,6 +2330,11 @@
           "writes": 3.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/innodb_table_stats.ibd",
@@ -2251,6 +2347,11 @@
           "writes": 3.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/transaction_registry.ibd",
@@ -2263,6 +2364,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/slow_log.CSM",
@@ -3285,12 +3391,9 @@
           "rows": 400.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 2106.280311,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 2106.280311
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -3536,12 +3639,9 @@
           "rows": 2000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": 21.033,
-            "min_ms": 0.520413,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.520413
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -3847,12 +3947,9 @@
           "rows": 300.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 32.453053,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 32.453053
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -3902,12 +3999,9 @@
           "rows": 30000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": 177.46,
-            "min_ms": 0.011083,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.011083
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -4205,12 +4299,9 @@
           "rows": 9991.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": 44.303,
-            "min_ms": 0.027,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.027
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -4591,12 +4682,9 @@
           "rows": 6398.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": 52.766,
-            "min_ms": 0.024417,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.024417
           },
           "stddev_time_ms": null,
           "temporary_work": {

@@ -263,6 +263,7 @@ pub(crate) fn definition(
         },
     };
     Ok(QueryDefinition {
+        variant_family: None,
         id: identity.definition_id(source)?,
         identity,
         sql,

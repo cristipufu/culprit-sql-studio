@@ -5,6 +5,7 @@ use crate::{
     index_operations,
     read::{Parameter, ReadError, ReadSession},
     test_support::config,
+    value::Rec,
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 use futures_util::{FutureExt, future::BoxFuture};
@@ -20,6 +21,7 @@ pub(super) struct Fixture {
     pub(super) pool: Option<Arc<Pool>>,
     pub(super) workers: Vec<Option<tokio::task::JoinHandle<Result<super::workload::CompletedWorker>>>>,
     admin: MsClient,
+    owned_host: bool,
 }
 impl Fixture {
     async fn open() -> Result<Self> {
@@ -30,9 +32,26 @@ impl Fixture {
         let admin =
             crate::test_support::connect(&config(port, "master", &password, "page-fixture-admin"), SessionKind::User)
                 .await?;
-        Ok(Self { name, port, password, pool: None, workers: Vec::new(), admin })
+        Ok(Self { name, port, password, pool: None, workers: Vec::new(), admin, owned_host: false })
     }
     async fn initialize(&mut self) -> Result<()> {
+        let rows = self
+            .admin
+            .simple_query("SELECT /* culprit */ CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) AS machine")
+            .await
+            .map_err(map_error)?
+            .into_first_result()
+            .await
+            .map_err(map_error)?;
+        let host = rows.first().map(Rec::from_row).ok_or_else(|| invalid("missing owned fixture identity"))?;
+        let machine = crate::read::text(&host, "machine")?;
+        if !machine
+            .strip_prefix("culprit-smoke-mssql-")
+            .is_some_and(|nonce| nonce.len() == 24 && nonce.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        {
+            return Err(invalid("only an owned nonce-labelled smoke fixture may create page workloads"));
+        }
+        self.owned_host = true;
         self.execute(&format!(
             "CREATE DATABASE [{}]; ALTER DATABASE [{}] SET RECOVERY SIMPLE;
             ALTER DATABASE [{}] MODIFY FILE(NAME=N'{}',MAXSIZE=64MB,FILEGROWTH=16MB);
@@ -148,10 +167,84 @@ impl Fixture {
             result
         }
     }
+    pub async fn qualify_index_point(&self, point: &PageIndexOperations) -> Result<()> {
+        let PageIndexOperations::Observed { counters, partition_id: Some(partition_id), .. } = point else {
+            return Err(invalid("native cost proof needs the captured checked partition identity"));
+        };
+        let mut reader = ReadSession::new(
+            self.pool.as_ref().unwrap().clone(),
+            CollectionBudget {
+                max_queries: 1,
+                statement_timeout_ms: 1000,
+                total_timeout_ms: 3000,
+                ..Default::default()
+            },
+        );
+        let layout = index_operations::Layout::read(&mut reader).await;
+        let layout = reader.finish(layout).await?;
+        let identity = &counters.identity;
+        let target = index_operations::targeted::Target {
+            database_id: identity.database_id,
+            object_id: identity.object_id,
+            index_id: identity.index_id,
+            partition_number: identity.partition_number,
+            partition_id: partition_id.parse().map_err(|_| invalid("invalid captured native partition id"))?,
+        };
+        if !target.is_valid() {
+            return Err(invalid("owned index cost proof cannot use wildcard inputs"));
+        }
+        let mut qualification = self.client("page-fixture-index-cost").await?;
+        let plans = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            crate::test_support::assert_no_execution_grant(
+                &mut qualification,
+                &index_operations::targeted::query(&layout, 1),
+                target.parameters().into(),
+            ),
+        )
+        .await
+        .map_err(|_| invalid("owned targeted index cost read exceeded its bound"))?;
+        for plan in plans {
+            culprit_core::xml::read(&plan, |document| {
+                let document = document.unwrap();
+                let mut partition_seeks = 0;
+                for operation in document.descendants().filter(|node| node.has_tag_name("RelOp")) {
+                    let rowsets = operation
+                        .children()
+                        .filter(|node| node.has_tag_name("IndexScan"))
+                        .flat_map(|node| node.children())
+                        .any(|node| node.has_tag_name("Object") && node.attribute("Table") == Some("[sysrowsets]"));
+                    if rowsets {
+                        partition_seeks += 1;
+                        assert!(
+                            matches!(operation.attribute("PhysicalOp"), Some("Clustered Index Seek" | "Index Seek")),
+                            "targeted metadata must not scan all database rowsets: {plan}"
+                        );
+                        assert!(
+                            operation
+                                .descendants()
+                                .filter(|node| node.has_tag_name("SeekPredicates"))
+                                .flat_map(|node| node.descendants())
+                                .any(|node| node.has_tag_name("ColumnReference")
+                                    && node.attribute("Column") == Some("@P5")),
+                            "native partition identity must drive the metadata seek: {plan}"
+                        );
+                    }
+                }
+                assert!(partition_seeks > 0, "the owned plan must expose native partition-key access: {plan}");
+            });
+            eprintln!("owned targeted index actual plan: {plan}");
+        }
+        Ok(())
+    }
     async fn close(&mut self) -> Result<()> {
         self.pool.take();
         // This targets only the nonce database even if a worker, observer or test assertion failed midway.
-        let result=self.execute(&format!("IF DB_ID(N'{}') IS NOT NULL BEGIN ALTER DATABASE [{}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{}]; END",self.name,self.name,self.name)).await;
+        let result = if self.owned_host {
+            self.execute(&format!("IF DB_ID(N'{}') IS NOT NULL BEGIN ALTER DATABASE [{}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{}]; END",self.name,self.name,self.name)).await
+        } else {
+            Ok(())
+        };
         for task in self.workers.drain(..).flatten() {
             task.abort();
             let _ = task.await;

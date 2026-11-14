@@ -67,9 +67,23 @@ test("MySQL and MariaDB runtime coverage follows collected data and preserves th
     const absent = renderToStaticMarkup(createElement(RuntimeSpread, props));
     check(absent.includes("scan includes no run-time histogram"), `${product}: missing histogram was attributed to the server version`);
     check(absent.includes(product.startsWith("MariaDB") ? "MariaDB" : "MySQL"), `${product}: wrong product label`);
-    query.spread = { min_ms: 1, p50_ms: 10, p95_ms: 50, p99_ms: 90, histogram: [[1, 100, 100]], lock_ms: null };
+    const ms = (value: number) => ({ unit: "milliseconds" as const, value });
+    query.spread = { min_ms: 1, lock_ms: null, distributions: [{
+      source: "native.histogram", origin: "native-histogram", population: { kind: "native-counters", sample_count: "100" },
+      p50: { kind: "histogram-upper-bound", lower: ms(1), upper: ms(10) },
+      p95: { kind: "histogram-upper-bound", lower: ms(10), upper: ms(50) },
+      p99: { kind: "histogram-upper-bound", lower: ms(50), upper: ms(90) },
+      histogram: [[1, 10, 50], [10, 50, 45], [50, 90, 4], [90, 100, 1]].map(([lower,upper,count]) => ({ lower: ms(lower!), upper: ms(upper!), samples: String(count) })),
+      issue: null,
+    }] };
     const measured = renderToStaticMarkup(createElement(RuntimeSpread, props));
-    check(measured.includes("keeps a run-time histogram per statement"), `${product}: collected histogram was ignored`);
+    check(measured.includes("Native histogram observation"), `${product}: collected histogram was ignored`);
+    const sourceKindOnly = renderToStaticMarkup(createElement(RuntimeSpread, { ...props, kind: "slow-log" }));
+    check(sourceKindOnly.includes("Native histogram observation") && !sourceKindOnly.includes("retained logged runs"), `${product}: workload kind relabeled an independent native population`);
+    query.spread.distributions = [{
+      ...query.spread.distributions[0]!, source: "mysql.slow_log", origin: "captured-runs", population: { kind: "captured-samples", sample_count: "100" },
+      p50: { kind: "sample-value", value: ms(10) }, p95: { kind: "sample-value", value: ms(50) }, p99: { kind: "sample-value", value: ms(90) },
+    }];
     const logged = renderToStaticMarkup(createElement(RuntimeSpread, { ...props, kind: "slow-log" }));
     check(logged.includes("retained logged runs"), `${product}: retained-run scope was lost`);
     check(logged.includes("may omit other executions"), `${product}: incomplete logging coverage was lost`);

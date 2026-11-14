@@ -66,8 +66,9 @@ async fn native_cache_grants_share_exact_rows_with_app_summaries_and_preserve_ow
     let largest = application(&mut native, ApplicationSelection::Largest).await.unwrap().unwrap();
     assert!(!largest.grants.is_empty(), "the owned sort establishes a real grant");
     assert!(largest.grants.iter().any(|grant| grant.avg_granted_kb > 0.0));
+    let runtime_layout = crate::cached_runtime::Layout::read(&mut native).await.unwrap();
     let runtime_rows = native
-        .query(&crate::cached_runtime::select_sql(), vec![Parameter::Integer(10_001)], 10_001)
+        .query(&crate::cached_runtime::select_sql(&runtime_layout), vec![Parameter::Integer(10_001)], 10_001)
         .await
         .map_err(ReadError::into_error)
         .unwrap();
@@ -77,6 +78,7 @@ async fn native_cache_grants_share_exact_rows_with_app_summaries_and_preserve_ow
     assert!(raw_zero.measured());
     assert_eq!(raw_zero.executions, decoded[zero_index].executions);
     assert!(raw_zero.counters.contains_key(&CachedRuntimeMetric::WorkerMicroseconds));
+    assert!(raw_zero.counters.contains_key(&CachedRuntimeMetric::SpilledPages));
     assert_eq!(native.close().await, SourceShutdown::Quiescent);
     let options = culprit_core::SnapshotOptions { top_queries: 50, plans: 2, ..Default::default() };
     let mut workload_reader = ReadSession::application(pool.clone());

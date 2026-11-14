@@ -76,6 +76,101 @@ pub fn source_failed(s: &Snapshot, names: &[&str]) -> Option<String> {
     s.source_problem(names)
 }
 
+pub(crate) const STORAGE_MIN_OPERATIONS: f64 = 1_000.0;
+
+pub(crate) fn same_storage_population(left: &culprit_core::FileIo, right: &culprit_core::FileIo) -> bool {
+    left.kind == right.kind
+        && left.context == right.context
+        && left.database == right.database
+        && left.scope == right.scope
+        && left.stats_reset == right.stats_reset
+        && left.write_operation == right.write_operation
+}
+
+/// The storage check assesses data reads and log writes, never cache pages or non-durable/bookkeeping activity.
+pub(crate) fn timed_storage_operation(file: &culprit_core::FileIo) -> bool {
+    use culprit_core::{FileKind, IoAccounting};
+    let (accounting, operations, time) = match file.kind {
+        FileKind::Data | FileKind::Temp => (file.context.read, file.reads, file.read_ms),
+        FileKind::Log => (file.context.write, file.writes, file.write_ms),
+        FileKind::Other => return false,
+    };
+    file.context.is_valid()
+        && accounting == IoAccounting::StorageOperation
+        && operations.is_finite()
+        && operations > 0.0
+        && time.is_some_and(|time| time.is_finite() && time >= 0.0)
+}
+
+fn storage_evidence(snapshot: &Snapshot, files: &[culprit_core::FileIo]) -> CheckEvidence {
+    use culprit_core::{FileKind, IoAccounting};
+    let Some(outcome) = snapshot.source_outcome(source_id::FILE_LATENCY) else {
+        return CheckEvidence::Insufficient(t!("evidence.source_outcome_missing"));
+    };
+    match outcome.state {
+        SourceState::Unavailable => {
+            return CheckEvidence::Unavailable(
+                outcome.reason.clone().unwrap_or_else(|| t!("evidence.storage_assessment_incomplete")),
+            );
+        }
+        SourceState::Partial => {
+            return CheckEvidence::Insufficient(
+                outcome.reason.clone().unwrap_or_else(|| t!("evidence.storage_assessment_incomplete")),
+            );
+        }
+        SourceState::NotApplicable => {
+            return CheckEvidence::NotApplicable(
+                outcome.reason.clone().unwrap_or_else(|| t!("evidence.source_not_applicable")),
+            );
+        }
+        SourceState::Collected | SourceState::Empty => {}
+    }
+    let mut populations: Vec<(&culprit_core::FileIo, f64, f64)> = Vec::new();
+    for file in files {
+        let (operations, time, accounting) = if file.kind == FileKind::Log {
+            (file.writes, file.write_ms, file.context.write)
+        } else {
+            (file.reads, file.read_ms, file.context.read)
+        };
+        if !file.context.is_valid()
+            || !operations.is_finite()
+            || operations < 0.0
+            || time.is_some_and(|time| !time.is_finite() || time < 0.0 || (operations == 0.0 && time > 0.0))
+        {
+            return CheckEvidence::Insufficient(t!("evidence.storage_assessment_incomplete"));
+        }
+        // A native zero-operation row does not dilute an average. Non-durable logs are explicitly outside the
+        // physical storage/commit assessment; they remain visible as native I/O elsewhere.
+        if operations == 0.0 || (file.kind == FileKind::Log && accounting == IoAccounting::NonDurableLog) {
+            continue;
+        }
+        if outcome.state == SourceState::Empty || !timed_storage_operation(file) {
+            return CheckEvidence::Insufficient(t!("evidence.storage_assessment_incomplete"));
+        }
+        let Some(time) = time else {
+            return CheckEvidence::Insufficient(t!("evidence.storage_assessment_incomplete"));
+        };
+        if let Some((_, count, milliseconds)) =
+            populations.iter_mut().find(|(first, _, _)| same_storage_population(first, file))
+        {
+            *count += operations;
+            *milliseconds += time;
+        } else {
+            populations.push((file, operations, time));
+        }
+    }
+    if populations.is_empty() {
+        CheckEvidence::Insufficient(t!("evidence.storage_untimed"))
+    } else if populations
+        .iter()
+        .any(|(_, count, time)| !count.is_finite() || !time.is_finite() || *count < STORAGE_MIN_OPERATIONS)
+    {
+        CheckEvidence::Insufficient(t!("evidence.storage_assessment_incomplete"))
+    } else {
+        CheckEvidence::Available
+    }
+}
+
 pub fn index_catalog(s: &Snapshot) -> Option<String> {
     catalog_of(s, |_| true)
 }
@@ -238,12 +333,11 @@ impl Requirement<'_> {
                 {
                     return insufficient(t!("evidence.pressure_scope"));
                 }
-                if *timed_files
-                    && !p.files.iter().any(|f| {
-                        f.avg_read_ms().into_iter().chain(f.avg_write_ms()).any(|ms| ms.is_finite() && ms >= 0.0)
-                    })
-                {
-                    return insufficient(t!("evidence.storage_untimed"));
+                if *timed_files {
+                    let assessed = storage_evidence(s, &p.files);
+                    if !matches!(assessed, Available) {
+                        return assessed;
+                    }
                 }
                 if *complete { Available } else { insufficient(t!("evidence.incomplete_coverage")) }
             }
@@ -340,7 +434,17 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
                         })
                 }
                 QueryMeasure::Variance => q.stddev_time_ms.is_some() && q.max_time_ms.is_some() && q.executions >= 50.0,
-                QueryMeasure::ParameterSpread => !q.workload_plans().is_empty() || q.spread.is_some(),
+                QueryMeasure::ParameterSpread => {
+                    q.workload_plans().len() >= 2
+                        || q.spread.as_ref().and_then(|spread| spread.bounded_distributions()).is_some_and(|observed| {
+                            observed.iter().any(|distribution| {
+                                distribution.is_usable()
+                                    && distribution.population.sample_count().is_some_and(|count| count >= 50)
+                                    && distribution.p50.as_ref().and_then(|quantile| quantile.upper_ms()).is_some()
+                                    && distribution.p99.as_ref().and_then(|quantile| quantile.lower_ms()).is_some()
+                            })
+                        })
+                }
                 QueryMeasure::Failures => costs(|c| c.failed.is_some() || c.aborted.is_some()),
                 QueryMeasure::Planning => costs(|c| c.plan_ms.is_some()),
                 QueryMeasure::Jit => costs(|c| c.jit_ms.is_some()),

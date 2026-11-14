@@ -698,6 +698,7 @@ pub(super) fn query_json(report: &Report, q: &QueryStat) -> Value {
         "spread": q.spread,
         // Failed and cancelled runs, planning and JIT time, log bytes, estimated row width: null where not kept.
         "costs": q.costs,
+        "variant_family": q.variant_family,
         // Per plan, when there are several: how each one's run times spread and what values it was compiled for.
         "plan_spread": (q.plans.len() > 1).then(|| {
             q.plans
@@ -711,7 +712,6 @@ pub(super) fn query_json(report: &Report, q: &QueryStat) -> Value {
                         "max_ms": p.max_time_ms,
                         "stddev_ms": p.stddev_time_ms,
                         "compiled": p.compiled,
-                        "variant_query": p.variant_query,
                     })
                 })
                 .collect::<Vec<_>>()

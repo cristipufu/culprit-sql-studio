@@ -9,6 +9,42 @@ use culprit_core::{Error, SourceState};
 fn state(coverage: &Coverage) -> SourceState {
     coverage.outcomes().into_iter().find(|outcome| outcome.source == sources::MEMORY_FAILURES.name).unwrap().state
 }
+
+#[test]
+fn the_native_profile_preserves_the_scan_ceiling_and_stricter_caller_limits() {
+    let scan = budget();
+    assert_eq!(scan.max_queries, 6);
+    assert_eq!(scan.max_snapshot_rows, 128);
+    assert_eq!(scan.page_bytes, 8 * 1024 * 1024);
+    assert_eq!(scan.statement_timeout_ms, 3000);
+    assert_eq!(scan.total_timeout_ms, 10_000);
+    let expanded = CollectionBudget {
+        max_snapshot_rows: 1000,
+        page_rows: 1000,
+        max_queries: 1000,
+        page_bytes: 8 * 1024 * 1024,
+        total_bytes: 1024 * 1024 * 1024,
+        statement_timeout_ms: 60_000,
+        total_timeout_ms: 120_000,
+        ..Default::default()
+    };
+    assert_eq!(bounded_budget(&expanded, 0), scan);
+    let strict = CollectionBudget {
+        max_snapshot_rows: 1,
+        page_rows: 1,
+        max_queries: 1,
+        page_bytes: 1024,
+        total_bytes: 2048,
+        max_sql_bytes: 1024,
+        max_plan_bytes: 1024,
+        max_pages: 1,
+        statement_timeout_ms: 1,
+        total_timeout_ms: 2,
+    };
+    strict.validate().unwrap();
+    assert_eq!(bounded_budget(&strict, 0), strict);
+    assert_eq!(bounded_budget(&strict, 2), strict);
+}
 fn pool_reader(after: Rec) -> FakeRead {
     FakeRead::new(vec![Ok(vec![identity_row()]), Ok(vec![platform(5)]), Ok(vec![row(), row()]), Ok(vec![after])])
 }

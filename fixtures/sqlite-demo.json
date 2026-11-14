@@ -35,7 +35,7 @@
       "reason": null
     }
   ],
-  "format": 3,
+  "format": 4,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",

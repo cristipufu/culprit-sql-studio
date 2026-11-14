@@ -2572,7 +2572,7 @@
       ]
     }
   },
-  "format": 3,
+  "format": 4,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",
@@ -2808,10 +2808,7 @@
         "trend": null,
         "spread": {
           "min_ms": 4.6986930000000005,
-          "p50_ms": null,
-          "p95_ms": null,
-          "p99_ms": null,
-          "histogram": [],
+          "distributions": [],
           "lock_ms": null
         },
         "costs": {
@@ -3144,10 +3141,7 @@
         "trend": null,
         "spread": {
           "min_ms": 3.0069290000000004,
-          "p50_ms": null,
-          "p95_ms": null,
-          "p99_ms": null,
-          "histogram": [],
+          "distributions": [],
           "lock_ms": null
         },
         "costs": {
@@ -3443,10 +3437,7 @@
         "trend": null,
         "spread": {
           "min_ms": 3.079424,
-          "p50_ms": null,
-          "p95_ms": null,
-          "p99_ms": null,
-          "histogram": [],
+          "distributions": [],
           "lock_ms": null
         },
         "costs": {
@@ -3834,10 +3825,7 @@
         "trend": null,
         "spread": {
           "min_ms": 3.474731,
-          "p50_ms": null,
-          "p95_ms": null,
-          "p99_ms": null,
-          "histogram": [],
+          "distributions": [],
           "lock_ms": null
         },
         "costs": {
@@ -4159,10 +4147,7 @@
         "trend": null,
         "spread": {
           "min_ms": 0.090327,
-          "p50_ms": null,
-          "p95_ms": null,
-          "p99_ms": null,
-          "histogram": [],
+          "distributions": [],
           "lock_ms": null
         },
         "costs": {

@@ -119,19 +119,56 @@ fn catalog_source<D: SnapshotRecipe>(
     final_visible: bool,
     budget: CollectionBudget,
 ) -> StreamedSnapshot<D, StreamingRead> {
+    catalog_source_with_layout(recipe, row, visible, final_visible, budget, vec![])
+}
+fn catalog_source_with_layout<D: SnapshotRecipe>(
+    recipe: D,
+    row: Rec,
+    visible: bool,
+    final_visible: bool,
+    budget: CollectionBudget,
+    layout: Vec<ReadResult<Vec<Rec>>>,
+) -> StreamedSnapshot<D, StreamingRead> {
+    catalog_source_with_native(
+        recipe,
+        row,
+        visible,
+        final_visible,
+        budget,
+        CatalogReplies { layout, final_proof: vec![] },
+    )
+}
+struct CatalogReplies {
+    layout: Vec<ReadResult<Vec<Rec>>>,
+    final_proof: Vec<ReadResult<Vec<Rec>>>,
+}
+fn catalog_source_with_native<D: SnapshotRecipe>(
+    recipe: D,
+    row: Rec,
+    visible: bool,
+    final_visible: bool,
+    budget: CollectionBudget,
+    native_reads: CatalogReplies,
+) -> StreamedSnapshot<D, StreamingRead> {
+    let CatalogReplies { layout, final_proof } = native_reads;
+    let mut replies = vec![
+        Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
+        Ok(vec![identity()]),
+        Ok(vec![replace(&clock("2020-01-01T06:02:00Z"), &[("metadata_visibility", Val::Int(i64::from(visible)))])]),
+        Ok(vec![pressure()]),
+    ];
+    replies.extend(layout);
+    replies.push(Ok(vec![pressure()]));
+    replies.extend(final_proof);
+    replies.extend([
+        Ok(vec![identity()]),
+        Ok(vec![replace(
+            &clock("2020-01-01T06:02:01Z"),
+            &[("metadata_visibility", Val::Int(i64::from(final_visible)))],
+        )]),
+    ]);
     let io = StreamingRead {
-        native: FakeRead::new(vec![
-            Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
-            Ok(vec![identity()]),
-            Ok(vec![replace(&clock("2020-01-01T06:02:00Z"), &[("metadata_visibility", Val::Int(i64::from(visible)))])]),
-            Ok(vec![pressure()]),
-            Ok(vec![pressure()]),
-            Ok(vec![identity()]),
-            Ok(vec![replace(
-                &clock("2020-01-01T06:02:01Z"),
-                &[("metadata_visibility", Val::Int(i64::from(final_visible)))],
-            )]),
-        ]),
+        native: FakeRead::new(replies),
         batches: vec![batch(row, true)].into(),
         starts: 0,
         pause_batches: false,
@@ -560,7 +597,14 @@ async fn cached_runtime_uses_the_shared_identity_and_exports_only_qualified_nati
         } else {
             replace(&crate::cached_runtime::tests::row(), &[("plan_handle", Val::Bytes(vec![0; 64]))])
         };
-        let mut source = catalog_source(CachedRuntime, row, true, true, Default::default());
+        let mut source = catalog_source_with_layout(
+            CachedRuntime,
+            row,
+            true,
+            true,
+            Default::default(),
+            vec![Ok(crate::cached_runtime::tests::spill_columns())],
+        );
         let initial = source.describe().await.unwrap();
         let CollectionRead::Page { records, next_cursor } =
             source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
@@ -571,6 +615,7 @@ async fn cached_runtime_uses_the_shared_identity_and_exports_only_qualified_nati
         let TelemetryRecord::Operational(record) = &records[0] else { panic!("runtime observation") };
         let OperationalFact::MssqlCachedRuntime(runtime) = &record.fact else { panic!("cache runtime") };
         assert_eq!(runtime.measured(), measured);
+        assert_eq!(runtime.counters.contains_key(&CachedRuntimeMetric::SpilledPages), measured);
         assert_eq!(record.key, runtime.context.identity.key().unwrap());
         ExportedRecord::new(
             &initial,
@@ -692,8 +737,16 @@ async fn partition_exports_keep_native_dates_after_redaction_and_qualify_missing
 #[tokio::test]
 async fn cached_definitions_export_two_bounded_payloads_without_duplicating_the_native_read() {
     use crate::telemetry::cached_definitions::CachedDefinitions;
-    let mut source =
-        catalog_source(CachedDefinitions, crate::cached_definitions::tests::row(), true, true, Default::default());
+    let row = crate::cached_definitions::tests::row();
+    let proof = crate::relational_inputs::tests::binding_row(&crate::cached_statements::context(&row).unwrap());
+    let mut source = catalog_source_with_native(
+        CachedDefinitions,
+        row,
+        true,
+        true,
+        Default::default(),
+        CatalogReplies { layout: vec![], final_proof: vec![Ok(vec![proof])] },
+    );
     let initial = source.describe().await.unwrap();
     let CollectionRead::Page { records, next_cursor } =
         source.read_page(TelemetryStream::ObjectDefinitions, None).await.unwrap()
@@ -714,5 +767,202 @@ async fn cached_definitions_export_two_bounded_payloads_without_duplicating_the_
     assert_eq!(record.fact.definition_payloads().count(), 2);
     let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
     assert!(completed.observation.snapshot().unwrap().sources[0].complete_scope);
+    assert_eq!(
+        source.query_count(),
+        9,
+        "one payload stream plus one independent binding check and the common owner checks"
+    );
+    let calls = &source.inner.reader().io.native.calls;
+    assert_eq!(calls.iter().filter(|call| call.sql.contains("sys.dm_exec_query_stats")).count(), 1);
+    assert_eq!(
+        calls.iter().filter(|call| call.sql.contains("sys.dm_exec_plan_attributes(selected.plan_handle)")).count(),
+        1
+    );
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn a_drained_cache_definition_stream_cannot_complete_after_its_native_module_binding_changes() {
+    use crate::telemetry::cached_definitions::CachedDefinitions;
+    for native_sql in [Val::Text("0x9999".into()), Val::Null] {
+        let row = crate::cached_definitions::tests::row();
+        let binding = crate::relational_inputs::tests::binding_row(&crate::cached_statements::context(&row).unwrap());
+        let mut source = catalog_source_with_native(
+            CachedDefinitions,
+            row,
+            true,
+            true,
+            Default::default(),
+            CatalogReplies {
+                layout: vec![],
+                final_proof: vec![Ok(vec![replace(&binding, &[("sql_handle", native_sql)])])],
+            },
+        );
+        let initial = source.describe().await.unwrap();
+        let CollectionRead::Page { records, next_cursor } =
+            source.read_page(TelemetryStream::ObjectDefinitions, None).await.unwrap()
+        else {
+            panic!("provisional definitions")
+        };
+        assert_eq!(records.len(), 1);
+        assert!(next_cursor.is_none());
+        assert!(!initial.observation.covers_request());
+        let error = source.finish().await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+        let reads = source.query_count();
+        assert!(
+            source
+                .inner
+                .reader()
+                .io
+                .native
+                .calls
+                .last()
+                .unwrap()
+                .sql
+                .contains("sys.dm_exec_plan_attributes(selected.plan_handle)"),
+            "a failed recipe proof must stop before the later target identity and clock reads"
+        );
+        assert!(source.finish().await.is_err());
+        assert_eq!(source.query_count(), reads);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn an_uncertain_post_stream_proof_fails_closed_before_identity_and_close_stays_owned() {
+    use crate::telemetry::cached_definitions::CachedDefinitions;
+    for stop in [CollectionStop::TimedOut, CollectionStop::CancellationUnconfirmed, CollectionStop::ByteLimit] {
+        let mut source = catalog_source_with_native(
+            CachedDefinitions,
+            crate::cached_definitions::tests::row(),
+            true,
+            true,
+            Default::default(),
+            CatalogReplies { layout: vec![], final_proof: vec![Err(ReadError::Stopped(stop))] },
+        );
+        source.describe().await.unwrap();
+        source.read_page(TelemetryStream::ObjectDefinitions, None).await.unwrap();
+        let error = source.finish().await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), stop);
+        assert_eq!(source.inner.reader().io.native.closed, 0, "the common owner must still close the session");
+        let reads = source.query_count();
+        assert!(source.read_page(TelemetryStream::ObjectDefinitions, None).await.is_err());
+        assert_eq!(source.query_count(), reads);
+        assert!(
+            source
+                .inner
+                .reader()
+                .io
+                .native
+                .calls
+                .last()
+                .unwrap()
+                .sql
+                .contains("sys.dm_exec_plan_attributes(selected.plan_handle)")
+        );
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(source.inner.reader().io.native.closed, 1);
+    }
+}
+
+#[tokio::test]
+async fn retained_plan_payloads_require_the_same_independent_post_stream_module_binding() {
+    use crate::telemetry::retained_definitions::RetainedPlans;
+    for unchanged in [true, false] {
+        let row = crate::cached_definitions::tests::row();
+        let context = crate::cached_statements::context(&row).unwrap();
+        let binding = crate::relational_inputs::tests::binding_row(&context);
+        let proof = if unchanged { binding } else { replace(&binding, &[("sql_handle", Val::Text("0x9999".into()))]) };
+        let mut source = catalog_source_with_native(
+            RetainedPlans,
+            row,
+            true,
+            true,
+            Default::default(),
+            CatalogReplies {
+                layout: vec![
+                    Ok(vec![crate::retained_definitions::tests::feature(1, 1)]),
+                    Ok(vec![Rec::of(&[("value", Val::Int(0))])]),
+                ],
+                final_proof: vec![Ok(vec![proof])],
+            },
+        );
+        let initial = source.describe().await.unwrap();
+        let CollectionRead::Page { records, next_cursor } =
+            source.read_page(TelemetryStream::ObjectDefinitions, None).await.unwrap()
+        else {
+            panic!("retained plan page")
+        };
+        assert_eq!(records.len(), 1);
+        assert!(next_cursor.is_none());
+        let TelemetryRecord::ObjectDefinition(record) = &records[0] else { panic!("definition") };
+        let ObjectDefinitionFact::MssqlRetainedPlan(plan) = &record.fact else { panic!("retained plan") };
+        assert_eq!(plan.context, context);
+        assert_eq!(plan.statement_executions.as_deref(), Some("2"));
+        assert_eq!(
+            plan.database_last_query_plan_stats,
+            Some(false),
+            "retained data is possible independently of this setting"
+        );
+        if unchanged {
+            let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
+            assert!(completed.observation.snapshot().unwrap().sources[0].complete_scope);
+            assert_eq!(source.query_count(), 11);
+        } else {
+            let error = source.finish().await.err().unwrap();
+            assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+            assert_eq!(source.query_count(), 9, "failed module proof must stop before target/clock rechecks");
+        }
+        assert_eq!(source.inner.reader().io.starts, 1);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn unqualified_retained_plan_tokens_keep_raw_counters_with_partial_scope_and_no_extra_proof_sql() {
+    use crate::telemetry::retained_definitions::RetainedPlans;
+    let row = replace(&crate::cached_definitions::tests::row(), &[("sql_handle", Val::Text("0x0000".into()))]);
+    let mut source = catalog_source_with_native(
+        RetainedPlans,
+        row,
+        true,
+        true,
+        Default::default(),
+        CatalogReplies {
+            layout: vec![
+                Ok(vec![crate::retained_definitions::tests::feature(1, 1)]),
+                Ok(vec![Rec::of(&[("value", Val::Int(1))])]),
+            ],
+            final_proof: vec![],
+        },
+    );
+    let initial = source.describe().await.unwrap();
+    let CollectionRead::Page { records, .. } =
+        source.read_page(TelemetryStream::ObjectDefinitions, None).await.unwrap()
+    else {
+        panic!("retained plan page")
+    };
+    let TelemetryRecord::ObjectDefinition(record) = &records[0] else { panic!("definition") };
+    let ObjectDefinitionFact::MssqlRetainedPlan(plan) = &record.fact else { panic!("retained plan") };
+    assert_eq!(plan.statement_executions.as_deref(), Some("2"));
+    assert!(matches!(
+        plan.batch_plan.payload,
+        DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }
+    ));
+    let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
+    let coverage = &completed.observation.snapshot().unwrap().sources[0];
+    assert_eq!(coverage.state, culprit_core::SourceState::Partial);
+    assert!(!coverage.complete_scope);
+    assert!(
+        !source
+            .inner
+            .reader()
+            .io
+            .native
+            .calls
+            .iter()
+            .any(|call| call.sql.contains("sys.dm_exec_plan_attributes(selected.plan_handle)"))
+    );
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }

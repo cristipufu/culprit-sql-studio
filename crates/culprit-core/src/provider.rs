@@ -41,6 +41,10 @@ pub struct SnapshotOptions {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_page_wait_targets: bool,
+    /// Explicit opt-in to current task allocation/deallocation counters, without inferring their allocating SQL.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub collect_task_space: bool,
 }
 
 impl Default for SnapshotOptions {
@@ -55,6 +59,7 @@ impl Default for SnapshotOptions {
             collect_native_failures: false,
             collect_session_memory: false,
             collect_page_wait_targets: false,
+            collect_task_space: false,
         }
     }
 }

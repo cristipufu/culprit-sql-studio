@@ -1352,13 +1352,13 @@ Plan B has plan warnings plan A doesn't: no join predicate, implicit conversion 
   Warning: Implicit conversion on Index Seek on orders | -
   Warning: Spills to disk on Index Seek on orders | -
   Warning: Plan warning: No join predicate | -
-  ? Memory: Plan B spills to disk; plan A doesn't. | Its sort or hash got less memory than the rows needed, usually because it expected fewer rows than it read.
+  ? Memory: Plan B records a spill warning; plan A does not. | A missing warning does not establish a spill-free execution. These captures alone do not establish equivalent work, the spill’s elapsed cost or cause.
 ## warnings gone
 Plan B runs the same steps as plan A.
   Warning: No longer: implicit conversion on Index Seek on orders | -
   Warning: No longer: spills to disk on Index Seek on orders | -
   Warning: No longer: no join predicate | -
-  ? Memory: Plan A spills to disk; plan B doesn't. | Its sort or hash got less memory than the rows needed, usually because it expected fewer rows than it read.
+  ? Memory: Plan A records a spill warning; plan B does not. | A missing warning does not establish a spill-free execution. These captures alone do not establish equivalent work, the spill’s elapsed cost or cause.
 ## one warning
 Plan B has a plan warning plan A doesn't: missing statistics.
   Warning: Plan warning: Missing statistics | -

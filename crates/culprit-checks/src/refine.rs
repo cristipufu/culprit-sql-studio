@@ -65,13 +65,13 @@ pub(crate) fn rules() -> Vec<Arc<dyn Refine>> {
     ]
 }
 
-/// A finding whose share of database time is its statements' but measures none of it: a guess at what the optimizer
-/// may misjudge (a column with no histogram, statistics behind their table) or an engine's estimate of what an index
-/// would save (Azure's index advice), and the list of forced plans. It never explains a heavy query away. SQL Server's
-/// own plan advice stands on what it measured: the regression behind a plan to force, a forced plan's scan. A native
-/// spill warning establishes resource work, without measuring how much query time spilling consumed.
-fn measures_no_time(f: &Finding) -> bool {
-    f.facts.cause == Some(FindingCause::Spill)
+/// Findings that do not explain elapsed time: observed runtime differences measure statement populations without
+/// establishing their cause, and native spill warnings establish resource work without measuring its delay. An
+/// optimizer guess, estimated index benefit or forced-plan inventory also cannot explain a heavy query away.
+/// Native plan recommendations retain their independently evidenced regression or forced-plan scan.
+fn does_not_explain_elapsed_time(f: &Finding) -> bool {
+    f.facts.runtime_variation.is_some()
+        || f.facts.cause == Some(FindingCause::Spill)
         || matches!(f.check.as_str(), "missing-histogram" | "stale-stats")
         || (f.check == "tuning-advice"
             && f.facts.recommended_plan.is_none()

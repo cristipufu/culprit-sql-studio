@@ -1,5 +1,6 @@
 import { isActionable } from "./findings";
 import { t } from "./i18n";
+import { sameIoContext } from "./file-io";
 import type { FileIo } from "../gen/FileIo";
 import type { OpenTransaction } from "../gen/OpenTransaction";
 import type { Finding } from "../gen/Finding";
@@ -34,6 +35,7 @@ export function tableSignalWarning(report: Report, table: TableStat, checks: str
 export function storageStatus(report: Report, file: FileIo): SignalStatus {
   return findingStatus(worstFinding(report, (f) => (f.facts?.storage_files ?? []).some((source) =>
     source.name === file.name && source.kind === file.kind && source.database === file.database &&
+    sameIoContext(source.context, file.context) &&
     source.scope === (file.scope ?? null) && source.stats_reset === (file.stats_reset ?? null) &&
     source.write_operation === (file.write_operation ?? null))));
 }

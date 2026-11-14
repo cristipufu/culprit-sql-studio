@@ -6,10 +6,6 @@ export type PlanVariant = { id: string, executions: number, total_time_ms: numbe
  */
 compiled: string | null, 
 /**
- * SQL Server 2022 parameter-sensitive plans: the variant query this plan belongs to.
- */
-variant_query: string | null, 
-/**
  * CPU time and logical reads across its runs, where the source keeps them per plan (Query Store): whether a
  * slower plan does more work, or only waited longer while it ran.
  */

@@ -49,6 +49,12 @@
       "title": "Unstable queries"
     },
     {
+      "check": "parameter-sensitive",
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Recorded query runtime differences"
+    },
+    {
       "check": "temp-spill",
       "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
@@ -77,6 +83,12 @@
       "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
       "title": "Queries with material recorded lock waits"
+    },
+    {
+      "check": "slow-storage",
+      "reason": "The source measurements needed for this assessment were not collected.",
+      "status": "unavailable",
+      "title": "Storage that's slow to read or write"
     }
   ],
   "findings": [
@@ -107,8 +119,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -199,8 +210,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -268,8 +278,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 3.5 MB.",
@@ -331,8 +340,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "ANALYZE reads every index once and holds the write lock while it stores the results: on a large file, run it when writes are quiet.",
@@ -836,7 +844,7 @@
         "table": "orders"
       }
     ],
-    "format": 3,
+    "format": 4,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -998,6 +1006,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080

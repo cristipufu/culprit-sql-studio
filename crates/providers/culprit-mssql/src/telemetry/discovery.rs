@@ -192,6 +192,7 @@ mod tests {
             Ok(vec![Rec::of(&[
                 ("actual_state_desc", Val::Text("READ_WRITE".into())),
                 ("query_capture_mode_desc", Val::Text("AUTO".into())),
+                ("variant_families", Val::Int(1)),
                 ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
             ])]),
             Ok(vec![identity()]),

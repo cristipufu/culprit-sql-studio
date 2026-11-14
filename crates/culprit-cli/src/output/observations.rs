@@ -1,5 +1,6 @@
 use culprit_core::{
-    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, SourceState, StatementWorkReport, format, t,
+    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, SourceState, StatementWorkReport, TaskSpaceReport,
+    format, t,
 };
 
 struct Summary<'a> {
@@ -24,6 +25,19 @@ pub(crate) fn retained(report: &RetainedFailureReport) -> String {
 }
 
 pub(crate) fn participants(report: &MemoryParticipantsReport) -> String {
+    render(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source_state: report.source_state,
+            source_reason: report.source_reason.as_deref(),
+            limitations: &report.limitations,
+        },
+        report.entries.iter().map(|entry| entry.title.as_str()),
+    )
+}
+
+pub(crate) fn task_space(report: &TaskSpaceReport) -> String {
     render(
         Summary {
             title: &report.title,
@@ -171,6 +185,45 @@ mod tests {
         );
         assert!(!text.contains("native-"));
         assert!(!text.contains("not included in concise output"));
+    }
+
+    #[test]
+    fn task_space_summaries_preserve_source_limits_and_bound_titles_without_native_payload_copies() {
+        let report = TaskSpaceReport {
+            source_state: Some(SourceState::Partial),
+            source_reason: Some("request context was incomplete".into()),
+            title: "native task space".into(),
+            summary: "allocation counters are not current footprint".into(),
+            limitations: vec!["task incarnations and allocating statements remain unresolved".into()],
+            entries: (0..8)
+                .map(|index| culprit_core::TaskSpaceExplanation {
+                    observation_key: format!("private-proof-{index}"),
+                    task: culprit_core::telemetry::TaskSpaceIdentity {
+                        session_id: "42".into(),
+                        request_id: "0".into(),
+                        execution_context_id: index.to_string(),
+                    },
+                    title: "x".repeat(1000),
+                    explanation: "private detailed native context".into(),
+                    investigation: "bounded native investigation".into(),
+                    verify: "equivalent useful work".into(),
+                })
+                .collect(),
+        };
+        let text = task_space(&report);
+        assert!(text.contains(&t!("evidence.cli.source_partial")));
+        assert!(text.contains(report.source_reason.as_deref().unwrap()));
+        assert!(text.contains(&report.limitations[0]));
+        assert_eq!(text.matches('•').count(), super::super::BRIEF_FINDING_LIMIT);
+        assert_eq!(
+            text.lines()
+                .filter(|line| line.starts_with('•'))
+                .flat_map(str::chars)
+                .filter(|character| *character == 'x')
+                .count(),
+            super::super::BRIEF_FINDING_LIMIT * super::super::BRIEF_TITLE_CHARS
+        );
+        assert!(!text.contains("private-proof") && !text.contains("private detailed native context"));
     }
 
     #[test]

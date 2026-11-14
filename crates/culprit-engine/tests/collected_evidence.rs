@@ -10,6 +10,9 @@ mod page_waits;
 mod request_memory;
 mod session_memory;
 mod statement_work;
+mod task_space;
+mod temporary_space;
+mod variant_family;
 mod waits;
 use fixture::Fixture;
 
@@ -39,6 +42,7 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
         };
         let id = identity.definition_id(&source).unwrap();
         records.push(TelemetryRecord::QueryDefinition(QueryDefinition {
+            variant_family: None,
             id: id.clone(),
             identity: identity.clone(),
             origin: StatementOrigin::Application,

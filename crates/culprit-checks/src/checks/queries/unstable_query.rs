@@ -72,8 +72,6 @@ pub struct UnstableQuery<'s> {
     waited: Option<WriteWaits<'s>>,
     /// What the engine recorded of its waits.
     recorded: Recorded,
-    /// The fewest slow runs that add up to the extra time.
-    fewest: f64,
 }
 
 /// The unstable-query findings of `snapshot`: its cases, each worded.
@@ -118,7 +116,6 @@ fn unstable_queries(snapshot: &Snapshot) -> Vec<UnstableQuery<'_>> {
                 waited,
                 // Aggregate waits retain observed candidates without assigning them to particular slow calls.
                 recorded: Recorded::read(snapshot, q),
-                fewest: (excess / (max - q.mean_time_ms).max(1.0)).ceil(),
             })
         })
         .collect()
@@ -214,23 +211,9 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
         f.metrics.push(Metric::said(culprit_core::key!("check.unstable_query.metric.io"), io, Unit::Ms));
     }
     // Parameter comparisons remain an investigation; aggregate waits do not select a cause.
-    let mut fix = match (&case.waited, snapshot.server.engine) {
-        (Some(w), Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => {
-            w.fix(snapshot)
-        }
-        (None, Engine::Mssql) => {
-            f.facts.advice.application = culprit_core::ApplicationAdvice::Alternative;
-            crate::queries::mssql_fix(snapshot, q, None, case.excess)
-        }
-        (None, Engine::Postgres) => crate::queries::postgres_fix(),
-        (None, Engine::Yugabyte) => Fix { summary: t!("check.unstable_query.fix.yugabyte"), sql: None, cost: None },
-        (None, Engine::Mysql) => {
-            // There is no proven allocation of the aggregate lock total to the slow calls.
-            crate::queries::mysql_fix(snapshot, q, 0.0, Some(case.fewest))
-        }
-        (None, Engine::Sqlite) => {
-            Fix { summary: t!("check.unstable_query.fix.sqlite"), sql: Some("ANALYZE;".into()), cost: None }
-        }
+    let mut fix = match &case.waited {
+        Some(waited) => waited.fix(snapshot),
+        None => crate::queries::runtime_variation_fix(),
     };
     if case.waited.is_none() && case.recorded.has_positive_locks() {
         // Aggregate lock totals do not identify the slow calls. Preserve both investigations rather than forcing
@@ -791,8 +774,10 @@ mod tests {
             f.summary
         );
         let fix = f.fix.unwrap();
-        assert!(fix.summary.contains("Pick the lightest option"), "{}", fix.summary);
+        assert!(fix.summary.contains("equivalent input classes and work"), "{}", fix.summary);
         assert!(fix.summary.contains("Inspect the blocking transaction"), "{}", fix.summary);
+        assert!(fix.sql.is_none());
+        assert!(fix.cost.is_none());
     }
 
     #[test]
@@ -857,7 +842,13 @@ mod tests {
             );
             let fix = finding.fix.unwrap();
             assert!(fix.summary.contains("Inspect the blocking transaction"), "{}", fix.summary);
-            assert!(fix.summary.contains("Pick the lightest option"), "{}", fix.summary);
+            assert!(
+                fix.summary.contains("Establish the mechanism before changing parameterization"),
+                "{}",
+                fix.summary
+            );
+            assert!(fix.sql.is_none());
+            assert!(fix.cost.is_none());
         }
     }
 

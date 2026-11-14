@@ -54,7 +54,7 @@ struct Shared {
 /// What one statement's plan warned of.
 enum Warned {
     Conversion(Conversion),
-    Spill,
+    Spill { node: Option<u32> },
     NoJoinPredicate(JoinCondition),
     MissingStatistics(Box<StatisticsWarning>),
 }
@@ -140,7 +140,7 @@ impl PlanWarningCase<'_> {
     fn warning(&self) -> PlanWarning {
         match self.warned {
             Warned::Conversion(_) => PlanWarning::ImplicitConversion,
-            Warned::Spill => PlanWarning::Spill,
+            Warned::Spill { .. } => PlanWarning::Spill,
             Warned::NoJoinPredicate(_) => PlanWarning::NoJoinPredicate,
             Warned::MissingStatistics(_) => PlanWarning::MissingStatistics,
         }
@@ -246,7 +246,7 @@ fn plan_warning_case<'s>(
             } else {
                 severity_for_impact(snapshot, &[q], impact)
             };
-            (Warned::Spill, severity, Confidence::High)
+            (Warned::Spill { node: node.map(|node| node.id) }, severity, Confidence::High)
         }
         PlanWarning::NoJoinPredicate => {
             let join = join_condition(&q.text);
@@ -340,20 +340,29 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
                 f.metrics.push(Metric::said_text(culprit_core::key!("check.plan_warnings.metric.column"), c.clone()));
             }
         }
-        Warned::Spill => {
+        Warned::Spill { node } => {
             f.facts.cause = Some(culprit_core::FindingCause::Spill);
-            f.title = t!("check.plan_warnings.title.spill", query = capitalize(&query), tense = tense);
-            f.summary = t!("check.plan_warnings.summary.spill");
-            f.fix = Some(Fix {
-                summary: match snapshot.server.engine {
-                    Engine::Mssql => t!("check.plan_warnings.fix.spill.mssql"),
-                    Engine::Postgres | Engine::Yugabyte => t!("check.plan_warnings.fix.spill.postgres"),
-                    Engine::Sqlite => t!("check.plan_warnings.fix.spill.sqlite"),
-                    Engine::Mysql => t!("check.plan_warnings.fix.spill.mysql"),
-                },
-                sql: None,
-                cost: None,
+            let insight = node.and_then(|node| {
+                culprit_core::insights::insights(q.plan.as_ref()?)
+                    .into_iter()
+                    .find(|insight| insight.rule == "spill" && insight.nodes.contains(&node))
             });
+            let fix = if let Some(insight) = insight {
+                f.title = t!(
+                    "check.plan_warnings.title.spill_native",
+                    query = capitalize(&query),
+                    observation = &insight.title
+                );
+                f.summary = insight.detail;
+                f.verify = vec![insight.verify];
+                insight.fix
+            } else {
+                f.title = t!("check.plan_warnings.title.spill", query = capitalize(&query), tense = tense);
+                f.summary = t!("check.plan_warnings.summary.spill");
+                f.verify = vec![t!("check.plan_warnings.verify.spill")];
+                t!("check.plan_warnings.fix.spill")
+            };
+            f.fix = Some(Fix { summary: fix, sql: None, cost: None });
         }
         Warned::NoJoinPredicate(join) => {
             if matches!(join, JoinCondition::Present) {
@@ -405,11 +414,13 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
             });
         }
     }
-    f.verify = vec![if warning == PlanWarning::MissingStatistics {
-        t!("check.plan_warnings.verify.statistics")
-    } else {
-        t!("check.plan_warnings.verify.rescan")
-    }];
+    if f.verify.is_empty() {
+        f.verify = vec![if warning == PlanWarning::MissingStatistics {
+            t!("check.plan_warnings.verify.statistics")
+        } else {
+            t!("check.plan_warnings.verify.rescan")
+        }];
+    }
     // Statements that share one cause: what they take together, said once.
     if let Some(shared) = &case.shared {
         apply_query_impact(&mut f, &shared.impact);
@@ -575,6 +586,9 @@ pub(super) fn warning_key(w: PlanWarning) -> &'static str {
         PlanWarning::ResidualPredicate => "residual-predicate",
     }
 }
+
+#[cfg(test)]
+mod spill_tests;
 
 pub(super) fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {

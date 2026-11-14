@@ -2,8 +2,9 @@
 use culprit_core::{
     Error, PageWaitExplanation, PageWaitReport, Result, SourceOutcome, SourceState, WaitResourceKind, format, key, t,
     telemetry::{
-        MAX_PAGE_WAIT_OBSERVATIONS, PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState,
-        PageWaitResolution, PageWaitTargetKind,
+        MAX_PAGE_WAIT_OBSERVATIONS, MssqlIndexCounter, PageIndexOperationRelation, PageIndexOperations,
+        PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState, PageWaitResolution,
+        PageWaitTargetKind,
     },
 };
 use std::collections::BTreeSet;
@@ -25,7 +26,7 @@ pub fn explain(observations: &[&PageWaitObservation], source: Option<&SourceOutc
                 count = format::count(observations.len() as f64)
             )
         },
-        limitations: limitations(source),
+        limitations: limitations(source, observations.iter().any(|row| row.index_operations.is_some())),
         entries: cases.into_iter().map(render).collect(),
     })
 }
@@ -34,11 +35,19 @@ struct ObservedPage<'a> {
     observation: &'a PageWaitObservation,
     key: String,
     wait: WaitKind,
+    index: Option<IndexPoint<'a>>,
 }
 #[derive(Clone, Copy)]
 enum WaitKind {
     Memory,
     Io,
+}
+enum IndexPoint<'a> {
+    Measured { waits: &'a str, milliseconds: &'a str, relation: PageIndexOperationRelation },
+    Unknown { relation: PageIndexOperationRelation },
+    Missing,
+    Denied,
+    Unavailable,
 }
 
 fn validate<'a>(
@@ -73,17 +82,21 @@ fn validate<'a>(
                 WaitResourceKind::PageIo => WaitKind::Io,
                 _ => return Err(invalid()),
             };
-            Ok(ObservedPage { observation, key, wait })
+            let index = observation.index_operations.as_ref().map(|point| index_point(point, wait));
+            Ok(ObservedPage { observation, key, wait, index })
         })
         .collect()
 }
 
-fn limitations(source: Option<&SourceOutcome>) -> Vec<String> {
+fn limitations(source: Option<&SourceOutcome>, has_index_points: bool) -> Vec<String> {
     let mut limits = vec![
         t!("view.page_waits.limit.ownership"),
         t!("view.page_waits.limit.bounds"),
         t!("view.page_waits.limit.clock"),
     ];
+    if has_index_points {
+        limits.push(t!("view.page_waits.limit.index_counters"));
+    }
     match source.map(|source| source.state) {
         None => limits.push(t!("view.page_waits.limit.source_unknown")),
         Some(SourceState::Partial) => limits.push(t!("view.page_waits.limit.source_partial")),
@@ -123,6 +136,9 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
         recheck_message(observation.after_check.as_ref().or(observation.before_check.as_ref())),
         &[],
     ));
+    if let Some(point) = &case.index {
+        render_index_point(&mut details, point, case.wait);
+    }
     let investigation = culprit_core::i18n::t(investigation_message(&case), &[]);
     PageWaitExplanation {
         observation_key: case.key,
@@ -132,6 +148,67 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
         explanation: details.join(" "),
         investigation,
         verify: t!("view.page_waits.verify"),
+    }
+}
+
+fn index_point(point: &PageIndexOperations, wait: WaitKind) -> IndexPoint<'_> {
+    match point {
+        PageIndexOperations::Observed { counters, relation, .. } => {
+            let (count, milliseconds) = match wait {
+                WaitKind::Memory => (MssqlIndexCounter::PageLatchWaits, MssqlIndexCounter::PageLatchWaitMs),
+                WaitKind::Io => (MssqlIndexCounter::PageIoLatchWaits, MssqlIndexCounter::PageIoLatchWaitMs),
+            };
+            match (counters.counter(count), counters.counter(milliseconds)) {
+                (Some(waits), Some(milliseconds)) => IndexPoint::Measured { waits, milliseconds, relation: *relation },
+                _ => IndexPoint::Unknown { relation: *relation },
+            }
+        }
+        PageIndexOperations::Missing => IndexPoint::Missing,
+        PageIndexOperations::PermissionDenied => IndexPoint::Denied,
+        PageIndexOperations::Unavailable => IndexPoint::Unavailable,
+    }
+}
+
+fn render_index_point(details: &mut Vec<String>, point: &IndexPoint<'_>, wait: WaitKind) {
+    let relation = match point {
+        IndexPoint::Measured { waits, milliseconds, relation } => {
+            let message = match wait {
+                WaitKind::Memory => key!("view.page_waits.index.memory"),
+                WaitKind::Io => key!("view.page_waits.index.io"),
+            };
+            details.push(culprit_core::i18n::t(
+                message,
+                &[
+                    ("waits", format::digits((*waits).to_owned()).into()),
+                    ("milliseconds", format::digits((*milliseconds).to_owned()).into()),
+                ],
+            ));
+            Some(*relation)
+        }
+        IndexPoint::Unknown { relation } => {
+            details.push(match wait {
+                WaitKind::Memory => t!("view.page_waits.index.memory_unknown"),
+                WaitKind::Io => t!("view.page_waits.index.io_unknown"),
+            });
+            Some(*relation)
+        }
+        IndexPoint::Missing => {
+            details.push(t!("view.page_waits.index.missing"));
+            None
+        }
+        IndexPoint::Denied => {
+            details.push(t!("view.page_waits.index.denied"));
+            None
+        }
+        IndexPoint::Unavailable => {
+            details.push(t!("view.page_waits.index.unavailable"));
+            None
+        }
+    };
+    match relation {
+        Some(PageIndexOperationRelation::ChangedTarget) => details.push(t!("view.page_waits.index.changed")),
+        Some(PageIndexOperationRelation::UnverifiedTarget) => details.push(t!("view.page_waits.index.unverified")),
+        Some(PageIndexOperationRelation::CheckedTarget) | None => {}
     }
 }
 

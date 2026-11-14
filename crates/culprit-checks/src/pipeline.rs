@@ -255,6 +255,7 @@ impl Pipeline {
         let request_memory = explained_request_memory(&mut snapshot);
         let session_memory = explained_session_memory(&mut snapshot);
         let page_waits = explained_page_waits(&mut snapshot);
+        let task_space = explained_task_space(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
         let mut assessments = Vec::new();
@@ -362,6 +363,7 @@ impl Pipeline {
             request_memory,
             session_memory,
             page_waits,
+            task_space,
         }
     }
 }
@@ -425,6 +427,21 @@ fn explained_page_waits(snapshot: &mut Snapshot) -> Option<culprit_core::PageWai
     admit_explanation(snapshot, source_id, culprit_core::message!("view.page_waits.invalid_capture"), result)
 }
 
+fn explained_task_space(snapshot: &mut Snapshot) -> Option<culprit_core::TaskSpaceReport> {
+    let captured = snapshot.operations.task_space.as_ref()?;
+    let source = snapshot.sources.iter().find(|source| source.source == captured.source);
+    let result = if captured.is_valid()
+        && captured.observations.iter().all(|row| row.fits_database_capture(&snapshot.server.database))
+    {
+        let rows: Vec<_> = captured.observations.iter().collect();
+        crate::task_space::explain(&rows, source)
+    } else {
+        Err(culprit_core::Error::invalid(culprit_core::t!("view.task_space.invalid_capture")))
+    };
+    let source_id = captured.source.clone();
+    admit_explanation(snapshot, source_id, culprit_core::message!("view.task_space.invalid_capture"), result)
+}
+
 fn admit_explanation<R>(
     snapshot: &mut Snapshot,
     source_id: String,
@@ -474,6 +491,41 @@ fn rank(findings: &mut [Finding]) {
 mod tests {
     use super::*;
     use culprit_core::{Capability, Engine, WaitStat};
+
+    #[test]
+    fn task_space_replay_keeps_empty_custom_source_coverage_and_withholds_invalid_clocks() {
+        use culprit_core::{SourceOutcome, SourceState, telemetry::TaskSpaceSnapshot};
+        let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+        let source = "embedded.task-observations";
+        let capture = TaskSpaceSnapshot {
+            source: source.into(),
+            observed_from: "2026-11-13T10:00:00Z".into(),
+            observed_until: "2026-11-13T10:00:01Z".into(),
+            observations: Vec::new(),
+        };
+        snapshot.operations.task_space = Some(capture.clone());
+        snapshot.sources.push(SourceOutcome {
+            source: source.into(),
+            state: SourceState::Empty,
+            reason: Some("native task read was empty".into()),
+            reason_message: None,
+        });
+        let report = crate::analyze(snapshot.clone());
+        let explanation = report.task_space.as_ref().unwrap();
+        assert_eq!(explanation.source_state, Some(SourceState::Empty));
+        assert_eq!(explanation.source_reason.as_deref(), Some("native task read was empty"));
+        assert!(explanation.entries.is_empty());
+        assert_eq!(report.snapshot.operations.task_space, Some(capture));
+
+        snapshot.operations.task_space.as_mut().unwrap().observed_until = "2026-11-13T09:59:59Z".into();
+        let report = crate::analyze(snapshot);
+        assert!(report.task_space.is_none());
+        let unavailable = report.snapshot.sources.iter().find(|outcome| outcome.source == source).unwrap();
+        assert_eq!(unavailable.state, SourceState::Unavailable);
+        assert_eq!(unavailable.reason.as_deref(), Some(t!("view.task_space.invalid_capture").as_str()));
+        assert!(report.snapshot.operations.task_space.is_some(), "invalid native input remains available");
+        assert!(report.snapshot.notes.iter().any(|note| note.collector == source));
+    }
 
     #[test]
     fn preparation_preserves_worker_io_totals_above_or_below_statement_elapsed_time() {

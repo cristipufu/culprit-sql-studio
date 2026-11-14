@@ -67,6 +67,10 @@ pub(crate) async fn last_actual_plan(pool: &Arc<Pool>, query_id: &str, plan_id: 
     let read = pool
         .observe(|reader| Box::pin(async move { retained::read(reader, query_id, plan_id, maximum).await }))
         .await?;
+    plan_from_retained(read)
+}
+
+fn plan_from_retained(read: retained::Read) -> Result<Plan> {
     let Some(row) = read.plan else {
         return Err(if read.setting_on == Some(false) { not_kept() } else { no_matching_plan() });
     };
@@ -75,6 +79,10 @@ pub(crate) async fn last_actual_plan(pool: &Arc<Pool>, query_id: &str, plan_id: 
         crate::query_store::payload::Payload::Unavailable(culprit_core::telemetry::PayloadUnavailable::Oversized) => {
             return Err(culprit_core::telemetry::CollectionStop::ByteLimit.error());
         }
+        crate::query_store::payload::Payload::Unavailable(
+            culprit_core::telemetry::PayloadUnavailable::NotCollected
+            | culprit_core::telemetry::PayloadUnavailable::SourceUnavailable,
+        ) => return Err(no_matching_plan()),
         crate::query_store::payload::Payload::Unavailable(_) => return Err(not_kept()),
     };
     let mut plan = plan_xml::parse_statement(&xml, row.context.query_hash.as_deref())?;
@@ -82,12 +90,7 @@ pub(crate) async fn last_actual_plan(pool: &Arc<Pool>, query_id: &str, plan_id: 
         return Err(not_kept());
     }
     plan.raw = None;
-    if let Some(at) = row.last_start_utc_estimate {
-        plan.facts_mut().last_run_at = Some(at.clone());
-        plan.props.insert("LastRunAt".into(), at);
-    }
     clear_unrecorded_times(&mut plan);
-    plan.props.insert("CachedExecutions".into(), row.executions);
     Ok(plan)
 }
 
@@ -320,6 +323,42 @@ fn node_progress(profiles: &[Rec], plan: Option<&Plan>) -> Vec<NodeProgress> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn retained_row() -> retained::RetainedPlan {
+        let xml = r#"<ShowPlanXML><BatchSequence><Batch><Statements><StmtSimple StatementText="SELECT id FROM @Rows" QueryHash="0x0123456789ABCDEF" StatementSubTreeCost="1"><QueryPlan><RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="100" EstimatedTotalSubtreeCost="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="10000" ActualExecutions="1" /></RunTimeInformation><TableScan><Object Table="[@Rows]" /></TableScan></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#;
+        retained::RetainedPlan {
+            context: crate::cached_statements::context(&crate::grants::tests::row()).unwrap(),
+            source_utf16_bytes: Some(xml.encode_utf16().count() * 2),
+            payload: crate::query_store::payload::Payload::Text(xml.into()),
+            executions: "9007199254740993".into(),
+            last_start_without_offset: Some("2020-01-01T10:01:00.0070000".into()),
+        }
+    }
+
+    #[test]
+    fn retained_runtime_rows_do_not_borrow_the_cache_counters_or_last_start_as_their_execution_identity() {
+        let row = retained_row();
+        assert_eq!(row.executions, "9007199254740993");
+        assert!(row.last_start_without_offset.is_some());
+        let plan = plan_from_retained(retained::Read { setting_on: Some(false), plan: Some(row) }).unwrap();
+        assert_eq!(plan.kind, PlanKind::Actual);
+        assert_eq!(plan.root.act_rows, Some(10000.0));
+        assert!(plan.facts().last_run_at.is_none());
+        assert!(!plan.props.contains_key("LastRunAt"));
+        assert!(!plan.props.contains_key("CachedExecutions"));
+        assert!(culprit_core::actual_summary(&plan).unwrap().last_run_at.is_none());
+    }
+
+    #[test]
+    fn an_unverified_retained_payload_does_not_suggest_enabling_statistics() {
+        let mut row = retained_row();
+        row.payload = crate::query_store::payload::Payload::Unavailable(
+            culprit_core::telemetry::PayloadUnavailable::SourceUnavailable,
+        );
+        let error = plan_from_retained(retained::Read { setting_on: Some(true), plan: Some(row) }).unwrap_err();
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert!(!error.hint.unwrap_or_default().contains(TURN_ON));
+    }
 
     #[test]
     fn lightweight_profile_zero_times_withdraw_typed_placeholders_and_keep_measured_fallbacks() {

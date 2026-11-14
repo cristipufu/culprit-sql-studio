@@ -4,6 +4,7 @@
 //! https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-page-info-transact-sql
 mod context;
 mod fields;
+mod index_context;
 #[cfg(test)]
 mod native_tests;
 mod participants;
@@ -38,6 +39,7 @@ struct Candidate {
     after_check: Option<PageWaitRecheck>,
     statement_identity: Option<NativeIdentity>,
     plan_identity: Option<NativeIdentity>,
+    index_operations: Option<PageIndexOperations>,
 }
 enum LookupState {
     Pending,
@@ -92,7 +94,7 @@ impl<R: NativeRead> ActivityReader<R> {
         }
 
         let indices = pending_indices(&candidates);
-        let before = match self.page_participants(&frame, &indices).await {
+        let before = match self.request_participants(&frame, &indices).await {
             Ok(rows) => rows,
             Err(error) if stops_remaining_reads(&error) => return Err(error),
             Err(error) => {
@@ -126,7 +128,12 @@ impl<R: NativeRead> ActivityReader<R> {
         };
         self.enrich_using_policy(&mut frame, &keys, false, MAX_SQL_BYTES, super::sql::QueryPolicy::SerialMetadata)
             .await?;
+        let index_read = index_context::ReadPlan::prepare(&mut self.io, &initial, &headers_before).await?;
         self.admit_page_headers(&initial).await?;
+        let index_points = index_read.acquire(&mut self.io).await?;
+        for candidate in &mut candidates {
+            candidate.index_operations = candidate.address.and_then(|address| index_points.get(&address).cloned());
+        }
         let headers_after = match self.page_headers(&addresses).await {
             Ok(rows) => rows,
             Err(error) if stops_remaining_reads(&error) => return Err(error),
@@ -135,7 +142,7 @@ impl<R: NativeRead> ActivityReader<R> {
                 return self.finish_page_capture(frame, candidates, limited, initial).await;
             }
         };
-        let after = match self.page_participants(&frame, &indices).await {
+        let after = match self.request_participants(&frame, &indices).await {
             Ok(rows) => rows,
             Err(error) if stops_remaining_reads(&error) => return Err(error),
             Err(error) => {
@@ -158,6 +165,14 @@ impl<R: NativeRead> ActivityReader<R> {
             let address = candidate.address.ok_or_else(invalid_data)?;
             let header_before = headers_before.get(&address).ok_or_else(invalid_data)?;
             let header_after = headers_after.get(&address).ok_or_else(invalid_data)?;
+            if let Some(point) = &mut candidate.index_operations {
+                if let PageIndexOperations::Observed { observed_at, .. } = point
+                    && !chronological(&[&header_before.observed_at, observed_at, &header_after.observed_at])
+                {
+                    return Err(CollectionStop::SourceChanged.error());
+                }
+                index_context::qualify(point, None, header_before, header_after);
+            }
             if !chronological(&[
                 &initial.activity.at,
                 &frame.context.at,
@@ -192,6 +207,9 @@ impl<R: NativeRead> ActivityReader<R> {
             }
             match mapped_target(&initial, header_after) {
                 Ok(target) => {
+                    if let Some(point) = &mut candidate.index_operations {
+                        index_context::qualify(point, Some(&target), header_before, header_after);
+                    }
                     candidate.state = LookupState::Observed { target: Box::new(target) };
                 }
                 Err(_) => candidate.withhold(PageWaitResolution::UnverifiedSource),
@@ -240,33 +258,6 @@ impl<R: NativeRead> ActivityReader<R> {
             return Err(CollectionStop::SourceChanged.error());
         }
         finish(frame, candidates, limited, initial, checked.activity.at)
-    }
-
-    async fn page_participants(
-        &mut self,
-        frame: &ActivityFrame,
-        indices: &[usize],
-    ) -> Result<BTreeMap<usize, participants::Check>> {
-        if indices.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-        let selected: BTreeSet<_> = indices.iter().copied().collect();
-        let rows = self
-            .io
-            .query(sql::PARTICIPANTS, vec![Parameter::Text(participants::selectors(frame, indices)?)], indices.len())
-            .await
-            .map_err(ReadError::into_error)?;
-        if rows.len() != indices.len() {
-            return Err(invalid_data());
-        }
-        let mut checked = BTreeMap::new();
-        for row in &rows {
-            let proof = participants::Check::decode(row)?;
-            if !selected.contains(&proof.ordinal) || checked.insert(proof.ordinal, proof).is_some() {
-                return Err(invalid_data());
-            }
-        }
-        Ok(checked)
     }
 
     async fn page_headers(&mut self, addresses: &BTreeSet<PageAddress>) -> Result<BTreeMap<PageAddress, HeaderRecord>> {
@@ -345,6 +336,7 @@ fn select(frame: &ActivityFrame, context: &context::LookupContext) -> (Vec<Candi
                 after_check: None,
                 statement_identity: None,
                 plan_identity: None,
+                index_operations: None,
             });
         }
     }
@@ -365,7 +357,7 @@ fn admitted_addresses(candidates: &[Candidate]) -> BTreeSet<PageAddress> {
 fn apply_request_checks(
     frame: &ActivityFrame,
     candidates: &mut [Candidate],
-    checks: &BTreeMap<usize, participants::Check>,
+    checks: &BTreeMap<usize, super::participants::Check>,
 ) {
     for candidate in candidates.iter_mut().filter(|candidate| candidate.is_pending()) {
         candidate.before_check = checks
@@ -423,6 +415,7 @@ fn finish(
                 target,
                 statement_identity: candidate.statement_identity,
                 plan_identity: candidate.plan_identity,
+                index_operations: candidate.index_operations,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -493,18 +486,14 @@ fn object(record: &HeaderRecord) -> Option<PageWaitObject> {
     {
         return None;
     }
-    let created = catalog.object_created.as_ref()?;
-    let modified = catalog.object_modified.as_ref()?;
-    let mut native = NativeIdentity::new(id.to_string())
-        .qualified("native_object", "sys.all_objects")
-        .qualified("created_without_offset", created)
-        .qualified("modified_without_offset", modified);
-    if let Some(id) = catalog.index_id {
-        native = native.qualified("index_id", id.to_string());
-    }
-    if let Some(hobt) = &catalog.hobt_id {
-        native = native.qualified("hobt_id", hobt);
-    }
+    let native = crate::index_operations::targeted::object_identity(
+        id.try_into().ok()?,
+        catalog.index_id.map(u32::try_from).transpose().ok()?,
+        catalog.index_type.map(i64::from),
+        catalog.object_created.as_deref(),
+        catalog.object_modified.as_deref(),
+        catalog.hobt_id.as_deref(),
+    )?;
     Some(PageWaitObject {
         native,
         schema: catalog.schema_name.clone()?,

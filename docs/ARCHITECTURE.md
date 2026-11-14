@@ -193,9 +193,10 @@ native unknowns, units and fractional timestamps. SQL text stays private for int
 An interactive scan freezes a bounded native interval population before reading runtime statistics. Waits, timelines,
 plan variants and runtime costs share that population and reader. A final native metadata recheck supplies precise
 observation bounds; retention gaps, changed membership or an uncertain terminal read invalidate the workload rather
-than supplying a different source's denominator. Costs with a later execution count cannot borrow an earlier query's
-denominator. Mutable open intervals are still separate native observations, not an atomic snapshot. Compilation
-history retains its independent lifetime.
+than supplying a different source's denominator. Outcome and log-volume sufficient statistics come from the original
+summary rows. A reset can preserve native identity, interval and execution count while replacing the executions;
+later rows cannot replace that original cost population. Mutable open intervals are still separate native
+observations, not an atomic snapshot. Compilation history retains its independent lifetime.
 
 Deadlock history uses one bounded native event reader and the existing graph parser. Native file/buffer positions,
 event digests and fractional timestamps identify exported events independently of redaction or retry. Interactive
@@ -455,6 +456,17 @@ and reject visible resets. Maximum wait duration is a maximum, not an additive c
 select only the target database and optional shared tempdb, never an all-database enumeration followed by a filter.
 Left catalog joins preserve file IDs and counters when names/types are unavailable. Point exports retain exact totals,
 zero-I/O files, units, unknown reset evidence and per-source closure; display ranking cannot truncate raw completeness.
+`FileIoContext` carries independent read/write accounting and native replica context through raw capture, analysis,
+findings and UI references. Hyperscale's special cache source is called only inside a positively qualified native
+control-flow branch. Cache pages, page-server responses, simulated writes, log-service writes and replica accounting
+cannot acquire conventional storage-operation semantics from an engine name or a nonzero timer. Unknown metadata
+stays unknown. Log merging and storage grouping preserve accounting, replica, scope, reset and write operation.
+
+`culprit-mssql::activity::tempdb` owns task allocation/deallocation reading and reuses the page reader's extracted
+request participant checker. Scans and `TaskSpaceSource` adapt the same capture; `FrozenSource` owns paging,
+completion and close proof. Capture-local task tuples provide no task generation or allocator evidence. Current
+SQL is checked request context only. The pure `views::task_space` explanation is reused by report preparation and
+the authenticated collected-evidence API; both stores keep the existing OperationalSamples schema and proof path.
 
 `culprit-mssql::performance` reads shared native counter facts once for pressure and connection churn. Typed units and
 counter nature come from the native counter format, not its display name. Unknown formats keep raw values and have
@@ -649,6 +661,17 @@ not establish support for hiding an index. Checks consume that decision instead 
 Native index hash groups remain separate from ordered keys. Distributed workload comparisons bind the contributing
 node set and each node's reset epoch through `CounterSet`; partial contributors or unknown epochs cannot establish a
 continuous counter history. Local index zeros cannot establish cluster-wide absence.
+
+`RuntimeDistribution` represents one observed population. Its typed quantiles distinguish retained sample values
+from native histogram bounds; native picosecond timers and counts keep exact integer strings. Later histograms do
+not borrow a statement summary's count, reset, mean or extrema. Checks compare bounds within one qualified
+population, while the UI presents independent observations separately. A bad or unavailable distribution does not
+erase valid statement statistics or another usable observation.
+
+Native query-variant metadata belongs to an identity-checked `QueryDefinition`. Both warehouse adapters preserve
+the same logical projection and original row proof; the archived analyzer carries the metadata into its scoped
+query group without manufacturing dispatcher runtime. A plan-average difference remains an informational candidate
+and cannot absorb an independent heavy-query finding or replace an engine's own tuning recommendation.
 
 Native QPM history has a separate `QueryStat::plan_history` context. Cache entry counts and dates are independent of
 the statement-statistics period; `workload_plans()` exposes only variants that share that period to causal checks,
@@ -966,7 +989,7 @@ interval with known query-counter growth but incomplete database totals is separ
 calls (a lower bound after evictions), never an inferred daily rate, average or share. The UI and briefs read this
 same `StatementCost` rather than dividing a new entry's calls by years since the global reset.
 
-Storage counters carry their own `FileIo::scope`, `stats_reset` and `write_operation`. PostgreSQL before 16 measures
+Storage counters carry their own `FileIo::context`, `scope`, `stats_reset` and `write_operation`. PostgreSQL before 16 measures
 data reads per database, while `pg_stat_io` and WAL are shared server sources. WAL syncs are flushes, not writes.
 An unknown source reset remains unknown.
 A reset of database, background-writer or archiver statistics never supplies the WAL source's period.

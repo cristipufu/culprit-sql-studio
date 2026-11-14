@@ -1,9 +1,11 @@
 //! One native activity reader. Consumers choose scope, enrichment and presentation after reading the same facts.
 pub(crate) mod memory;
 pub(crate) mod page_targets;
+mod participants;
 mod resources;
 mod rows;
 mod sql;
+pub(crate) mod tempdb;
 
 use crate::{
     conn::Pool,

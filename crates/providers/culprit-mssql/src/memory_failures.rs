@@ -39,16 +39,22 @@ impl Context {
     }
 }
 
-fn budget() -> CollectionBudget {
+pub(crate) fn bounded_budget(requested: &CollectionBudget, envelope_queries: u32) -> CollectionBudget {
     CollectionBudget {
-        max_queries: MAX_QUERIES,
-        max_snapshot_rows: MAX_ROWS as u32,
-        page_rows: MAX_ROWS as u32,
-        page_bytes: 8 * 1024 * 1024,
-        statement_timeout_ms: 3_000,
-        total_timeout_ms: 10_000,
-        ..Default::default()
+        max_queries: requested.max_queries.min(MAX_QUERIES.saturating_add(envelope_queries)),
+        max_snapshot_rows: requested.max_snapshot_rows.min(MAX_ROWS as u32),
+        page_rows: requested.page_rows.min(MAX_ROWS as u32),
+        page_bytes: requested.page_bytes.min(8 * 1024 * 1024),
+        total_bytes: requested.total_bytes.min(64 * 1024 * 1024),
+        statement_timeout_ms: requested.statement_timeout_ms.min(3_000),
+        total_timeout_ms: requested.total_timeout_ms.min(10_000),
+        ..requested.clone()
     }
+}
+
+fn budget() -> CollectionBudget {
+    let requested = CollectionBudget { page_bytes: 8 * 1024 * 1024, ..Default::default() };
+    bounded_budget(&requested, 0)
 }
 
 pub(crate) async fn collect(

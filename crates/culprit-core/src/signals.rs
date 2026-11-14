@@ -130,6 +130,7 @@ pub struct FileIo {
     /// The file's logical name or path; on PostgreSQL the kind of object read ("tables and indexes").
     pub name: String,
     pub kind: FileKind,
+    pub context: crate::FileIoContext,
     /// The database the file belongs to, when the engine says (tempdb, the scanned database).
     pub database: Option<String>,
     pub reads: f64,
@@ -159,6 +160,7 @@ fn same_log(a: &FileIo, b: &FileIo) -> bool {
         && a.scope == b.scope
         && a.stats_reset == b.stats_reset
         && a.write_operation == b.write_operation
+        && a.context == b.context
 }
 
 /// Identity of a measured storage source, without its display wording or counters.
@@ -167,10 +169,23 @@ fn same_log(a: &FileIo, b: &FileIo) -> bool {
 pub struct FileReference {
     pub name: String,
     pub kind: FileKind,
+    pub context: crate::FileIoContext,
     pub database: Option<String>,
     pub scope: Option<FileScope>,
     pub stats_reset: Option<String>,
     pub write_operation: Option<FileWriteOperation>,
+}
+
+impl FileReference {
+    /// Stable within this captured source namespace. Native replica/accounting/reset facts are part of identity;
+    /// timing counters and translated descriptions are not. A missing reset is still unknown, not a generation.
+    pub fn key(&self) -> crate::Result<String> {
+        let mut identity = self.clone();
+        identity.name = crate::redact::shareable_name(&identity.name);
+        serde_json::to_vec(&identity)
+            .map(|bytes| crate::telemetry::digest(&bytes))
+            .map_err(|_| crate::telemetry::CollectionStop::InvalidPage.error())
+    }
 }
 
 impl FileIo {
@@ -178,6 +193,7 @@ impl FileIo {
         FileReference {
             name: self.name.clone(),
             kind: self.kind,
+            context: self.context.clone(),
             database: self.database.clone(),
             scope: self.scope,
             stats_reset: self.stats_reset.clone(),
@@ -224,26 +240,18 @@ pub fn merge_logs(files: &[FileIo]) -> Vec<FileIo> {
 }
 
 impl FileIo {
-    pub fn write_label(&self) -> &'static str {
-        if self.write_operation == Some(FileWriteOperation::Flush) { "flush" } else { "write" }
-    }
-
     pub fn coverage(&self, snapshot: &Snapshot) -> String {
+        let database = self.database.as_deref().unwrap_or_default();
         let scope = match self.scope {
-            Some(FileScope::Server) => "whole server",
-            Some(FileScope::Database) => {
-                self.database.as_deref().filter(|db| *db != snapshot.server.database).unwrap_or("this database")
-            }
-            None => "recorded file statistics",
+            Some(FileScope::Server) => "server",
+            Some(FileScope::Database) if !database.is_empty() && database != snapshot.server.database => "named",
+            Some(FileScope::Database) => "database",
+            None => "unknown",
         };
-        let period = self.stats_reset.as_deref().map(|at| format!("since {at}")).unwrap_or_else(|| {
-            if snapshot.server.engine == crate::Engine::Postgres {
-                "over an unknown statistics period".into()
-            } else {
-                "over the recorded history".into()
-            }
-        });
-        format!("{scope}, {period}")
+        match self.stats_reset.as_deref() {
+            Some(at) => t!("core.io.coverage.since", scope = scope, database = database, at = at),
+            None => t!("core.io.coverage.unknown", scope = scope, database = database),
+        }
     }
 
     pub fn avg_read_ms(&self) -> Option<f64> {
@@ -979,6 +987,7 @@ mod merge_tests {
 
     fn file(name: &str, kind: FileKind, writes: f64, write_ms: f64) -> FileIo {
         FileIo {
+            context: crate::FileIoContext::STORAGE,
             name: name.into(),
             kind,
             database: None,
@@ -1018,5 +1027,43 @@ mod merge_tests {
         let merged = merge_logs(&[timed, untimed]);
         assert_eq!(merged[0].writes, 10_000.0);
         assert_eq!(merged[0].avg_write_ms(), None, "the missing timings are unknown, not zero");
+    }
+
+    #[test]
+    fn file_identity_survives_sharing_without_collapsing_distinct_paths_or_native_populations() {
+        let mut native = file("/private/first/data.db", FileKind::Data, 1000.0, 50_000.0);
+        native.database = Some("shop".into());
+        native.scope = Some(FileScope::Database);
+        native.stats_reset = Some("2026-11-12T10:00:00Z".into());
+        native.context.replica_id = Some("native-replica-1".into());
+        let key = native.reference().key().unwrap();
+        let mut shared = native.clone();
+        shared.name = crate::redact::shareable_name(&shared.name);
+        assert!(!shared.name.contains("/private/"));
+        assert_eq!(shared.reference().key().unwrap(), key);
+        shared.name = crate::redact::shareable_name(&shared.name);
+        assert_eq!(shared.reference().key().unwrap(), key, "sharing is idempotent");
+        for change in
+            ["path", "read-accounting", "write-accounting", "replica", "reset", "scope", "database", "operation"]
+        {
+            let mut different = native.clone();
+            match change {
+                "path" => different.name = "/private/second/data.db".into(),
+                "read-accounting" => different.context.read = crate::IoAccounting::CachePage,
+                "write-accounting" => different.context.write = crate::IoAccounting::Unknown,
+                "replica" => different.context.replica_id = Some("native-replica-2".into()),
+                "reset" => different.stats_reset = None,
+                "scope" => different.scope = Some(FileScope::Server),
+                "database" => different.database = Some("other".into()),
+                "operation" => different.write_operation = Some(FileWriteOperation::Flush),
+                _ => unreachable!(),
+            }
+            assert_ne!(different.reference().key().unwrap(), key, "{change}");
+        }
+        shared.reads = 50_000.0;
+        shared.read_ms = Some(250_000.0);
+        shared.writes = 0.0;
+        shared.write_ms = None;
+        assert_eq!(shared.reference().key().unwrap(), key, "counters do not become file identity");
     }
 }

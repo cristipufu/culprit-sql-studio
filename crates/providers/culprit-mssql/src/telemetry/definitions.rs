@@ -19,6 +19,10 @@ const RECORD_OVERHEAD_BYTES: usize = 4096;
 // A UTF-16 source code unit can become a six-byte JSON escape. Redaction replacements fit the metadata reserve.
 const JSON_BYTES_PER_SOURCE_BYTE: usize = 3;
 
+#[cfg(test)]
+#[path = "definitions/family_tests.rs"]
+mod family_tests;
+
 #[derive(Default)]
 pub(super) struct Definitions {
     plans: BTreeMap<i64, NativePlanIdentity>,
@@ -93,6 +97,7 @@ impl Definitions {
         budget: &CollectionBudget,
         stream: TelemetryStream,
         token: Option<&str>,
+        variant_families: bool,
     ) -> std::result::Result<CollectionRead, ReadError> {
         self.frozen = true;
         let offset =
@@ -124,19 +129,25 @@ impl Definitions {
         let limit = payload_limit(stream, budget)?;
         let count = packed_prefix(&rows, budget.page_bytes as usize, limit)?;
         let selected = &ids[offset..offset + count];
-        let payload_sql =
-            if stream == TelemetryStream::QueryDefinitions { sql::QUERY_DEFINITIONS } else { sql::PLAN_DEFINITIONS };
-        let rows =
-            session.query(payload_sql, vec![ids_parameter(selected)?, Parameter::Integer(limit as i64)], count).await?;
-        if rows.len() != count {
-            return Err(decode::malformed().into());
-        }
+        let kind = if stream == TelemetryStream::QueryDefinitions {
+            crate::query_store::definitions::Kind::Query
+        } else {
+            crate::query_store::definitions::Kind::Plan
+        };
+        let rows = crate::query_store::definitions::read_payload(
+            session,
+            &selected.iter().map(i64::to_string).collect::<Vec<_>>(),
+            kind,
+            limit,
+            variant_families,
+        )
+        .await?;
         let mut records = Vec::with_capacity(count);
         for (row, id) in rows.iter().zip(selected) {
             if decode::integer(row, "id")? != *id {
                 return Err(decode::malformed().into());
             }
-            records.push(self.decode(row, *id, source, stream, limit)?);
+            records.push(self.decode(row, *id, source, stream, limit, variant_families)?);
         }
         let next = offset + count;
         let next_cursor =
@@ -162,6 +173,7 @@ impl Definitions {
         source: &CollectionDescription,
         stream: TelemetryStream,
         limit: usize,
+        variant_families: bool,
     ) -> Result<TelemetryRecord> {
         let bytes = optional_size(row)?;
         match stream {
@@ -186,7 +198,10 @@ impl Definitions {
                 .collect();
                 let native = native_payload(row, bytes, limit);
                 let provenance = crate::statement_origin::read(row, native.text());
+                let variant_family =
+                    if variant_families { crate::query_store::variants_sql::decode(row)? } else { None };
                 Ok(TelemetryRecord::QueryDefinition(QueryDefinition {
+                    variant_family,
                     origin: provenance.origin,
                     monitoring_template_id: provenance.template_id,
                     id: identity.definition_id(source)?,

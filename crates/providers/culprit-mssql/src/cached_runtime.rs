@@ -7,6 +7,11 @@ use crate::{
 use culprit_core::{Result, telemetry::*};
 use std::collections::BTreeMap;
 
+mod layout;
+pub(crate) use layout::Layout;
+
+const STATISTICS: [&str; 4] = ["total", "last", "min", "max"];
+
 fn native_suffix(metric: CachedRuntimeMetric) -> &'static str {
     match metric {
         CachedRuntimeMetric::WorkerMicroseconds => "worker_time",
@@ -16,13 +21,21 @@ fn native_suffix(metric: CachedRuntimeMetric) -> &'static str {
         CachedRuntimeMetric::PhysicalReads => "physical_reads",
         CachedRuntimeMetric::LogicalWrites => "logical_writes",
         CachedRuntimeMetric::Rows => "rows",
+        CachedRuntimeMetric::SpilledPages => "spills",
     }
 }
-pub(crate) fn select_sql() -> String {
+pub(crate) fn select_sql(layout: &Layout) -> String {
     let counters = CachedRuntimeMetric::ALL
         .into_iter()
         .flat_map(|metric| {
-            ["total", "last", "min", "max"].map(|statistic| format!("qs.{statistic}_{}", native_suffix(metric)))
+            STATISTICS.map(|statistic| {
+                let column = format!("{statistic}_{}", native_suffix(metric));
+                if layout.supports(metric) {
+                    format!("qs.{column}")
+                } else {
+                    format!("CAST(NULL AS bigint) AS {column}")
+                }
+            })
         })
         .collect::<Vec<_>>()
         .join(",");
@@ -43,18 +56,9 @@ pub(crate) fn decode(row: &Rec) -> Result<CachedStatementRuntime> {
     let mut counters = BTreeMap::new();
     if measured {
         for metric in CachedRuntimeMetric::ALL {
-            let counter = |statistic| {
-                integer(row, &format!("{statistic}_{}", native_suffix(metric))).map(|value| value.to_string())
-            };
-            counters.insert(
-                metric,
-                CachedCounterDistribution {
-                    total: counter("total")?,
-                    last: counter("last")?,
-                    minimum: counter("min")?,
-                    maximum: counter("max")?,
-                },
-            );
+            if let Some(distribution) = distribution(row, metric)? {
+                counters.insert(metric, distribution);
+            }
         }
     }
     let value = CachedStatementRuntime {
@@ -71,6 +75,18 @@ pub(crate) fn decode(row: &Rec) -> Result<CachedStatementRuntime> {
         return Err(invalid_data());
     }
     Ok(value)
+}
+
+fn distribution(row: &Rec, metric: CachedRuntimeMetric) -> Result<Option<CachedCounterDistribution>> {
+    let [total, last, minimum, maximum] = STATISTICS
+        .map(|statistic| crate::read::optional_counter(row, &format!("{statistic}_{}", native_suffix(metric))));
+    match [total?, last?, minimum?, maximum?] {
+        [None, None, None, None] if !metric.is_required() => Ok(None),
+        [Some(total), Some(last), Some(minimum), Some(maximum)] => {
+            Ok(Some(CachedCounterDistribution { total, last, minimum, maximum }))
+        }
+        _ => Err(invalid_data()),
+    }
 }
 
 pub(crate) struct Summary {
@@ -149,5 +165,7 @@ FROM db_stats GROUP BY query_hash OPTION(MAXDOP 1)"#,
     )
 }
 
+#[cfg(test)]
+mod native_tests;
 #[cfg(test)]
 pub(crate) mod tests;

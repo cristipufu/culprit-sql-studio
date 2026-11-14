@@ -18,13 +18,14 @@ pub(crate) struct Reader<R = ReadSession> {
     io: R,
     layout: Option<RuntimeLayout>,
     window: Option<super::window_sql::FrozenWindow>,
-    log_bytes: Option<bool>,
     stopped: Option<culprit_core::Error>,
 }
 #[derive(Clone, Copy)]
 struct RuntimeLayout {
     tempdb: bool,
+    log_bytes: bool,
     waits: bool,
+    variants: super::variants_sql::Availability,
 }
 impl Reader {
     pub(crate) fn open(pool: Arc<Pool>) -> Self {
@@ -38,7 +39,7 @@ impl Reader {
 }
 impl<R: NativeRead> Reader<R> {
     pub(crate) fn new(io: R) -> Self {
-        Self { io, layout: None, window: None, log_bytes: None, stopped: None }
+        Self { io, layout: None, window: None, stopped: None }
     }
     fn admit(&self) -> Result<()> {
         if let Some(error) = &self.stopped {
@@ -93,7 +94,13 @@ impl<R: NativeRead> Reader<R> {
             1 => true,
             _ => return Err(invalid_data()),
         };
-        let layout = RuntimeLayout { tempdb, waits: super::window_sql::waits_supported(row)? };
+        let log_bytes = match integer(row, "log_bytes")? {
+            0 => false,
+            1 => true,
+            _ => return Err(invalid_data()),
+        };
+        let variants = super::variants_sql::Availability::decode(row, "variants")?;
+        let layout = RuntimeLayout { tempdb, log_bytes, waits: super::window_sql::waits_supported(row)?, variants };
         let rows = self
             .read(
                 &super::window_sql::metadata_sql(layout.waits, false),
@@ -132,11 +139,16 @@ impl<R: NativeRead> Reader<R> {
     pub(crate) async fn summary(&mut self, window_minutes: u32) -> Result<Vec<PlanSummary>> {
         let window = self.window(window_minutes).await?;
         let layout = self.layout.ok_or_else(invalid_data)?;
-        self.read(&runtime::summary_sql(layout.tempdb), vec![window.parameter()], MAX_RESULT_ROWS)
+        let result = self
+            .read(&runtime::summary_sql(layout.tempdb, layout.log_bytes), vec![window.parameter()], MAX_RESULT_ROWS)
             .await?
             .iter()
             .map(PlanSummary::decode)
-            .collect()
+            .collect();
+        if let Err(error) = &result {
+            self.observe_failure(error);
+        }
+        result
     }
     pub(crate) async fn waits(
         &mut self,
@@ -169,32 +181,11 @@ impl<R: NativeRead> Reader<R> {
         kind: super::definitions::Kind,
         limit: usize,
     ) -> Result<Vec<super::definitions::Definition>> {
-        super::definitions::read(self, ids, kind, limit).await
-    }
-    pub(crate) async fn costs(&mut self, window_minutes: u32, ids: &[String]) -> Result<Vec<super::costs::RunCosts>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
+        let result = super::definitions::read(self, ids, kind, limit).await;
+        if let Err(error) = &result {
+            self.observe_failure(error);
         }
-        let log = self.has_log_bytes().await?;
-        let scope = self.window(window_minutes).await?.parameter();
-        self.read(&super::costs::runs_sql(log), vec![scope, ids_parameter(ids)?], MAX_RESULT_ROWS)
-            .await?
-            .iter()
-            .map(super::costs::RunCosts::decode)
-            .collect()
-    }
-    async fn has_log_bytes(&mut self) -> Result<bool> {
-        if let Some(value) = self.log_bytes {
-            return Ok(value);
-        }
-        let rows = self.read(super::costs::LAYOUT, vec![], 1).await?;
-        let value = match integer(rows.first().ok_or_else(invalid_data)?, "log_bytes")? {
-            0 => false,
-            1 => true,
-            _ => return Err(invalid_data()),
-        };
-        self.log_bytes = Some(value);
-        Ok(value)
+        result
     }
     pub(crate) async fn compilations(&mut self, ids: &[String]) -> Result<Vec<super::costs::Compilation>> {
         if ids.is_empty() {
@@ -212,6 +203,12 @@ impl<R: NativeRead> Reader<R> {
             compilations.push(compilation);
         }
         Ok(compilations)
+    }
+    pub(crate) fn variant_families_supported(&self) -> bool {
+        self.variant_family_availability() == super::variants_sql::Availability::Readable
+    }
+    pub(crate) fn variant_family_availability(&self) -> super::variants_sql::Availability {
+        self.layout.map(|layout| layout.variants).unwrap_or(super::variants_sql::Availability::Unavailable)
     }
     pub(crate) async fn close(&mut self) -> SourceShutdown {
         self.io.close().await

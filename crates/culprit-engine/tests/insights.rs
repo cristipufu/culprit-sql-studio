@@ -3,6 +3,7 @@
 //! how to fix it, on every engine.
 
 use culprit_core::insights::{PlanInsight, coverage_note, insights};
+use culprit_core::plan_facts::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
 use culprit_core::{Engine, Severity};
 use culprit_engine::plans::parse_plan;
 
@@ -90,7 +91,15 @@ fn sql_server_shapes() {
     let udf = find("mssql-udf.sqlplan", "scalar-udf");
     assert_eq!(udf.severity, Severity::Medium);
     assert!(udf.title.starts_with("shop.fn_age_label runs once for every row"));
-    assert!(find("mssql-tablevar.sqlplan", "table-variable").title.contains("@t"));
+    let unqualified_input = load("mssql-tablevar.sqlplan");
+    let nodes = unqualified_input.nodes();
+    let input = nodes.iter().find(|node| node.object.as_deref() == Some("@t")).expect("native @t reference");
+    assert_eq!(input.est_rows, 1.0);
+    assert_eq!(
+        input.facts().relational_input,
+        Some(RelationalInput { kind: RelationalInputKind::Unknown, provenance: RelationalInputProvenance::Unresolved })
+    );
+    assert!(!rules_of(&unqualified_input).contains(&"table-variable".into()));
     // A cost of 31 is below the cost threshold for parallelism many servers use (50): whether it would split depends
     // on the server's setting, which the plan doesn't carry.
     let maxdop = find("mssql-maxdop1.sqlplan", "parallelism-blocked");
@@ -134,7 +143,9 @@ fn postgres_shapes() {
     assert!(not_in.fix.contains("NOT IN and NOT EXISTS are not interchangeable"));
     assert!(not_in.verify.contains("empty subquery"));
     assert!(!rules("pg-notin.json").contains(&"correlated-subquery".into()), "NOT IN's subplan isn't reported twice");
-    assert!(find("pg-sort-spill.json", "spill").title.starts_with("The sort writes"));
+    let spill = find("pg-sort-spill.json", "spill");
+    assert_eq!(spill.title, "The sort used 72.0 MB of temporary disk space");
+    assert!(spill.fix_sql.is_none(), "the native disk-space measurement does not establish a work_mem value");
     assert!(rules("pg-hash-batches.json").iter().filter(|r| *r == "spill").count() >= 2, "sort and hash both spill");
     let mis = find("pg-misestimate.json", "misestimate");
     assert!(mis.title.starts_with("Expected 438 rows from customers"), "{}", mis.title);

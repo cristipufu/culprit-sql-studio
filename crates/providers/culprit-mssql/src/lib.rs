@@ -45,6 +45,7 @@ mod queues;
 mod read;
 mod read_metrics;
 mod recorded;
+mod relational_inputs;
 mod replication;
 mod request_memory;
 mod resource_counters;
@@ -61,6 +62,7 @@ mod statement_origin;
 mod statistics;
 mod storage_io;
 mod tables;
+mod task_space;
 mod telemetry;
 #[cfg(test)]
 mod test_support;

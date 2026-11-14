@@ -36,12 +36,27 @@ fn a_scan_without_query_history_says_why() {
 }
 
 #[test]
-fn percentiles_never_pass_the_slowest_run() {
-    let mut s = Spread { p50_ms: Some(10.0), p95_ms: Some(40.0), p99_ms: Some(43.7), ..Default::default() };
-    s.clamp_to(Some(43.4));
-    assert_eq!((s.p50_ms, s.p95_ms, s.p99_ms), (Some(10.0), Some(40.0), Some(43.4)));
-    s.clamp_to(None);
-    assert_eq!(s.p99_ms, Some(43.4));
+fn independent_quantile_bounds_are_not_rewritten_by_statement_extrema() {
+    use crate::{
+        DistributionPopulation, RuntimeDistribution, RuntimeDistributionOrigin, RuntimeDuration, RuntimeQuantile,
+    };
+    let observed = RuntimeDistribution {
+        source: "native-summary".into(),
+        origin: RuntimeDistributionOrigin::StatementSummary,
+        population: DistributionPopulation::NativeCounters { sample_count: None },
+        p50: None,
+        p95: None,
+        p99: Some(RuntimeQuantile::HistogramUpperBound {
+            lower: None,
+            upper: RuntimeDuration::Picoseconds { value: "43700000000".into() },
+        }),
+        histogram: Vec::new(),
+        issue: None,
+    };
+    let spread = Spread { min_ms: Some(1.0), distributions: vec![observed.clone()], lock_ms: None };
+    assert!(spread.distributions[0].is_usable());
+    assert_eq!(spread.distributions[0], observed);
+    assert_eq!(spread.distributions[0].p99.as_ref().unwrap().upper_ms(), Some(43.7));
 }
 
 /// The app reads each engine's facts (abilities, session actions, the reasons it refuses) from the engine files

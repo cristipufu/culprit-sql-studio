@@ -3,7 +3,7 @@ use super::*;
 use crate::{
     activity::ReadOptions,
     conn::{Pool, SessionKind},
-    test_support::{batch, config, session_id},
+    test_support::{assert_no_execution_grant, batch, config, session_id},
 };
 use futures_util::{FutureExt, TryStreamExt};
 use std::{
@@ -75,64 +75,6 @@ async fn observe_request(pool: Arc<Pool>, session: &str, port: u16) -> (Activity
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-}
-
-async fn assert_no_execution_grant(client: &mut crate::conn::MsClient, sql: &str, parameters: Vec<Parameter>) {
-    // Actual plan instrumentation is confined to the owned fixture and runs only Culprit's metadata statements.
-    batch(client, "SET STATISTICS XML ON").await;
-    let mut query = tiberius::Query::new(sql);
-    for parameter in &parameters {
-        match parameter {
-            Parameter::Integer(value) => {
-                query.bind(*value);
-            }
-            Parameter::Text(value) => {
-                query.bind(value.as_str());
-            }
-        }
-    }
-    let results = query.query(&mut *client).await.unwrap().into_results().await.unwrap();
-    batch(client, "SET STATISTICS XML OFF").await;
-    let mut plans = 0;
-    for rows in results {
-        for row in rows {
-            let row = Rec::from_row(&row);
-            for (_, value) in row.columns() {
-                let crate::value::Val::Text(value) = value else { continue };
-                if !value.contains("<ShowPlanXML") {
-                    continue;
-                }
-                culprit_core::xml::read(value, |document| {
-                    let document = document.unwrap();
-                    assert_eq!(document.root_element().tag_name().name(), "ShowPlanXML");
-                    for node in document.descendants().filter(|node| node.is_element()) {
-                        assert!(
-                            !matches!(node.attribute("PhysicalOp"), Some("Hash Match" | "Sort")),
-                            "grant-bearing operator in memory diagnostic: {value}"
-                        );
-                        if node.tag_name().name() == "MemoryGrantInfo" {
-                            for name in [
-                                "GrantedMemory",
-                                "RequestedMemory",
-                                "RequiredMemory",
-                                "DesiredMemory",
-                                "SerialRequiredMemory",
-                                "SerialDesiredMemory",
-                                "MaxUsedMemory",
-                            ] {
-                                assert!(
-                                    node.attribute(name).is_none_or(|value| value.parse::<u64>() == Ok(0)),
-                                    "{name} in diagnostic actual plan: {value}"
-                                );
-                            }
-                        }
-                    }
-                });
-                plans += 1;
-            }
-        }
-    }
-    assert!(plans > 0, "actual metadata plan was not returned");
 }
 
 fn options() -> ReadOptions {

@@ -396,6 +396,10 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub page_waits: Option<crate::PageWaitReport>,
+    /// Capture-local task counters and independently qualified request context, never allocator ownership.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub task_space: Option<crate::TaskSpaceReport>,
     pub snapshot: Snapshot,
     pub findings: Vec<Finding>,
     pub locked: Vec<LockedCheck>,

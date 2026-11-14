@@ -7,8 +7,13 @@ use ts_rs::TS;
 use crate::format::{self, digits};
 use crate::plan::Plan;
 use crate::t;
+use crate::telemetry::{NativePlanIdentity, NativeQueryIdentity};
 
 use super::WaitStat;
+
+#[cfg(test)]
+#[path = "workload/variant_tests.rs"]
+mod variant_tests;
 
 /// What a workload was read from. The rules that depend on it ask this, never the name in `Workload::source`: a slow
 /// query log keeps only the runs it logged, performance_schema's histograms count from the server's start, the plan
@@ -1055,6 +1060,11 @@ pub struct QueryStat {
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
     pub plans: Vec<PlanVariant>,
+    /// A native child-query relationship. Its plans and counters remain this child's own runtime population;
+    /// the dispatcher and parent are metadata, not additional executions or proof of harmful plan reuse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub variant_family: Option<QueryVariantFamily>,
     pub plan: Option<Plan>,
     pub waits: Vec<WaitStat>,
     /// Classes this source measured for this query and whether their observation is complete. Positive rows alone
@@ -1087,11 +1097,8 @@ pub struct QueryStat {
 #[ts(export)]
 pub struct Spread {
     pub min_ms: Option<f64>,
-    pub p50_ms: Option<f64>,
-    pub p95_ms: Option<f64>,
-    pub p99_ms: Option<f64>,
-    /// `[low_ms, high_ms, runs]` per bucket, fastest first (MySQL).
-    pub histogram: Vec<[f64; 3]>,
+    /// Each distribution owns its quantile representation and population; independent observations stay separate.
+    pub distributions: Vec<crate::RuntimeDistribution>,
     /// Time spent waiting for locks across all runs (MySQL).
     /// Native accumulated lock timer. Its source may cover only table-lock acquisition and may use a different
     /// clock from statement execution; a scalar value establishes neither all lock classes nor an elapsed share.
@@ -1099,14 +1106,8 @@ pub struct Spread {
 }
 
 impl Spread {
-    /// Percentiles never above the slowest run: MySQL reports them as bucket upper edges, which can overshoot it.
-    pub fn clamp_to(&mut self, max_ms: Option<f64>) {
-        let Some(max) = max_ms.filter(|m| m.is_finite() && *m > 0.0) else { return };
-        for p in [&mut self.p50_ms, &mut self.p95_ms, &mut self.p99_ms] {
-            if let Some(v) = p.as_mut() {
-                *v = v.min(max);
-            }
-        }
+    pub fn bounded_distributions(&self) -> Option<&[crate::RuntimeDistribution]> {
+        (self.distributions.len() <= crate::MAX_RUNTIME_DISTRIBUTIONS).then_some(&self.distributions)
     }
 }
 
@@ -1262,12 +1263,30 @@ pub struct PlanVariant {
     pub stddev_time_ms: Option<f64>,
     /// The parameter values this plan was compiled for, as the engine reports them (SQL Server showplan).
     pub compiled: Option<String>,
-    /// SQL Server 2022 parameter-sensitive plans: the variant query this plan belongs to.
-    pub variant_query: Option<String>,
     /// CPU time and logical reads across its runs, where the source keeps them per plan (Query Store): whether a
     /// slower plan does more work, or only waited longer while it ran.
     pub cpu_time_ms: Option<f64>,
     pub logical_reads: Option<f64>,
+}
+
+/// Native query-variant metadata within the captured database/source namespace. A dispatcher can have no runtime
+/// rows while its child runs; these identities therefore never substitute for or add to the child's statistics.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct QueryVariantFamily {
+    pub variant: NativeQueryIdentity,
+    pub parent: NativeQueryIdentity,
+    pub dispatcher: NativePlanIdentity,
+}
+
+impl QueryVariantFamily {
+    pub fn is_valid(&self) -> bool {
+        self.variant.is_valid()
+            && self.parent.is_valid()
+            && self.dispatcher.is_valid()
+            && self.variant.query_id != self.parent.query_id
+            && self.dispatcher.query == self.parent
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

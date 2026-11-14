@@ -24,7 +24,6 @@ impl Policy {
 pub(super) struct Rule(pub Policy);
 enum Action {
     Timeline,
-    Recommendation,
     Scan(ReadChange),
 }
 struct Decision {
@@ -85,11 +84,6 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
             {
                 return Some(Decision { from, into, action: Action::Timeline });
             }
-            if let Some(target) =
-                findings.iter().position(|f| f.check == "parameter-sensitive" && single(f) == Some(id))
-            {
-                return Some(Decision { from: into, into: target, action: Action::Recommendation });
-            }
         }
         return None;
     }
@@ -129,27 +123,6 @@ fn timeline(s: &Snapshot, source: &Finding, named: bool) -> Option<String> {
         "regression" => crate::queries::regression_timeline(s, query),
         "plan-regression" => crate::queries::plan_regression_timeline(s, query, named),
         _ => None,
-    }
-}
-fn recommendation_caveat(rec: &Finding, sensitive: &Finding) -> String {
-    let recommended = rec.facts.recommended_plan.as_ref().map(|r| r.plan.as_str());
-    let saving = rec.facts.recommended_plan.as_ref().and_then(|r| r.cpu_saved_share);
-    let (kind, plan) = recommended.map_or(("unknown", ""), |plan| ("known", plan));
-    let share = saving.map(format::percent).unwrap_or_default();
-    let saving = if saving.is_some() { "yes" } else { "no" };
-    match sensitive.facts.usual_fast_plan.as_deref() {
-        Some(fast) if Some(fast) == recommended => {
-            t!("refine.queries.force_the_fast_plan", kind = kind, plan = plan, saving = saving, share = share)
-        }
-        Some(fast) => t!(
-            "refine.queries.force_another_than_the_fast_plan",
-            kind = kind,
-            plan = plan,
-            saving = saving,
-            share = share,
-            fast = fast
-        ),
-        None => t!("refine.queries.force_plan", kind = kind, plan = plan, saving = saving, share = share),
     }
 }
 impl Refine for Rule {
@@ -194,7 +167,6 @@ impl Refine for Rule {
                         }
                     }
                 }
-                Action::Recommendation => target.caveats.push(recommendation_caveat(&source, target)),
                 Action::Scan(reads) => {
                     let Some(q) = source.queries.first().and_then(|r| s.workload.as_ref()?.query(&r.id)) else {
                         continue;

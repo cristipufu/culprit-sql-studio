@@ -196,7 +196,7 @@ fn heavy_causes(s: &Snapshot, findings: &[Finding]) -> BTreeMap<String, Vec<(usi
         !matches!(
             f.check.as_str(),
             "heavy-query" | "unused-index" | "duplicate-index" | "memory-grant" | "network-wait" | "unstable-query"
-        ) && !measures_no_time(f)
+        ) && !does_not_explain_elapsed_time(f)
     }) {
         let Some(share) = f.impact.db_time_share else {
             continue;
@@ -356,6 +356,34 @@ mod tests {
         confirmed.facts.cause = Some(FindingCause::Spill);
         confirmed.queries[0].plan_node = Some(8);
         assert_eq!(decide(Policy::SpillSort, &s, &[sort, confirmed]).len(), 1);
+    }
+
+    #[test]
+    fn observed_runtime_variation_does_not_explain_a_heavy_querys_measured_time_away() {
+        use culprit_core::{Actionability, FindingRuntimeVariation};
+        let s = snapshot();
+        let id = &s.queries()[0].id;
+        for shape in [
+            FindingRuntimeVariation::PlanAverages { faster_plan: "fast".into(), slower_plan: "slow".into() },
+            FindingRuntimeVariation::RuntimeTail,
+        ] {
+            let mut heavy = finding("heavy-query", id, id);
+            heavy.impact.time_ms_per_day = Some(1_000_000.0);
+            let mut observation = finding("embedded-runtime-observation", id, id);
+            observation.facts.runtime_variation = Some(shape.clone());
+            observation.actionability = Actionability::Information;
+            observation.severity = Severity::Low;
+            let mut findings = vec![heavy.clone(), observation];
+            let trace = Rule(Policy::Heavy).refine_traced(&s, &mut findings);
+            assert!(trace.is_empty(), "a typed observed shape does not establish a cause");
+            assert_eq!(findings.len(), 2);
+            assert_eq!(findings[0].severity, heavy.severity);
+            assert_eq!(findings[0].impact.db_time_share, heavy.impact.db_time_share);
+            assert_eq!(findings[0].impact.time_ms_per_day, heavy.impact.time_ms_per_day);
+            assert_eq!(findings[0].queries.len(), 1);
+            assert_eq!(findings[0].queries[0].id, *id);
+            assert_eq!(findings[1].facts.runtime_variation, Some(shape));
+        }
     }
 
     #[test]

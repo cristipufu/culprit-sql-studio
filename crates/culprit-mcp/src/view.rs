@@ -193,6 +193,7 @@ fn query_row(w: &Workload, q: &QueryStat) -> Value {
         "cpu_ms_per_run": q.cpu_time_ms.filter(|_| q.executions > 0.0).map(|c| round(c / q.executions, 3)),
         "rows_per_run": q.rows_per_execution().map(|v| round(v, 1)),
         "reads_per_run": q.reads_per_execution().map(|v| round(v, 1)),
+        "variant_family": q.variant_family,
         "plans": q.plans.len().max(usize::from(q.plan.is_some())),
         "object": q.object_name,
         "text": clip(&q.text, TEXT_SHORT),
@@ -248,7 +249,6 @@ pub fn query(report: &Report, id: &str) -> Result<Value> {
                 "max_ms": ms(p.max_time_ms),
                 "stddev_ms": ms(p.stddev_time_ms),
                 "compiled_for": p.compiled,
-                "variant_query": p.variant_query,
                 "last_seen": p.last_seen,
                 "forced": p.is_forced.then_some(true),
             }))

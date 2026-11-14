@@ -13,13 +13,18 @@ pub(crate) use crate::read::{integer, invalid_data as malformed, text};
 use crate::read::{optional_nonnegative_number as optional_number, required_nonnegative_number as number};
 
 pub(crate) fn query_identity(row: &Rec) -> Result<NativeQueryIdentity> {
+    prefixed_query_identity(row, "")
+}
+
+pub(crate) fn prefixed_query_identity(row: &Rec, prefix: &str) -> Result<NativeQueryIdentity> {
+    let field = |name: &str| format!("{prefix}{name}");
     Ok(NativeQueryIdentity {
-        query_id: integer(row, "query_id")?.to_string(),
+        query_id: integer(row, &field("query_id"))?.to_string(),
         qualifiers: [
-            ("context_settings_id".into(), integer(row, "context_settings_id")?.to_string()),
-            ("object_id".into(), integer(row, "object_id")?.to_string()),
-            ("query_hash".into(), text(row, "query_hash")?),
-            ("initial_compile_at".into(), canonical_time(&text(row, "query_initial_compile_at")?)?),
+            ("context_settings_id".into(), integer(row, &field("context_settings_id"))?.to_string()),
+            ("object_id".into(), integer(row, &field("object_id"))?.to_string()),
+            ("query_hash".into(), text(row, &field("query_hash"))?),
+            ("initial_compile_at".into(), canonical_time(&text(row, &field("query_initial_compile_at"))?)?),
         ]
         .into(),
     })
@@ -41,12 +46,27 @@ pub(crate) fn plan_identity(row: &Rec) -> Result<Option<NativePlanIdentity>> {
     {
         return Ok(None);
     }
+    plan_identity_for_query(row, "", query_identity(row)?)
+}
+
+pub(crate) fn plan_identity_for_query(
+    row: &Rec,
+    prefix: &str,
+    query: NativeQueryIdentity,
+) -> Result<Option<NativePlanIdentity>> {
+    let field = |name: &str| format!("{prefix}{name}");
+    if ["definition_plan_id", "plan_hash", "plan_initial_compile_at"]
+        .into_iter()
+        .any(|name| row.str(&field(name)).is_none())
+    {
+        return Ok(None);
+    }
     Ok(Some(NativePlanIdentity {
-        plan_id: integer(row, "definition_plan_id")?.to_string(),
-        query: query_identity(row)?,
+        plan_id: integer(row, &field("definition_plan_id"))?.to_string(),
+        query,
         qualifiers: [
-            ("plan_hash".into(), text(row, "plan_hash")?),
-            ("initial_compile_at".into(), canonical_time(&text(row, "plan_initial_compile_at")?)?),
+            ("plan_hash".into(), text(row, &field("plan_hash"))?),
+            ("initial_compile_at".into(), canonical_time(&text(row, &field("plan_initial_compile_at"))?)?),
         ]
         .into(),
     }))

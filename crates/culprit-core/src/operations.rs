@@ -46,6 +46,9 @@ pub struct OperationalStats {
     pub page_waits: Option<crate::telemetry::PageWaitSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub task_space: Option<crate::telemetry::TaskSpaceSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub node_resources: Option<NodeResources>,
 }
 
@@ -117,6 +120,7 @@ impl OperationalStats {
             native_failures: _,
             session_memory: _,
             page_waits: _,
+            task_space: _,
             node_resources: _,
         } = self;
         Counters { log_failures, spaces, counters, sequences, multixacts, sqlite, cluster }

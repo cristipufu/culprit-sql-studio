@@ -38,31 +38,125 @@ pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRe
     undecoded.statement_identity = None;
     undecoded.plan_identity = None;
     partial.push(record(undecoded));
-    [
+    let mut cases = vec![
         (full, culprit_core::SourceState::Collected),
         (partial, culprit_core::SourceState::Partial),
         (vec![], culprit_core::SourceState::Empty),
         (vec![], culprit_core::SourceState::Unavailable),
+    ];
+    for relation in [
+        PageIndexOperationRelation::CheckedTarget,
+        PageIndexOperationRelation::ChangedTarget,
+        PageIndexOperationRelation::UnverifiedTarget,
+    ] {
+        let mut observed = observation("67", "5:1:42", WaitResourceKind::MemoryPage, 42);
+        observed.after_check.as_mut().unwrap().wait = PageWaitRelation::NoLongerObserved;
+        observed.index_operations = Some(index_point(observed.target.as_ref().unwrap(), relation));
+        if relation != PageIndexOperationRelation::CheckedTarget {
+            observed.target = None;
+            observed.resolution = PageWaitResolution::ChangedMetadata;
+        }
+        let state = if relation == PageIndexOperationRelation::CheckedTarget {
+            culprit_core::SourceState::Collected
+        } else {
+            culprit_core::SourceState::Partial
+        };
+        cases.push((vec![record(observed)], state));
+    }
+    for point in [PageIndexOperations::Missing, PageIndexOperations::PermissionDenied, PageIndexOperations::Unavailable]
+    {
+        let mut observed = observation("68", "5:1:42", WaitResourceKind::MemoryPage, 42);
+        observed.index_operations = Some(point);
+        cases.push((vec![record(observed)], culprit_core::SourceState::Partial));
+    }
+    cases
+        .into_iter()
+        .map(|(records, state)| {
+            let mut source = manifest.source.clone();
+            source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
+                dataset: SnapshotDataset::PageWaitTargets,
+                observed_from: "2020-01-01T12:00:00Z".into(),
+                observed_until: "2020-01-01T12:00:01Z".into(),
+                records: records.len() as u32,
+                sources: vec![if state == culprit_core::SourceState::Unavailable {
+                    StateSourceCoverage::unavailable(source_id.into(), culprit_core::ErrorCode::PermissionDenied, None)
+                } else {
+                    StateSourceCoverage::observed(
+                        source_id.into(),
+                        records.len() as u32,
+                        state != culprit_core::SourceState::Partial,
+                    )
+                }],
+            });
+            (source, records)
+        })
+        .collect()
+}
+
+fn index_point(target: &MappedPageTarget, relation: PageIndexOperationRelation) -> PageIndexOperations {
+    let verified_catalog = relation != PageIndexOperationRelation::UnverifiedTarget;
+    PageIndexOperations::Observed {
+        observed_at: "2020-01-01T12:00:00.500000000Z".into(),
+        partition_id: verified_catalog.then(|| target.header.partition_id.clone()).flatten(),
+        object: verified_catalog.then(|| target.object.as_ref().map(|object| object.native.clone())).flatten(),
+        relation,
+        counters: Box::new(MssqlIndexOperations {
+            identity: MssqlIndexIdentity {
+                database_id: 5,
+                object_id: 128,
+                index_id: 1,
+                partition_number: 1,
+                hobt_id: None,
+            },
+            schema: Some("dbo".into()),
+            object: Some("orders".into()),
+            index: Some("orders_id".into()),
+            object_type: Some("U".into()),
+            engine_internal: Some(false),
+            leading_key_is_identity: None,
+            leading_key_default: None,
+            optimize_for_sequential_key: None,
+            counters: [
+                (MssqlIndexCounter::PageLatchWaits, Some("3".into())),
+                (MssqlIndexCounter::PageLatchWaitMs, Some("9007199254740993".into())),
+                (MssqlIndexCounter::PageIoLatchWaits, None),
+                (MssqlIndexCounter::PageIoLatchWaitMs, Some("0".into())),
+            ]
+            .into(),
+            reset: culprit_core::ResetMarker::Unknown,
+        }),
+    }
+}
+
+pub fn page_wait_tamper_cases(original: &serde_json::Value) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let changed_wait = if original.pointer("/after_check/wait") == Some(&json!("no-longer-observed")) {
+        json!("original-observed")
+    } else {
+        json!("no-longer-observed")
+    };
+    let changed_link = if original.pointer("/index_operations/relation") == Some(&json!("checked-target")) {
+        json!("unverified-target")
+    } else {
+        json!("checked-target")
+    };
+    [
+        ("/target/header/page_id", json!(999)),
+        ("/observed_address/page_id", json!(999)),
+        ("/after_check/wait", changed_wait),
+        ("/before_check/observed_at", json!("2020-01-01T12:00:00.400000000Z")),
+        ("/index_operations/observed_at", json!("2020-01-01T12:00:00.600000000Z")),
+        ("/index_operations/counters/identity/partition_number", json!(2)),
+        ("/index_operations/counters/counters/page-latch-wait-ms", json!("0")),
+        ("/index_operations/relation", changed_link),
     ]
     .into_iter()
-    .map(|(records, state)| {
-        let mut source = manifest.source.clone();
-        source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
-            dataset: SnapshotDataset::PageWaitTargets,
-            observed_from: "2020-01-01T12:00:00Z".into(),
-            observed_until: "2020-01-01T12:00:01Z".into(),
-            records: records.len() as u32,
-            sources: vec![if state == culprit_core::SourceState::Unavailable {
-                StateSourceCoverage::unavailable(source_id.into(), culprit_core::ErrorCode::PermissionDenied, None)
-            } else {
-                StateSourceCoverage::observed(
-                    source_id.into(),
-                    records.len() as u32,
-                    state != culprit_core::SourceState::Partial,
-                )
-            }],
-        });
-        (source, records)
+    .filter_map(|(pointer, replacement)| {
+        let mut changed = original.clone();
+        let value = changed.pointer_mut(pointer)?;
+        assert_ne!(*value, replacement, "a conformance mutation must change the committed fact: {pointer}");
+        *value = replacement;
+        Some(changed)
     })
     .collect()
 }
@@ -94,6 +188,7 @@ fn observation(session: &str, address: &str, kind: WaitResourceKind, page: u32) 
     });
     PageWaitObservation {
         source: culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
+        index_operations: None,
         observed_from: "2020-01-01T12:00:00.250000000Z".into(),
         observed_until: "2020-01-01T12:00:00.750000000Z".into(),
         request,

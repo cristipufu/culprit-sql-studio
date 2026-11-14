@@ -1,6 +1,10 @@
 // Stable templates and bound parameters keep page values out of SQL text and the plan-cache key.
 pub(crate) const EDITION: &str = "SELECT /* culprit */ CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition";
-pub(crate) const OPTIONS: &str = "SELECT /* culprit */ * FROM sys.database_query_store_options";
+pub(crate) const OPTIONS: &str = concat!(
+    "SELECT /* culprit */ *, ",
+    super::variants_sql::readable!(),
+    " AS variant_families FROM sys.database_query_store_options"
+);
 pub(crate) const IDENTITY: &str = r#"
 SELECT /* culprit */ database_name, CONVERT(varchar(36), logical_database_guid) AS incarnation,
  CONVERT(varchar(36), physical_database_guid) AS physical_incarnation,
@@ -12,25 +16,66 @@ pub(crate) const MAX_PLAN: &str =
     "SELECT TOP (1) /* culprit */ plan_id FROM sys.query_store_plan ORDER BY plan_id DESC OPTION (MAXDOP 1)";
 macro_rules! query_identity_columns {
     ($query_id:literal) => {
+        $crate::query_store::catalog_sql::query_identity_columns!($query_id, "q", "")
+    };
+    ($query_id:literal, $query_alias:literal, $prefix:literal) => {
         concat!(
             $query_id,
-            r#",q.context_settings_id,q.object_id,
- CONVERT(varchar(16),q.query_hash,2) AS query_hash,
- CONVERT(varchar(40),q.initial_compile_start_time,127) AS query_initial_compile_at"#
+            " AS ",
+            $prefix,
+            "query_id,",
+            $query_alias,
+            ".context_settings_id AS ",
+            $prefix,
+            "context_settings_id,",
+            $query_alias,
+            ".object_id AS ",
+            $prefix,
+            "object_id,",
+            "CONVERT(varchar(16),",
+            $query_alias,
+            ".query_hash,2) AS ",
+            $prefix,
+            "query_hash,",
+            "CONVERT(varchar(40),",
+            $query_alias,
+            ".initial_compile_start_time,127) AS ",
+            $prefix,
+            "query_initial_compile_at"
         )
     };
 }
 pub(crate) use query_identity_columns;
 
+macro_rules! plan_identity_columns {
+    ($plan_alias:literal, $prefix:literal) => {
+        concat!(
+            $plan_alias,
+            ".plan_id AS ",
+            $prefix,
+            "definition_plan_id,",
+            "CONVERT(varchar(16),",
+            $plan_alias,
+            ".query_plan_hash,2) AS ",
+            $prefix,
+            "plan_hash,",
+            "CONVERT(varchar(40),",
+            $plan_alias,
+            ".initial_compile_start_time,127) AS ",
+            $prefix,
+            "plan_initial_compile_at"
+        )
+    };
+}
+pub(crate) use plan_identity_columns;
+
 macro_rules! definition_columns {
     () => {
         concat!(
             query_identity_columns!("q.query_id"),
-            r#",
- p.plan_id AS definition_plan_id,OBJECT_SCHEMA_NAME(q.object_id)+'.'+OBJECT_NAME(q.object_id) AS object_name,
- CONVERT(varchar(16), p.query_plan_hash, 2) AS plan_hash,
- CONVERT(varchar(40), p.initial_compile_start_time, 127) AS plan_initial_compile_at
-"#
+            ",",
+            plan_identity_columns!("p", ""),
+            ",OBJECT_SCHEMA_NAME(q.object_id)+'.'+OBJECT_NAME(q.object_id) AS object_name\n"
         )
     };
 }
@@ -96,12 +141,11 @@ CROSS APPLY(SELECT x.value('@id[1]','bigint') AS id) ids
 LEFT JOIN sys.query_store_plan p ON p.plan_id = ids.id
 ORDER BY ids.id OPTION (MAXDOP 1)"#;
 
-pub(crate) const QUERY_DEFINITIONS: &str = concat!(
-    r#"
-DECLARE /* culprit */ @ids xml=CONVERT(xml,@P1);
-SELECT /* culprit */ ids.id,"#,
+const QUERY_DEFINITION_PREFIX: &str = concat!(
+    "DECLARE /* culprit */ @ids xml=CONVERT(xml,@P1);\nSELECT /* culprit */ ids.id,",
     query_identity_columns!("q.query_id"),
-    r#",
+);
+const QUERY_DEFINITION_COLUMNS: &str = r#",
  CAST(q.is_internal_query AS int) AS engine_internal, CAST(q.is_clouddb_internal_query AS int) AS cloud_internal, OBJECT_SCHEMA_NAME(q.object_id)+'.'+OBJECT_NAME(q.object_id) AS object_name,
  DATALENGTH(t.query_sql_text) AS source_bytes,
  t.is_part_of_encrypted_module AS encrypted, t.has_restricted_text AS restricted,
@@ -110,14 +154,22 @@ SELECT /* culprit */ ids.id,"#,
  c.context_settings_id AS observed_context_settings_id,
  CONVERT(varchar(16), c.set_options, 2) AS set_options, c.language_id, c.date_format, c.date_first,
  CONVERT(varchar(4), c.status, 2) AS status, c.required_cursor_options, c.acceptable_cursor_options,
- c.merge_action_type, c.default_schema_id
+ c.merge_action_type, c.default_schema_id"#;
+const QUERY_DEFINITION_JOINS: &str = r#"
 FROM @ids.nodes('/ids/id') n(x)
 CROSS APPLY(SELECT x.value('@id[1]','bigint') AS id) ids
 LEFT JOIN sys.query_store_query q ON q.query_id = ids.id
 LEFT JOIN sys.query_store_query_text t ON t.query_text_id = q.query_text_id
-LEFT JOIN sys.query_context_settings c ON c.context_settings_id = q.context_settings_id
-ORDER BY ids.id OPTION (MAXDOP 1)"#
-);
+LEFT JOIN sys.query_context_settings c ON c.context_settings_id = q.context_settings_id"#;
+const DEFINITION_ORDER: &str = "\nORDER BY ids.id OPTION (MAXDOP 1)";
+
+pub(crate) fn query_definitions(with_families: bool) -> String {
+    let (columns, joins) =
+        if with_families { (super::variants_sql::COLUMNS, super::variants_sql::JOINS) } else { ("", "") };
+    format!(
+        "{QUERY_DEFINITION_PREFIX}{QUERY_DEFINITION_COLUMNS}{columns}{QUERY_DEFINITION_JOINS}{joins}{DEFINITION_ORDER}"
+    )
+}
 
 pub(crate) const PLAN_DEFINITIONS: &str = concat!(
     r#"

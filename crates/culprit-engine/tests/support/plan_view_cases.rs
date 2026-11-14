@@ -78,8 +78,9 @@ fn variant(id: &str, mean: f64, reads: f64) -> PlanVariant {
     serde_json::from_value(serde_json::json!({
         "id":id,"executions":10.0,"mean_time_ms":mean,"total_time_ms":mean*10.0,
         "logical_reads":reads*10.0,"first_seen":null,"last_seen":null,"is_forced":false,
-        "min_time_ms":null,"max_time_ms":null,"stddev_time_ms":null,"compiled":null,"variant_query":null,"cpu_time_ms":null
-    })).unwrap()
+        "min_time_ms":null,"max_time_ms":null,"stddev_time_ms":null,"compiled":null,"cpu_time_ms":null
+    }))
+    .unwrap()
 }
 
 fn finish(name: &str, mut plan: Plan, query: Option<QueryStat>) -> Case {

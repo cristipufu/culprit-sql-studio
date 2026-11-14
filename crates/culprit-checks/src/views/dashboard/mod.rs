@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use culprit_core::signals::{FileIo, FileKind, Replica, ReplicaRole, merge_logs};
+use culprit_core::signals::{FileIo, FileKind, Replica, ReplicaRole};
 use culprit_core::{
     Capability, Dashboard, Engine, Finding, ItemKind, LiveState, QueryStat, Report, ServerInfo, Severity, Signal,
     SignalStatus, SignalUnit, Snapshot, Tile, TileItem, TileKey, TileMetric, TileStatus, WaitScope, Workload, format,

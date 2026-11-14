@@ -4,6 +4,10 @@ use crate::{Engine, Result};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+#[cfg(test)]
+#[path = "definitions/variant_tests.rs"]
+mod variant_tests;
+
 pub const REDACTION_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -149,6 +153,10 @@ pub struct QueryDefinition {
     pub origin: StatementOrigin,
     pub monitoring_template_id: Option<String>,
     pub identity: NativeQueryIdentity,
+    /// Native child/dispatcher relationship observed with this exact query definition. No parent runtime is implied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub variant_family: Option<crate::QueryVariantFamily>,
     /// Native context settings are opaque source facts, independent of localized labels.
     pub context: std::collections::BTreeMap<String, String>,
     pub context_available: bool,
@@ -160,6 +168,7 @@ impl QueryDefinition {
     pub fn is_valid(&self) -> bool {
         valid_digest(&self.id)
             && self.identity.is_valid()
+            && self.variant_family.as_ref().is_none_or(|family| family.is_valid() && family.variant == self.identity)
             && self.monitoring_template_id.as_deref().is_none_or(valid_digest)
             && (self.monitoring_template_id.is_none() || self.origin == StatementOrigin::CulpritMonitoring)
             && self.sql.is_valid()

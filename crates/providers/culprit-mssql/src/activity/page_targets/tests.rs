@@ -1,4 +1,5 @@
 use super::*;
+pub(crate) mod index_operations;
 const HEADER_BEFORE: usize = 4;
 const HEADER_AFTER: usize = 7;
 const CHECK_AFTER: usize = 8;
@@ -231,6 +232,7 @@ pub(crate) fn header(ordinal: usize, page: i64) -> Rec {
         ("index_name", Val::Text("PK_orders".into())),
         ("index_type", Val::Int(1)),
         ("catalog_partition_id", Val::Int(9007199254740993)),
+        ("catalog_partition_number", Val::Null),
         ("catalog_hobt_id", Val::Int(9007199254740994)),
     ]);
     replace(

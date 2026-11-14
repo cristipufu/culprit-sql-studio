@@ -263,7 +263,8 @@ async fn a_plugin_hands_the_engines_plan_text_to_the_built_in_parser() {
     assert_eq!((plan.root.facts().sort_space_kb, plan.root.facts().sort_on_disk), (Some(20480.0), Some(true)));
     assert_eq!(plan.facts().elapsed_ms, Some(815.1));
     let spill = culprit_core::insights::insights(&plan).into_iter().find(|i| i.rule == "spill").expect("the spill");
-    assert!(spill.title.contains("writes 20.0 MB to disk"), "{}", spill.title);
+    assert_eq!(spill.title, "The sort used 20.0 MB of temporary disk space");
+    assert!(spill.fix_sql.is_none(), "the native spill does not establish a safe memory-setting value");
     let _ = std::fs::remove_dir_all(home);
 }
 

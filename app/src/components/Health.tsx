@@ -19,6 +19,7 @@ import { NativeFailureSourceIssue, RetainedNativeFailures, nativeFailureReadIssu
 import { RequestMemoryParticipants, SessionMemoryParticipants } from "./MemoryParticipants";
 import { ObservationSourceIssue, observationReadIssue } from "./ObservationList";
 import { PageWaitTargets } from "./PageWaitTargets";
+import { TaskSpace } from "./TaskSpace";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -96,7 +97,10 @@ export function HealthTab({
   const pageWaits = report.snapshot.operations.page_waits;
   const pageReport = report.page_waits;
   const pageIssue = observationReadIssue(pageWaits?.source ?? "page wait targets", report.snapshot.sources ?? [], report.snapshot.options?.collect_page_wait_targets === true);
-  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue && !(requests && requestReport) && !requestIssue && !(sessions && sessionReport) && !sessionIssue && !(pageWaits && pageReport) && !pageIssue) {
+  const tasks = report.snapshot.operations.task_space;
+  const taskReport = report.task_space;
+  const taskIssue = observationReadIssue(tasks?.source ?? "task space", report.snapshot.sources ?? [], report.snapshot.options?.collect_task_space === true);
+  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue && !(requests && requestReport) && !requestIssue && !(sessions && sessionReport) && !sessionIssue && !(pageWaits && pageReport) && !pageIssue && !(tasks && taskReport) && !taskIssue) {
     return (
       <div className="waits-empty">
         <h3>{t("ui.health.empty")}</h3>
@@ -145,6 +149,8 @@ export function HealthTab({
       {!(sessions && sessionReport) && sessionIssue && <ObservationSourceIssue source={sessionIssue} title={t("view.session_memory.title")} />}
       {pageWaits && pageReport && <PageWaitTargets key={pageWaits.observed_until} evidence={pageWaits} report={pageReport} />}
       {!(pageWaits && pageReport) && pageIssue && <ObservationSourceIssue source={pageIssue} title={t("view.page_waits.title")} />}
+      {tasks && taskReport && <TaskSpace key={tasks.observed_until} evidence={tasks} report={taskReport} />}
+      {!(tasks && taskReport) && taskIssue && <ObservationSourceIssue source={taskIssue} title={t("view.task_space.title")} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
     </div>
   );

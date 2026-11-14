@@ -398,6 +398,7 @@ fn a_not_valid_check_is_about_the_data_unless_the_planner_reads_it() {
 
 fn file(name: &str, db: &str, kind: FileKind, reads: (f64, f64, f64), writes: (f64, f64)) -> FileIo {
     FileIo {
+        context: culprit_core::FileIoContext::STORAGE,
         name: name.into(),
         kind,
         database: Some(db.into()),
@@ -407,7 +408,7 @@ fn file(name: &str, db: &str, kind: FileKind, reads: (f64, f64, f64), writes: (f
         writes: writes.0,
         write_ms: Some(writes.1),
         write_bytes: None,
-        scope: None,
+        scope: Some(culprit_core::FileScope::Database),
         stats_reset: None,
         write_operation: None,
     }
@@ -416,27 +417,48 @@ fn file(name: &str, db: &str, kind: FileKind, reads: (f64, f64, f64), writes: (f
 #[test]
 fn storage_latency_is_weighted_per_kind_and_tempdbs_log_holds_no_commit() {
     let mut s = fixture("mssql-demo");
+    let database = s.server.database.clone();
+    let mut temporary_log = file("templog", "tempdb", FileKind::Log, (0.0, 0.0, 0.0), (50_000.0, 2_000_000.0));
+    temporary_log.context.write = culprit_core::IoAccounting::NonDurableLog;
+    temporary_log.scope = Some(culprit_core::FileScope::Server);
     pressure(&mut s).files = vec![
-        // tempdb's log is slower, but SQL Server doesn't harden it at commit: it mustn't hide the user log.
-        file("templog", "tempdb", FileKind::Log, (0.0, 0.0, 0.0), (50_000.0, 2_000_000.0)),
-        file("shop_log", "shop", FileKind::Log, (0.0, 0.0, 0.0), (50_000.0, 600_000.0)),
-        // A busy fast data file and a quiet one a backup read in 1 MB chunks: 5 ms weighted, not 300 ms.
-        file("shop", "shop", FileKind::Data, (100_000.0, 200_000.0, 100_000.0 * 8_192.0), (0.0, 0.0)),
-        file("shop_archive", "shop", FileKind::Data, (2_000.0, 600_000.0, 2_000.0 * MB), (0.0, 0.0)),
+        // Shared tempdb log work is retained, but does not establish durable commit or storage latency.
+        temporary_log,
+        file("shop_log", &database, FileKind::Log, (0.0, 0.0, 0.0), (50_000.0, 600_000.0)),
+        // Operation-weighting keeps these data files under 8 ms; a quiet large-request file does not dominate.
+        file("shop", &database, FileKind::Data, (100_000.0, 200_000.0, 100_000.0 * 8_192.0), (0.0, 0.0)),
+        file("shop_archive", &database, FileKind::Data, (2_000.0, 600_000.0, 2_000.0 * MB), (0.0, 0.0)),
     ];
     let r = analyze(s.clone());
-    let titles: Vec<&str> = of(&r, "slow-storage").iter().map(|f| f.title.as_str()).collect();
-    assert_eq!(titles, vec!["Recorded log writes to shop's log averaged 12 ms"]);
-    // Large reads on their own: bulk, Low, and said.
+    let findings = of(&r, "slow-storage");
+    assert_eq!(
+        findings.len(),
+        1,
+        "neither non-durable tempdb work nor the weighted-fast data group is storage pressure"
+    );
+    let log = findings[0];
+    assert_eq!(log.facts.storage_files.len(), 1);
+    assert_eq!(log.facts.storage_files[0].name, "shop_log");
+    assert_eq!(log.facts.storage_files[0].database.as_deref(), Some(database.as_str()));
+    assert_eq!(log.facts.storage_files[0].context.write, culprit_core::IoAccounting::StorageOperation);
+    assert_eq!(log.metrics.iter().find(|metric| metric.unit == culprit_core::Unit::Ms).unwrap().value, 12.0);
+    assert!(log.queries.is_empty(), "native log averages do not identify an issuing query");
+    assert!(log.impact.db_time_share.is_none(), "a log average does not establish a share of query elapsed time");
+    assert_eq!(r.snapshot.pressure.as_ref().unwrap().files[0].context.write, culprit_core::IoAccounting::NonDurableLog);
+    assert_eq!(r.snapshot.pressure.as_ref().unwrap().files[0].scope, Some(culprit_core::FileScope::Server));
+    // Large requests remain a Low recorded observation, without identifying a backup or an issuing query.
     pressure(&mut s).files =
-        vec![file("shop_archive", "shop", FileKind::Data, (2_000.0, 600_000.0, 2_000.0 * MB), (0.0, 0.0))];
+        vec![file("shop_archive", &database, FileKind::Data, (2_000.0, 600_000.0, 2_000.0 * MB), (0.0, 0.0))];
     let r = analyze(s.clone());
     let f = of(&r, "slow-storage")[0];
     assert_eq!(f.severity, Severity::Low);
-    assert!(f.summary.contains("backups, CHECKDB, read-ahead"), "{}", f.summary);
-    // Managed Instance General Purpose: file size sets the IOPS.
+    assert_eq!(f.metrics.iter().find(|metric| metric.is("check.slow_storage.metric.read_size")).unwrap().value, MB);
+    assert!(f.queries.is_empty());
+    assert!(f.impact.db_time_share.is_none());
+    assert!(f.fix.as_ref().unwrap().sql.is_none(), "request size alone cannot authorize a storage change");
+    // A Managed Instance still needs its actual storage policy; platform identity cannot pick a file size.
     s.server.set_platform(Some(culprit_core::Platform::AzureSqlManagedInstance));
-    assert!(of(&analyze(s), "slow-storage")[0].fix.as_ref().unwrap().summary.contains("come from the file's size"));
+    assert!(of(&analyze(s), "slow-storage")[0].fix.as_ref().unwrap().sql.is_none());
 }
 
 // ── 12. large rows ─────────────────────────────────────────────────────────────────────────────────

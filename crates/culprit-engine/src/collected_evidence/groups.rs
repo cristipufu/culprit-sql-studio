@@ -223,7 +223,13 @@ fn query(
         first = extreme(first, row.first_execution_at.as_deref(), true)?;
         last = extreme(last, row.last_execution_at.as_deref(), false)?;
         if row.metrics.iter().any(|metric| {
-            !matches!(metric.key, RuntimeMetricKey::Duration | RuntimeMetricKey::CpuTime | RuntimeMetricKey::Rows)
+            !matches!(
+                metric.key,
+                RuntimeMetricKey::Duration
+                    | RuntimeMetricKey::CpuTime
+                    | RuntimeMetricKey::Rows
+                    | RuntimeMetricKey::TemporaryStorage
+            )
         }) {
             limitations.push(limit(export.record_id.clone(), CollectedAnalysisLimit::MetricNotProjected));
         }
@@ -241,6 +247,12 @@ fn query(
     }
     let plan = plan(group.plan, capture.source().target.engine(), limitations)?;
     let DefinitionPayload::Available { text, .. } = &group.query.sql else { return Err(invalid()) };
+    let temporary_work = runtime_temporary_space(group.rows.iter().map(|(_, row)| *row), &capture.source().source);
+    if temporary_work.is_none()
+        && group.rows.iter().any(|(_, row)| row.metric(&RuntimeMetricKey::TemporaryStorage).is_some())
+    {
+        limitations.push(limit(Some(id.into()), CollectedAnalysisLimit::MetricNotProjected));
+    }
     Ok(Some(QueryStat {
         id: id.into(),
         text: text.clone(),
@@ -256,7 +268,7 @@ fn query(
         rows,
         logical_reads: None,
         physical_reads: None,
-        temporary_work: None,
+        temporary_work,
         first_seen: has_first.then_some(first).flatten(),
         last_seen: has_last.then_some(last).flatten(),
         plans: vec![],
@@ -269,6 +281,7 @@ fn query(
         rows_affected: None,
         plan_id: group.plan.map(|plan| plan.identity.plan_id.clone()),
         plan_history: None,
+        variant_family: group.query.variant_family.clone(),
         requests: None,
         resolved_write_target: None,
     }))

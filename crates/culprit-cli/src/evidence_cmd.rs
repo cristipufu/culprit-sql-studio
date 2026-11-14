@@ -111,6 +111,7 @@ enum Analysis {
     RequestMemory,
     SessionMemory,
     PageWaits,
+    TaskSpace,
     StatementWork,
 }
 impl Analysis {
@@ -127,6 +128,7 @@ impl Analysis {
             | Self::RequestMemory
             | Self::SessionMemory
             | Self::PageWaits
+            | Self::TaskSpace
             | Self::StatementWork => {
                 vec![EvidenceFamily::OperationalSamples]
             }
@@ -197,6 +199,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::PageWaits) => {
             let analysis = culprit_engine::collected_resources::page_waits(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::page_waits(&analysis.report))?;
+        }
+        Some(Analysis::TaskSpace) => {
+            let analysis = culprit_engine::collected_resources::task_space(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::task_space(&analysis.report))?;
         }
         Some(Analysis::StatementWork) => {
             let analysis = culprit_engine::collected_resources::statement_work(&capture)?;

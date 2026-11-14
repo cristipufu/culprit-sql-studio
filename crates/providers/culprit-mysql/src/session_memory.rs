@@ -26,6 +26,20 @@ pub(crate) fn budget() -> CollectionBudget {
     }
 }
 
+pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    let native = budget();
+    CollectionBudget {
+        max_queries: requested.max_queries.min(native.max_queries),
+        max_snapshot_rows: requested.max_snapshot_rows.min(native.max_snapshot_rows),
+        page_rows: requested.page_rows.min(native.page_rows),
+        page_bytes: requested.page_bytes.min(native.page_bytes),
+        total_bytes: requested.total_bytes.min(native.total_bytes),
+        statement_timeout_ms: requested.statement_timeout_ms.min(native.statement_timeout_ms),
+        total_timeout_ms: requested.total_timeout_ms.min(native.total_timeout_ms),
+        ..requested.clone()
+    }
+}
+
 pub(crate) struct Capture {
     pub context: native_memory::Context,
     pub snapshot: SessionMemorySnapshot,
@@ -144,7 +158,7 @@ pub(crate) async fn collect(
     requested: bool,
     probe: &Probe,
 ) -> (Option<SessionMemorySnapshot>, Coverage) {
-    let mut reader = ReadSession::new(connector, budget(), Scope::Server);
+    let mut reader = ReadSession::new(connector, bounded_budget(&CollectionBudget::default()), Scope::Server);
     collect_from(
         &mut reader,
         requested,

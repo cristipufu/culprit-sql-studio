@@ -1,6 +1,6 @@
 use super::fields::{native_big_id, signed_integer};
 use crate::{
-    read::{integer, invalid_data, optional_text, text},
+    read::{integer, invalid_data, optional_integer, optional_text, text},
     value::Rec,
 };
 use culprit_core::Result;
@@ -72,6 +72,7 @@ pub(super) struct Catalog {
     pub index_name: Option<String>,
     pub index_type: Option<i32>,
     pub partition_id: Option<String>,
+    pub partition_number: Option<u32>,
     pub hobt_id: Option<String>,
 }
 impl Catalog {
@@ -90,6 +91,9 @@ impl Catalog {
             index_name: optional_text(row, "index_name")?,
             index_type: signed_integer(row, "index_type")?,
             partition_id: native_big_id(row, "catalog_partition_id")?,
+            partition_number: optional_integer(row, "catalog_partition_number")?
+                .map(|number| number.try_into().map_err(|_| invalid_data()))
+                .transpose()?,
             hobt_id: native_big_id(row, "catalog_hobt_id")?,
         })
     }

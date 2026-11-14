@@ -1,6 +1,7 @@
 use super::*;
 use culprit_core::{Engine, ObservedWaitResource, telemetry::*};
 use serde_json::json;
+mod index_operations;
 
 pub(crate) fn observation(session: &str, kind: WaitResourceKind) -> PageWaitObservation {
     let resource = ObservedWaitResource {
@@ -34,6 +35,7 @@ pub(crate) fn observation(session: &str, kind: WaitResourceKind) -> PageWaitObse
         }),
         statement_identity: Some(NativeIdentity::new("native-handle").qualified("statement_start_offset", "0")),
         plan_identity: None,
+        index_operations: None,
         resource,
         observed_address: Some(PageWaitAddress { database_id: 7, file_id: 1, page_id: 4144 }),
         resolution: PageWaitResolution::ObservedAtBothBounds,

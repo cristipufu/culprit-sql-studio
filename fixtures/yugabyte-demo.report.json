@@ -86,6 +86,12 @@
       "title": "Unstable queries"
     },
     {
+      "check": "parameter-sensitive",
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Recorded query runtime differences"
+    },
+    {
       "check": "temp-spill",
       "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
@@ -121,6 +127,12 @@
       "reason": null,
       "status": "assessed",
       "title": "Unvalidated or disabled constraints"
+    },
+    {
+      "check": "slow-storage",
+      "reason": "The source measurements needed for this assessment were not collected.",
+      "status": "unavailable",
+      "title": "Storage that's slow to read or write"
     }
   ],
   "findings": [
@@ -147,8 +159,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -230,8 +241,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -308,8 +318,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -389,8 +398,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -464,7 +472,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -962,7 +969,7 @@
         "table": "orders"
       }
     ],
-    "format": 3,
+    "format": 4,
     "histograms": null,
     "id": "20261024T065249.190547Z",
     "identity": {
@@ -3686,6 +3693,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080
@@ -5891,8 +5899,7 @@
               "mean_time_ms": 14.457514985714282,
               "min_time_ms": null,
               "stddev_time_ms": null,
-              "total_time_ms": 3036.0781469999993,
-              "variant_query": null
+              "total_time_ms": 3036.0781469999993
             }
           ],
           "query_hash": null,
@@ -5901,12 +5908,9 @@
           "rows": 600.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 4.6986930000000005,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 4.6986930000000005
           },
           "stddev_time_ms": 2.414820547812505,
           "temporary_work": null,
@@ -6386,8 +6390,7 @@
               "mean_time_ms": 5.458163628571427,
               "min_time_ms": null,
               "stddev_time_ms": null,
-              "total_time_ms": 1146.2143619999997,
-              "variant_query": null
+              "total_time_ms": 1146.2143619999997
             }
           ],
           "query_hash": null,
@@ -6396,12 +6399,9 @@
           "rows": 300.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 3.0069290000000004,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 3.0069290000000004
           },
           "stddev_time_ms": 0.8079847240303702,
           "temporary_work": null,
@@ -6864,8 +6864,7 @@
               "mean_time_ms": 6.5378440761904795,
               "min_time_ms": null,
               "stddev_time_ms": null,
-              "total_time_ms": 1372.9472560000006,
-              "variant_query": null
+              "total_time_ms": 1372.9472560000006
             }
           ],
           "query_hash": null,
@@ -6874,12 +6873,9 @@
           "rows": 30.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 3.079424,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 3.079424
           },
           "stddev_time_ms": 0.6935227743968565,
           "temporary_work": null,
@@ -7554,8 +7550,7 @@
               "mean_time_ms": 7.285773542857143,
               "min_time_ms": null,
               "stddev_time_ms": null,
-              "total_time_ms": 510.004148,
-              "variant_query": null
+              "total_time_ms": 510.004148
             }
           ],
           "query_hash": null,
@@ -7564,12 +7559,9 @@
           "rows": 200.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 3.474731,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 3.474731
           },
           "stddev_time_ms": 1.2381343092638095,
           "temporary_work": null,
@@ -7885,8 +7877,7 @@
               "mean_time_ms": 1.2243178502415464,
               "min_time_ms": null,
               "stddev_time_ms": null,
-              "total_time_ms": 253.4337950000001,
-              "variant_query": null
+              "total_time_ms": 253.4337950000001
             },
             {
               "compiled": null,
@@ -7901,8 +7892,7 @@
               "mean_time_ms": 3.2408265000000007,
               "min_time_ms": null,
               "stddev_time_ms": null,
-              "total_time_ms": 12.963306000000005,
-              "variant_query": null
+              "total_time_ms": 12.963306000000005
             }
           ],
           "query_hash": null,
@@ -7911,12 +7901,9 @@
           "rows": 30.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.090327,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.090327
           },
           "stddev_time_ms": 0.18929466561681615,
           "temporary_work": null,

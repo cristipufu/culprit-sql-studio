@@ -21,6 +21,9 @@ fn request() -> CollectionRequest {
     }
 }
 fn source(after: Rec, failure: Option<ReadError>) -> StateSource<FakeRead> {
+    source_with_request(after, failure, &request())
+}
+fn source_with_request(after: Rec, failure: Option<ReadError>, request: &CollectionRequest) -> StateSource<FakeRead> {
     let mut replies = vec![
         Ok(vec![platform(5)]),
         Ok(vec![identity_row()]),
@@ -30,7 +33,44 @@ fn source(after: Rec, failure: Option<ReadError>) -> StateSource<FakeRead> {
         failure.map_or_else(|| Ok(vec![row(), row()]), Err),
     ];
     replies.extend([Ok(vec![super::tests::clock(false, "2020-01-01T06:02:01Z")]), Ok(vec![after])]);
-    StateSource::with_io(FakeRead::new(replies), &request(), "member-alias.invalid".into(), 1433).unwrap()
+    let io = FakeRead::new(replies).with_query_limit(native_budget(request).max_queries);
+    StateSource::with_io(io, request, "member-alias.invalid".into(), 1433).unwrap()
+}
+
+#[tokio::test]
+async fn the_eight_query_collector_budget_keeps_both_clocks_and_cannot_widen_a_seven_query_caller() {
+    let limits = native_budget(&request());
+    assert_eq!(limits.max_queries, 8);
+    assert_eq!(limits.max_snapshot_rows, 128);
+    assert_eq!(limits.statement_timeout_ms, 3000);
+    assert_eq!(limits.total_timeout_ms, 10_000);
+    for limit in [8, 7] {
+        let mut requested = request();
+        requested.budget.max_queries = limit;
+        let mut source = source_with_request(identity_row(), None, &requested);
+        source.describe().await.unwrap();
+        let _ = source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap();
+        let _ = source.read_page(TelemetryStream::OperationalSamples, Some("1")).await.unwrap();
+        if limit == 8 {
+            assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+        } else {
+            assert_eq!(CollectionStop::from_error(&source.finish().await.unwrap_err()), CollectionStop::QueryLimit);
+        }
+        assert_eq!(source.query_count(), limit);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn constructing_a_shared_oom_profile_is_read_free_and_does_not_change_other_state_profiles() {
+    let pool =
+        Arc::new(crate::conn::Pool::new(crate::test_support::config(1, "never-opened", "unused", "culprit"), None));
+    let mut source = StateSource::new(pool, &request(), "unused.invalid".into(), 1).unwrap();
+    assert_eq!(source.query_count(), 0);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    let mut other = request();
+    other.selection = CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational };
+    assert_eq!(native_budget(&other), other.budget);
 }
 
 #[tokio::test]

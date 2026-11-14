@@ -9,7 +9,7 @@ use crate::plan::{NodeKind, Plan, PlanNode};
 use crate::sql::identifier_parts;
 
 use super::predicates::{column_reference, convert_calls, is_column_operand, same_type};
-use super::{conditions, is_system_object, statistics_note, table_leaf};
+use super::{conditions, is_system_object, relational_input_kind, statistics_note, table_leaf};
 
 const STATISTICS_MAINTENANCE: &str = "Statistics maintenance";
 
@@ -359,7 +359,7 @@ pub(super) fn mark_table_indexes(n: &mut PlanNode, tables: &[CatalogTable], stop
     } else {
         n.object.clone()
     };
-    if let Some(object) = object.filter(|o| !o.starts_with(['@', '#']) && !tables.is_empty()) {
+    if let Some(object) = object.filter(|_| relational_input_kind(n).is_none() && !tables.is_empty()) {
         let mut candidates = tables.iter().filter(|t| catalog_table_matches(&object, &t.schema, &t.name));
         let first = candidates.next();
         if let (Some(table), None) = (first, candidates.next()) {

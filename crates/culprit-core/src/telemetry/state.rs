@@ -20,6 +20,7 @@ pub enum SnapshotDataset {
     CurrentRequestMemory,
     SessionMemory,
     PageWaitTargets,
+    TaskSpace,
     MemoryFailures,
     NativeFailures,
     IndexOperations,
@@ -53,6 +54,7 @@ impl SnapshotDataset {
             | Self::CurrentRequestMemory
             | Self::SessionMemory
             | Self::PageWaitTargets
+            | Self::TaskSpace
             | Self::MemoryFailures
             | Self::NativeFailures
             | Self::IndexOperations
@@ -224,15 +226,12 @@ impl StateSourceCoverage {
     }
     fn is_valid(&self) -> bool {
         let observed = match self.state {
-            SourceState::Collected => self.records > 0,
-            SourceState::Empty => self.records == 0,
+            SourceState::Collected => self.records > 0 && self.complete_scope,
+            SourceState::Empty => self.records == 0 && self.complete_scope,
             SourceState::Partial => !self.complete_scope,
             SourceState::Unavailable | SourceState::NotApplicable => self.records == 0 && !self.complete_scope,
         };
-        valid_key(&self.source)
-            && observed
-            && self.records <= 100_000
-            && (!self.complete_scope || matches!(self.state, SourceState::Collected | SourceState::Empty))
+        valid_key(&self.source) && observed && self.records <= 100_000
     }
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -245,6 +244,26 @@ pub struct StateSnapshotDescription {
     pub sources: Vec<StateSourceCoverage>,
 }
 impl StateSnapshotDescription {
+    /// Native population coverage is independent of successful capture, ingestion and warehouse readback.
+    pub fn coverage_state(&self) -> Result<SourceState> {
+        if !self.is_valid() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        let any = |state| self.sources.iter().any(|source| source.state == state);
+        let observed = any(SourceState::Collected) || any(SourceState::Empty);
+        Ok(if any(SourceState::Partial) || any(SourceState::Unavailable) && observed {
+            SourceState::Partial
+        } else if any(SourceState::Unavailable) {
+            SourceState::Unavailable
+        } else if any(SourceState::Collected) {
+            SourceState::Collected
+        } else if any(SourceState::Empty) {
+            SourceState::Empty
+        } else {
+            SourceState::NotApplicable
+        })
+    }
+
     pub fn is_valid(&self) -> bool {
         let mut sources = std::collections::BTreeSet::new();
         !self.sources.is_empty()
@@ -260,6 +279,114 @@ impl StateSnapshotDescription {
             && self.sources.iter().any(|source| {
                 source.source == source_key && matches!(source.state, SourceState::Collected | SourceState::Partial)
             })
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    fn description(coverage: StateSourceCoverage) -> StateSnapshotDescription {
+        StateSnapshotDescription {
+            dataset: SnapshotDataset::Operational,
+            observed_from: "2020-01-01T00:00:00Z".into(),
+            observed_until: "2020-01-01T00:00:01Z".into(),
+            records: coverage.records,
+            sources: vec![coverage],
+        }
+    }
+
+    #[test]
+    fn collected_and_empty_descriptions_cannot_disclaim_complete_native_scope() {
+        for records in [0, 1] {
+            let mut scope = StateSourceCoverage::collected("native-point".into(), records);
+            assert!(description(scope.clone()).is_valid());
+            scope.complete_scope = false;
+            let native = description(scope);
+            assert!(!native.is_valid());
+            let decoded: StateSnapshotDescription =
+                serde_json::from_value(serde_json::to_value(&native).unwrap()).unwrap();
+            assert!(!decoded.is_valid(), "serialization must not repair contradictory source qualification");
+        }
+    }
+
+    #[test]
+    fn positive_empty_and_partial_native_coverage_keep_their_distinct_states() {
+        for (records, complete, expected) in [
+            (1, true, SourceState::Collected),
+            (0, true, SourceState::Empty),
+            (1, false, SourceState::Partial),
+            (0, false, SourceState::Partial),
+        ] {
+            let scope = StateSourceCoverage::observed("native-point".into(), records, complete);
+            assert_eq!(scope.state, expected);
+            let native = description(scope);
+            assert!(native.is_valid(), "{records} retained rows, complete_scope={complete}");
+            let decoded: StateSnapshotDescription =
+                serde_json::from_value(serde_json::to_value(&native).unwrap()).unwrap();
+            assert!(decoded.is_valid());
+            assert_eq!(decoded.sources[0].state, expected);
+            assert_eq!(decoded.sources[0].complete_scope, complete);
+        }
+    }
+
+    #[test]
+    fn completed_states_also_require_their_declared_row_population() {
+        for (records, state) in [(0, SourceState::Collected), (1, SourceState::Empty)] {
+            let mut coverage = StateSourceCoverage::collected("native-point".into(), records);
+            coverage.state = state;
+            assert!(!description(coverage).is_valid());
+        }
+        let mut partial = StateSourceCoverage::observed("native-point".into(), 1, false);
+        partial.complete_scope = true;
+        assert!(!description(partial).is_valid());
+    }
+
+    #[test]
+    fn snapshot_coverage_preserves_unavailable_empty_inapplicable_and_mixed_native_populations() {
+        let cases = [
+            (
+                vec![StateSourceCoverage::unavailable("denied".into(), ErrorCode::PermissionDenied, None)],
+                SourceState::Unavailable,
+            ),
+            (vec![StateSourceCoverage::not_applicable("absent-feature".into())], SourceState::NotApplicable),
+            (vec![StateSourceCoverage::collected("empty".into(), 0)], SourceState::Empty),
+            (vec![StateSourceCoverage::collected("positive".into(), 1)], SourceState::Collected),
+            (vec![StateSourceCoverage::observed("partial-empty".into(), 0, false)], SourceState::Partial),
+            (
+                vec![
+                    StateSourceCoverage::collected("positive".into(), 1),
+                    StateSourceCoverage::unavailable("denied".into(), ErrorCode::PermissionDenied, None),
+                ],
+                SourceState::Partial,
+            ),
+            (
+                vec![
+                    StateSourceCoverage::collected("empty".into(), 0),
+                    StateSourceCoverage::observed("partial-empty".into(), 0, false),
+                ],
+                SourceState::Partial,
+            ),
+            (
+                vec![
+                    StateSourceCoverage::collected("positive".into(), 1),
+                    StateSourceCoverage::not_applicable("absent-feature".into()),
+                ],
+                SourceState::Collected,
+            ),
+        ];
+        for (sources, expected) in cases {
+            let mut snapshot = description(sources[0].clone());
+            snapshot.records = sources.iter().map(|source| source.records).sum();
+            snapshot.sources = sources;
+            assert_eq!(snapshot.coverage_state().unwrap(), expected);
+        }
+        let mut invalid = description(StateSourceCoverage::collected("claimed".into(), 0));
+        invalid.sources[0].complete_scope = false;
+        assert!(
+            invalid.coverage_state().is_err(),
+            "contradictory native qualification cannot be summarized as complete"
+        );
     }
 }
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -304,6 +431,7 @@ pub enum OperationalFact {
     ExecutionGrant(Box<ExecutionGrantObservation>),
     SessionMemory(Box<SessionMemoryObservation>),
     PageWait(Box<PageWaitObservation>),
+    TaskSpace(Box<TaskSpaceObservation>),
     MssqlOutOfMemory(Box<MssqlOutOfMemoryObservation>),
     MysqlErrorLog(Box<MysqlErrorLogObservation>),
     PostgresLog(Box<PostgresLogFailureObservation>),
@@ -336,6 +464,7 @@ impl OperationalFact {
             Self::ExecutionGrant(grant) => grant.key(),
             Self::SessionMemory(observation) => observation.key(),
             Self::PageWait(observation) => observation.key(),
+            Self::TaskSpace(observation) => observation.key(),
             Self::MssqlOutOfMemory(observation) => observation.key(),
             Self::MysqlErrorLog(observation) => observation.key(),
             Self::PostgresLog(observation) => observation.key(),
@@ -371,6 +500,7 @@ impl OperationalFact {
             Self::PostgresLog(observation) => observation.redact(),
             Self::SessionMemory(_) => {}
             Self::PageWait(observation) => observation.redact(engine),
+            Self::TaskSpace(observation) => observation.redact(engine),
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
@@ -425,6 +555,7 @@ impl OperationalFact {
             Self::ExecutionGrant(grant) => grant.is_valid(),
             Self::SessionMemory(observation) => observation.is_valid(),
             Self::PageWait(observation) => observation.is_valid(),
+            Self::TaskSpace(observation) => observation.is_valid(),
             Self::MssqlOutOfMemory(observation) => observation.is_valid(),
             Self::MysqlErrorLog(observation) => observation.is_valid(),
             Self::PostgresLog(observation) => observation.is_valid(),
@@ -472,6 +603,7 @@ impl OperationalObservation {
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,
                 OperationalFact::SessionMemory(observation) => observation.source == self.source,
                 OperationalFact::PageWait(observation) => observation.source == self.source,
+                OperationalFact::TaskSpace(observation) => observation.source == self.source,
                 _ => true,
             }
     }

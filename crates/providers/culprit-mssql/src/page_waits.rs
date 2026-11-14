@@ -8,7 +8,19 @@ use crate::{
 use culprit_core::{Coverage, telemetry::*};
 use std::sync::Arc;
 
-const SCAN_QUERIES: u32 = 16; // Up to three local-identity reads per bound, plus observed targets and guarded SQL.
+const MAX_QUERIES: u32 = 18; // Local identity guards, observed pages/SQL and at most two targeted-index reads.
+
+pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    CollectionBudget {
+        max_snapshot_rows: requested.max_snapshot_rows.min(MAX_PAGE_WAIT_OBSERVATIONS as u32 + 1),
+        page_rows: requested.page_rows.min(MAX_PAGE_WAIT_OBSERVATIONS as u32),
+        max_sql_bytes: requested.max_sql_bytes.min(16 * 1024),
+        max_queries: requested.max_queries.min(MAX_QUERIES),
+        statement_timeout_ms: requested.statement_timeout_ms.min(1_000),
+        total_timeout_ms: requested.total_timeout_ms.min(5_000),
+        ..requested.clone()
+    }
+}
 
 pub(crate) async fn collect(
     pool: Arc<Pool>,
@@ -25,15 +37,7 @@ pub(crate) async fn collect(
         return (None, coverage);
     }
     let options = ReadOptions {
-        budget: CollectionBudget {
-            max_snapshot_rows: MAX_PAGE_WAIT_OBSERVATIONS as u32 + 1,
-            page_rows: MAX_PAGE_WAIT_OBSERVATIONS as u32,
-            max_sql_bytes: 16 * 1024,
-            max_queries: SCAN_QUERIES,
-            statement_timeout_ms: 1_000,
-            total_timeout_ms: 5_000,
-            ..Default::default()
-        },
+        budget: bounded_budget(&CollectionBudget::default()),
         scope: ActivityScope::CurrentDatabase,
         identity: IdentityDetail::Endpoint,
     };

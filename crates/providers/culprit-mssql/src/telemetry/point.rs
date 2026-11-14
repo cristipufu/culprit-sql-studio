@@ -86,7 +86,8 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         SnapshotDataset::MemoryFailures
         | SnapshotDataset::NativeFailures
         | SnapshotDataset::SessionMemory
-        | SnapshotDataset::PageWaitTargets => return Err(crate::read::invalid_data()),
+        | SnapshotDataset::PageWaitTargets
+        | SnapshotDataset::TaskSpace => return Err(crate::read::invalid_data()),
     })
 }
 

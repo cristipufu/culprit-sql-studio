@@ -26,6 +26,26 @@ struct WorkloadPart {
     outcome: Outcome,
 }
 
+impl WorkloadPart {
+    fn accept(&mut self, source: &culprit_core::Source, capability: Capability, result: workload::WorkloadResult) {
+        self.outcome.merge(result.coverage);
+        self.outcome.completed(source, result.workload.queries.len());
+        self.outcome.delivered(capability);
+        if result.plans_parsed > 0 {
+            self.outcome.delivered(Capability::QueryPlans);
+        }
+        if result.plan_errors > 0 {
+            self.outcome.note("plans", unparsed_plans(result.plan_errors));
+        }
+        if !result.waits.is_empty() {
+            self.outcome.delivered(Capability::WaitStats);
+        }
+        self.waits = result.waits;
+        self.query_identities = result.query_identities;
+        self.workload = Some(result.workload);
+    }
+}
+
 #[derive(Default)]
 struct SchemaPart {
     tables: Vec<TableStat>,
@@ -166,21 +186,7 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
                 if error.code == culprit_core::ErrorCode::PermissionDenied { error.with_hint(grant()) } else { error }
             }),
         ) {
-            part.outcome.merge(result.coverage);
-            part.outcome.completed(&sources::QUERY_STORE, result.workload.queries.len());
-            part.outcome.delivered(Capability::QueryStore);
-            if result.plans_parsed > 0 {
-                part.outcome.delivered(Capability::QueryPlans);
-            }
-            if result.plan_errors > 0 {
-                part.outcome.note("plans", unparsed_plans(result.plan_errors));
-            }
-            if !result.waits.is_empty() {
-                part.outcome.delivered(Capability::WaitStats);
-            }
-            part.waits = result.waits;
-            part.query_identities = result.query_identities;
-            part.workload = Some(result.workload);
+            part.accept(&sources::QUERY_STORE, Capability::QueryStore, result);
             return part;
         }
         if stop_followup {
@@ -205,12 +211,7 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
             }
         }),
     ) {
-        part.outcome.completed(&sources::PLAN_CACHE, result.workload.queries.len());
-        part.outcome.delivered(Capability::PlanCache);
-        if result.plans_parsed > 0 {
-            part.outcome.delivered(Capability::QueryPlans);
-        }
-        part.workload = Some(result.workload);
+        part.accept(&sources::PLAN_CACHE, Capability::PlanCache, result);
     }
     part
 }
@@ -513,6 +514,15 @@ pub(crate) async fn snapshot(
     .await;
     snapshot.operations.page_waits = page_waits;
     page_wait_coverage.append_to(&mut snapshot);
+    let (task_space, task_space_coverage) = crate::task_space::collect(
+        provider.pool.clone(),
+        options.collect_task_space,
+        provider.endpoint_host.clone(),
+        provider.endpoint_port,
+    )
+    .await;
+    snapshot.operations.task_space = task_space;
+    task_space_coverage.append_to(&mut snapshot);
     provider.pool.ensure_available()?;
     snapshot.bind_identity(culprit_core::DatabaseIdentity::server(
         Engine::Mssql,
@@ -528,6 +538,76 @@ pub(crate) async fn snapshot(
 #[cfg(test)]
 mod tests {
     use super::created_since_server_start;
+
+    fn cache_result(coverage: culprit_core::Coverage, plan_errors: usize) -> crate::workload::WorkloadResult {
+        let mut snapshot: culprit_core::Snapshot =
+            serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+        let mut workload = snapshot.workload.take().unwrap();
+        workload.kind = Some(culprit_core::WorkloadKind::PlanCache);
+        assert!(!workload.queries.is_empty(), "the regression must preserve a real populated workload");
+        crate::workload::WorkloadResult {
+            workload,
+            query_identities: Default::default(),
+            waits: vec![],
+            plans_parsed: 1,
+            plan_errors,
+            coverage,
+        }
+    }
+
+    #[test]
+    fn partial_cache_binding_or_statistics_coverage_survives_normal_scan_admission_with_valid_runtime() {
+        // A missing/changed binding and the bounded proof ceiling use the same native payload-coverage outcome.
+        // Admission must preserve that state regardless of how many valid runtime rows were decoded.
+        for reason in [
+            culprit_core::message!("provider.mssql.plan_cache.partial_payloads"),
+            culprit_core::message!("provider.mssql.plan_cache.partial_statistics"),
+        ] {
+            let mut source = culprit_core::Coverage::default();
+            source.partial(&crate::sources::PLAN_CACHE, reason.clone());
+            let result = cache_result(source, 2);
+            let expected_time = result.workload.total_time_ms;
+            let expected_executions = result.workload.total_executions;
+            let expected_queries = result.workload.queries.len();
+            let mut part = super::WorkloadPart::default();
+            let result = part.outcome.read(&crate::sources::PLAN_CACHE, Ok(result)).unwrap();
+            part.accept(&crate::sources::PLAN_CACHE, culprit_core::Capability::PlanCache, result);
+            let workload = part.workload.as_ref().unwrap();
+            assert_eq!(workload.total_time_ms, expected_time);
+            assert_eq!(workload.total_executions, expected_executions);
+            assert_eq!(workload.queries.len(), expected_queries);
+            let outcomes = part.outcome.outcomes();
+            let source = outcomes.iter().find(|source| source.source == crate::sources::PLAN_CACHE.name).unwrap();
+            assert_eq!(source.state, culprit_core::SourceState::Partial);
+            assert_eq!(source.reason_message.as_ref(), Some(&reason));
+            assert!(part.outcome.has(culprit_core::Capability::PlanCache));
+            assert!(
+                part.outcome.has(culprit_core::Capability::QueryPlans),
+                "available plans remain useful without claiming complete coverage"
+            );
+            let (_, _, notes) = part.outcome.finish();
+            assert!(notes.iter().any(|note| note.collector == crate::sources::PLAN_CACHE.name
+                && note.message_source.as_ref() == Some(&reason)));
+            assert!(notes.iter().any(
+                |note| note.collector == "plans" && note.message_source.as_ref() == Some(&super::unparsed_plans(2))
+            ));
+        }
+    }
+
+    #[test]
+    fn fully_collected_workload_results_keep_success_and_do_not_invent_missing_plan_notes() {
+        for (source, capability) in [
+            (&crate::sources::PLAN_CACHE, culprit_core::Capability::PlanCache),
+            (&crate::sources::QUERY_STORE, culprit_core::Capability::QueryStore),
+        ] {
+            let mut part = super::WorkloadPart::default();
+            let result = part.outcome.read(source, Ok(cache_result(Default::default(), 0))).unwrap();
+            part.accept(source, capability, result);
+            assert_eq!(part.outcome.outcomes()[0].state, culprit_core::SourceState::Collected);
+            assert!(part.outcome.has(capability));
+            assert!(part.outcome.finish().2.is_empty());
+        }
+    }
 
     #[test]
     fn limited_catalog_visibility_cannot_turn_empty_sources_into_proven_absence_or_hide_a_failure() {

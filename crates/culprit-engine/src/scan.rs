@@ -116,6 +116,7 @@ fn record_unreported_optional_sources(snapshot: &mut Snapshot, options: &Snapsho
         ),
         (options.collect_session_memory, snapshot.operations.session_memory.is_some(), source_id::SESSION_MEMORY),
         (options.collect_page_wait_targets, snapshot.operations.page_waits.is_some(), source_id::PAGE_WAIT_TARGETS),
+        (options.collect_task_space, snapshot.operations.task_space.is_some(), source_id::TASK_SPACE),
         (options.collect_memory_failures, snapshot.operations.memory_failures.is_some(), source_id::MEMORY_FAILURES),
         (options.collect_native_failures, snapshot.operations.native_failures.is_some(), source_id::NATIVE_FAILURES),
     ];
@@ -211,6 +212,7 @@ mod tests {
             collect_request_memory: true,
             collect_session_memory: true,
             collect_page_wait_targets: true,
+            collect_task_space: true,
             collect_memory_failures: true,
             collect_native_failures: true,
             ..Default::default()
@@ -221,6 +223,7 @@ mod tests {
             culprit_core::source_id::CURRENT_REQUEST_MEMORY,
             culprit_core::source_id::SESSION_MEMORY,
             culprit_core::source_id::PAGE_WAIT_TARGETS,
+            culprit_core::source_id::TASK_SPACE,
             culprit_core::source_id::MEMORY_FAILURES,
             culprit_core::source_id::NATIVE_FAILURES,
         ] {

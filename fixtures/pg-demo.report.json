@@ -118,6 +118,12 @@
       "title": "Unstable queries"
     },
     {
+      "check": "parameter-sensitive",
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Recorded query runtime differences"
+    },
+    {
       "assessed_queries": [
         "9065391607317686058",
         "5308963031944094559",
@@ -305,8 +311,8 @@
     },
     {
       "check": "slow-storage",
-      "reason": null,
-      "status": "assessed",
+      "reason": "Some native I/O populations lack qualified storage-operation accounting, timing or enough operations for a storage-speed assessment.",
+      "status": "insufficient-evidence",
       "title": "Storage that's slow to read or write"
     },
     {
@@ -346,8 +352,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -431,7 +436,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -515,8 +519,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -641,8 +644,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -739,8 +741,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -816,7 +817,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -900,8 +900,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "This affects every statement that role runs, including analytical queries that may benefit from JIT.",
@@ -976,8 +975,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "VACUUM doesn't block reads or writes; it does add I/O while it runs.",
@@ -1061,8 +1059,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "public.order_items had no writes in the 6 h 59 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
@@ -1132,8 +1129,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 13.3 MB.",
@@ -1195,8 +1191,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 328 KB.",
@@ -1387,8 +1382,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -1477,8 +1471,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -2371,7 +2364,7 @@
         "table": "order_items"
       }
     ],
-    "format": 3,
+    "format": 4,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {
@@ -2809,6 +2802,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080
@@ -2818,6 +2812,11 @@
       "cpus": null,
       "files": [
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "WAL",
@@ -2831,6 +2830,11 @@
           "writes": 1370.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "Tables and indexes",
@@ -3870,12 +3874,9 @@
           "rows": 52768740.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 269.364302,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 269.364302
           },
           "stddev_time_ms": 21.93120453003782,
           "temporary_work": {
@@ -4309,12 +4310,9 @@
           "rows": 8638.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 31.982059,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 31.982059
           },
           "stddev_time_ms": 8.299890707788853,
           "temporary_work": {
@@ -4501,12 +4499,9 @@
           "rows": 1.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 1006.063762,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 1006.063762
           },
           "stddev_time_ms": 8963.45865766771,
           "temporary_work": {
@@ -4767,12 +4762,9 @@
           "rows": 1.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 18957.566422,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 18957.566422
           },
           "stddev_time_ms": 0.0,
           "temporary_work": {
@@ -5200,12 +5192,9 @@
           "rows": 397.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 13.120586,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 13.120586
           },
           "stddev_time_ms": 2.409066030206302,
           "temporary_work": {
@@ -5691,12 +5680,9 @@
           "rows": 1020.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 7.288824999999999,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 7.288824999999999
           },
           "stddev_time_ms": 3.120407355203056,
           "temporary_work": {
@@ -6022,12 +6008,9 @@
           "rows": 2996.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.006291000000000001,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.006291000000000001
           },
           "stddev_time_ms": 0.06958091203996157,
           "temporary_work": {
@@ -6222,12 +6205,9 @@
           "rows": 8193.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.002208,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.002208
           },
           "stddev_time_ms": 0.11234093600405518,
           "temporary_work": {
@@ -6300,12 +6280,9 @@
           "rows": 0.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 48.613977,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 48.613977
           },
           "stddev_time_ms": 0.0,
           "temporary_work": {
@@ -7351,12 +7328,9 @@
           "rows": 0.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.000291,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.000291
           },
           "stddev_time_ms": 0.0007790701417165758,
           "temporary_work": {
@@ -7628,12 +7602,9 @@
           "rows": 21428.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 326.781899,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 326.781899
           },
           "stddev_time_ms": 0.0,
           "temporary_work": {
@@ -9300,12 +9271,9 @@
           "rows": 300.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.041791,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.041791
           },
           "stddev_time_ms": 0.013392320049970183,
           "temporary_work": {
@@ -9573,12 +9541,9 @@
           "rows": 120.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 28.759226,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 28.759226
           },
           "stddev_time_ms": 5.7957299848605315,
           "temporary_work": {

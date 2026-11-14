@@ -1,6 +1,10 @@
 //! The dashboard's storage, connections, replication and failing-queries tiles: one sentence each from the server's signals.
 
 use super::*;
+use culprit_core::IoAccounting;
+
+#[cfg(test)]
+mod io_tests;
 
 /// The worst finding of one check, for a tile that leads with it.
 /// Findings arrive ranked by impact; among equally severe ones the first is the most important. (`max_by_key` keeps
@@ -43,21 +47,111 @@ fn flushes(f: &FileIo) -> bool {
 
 /// The latency a file is waited on for (reads of data, writes of the log) and how many operations it averages.
 pub(super) fn waited_latency(f: &FileIo) -> Option<(f64, f64, Waited)> {
-    if f.kind == FileKind::Log {
+    let measured = if f.kind == FileKind::Log {
         let op = if flushes(f) { Waited::Flush } else { Waited::Write };
         f.avg_write_ms().map(|avg| (avg, f.writes, op))
     } else {
         f.avg_read_ms().map(|avg| (avg, f.reads, Waited::Read))
+    };
+    measured.filter(|(average, operations, _)| {
+        f.context.is_valid() && average.is_finite() && *average >= 0.0 && operations.is_finite()
+    })
+}
+
+fn accounting(file: &FileIo) -> IoAccounting {
+    if file.kind == FileKind::Log { file.context.write } else { file.context.read }
+}
+
+/// A common label cannot stand for different replicas, reset windows, accounting units or write operations.
+fn coherent_latency(files: &[FileIo], log: bool) -> Option<(f64, Waited)> {
+    let selected: Vec<_> = files
+        .iter()
+        .filter(|file| {
+            (file.kind == FileKind::Log) == log
+                && file.kind != FileKind::Other
+                && if log { file.writes > 0.0 } else { file.reads > 0.0 }
+        })
+        .collect();
+    let first = *selected.first()?;
+    if selected.iter().any(|file| {
+        accounting(file) != IoAccounting::StorageOperation
+            || !crate::evidence::same_storage_population(first, file)
+            || waited_latency(file).is_none()
+    }) {
+        return None;
+    }
+    let mut operations = 0.0;
+    let mut milliseconds = 0.0;
+    for file in selected {
+        operations += if log { file.writes } else { file.reads };
+        milliseconds += if log { file.write_ms? } else { file.read_ms? };
+    }
+    if !operations.is_finite() || !milliseconds.is_finite() || operations < crate::evidence::STORAGE_MIN_OPERATIONS {
+        return None;
+    }
+    let (_, _, operation) = waited_latency(first)?;
+    Some((milliseconds / operations, operation))
+}
+
+fn io_context(file: &FileIo) -> String {
+    let context = t!(
+        "core.io.context",
+        reads = t!("core.io.accounting", accounting = file.context.read.key()),
+        writes = t!("core.io.accounting", accounting = file.context.write.key())
+    );
+    match &file.context.replica_id {
+        Some(replica) => format!("{} {}", context, t!("core.io.replica", replica = replica)),
+        None => context,
     }
 }
 
-/// Average read latency of data and temporary files, and write latency of the log: what queries and commits wait on.
+fn storage_item(report: &Report, file: &FileIo) -> Option<(f64, TileItem)> {
+    let (average, _, operation) = waited_latency(file)?;
+    let snapshot = &report.snapshot;
+    let name = file_name(snapshot, file);
+    let label = if file.scope == Some(culprit_core::FileScope::Server) {
+        t!("view.dashboard.storage.whole_server", file = name)
+    } else if file.scope == Some(culprit_core::FileScope::Database)
+        && file.database.as_deref().is_none_or(|database| database == snapshot.server.database)
+    {
+        t!("view.dashboard.storage.this_database", file = name)
+    } else {
+        name
+    };
+    let reference = file.reference();
+    let mut item = TileItem::new(ItemKind::Signal, reference.key().ok()?, label);
+    let latency = format::storage_latency(average);
+    item.value = Some(if accounting(file) == IoAccounting::StorageOperation {
+        match operation {
+            Waited::Read => t!("view.dashboard.storage.per_read", latency = latency),
+            Waited::Write => t!("view.dashboard.storage.per_write", latency = latency),
+            Waited::Flush => t!("view.dashboard.storage.per_flush", latency = latency),
+        }
+    } else {
+        t!(
+            "view.dashboard.storage.native_average",
+            latency = latency,
+            accounting = t!("core.io.accounting", accounting = accounting(file).key())
+        )
+    });
+    item.status = Some(
+        report
+            .findings
+            .iter()
+            .filter(|finding| finding.is_actionable() && finding.facts.storage_files.contains(&reference))
+            .map(|finding| severity_status(finding.severity))
+            .max()
+            .unwrap_or(TileStatus::Info),
+    );
+    Some((average, item))
+}
+
+/// Storage-operation averages remain separate from the other native I/O accounting visible in each source row.
 pub(super) fn storage(report: &Report) -> Tile {
     let s = &report.snapshot;
     let family = family(&s.server);
-    let merged = s.pressure.as_ref().map(|p| merge_logs(&p.files)).unwrap_or_default();
-    let files: Vec<&FileIo> =
-        merged.iter().filter(|f| f.kind != FileKind::Other && waited_latency(f).is_some()).collect();
+    let recorded = s.pressure.as_ref().map_or(&[][..], |pressure| pressure.files.as_slice());
+    let files: Vec<&FileIo> = recorded.iter().filter(|file| waited_latency(file).is_some()).collect();
     if files.is_empty() {
         // An engine fact only when the scan proves it; otherwise just what this scan lacks (a login that can't read
         // the views, a source that failed).
@@ -74,22 +168,28 @@ pub(super) fn storage(report: &Report) -> Tile {
         t.detail = collector_note(s, &[culprit_core::source_id::FILE_LATENCY, "storage", "files", "signals"]);
         return t;
     }
-    // Enough operations for an average to mean something: the floor the slow-storage check uses.
-    let worst = |log: bool| {
-        files
-            .iter()
-            .filter(|f| (f.kind == FileKind::Log) == log)
-            .filter_map(|f| waited_latency(f).filter(|(_, ops, _)| *ops >= 1_000.0).map(|(avg, _, _)| avg))
-            .max_by(f64::total_cmp)
-    };
-    let (read, log) = (worst(false), worst(true));
-    // The log's operation as the engine timed it: a flush on any log file says flushes.
-    let flush = files.iter().any(|f| f.kind == FileKind::Log && flushes(f));
+    let (read, log) = (coherent_latency(recorded, false), coherent_latency(recorded, true));
+    let flush = log.is_some_and(|(_, operation)| operation == Waited::Flush);
     let op = if flush { "flush" } else { "write" };
     let (status, takeaway) = match worst_finding(report, "slow-storage") {
         Some(f) => (severity_status(f.severity), format!("{}.", f.title.trim_end_matches('.'))),
-        None => match (read.map(format::storage_latency), log.map(format::storage_latency)) {
-            (None, None) => (TileStatus::Info, t!("view.dashboard.storage.too_little")),
+        None => match (
+            read.map(|(average, _)| format::storage_latency(average)),
+            log.map(|(average, _)| format::storage_latency(average)),
+        ) {
+            (None, None) => (
+                TileStatus::Info,
+                if files.iter().any(|file| accounting(file) != IoAccounting::StorageOperation) {
+                    t!("view.dashboard.storage.native")
+                } else if files.iter().any(|file| {
+                    waited_latency(file)
+                        .is_some_and(|(_, operations, _)| operations >= crate::evidence::STORAGE_MIN_OPERATIONS)
+                }) {
+                    t!("view.dashboard.storage.mixed")
+                } else {
+                    t!("view.dashboard.storage.too_little")
+                },
+            ),
             (Some(read), None) => (TileStatus::Info, t!("view.dashboard.storage.averages_read", read = read)),
             (None, Some(log)) => (TileStatus::Info, t!("view.dashboard.storage.averages_log", op = op, log = log)),
             (Some(read), Some(log)) => {
@@ -98,7 +198,7 @@ pub(super) fn storage(report: &Report) -> Tile {
         },
     };
     let mut t = Tile::new(TileKey::Storage, status, takeaway);
-    if let Some(avg) = read {
+    if let Some((avg, _)) = read {
         t.metrics.push(TileMetric::new(
             "read-ms",
             &t!("view.dashboard.storage.metric.read"),
@@ -106,7 +206,7 @@ pub(super) fn storage(report: &Report) -> Tile {
             format::storage_latency(avg),
         ));
     }
-    if let Some(avg) = log {
+    if let Some((avg, _)) = log {
         let label = if flush {
             t!("view.dashboard.storage.metric.log_flush")
         } else {
@@ -115,48 +215,20 @@ pub(super) fn storage(report: &Report) -> Tile {
         t.metrics.push(TileMetric::new("log-write-ms", &label, Some(avg), format::storage_latency(avg)));
     }
     // The slowest files, each by what it's waited on for.
-    let mut rows: Vec<(f64, TileItem)> = files
+    let mut rows: Vec<_> = files
         .iter()
-        .filter_map(|f| {
-            let (avg, ops, what) = waited_latency(f)?;
-            (ops >= 1_000.0).then(|| {
-                let id = format!("{}:{}", f.database.as_deref().unwrap_or(""), f.name);
-                let name = file_name(s, f);
-                let label = if f.scope == Some(culprit_core::FileScope::Server) {
-                    t!("view.dashboard.storage.whole_server", file = name)
-                } else if f.scope == Some(culprit_core::FileScope::Database)
-                    && f.database.as_deref().is_none_or(|db| db == s.server.database)
-                {
-                    t!("view.dashboard.storage.this_database", file = name)
-                } else {
-                    name
-                };
-                let mut item = TileItem::new(ItemKind::Signal, id, label);
-                let average = format::storage_latency(avg);
-                item.value = Some(match what {
-                    Waited::Read => t!("view.dashboard.storage.per_read", latency = average),
-                    Waited::Write => t!("view.dashboard.storage.per_write", latency = average),
-                    Waited::Flush => t!("view.dashboard.storage.per_flush", latency = average),
-                });
-                let file = f.reference();
-                item.status = Some(
-                    report
-                        .findings
-                        .iter()
-                        .filter(|g| g.is_actionable() && g.facts.storage_files.contains(&file))
-                        .map(|g| severity_status(g.severity))
-                        .max()
-                        .unwrap_or(TileStatus::Info),
-                );
-                (avg, item)
-            })
-        })
+        .filter_map(|file| storage_item(report, file).map(|(average, item)| (average, *file, item)))
         .collect();
     rows.sort_by(|a, b| b.0.total_cmp(&a.0));
-    t.items = rows.into_iter().map(|(_, i)| i).take(4).collect();
-    // The counters' own window, worded like every other one (a statistics reset on PostgreSQL, else the restart).
-    t.detail =
-        Some(files.iter().map(|f| format!("{}: {}", file_name(s, f), f.coverage(s))).collect::<Vec<_>>().join("; "));
+    // Every row retains its own native scope, reset and operation accounting.
+    t.detail = Some(
+        rows.iter()
+            .take(4)
+            .map(|(_, file, _)| format!("{}: {} {}", file_name(s, file), file.coverage(s), io_context(file)))
+            .collect::<Vec<_>>()
+            .join("; "),
+    );
+    t.items = rows.into_iter().map(|(_, _, item)| item).take(4).collect();
     t
 }
 

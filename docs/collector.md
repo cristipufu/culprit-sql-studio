@@ -130,6 +130,8 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis page-waits --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis statement-work --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis task-space --json
 ```
 
 `memory-failures` selects the retained SQL Server OOM analysis; `native-failures` selects native structured
@@ -161,6 +163,13 @@ clocks and reset qualification, and shares the scan's temporary-work explanation
 block traffic and recorded I/O timing from internal-table and sort-pass counts. Exact integer counters survive
 readback; missing metrics remain unknown. A point does not establish an interval or safe delta, and matching a
 query ID does not attach SQL from a separately captured definition. No mode reconnects to the monitored database.
+
+`task-space` explains database-target task allocation/deallocation captures from `operational-samples`. It retains
+exact page counters, native task tuples, request-check clocks and source coverage. The same pure view serves
+scans and authenticated readback from either warehouse. Current checked SQL does not prove allocation ownership;
+partial, unavailable and complete-empty sources stay distinct. The dataset is opt-in and is not added to a default
+fleet schedule. See [SQL Server task observations](providers/mssql.md#task-level-temporary-space-observations) for
+the current source support and read budgets.
 
 For ADX, select warehouse provider `adx`, its query endpoint/database and an independently named bearer profile.
 Azure recovery uses the existing recovery adapter and profile shape. Neither route needs an ingestion identity.

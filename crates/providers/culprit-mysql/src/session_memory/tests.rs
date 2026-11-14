@@ -7,6 +7,47 @@ use crate::{
 use culprit_core::SourceState;
 use mysql_async::Value;
 
+#[test]
+fn scan_and_collection_share_native_ceilings_while_preserving_every_stricter_caller_field() {
+    for requested in [
+        CollectionBudget::default(),
+        CollectionBudget {
+            max_snapshot_rows: 10_000,
+            page_rows: 1000,
+            max_queries: 1000,
+            page_bytes: 8 * 1024 * 1024,
+            total_bytes: 1024 * 1024 * 1024,
+            statement_timeout_ms: 60_000,
+            total_timeout_ms: 120_000,
+            ..Default::default()
+        },
+    ] {
+        let actual = bounded_budget(&requested);
+        actual.validate().unwrap();
+        assert_eq!(actual.max_snapshot_rows, 128);
+        assert_eq!(actual.page_rows, 128);
+        assert_eq!(actual.max_queries, 24);
+        assert_eq!(actual.page_bytes, 1024 * 1024);
+        assert_eq!(actual.total_bytes, 8 * 1024 * 1024);
+        assert_eq!(actual.statement_timeout_ms, 2000);
+        assert_eq!(actual.total_timeout_ms, 10_000);
+    }
+    let strict = CollectionBudget {
+        max_snapshot_rows: 1,
+        page_rows: 1,
+        max_queries: 1,
+        page_bytes: 1024,
+        total_bytes: 2048,
+        max_sql_bytes: 1024,
+        max_plan_bytes: 1024,
+        max_pages: 1,
+        statement_timeout_ms: 1,
+        total_timeout_ms: 2,
+    };
+    strict.validate().unwrap();
+    assert_eq!(bounded_budget(&strict), strict);
+}
+
 pub(crate) fn frame() -> Vec<Result<Vec<Rec>>> {
     let mut replies = native_rows::context_rows();
     replies.push(Ok(vec![native_rows::thread_row(120, Value::UInt(75), true, Value::UInt(4096))]));

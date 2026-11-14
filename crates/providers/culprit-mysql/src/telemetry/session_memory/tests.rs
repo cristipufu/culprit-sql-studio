@@ -19,6 +19,49 @@ fn reader() -> Reader<Read> {
     Reader { io: Read::with(replies), context: None }
 }
 
+#[tokio::test]
+async fn constructing_a_session_memory_capture_does_not_connect_or_run_setup() {
+    let connector = Arc::new(
+        Connector::new(&culprit_core::ConnectionSpec {
+            engine: Some(culprit_core::Engine::Mysql),
+            host: "127.0.0.1".into(),
+            port: Some(1),
+            user: Some("unused".into()),
+            password: Some("unused".into()),
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let mut source = super::source(connector, &request()).unwrap();
+    assert_eq!(source.query_count(), 0);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    assert_eq!(source.query_count(), 0);
+}
+
+#[tokio::test]
+async fn the_final_owner_check_uses_the_remaining_caller_allowance_after_owned_setup() {
+    const SETUP_QUERIES: u32 = 7;
+    for limit in [24, 20] {
+        let mut requested = request();
+        requested.budget.max_queries = limit;
+        let limits = session_memory::bounded_budget(&requested.budget);
+        let mut reader = reader();
+        reader.io = reader.io.with_query_budget(limits.max_queries, SETUP_QUERIES);
+        let mut source = FrozenSource::new(reader, &requested).unwrap();
+        source.describe().await.unwrap();
+        assert_eq!(source.query_count(), 17);
+        retained_page(&mut source).await;
+        if limit == 24 {
+            assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+            assert_eq!(source.query_count(), 21);
+        } else {
+            assert_eq!(CollectionStop::from_error(&source.finish().await.unwrap_err()), CollectionStop::QueryLimit);
+            assert_eq!(source.query_count(), 20);
+        }
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
 async fn retained_page(source: &mut dyn TelemetrySource) -> Vec<TelemetryRecord> {
     let CollectionRead::Page { records, next_cursor: None } =
         source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()

@@ -29,12 +29,14 @@ fn construction_is_offline_and_does_not_advertise_unimplemented_native_sources()
     };
     let source = provider.telemetry_source(&request).unwrap();
     assert_eq!(source.query_count(), 0);
-    let unsupported = CollectionRequest {
-        subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::MissingIndexes },
-        ..request
-    };
-    assert_eq!(provider.telemetry_source(&unsupported).err().unwrap().code, ErrorCode::Unsupported);
+    for dataset in [SnapshotDataset::MissingIndexes, SnapshotDataset::TaskSpace] {
+        let unsupported = CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
+            selection: CollectionSelection::Snapshot { dataset },
+            ..request.clone()
+        };
+        assert_eq!(provider.telemetry_source(&unsupported).err().unwrap().code, ErrorCode::Unsupported);
+    }
 }
 #[tokio::test]
 #[ignore = "requires the owned YugabyteDB fixture"]

@@ -205,6 +205,7 @@ fn definition(stream: TelemetryStream) -> TelemetryRecord {
     let query_id = identity.query.definition_id(&source).unwrap();
     if stream == TelemetryStream::QueryDefinitions {
         TelemetryRecord::QueryDefinition(QueryDefinition {
+            variant_family: None,
             origin: culprit_core::telemetry::StatementOrigin::Unknown,
             monitoring_template_id: None,
             id: query_id,

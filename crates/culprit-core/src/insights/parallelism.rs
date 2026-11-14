@@ -26,11 +26,11 @@ pub(super) fn spill(cx: &Cx) -> Vec<Draft> {
         d.verify = t!("insight.spill.exchange.verify");
         out.push(d);
     }
-    // Underestimates by the rule behind the Misestimate warning: 30 rows where 2 were expected sized no grant.
+    // The shared misestimate threshold establishes an observed mismatch, not the spill's cause.
     let misestimated: HashMap<u32, f64> = cx.plan.root.misestimates().into_iter().collect();
     for n in cx.nodes.iter().filter(|n| n.warnings.contains(&PlanWarning::Spill)) {
         let mut d = Draft::new("spill", InsightArea::Memory, cx.share(n), vec![n.id]);
-        // The plan's costs were estimated before the spill happened; its size is the evidence of what it cost.
+        // Native spill size describes temporary work; it does not measure elapsed cost.
         match spilled_bytes(n) {
             Some(bytes) if bytes < SPILL_MATERIAL_BYTES => d.cap = Severity::Low,
             Some(_) => d.floor = Severity::Medium,
@@ -67,21 +67,31 @@ pub(super) fn spill(cx: &Cx) -> Vec<Draft> {
                 }
                 d.detail = detail.join(" ");
                 d.fix = t!("insight.spill.work_mem.fix");
-                d.fix_sql = Some("-- Try it in your session first:\nSET work_mem = '64MB';\n-- Then for the application's role:\n-- ALTER ROLE app_user SET work_mem = '64MB';".into());
                 d.verify = t!("insight.spill.work_mem.verify");
             }
             // MariaDB's ANALYZE counts a sort's merge passes: it didn't fit in sort_buffer_size.
             Engine::Mysql => {
-                let passes = n.facts().sort_merge_passes.map(f64::from).unwrap_or(1.0);
-                d.title = t!("insight.spill.sort_buffer.title", n = plural_n(passes), count = rows_text(passes));
-                let mut detail = vec![t!("insight.spill.sort_buffer.detail")];
+                let passes = n.facts().sort_merge_passes.filter(|passes| *passes > 0).map(f64::from);
+                d.title = match passes {
+                    Some(passes) => {
+                        t!("insight.spill.sort_buffer.title", n = plural_n(passes), count = rows_text(passes))
+                    }
+                    None => t!("insight.spill.sort_buffer.title_unknown", op = &n.op),
+                };
+                let mut detail = vec![if passes.is_some() {
+                    t!("insight.spill.sort_buffer.detail")
+                } else {
+                    t!("insight.spill.sort_buffer.detail_unknown")
+                }];
                 if underestimated {
                     detail.push(t!("insight.spill.sort_buffer.underestimated"));
                 }
                 d.detail = detail.join(" ");
-                d.fix = t!("insight.spill.sort_buffer.fix");
-                d.fix_sql =
-                    Some("-- Try it in your session first:\nSET SESSION sort_buffer_size = 8 * 1024 * 1024;".into());
+                d.fix = if passes.is_some() {
+                    t!("insight.spill.sort_buffer.fix")
+                } else {
+                    t!("insight.spill.sort_buffer.fix_unknown")
+                };
                 d.verify = t!("insight.spill.sort_buffer.verify");
             }
             Engine::Mssql => {
@@ -99,6 +109,9 @@ pub(super) fn spill(cx: &Cx) -> Vec<Draft> {
                 d.fix = t!("insight.spill.tempdb.fix");
                 d.verify = t!("insight.spill.tempdb.verify");
             }
+        }
+        if n.kind == NodeKind::Sort {
+            d.fix = [d.fix, t!("insight.spill.fix.order")].join(" ");
         }
         out.push(d);
     }

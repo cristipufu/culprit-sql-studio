@@ -266,14 +266,17 @@
   },
   {
     "category": "queries",
-    "description": "Statements whose run time depends heavily on the values they run with: two plans used side by side, one fast and one slow (SQL Server Query Store), or a long tail in the run-time histogram (MySQL). Single-plan variance on any engine is `unstable-query`.",
+    "description": "Different plan averages or a long runtime tail identify statements worth investigating. They do not establish input-dependent plan reuse; the cause requires further evidence.",
     "engines": [
       "mssql",
-      "mysql"
+      "postgres",
+      "yugabyte",
+      "mysql",
+      "sqlite"
     ],
     "id": "parameter-sensitive",
     "requires": [],
-    "title": "Queries that are fast for most calls and slow for some"
+    "title": "Recorded query runtime differences"
   },
   {
     "category": "queries",
@@ -690,11 +693,13 @@
   },
   {
     "category": "configuration",
-    "description": "Average read and write latency per database file since startup: sys.dm_io_virtual_file_stats, pg_stat_io (16+, with track_io_timing), performance_schema file I/O.",
+    "description": "Recorded timing per native storage operation, with each source’s scope and reset period. Cache pages, remote page responses and log-service accounting remain separate.",
     "engines": [
       "mssql",
       "postgres",
-      "mysql"
+      "yugabyte",
+      "mysql",
+      "sqlite"
     ],
     "id": "slow-storage",
     "requires": [],

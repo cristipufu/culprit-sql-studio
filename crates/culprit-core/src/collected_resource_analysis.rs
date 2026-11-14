@@ -1,6 +1,6 @@
 //! Explanations over an authenticated resource capture retain the native rows once, without creating a database.
 use crate::{
-    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, StatementWorkReport,
+    MemoryParticipantsReport, PageWaitReport, RetainedFailureReport, StatementWorkReport, TaskSpaceReport,
     collected_analysis::CollectedEvidenceContext,
 };
 use serde::Serialize;
@@ -32,4 +32,11 @@ pub struct CollectedPageWaitAnalysis {
 pub struct CollectedStatementWorkAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: StatementWorkReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedTaskSpaceAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: TaskSpaceReport,
 }

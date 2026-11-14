@@ -408,12 +408,14 @@ fn construction_declares_only_real_support_without_a_runtime_or_database_probe()
     let source = provider.telemetry_source(&request()).unwrap();
     assert_eq!(source.query_count(), 0);
     assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);
-    let unsupported = CollectionRequest {
-        subject: culprit_core::telemetry::CollectionSubject::Database,
-        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::PlanCacheSummary },
-        ..request()
-    };
-    assert_eq!(provider.telemetry_source(&unsupported).err().unwrap().code, ErrorCode::Unsupported);
+    for dataset in [SnapshotDataset::PlanCacheSummary, SnapshotDataset::TaskSpace] {
+        let unsupported = CollectionRequest {
+            subject: culprit_core::telemetry::CollectionSubject::Database,
+            selection: CollectionSelection::Snapshot { dataset },
+            ..request()
+        };
+        assert_eq!(provider.telemetry_source(&unsupported).err().unwrap().code, ErrorCode::Unsupported);
+    }
 }
 
 #[tokio::test]

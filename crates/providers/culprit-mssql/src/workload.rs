@@ -5,8 +5,20 @@ use culprit_core::{Coverage, PlanVariant, QueryStat, SnapshotOptions, StatementT
 use crate::plan_xml;
 use crate::query_store::waits;
 use crate::read::NativeRead;
-use culprit_core::telemetry::{NativeQueryIdentity, WaitCaptureState};
+use culprit_core::telemetry::{NativePlanIdentity, NativeQueryIdentity, WaitCaptureState};
 
+#[cfg(test)]
+#[path = "workload/identity_tests.rs"]
+mod identity_tests;
+#[cfg(test)]
+#[path = "workload/native_tests.rs"]
+mod native_tests;
+#[cfg(test)]
+#[path = "workload/parameter_tests.rs"]
+mod parameter_tests;
+#[cfg(test)]
+#[path = "workload/variant_native_tests.rs"]
+mod variant_native_tests;
 #[cfg(test)]
 #[path = "workload/window_tests.rs"]
 mod window_tests;
@@ -17,6 +29,7 @@ const TREND_QUERIES: usize = 40;
 #[derive(Clone, Debug, Default)]
 struct PlanAgg {
     plan_id: String,
+    identity: Option<NativePlanIdentity>,
     executions: f64,
     total_ms: f64,
     max_ms: f64,
@@ -32,6 +45,7 @@ struct PlanAgg {
     first_seen: Option<String>,
     last_seen: Option<String>,
     forced: bool,
+    runtime_costs: Option<crate::query_store::runtime::ExecutionCosts>,
 }
 
 impl PlanAgg {
@@ -60,6 +74,7 @@ impl PlanAgg {
         let stats = value.moments;
         Self {
             plan_id: value.plan_id,
+            identity: Some(value.plan_identity),
             executions: stats.executions as f64,
             total_ms: milliseconds(stats.duration_us),
             max_ms: milliseconds(stats.max_us),
@@ -73,6 +88,7 @@ impl PlanAgg {
             first_seen: value.first_seen,
             last_seen: value.last_seen,
             forced: value.forced,
+            runtime_costs: Some(value.costs),
         }
     }
 
@@ -90,10 +106,21 @@ impl PlanAgg {
 #[derive(Clone, Debug, Default)]
 struct QueryAgg {
     query_id: String,
+    /// Query Store identity captured with the original runtime totals. Plan-cache summaries use their own guards.
+    identity: Option<NativeQueryIdentity>,
     plans: Vec<PlanAgg>,
 }
 
 impl QueryAgg {
+    fn runtime_costs(&self) -> Option<crate::query_store::runtime::ExecutionCosts> {
+        if self.plans.iter().any(|plan| plan.runtime_costs.is_none()) {
+            return None;
+        }
+        crate::query_store::runtime::ExecutionCosts::aggregate(
+            self.plans.iter().filter_map(|plan| plan.runtime_costs.as_ref()),
+        )
+    }
+
     fn temporary_space_usage(&self) -> Option<StatementTemporaryWork> {
         if self.plans.is_empty() {
             return None;
@@ -174,7 +201,7 @@ pub(crate) fn id_list(ids: &[String]) -> String {
 
 pub(crate) struct WorkloadResult {
     pub(crate) workload: Workload,
-    /// Original definition identities remain private to this scan's later native attribution reads.
+    /// Earliest runtime identities remain private to this scan's later native attribution reads.
     pub(crate) query_identities: HashMap<String, NativeQueryIdentity>,
     pub(crate) waits: Vec<WaitStat>,
     pub(crate) plans_parsed: usize,
@@ -206,14 +233,32 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
     let window = reader.window(window_minutes).await?;
     let mut by_query: BTreeMap<String, QueryAgg> = BTreeMap::new();
     for row in rows {
-        let query_id = row.query_id.clone();
-        let entry = by_query.entry(query_id.clone()).or_insert_with(|| QueryAgg { query_id, plans: Vec::new() });
+        let query_id = row.identity.query_id.clone();
+        let entry = by_query.entry(query_id.clone()).or_insert_with(|| QueryAgg {
+            query_id,
+            identity: Some(row.identity.clone()),
+            plans: Vec::new(),
+        });
+        if entry.identity.as_ref() != Some(&row.identity) || entry.plans.iter().any(|plan| plan.plan_id == row.plan_id)
+        {
+            return Err(reader.source_changed());
+        }
         entry.plans.push(PlanAgg::from_query_store(row));
     }
     let all: Vec<QueryAgg> = by_query.into_values().collect();
     let total_time_ms: f64 = all.iter().map(QueryAgg::total_ms).sum();
     let total_cpu_ms: f64 = all.iter().map(|q| q.sum(|p| p.cpu_ms)).sum();
     let total_executions: f64 = all.iter().map(QueryAgg::executions).sum();
+    let runtime_costs = all
+        .iter()
+        .filter_map(|query| query.runtime_costs().map(|costs| (query.query_id.clone(), costs)))
+        .collect::<HashMap<_, _>>();
+    let total_log_bytes = (runtime_costs.len() == all.len())
+        .then(|| all.iter().map(|query| runtime_costs[&query.query_id].log_bytes).sum::<Option<f64>>())
+        .flatten()
+        .filter(|total| total.is_finite());
+    let log_sum_unrepresentable =
+        runtime_costs.values().all(|costs| costs.log_bytes.is_some()) && total_log_bytes.is_none();
 
     let mut selected = select_top(&all, options.top_queries as usize);
     // The queries the optimizer asked for a missing index for, when SQL Server says which (2019+, Azure SQL), join the
@@ -228,6 +273,15 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         selected.extend(extra.into_iter().take(MAX_ASKERS));
     }
     let ids: Vec<String> = selected.iter().map(|q| q.query_id.clone()).collect();
+    let query_identities = selected
+        .iter()
+        .filter_map(|query| query.identity.clone().map(|identity| (query.query_id.clone(), identity)))
+        .collect::<HashMap<_, _>>();
+    let plan_identities = selected
+        .iter()
+        .flat_map(|query| query.plans.iter())
+        .filter_map(|plan| plan.identity.clone().map(|identity| (plan.plan_id.clone(), identity)))
+        .collect::<HashMap<_, _>>();
 
     let texts = reader
         .definitions(&ids, crate::query_store::definitions::Kind::Query, 256 * 1024)
@@ -235,14 +289,26 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         .into_iter()
         .map(|row| (row.id.clone(), row))
         .collect::<HashMap<_, _>>();
+    if selected.iter().any(|query| {
+        query.identity.is_none()
+            || texts.get(&query.query_id).and_then(|definition| definition.query.as_ref()) != query.identity.as_ref()
+    }) {
+        return Err(reader.source_changed());
+    }
     let plan_ids: Vec<String> = selected
         .iter()
         .take(options.plans as usize)
         .filter_map(|query| query.current_plan().map(|plan| plan.plan_id.clone()))
         .collect();
-    let plans_xml = reader
-        .definitions(&plan_ids, crate::query_store::definitions::Kind::Plan, 2 * 1024 * 1024)
-        .await?
+    let definitions =
+        reader.definitions(&plan_ids, crate::query_store::definitions::Kind::Plan, 2 * 1024 * 1024).await?;
+    if definitions.iter().any(|definition| {
+        let expected = plan_identities.get(&definition.id);
+        expected.is_none() || definition.plan.as_ref() != expected
+    }) {
+        return Err(reader.source_changed());
+    }
+    let plans_xml = definitions
         .into_iter()
         .filter_map(|row| row.payload.text().map(|text| (row.id.clone(), text.to_owned())))
         .collect::<HashMap<_, _>>();
@@ -250,6 +316,10 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
     let all_plan_ids: Vec<String> =
         selected.iter().flat_map(|query| query.plans.iter().map(|plan| plan.plan_id.clone())).collect();
     let mut coverage = Coverage::default();
+    if reader.variant_family_availability() == crate::query_store::variants_sql::Availability::Unavailable {
+        coverage
+            .partial(&crate::sources::QUERY_STORE, culprit_core::message!("provider.mssql.variant_family.unavailable"));
+    }
     let wait_result = reader.waits(window_minutes, Some(&all_plan_ids)).await;
     if let Err(error) = &wait_result
         && crate::read::stops_remaining_reads(error)
@@ -329,12 +399,25 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
             stat.waits_coverage = Some(waits::coverage(false));
             stat.plan_id = stat.plan.as_ref().and(current).map(|p| p.plan_id.clone());
             stat.trend = trends.remove(&q.query_id);
+            stat.costs = runtime_costs
+                .get(&q.query_id)
+                .map(|costs| costs.query_costs(total_log_bytes))
+                .filter(|costs| !costs.is_empty());
             stat
         })
         .collect();
     // Compiled values and SQL Server 2022 variants are a bonus as well.
-    crate::spread::attach(reader, window_minutes, &mut queries).await?;
-    crate::signals::attach_runtime_costs(reader, window_minutes, &mut queries, &texts, &mut coverage).await?;
+    crate::spread::attach(reader, &mut queries, &plan_identities, &mut coverage).await?;
+    coverage.completed(&crate::sources::QUERY_COSTS, queries.len());
+    if runtime_costs.len() != all.len()
+        || log_sum_unrepresentable
+        || runtime_costs.values().any(|costs| !costs.is_complete())
+    {
+        coverage.partial(
+            &crate::sources::QUERY_COSTS,
+            culprit_core::message!("provider.mssql.query_costs.partial_population"),
+        );
+    }
     verify_runtime_window(reader, &mut coverage).await?;
     let window = reader.window(window_minutes).await?;
     let window_hours = window.hours;
@@ -365,8 +448,6 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         min_logged_ms: None,
         log: None,
     };
-    let query_identities =
-        texts.into_iter().filter_map(|(id, definition)| definition.query.map(|identity| (id, identity))).collect();
     Ok(WorkloadResult { workload, query_identities, waits, plans_parsed, plan_errors, coverage })
 }
 
@@ -393,7 +474,6 @@ fn to_query_stat(
             max_time_ms: Some(p.max_ms),
             stddev_time_ms: p.stddev_ms(),
             compiled: None,
-            variant_query: None,
             cpu_time_ms: Some(p.cpu_ms),
             logical_reads: Some(p.reads),
         })
@@ -401,6 +481,7 @@ fn to_query_stat(
     variants.sort_by(|a, b| b.total_time_ms.total_cmp(&a.total_time_ms));
     let (parameters, sql) = split_parameters(text.and_then(|definition| definition.payload.text()).unwrap_or_default());
     QueryStat {
+        variant_family: text.and_then(|definition| definition.variant_family.clone()),
         plan_history: None,
         resolved_write_target: None,
         requests: None,
@@ -555,6 +636,7 @@ pub(crate) async fn from_plan_cache(
         .iter()
         .map(|(summary, counts)| QueryAgg {
             query_id: summary.query_hash.clone(),
+            identity: None,
             plans: vec![PlanAgg::from_cache_summary(summary, counts)],
         })
         .collect();
@@ -592,15 +674,22 @@ pub(crate) async fn from_plan_cache(
         .map(|(rank, q)| {
             let detail = details.get(&q.query_id);
             let plan = if rank < options.plans as usize {
-                detail.and_then(|d| d.plan.text()).and_then(|xml| match plan_xml::parse(xml) {
-                    Ok(p) => {
-                        plans_parsed += 1;
-                        Some(p)
-                    }
-                    Err(_) if plan_xml::is_empty(xml) => None,
-                    Err(_) => {
-                        plan_errors += 1;
-                        None
+                detail.and_then(|d| d.plan.text().map(|xml| (d, xml))).and_then(|(detail, xml)| {
+                    match plan_xml::parse_cached_statement(
+                        xml,
+                        &detail.context,
+                        detail.module_parameters.as_ref(),
+                        detail.statement.text(),
+                    ) {
+                        Ok(p) => {
+                            plans_parsed += 1;
+                            Some(p)
+                        }
+                        Err(_) if plan_xml::is_empty(xml) => None,
+                        Err(_) => {
+                            plan_errors += 1;
+                            None
+                        }
                     }
                 })
             } else {
@@ -671,6 +760,7 @@ mod tests {
     fn agg(id: &str, ms: f64, cpu: f64, reads: f64, executions: f64) -> QueryAgg {
         QueryAgg {
             query_id: id.into(),
+            identity: None,
             plans: vec![PlanAgg {
                 plan_id: id.into(),
                 total_ms: ms,
@@ -716,6 +806,7 @@ mod tests {
         // The old plan ran most of the week; an index made SQL Server compile a new one, which has run since.
         let fixed = QueryAgg {
             query_id: "1".into(),
+            identity: None,
             plans: vec![
                 plan("old", 9_000.0, "2026-10-01T00:00:00Z", "2026-10-06T10:00:00Z"),
                 plan("new", 100.0, "2026-10-06T10:05:00Z", "2026-10-07T09:00:00Z"),
@@ -726,6 +817,7 @@ mod tests {
         // Plans that take turns (parameter sensitivity) are both in use: the heaviest leads.
         let turns = QueryAgg {
             query_id: "2".into(),
+            identity: None,
             plans: vec![
                 plan("a", 9_000.0, "2026-10-01T00:00:00Z", "2026-10-07T08:00:00Z"),
                 plan("b", 100.0, "2026-10-02T00:00:00Z", "2026-10-07T09:00:00Z"),
@@ -735,6 +827,7 @@ mod tests {
         // Without run times, the heaviest.
         let unknown = QueryAgg {
             query_id: "3".into(),
+            identity: None,
             plans: vec![
                 PlanAgg { plan_id: "x".into(), total_ms: 5.0, ..PlanAgg::default() },
                 PlanAgg { plan_id: "y".into(), total_ms: 50.0, ..PlanAgg::default() },
@@ -787,6 +880,7 @@ mod tests {
     fn pooled_stddev_spans_plans() {
         let q = QueryAgg {
             query_id: "1".into(),
+            identity: None,
             plans: vec![
                 PlanAgg { executions: 2.0, total_ms: 2.0, sum_sq_us: 2.0 * 1_000_000.0, ..PlanAgg::default() },
                 PlanAgg { executions: 2.0, total_ms: 6.0, sum_sq_us: 2.0 * 9_000_000.0, ..PlanAgg::default() },

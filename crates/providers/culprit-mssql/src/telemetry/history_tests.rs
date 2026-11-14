@@ -6,7 +6,7 @@ use crate::{
 };
 use culprit_core::telemetry::*;
 
-fn request() -> CollectionRequest {
+pub(super) fn request() -> CollectionRequest {
     CollectionRequest {
         subject: culprit_core::telemetry::CollectionSubject::Database,
         selection: CollectionSelection::QueryHistory {
@@ -16,7 +16,7 @@ fn request() -> CollectionRequest {
         budget: Default::default(),
     }
 }
-fn pressure() -> Rec {
+pub(super) fn pressure() -> Rec {
     replace(
         &latest_row("2020-01-01T06:01:59Z"),
         &[
@@ -28,13 +28,14 @@ fn pressure() -> Rec {
         ],
     )
 }
-fn description_rows() -> Vec<crate::read::ReadResult<Vec<Rec>>> {
+pub(super) fn description_rows() -> Vec<crate::read::ReadResult<Vec<Rec>>> {
     vec![
         Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
         Ok(vec![pressure()]),
         Ok(vec![Rec::of(&[
             ("actual_state_desc", Val::Text("READ_WRITE".into())),
             ("query_capture_mode_desc", Val::Text("AUTO".into())),
+            ("variant_families", Val::Int(1)),
             ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
         ])]),
         Ok(vec![Rec::of(&[

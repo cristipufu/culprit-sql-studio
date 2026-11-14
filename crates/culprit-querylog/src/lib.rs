@@ -325,6 +325,7 @@ impl Aggregator {
                         sample_truncated: s.requests_truncated,
                     }),
                     plan_history: None,
+                    variant_family: None,
                     resolved_write_target: None,
                     id: id(&key),
                     query_hash: None,

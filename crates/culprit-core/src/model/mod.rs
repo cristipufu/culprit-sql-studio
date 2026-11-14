@@ -12,14 +12,14 @@ mod workload;
 
 pub use workload::{
     Cadence, CounterScope, CounterSet, PER_DAY_MIN_HOURS, PlanHistory, PlanHistoryKind, PlanVariant, QueryStat,
-    QueryTrend, RATE_MIN_HOURS, ScanSpan, SpanLength, Spread, StatementActivity, StatementCost, Timeline,
-    TimelineSource, Workload, WorkloadKind, last_span, last_span_message, log_span, log_span_message, since_reset_span,
-    since_reset_span_message, span_length, span_when, span_words, span_words_message,
+    QueryTrend, QueryVariantFamily, RATE_MIN_HOURS, ScanSpan, SpanLength, Spread, StatementActivity, StatementCost,
+    Timeline, TimelineSource, Workload, WorkloadKind, last_span, last_span_message, log_span, log_span_message,
+    since_reset_span, since_reset_span_message, span_length, span_when, span_words, span_words_message,
 };
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 3;
+pub const SNAPSHOT_FORMAT: u32 = 4;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {

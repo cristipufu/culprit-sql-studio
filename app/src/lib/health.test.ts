@@ -23,7 +23,7 @@ const finding = (extra: Partial<Finding>): Finding => {
 const report = (findings: Finding[]) => partial<Report>({ findings });
 
 function reference(file: FileIo): FileReference {
-  return { name: file.name, kind: file.kind, database: file.database, scope: file.scope ?? null,
+  return { name: file.name, kind: file.kind, database: file.database, context: file.context, scope: file.scope ?? null,
     stats_reset: file.stats_reset ?? null, write_operation: file.write_operation ?? null };
 }
 
@@ -35,10 +35,11 @@ test("Health warnings follow measured evidence", () => {
   check(querySignalStatus(report([finding({ check: "jit-overhead", severity: "medium", queries: [{ id: "tiny", plan_node: null, note: null }] })]), tiny, ["jit-overhead"]) === "watch", "A supported warning must remain visible");
 
   // Bulk reads are a Low context finding; a file with the same name in another database is separate evidence.
-  const file = { name: "data, archive", database: "shop", kind: "data", reads: 10000, read_ms: 1_000_000 } as FileIo;
+  const context = { read: "storage-operation", write: "storage-operation", replica_id: null } as const;
+  const file = { name: "data, archive", database: "shop", kind: "data", context, reads: 10000, read_ms: 1_000_000 } as FileIo;
   const storage = finding({ id: "opaque-storage", check: "slow-storage", facts: partial<FindingFacts>({ storage_files: [reference(file)] }) });
   // A log said as one (MySQL's redo log) covers each of its files, whatever the finding calls it.
-  const redo = { name: "#ib_redo10", database: "shop", kind: "log", reads: 0, writes: 10000, write_ms: 300_000 } as FileIo;
+  const redo = { name: "#ib_redo10", database: "shop", kind: "log", context, reads: 0, writes: 10000, write_ms: 300_000 } as FileIo;
   const log = finding({ id: "opaque-log", check: "slow-storage", severity: "medium", facts: partial<FindingFacts>({ storage_files: [reference({ ...redo, name: "#ib_redo9" }), reference(redo)] }) });
   check(storageStatus(report([log]), redo) === "watch", "Each file of a slow log shows it");
   check(storageStatus(report([log]), file) === "info", "A slow log says nothing of a data file");
@@ -48,6 +49,13 @@ test("Health warnings follow measured evidence", () => {
 
   check(storageStatus(report([{ ...storage, severity: "high", actionability: "needs-attention" }]), { ...file, scope: "server" }) === "info", "Shared and database-local sources remain distinct");
   check(storageStatus(report([{ ...storage, severity: "high", actionability: "needs-attention" }]), { ...file, name: "archive" }) === "info", "Commas are part of a filename");
+  for (const changed of [
+    { ...context, replica_id: "another-replica" },
+    { ...context, read: "cache-page" as const },
+    { ...context, write: "simulated" as const },
+  ]) {
+    check(storageStatus(report([{ ...storage, severity: "high", actionability: "needs-attention" }]), { ...file, context: changed }) === "info", "Unlike native accounting and replica contexts cannot inherit a file warning");
+  }
 
   // An inactive slot may be between syncs or bounded by a WAL cap; inactivity and byte count alone do not grade it.
   const slot = { name: "batch_consumer", role: "slot", condition: "slot_inactive", state: null, lag_bytes: 2 * 1024 ** 3 } as const;

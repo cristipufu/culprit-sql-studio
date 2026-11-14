@@ -2,7 +2,7 @@
 mod http;
 #[cfg(test)]
 mod tests;
-use culprit_core::{Result, telemetry::*};
+use culprit_core::{Result, SourceState, telemetry::*};
 pub use http::HealthServer;
 use std::{
     collections::BTreeMap,
@@ -10,7 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_METRICS_BYTES: usize = 32 * 1024 * 1024;
+// The maximum inventory has 32,768 schedules. Each can expose eight bounded, hashed-label metric lines.
+const MAX_METRICS_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STATUS_AGE: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
@@ -38,15 +39,23 @@ struct Schedule {
     last_attempt: Option<Instant>,
     last_complete: Option<Instant>,
     last_failed: bool,
+    native_coverage: Option<SourceState>,
+    last_native_observation: Option<Instant>,
     attempts: u64,
     complete: u64,
     incomplete: u64,
 }
 impl Schedule {
-    fn record(&mut self, status: &CollectionStatus, now: Instant) {
+    fn record(&mut self, event: &FleetCollectionEvent, now: Instant) {
         self.last_attempt = Some(now);
         self.attempts = self.attempts.saturating_add(1);
-        match status {
+        if event.work == FleetWork::Capture {
+            self.native_coverage = event.native_coverage;
+            if event.native_coverage.is_some() {
+                self.last_native_observation = Some(now);
+            }
+        }
+        match &event.status {
             CollectionStatus::Complete => {
                 self.complete = self.complete.saturating_add(1);
                 self.last_complete = Some(now);
@@ -99,6 +108,8 @@ impl CollectorHealth {
                         last_attempt: None,
                         last_complete: None,
                         last_failed: false,
+                        native_coverage: None,
+                        last_native_observation: None,
                         attempts: 0,
                         complete: 0,
                         incomplete: 0,
@@ -138,7 +149,7 @@ impl CollectorHealth {
             if schedule.connection != event.connection {
                 return;
             }
-            schedule.record(&event.status, Instant::now());
+            schedule.record(event, Instant::now());
         })
     }
     pub fn delivery(&self, result: &Result<DeliveryEntry>) -> Result<()> {
@@ -199,6 +210,7 @@ impl CollectorHealth {
             for (name, at) in [
                 ("last_attempt_age_seconds", schedule.last_attempt),
                 ("last_completed_operation_age_seconds", schedule.last_complete),
+                ("last_native_observation_age_seconds", schedule.last_native_observation),
             ] {
                 if let Some(at) = at {
                     writeln!(
@@ -209,6 +221,21 @@ impl CollectorHealth {
                     )
                     .map_err(metric_error)?;
                 }
+            }
+            if let Some(coverage) = schedule.native_coverage {
+                let state = match coverage {
+                    SourceState::Collected => "collected",
+                    SourceState::Empty => "empty",
+                    SourceState::Partial => "partial",
+                    SourceState::Unavailable => "unavailable",
+                    SourceState::NotApplicable => "not-applicable",
+                };
+                writeln!(
+                    body,
+                    "culprit_collector_schedule_native_coverage{{schedule=\"{}\",state=\"{state}\"}} 1",
+                    schedule.id
+                )
+                .map_err(metric_error)?;
             }
         }
         for (problem, count) in &state.delivery_errors {

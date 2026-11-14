@@ -16,9 +16,6 @@ use crate::sources;
 #[cfg(test)]
 #[path = "signals/compilation_tests.rs"]
 mod compilation_tests;
-#[cfg(test)]
-#[path = "signals/runtime_tests.rs"]
-mod runtime_tests;
 
 /// Collect every signal into `snapshot`, each source read through `sources::read`: these add detail and lock nothing,
 /// so a failure is a note.
@@ -160,65 +157,6 @@ async fn collect_query_compilations<R: NativeRead>(
         );
     }
     signals
-}
-
-/// Runtime ratios stay in their original native owner and interval population. A later counter value is not the
-/// earlier query's execution denominator, and a recycled query ID cannot borrow its SQL or costs.
-pub(crate) async fn attach_runtime_costs<R: NativeRead>(
-    reader: &mut Reader<R>,
-    window_minutes: u32,
-    queries: &mut [culprit_core::QueryStat],
-    definitions: &HashMap<String, crate::query_store::definitions::Definition>,
-    coverage: &mut Coverage,
-) -> culprit_core::Result<()> {
-    let ids = queries.iter().map(|query| query.id.clone()).collect::<Vec<_>>();
-    let captured = match reader.costs(window_minutes, &ids).await {
-        Ok(rows) => rows,
-        Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
-        Err(error) => {
-            coverage.source_failed(&sources::QUERY_COSTS, &error);
-            return Ok(());
-        }
-    };
-    coverage.completed(&sources::QUERY_COSTS, captured.len());
-    let by_id = captured.into_iter().map(|row| (row.query_id.clone(), row)).collect::<HashMap<_, _>>();
-    let mut changed_counts = false;
-    const MAX_EXACT_COUNT: u64 = 1 << 53;
-    for query in queries {
-        let Some(row) = by_id.get(&query.id) else {
-            return Err(reader.source_changed());
-        };
-        let Some(expected) = definitions.get(&query.id).and_then(|definition| definition.query.as_ref()) else {
-            changed_counts = true;
-            continue;
-        };
-        if &row.identity != expected || (row.executions as f64) < query.executions {
-            return Err(reader.source_changed());
-        }
-        if row.executions > MAX_EXACT_COUNT || row.executions as f64 != query.executions {
-            changed_counts = true;
-            continue;
-        }
-        let mut costs = query.costs.take().unwrap_or_default();
-        costs.aborted = Some(row.aborted as f64);
-        costs.failed = Some(row.failed as f64);
-        costs.aborted_mean_ms =
-            (row.aborted > 0).then(|| crate::query_store::runtime::milliseconds(row.aborted_us) / row.aborted as f64);
-        costs.log_bytes = row.log_bytes;
-        // Both aggregates share one native statement and frozen population; selected groups are bounded by IDs.
-        costs.log_share = match (row.log_bytes, row.total_log_bytes) {
-            (Some(own), Some(all)) if all > 0.0 => Some((own / all).min(1.0)),
-            _ => None,
-        };
-        query.costs = (!costs.is_empty()).then_some(costs);
-    }
-    if changed_counts {
-        coverage.partial(
-            &sources::QUERY_COSTS,
-            culprit_core::telemetry::CollectionStop::SourceChanged.error().message_source(),
-        );
-    }
-    Ok(())
 }
 
 /// Compilation history keeps its own lifetime even when runtime costs are unavailable.

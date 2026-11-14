@@ -101,6 +101,7 @@ pub mod source_id {
     pub const CURRENT_REQUEST_MEMORY: &str = "current request memory";
     pub const SESSION_MEMORY: &str = "session memory";
     pub const PAGE_WAIT_TARGETS: &str = "page wait targets";
+    pub const TASK_SPACE: &str = "task space";
     pub const PERFORMANCE_COUNTERS: &str = "performance counters";
     pub const DATABASE_STATS: &str = "database statistics";
     pub const RESOURCES: &str = "resources";
@@ -204,6 +205,7 @@ pub mod source_id {
         CURRENT_REQUEST_MEMORY,
         SESSION_MEMORY,
         PAGE_WAIT_TARGETS,
+        TASK_SPACE,
         PERFORMANCE_COUNTERS,
         DATABASE_STATS,
         RESOURCES,

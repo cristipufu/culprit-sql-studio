@@ -106,6 +106,7 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
         })],
         TelemetryStream::QueryWaits => vec![],
         TelemetryStream::QueryDefinitions => vec![TelemetryRecord::QueryDefinition(QueryDefinition {
+            variant_family: None,
             origin: culprit_core::telemetry::StatementOrigin::Unknown,
             monitoring_template_id: None,
             id: identity.query.definition_id(&source).unwrap(),

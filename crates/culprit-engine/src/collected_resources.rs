@@ -14,6 +14,8 @@ mod page_waits;
 pub use page_waits::page_waits;
 mod statement_work;
 pub use statement_work::statement_work;
+mod task_space;
+pub use task_space::task_space;
 
 /// Positions identify captured rows, never incidents across observations. Native offset-free event time remains
 /// distinct from UTC capture and delivery clocks.

@@ -1,6 +1,68 @@
 use super::*;
 use crate::{resources::test_support::replace, value::Val};
 
+pub(crate) fn spill_columns() -> Vec<Rec> {
+    STATISTICS.map(|statistic| Rec::of(&[("name", Val::Text(format!("{statistic}_spills")))])).into()
+}
+
+#[tokio::test]
+async fn optional_spill_columns_are_qualified_once_without_another_cache_walk() {
+    use crate::resources::test_support::FakeRead;
+    for available in [false, true] {
+        let mut reader = FakeRead::new(vec![Ok(if available { spill_columns() } else { vec![] })]);
+        let layout = Layout::read(&mut reader).await.unwrap();
+        let sql = select_sql(&layout);
+        assert_eq!(reader.calls.len(), 1);
+        assert_eq!(reader.calls[0].limit, 5);
+        assert!(reader.calls[0].sql.contains("sys.all_columns"));
+        assert!(!reader.calls[0].sql.contains("FROM sys.dm_exec_query_stats"));
+        for statistic in STATISTICS {
+            let column = format!("{statistic}_spills");
+            if available {
+                assert!(sql.contains(&format!("qs.{column}")));
+                assert!(!sql.contains(&format!("NULL AS bigint) AS {column}")));
+            } else {
+                assert!(sql.contains(&format!("CAST(NULL AS bigint) AS {column}")));
+                assert!(!sql.contains(&format!("qs.{column}")));
+            }
+        }
+        assert!(sql.contains("TOP (@P1)"));
+    }
+    let partial = vec![spill_columns()[0].clone()];
+    let duplicate = vec![spill_columns()[0].clone(), spill_columns()[0].clone()];
+    for rows in [partial, duplicate, vec![Rec::of(&[("name", Val::Text("unselected-column".into()))])]] {
+        assert!(Layout::read(&mut FakeRead::new(vec![Ok(rows)])).await.is_err());
+    }
+}
+
+#[test]
+fn spill_pages_preserve_completed_execution_units_zero_unknown_and_exact_distribution_counters() {
+    let native = row();
+    let measured = decode(&native).unwrap();
+    let spills = &measured.counters[&CachedRuntimeMetric::SpilledPages];
+    assert_eq!(spills.total, "9007199254740993");
+    assert_eq!(spills.last, "9007199254740993");
+    for value in [Val::Null, Val::Int(0)] {
+        let changes = STATISTICS.map(|statistic| (format!("{statistic}_spills"), value.clone()));
+        let references = changes.iter().map(|(name, value)| (name.as_str(), value.clone())).collect::<Vec<_>>();
+        let runtime = decode(&replace(&native, &references)).unwrap();
+        assert!(runtime.is_valid());
+        match value {
+            Val::Null => assert!(!runtime.counters.contains_key(&CachedRuntimeMetric::SpilledPages)),
+            _ => assert_eq!(runtime.counters[&CachedRuntimeMetric::SpilledPages].total, "0"),
+        }
+        assert_eq!(runtime.context.identity, measured.context.identity);
+        assert_eq!(runtime.executions, measured.executions);
+        assert_eq!(runtime.counters[&CachedRuntimeMetric::Rows], measured.counters[&CachedRuntimeMetric::Rows]);
+    }
+    for value in [Val::Null, Val::Int(-1), Val::Float(1.0)] {
+        assert!(decode(&replace(&native, &[("total_spills", value)])).is_err());
+    }
+    let mut without_required = measured.clone();
+    without_required.counters.remove(&CachedRuntimeMetric::WorkerMicroseconds);
+    assert!(!without_required.is_valid());
+}
+
 pub(crate) fn row() -> Rec {
     let context = crate::grants::tests::row();
     let mut fields = context.columns().map(|(name, value)| (name.to_string(), value.clone())).collect::<Vec<_>>();

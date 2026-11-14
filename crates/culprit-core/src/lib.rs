@@ -25,6 +25,7 @@ pub mod format;
 pub mod i18n;
 pub mod index_filter;
 pub mod insights;
+pub mod io_accounting;
 #[cfg(test)]
 mod label_tests;
 pub mod limits;
@@ -48,9 +49,11 @@ pub mod query_temporary_work;
 pub mod redact;
 pub mod refinement;
 pub mod retained_failure_report;
+pub mod runtime_distribution;
 pub mod signals;
 pub mod sql;
 pub mod statement_work_report;
+pub mod task_space_report;
 pub mod telemetry;
 pub mod verification;
 pub mod wait_resources;
@@ -95,6 +98,7 @@ pub use error::{Error, ErrorCode, ErrorDetail, Result};
 pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
+pub use io_accounting::{FileIoContext, IoAccounting};
 pub use measurement::*;
 pub use memory_participants::{MemoryParticipantExplanation, MemoryParticipantsReport};
 pub use model::*;
@@ -125,6 +129,7 @@ pub use provider::{ExplainMode, Provider, SnapshotOptions};
 pub use query_temporary_work::{StatementTemporaryWork, TemporaryWorkExplanation};
 pub use refinement::{FixWithholdingBasis, HistoryBasis, PresentationAspect, RefinementDecision, RefinementOutcome};
 pub use retained_failure_report::{RetainedFailureExplanation, RetainedFailureReport};
+pub use runtime_distribution::*;
 pub use signals::{
     ColumnHistogram, ConstraintIssue, ConstraintKind, ContentionBaseline, CountBaseline, EscalationBaseline, FileIo,
     FileKind, FileScope, FileWriteOperation, IndexContention, IndexLockCounts, QueryCosts, Replica, ReplicaCondition,
@@ -132,6 +137,7 @@ pub use signals::{
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_work_report::{StatementWorkEntry, StatementWorkReport};
+pub use task_space_report::*;
 pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_reports};
 pub use wait_resources::{ObservedWaitResource, WaitResourceKind};
 pub use waits::{

@@ -46,7 +46,10 @@ pub struct FindingFacts {
     #[ts(optional)]
     pub plan_baseline: Option<PlanBaseline>,
     pub recommended_plan: Option<FindingPlanRecommendation>,
-    pub usual_fast_plan: Option<String>,
+    /// Recorded performance variation selects an investigation; it does not establish parameter sensitivity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub runtime_variation: Option<FindingRuntimeVariation>,
     pub bloat: Option<FindingBloat>,
     pub log_write: Option<FindingLogWrite>,
     pub large_rows: Option<FindingLargeRows>,
@@ -65,6 +68,15 @@ pub struct FindingFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub uncosted_plan_explained: Option<bool>,
+}
+
+/// Observed runtime shape, independent of translated explanations, suspected causes or proposed plan changes.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum FindingRuntimeVariation {
+    PlanAverages { faster_plan: String, slower_plan: String },
+    RuntimeTail,
 }
 
 /// Evidence used to relate findings, independent of a check's public naming convention.

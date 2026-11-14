@@ -33,6 +33,8 @@ use culprit_core::PlanSampleSource as SampleFrom;
 
 const PICOS_PER_MS: f64 = 1e9;
 
+mod distributions;
+
 pub(crate) async fn collect_workload(
     conn: &mut impl crate::read::QueryRead,
     connector: &std::sync::Arc<Connector>,
@@ -96,13 +98,15 @@ pub(crate) async fn collect_workload(
 
     let mut kept = select_top(all, options.top_queries as usize);
     attach_histograms(conn, &probe.database, &mut kept).await;
-    for d in kept.iter_mut() {
-        let max = d.stat.max_time_ms;
-        if let Some(spread) = d.stat.spread.as_mut() {
-            spread.clamp_to(max);
-        }
-    }
     let mut notes = Vec::new();
+    if kept
+        .iter()
+        .filter_map(|digest| digest.stat.spread.as_ref())
+        .flat_map(|spread| &spread.distributions)
+        .any(|observed| !observed.is_usable())
+    {
+        notes.push(("workload", culprit_core::message!("provider.mysql.workload.distributions_partial")));
+    }
     let mut no_plans = None;
     if !kept.is_empty() && options.plans > 0 {
         let limit = options.plans as usize;
@@ -225,6 +229,7 @@ fn digest(r: &Rec, has_cpu: bool, columns: &BTreeSet<String>) -> Result<Digest> 
     Ok(Digest {
         stat: QueryStat {
             plan_history: None,
+            variant_family: None,
             resolved_write_target: None,
             requests: None,
             id: digest.chars().take(16).collect(),
@@ -252,10 +257,8 @@ fn digest(r: &Rec, has_cpu: bool, columns: &BTreeSet<String>) -> Result<Digest> 
             // Percentiles exist from 8.0.31; the histogram, attached later, from 8.0.19.
             spread: Some(Spread {
                 min_ms: ms("min_ps"),
-                p95_ms: ms("quantile_95"),
-                p99_ms: ms("quantile_99"),
+                distributions: distributions::summary(r).into_iter().collect(),
                 lock_ms,
-                ..Default::default()
             }),
             costs: None,
             // `rows` is what the statement sent back (none for an UPDATE); this is what it changed.
@@ -283,47 +286,16 @@ async fn attach_histograms(conn: &mut impl crate::read::QueryRead, database: &st
           ORDER BY DIGEST, BUCKET_NUMBER"
     );
     let mut params = vec![Value::from(database.to_string())];
-    params.extend(digests.into_iter().map(Value::from));
-    let Ok(rows) = query_with(conn, &sql, params).await else { return };
-    let mut by_digest: HashMap<String, Vec<[f64; 3]>> = HashMap::new();
-    for r in rows {
-        let low = r.number("low_ps").unwrap_or(0.0) / PICOS_PER_MS;
-        let high = r.number("high_ps").unwrap_or(0.0) / PICOS_PER_MS;
-        by_digest.entry(r.string("digest")).or_default().push([low, high, r.number("runs").unwrap_or(0.0)]);
-    }
+    params.extend(digests.iter().cloned().map(Value::from));
+    let mut by_digest = match query_with(conn, &sql, params).await {
+        Ok(rows) => distributions::histograms(&rows, &digests),
+        Err(_) => distributions::unavailable(&digests, culprit_core::RuntimeDistributionIssue::ReadUnavailable),
+    };
     for d in kept.iter_mut() {
-        let Some(buckets) = d.stat.query_hash.as_ref().and_then(|h| by_digest.remove(h)) else { continue };
+        let Some(observed) = d.stat.query_hash.as_ref().and_then(|h| by_digest.remove(h)) else { continue };
         let spread = d.stat.spread.get_or_insert_with(Spread::default);
-        spread.p50_ms = quantile(&buckets, 0.5);
-        spread.p95_ms = spread.p95_ms.or(quantile(&buckets, 0.95));
-        spread.p99_ms = spread.p99_ms.or(quantile(&buckets, 0.99));
-        spread.histogram = fold_buckets(&buckets, 32);
+        spread.distributions.push(observed);
     }
-}
-
-/// The upper edge of the bucket where the running count reaches `q` of all runs.
-fn quantile(buckets: &[[f64; 3]], q: f64) -> Option<f64> {
-    let total: f64 = buckets.iter().map(|b| b[2]).sum();
-    if total <= 0.0 {
-        return None;
-    }
-    let mut seen = 0.0;
-    for b in buckets {
-        seen += b[2];
-        if seen >= total * q {
-            return Some(b[1]);
-        }
-    }
-    buckets.last().map(|b| b[1])
-}
-
-/// MySQL's histogram has 450 narrow buckets; neighbours merge until at most `max` remain.
-fn fold_buckets(buckets: &[[f64; 3]], max: usize) -> Vec<[f64; 3]> {
-    if buckets.len() <= max {
-        return buckets.to_vec();
-    }
-    let per = buckets.len().div_ceil(max);
-    buckets.chunks(per).map(|c| [c[0][0], c[c.len() - 1][1], c.iter().map(|b| b[2]).sum()]).collect()
 }
 
 /// Keep the heaviest digests by time, plus the heaviest by executions and rows examined, so chatty and scan-heavy
@@ -853,6 +825,7 @@ mod tests {
         Digest {
             stat: QueryStat {
                 plan_history: None,
+                variant_family: None,
                 resolved_write_target: None,
                 requests: None,
                 id: id.into(),
@@ -1076,14 +1049,5 @@ mod tests {
         assert_eq!(hours_between("2026-10-11T06:00:00Z", "2026-10-11T07:30:00Z"), Some(1.5));
         assert_eq!(crate::pressure::category("wait/io/file/innodb/innodb_data_file"), "IO");
         assert_eq!(crate::pressure::category("wait/lock/metadata/sql/mdl"), "Lock");
-    }
-
-    #[test]
-    fn histogram_percentiles_and_folding() {
-        let buckets = [[0.0, 1.0, 50.0], [1.0, 2.0, 45.0], [2.0, 4.0, 4.0], [500.0, 1000.0, 1.0]];
-        assert_eq!(quantile(&buckets, 0.5), Some(1.0));
-        assert_eq!(quantile(&buckets, 0.95), Some(2.0));
-        assert_eq!(quantile(&buckets, 0.995), Some(1000.0));
-        assert_eq!(fold_buckets(&buckets, 2), vec![[0.0, 2.0, 95.0], [2.0, 1000.0, 5.0]]);
     }
 }

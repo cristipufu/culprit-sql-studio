@@ -148,6 +148,21 @@ pub(super) fn completed(
         }
         CollectionStatus::Incomplete(stopped) => retry_outcome(stopped),
     };
+    let native_coverage = manifest
+        .description
+        .as_ref()
+        .and_then(|description| description.observation.snapshot())
+        .map(|snapshot| snapshot.coverage_state())
+        .transpose()?
+        .map(|coverage| {
+            if manifest.status != CollectionStatus::Complete
+                && matches!(coverage, culprit_core::SourceState::Collected | culprit_core::SourceState::Empty)
+            {
+                culprit_core::SourceState::Partial
+            } else {
+                coverage
+            }
+        });
     Ok(WorkResult {
         event: FleetCollectionEvent {
             target: job.target.clone(),
@@ -155,6 +170,7 @@ pub(super) fn completed(
             schedule: job.schedule.id.clone(),
             work: FleetWork::Capture,
             status: manifest.status,
+            native_coverage,
             capture: Some(manifest.capture),
             error_code: None,
             gap,
@@ -184,6 +200,7 @@ pub(super) fn failure(job: &Job, work: FleetWork, error: Error, gap: Option<Tele
             schedule: job.schedule.id.clone(),
             work,
             status: CollectionStatus::Incomplete(stopped),
+            native_coverage: None,
             capture: None,
             error_code: Some(error.code),
             gap,

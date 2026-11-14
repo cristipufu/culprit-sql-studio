@@ -18,7 +18,7 @@ struct MemoryObservationReader<R: NativeRead> {
 impl MemorySource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let options = ReadOptions {
-            budget: request.budget.clone(),
+            budget: crate::request_memory::bounded_budget(&request.budget),
             scope: ActivityScope::CurrentDatabase,
             identity: IdentityDetail::AzureDatabase,
         };

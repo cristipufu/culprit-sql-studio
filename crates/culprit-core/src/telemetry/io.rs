@@ -10,6 +10,7 @@ pub struct FileIoCounters {
     pub native_name: Option<String>,
     pub native_type: Option<String>,
     pub kind: crate::FileKind,
+    pub context: crate::FileIoContext,
     pub scope: crate::FileScope,
     pub reset: crate::ResetMarker,
     pub reads: String,
@@ -25,6 +26,7 @@ pub struct FileIoCounters {
 impl FileIoCounters {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.native_database_id)
+            && self.context.is_valid()
             && valid_key(&self.file_id)
             && [&self.database, &self.native_name, &self.native_type]
                 .into_iter()

@@ -26,6 +26,49 @@ fn reader(count: usize) -> Reader<Read> {
 }
 
 #[tokio::test]
+async fn constructing_a_native_failure_capture_does_not_connect_or_run_setup() {
+    let connector = Arc::new(
+        Connector::new(&culprit_core::ConnectionSpec {
+            engine: Some(culprit_core::Engine::Mysql),
+            host: "127.0.0.1".into(),
+            port: Some(1),
+            user: Some("unused".into()),
+            password: Some("unused".into()),
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let mut source = super::source(connector, &request()).unwrap();
+    assert_eq!(source.query_count(), 0);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    assert_eq!(source.query_count(), 0);
+}
+
+#[tokio::test]
+async fn final_verification_cannot_bypass_the_caller_budget_after_owned_setup() {
+    const SETUP_QUERIES: u32 = 7;
+    for limit in [24, 16] {
+        let mut requested = request();
+        requested.budget.max_queries = limit;
+        let limits = native_failures::bounded_budget(&requested.budget);
+        let mut reader = reader(1);
+        reader.io = reader.io.with_query_budget(limits.max_queries, SETUP_QUERIES);
+        let mut source = FrozenSource::new(reader, &requested).unwrap();
+        source.describe().await.unwrap();
+        assert_eq!(source.query_count(), 14);
+        let _ = source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap();
+        if limit == 24 {
+            assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+            assert_eq!(source.query_count(), 17);
+        } else {
+            assert_eq!(CollectionStop::from_error(&source.finish().await.unwrap_err()), CollectionStop::QueryLimit);
+            assert_eq!(source.query_count(), 16);
+        }
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
 async fn frozen_native_rows_share_scan_decoder_and_never_requery_or_attach_current_threads_while_paging() {
     let request = request();
     let mut source = FrozenSource::new(reader(2), &request).unwrap();

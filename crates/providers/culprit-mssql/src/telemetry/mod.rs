@@ -13,6 +13,7 @@ mod partitions;
 mod request_memory;
 mod retained_definitions;
 mod streamed;
+mod task_space;
 mod triggers;
 use crate::query_store::{catalog_sql as sql, decode};
 pub(crate) mod activity;
@@ -91,6 +92,9 @@ pub(crate) fn source(
         }
         culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets) => {
             Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
+        }
+        culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::TaskSpace) => {
+            Ok(Box::new(task_space::TaskSpaceSource::new(pool, request, host, port)?))
         }
         culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::IndexOperations) => {
             Ok(Box::new(streamed::StreamedSnapshot::new(pool, request, host, port, index_operations::IndexOperations)?))
@@ -203,7 +207,14 @@ impl<R: crate::read::NativeRead> Source<R> {
             let description = self.description.as_ref().ok_or_else(decode::malformed)?;
             return self
                 .definitions
-                .page(&mut self.session, &description.value, &self.request.budget, stream, token)
+                .page(
+                    &mut self.session,
+                    &description.value,
+                    &self.request.budget,
+                    stream,
+                    token,
+                    description.variant_families == crate::query_store::variants_sql::Availability::Readable,
+                )
                 .await;
         }
         if self.definitions.is_frozen() {

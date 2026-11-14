@@ -15,6 +15,15 @@ fn request() -> CollectionRequest {
         budget: CollectionBudget { page_rows: 1, ..Default::default() },
     }
 }
+
+#[tokio::test]
+async fn constructing_the_profile_does_not_open_a_connection_or_query() {
+    let pool = Arc::new(Pool::new(crate::test_support::config(1, "never-opened", "unused", "culprit"), None));
+    let mut source = MemorySource::new(pool, &request(), "unused.invalid".into(), 1).unwrap();
+    assert_eq!(source.query_count(), 0);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    assert_eq!(source.query_count(), 0);
+}
 fn source(final_context: crate::value::Rec) -> MemorySource<FakeRead> {
     let other = replace(
         &row(),

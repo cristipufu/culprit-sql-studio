@@ -140,7 +140,6 @@ pub const RULES: &[(&str, &[Engine], RuleLine)] = &[
     ("leading-wildcard", ALL, RuleLine(key!("insight.leading_wildcard.rule"))),
     ("not-in", ALL, RuleLine(key!("insight.not_in.rule"))),
     ("scalar-udf", &[Engine::Mssql], RuleLine(key!("insight.scalar_udf.rule"))),
-    ("table-variable", &[Engine::Mssql], RuleLine(key!("insight.table_variable.rule"))),
     ("parallelism-blocked", &[Engine::Mssql], RuleLine(key!("insight.parallelism_blocked.rule"))),
     ("parallel-skew", &[Engine::Mssql, Engine::Postgres], RuleLine(key!("insight.parallel_skew.rule"))),
     ("eager-spool", &[Engine::Mssql], RuleLine(key!("insight.eager_spool.rule"))),
@@ -283,7 +282,6 @@ pub fn insights(plan: &Plan) -> Vec<PlanInsight> {
         leading_wildcard,
         not_in,
         scalar_udf,
-        table_variable,
         parallelism_blocked,
         parallel_skew,
         eager_spool,
@@ -833,9 +831,16 @@ fn table_leaf(table: &str) -> String {
     clean_identifier(table.rsplit('.').next().unwrap_or(table))
 }
 
-/// The table variable an operator reads (`@t`): SQL Server keeps no statistics on those.
-fn table_variable_of(n: &PlanNode) -> Option<String> {
-    n.object.as_deref().map(table_leaf).filter(|t| t.starts_with('@'))
+/// A native classification can establish kind. A variable/temporary-shaped identifier without classification can
+/// only withhold advice that requires a persistent table; it cannot establish a local table variable or TVP.
+fn relational_input_kind(n: &PlanNode) -> Option<crate::plan_facts::RelationalInputKind> {
+    n.facts().relational_input.map(|input| input.qualified_kind()).or_else(|| {
+        n.object
+            .as_deref()
+            .map(table_leaf)
+            .filter(|name| name.starts_with(['@', '#']))
+            .map(|_| crate::plan_facts::RelationalInputKind::Unknown)
+    })
 }
 
 /// Node prop (SQL Server): a Parallelism exchange wrote its buffers to tempdb. That resolves a deadlock between parallel

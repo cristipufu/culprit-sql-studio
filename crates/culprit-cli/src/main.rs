@@ -261,6 +261,8 @@ struct ScanArgs {
     collect_session_memory: bool,
     #[arg(long, help = t!("cli.scan.page_wait_targets"))]
     collect_page_wait_targets: bool,
+    #[arg(long, help = t!("cli.scan.task_space"))]
+    collect_task_space: bool,
     /// Exit with code 3 if any finding is at least this severe (for CI).
     #[arg(long, value_enum)]
     fail_on: Option<SeverityArg>,
@@ -285,6 +287,7 @@ impl ScanArgs {
             collect_native_failures: self.collect_native_failures,
             collect_session_memory: self.collect_session_memory,
             collect_page_wait_targets: self.collect_page_wait_targets,
+            collect_task_space: self.collect_task_space,
             ..SnapshotOptions::default()
         }
         .with_window_minutes(window)
@@ -728,6 +731,20 @@ mod tests {
         let options = scan_args(&["--collect-memory-failures", "--window", "6h"]).unwrap().snapshot_options();
         assert!(options.collect_memory_failures);
         assert!(!options.collect_shared_resources && !options.collect_request_memory);
+        assert_eq!(options.window_minutes, 360);
+    }
+
+    #[test]
+    fn task_space_reads_are_an_independent_explicit_scan_selection() {
+        assert!(!scan_args(&[]).unwrap().snapshot_options().collect_task_space);
+        for flag in ["--collect-request-memory", "--collect-page-wait-targets", "--collect-shared-resources"] {
+            assert!(!scan_args(&[flag]).unwrap().snapshot_options().collect_task_space);
+        }
+        let options = scan_args(&["--collect-task-space", "--window", "6h"]).unwrap().snapshot_options();
+        assert!(options.collect_task_space);
+        assert!(
+            !options.collect_request_memory && !options.collect_page_wait_targets && !options.collect_shared_resources
+        );
         assert_eq!(options.window_minutes, 360);
     }
 

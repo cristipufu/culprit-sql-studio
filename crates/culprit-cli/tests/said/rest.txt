@@ -37,8 +37,8 @@ regression        Queries that got slower
                   SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Queries whose runs became much slower at some point in the window, with when it started and whether a plan change coincides. Needs Query Store history or a few earlier scans.
 unstable-query    Unstable queries
                   SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Queries whose duration swings wildly between runs with the same plan, a sign of parameter sensitivity or blocking.
-parameter-sensitive  Queries that are fast for most calls and slow for some
-                  SQL Server, MySQL/MariaDB · Statements whose run time depends heavily on the values they run with: two plans used side by side, one fast and one slow (SQL Server Query Store), or a long tail in the run-time histogram (MySQL). Single-plan variance on any engine is `unstable-query`.
+parameter-sensitive  Recorded query runtime differences
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Different plan averages or a long runtime tail identify statements worth investigating. They do not establish input-dependent plan reuse; the cause requires further evidence.
 temp-spill        Temporary resource work
                   SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Recorded temporary I/O, internal table creation and space use, without inferring elapsed cost or a memory shortage.
 stale-stats       Stale statistics
@@ -114,7 +114,7 @@ table-bloat       Tables that are mostly empty space
 large-rows        Tables whose rows are mostly large values
                   SQL Server, PostgreSQL · Tables whose rows average many kilobytes, most of it in large values kept apart from the rows (SQL Server's LOB pages, PostgreSQL's TOAST): every statement that reads whole rows pulls them in, every write that sets them writes them again. From the catalog's page counts; no data is read.
 slow-storage      Storage that's slow to read or write
-                  SQL Server, PostgreSQL, MySQL/MariaDB · Average read and write latency per database file since startup: sys.dm_io_virtual_file_stats, pg_stat_io (16+, with track_io_timing), performance_schema file I/O.
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Recorded timing per native storage operation, with each source’s scope and reset period. Cache pages, remote page responses and log-service accounting remain separate.
 connection-churn  Applications that connect for every request
                   SQL Server, PostgreSQL, MySQL/MariaDB · New connections per second since startup (SQL Server logins, PostgreSQL 14+ sessions, MySQL and MariaDB Connections), with how long sessions last and how many came from a pool where the engine says.
 replica-lag       Replicas that fall behind
@@ -126,6 +126,7 @@ SQL Server
   memory failures           retained database-engine out-of-memory observations · adds detail
   current request memory    current query memory requests and reservations · adds detail
   page wait targets         observed page waits and bounded current page/object metadata · adds detail
+  task space                current task temporary-space counters and request context · adds detail
   replication               availability replicas and geo-replication links · adds detail
   log_capacity              database log space and log reuse reason · adds detail
   file_capacity             data file space and growth limits · adds detail

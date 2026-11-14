@@ -14,7 +14,10 @@ pub(super) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> 
     request.validate()?;
     shared_instance(request, SnapshotDataset::SessionMemory)?;
     Ok(Box::new(FrozenSource::new(
-        Reader { io: ReadSession::new(connector, request.budget.clone(), Scope::Server), context: None },
+        Reader {
+            io: ReadSession::new(connector, session_memory::bounded_budget(&request.budget), Scope::Server),
+            context: None,
+        },
         request,
     )?))
 }

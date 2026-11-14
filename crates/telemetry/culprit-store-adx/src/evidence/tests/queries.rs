@@ -8,6 +8,74 @@ const FAMILIES: &[EvidenceFamily] = &[
 ];
 
 #[tokio::test]
+async fn native_variant_metadata_round_trips_without_requiring_or_synthesizing_parent_runtime() {
+    let (source, records) = test_support::query_variant_evidence();
+    let fixture = Fixture::new(source.clone(), records.clone()).await;
+    fixture.reply_families(FAMILIES, 250);
+    let captured = fixture.reader().read_capture(&fixture.range, FAMILIES, budget()).await.unwrap();
+    assert!(captured.is_read_complete(), "{:?}", captured.gaps());
+    assert_eq!(captured.records().len(), records.len());
+    for expected in &records {
+        let expected = ExportedRecord::new(&source, captured.capture(), expected.clone()).unwrap();
+        assert!(captured.records().iter().any(|row| row.row() == &expected));
+    }
+    let definitions = captured
+        .records()
+        .iter()
+        .filter_map(|row| match &row.row().record {
+            TelemetryRecord::QueryDefinition(query) => Some(query),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(definitions.len(), 1);
+    let family = definitions[0].variant_family.as_ref().unwrap();
+    assert_eq!(family.variant, definitions[0].identity);
+    assert_ne!(family.parent, family.variant);
+    assert_eq!(family.dispatcher.query, family.parent);
+}
+
+#[tokio::test]
+async fn changed_variant_parent_dispatcher_or_incarnation_fails_the_original_projection_proof() {
+    let (source, records) = test_support::query_variant_evidence();
+    let fixture = Fixture::new(source, records).await;
+    let schema = fixture.catalog.get(TelemetryStream::QueryDefinitions).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "QueryVariantFamily").unwrap();
+    for pointer in
+        ["/variant/qualifiers/context", "/parent/query_id", "/dispatcher/plan_id", "/dispatcher/qualifiers/generation"]
+    {
+        let mut rows = fixture.rows_for(EvidenceFamily::QueryDefinitions);
+        let mut family: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+        *family.pointer_mut(pointer).unwrap() = json!("another-native-incarnation");
+        rows[0][column] = json!(serde_json::to_string(&family).unwrap());
+        fixture.replies(vec![rows]);
+        let error = fixture
+            .reader()
+            .read_capture(&fixture.range, &[EvidenceFamily::QueryDefinitions], budget())
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}
+
+#[tokio::test]
+async fn temporary_space_average_or_page_unit_tampering_fails_the_original_committed_proof() {
+    let (source, records) = test_support::query_evidence();
+    let fixture = Fixture::new(source, records).await;
+    let schema = fixture.catalog.get(TelemetryStream::QueryRuntime).unwrap();
+    let column = schema.columns().iter().position(|column| column.name == "Metrics").unwrap();
+    for (pointer, replacement) in [("/2/average", json!(99.0)), ("/2/unit/bytes_per_page", json!(8192))] {
+        let mut rows = fixture.rows_for(EvidenceFamily::QueryRuntime);
+        let mut metrics: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+        *metrics.pointer_mut(pointer).unwrap() = replacement;
+        rows[0][column] = json!(serde_json::to_string(&metrics).unwrap());
+        fixture.replies(vec![rows]);
+        let error =
+            fixture.reader().read_capture(&fixture.range, &[EvidenceFamily::QueryRuntime], budget()).await.unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}
+
+#[tokio::test]
 async fn query_reads_preserve_exact_references_outcomes_metrics_scope_and_redacted_text() {
     let (source, records) = test_support::query_evidence();
     let fixture = Fixture::new(source.clone(), records.clone()).await;
@@ -25,6 +93,14 @@ async fn query_reads_preserve_exact_references_outcomes_metrics_scope_and_redact
         let expected = ExportedRecord::new(&source, result.capture(), expected).unwrap();
         let actual = result.records().iter().find(|record| record.row().record_id == expected.record_id).unwrap();
         assert_eq!(actual.row(), &expected);
+    }
+    for record in result.records() {
+        if let TelemetryRecord::QueryRuntime(runtime) = &record.row().record {
+            let space = runtime.metric(&RuntimeMetricKey::TemporaryStorage).unwrap();
+            assert_eq!(space.unit, RuntimeMetricUnit::Pages { bytes_per_page: 16384 });
+            assert_eq!(space.average, 1.25);
+            assert_eq!(runtime.executions, "9007199254740993");
+        }
     }
     let query = result
         .records()

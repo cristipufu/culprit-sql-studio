@@ -60,7 +60,7 @@ Information and history (5)
  28  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
 
-Check coverage: 8 assessed without a finding; 25 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 6 assessed without a finding; 27 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mssql-demo`.
 
@@ -182,9 +182,9 @@ Needs a look: 23 opportunities; the top ones touch 3 min of database time over t
                     ● A nested loop repeating thousands of times  1 plan  id 263
                     → culprit explain mssql-demo --query-id 249
 
-○ Storage           Recorded storage averages: reads average 40 µs, log writes 632 µs.
-                    culprit_demo log: this database, over the recorded history; culprit_demo: this database, over the recorded history; tempdb log: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history
-                    Avg read 40 µs · Avg log write 632 µs
+○ Storage           Native I/O timings are recorded; their accounting does not establish physical storage speed.
+                    tempdb log: tempdb, over an unknown statistics period Native accounting: reads count storage operations; writes count non-durable log work.; culprit_demo log: this database, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; culprit_demo: this database, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; tempdb: tempdb, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
+                    ○ tempdb log  Native average: 2.2 ms (non-durable log work).
                     ○ culprit_demo log (this database)  632 µs per write
                     ○ culprit_demo (this database)  40 µs per read
                     → culprit waits mssql-demo
@@ -306,7 +306,7 @@ Information and history (3)
  17  ○  A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping
        heavy-query:-8886085649470066503
 
-Check coverage: 9 assessed without a finding; 22 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 8 assessed without a finding; 24 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor pg-demo`.
 
@@ -422,7 +422,7 @@ Needs a look: 14 opportunities; the top ones touch 2 min of database time over t
                     → culprit explain pg-demo --query-id 5308963031944094559
 
 ○ Storage           Recorded storage averages: reads average 3 µs.
-                    tables and indexes: whole server, over an unknown statistics period
+                    tables and indexes: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
                     Avg read 3 µs
                     ○ tables and indexes (whole server)  3 µs per read
                     → culprit waits pg-demo
@@ -516,7 +516,7 @@ Information and history (1)
  14  ○  A read from orders: Recorded internal temporary-table work
        temp-spill:04cd7be9c366fadc
 
-Check coverage: 6 assessed without a finding; 18 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 4 assessed without a finding; 20 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mysql-demo`.
 
@@ -612,12 +612,12 @@ Needs a look: 13 opportunities; the top ones touch 4 min of database time over t
                     8 current queries have plans.
                     Current plans 8 · With problems 0
 
-○ Storage           Recorded storage averages: reads average 8 µs, log writes 5 µs.
-                    #innodb_temp/temp_10.ibt: whole server, over the recorded history; shop/orders.ibd: whole server, over the recorded history; shop/products.ibd: whole server, over the recorded history; shop/order_items.ibd: whole server, over the recorded history; mysql/mysql.ibd: whole server, over the recorded history; mysql/binlog.000002: whole server, over the recorded history; mysql/undo_001: whole server, over the recorded history; mysql/ibtmp1: whole server, over the recorded history; mysql/undo_002: whole server, over the recorded history; shop/customers.ibd: whole server, over the recorded history; mysql/ibdata1: whole server, over the recorded history; #innodb_temp/temp_9.ibt: whole server, over the recorded history; sys/sys_config.ibd: whole server, over the recorded history
-                    Avg read 8 µs · Avg log write 5 µs
-                    ○ shop/products.ibd (whole server)  8 µs per read
-                    ○ shop/order_items.ibd (whole server)  7 µs per read
-                    ○ shop/orders.ibd (whole server)  5 µs per read
+○ Storage           Recorded storage averages: log writes 5 µs.
+                    mysql/#ib_16384_1.dblwr: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; mysql/#ib_16384_0.dblwr: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; sys/sys_config.ibd: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; english/errmsg.sys: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
+                    Avg log write 5 µs
+                    ○ mysql/#ib_16384_1.dblwr (whole server)  5.1 ms per read
+                    ○ mysql/#ib_16384_0.dblwr (whole server)  1.8 ms per read
+                    ○ sys/sys_config.ibd (whole server)  225 µs per read
                     → culprit waits mysql-demo
 
 ○ Connections       4 new connections a minute over the recorded counter history.
@@ -700,7 +700,7 @@ $ culprit --format text findings x --report <repo>/fixtures/sqlite-demo.report.j
   5  ●  47.0 MB of the file is free pages (71% of it)  · 47.0 MB free
        config:sqlite-free-pages
 
-Check coverage: 1 assessed without a finding; 8 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 1 assessed without a finding; 10 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 Next: culprit show sqlite-demo 'unindexed-fk:main.orders(customer_id)'
 $ culprit --format text top x --report <repo>/fixtures/sqlite-demo.report.json
@@ -810,7 +810,7 @@ Information and history (1)
   5  ○  orders is read in full to find rows by customer_id
        filtered-scan:public.orders(customer_id)
 
-Check coverage: 5 assessed without a finding; 10 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 5 assessed without a finding; 12 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 3 checks are locked (Unused indexes, Overlapping indexes and Repeated statements within logged requests). See `culprit doctor yugabyte-demo`.
 
@@ -1110,7 +1110,7 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
   8 current queries have plans. 4 past or one-off queries are excluded.
   - A scan reading far more rows than it keeps — 2 plans
 - **Storage** (for context): Recorded storage averages: reads average 3 µs.
-  tables and indexes: whole server, over an unknown statistics period
+  tables and indexes: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
   - tables and indexes (whole server) — 3 µs per read
 - **Connections** (for context): 1 new connections a minute over the recorded counter history.
   - Connections in use (whole server) — 6.19%

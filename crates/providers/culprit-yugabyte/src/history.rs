@@ -136,7 +136,6 @@ pub(crate) async fn collect(
             max_time_ms: row.number("max_ms").filter(|n| *n >= 0.0),
             stddev_time_ms: None,
             compiled: None,
-            variant_query: None,
             cpu_time_ms: None,
             logical_reads: None,
         });

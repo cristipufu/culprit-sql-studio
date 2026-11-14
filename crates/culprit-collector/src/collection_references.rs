@@ -161,6 +161,7 @@ mod tests {
     use culprit_core::telemetry::*;
     fn query(id: &str) -> QueryDefinition {
         QueryDefinition {
+            variant_family: None,
             id: digest(id.as_bytes()),
             origin: StatementOrigin::Unknown,
             monitoring_template_id: None,

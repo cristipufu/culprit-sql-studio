@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::FileScope;
+use culprit_core::signals::FileReference;
 use std::collections::BTreeSet;
 
 pub fn slow_storage_info() -> CheckInfo {
@@ -9,7 +11,7 @@ pub fn slow_storage_info() -> CheckInfo {
         id: "slow-storage".into(),
         title: t!("check.slow_storage.info.title"),
         category: Category::Configuration,
-        engines: vec![Engine::Mssql, Engine::Postgres, Engine::Mysql],
+        engines: Engine::ALL.to_vec(),
         requires: vec![],
         description: t!("check.slow_storage.info.description"),
     }
@@ -23,12 +25,11 @@ check!(
     evidence = &[Evidence::Pressure { signal: None, timed_files: true, complete: true }],
 );
 
-/// Reads (or log writes) at least this large on average are bulk I/O: backups, CHECKDB, read-ahead of large scans. Each
-/// takes longer than the page-sized reads queries wait on, so their average says little about the storage.
+/// Large average requests need their size alongside their timing. The size does not identify the issuing workload.
 pub(super) const BULK_IO_BYTES: f64 = 64.0 * 1024.0;
 
 /// The files of one kind in one database, added up for the operation that matters for that kind: reads of data and
-/// temporary files, writes of the log (every commit waits for them).
+/// temporary files, writes of the log. Only measured storage operations enter this assessment.
 pub(super) struct FileGroup<'a> {
     files: Vec<&'a FileIo>,
     database: Option<String>,
@@ -41,6 +42,10 @@ pub(super) struct FileGroup<'a> {
 }
 
 impl FileGroup<'_> {
+    fn accepts(&self, file: &FileIo) -> bool {
+        self.files.first().is_some_and(|first| crate::evidence::same_storage_population(first, file))
+    }
+
     /// Average time per operation, weighted by operations across the files: one quiet file read in large chunks by a
     /// backup doesn't stand for the database's storage.
     fn avg_ms(&self) -> f64 {
@@ -58,39 +63,60 @@ impl FileGroup<'_> {
 }
 
 /// Every kind of file in every database whose operation-weighted average crosses its threshold over 1,000 operations.
-/// tempdb's log is left out: SQL Server doesn't harden it at commit, so no commit waits for those writes.
-pub(super) fn slow_groups<'a>(snapshot: &Snapshot, files: &'a [FileIo]) -> Vec<FileGroup<'a>> {
-    let mut groups: BTreeMap<(u8, Option<String>), FileGroup<'a>> = BTreeMap::new();
+/// A cache page, remote response or bookkeeping counter cannot be judged as a storage operation.
+pub(super) fn slow_groups(files: &[FileIo]) -> Vec<FileGroup<'_>> {
+    let mut groups: Vec<FileGroup<'_>> = Vec::new();
     for f in files {
-        let (order, write) = match f.kind {
-            FileKind::Data => (0, false),
-            FileKind::Temp => (1, false),
-            FileKind::Log => (2, true),
+        let write = match f.kind {
+            FileKind::Data | FileKind::Temp => false,
+            FileKind::Log => true,
             FileKind::Other => continue,
         };
-        if snapshot.server.engine == Engine::Mssql && f.kind == FileKind::Log && f.database.as_deref() == Some("tempdb")
-        {
+        if !crate::evidence::timed_storage_operation(f) {
             continue;
         }
         let (ops, ms, bytes) =
             if write { (f.writes, f.write_ms, f.write_bytes) } else { (f.reads, f.read_ms, f.read_bytes) };
         // An operation nobody timed says nothing about its time.
-        let Some(ms) = ms.filter(|_| ops > 0.0) else { continue };
-        let g = groups.entry((order, f.database.clone())).or_insert_with(|| FileGroup {
-            files: Vec::new(),
-            database: f.database.clone(),
-            kind: f.kind,
-            write,
-            ops: 0.0,
-            ms: 0.0,
-            bytes: Some(0.0),
+        let Some(ms) = ms.filter(|ms| ms.is_finite() && *ms >= 0.0 && ops.is_finite() && ops > 0.0) else {
+            continue;
+        };
+        let index = groups.iter().position(|group| group.accepts(f)).unwrap_or_else(|| {
+            groups.push(FileGroup {
+                files: Vec::new(),
+                database: f.database.clone(),
+                kind: f.kind,
+                write,
+                ops: 0.0,
+                ms: 0.0,
+                bytes: Some(0.0),
+            });
+            groups.len() - 1
         });
+        let g = &mut groups[index];
         g.files.push(f);
         g.ops += ops;
         g.ms += ms;
-        g.bytes = g.bytes.zip(bytes).map(|(a, b)| a + b);
+        g.bytes = g.bytes.zip(bytes.filter(|value| value.is_finite() && *value >= 0.0)).map(|(a, b)| a + b);
     }
-    groups.into_values().filter(|g| g.ops >= 1_000.0 && g.avg_ms() >= if g.write { 10.0 } else { 20.0 }).collect()
+    groups.sort_by_key(|group| {
+        let order = match group.kind {
+            FileKind::Data => 0,
+            FileKind::Temp => 1,
+            FileKind::Log => 2,
+            FileKind::Other => 3,
+        };
+        (order, group.database.clone())
+    });
+    groups
+        .into_iter()
+        .filter(|group| {
+            group.ops.is_finite()
+                && group.ms.is_finite()
+                && group.ops >= crate::evidence::STORAGE_MIN_OPERATIONS
+                && group.avg_ms() >= if group.write { 10.0 } else { 20.0 }
+        })
+        .collect()
 }
 
 /// What a group of files is called: by the database and kind where the engine says, else by the file.
@@ -202,10 +228,9 @@ impl Operation {
 /// One kind of file in one database whose average read (or log write) crosses its threshold over 1,000 operations.
 pub struct SlowFiles {
     files: Vec<FileIo>,
-    database: Option<String>,
+    references: Vec<FileReference>,
+    key: String,
     label: FileLabel,
-    /// The files' name in the finding's id: the one file's, or their kind's.
-    what: String,
     operation: Operation,
     avg_ms: f64,
     ops: f64,
@@ -220,15 +245,14 @@ pub struct SlowFiles {
 
 fn slow_files(snapshot: &Snapshot) -> Vec<SlowFiles> {
     let Some(p) = snapshot.pressure.as_ref() else { return Vec::new() };
-    let files = culprit_core::signals::merge_logs(&p.files);
     let host = match snapshot.server.platform() {
         Some(culprit_core::Platform::AzureSqlDatabase) => StorageHost::AzureSqlDatabase,
         Some(culprit_core::Platform::AzureSqlManagedInstance) => StorageHost::ManagedInstance,
         _ => StorageHost::Volume,
     };
-    slow_groups(snapshot, &files)
+    slow_groups(&p.files)
         .into_iter()
-        .map(|g| {
+        .filter_map(|g| {
             let write = g.write;
             let operation = if !write {
                 Operation::Read
@@ -237,22 +261,20 @@ fn slow_files(snapshot: &Snapshot) -> Vec<SlowFiles> {
             } else {
                 Operation::Write
             };
-            let what = match g.files.as_slice() {
-                [one] => one.name.clone(),
-                _ => format!(
-                    "{} files",
-                    match g.kind {
-                        FileKind::Temp => "temp",
-                        FileKind::Log => "log",
-                        _ => "data",
-                    }
-                ),
-            };
-            // Only reads come in bulk sizes that slow each one down; a log is judged on its commits.
+            let references: Vec<_> = g.files.iter().map(|file| file.reference()).collect();
+            let mut keys = references.iter().map(FileReference::key).collect::<culprit_core::Result<Vec<_>>>().ok()?;
+            keys.sort();
+            let key = culprit_core::telemetry::digest(keys.join("|").as_bytes());
+            // Request size supplies context, not a workload identity or an elapsed query delay.
             let bulk = !write && g.bulk();
-            let shared = snapshot.server.engine != Engine::Mssql
-                || g.database.as_deref().is_none_or(|db| !db.eq_ignore_ascii_case(&snapshot.server.database));
-            let amount = counter_rate_per_day(snapshot, g.ms);
+            let shared = g.files.iter().any(|file| {
+                file.scope != Some(FileScope::Database)
+                    || file.database.as_deref().is_none_or(|db| !db.eq_ignore_ascii_case(&snapshot.server.database))
+            });
+            let amount = g.files[0]
+                .stats_reset
+                .as_ref()
+                .and_then(|at| counter_rate_per_day_since(snapshot, g.ms, &culprit_core::ResetMarker::At(at.clone())));
             // Historical/shared averages do not establish a current incident in this database. A slow read also
             // needs an amount behind it: a thousand old reads on a mostly idle database need no urgent warning.
             let severity = if bulk || shared || amount.is_none_or(|ms| ms < MEDIUM_MS_A_DAY) {
@@ -260,11 +282,11 @@ fn slow_files(snapshot: &Snapshot) -> Vec<SlowFiles> {
             } else {
                 Severity::Medium
             };
-            SlowFiles {
+            Some(SlowFiles {
                 label: file_label(snapshot, &g),
                 files: g.files.iter().map(|f| (*f).clone()).collect(),
-                database: g.database.clone(),
-                what,
+                references,
+                key,
                 operation,
                 avg_ms: g.avg_ms(),
                 ops: g.ops,
@@ -273,7 +295,7 @@ fn slow_files(snapshot: &Snapshot) -> Vec<SlowFiles> {
                 shared,
                 severity,
                 host,
-            }
+            })
         })
         .collect()
 }
@@ -281,10 +303,12 @@ fn slow_files(snapshot: &Snapshot) -> Vec<SlowFiles> {
 fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     let label = label_words(&slow.label);
     let op = slow.operation.key();
-    let key =
-        format!("{}:{}", slow.database.as_deref().unwrap_or(""), culprit_core::redact::shareable_name(&slow.what));
-    let mut f =
-        finding("slow-storage", &key, Category::Configuration, subject(SubjectKind::Database, label_name(&slow.label)));
+    let mut f = finding(
+        "slow-storage",
+        &slow.key,
+        Category::Configuration,
+        subject(SubjectKind::Database, label_name(&slow.label)),
+    );
     let avg = format::storage_latency(slow.avg_ms);
     f.title = if slow.bulk {
         t!(
@@ -296,20 +320,15 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     } else {
         t!("check.slow_storage.title.average", operation = op, label = &label, average = &avg)
     };
-    // PostgreSQL says what each file's statistics cover; the others count since the server started.
-    let period = if snapshot.server.engine == Engine::Postgres {
-        let coverage = slow
-            .files
-            .iter()
-            .map(|f| f.coverage(snapshot))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>()
-            .join("; ");
-        t!("check.slow_storage.coverage", coverage = coverage)
-    } else {
-        since_start(snapshot)
-    };
+    let coverage = slow
+        .files
+        .iter()
+        .map(|file| file.coverage(snapshot))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join("; ");
+    let period = t!("check.slow_storage.coverage", coverage = coverage);
     // The label starts with a database name: never capitalize it, lead with the operation instead.
     let mut summary = vec![t!(
         "check.slow_storage.summary.took",
@@ -320,11 +339,6 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
         count = format::count(slow.ops),
         period = period
     )];
-    match snapshot.server.engine {
-        Engine::Postgres => summary.push(t!("check.slow_storage.summary.cache_postgres")),
-        Engine::Mysql => summary.push(t!("check.slow_storage.summary.cache_mysql")),
-        Engine::Mssql | Engine::Sqlite | Engine::Yugabyte => {}
-    }
     if slow.bulk {
         summary.push(t!("check.slow_storage.summary.bulk", size = format::bytes(slow.avg_bytes.unwrap_or(0.0))));
     }
@@ -341,9 +355,7 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
             slow.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", "),
         ),
     ];
-    let snapshot_files = snapshot.pressure.as_ref().map_or(&[][..], |p| p.files.as_slice());
-    f.facts.storage_files =
-        slow.files.iter().flat_map(|merged| culprit_core::signals::merged_from(merged, snapshot_files)).collect();
+    f.facts.storage_files = slow.references;
     if let Some(b) = slow.avg_bytes.filter(|_| slow.operation == Operation::Read) {
         f.metrics.push(Metric::said(culprit_core::key!("check.slow_storage.metric.read_size"), b, Unit::Bytes));
     }
@@ -375,3 +387,6 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     }
     f
 }
+
+#[cfg(test)]
+mod tests;

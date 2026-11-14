@@ -9,6 +9,7 @@ import type { FindingLockWait } from "./FindingLockWait";
 import type { FindingLogWrite } from "./FindingLogWrite";
 import type { FindingPlanChange } from "./FindingPlanChange";
 import type { FindingPlanRecommendation } from "./FindingPlanRecommendation";
+import type { FindingRuntimeVariation } from "./FindingRuntimeVariation";
 import type { NothingToCheck } from "./NothingToCheck";
 import type { PlanBaseline } from "./PlanBaseline";
 import type { StatementEvidence } from "./StatementEvidence";
@@ -38,7 +39,11 @@ cleanup_holder?: string,
 /**
  * The native cleanup horizon selected by the diagnosis; data and catalog holds are independent.
  */
-cleanup_horizon?: CleanupHorizon, cleanup_retention_key?: string, cleanup_visibility_complete?: boolean, cleanup_tied_holders?: number, histogram_columns: Array<string>, index_keys: Array<string>, lock_wait: FindingLockWait | null, plan_change: FindingPlanChange | null, plan_baseline?: PlanBaseline, recommended_plan: FindingPlanRecommendation | null, usual_fast_plan: string | null, bloat: FindingBloat | null, log_write: FindingLogWrite | null, large_rows: FindingLargeRows | null, 
+cleanup_horizon?: CleanupHorizon, cleanup_retention_key?: string, cleanup_visibility_complete?: boolean, cleanup_tied_holders?: number, histogram_columns: Array<string>, index_keys: Array<string>, lock_wait: FindingLockWait | null, plan_change: FindingPlanChange | null, plan_baseline?: PlanBaseline, recommended_plan: FindingPlanRecommendation | null, 
+/**
+ * Recorded performance variation selects an investigation; it does not establish parameter sensitivity.
+ */
+runtime_variation?: FindingRuntimeVariation, bloat: FindingBloat | null, log_write: FindingLogWrite | null, large_rows: FindingLargeRows | null, 
 /**
  * The files a storage finding is about, including each constituent of a merged log.
  */

@@ -228,6 +228,7 @@ fn definitions_keep_native_provenance_and_payload_references_without_copying_lar
         .into(),
     };
     let query = QueryDefinition {
+        variant_family: None,
         id: digest(b"definition"),
         origin: StatementOrigin::CulpritMonitoring,
         monitoring_template_id: Some(digest(b"monitoring-template")),

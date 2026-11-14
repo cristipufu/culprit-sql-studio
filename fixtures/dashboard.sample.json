@@ -495,41 +495,52 @@
         "title": "Plans"
       },
       {
-        "detail": "shop/order_items.ibd: whole server, over the recorded history; shop/orders.ibd: whole server, over the recorded history; shop/customers.ibd: whole server, over the recorded history; mysql/ibdata1: whole server, over the recorded history; mysql/undo002: whole server, over the recorded history; mysql/undo003: whole server, over the recorded history; mysql/undo001: whole server, over the recorded history; shop/products.ibd: whole server, over the recorded history; mysql/innodb_index_stats.ibd: whole server, over the recorded history; mysql/innodb_table_stats.ibd: whole server, over the recorded history; mysql/transaction_registry.ibd: whole server, over the recorded history",
+        "detail": "mysql/help_keyword.frm: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; performance_schema/db.opt: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; mysql/ibdata1: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; sys/db.opt: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.",
         "fix_sql": null,
         "items": [
           {
             "at": null,
             "finding_id": null,
-            "id": ":shop/customers.ibd",
+            "id": "c6b9d65cc32aa181e48eaa956c49705dcebd83de072d31a08f526fca2561e7bc",
             "kind": "signal",
-            "label": "shop/customers.ibd (whole server)",
+            "label": "mysql/help_keyword.frm (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
-            "value": "43 µs per read"
+            "value": "264 µs per read"
           },
           {
             "at": null,
             "finding_id": null,
-            "id": ":shop/order_items.ibd",
+            "id": "b2bffa3a7982cf6077e669eb4e3d4e1887db0fa3499f0562e2de50c2f9014b14",
             "kind": "signal",
-            "label": "shop/order_items.ibd (whole server)",
+            "label": "performance_schema/db.opt (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
-            "value": "22 µs per read"
+            "value": "188 µs per read"
           },
           {
             "at": null,
             "finding_id": null,
-            "id": ":shop/orders.ibd",
+            "id": "6580a0ad28ee4ab053ee6a604b0f65b630a8fd66b2156688ad44a43deda5ca67",
             "kind": "signal",
-            "label": "shop/orders.ibd (whole server)",
+            "label": "mysql/ibdata1 (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
-            "value": "7 µs per read"
+            "value": "170 µs per read"
+          },
+          {
+            "at": null,
+            "finding_id": null,
+            "id": "8e26472bc19e108480f97ec3c1cdf9bf36b99c6f6fac66025d790b311f3aaf71",
+            "kind": "signal",
+            "label": "sys/db.opt (whole server)",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "117 µs per read"
           }
         ],
         "key": "storage",
@@ -537,13 +548,13 @@
           {
             "key": "read-ms",
             "label": "Avg read",
-            "text": "43 µs",
-            "value": 0.042947746202236715
+            "text": "15 µs",
+            "value": 0.015467493542058269
           }
         ],
         "next": "culprit waits mariadb-demo",
         "status": "info",
-        "takeaway": "Recorded storage averages: reads average 43 µs.",
+        "takeaway": "Recorded storage averages: reads average 15 µs.",
         "title": "Storage"
       },
       {
@@ -1241,13 +1252,24 @@
         "title": "Plans"
       },
       {
-        "detail": "culprit_demo log: this database, over the recorded history; culprit_demo: this database, over the recorded history; tempdb log: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history; tempdb: tempdb, over the recorded history",
+        "detail": "tempdb log: tempdb, over an unknown statistics period Native accounting: reads count storage operations; writes count non-durable log work.; culprit_demo log: this database, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; culprit_demo: this database, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; tempdb: tempdb, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.",
         "fix_sql": null,
         "items": [
           {
             "at": null,
             "finding_id": null,
-            "id": "culprit_demo:culprit_demo_log",
+            "id": "5b3d37c23823ccda823f96cf9f4e3b19d21ca273d16a517327978006649c96fa",
+            "kind": "signal",
+            "label": "tempdb log",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "Native average: 2.2 ms (non-durable log work)."
+          },
+          {
+            "at": null,
+            "finding_id": null,
+            "id": "1dc551bead5b667441443a1817b8873d1941c68212e1fff83c107e74240a8846",
             "kind": "signal",
             "label": "culprit_demo log (this database)",
             "query_id": null,
@@ -1258,33 +1280,31 @@
           {
             "at": null,
             "finding_id": null,
-            "id": "culprit_demo:culprit_demo",
+            "id": "71a7bc1007ffa50ca56774a713fb32b75b6425c979ef7759e42dc6f8b3653138",
             "kind": "signal",
             "label": "culprit_demo (this database)",
             "query_id": null,
             "share": null,
             "status": "info",
             "value": "40 µs per read"
+          },
+          {
+            "at": null,
+            "finding_id": null,
+            "id": "c72be93126c5d16268c620c0bfbfa3e577f16ee5897014171d038456ba2f1061",
+            "kind": "signal",
+            "label": "tempdb",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "31 µs per read"
           }
         ],
         "key": "storage",
-        "metrics": [
-          {
-            "key": "read-ms",
-            "label": "Avg read",
-            "text": "40 µs",
-            "value": 0.04025974025974026
-          },
-          {
-            "key": "log-write-ms",
-            "label": "Avg log write",
-            "text": "632 µs",
-            "value": 0.63199539082005
-          }
-        ],
+        "metrics": [],
         "next": "culprit waits mssql-demo",
         "status": "info",
-        "takeaway": "Recorded storage averages: reads average 40 µs, log writes 632 µs.",
+        "takeaway": "Native I/O timings are recorded; their accounting does not establish physical storage speed.",
         "title": "Storage"
       },
       {
@@ -2381,62 +2401,56 @@
         "title": "Plans"
       },
       {
-        "detail": "#innodb_temp/temp_10.ibt: whole server, over the recorded history; shop/orders.ibd: whole server, over the recorded history; shop/products.ibd: whole server, over the recorded history; shop/order_items.ibd: whole server, over the recorded history; mysql/mysql.ibd: whole server, over the recorded history; mysql/binlog.000002: whole server, over the recorded history; mysql/undo_001: whole server, over the recorded history; mysql/ibtmp1: whole server, over the recorded history; mysql/undo_002: whole server, over the recorded history; shop/customers.ibd: whole server, over the recorded history; mysql/ibdata1: whole server, over the recorded history; #innodb_temp/temp_9.ibt: whole server, over the recorded history; sys/sys_config.ibd: whole server, over the recorded history",
+        "detail": "mysql/#ib_16384_1.dblwr: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; mysql/#ib_16384_0.dblwr: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; sys/sys_config.ibd: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.; english/errmsg.sys: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.",
         "fix_sql": null,
         "items": [
           {
             "at": null,
             "finding_id": null,
-            "id": ":shop/products.ibd",
+            "id": "0061abedfe1d39a9a5f96406854910d72785fbaa57dc8a9e1b4f365856a73c68",
             "kind": "signal",
-            "label": "shop/products.ibd (whole server)",
+            "label": "mysql/#ib_16384_1.dblwr (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
-            "value": "8 µs per read"
+            "value": "5.1 ms per read"
           },
           {
             "at": null,
             "finding_id": null,
-            "id": ":shop/order_items.ibd",
+            "id": "492878850e57c7835716fa03c510f0aaa52f8e7dc5746e1f38a21ea2476b6121",
             "kind": "signal",
-            "label": "shop/order_items.ibd (whole server)",
+            "label": "mysql/#ib_16384_0.dblwr (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
-            "value": "7 µs per read"
+            "value": "1.8 ms per read"
           },
           {
             "at": null,
             "finding_id": null,
-            "id": ":shop/orders.ibd",
+            "id": "75dd0b515648e632180675ba0dbe6729137cacc8f9ba07a924d99ac2f4a925d2",
             "kind": "signal",
-            "label": "shop/orders.ibd (whole server)",
+            "label": "sys/sys_config.ibd (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
-            "value": "5 µs per read"
+            "value": "225 µs per read"
           },
           {
             "at": null,
             "finding_id": null,
-            "id": ":mysql/binlog.000002",
+            "id": "357ec4df593f509e982a910c1de3d1a48e862a3a72e906a49fd18d0c2250e91f",
             "kind": "signal",
-            "label": "mysql/binlog.000002 (whole server)",
+            "label": "english/errmsg.sys (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
-            "value": "5 µs per write"
+            "value": "26 µs per read"
           }
         ],
         "key": "storage",
         "metrics": [
-          {
-            "key": "read-ms",
-            "label": "Avg read",
-            "text": "8 µs",
-            "value": 0.008323210703703704
-          },
           {
             "key": "log-write-ms",
             "label": "Avg log write",
@@ -2446,7 +2460,7 @@
         ],
         "next": "culprit waits mysql-demo",
         "status": "info",
-        "takeaway": "Recorded storage averages: reads average 8 µs, log writes 5 µs.",
+        "takeaway": "Recorded storage averages: log writes 5 µs.",
         "title": "Storage"
       },
       {
@@ -3096,13 +3110,13 @@
         "title": "Plans"
       },
       {
-        "detail": "tables and indexes: whole server, over an unknown statistics period",
+        "detail": "tables and indexes: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.",
         "fix_sql": null,
         "items": [
           {
             "at": null,
             "finding_id": null,
-            "id": ":Tables and indexes",
+            "id": "64f2429d9cc9e0589eca6e0d4045de58cee48688183017ce59b8329da10931be",
             "kind": "signal",
             "label": "tables and indexes (whole server)",
             "query_id": null,

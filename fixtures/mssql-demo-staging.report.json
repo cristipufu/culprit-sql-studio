@@ -106,7 +106,7 @@
       "check": "parameter-sensitive",
       "reason": "Query Store is OFF on this database.",
       "status": "unavailable",
-      "title": "Queries that are fast for most calls and slow for some"
+      "title": "Recorded query runtime differences"
     },
     {
       "check": "temp-spill",
@@ -266,7 +266,7 @@
     },
     {
       "check": "slow-storage",
-      "reason": "Storage operations were not timed in this scan.",
+      "reason": "This scan did not record the required source's collection outcome.",
       "status": "insufficient-evidence",
       "title": "Storage that's slow to read or write"
     },
@@ -364,8 +364,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -433,8 +432,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -511,8 +509,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 26.5 MB.",
@@ -574,8 +571,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 648 KB.",
@@ -663,8 +659,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -1482,7 +1477,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 3,
+    "format": 4,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {
@@ -2014,6 +2009,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080

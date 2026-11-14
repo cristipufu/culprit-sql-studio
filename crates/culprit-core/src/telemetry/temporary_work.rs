@@ -2,6 +2,48 @@
 use super::*;
 use crate::StatementTemporaryWork;
 
+/// Project a single already-qualified native runtime population. The caller owns source, interval, definition
+/// and epoch membership; this function neither joins captures nor differences cumulative counters.
+///
+/// Every contributing fragment must declare page-based temporary-space averages. Missing fragments, byte-only
+/// representations and incompatible page sizes withhold the projection rather than turn a partial sum into a
+/// complete one. Native zero averages remain measured zero; zero executions establish no space observation.
+pub fn runtime_temporary_space<'a>(
+    rows: impl IntoIterator<Item = &'a RuntimeMeasurement>,
+    source: &str,
+) -> Option<StatementTemporaryWork> {
+    const MAX_EXACT_EXECUTIONS: u64 = 1 << 53;
+    if !valid_key(source) || source.trim().is_empty() {
+        return None;
+    }
+    let mut executions = 0u64;
+    let mut page_bytes = None;
+    let mut usage_pages_total = 0.0;
+    for row in rows {
+        if !row.is_valid() {
+            return None;
+        }
+        let n = row.executions.parse::<u64>().ok()?;
+        executions = executions.checked_add(n).filter(|count| *count <= MAX_EXACT_EXECUTIONS)?;
+        if n == 0 {
+            continue;
+        }
+        let metric = row.metric(&RuntimeMetricKey::TemporaryStorage)?;
+        let RuntimeMetricUnit::Pages { bytes_per_page } = metric.unit else { return None };
+        if page_bytes.is_some_and(|previous| previous != bytes_per_page) {
+            return None;
+        }
+        page_bytes = Some(bytes_per_page);
+        usage_pages_total += metric.average * n as f64;
+        if !usage_pages_total.is_finite() {
+            return None;
+        }
+    }
+    let work =
+        StatementTemporaryWork::SpaceUsage { source: source.into(), bytes_per_page: page_bytes?, usage_pages_total };
+    work.is_valid().then_some(work)
+}
+
 /// An observation may record both block I/O and table creation. Native names have no analytical meaning here.
 pub fn statement_temporary_work(sample: &StatementCounterSample, source: &str) -> Result<Vec<StatementTemporaryWork>> {
     if !sample.is_valid() || !valid_key(source) || source.trim().is_empty() {
@@ -100,5 +142,8 @@ fn invalid() -> Error {
     CollectionStop::InvalidPage.error()
 }
 
+#[cfg(test)]
+#[path = "temporary_work/runtime_tests.rs"]
+mod runtime_tests;
 #[cfg(test)]
 mod tests;

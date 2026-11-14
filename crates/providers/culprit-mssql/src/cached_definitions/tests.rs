@@ -11,9 +11,11 @@ pub(crate) fn row() -> Rec {
         ("plan_bytes".into(), Val::Int(XML.encode_utf16().count() as i64 * 2)),
         ("query_plan".into(), Val::Text(XML.into())),
         ("encrypted".into(), Val::Bool(false)),
+        ("module_database_id".into(), Val::Null),
+        ("module_object_id".into(), Val::Null),
+        ("module_number".into(), Val::Null),
         ("query_plan_hash".into(), Val::Text("0x0000000000000009".into())),
         ("last_start_without_offset".into(), Val::Text("2020-01-01T08:00:00.003".into())),
-        ("last_start_utc_estimate".into(), Val::Text("2020-01-01T06:00:00Z".into())),
     ]);
     Rec::of(&fields.iter().map(|(name, value)| (name.as_str(), value.clone())).collect::<Vec<_>>())
 }

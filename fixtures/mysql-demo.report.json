@@ -96,21 +96,16 @@
     },
     {
       "assessed_queries": [
-        "04cd7be9c366fadc",
         "19bd4ff468839ea3",
         "c7b5ac9bb4bcecfe",
         "9b30e6ad79d940fe",
         "17f97e6ec7a22e0a",
-        "b4c0f3861e32013e",
-        "4167fe7f2c20deb7",
-        "4515abd524a46f37",
-        "7f47c8550af0c644",
-        "fc709554a9248878"
+        "b4c0f3861e32013e"
       ],
       "check": "parameter-sensitive",
-      "reason": null,
-      "status": "assessed",
-      "title": "Queries that are fast for most calls and slow for some"
+      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
+      "status": "insufficient-evidence",
+      "title": "Recorded query runtime differences"
     },
     {
       "assessed_queries": [
@@ -234,8 +229,8 @@
     },
     {
       "check": "slow-storage",
-      "reason": null,
-      "status": "assessed",
+      "reason": "Some native I/O populations lack qualified storage-operation accounting, timing or enough operations for a storage-speed assessment.",
+      "status": "insufficient-evidence",
       "title": "Storage that's slow to read or write"
     },
     {
@@ -277,8 +272,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -366,8 +360,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -453,8 +446,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -540,8 +532,7 @@
         },
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -621,8 +612,7 @@
         },
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -698,8 +688,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -773,8 +762,7 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "uncosted_plan_explained": true,
-        "usual_fast_plan": null
+        "uncosted_plan_explained": true
       },
       "fix": {
         "cost": null,
@@ -863,7 +851,6 @@
         "log_write": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null,
         "workload_dependency": "current-statements"
       },
       "fix": {
@@ -949,8 +936,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 10.5 MB.",
@@ -1012,8 +998,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": "Frees 432 KB.",
@@ -1139,8 +1124,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -1916,7 +1900,7 @@
         "table": "orders"
       }
     ],
-    "format": 3,
+    "format": 4,
     "histograms": [
       {
         "buckets": 4.0,
@@ -2331,6 +2315,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080
@@ -2340,6 +2325,11 @@
       "cpus": null,
       "files": [
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "temp",
           "name": "#innodb_temp/temp_10.ibt",
@@ -2352,6 +2342,11 @@
           "writes": 1035938.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/orders.ibd",
@@ -2364,6 +2359,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/products.ibd",
@@ -2376,6 +2376,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/order_items.ibd",
@@ -2388,6 +2393,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/mysql.ibd",
@@ -2400,6 +2410,11 @@
           "writes": 321.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/#ib_16384_0.dblwr",
@@ -2412,6 +2427,11 @@
           "writes": 44.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "mysql/binlog.000002",
@@ -2424,6 +2444,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/undo_001",
@@ -2436,6 +2461,11 @@
           "writes": 240.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "temp",
           "name": "mysql/ibtmp1",
@@ -2448,6 +2478,11 @@
           "writes": 143.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/undo_002",
@@ -2460,6 +2495,11 @@
           "writes": 57.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "shop/customers.ibd",
@@ -2472,6 +2512,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "mysql/ibdata1",
@@ -2484,6 +2529,11 @@
           "writes": 31.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "mysql/#ib_16384_1.dblwr",
@@ -2496,6 +2546,11 @@
           "writes": 2.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "#innodb_redo/#ib_redo114",
@@ -2508,6 +2563,11 @@
           "writes": 387.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "#innodb_redo/#ib_redo113",
@@ -2520,6 +2580,11 @@
           "writes": 748.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "#innodb_redo/#ib_redo111",
@@ -2532,6 +2597,11 @@
           "writes": 695.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "temp",
           "name": "#innodb_temp/temp_9.ibt",
@@ -2544,6 +2614,11 @@
           "writes": 20.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "#innodb_redo/#ib_redo112",
@@ -2556,6 +2631,11 @@
           "writes": 629.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "#innodb_redo/#ib_redo110",
@@ -2568,6 +2648,11 @@
           "writes": 150.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "mysql/binlog.000003",
@@ -2580,6 +2665,11 @@
           "writes": 235.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "mysql/binlog.000001",
@@ -2592,6 +2682,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "staging/import_batches.ibd",
@@ -2604,6 +2699,11 @@
           "writes": 10.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "sys/sys_config.ibd",
@@ -2616,6 +2716,11 @@
           "writes": 0.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "other",
           "name": "english/errmsg.sys",
@@ -3625,73 +3730,186 @@
           "rows": 400.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                1445.439770745,
-                1513.561248436,
-                1.0
-              ],
-              [
-                1513.561248436,
-                1584.893192461,
-                1.0
-              ],
-              [
-                1584.893192461,
-                1659.586907437,
-                1.0
-              ],
-              [
-                1659.586907437,
-                1737.800828749,
-                1.0
-              ],
-              [
-                1737.800828749,
-                1819.70085861,
-                1.0
-              ],
-              [
-                1819.70085861,
-                1905.460717963,
-                4.0
-              ],
-              [
-                1905.460717963,
-                1995.262314968,
-                3.0
-              ],
-              [
-                1995.262314968,
-                2089.296130854,
-                2.0
-              ],
-              [
-                2089.296130854,
-                2187.761623949,
-                3.0
-              ],
-              [
-                2398.832919019,
-                2511.886431509,
-                1.0
-              ],
-              [
-                2754.228703338,
-                2884.031503126,
-                1.0
-              ],
-              [
-                3019.951720402,
-                3162.277660168,
-                1.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1445.439770745
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1513.561248436
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1513.561248436
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1584.893192461
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1584.893192461
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1659.586907437
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1659.586907437
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1737.800828749
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1737.800828749
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1819.70085861
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1819.70085861
+                    },
+                    "samples": "4",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1905.460717963
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1905.460717963
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1995.262314968
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1995.262314968
+                    },
+                    "samples": "2",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2089.296130854
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2089.296130854
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2187.761623949
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2398.832919019
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2511.886431509
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2754.228703338
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2884.031503126
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3019.951720402
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3162.277660168
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 1905.460717963
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 1995.262314968
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 2754.228703338
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 2884.031503126
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 3019.951720402
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 3162.277660168
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "20"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 0.019,
-            "min_ms": 1505.553607,
-            "p50_ms": 1995.262314968,
-            "p95_ms": 2884.031503126,
-            "p99_ms": 3162.277660168
+            "min_ms": 1505.553607
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -3996,88 +4214,219 @@
           "rows": 300.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                52.480746024,
-                54.954087385,
-                1.0
-              ],
-              [
-                54.954087385,
-                57.543993733,
-                1.0
-              ],
-              [
-                57.543993733,
-                60.255958607,
-                3.0
-              ],
-              [
-                60.255958607,
-                63.095734448,
-                10.0
-              ],
-              [
-                63.095734448,
-                66.0693448,
-                7.0
-              ],
-              [
-                66.0693448,
-                69.183097091,
-                4.0
-              ],
-              [
-                69.183097091,
-                72.443596007,
-                5.0
-              ],
-              [
-                72.443596007,
-                75.857757502,
-                6.0
-              ],
-              [
-                75.857757502,
-                79.432823472,
-                1.0
-              ],
-              [
-                79.432823472,
-                83.17637711,
-                2.0
-              ],
-              [
-                83.17637711,
-                87.096358995,
-                7.0
-              ],
-              [
-                87.096358995,
-                91.201083935,
-                6.0
-              ],
-              [
-                91.201083935,
-                95.499258602,
-                5.0
-              ],
-              [
-                95.499258602,
-                100.0,
-                1.0
-              ],
-              [
-                104.712854805,
-                109.647819614,
-                1.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 52.480746024
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 54.954087385
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 54.954087385
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 57.543993733
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 57.543993733
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 60.255958607
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 60.255958607
+                    },
+                    "samples": "10",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 63.095734448
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 63.095734448
+                    },
+                    "samples": "7",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 66.0693448
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 66.0693448
+                    },
+                    "samples": "4",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 69.183097091
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 69.183097091
+                    },
+                    "samples": "5",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 72.443596007
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 72.443596007
+                    },
+                    "samples": "6",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 75.857757502
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 75.857757502
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 79.432823472
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 79.432823472
+                    },
+                    "samples": "2",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 83.17637711
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 83.17637711
+                    },
+                    "samples": "7",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 87.096358995
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 87.096358995
+                    },
+                    "samples": "6",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 91.201083935
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 91.201083935
+                    },
+                    "samples": "5",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 95.499258602
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 95.499258602
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 100.0
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 104.712854805
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 109.647819614
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 69.183097091
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 72.443596007
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 91.201083935
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 95.499258602
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 104.712854805
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 109.647819614
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "60"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 0.024,
-            "min_ms": 53.812449,
-            "p50_ms": 72.443596007,
-            "p95_ms": 95.499258602,
-            "p99_ms": 109.647819614
+            "min_ms": 53.812449
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -4329,138 +4678,329 @@
           "rows": 2000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                0.660693448,
-                0.72443596,
-                16.0
-              ],
-              [
-                0.72443596,
-                0.794328234,
-                28.0
-              ],
-              [
-                0.794328234,
-                0.870963589,
-                32.0
-              ],
-              [
-                0.870963589,
-                0.954992586,
-                78.0
-              ],
-              [
-                0.954992586,
-                1.047128548,
-                63.0
-              ],
-              [
-                1.047128548,
-                1.148153621,
-                52.0
-              ],
-              [
-                1.148153621,
-                1.258925411,
-                118.0
-              ],
-              [
-                1.258925411,
-                1.380384264,
-                91.0
-              ],
-              [
-                1.380384264,
-                1.513561248,
-                123.0
-              ],
-              [
-                1.513561248,
-                1.659586907,
-                128.0
-              ],
-              [
-                1.659586907,
-                1.819700858,
-                138.0
-              ],
-              [
-                1.819700858,
-                1.995262314,
-                170.0
-              ],
-              [
-                1.995262314,
-                2.187761623,
-                179.0
-              ],
-              [
-                2.187761623,
-                2.398832919,
-                149.0
-              ],
-              [
-                2.398832919,
-                2.630267991,
-                150.0
-              ],
-              [
-                2.630267991,
-                2.884031503,
-                134.0
-              ],
-              [
-                2.884031503,
-                3.16227766,
-                103.0
-              ],
-              [
-                3.16227766,
-                3.467368504,
-                82.0
-              ],
-              [
-                3.467368504,
-                3.801893963,
-                57.0
-              ],
-              [
-                3.801893963,
-                4.168693834,
-                48.0
-              ],
-              [
-                4.168693834,
-                4.570881896,
-                33.0
-              ],
-              [
-                4.570881896,
-                5.011872336,
-                12.0
-              ],
-              [
-                5.011872336,
-                5.495408738,
-                13.0
-              ],
-              [
-                5.495408738,
-                6.309573444,
-                2.0
-              ],
-              [
-                6.309573444,
-                6.60693448,
-                1.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.660693448
+                    },
+                    "samples": "16",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.72443596
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.72443596
+                    },
+                    "samples": "28",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.794328234
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.794328234
+                    },
+                    "samples": "32",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.870963589
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.870963589
+                    },
+                    "samples": "78",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.954992586
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.954992586
+                    },
+                    "samples": "63",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.047128548
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.047128548
+                    },
+                    "samples": "52",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.148153621
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.148153621
+                    },
+                    "samples": "118",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.258925411
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.258925411
+                    },
+                    "samples": "91",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.380384264
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.380384264
+                    },
+                    "samples": "123",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.513561248
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.513561248
+                    },
+                    "samples": "128",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.659586907
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.659586907
+                    },
+                    "samples": "138",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.819700858
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.819700858
+                    },
+                    "samples": "170",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.995262314
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.995262314
+                    },
+                    "samples": "179",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.187761623
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.187761623
+                    },
+                    "samples": "149",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.398832919
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.398832919
+                    },
+                    "samples": "150",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.630267991
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.630267991
+                    },
+                    "samples": "134",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.884031503
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.884031503
+                    },
+                    "samples": "103",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.16227766
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.16227766
+                    },
+                    "samples": "82",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.467368504
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.467368504
+                    },
+                    "samples": "57",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.801893963
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.801893963
+                    },
+                    "samples": "48",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 4.168693834
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 4.168693834
+                    },
+                    "samples": "33",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 4.570881896
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 4.570881896
+                    },
+                    "samples": "12",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 5.011872336
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 5.011872336
+                    },
+                    "samples": "13",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 5.495408738
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 5.495408738
+                    },
+                    "samples": "2",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 6.309573444
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 6.309573444
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 6.60693448
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 1.819700858
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 1.995262314
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 3.801893963
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 4.168693834
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 4.570881896
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 5.011872336
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "2000"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 0.64,
-            "min_ms": 0.682918,
-            "p50_ms": 1.995262314,
-            "p95_ms": 3.981071705,
-            "p99_ms": 4.786300923
+            "min_ms": 0.682918
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -4703,158 +5243,373 @@
           "rows": 30000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                0.010471285,
-                0.012589254,
-                29.0
-              ],
-              [
-                0.012589254,
-                0.015135612,
-                3115.0
-              ],
-              [
-                0.015135612,
-                0.018197008,
-                4897.0
-              ],
-              [
-                0.018197008,
-                0.021877616,
-                2226.0
-              ],
-              [
-                0.021877616,
-                0.026302679,
-                4848.0
-              ],
-              [
-                0.026302679,
-                0.031622776,
-                3692.0
-              ],
-              [
-                0.031622776,
-                0.038018939,
-                2879.0
-              ],
-              [
-                0.038018939,
-                0.045708818,
-                2098.0
-              ],
-              [
-                0.045708818,
-                0.054954087,
-                1835.0
-              ],
-              [
-                0.054954087,
-                0.066069344,
-                1496.0
-              ],
-              [
-                0.066069344,
-                0.079432823,
-                874.0
-              ],
-              [
-                0.079432823,
-                0.095499258,
-                550.0
-              ],
-              [
-                0.095499258,
-                0.114815362,
-                333.0
-              ],
-              [
-                0.114815362,
-                0.138038426,
-                250.0
-              ],
-              [
-                0.138038426,
-                0.16595869,
-                166.0
-              ],
-              [
-                0.16595869,
-                0.199526231,
-                123.0
-              ],
-              [
-                0.199526231,
-                0.239883291,
-                96.0
-              ],
-              [
-                0.239883291,
-                0.28840315,
-                54.0
-              ],
-              [
-                0.28840315,
-                0.34673685,
-                40.0
-              ],
-              [
-                0.34673685,
-                0.416869383,
-                28.0
-              ],
-              [
-                0.416869383,
-                0.501187233,
-                42.0
-              ],
-              [
-                0.501187233,
-                0.602559586,
-                93.0
-              ],
-              [
-                0.602559586,
-                0.72443596,
-                101.0
-              ],
-              [
-                0.72443596,
-                0.870963589,
-                56.0
-              ],
-              [
-                0.870963589,
-                1.047128548,
-                36.0
-              ],
-              [
-                1.047128548,
-                1.258925411,
-                21.0
-              ],
-              [
-                1.258925411,
-                1.584893192,
-                12.0
-              ],
-              [
-                1.659586907,
-                2.187761623,
-                6.0
-              ],
-              [
-                2.187761623,
-                6.309573444,
-                4.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.010471285
+                    },
+                    "samples": "29",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.012589254
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.012589254
+                    },
+                    "samples": "3115",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.015135612
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.015135612
+                    },
+                    "samples": "4897",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.018197008
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.018197008
+                    },
+                    "samples": "2226",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.021877616
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.021877616
+                    },
+                    "samples": "4848",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.026302679
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.026302679
+                    },
+                    "samples": "3692",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.031622776
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.031622776
+                    },
+                    "samples": "2879",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.038018939
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.038018939
+                    },
+                    "samples": "2098",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.045708818
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.045708818
+                    },
+                    "samples": "1835",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.054954087
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.054954087
+                    },
+                    "samples": "1496",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.066069344
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.066069344
+                    },
+                    "samples": "874",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.079432823
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.079432823
+                    },
+                    "samples": "550",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.095499258
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.095499258
+                    },
+                    "samples": "333",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.114815362
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.114815362
+                    },
+                    "samples": "250",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.138038426
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.138038426
+                    },
+                    "samples": "166",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.16595869
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.16595869
+                    },
+                    "samples": "123",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.199526231
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.199526231
+                    },
+                    "samples": "96",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.239883291
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.239883291
+                    },
+                    "samples": "54",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.28840315
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.28840315
+                    },
+                    "samples": "40",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.34673685
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.34673685
+                    },
+                    "samples": "28",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.416869383
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.416869383
+                    },
+                    "samples": "42",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.501187233
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.501187233
+                    },
+                    "samples": "93",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.602559586
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.602559586
+                    },
+                    "samples": "101",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.72443596
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.72443596
+                    },
+                    "samples": "56",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.870963589
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.870963589
+                    },
+                    "samples": "36",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.047128548
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.047128548
+                    },
+                    "samples": "21",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.258925411
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.258925411
+                    },
+                    "samples": "12",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.584893192
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.659586907
+                    },
+                    "samples": "6",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.187761623
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.187761623
+                    },
+                    "samples": "4",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 6.309573444
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.021877616
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.026302679
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.079432823
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.095499258
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.501187233
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.602559586
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "30000"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 7.923,
-            "min_ms": 0.010541,
-            "p50_ms": 0.026302679,
-            "p95_ms": 0.095499258,
-            "p99_ms": 0.549540873
+            "min_ms": 0.010541
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -5151,98 +5906,241 @@
           "rows": 9991.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                0.039810717,
-                0.047863009,
-                24.0
-              ],
-              [
-                0.047863009,
-                0.057543993,
-                214.0
-              ],
-              [
-                0.057543993,
-                0.069183097,
-                452.0
-              ],
-              [
-                0.069183097,
-                0.083176377,
-                299.0
-              ],
-              [
-                0.083176377,
-                0.1,
-                336.0
-              ],
-              [
-                0.1,
-                0.120226443,
-                387.0
-              ],
-              [
-                0.120226443,
-                0.144543977,
-                482.0
-              ],
-              [
-                0.144543977,
-                0.173780082,
-                501.0
-              ],
-              [
-                0.173780082,
-                0.208929613,
-                475.0
-              ],
-              [
-                0.208929613,
-                0.251188643,
-                367.0
-              ],
-              [
-                0.251188643,
-                0.301995172,
-                253.0
-              ],
-              [
-                0.301995172,
-                0.363078054,
-                130.0
-              ],
-              [
-                0.363078054,
-                0.436515832,
-                55.0
-              ],
-              [
-                0.436515832,
-                0.549540873,
-                13.0
-              ],
-              [
-                0.575439937,
-                0.794328234,
-                5.0
-              ],
-              [
-                0.831763771,
-                1.0,
-                4.0
-              ],
-              [
-                1.513561248,
-                6.02559586,
-                3.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.039810717
+                    },
+                    "samples": "24",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.047863009
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.047863009
+                    },
+                    "samples": "214",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.057543993
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.057543993
+                    },
+                    "samples": "452",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.069183097
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.069183097
+                    },
+                    "samples": "299",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.083176377
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.083176377
+                    },
+                    "samples": "336",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.1
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.1
+                    },
+                    "samples": "387",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.120226443
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.120226443
+                    },
+                    "samples": "482",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.144543977
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.144543977
+                    },
+                    "samples": "501",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.173780082
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.173780082
+                    },
+                    "samples": "475",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.208929613
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.208929613
+                    },
+                    "samples": "367",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.251188643
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.251188643
+                    },
+                    "samples": "253",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.301995172
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.301995172
+                    },
+                    "samples": "130",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.363078054
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.363078054
+                    },
+                    "samples": "55",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.436515832
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.436515832
+                    },
+                    "samples": "13",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.549540873
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.575439937
+                    },
+                    "samples": "5",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.794328234
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.831763771
+                    },
+                    "samples": "4",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.0
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.513561248
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 6.02559586
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.120226443
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.144543977
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.301995172
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.363078054
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.363078054
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.436515832
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "4000"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 1.452,
-            "min_ms": 0.040667,
-            "p50_ms": 0.138038426,
-            "p95_ms": 0.316227766,
-            "p99_ms": 0.416869383
+            "min_ms": 0.040667
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -5627,108 +6525,263 @@
           "rows": 6398.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                0.039810717,
-                0.047863009,
-                12.0
-              ],
-              [
-                0.047863009,
-                0.057543993,
-                164.0
-              ],
-              [
-                0.057543993,
-                0.069183097,
-                502.0
-              ],
-              [
-                0.069183097,
-                0.083176377,
-                410.0
-              ],
-              [
-                0.083176377,
-                0.1,
-                324.0
-              ],
-              [
-                0.1,
-                0.120226443,
-                403.0
-              ],
-              [
-                0.120226443,
-                0.144543977,
-                521.0
-              ],
-              [
-                0.144543977,
-                0.173780082,
-                514.0
-              ],
-              [
-                0.173780082,
-                0.208929613,
-                438.0
-              ],
-              [
-                0.208929613,
-                0.251188643,
-                304.0
-              ],
-              [
-                0.251188643,
-                0.301995172,
-                207.0
-              ],
-              [
-                0.301995172,
-                0.363078054,
-                102.0
-              ],
-              [
-                0.363078054,
-                0.436515832,
-                60.0
-              ],
-              [
-                0.436515832,
-                0.52480746,
-                13.0
-              ],
-              [
-                0.52480746,
-                0.630957344,
-                8.0
-              ],
-              [
-                0.660693448,
-                0.794328234,
-                8.0
-              ],
-              [
-                0.794328234,
-                1.096478196,
-                5.0
-              ],
-              [
-                1.202264434,
-                1.513561248,
-                4.0
-              ],
-              [
-                5.495408738,
-                5.754399373,
-                1.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.039810717
+                    },
+                    "samples": "12",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.047863009
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.047863009
+                    },
+                    "samples": "164",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.057543993
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.057543993
+                    },
+                    "samples": "502",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.069183097
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.069183097
+                    },
+                    "samples": "410",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.083176377
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.083176377
+                    },
+                    "samples": "324",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.1
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.1
+                    },
+                    "samples": "403",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.120226443
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.120226443
+                    },
+                    "samples": "521",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.144543977
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.144543977
+                    },
+                    "samples": "514",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.173780082
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.173780082
+                    },
+                    "samples": "438",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.208929613
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.208929613
+                    },
+                    "samples": "304",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.251188643
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.251188643
+                    },
+                    "samples": "207",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.301995172
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.301995172
+                    },
+                    "samples": "102",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.363078054
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.363078054
+                    },
+                    "samples": "60",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.436515832
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.436515832
+                    },
+                    "samples": "13",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.52480746
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.52480746
+                    },
+                    "samples": "8",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.630957344
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.660693448
+                    },
+                    "samples": "8",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.794328234
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.794328234
+                    },
+                    "samples": "5",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.096478196
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1.202264434
+                    },
+                    "samples": "4",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.513561248
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 5.495408738
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 5.754399373
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.120226443
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.144543977
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.301995172
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.363078054
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.363078054
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.436515832
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "4000"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 1.574,
-            "min_ms": 0.04,
-            "p50_ms": 0.131825673,
-            "p95_ms": 0.316227766,
-            "p99_ms": 0.436515832
+            "min_ms": 0.04
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -5968,28 +7021,87 @@
           "rows": 4.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                0.575439937,
-                0.602559586,
-                1.0
-              ],
-              [
-                27542.287033382,
-                28840.315031266,
-                1.0
-              ],
-              [
-                41686.938347034,
-                43651.583224017,
-                2.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.575439937
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.602559586
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 27542.287033382
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 28840.315031266
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 41686.938347034
+                    },
+                    "samples": "2",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 43651.583224017
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 27542.287033382
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 28840.315031266
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 41686.938347034
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 43651.583224017
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 41686.938347034
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 43651.583224017
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "4"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 115298.819,
-            "min_ms": 0.59741,
-            "p50_ms": 28840.315031266,
-            "p95_ms": 43651.583224017,
-            "p99_ms": 43651.583224017
+            "min_ms": 0.59741
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -6048,93 +7160,230 @@
           "rows": 0.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                0.0,
-                0.01,
-                1.0
-              ],
-              [
-                0.01,
-                0.010471285,
-                1.0
-              ],
-              [
-                0.010964781,
-                0.011481536,
-                1.0
-              ],
-              [
-                0.012022644,
-                0.012589254,
-                10.0
-              ],
-              [
-                0.012589254,
-                0.013182567,
-                4.0
-              ],
-              [
-                0.013182567,
-                0.013803842,
-                5.0
-              ],
-              [
-                0.014454397,
-                0.015135612,
-                1.0
-              ],
-              [
-                0.015135612,
-                0.015848931,
-                1.0
-              ],
-              [
-                0.015848931,
-                0.016595869,
-                1.0
-              ],
-              [
-                0.016595869,
-                0.017378008,
-                1.0
-              ],
-              [
-                0.021877616,
-                0.022908676,
-                1.0
-              ],
-              [
-                0.026302679,
-                0.027542287,
-                1.0
-              ],
-              [
-                0.043651583,
-                0.045708818,
-                1.0
-              ],
-              [
-                0.131825673,
-                0.138038426,
-                1.0
-              ],
-              [
-                0.190546071,
-                0.199526231,
-                1.0
-              ],
-              [
-                1000.0,
-                1047.12854805,
-                12.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.0
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.01
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.01
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.010471285
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.010964781
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.011481536
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.012022644
+                    },
+                    "samples": "10",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.012589254
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.012589254
+                    },
+                    "samples": "4",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.013182567
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.013182567
+                    },
+                    "samples": "5",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.013803842
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.014454397
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.015135612
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.015135612
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.015848931
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.015848931
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.016595869
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.016595869
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.017378008
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.021877616
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.022908676
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.026302679
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.027542287
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.043651583
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.045708818
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.131825673
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.138038426
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.190546071
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.199526231
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 1000.0
+                    },
+                    "samples": "12",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1047.12854805
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.013182567
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 0.013803842
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 1000.0
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 1047.12854805
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 1000.0
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 1047.12854805
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "43"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 12034.678,
-            "min_ms": 0.009083,
-            "p50_ms": 0.013803842,
-            "p95_ms": 1047.12854805,
-            "p99_ms": 1047.12854805
+            "min_ms": 0.009083
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -6379,78 +7628,197 @@
           "rows": 500000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                2.08929613,
-                2.187761623,
-                1.0
-              ],
-              [
-                2.398832919,
-                2.511886431,
-                1.0
-              ],
-              [
-                2.511886431,
-                2.630267991,
-                1.0
-              ],
-              [
-                2.630267991,
-                2.754228703,
-                3.0
-              ],
-              [
-                2.754228703,
-                2.884031503,
-                2.0
-              ],
-              [
-                2.884031503,
-                3.01995172,
-                3.0
-              ],
-              [
-                3.01995172,
-                3.16227766,
-                3.0
-              ],
-              [
-                3.311311214,
-                3.467368504,
-                2.0
-              ],
-              [
-                3.467368504,
-                3.630780547,
-                3.0
-              ],
-              [
-                3.630780547,
-                3.801893963,
-                3.0
-              ],
-              [
-                3.801893963,
-                3.981071705,
-                1.0
-              ],
-              [
-                4.786300923,
-                5.011872336,
-                1.0
-              ],
-              [
-                5.011872336,
-                5.248074602,
-                1.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.08929613
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.187761623
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.398832919
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.511886431
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.511886431
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.630267991
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.630267991
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.754228703
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.754228703
+                    },
+                    "samples": "2",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 2.884031503
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 2.884031503
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.01995172
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.01995172
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.16227766
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.311311214
+                    },
+                    "samples": "2",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.467368504
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.467368504
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.630780547
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.630780547
+                    },
+                    "samples": "3",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.801893963
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.801893963
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.981071705
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 4.786300923
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 5.011872336
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 5.011872336
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 5.248074602
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 3.01995172
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 3.16227766
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 4.786300923
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 5.011872336
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 5.011872336
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 5.248074602
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "25"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 0.012,
-            "min_ms": 2.183807,
-            "p50_ms": 3.16227766,
-            "p95_ms": 5.011872336,
-            "p99_ms": 5.248074602
+            "min_ms": 2.183807
           },
           "stddev_time_ms": null,
           "temporary_work": {
@@ -6509,48 +7877,131 @@
           "rows": 0.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [
-              [
-                0.095499258,
-                0.1,
-                1.0
-              ],
-              [
-                0.131825673,
-                0.138038426,
-                1.0
-              ],
-              [
-                0.199526231,
-                0.208929613,
-                1.0
-              ],
-              [
-                0.954992586,
-                1.0,
-                1.0
-              ],
-              [
-                3.630780547,
-                3.801893963,
-                1.0
-              ],
-              [
-                27542.287033382,
-                28840.315031266,
-                1.0
-              ],
-              [
-                41686.938347034,
-                43651.583224017,
-                2.0
-              ]
+            "distributions": [
+              {
+                "histogram": [
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.095499258
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.1
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.131825673
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.138038426
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.199526231
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 0.208929613
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 0.954992586
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 1.0
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 3.630780547
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 3.801893963
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 27542.287033382
+                    },
+                    "samples": "1",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 28840.315031266
+                    }
+                  },
+                  {
+                    "lower": {
+                      "unit": "milliseconds",
+                      "value": 41686.938347034
+                    },
+                    "samples": "2",
+                    "upper": {
+                      "unit": "milliseconds",
+                      "value": 43651.583224017
+                    }
+                  }
+                ],
+                "issue": null,
+                "origin": "native-histogram",
+                "p50": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 0.954992586
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 1.0
+                  }
+                },
+                "p95": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 41686.938347034
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 43651.583224017
+                  }
+                },
+                "p99": {
+                  "kind": "histogram-upper-bound",
+                  "lower": {
+                    "unit": "milliseconds",
+                    "value": 41686.938347034
+                  },
+                  "upper": {
+                    "unit": "milliseconds",
+                    "value": 43651.583224017
+                  }
+                },
+                "population": {
+                  "kind": "native-counters",
+                  "sample_count": "8"
+                },
+                "source": "performance_schema.events_statements_histogram_by_digest"
+              }
             ],
             "lock_ms": 115296.687,
-            "min_ms": 0.098749,
-            "p50_ms": 1.0,
-            "p95_ms": 43651.583224017,
-            "p99_ms": 43651.583224017
+            "min_ms": 0.098749
           },
           "stddev_time_ms": null,
           "temporary_work": {

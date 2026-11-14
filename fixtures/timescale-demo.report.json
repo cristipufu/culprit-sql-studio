@@ -101,6 +101,12 @@
       "title": "Unstable queries"
     },
     {
+      "check": "parameter-sensitive",
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Recorded query runtime differences"
+    },
+    {
       "assessed_queries": [
         "-6927356924371546951",
         "3152047327284928468",
@@ -254,7 +260,7 @@
     },
     {
       "check": "slow-storage",
-      "reason": "Storage operations were not timed in this scan.",
+      "reason": "Some native I/O populations lack qualified storage-operation accounting, timing or enough operations for a storage-speed assessment.",
       "status": "insufficient-evidence",
       "title": "Storage that's slow to read or write"
     },
@@ -295,8 +301,7 @@
         "lock_wait": null,
         "log_write": null,
         "plan_change": null,
-        "recommended_plan": null,
-        "usual_fast_plan": null
+        "recommended_plan": null
       },
       "fix": {
         "cost": null,
@@ -643,7 +648,7 @@
     "escalations_before": null,
     "evictions_before": null,
     "foreign_keys": [],
-    "format": 3,
+    "format": 4,
     "histograms": null,
     "id": "20261023T213241Z",
     "identity": {
@@ -853,6 +858,7 @@
       "collect_request_memory": false,
       "collect_session_memory": false,
       "collect_shared_resources": false,
+      "collect_task_space": false,
       "plans": 25,
       "top_queries": 60,
       "window_minutes": 10080
@@ -862,6 +868,11 @@
       "cpus": null,
       "files": [
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "data",
           "name": "Tables and indexes",
@@ -875,6 +886,11 @@
           "writes": 6215.0
         },
         {
+          "context": {
+            "read": "storage-operation",
+            "replica_id": null,
+            "write": "storage-operation"
+          },
           "database": null,
           "kind": "log",
           "name": "WAL",
@@ -4413,12 +4429,9 @@
           "rows": 10000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 6.208518,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 6.208518
           },
           "stddev_time_ms": 5.094069300605403,
           "temporary_work": {
@@ -6275,12 +6288,9 @@
           "rows": 5000.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.06374200000000001,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.06374200000000001
           },
           "stddev_time_ms": 0.1615239255472588,
           "temporary_work": {
@@ -6461,12 +6471,9 @@
           "rows": 100.0,
           "rows_affected": null,
           "spread": {
-            "histogram": [],
+            "distributions": [],
             "lock_ms": null,
-            "min_ms": 0.004915,
-            "p50_ms": null,
-            "p95_ms": null,
-            "p99_ms": null
+            "min_ms": 0.004915
           },
           "stddev_time_ms": 0.0031995476514501235,
           "temporary_work": {

@@ -157,10 +157,10 @@ note: Estimated plan: misestimates, spills, unused memory grants and uneven thre
   fix: Uneven work usually means one key value holds most of the rows (check the distribution of the join or filter column) or a parallel scan over a small range; update statistics and consider filtering that value separately.
   verify: Run with actual rows: each thread handles a similar share.
 == tests/insights/mssql-sort-spill.sqlplan
-[spill] Sort ran out of memory and wrote 5.4 MB to tempdb
-  detail: The memory granted to Sort was too small for the rows it got, so part of the work went to disk in tempdb.
-  fix: Fix the row estimate first (update statistics on the tables feeding it); an index that returns rows in the needed order removes the sort altogether. SQL Server 2019+ also grows the grant on later runs (memory grant feedback, compatibility level 150).
-  verify: Run with an actual plan: no spill warning on that operator.
+[spill] Sort spilled 5.4 MB to tempdb
+  detail: Sort used tempdb for part of this execution’s work. The spill alone does not establish its elapsed cost or underlying cause.
+  fix: Compare input rows and width with estimates, then inspect requested, granted and used memory, applicable limits and concurrent demand. Reduce unnecessary input work where possible; check native memory grant feedback eligibility and status before relying on it. For this sort, test whether an access path can supply the required order.
+  verify: Compare representative runs under equivalent load: spill warnings or volume, elapsed time, CPU and grant waiting. Fewer spills alone do not establish a better result; a larger grant can increase concurrency pressure.
 [memory-grant] Waited 3.0 s for memory before it could start
   detail: Other queries held the memory it needed. The run was slow before it did any work.
   fix: Find the queries with oversized grants (they show up with this same insight) and shrink them; adding memory only postpones it.
@@ -180,10 +180,6 @@ note: Estimated plan: misestimates, spills, unused memory grants and uneven thre
   verify: Explain again: the Index Spool is gone and the lookup seeks the new index.
 == tests/insights/mssql-tablevar.sqlplan
 note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
-[table-variable] SQL Server plans for 1 row in table variable @t
-  detail: Table variables have no statistics, so everything joined to it is planned as if it held a single row. That's fine for a handful of rows and badly wrong for thousands.
-  fix: If @t can hold more than a few hundred rows, use a temporary table (#t) instead; it gets statistics. Compatibility level 150+ also defers its compilation so the first run's row count is used.
-  verify: Run with an actual plan: the estimate for that table matches its actual rows.
 == tests/insights/mssql-udf.sqlplan
 note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
 [missing-index-hint] SQL Server estimates an index on shop.orders (total) would make this 84% cheaper
@@ -255,30 +251,18 @@ note: Without EXPLAIN ANALYZE there are no actual rows, spills or timings to che
 note: Without EXPLAIN ANALYZE there are no actual rows, spills or timings to check. PostgreSQL plans never carry index suggestions; Culprit reads filters instead.
 == tests/insights/pg-hash-batches.json
 note: PostgreSQL plans carry no index suggestions or memory grants; index advice comes from the filters.
-[spill] Aggregate writes 7.4 MB of temporary files because it didn't fit in work_mem
-  detail: Disk is many times slower than memory for sorting and hashing.
-  fix: Give this workload more memory for sorts and hashes, per role or per session rather than server-wide, or add an index that returns rows already ordered so the sort disappears.
-  sql: -- Try it in your session first:
-       SET work_mem = '64MB';
-       -- Then for the application's role:
-       -- ALTER ROLE app_user SET work_mem = '64MB';
-  verify: Explain analyze again: Sort Method is quicksort/top-N (in memory) and Hash Batches is 1.
-[spill] The sort writes 2.8 MB to disk because it didn't fit in work_mem
-  detail: Disk is many times slower than memory for sorting and hashing.
-  fix: Give this workload more memory for sorts and hashes, per role or per session rather than server-wide, or add an index that returns rows already ordered so the sort disappears.
-  sql: -- Try it in your session first:
-       SET work_mem = '64MB';
-       -- Then for the application's role:
-       -- ALTER ROLE app_user SET work_mem = '64MB';
-  verify: Explain analyze again: Sort Method is quicksort/top-N (in memory) and Hash Batches is 1.
-[spill] The hash split its input into 32 batches on disk because it didn't fit in work_mem
-  detail: Disk is many times slower than memory for sorting and hashing.
-  fix: Give this workload more memory for sorts and hashes, per role or per session rather than server-wide, or add an index that returns rows already ordered so the sort disappears.
-  sql: -- Try it in your session first:
-       SET work_mem = '64MB';
-       -- Then for the application's role:
-       -- ALTER ROLE app_user SET work_mem = '64MB';
-  verify: Explain analyze again: Sort Method is quicksort/top-N (in memory) and Hash Batches is 1.
+[spill] Aggregate reported 7.4 MB for temporary work
+  detail: This operator recorded temporary work under its native memory policy. Its volume or batch count alone does not establish elapsed cost or a suitable work_mem value.
+  fix: Compare actual input rows, row width and operator memory use with work_mem and, for hash operations, hash_mem_multiplier. Reduce unnecessary input work where possible; test any session or role memory change under representative concurrency before choosing a value.
+  verify: Compare representative executions under equivalent load: temporary-file use or batches, elapsed time, CPU and waiting. A larger work_mem can multiply memory demand across operators, workers and concurrent executions; fewer spills alone do not establish a better result.
+[spill] The sort used 2.8 MB of temporary disk space
+  detail: This operator recorded temporary work under its native memory policy. Its volume or batch count alone does not establish elapsed cost or a suitable work_mem value.
+  fix: Compare actual input rows, row width and operator memory use with work_mem and, for hash operations, hash_mem_multiplier. Reduce unnecessary input work where possible; test any session or role memory change under representative concurrency before choosing a value. For this sort, test whether an access path can supply the required order.
+  verify: Compare representative executions under equivalent load: temporary-file use or batches, elapsed time, CPU and waiting. A larger work_mem can multiply memory demand across operators, workers and concurrent executions; fewer spills alone do not establish a better result.
+[spill] The hash processed its input in 32 batches
+  detail: This operator recorded temporary work under its native memory policy. Its volume or batch count alone does not establish elapsed cost or a suitable work_mem value.
+  fix: Compare actual input rows, row width and operator memory use with work_mem and, for hash operations, hash_mem_multiplier. Reduce unnecessary input work where possible; test any session or role memory change under representative concurrency before choosing a value.
+  verify: Compare representative executions under equivalent load: temporary-file use or batches, elapsed time, CPU and waiting. A larger work_mem can multiply memory demand across operators, workers and concurrent executions; fewer spills alone do not establish a better result.
 == tests/insights/pg-heap-fetches.json
 note: PostgreSQL plans carry no index suggestions or memory grants; index advice comes from the filters.
 [heap-fetches] The index-only scan on events still visits the table 8.0K times
@@ -295,18 +279,14 @@ note: PostgreSQL plans carry no index suggestions or memory grants; index advice
 == tests/insights/pg-misestimate.json
 note: PostgreSQL plans carry no index suggestions or memory grants; index advice comes from the filters.
 [misestimate] Expected 438 rows from customers, got 50K (114× more)
-  detail: Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism (here a sort or hash above it ran out of memory as a result). The filter compares an expression, not a plain column, so the column's statistics can't predict it.
+  detail: An operator above it also recorded a spill. The row-estimate mismatch can affect planning, but these observations alone do not establish the spill’s cause or elapsed cost. The filter compares an expression, not a plain column, so the column's statistics can't predict it.
   fix: Analyze customers; on PostgreSQL 14+ statistics on the expression itself help (CREATE STATISTICS … ON (expression) FROM table).
   sql: ANALYZE public.customers;
   verify: Run with actual rows again: the estimate is within about 10× of the actual count.
-[spill] The sort writes 4.3 MB to disk because it didn't fit in work_mem
-  detail: Disk is many times slower than memory for sorting and hashing. The rows feeding it were badly underestimated, so it was planned with too little memory.
-  fix: Give this workload more memory for sorts and hashes, per role or per session rather than server-wide, or add an index that returns rows already ordered so the sort disappears.
-  sql: -- Try it in your session first:
-       SET work_mem = '64MB';
-       -- Then for the application's role:
-       -- ALTER ROLE app_user SET work_mem = '64MB';
-  verify: Explain analyze again: Sort Method is quicksort/top-N (in memory) and Hash Batches is 1.
+[spill] The sort used 4.3 MB of temporary disk space
+  detail: This operator recorded temporary work under its native memory policy. Its volume or batch count alone does not establish elapsed cost or a suitable work_mem value. Actual rows were also substantially underestimated in this subtree; that mismatch alone does not establish why temporary work occurred.
+  fix: Compare actual input rows, row width and operator memory use with work_mem and, for hash operations, hash_mem_multiplier. Reduce unnecessary input work where possible; test any session or role memory change under representative concurrency before choosing a value. For this sort, test whether an access path can supply the required order.
+  verify: Compare representative executions under equivalent load: temporary-file use or batches, elapsed time, CPU and waiting. A larger work_mem can multiply memory demand across operators, workers and concurrent executions; fewer spills alone do not establish a better result.
 == tests/insights/pg-notin.json
 note: Without EXPLAIN ANALYZE there are no actual rows, spills or timings to check. PostgreSQL plans never carry index suggestions; Culprit reads filters instead.
 [not-in] NOT IN tests rows against a repeatedly searched subquery
@@ -323,14 +303,10 @@ note: PostgreSQL plans carry no index suggestions or memory grants; index advice
   verify: Explain again: orders reads about as many rows as it keeps.
 == tests/insights/pg-sort-spill.json
 note: PostgreSQL plans carry no index suggestions or memory grants; index advice comes from the filters.
-[spill] The sort writes 72.0 MB to disk because it didn't fit in work_mem
-  detail: Disk is many times slower than memory for sorting and hashing.
-  fix: Give this workload more memory for sorts and hashes, per role or per session rather than server-wide, or add an index that returns rows already ordered so the sort disappears.
-  sql: -- Try it in your session first:
-       SET work_mem = '64MB';
-       -- Then for the application's role:
-       -- ALTER ROLE app_user SET work_mem = '64MB';
-  verify: Explain analyze again: Sort Method is quicksort/top-N (in memory) and Hash Batches is 1.
+[spill] The sort used 72.0 MB of temporary disk space
+  detail: This operator recorded temporary work under its native memory policy. Its volume or batch count alone does not establish elapsed cost or a suitable work_mem value.
+  fix: Compare actual input rows, row width and operator memory use with work_mem and, for hash operations, hash_mem_multiplier. Reduce unnecessary input work where possible; test any session or role memory change under representative concurrency before choosing a value. For this sort, test whether an access path can supply the required order.
+  verify: Compare representative executions under equivalent load: temporary-file use or batches, elapsed time, CPU and waiting. A larger work_mem can multiply memory demand across operators, workers and concurrent executions; fewer spills alone do not establish a better result.
 == tests/plans/mariadb-index.json
 note: MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.
 == tests/plans/mariadb-scan.json
