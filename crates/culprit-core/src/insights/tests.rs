@@ -1,3 +1,4 @@
+mod compilation;
 mod parameters;
 mod relational_inputs;
 mod spills;
@@ -2637,10 +2638,10 @@ const RARELY_SAID: &str = r##"== automatic index, no columns
   detail: Large grants are reserved for the whole run; a few of these at once make other queries queue for memory.
   fix: Check the row estimates of the sorts and hashes; sort fewer rows or columns, or cap it with OPTION (MAX_GRANT_PERCENT = n).
   verify: Explain again: the desired memory is lower.
-[optimizer-timeout] The optimizer ran out of memory before it finished choosing a plan
-  detail: SQL Server reports StatementOptmEarlyAbortReason = MemoryLimitExceeded: the query is complex enough that the plan in use is the best one found in the time allowed, not necessarily the best one.
-  fix: Make it simpler to optimize: split it into steps with a temporary table, remove joins the result doesn't need, or replace nested views with direct table references.
-  verify: Explain again: StatementOptmEarlyAbortReason is gone.
+[optimizer-timeout] Plan search stopped at an optimizer memory limit
+  detail: SQL Server reports StatementOptmEarlyAbortReason = MemoryLimitExceeded. A memory limit on optimization stopped further plan search for this statement. The plan alone does not identify a current compiler memory owner or prove a memory shortage across the server. This selected plan records compilation elapsed time of 800 ms.
+  fix: Inspect join, view and partition expansion and this selected plan's compilation memory, when measured. Test removing unnecessary optimizer work while preserving results and checking representative inputs. Review contemporaneous native compiler admission and other memory consumers before attributing wider pressure; this plan alone does not justify memory settings changes.
+  verify: Compare the same statement, native plan scope, representative inputs and results before and after a controlled test. Check the reported search limit and compilation elapsed time, CPU, memory and execution cost together. Keep a change only if combined behavior improves; removing the reason alone is not a performance result.
 [slow-compile] Compiling this plan took 800 ms
   detail: When the plan isn't reused, every run pays this again. Many joins, many partitions or long IN lists make planning expensive.
   fix: Make sure the plan is reused: send the query parameterized rather than with literal values, and avoid OPTION (RECOMPILE) on frequent queries.
@@ -2888,7 +2889,7 @@ rule nested-loops [Mssql, Postgres, Yugabyte, Mysql]: A nested loop rereading it
 rule big-sort [Mssql, Postgres, Yugabyte, Mysql]: A large sort that dominates the plan
 rule no-join-predicate [Mssql, Postgres, Yugabyte, Mysql]: Two inputs joined without a condition
 rule missing-statistics [Mssql]: Columns without statistics
-rule optimizer-timeout [Mssql]: The optimizer stopped before finding the best plan
+rule optimizer-timeout [Mssql]: A native optimizer search limit
 rule legacy-ce [Mssql]: Planned with the legacy cardinality estimator
 rule slow-compile [Mssql, Postgres, Yugabyte]: Planning takes long, or longer than running
 rule many-to-many [Mssql]: A many-to-many merge join working through tempdb

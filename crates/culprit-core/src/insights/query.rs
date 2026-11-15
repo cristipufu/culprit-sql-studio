@@ -624,22 +624,51 @@ pub(super) fn no_join_predicate(cx: &Cx) -> Vec<Draft> {
         .collect()
 }
 
+enum OptimizationLimit {
+    SearchBudget,
+    CompilerMemory,
+}
+
+impl OptimizationLimit {
+    fn from_native(reason: &str) -> Option<Self> {
+        match reason {
+            "TimeOut" => Some(Self::SearchBudget),
+            "MemoryLimitExceeded" => Some(Self::CompilerMemory),
+            _ => None,
+        }
+    }
+}
+
 pub(super) fn optimizer_limits(cx: &Cx) -> Vec<Draft> {
     let mut out = Vec::new();
     let facts = cx.plan.facts();
-    if let Some(reason) =
-        facts.optimization_early_abort.as_deref().filter(|r| matches!(*r, "TimeOut" | "MemoryLimitExceeded"))
+    if cx.engine() == Engine::Mssql
+        && let Some(limit) = facts.optimization_early_abort.as_deref().and_then(OptimizationLimit::from_native)
     {
         let mut d = Draft::new("optimizer-timeout", InsightArea::Query, 0.1, vec![cx.plan.root.id]);
-        // The optimizer says it stopped searching, not that the plan it kept is a bad one: Low on its word alone.
+        // TimeOut is an optimizer task threshold, not elapsed time or a client execution timeout. Neither native
+        // limit proves the selected plan is poor or identifies an incident-time compiler-memory owner.
+        // https://learn.microsoft.com/troubleshoot/sql/database-engine/performance/troubleshoot-optimizer-timeout-performance
         d.fixed_weight = true;
         d.subtree = true;
-        d.cap = Severity::Medium;
-        let memory = reason.eq_ignore_ascii_case("MemoryLimitExceeded");
-        d.title =
-            if memory { t!("insight.optimizer_timeout.title_memory") } else { t!("insight.optimizer_timeout.title") };
-        d.detail = t!("insight.optimizer_timeout.detail", reason = reason);
-        d.fix = t!("insight.optimizer_timeout.fix");
+        d.cap = Severity::Low;
+        let (title, detail, fix) = match limit {
+            OptimizationLimit::SearchBudget => (
+                t!("insight.optimizer_timeout.title"),
+                t!("insight.optimizer_timeout.detail.search_budget"),
+                t!("insight.optimizer_timeout.fix.search_budget"),
+            ),
+            OptimizationLimit::CompilerMemory => (
+                t!("insight.optimizer_timeout.title_memory"),
+                t!("insight.optimizer_timeout.detail.compiler_memory"),
+                t!("insight.optimizer_timeout.fix.compiler_memory"),
+            ),
+        };
+        d.title = title;
+        let mut context = vec![detail];
+        context.extend(optimizer_compilation_context(facts));
+        d.detail = context.join(" ");
+        d.fix = fix;
         d.verify = t!("insight.optimizer_timeout.verify");
         out.push(d);
     }
@@ -655,6 +684,23 @@ pub(super) fn optimizer_limits(cx: &Cx) -> Vec<Draft> {
         out.push(d);
     }
     out
+}
+
+fn optimizer_compilation_context(facts: &crate::PlanFacts) -> Vec<String> {
+    let mut context = Vec::new();
+    if let Some(elapsed) = facts.compile_ms.and_then(crate::plan_facts::nonnegative) {
+        context.push(t!("insight.optimizer_timeout.context.elapsed", elapsed = format::duration(elapsed)));
+    }
+    if let Some(cpu) = facts.compile_cpu_ms.and_then(crate::plan_facts::nonnegative) {
+        context.push(t!("insight.optimizer_timeout.context.cpu", cpu = format::duration(cpu)));
+    }
+    if let Some(memory) = facts.compile_memory_kb.and_then(crate::plan_facts::nonnegative) {
+        context.push(t!(
+            "insight.optimizer_timeout.context.memory",
+            memory = t!("common.bytes.kib", n = format::digits(memory.to_string()))
+        ));
+    }
+    context
 }
 
 pub(super) fn slow_compile(cx: &Cx) -> Vec<Draft> {
