@@ -328,6 +328,8 @@ mod tests {
         let observations = (0..entries)
             .map(|index| {
                 let native = MssqlQueryCompilation {
+                    statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+                    origin: StatementOrigin::Unknown,
                     identity: NativeQueryIdentity {
                         query_id: (index + 100).to_string(),
                         qualifiers: [

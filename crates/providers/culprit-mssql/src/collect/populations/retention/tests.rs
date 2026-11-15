@@ -29,6 +29,8 @@ fn workloads(catalog: &RuntimePopulationCatalog) -> Workloads {
             .collect(),
         catalog: Some(catalog.clone()),
         stop_followup: false,
+        pending_compilation: None,
+        compilation: Default::default(),
     }
 }
 
@@ -108,14 +110,16 @@ fn retained_workloads_share_one_budget_and_bounded_serialization_stops_without_b
     let original: Box<Snapshot> =
         serde_json::from_str(include_str!("../../../../../../../fixtures/mssql-demo.json")).unwrap();
     let workload = original.workload.unwrap();
-    let bytes = serialized_size(&workload, MAX_RETAINED_WORKLOAD_BYTES).unwrap();
+    let statements: std::collections::HashMap<String, crate::query_store::costs::CompilationStatement> =
+        Default::default();
+    let bytes = serialized_size(&(&workload, &statements), MAX_RETAINED_WORKLOAD_BYTES).unwrap();
     let mut budget = WorkloadBudget { remaining: bytes, exhausted: false };
-    budget.retain(&workload).unwrap();
-    let error = budget.retain(&workload).unwrap_err();
+    budget.retain(&workload, &Default::default()).unwrap();
+    let error = budget.retain(&workload, &Default::default()).unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::ByteLimit);
     assert!(budget.exhausted());
     assert_eq!(
-        CollectionStop::from_error(&serialized_size(&workload, bytes - 1).unwrap_err()),
+        CollectionStop::from_error(&serialized_size(&(&workload, &statements), bytes - 1).unwrap_err()),
         CollectionStop::ByteLimit
     );
 }

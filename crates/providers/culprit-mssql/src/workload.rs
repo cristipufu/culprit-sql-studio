@@ -207,6 +207,7 @@ pub(crate) struct WorkloadResult {
     pub(crate) workload: Workload,
     /// Earliest runtime identities remain private to this scan's later native attribution reads.
     pub(crate) query_identities: HashMap<String, NativeQueryIdentity>,
+    pub(crate) compilation_statements: HashMap<String, crate::query_store::costs::CompilationStatement>,
     pub(crate) waits: Vec<WaitStat>,
     pub(crate) plans_parsed: usize,
     pub(crate) plan_errors: usize,
@@ -228,7 +229,25 @@ pub(crate) fn waits_not_captured() -> String {
 
 /// Workload from Query Store over the scan's window. Query Store keeps runtime stats per interval (often an
 /// hour), so the window reaches back to the start of the interval its edge falls in.
+#[cfg(test)]
 pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
+    reader: &mut crate::query_store::Reader<R>,
+    options: &SnapshotOptions,
+) -> culprit_core::Result<WorkloadResult> {
+    let mut result = read_query_store(reader, options).await?;
+    let window = finish_query_store(reader, &mut result.coverage, options.window_in_minutes()).await?;
+    result.database = Some(window.database);
+    result.workload.window_start = window.start;
+    result.workload.window_end = window.end;
+    result.workload.window_hours = window.hours;
+    if let Some(timeline) = &mut result.workload.timeline {
+        timeline.end = result.workload.window_end.clone().ok_or_else(crate::read::invalid_data)?;
+    }
+    Ok(result)
+}
+
+/// Provisional workload inputs. The owner may acquire related facts before the existing final authority check.
+pub(crate) async fn read_query_store<R: crate::read::NativeRead>(
     reader: &mut crate::query_store::Reader<R>,
     options: &SnapshotOptions,
 ) -> culprit_core::Result<WorkloadResult> {
@@ -404,7 +423,6 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
             culprit_core::message!("provider.mssql.query_costs.partial_population"),
         );
     }
-    verify_runtime_window(reader, &mut coverage).await?;
     if reader.accepts_local_capture() == Some(false) {
         coverage
             .partial(&crate::sources::QUERY_STORE, culprit_core::message!("provider.mssql.query_store.history_only"));
@@ -454,6 +472,11 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         database: Some(window.database),
         workload,
         query_identities,
+        compilation_statements: texts
+            .values()
+            .filter_map(crate::query_store::costs::CompilationStatement::from_definition)
+            .map(|definition| (definition.identity.query_id.clone(), definition))
+            .collect(),
         waits,
         plans_parsed,
         plan_errors,
@@ -596,6 +619,15 @@ fn select_top(all: &[QueryAgg], limit: usize) -> Vec<&QueryAgg> {
     }
     out.sort_by(|a, b| b.total_ms().total_cmp(&a.total_ms()));
     out
+}
+
+pub(crate) async fn finish_query_store<R: NativeRead>(
+    reader: &mut crate::query_store::Reader<R>,
+    coverage: &mut Coverage,
+    window_minutes: u32,
+) -> culprit_core::Result<crate::query_store::window_sql::FrozenWindow> {
+    verify_runtime_window(reader, coverage).await?;
+    reader.window(window_minutes).await
 }
 
 async fn verify_runtime_window<R: NativeRead>(
@@ -817,6 +849,7 @@ pub(crate) async fn from_plan_cache(
         database: None,
         workload,
         query_identities: HashMap::new(),
+        compilation_statements: HashMap::new(),
         waits: Vec::new(),
         plans_parsed,
         plan_errors,

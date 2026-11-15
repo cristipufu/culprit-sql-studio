@@ -518,6 +518,11 @@ impl OperationalFact {
                     grants.statement = DefinitionPayload::sql(text, engine);
                 }
             }
+            Self::MssqlQueryCompilation(compilation) => {
+                if let DefinitionPayload::Available { text, .. } = &compilation.statement {
+                    compilation.statement = DefinitionPayload::sql(text, engine);
+                }
+            }
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
@@ -535,7 +540,6 @@ impl OperationalFact {
             | Self::MssqlTable(_)
             | Self::MssqlStatistics(_)
             | Self::MssqlMissingIndex(_)
-            | Self::MssqlQueryCompilation(_)
             | Self::MssqlCachedRuntime(_)
             | Self::SuspectPages { .. } => {}
         }

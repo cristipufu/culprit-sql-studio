@@ -47,12 +47,8 @@ fn planning_times(snapshot: &Snapshot) -> Vec<PlanningTime<'_>> {
     let step = snapshot.server.engine.spec().statement_metrics().planning;
     let mut cases: Vec<(PlanningTime<'_>, f64)> = app_queries(snapshot)
         .filter_map(|q| {
-            let costs = q.costs.as_ref()?;
-            let plan_ms = costs.plan_ms.filter(|ms| *ms >= 5_000.0)?;
-            let share = plan_ms / (plan_ms + q.total_time_ms);
-            // Compilation/planning and execution aggregates are not a history of individual cache lookups.
-            let events = costs.plans.filter(|events| events.is_finite() && *events >= 0.0);
-            (share >= 0.25 && q.executions >= 50.0).then_some((q, plan_ms, events, share))
+            let measured = comparable_planning_time(q)?;
+            Some((q, measured.plan_ms, measured.events, measured.share))
         })
         .map(|(q, plan_ms, events, share)| {
             let severity = if share >= 0.5 && window_at_least(snapshot, q, plan_ms, 60_000.0) {
@@ -88,6 +84,28 @@ fn planning_times(snapshot: &Snapshot) -> Vec<PlanningTime<'_>> {
     cases.sort_by(|a, b| b.1.total_cmp(&a.1));
     cases.truncate(5);
     cases.into_iter().map(|(case, _)| case).collect()
+}
+
+pub(crate) struct ComparablePlanningTime {
+    plan_ms: f64,
+    events: Option<f64>,
+    share: f64,
+}
+
+/// The same measured-work bar keeps historical policy context from replacing a qualified runtime-impact case.
+pub(crate) fn comparable_planning_time(query: &QueryStat) -> Option<ComparablePlanningTime> {
+    let costs = query.costs.as_ref()?;
+    let plan_ms = costs.plan_ms.filter(|ms| ms.is_finite() && *ms >= 5_000.0)?;
+    if !query.total_time_ms.is_finite()
+        || query.total_time_ms < 0.0
+        || !query.executions.is_finite()
+        || query.executions < 50.0
+    {
+        return None;
+    }
+    let share = plan_ms / (plan_ms + query.total_time_ms);
+    let events = costs.plans.filter(|events| events.is_finite() && *events >= 0.0);
+    (share >= 0.25).then_some(ComparablePlanningTime { plan_ms, events, share })
 }
 
 fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding {

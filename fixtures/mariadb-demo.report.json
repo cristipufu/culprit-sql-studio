@@ -931,6 +931,7 @@
         "memory-queue",
         "compile-pressure",
         "compile-queue",
+        "compilation-policy",
         "worker-pressure",
         "held-cleanup",
         "network-wait",

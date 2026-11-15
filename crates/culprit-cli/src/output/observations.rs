@@ -129,14 +129,14 @@ pub(crate) fn statement_grants(report: &culprit_core::StatementGrantReport) -> S
 }
 
 pub(crate) fn compilation(report: &CompilationReport) -> String {
-    render(
+    render_explanations(
         Summary {
             title: &report.title,
             summary: &report.summary,
             source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
-        report.entries.iter().map(|entry| entry.title.as_str()),
+        report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
     )
 }
 
@@ -285,6 +285,16 @@ pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
 
 fn render<'a>(report: Summary<'_>, titles: impl Iterator<Item = &'a str>) -> String {
     render_summary(report, |text| super::append_brief_titles(text, titles))
+}
+
+fn render_explanations<'a>(report: Summary<'_>, entries: impl Iterator<Item = (&'a str, &'a str)>) -> String {
+    let entries = entries
+        .take(super::BRIEF_FINDING_LIMIT)
+        .map(|(title, explanation)| t!("evidence.cli.observation_entry", title = title, explanation = explanation))
+        .collect::<Vec<_>>();
+    render_summary(report, |text| {
+        super::append_brief_details(text, entries.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS);
+    })
 }
 
 fn render_summary(report: Summary<'_>, append_entries: impl FnOnce(&mut String)) -> String {

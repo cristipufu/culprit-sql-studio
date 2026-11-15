@@ -6,8 +6,7 @@ use std::collections::HashMap;
 
 use culprit_core::telemetry::NativeQueryIdentity;
 use culprit_core::{
-    Coverage, Pressure, QueryStat, QueryStoreScope, Signal, SignalScope, SignalUnit, Snapshot, SnapshotOptions,
-    WorkloadKind,
+    Coverage, Pressure, QueryStat, QueryStoreScope, Signal, SignalScope, SignalUnit, Snapshot, WorkloadKind,
 };
 
 use crate::probe::Probe;
@@ -25,6 +24,7 @@ mod compilation_tests;
 pub(crate) struct QueryParticipant<'a> {
     pub query: &'a mut QueryStat,
     pub identity: Option<&'a NativeQueryIdentity>,
+    pub compilation_statement: Option<&'a crate::query_store::costs::CompilationStatement>,
     pub kind: Option<WorkloadKind>,
     pub runtime_scope: QueryStoreScope,
 }
@@ -35,28 +35,20 @@ pub(crate) async fn collect(
     client: &mut impl NativeRead,
     provider: &crate::MssqlProvider,
     probe: &Probe,
-    options: &SnapshotOptions,
     participants: &mut [QueryParticipant<'_>],
+    compilation: CompilationRead,
     snapshot: &mut Snapshot,
 ) {
     let pool = provider.pool.clone();
     let mut coverage = Coverage::default();
     snapshot.operations.query_compilation = None;
     if participants.iter().any(|participant| participant.kind == Some(WorkloadKind::QueryStore)) {
-        let compiles = collect_query_compilations(
-            Reader::open(pool.clone()),
-            options.window_in_minutes(),
-            participants,
-            &mut coverage,
-        )
-        .await;
-        snapshot.operations.query_compilation = compiles.snapshot;
+        compilation.apply(snapshot, &mut coverage);
         for participant in
             participants.iter_mut().filter(|participant| participant.kind == Some(WorkloadKind::QueryStore))
         {
             culprit_core::signals::fill_row_bytes(std::slice::from_mut(participant.query));
         }
-        snapshot.pressure.get_or_insert_with(Pressure::default).signals.extend(compiles.signals);
     }
     if probe.can_read_dmvs() {
         crate::index_operations::collect(pool.clone(), probe, snapshot).await;
@@ -133,20 +125,39 @@ pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -
 }
 
 #[derive(Default)]
-struct CompilationRead {
+pub(crate) struct CompilationRead {
     signals: Vec<Signal>,
     snapshot: Option<culprit_core::telemetry::CompilationSnapshot>,
+    coverage: Coverage,
 }
 
-/// Compilation lifetimes stay independent of runtime sampling and publish only after their own confirmed shutdown.
-async fn collect_query_compilations<R: NativeRead>(
-    mut reader: Reader<R>,
-    window_minutes: u32,
-    participants: &mut [QueryParticipant<'_>],
-    coverage: &mut Coverage,
-) -> CompilationRead {
+impl CompilationRead {
+    pub(crate) fn apply(self, snapshot: &mut Snapshot, coverage: &mut Coverage) {
+        snapshot.operations.query_compilation = self.snapshot;
+        snapshot.pressure.get_or_insert_with(Pressure::default).signals.extend(self.signals);
+        coverage.merge(self.coverage);
+    }
+
+    pub(crate) fn failed(error: &culprit_core::Error) -> Self {
+        let mut coverage = Coverage::default();
+        coverage.source_failed(&sources::QUERY_COMPILATION, error);
+        Self { coverage, ..Default::default() }
+    }
+}
+
+pub(crate) struct PendingCompilationRead {
+    observed_from: String,
+    observed_until: String,
+    compilations: culprit_core::Result<Vec<Compilation>>,
+    database: culprit_core::Result<Vec<Signal>>,
+}
+
+/// The workload owner must complete its final authority check and close before it publishes this pending read.
+pub(crate) async fn read_compilations<R: NativeRead>(
+    reader: &mut Reader<R>,
+    participants: &[QueryParticipant<'_>],
+) -> PendingCompilationRead {
     let observed_from = chrono::Utc::now().to_rfc3339();
-    clear_compilations(participants);
     let ids: Vec<String> = participants
         .iter()
         .filter(|participant| participant.kind == Some(WorkloadKind::QueryStore))
@@ -154,34 +165,77 @@ async fn collect_query_compilations<R: NativeRead>(
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    let compilations = match reader.compilations(&ids).await {
-        Err(error) if crate::read::stops_remaining_reads(&error) => {
-            let _ = reader.close().await;
-            coverage.source_failed(&sources::QUERY_COMPILATION, &error);
-            return CompilationRead::default();
-        }
-        result => result,
+    let compilations = reader.compilations(&ids).await;
+    let database = match &compilations {
+        Err(error) if crate::read::stops_remaining_reads(error) => Err(error.clone()),
+        _ => database_compiles(reader).await,
     };
-    let database = database_compiles(&mut reader).await;
-    if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
-        let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
-        coverage.source_failed(&sources::QUERY_COMPILATION, &error);
-        return CompilationRead::default();
-    }
     let observed_until = chrono::Utc::now().to_rfc3339();
-    let compilations = coverage.read(&sources::QUERY_COMPILATION, compilations);
-    let captured = compilations.as_ref().map(|rows| compilation_snapshot(rows, observed_from, observed_until));
-    let snapshot = captured.and_then(|result| coverage.read(&sources::QUERY_COMPILATION, result));
-    let complete =
-        compilations.is_none_or(|compilations| attach_compilations(participants, compilations, window_minutes));
-    let signals = coverage.read(&sources::QUERY_COMPILATION, database).unwrap_or_default();
-    if !complete {
-        coverage.partial(
-            &sources::QUERY_COMPILATION,
-            culprit_core::message!("provider.mssql.compilation.identity_unverified"),
-        );
+    PendingCompilationRead { observed_from, observed_until, compilations, database }
+}
+
+impl PendingCompilationRead {
+    pub(crate) fn finish(
+        self,
+        window_minutes: u32,
+        participants: &mut [QueryParticipant<'_>],
+        shutdown: culprit_core::telemetry::SourceShutdown,
+    ) -> CompilationRead {
+        let mut coverage = Coverage::default();
+        clear_compilations(participants);
+        if shutdown == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            coverage.source_failed(
+                &sources::QUERY_COMPILATION,
+                &culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error(),
+            );
+            return CompilationRead { coverage, ..Default::default() };
+        }
+        let mut compilations = coverage.read(&sources::QUERY_COMPILATION, self.compilations);
+        let definitions_consistent =
+            compilations.as_mut().is_none_or(|rows| bind_compilation_statements(rows, participants));
+        let captured =
+            compilations.as_ref().map(|rows| compilation_snapshot(rows, self.observed_from, self.observed_until));
+        let snapshot = captured.and_then(|result| coverage.read(&sources::QUERY_COMPILATION, result));
+        let complete =
+            compilations.is_none_or(|compilations| attach_compilations(participants, compilations, window_minutes));
+        let signals = coverage.read(&sources::QUERY_COMPILATION, self.database).unwrap_or_default();
+        if !complete || !definitions_consistent {
+            coverage.partial(
+                &sources::QUERY_COMPILATION,
+                culprit_core::message!("provider.mssql.compilation.identity_unverified"),
+            );
+        }
+        CompilationRead { signals, snapshot, coverage }
     }
-    CompilationRead { signals, snapshot }
+}
+
+#[cfg(test)]
+async fn collect_query_compilations<R: NativeRead>(
+    mut reader: Reader<R>,
+    window_minutes: u32,
+    participants: &mut [QueryParticipant<'_>],
+    coverage: &mut Coverage,
+) -> CompilationRead {
+    let pending = read_compilations(&mut reader, participants).await;
+    let shutdown = reader.close().await;
+    let mut read = pending.finish(window_minutes, participants, shutdown);
+    coverage.merge(std::mem::take(&mut read.coverage));
+    read
+}
+
+fn bind_compilation_statements(compilations: &mut [Compilation], participants: &[QueryParticipant<'_>]) -> bool {
+    let mut complete = true;
+    for compilation in compilations {
+        let identity = compilation.identity.clone();
+        let definitions = participants
+            .iter()
+            .filter(|participant| {
+                participant.kind == Some(WorkloadKind::QueryStore) && participant.identity == Some(&identity)
+            })
+            .map(|participant| participant.compilation_statement);
+        complete &= crate::query_store::costs::bind_statement(compilation, definitions);
+    }
+    complete
 }
 
 fn compilation_snapshot(
@@ -353,7 +407,7 @@ pub(crate) fn connection_reuse_signals(logins: Option<f64>, resets: Option<f64>,
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         resources::test_support::{FakeRead, replace},
@@ -368,7 +422,7 @@ mod tests {
         query
     }
 
-    pub(super) fn database_compilation_row() -> Rec {
+    pub(crate) fn database_compilation_row() -> Rec {
         Rec::of(&[
             ("compiles", Val::Float(5.0)),
             ("compile_ms", Val::Float(6000.0)),
@@ -394,6 +448,7 @@ mod tests {
                 QueryParticipant {
                     query,
                     identity,
+                    compilation_statement: None,
                     kind: Some(WorkloadKind::QueryStore),
                     runtime_scope: QueryStoreScope::Local,
                 }

@@ -13,6 +13,7 @@ use culprit_core::{Check, key, t};
 use crate::support::*;
 
 mod checkpoint_pressure;
+mod compilation_policy;
 mod compile_pressure;
 mod compile_queue;
 mod health;
@@ -29,6 +30,7 @@ pub(crate) mod words;
 mod worker_pressure;
 
 pub use checkpoint_pressure::*;
+pub use compilation_policy::*;
 pub use compile_pressure::*;
 pub use compile_queue::*;
 pub use held_cleanup::*;
@@ -45,6 +47,7 @@ pub(crate) const CHECKS: &[&dyn Check] = &[
     &MemoryQueueCheck,
     &CompilePressureCheck,
     &CompileQueueCheck,
+    &CompilationPolicyCheck,
     &WorkerPressureCheck,
     &HeldCleanupCheck,
     &NetworkWaitCheck,

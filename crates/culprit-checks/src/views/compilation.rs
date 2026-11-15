@@ -6,27 +6,13 @@ use culprit_core::{
 };
 use std::collections::BTreeSet;
 
+pub(crate) mod policy;
+pub(crate) use policy::{RepeatedRecompile, repeated_recompile};
+
 pub fn explain(observations: &[&OperationalObservation], source: Option<&SourceOutcome>) -> Result<CompilationReport> {
-    let mut cases = validate(observations, source)?;
+    let mut cases = cases(observations, source)?;
     cases.sort_by(|left, right| left.observation.key.cmp(&right.observation.key));
-    let mut limitations = vec![
-        t!("view.compilation.limit.lifetime"),
-        t!("view.compilation.limit.population"),
-        t!("view.compilation.limit.causes"),
-        t!("check.planning_time.caveat.compile_memory"),
-        t!("view.compilation.limit.admission"),
-    ];
-    if cases.iter().any(|case| case.native.seconds_since_first_compile < 0) {
-        limitations.push(t!("view.compilation.limit.clock"));
-    }
-    match source.map(|source| source.state) {
-        None => limitations.push(t!("view.compilation.limit.source_unknown")),
-        Some(SourceState::Partial) => limitations.push(t!("view.compilation.limit.source_partial")),
-        Some(SourceState::Unavailable | SourceState::NotApplicable) => {
-            limitations.push(t!("view.compilation.limit.source_unavailable"))
-        }
-        Some(SourceState::Collected | SourceState::Empty) => {}
-    }
+    let limitations = limitations(observations, source, cases.iter().any(|case| case.recompile.is_some()));
     Ok(CompilationReport {
         source_state: source.map(|source| source.state),
         source_reason: source.and_then(|source| source.reason.clone()),
@@ -45,14 +31,48 @@ pub fn explain(observations: &[&OperationalObservation], source: Option<&SourceO
     })
 }
 
-struct QueryCompilation<'a> {
-    observation: &'a OperationalObservation,
-    native: &'a MssqlQueryCompilation,
-    count: u64,
-    first_compile_at: String,
+pub(crate) fn limitations(
+    observations: &[&OperationalObservation],
+    source: Option<&SourceOutcome>,
+    explicit_policy: bool,
+) -> Vec<String> {
+    let mut limitations = vec![
+        t!("view.compilation.limit.lifetime"),
+        t!("view.compilation.limit.population"),
+        if explicit_policy { t!("view.compilation.limit.policy") } else { t!("view.compilation.limit.causes") },
+        t!("check.planning_time.caveat.compile_memory"),
+        t!("view.compilation.limit.admission"),
+    ];
+    if observations.iter().any(|row| {
+        matches!(&row.fact, OperationalFact::MssqlQueryCompilation(native) if native.seconds_since_first_compile < 0)
+    }) {
+        limitations.push(t!("view.compilation.limit.clock"));
+    }
+    if observations.iter().any(
+        |row| matches!(&row.fact, OperationalFact::MssqlQueryCompilation(native) if !native.statement.is_available()),
+    ) {
+        limitations.push(t!("view.compilation.limit.statement"));
+    }
+    match source.map(|source| source.state) {
+        None => limitations.push(t!("view.compilation.limit.source_unknown")),
+        Some(SourceState::Partial) => limitations.push(t!("view.compilation.limit.source_partial")),
+        Some(SourceState::Unavailable | SourceState::NotApplicable) => {
+            limitations.push(t!("view.compilation.limit.source_unavailable"))
+        }
+        Some(SourceState::Collected | SourceState::Empty) => {}
+    }
+    limitations
 }
 
-fn validate<'a>(
+pub(crate) struct QueryCompilation<'a> {
+    pub observation: &'a OperationalObservation,
+    pub native: &'a MssqlQueryCompilation,
+    count: u64,
+    first_compile_at: String,
+    pub recompile: Option<RepeatedRecompile<'a>>,
+}
+
+pub(crate) fn cases<'a>(
     observations: &[&'a OperationalObservation],
     source: Option<&SourceOutcome>,
 ) -> Result<Vec<QueryCompilation<'a>>> {
@@ -74,12 +94,13 @@ fn validate<'a>(
                 native,
                 count: native.compilations.parse().map_err(|_| invalid())?,
                 first_compile_at: native.first_compile_at().map_err(|_| invalid())?,
+                recompile: repeated_recompile(native),
             })
         })
         .collect()
 }
 
-fn render(case: QueryCompilation<'_>) -> CompilationExplanation {
+pub(crate) fn render(case: QueryCompilation<'_>) -> CompilationExplanation {
     let row = case.native;
     let count = format::digits(row.compilations.clone());
     let mut explanation = vec![match case.count {
@@ -96,6 +117,14 @@ fn render(case: QueryCompilation<'_>) -> CompilationExplanation {
             t!("common.duration.us", n = format::digits(row.average_duration_us.to_string())),
         ),
     ];
+    if let Some(recompile) = case.recompile {
+        explanation
+            .push(t!("view.compilation.entry.recompile", total = format::duration(recompile.total_milliseconds)));
+        metrics.push(Metric::said_text(
+            key!("view.compilation.metric.lifetime_duration"),
+            format::duration(recompile.total_milliseconds),
+        ));
+    }
     if let Some(memory) = row.memory {
         for (label, value) in [
             (key!("common.metric.compile_memory_average"), memory.average_kb),
@@ -112,15 +141,30 @@ fn render(case: QueryCompilation<'_>) -> CompilationExplanation {
     CompilationExplanation {
         observation_key: case.observation.key.clone(),
         identity: row.identity.clone(),
-        title: t!("view.compilation.entry.title", query = &row.identity.query_id),
+        title: if let Some(recompile) = case.recompile {
+            const TITLE_CHARACTERS: usize = 160;
+            let mut statement: String = recompile.statement.chars().take(TITLE_CHARACTERS).collect();
+            if recompile.statement.chars().count() > TITLE_CHARACTERS {
+                statement.push('…');
+            }
+            t!("view.compilation.entry.recompile_title", statement = statement)
+        } else {
+            t!("view.compilation.entry.title", query = &row.identity.query_id)
+        },
         explanation: explanation.join(" "),
         metrics,
-        investigation: if case.count > 1 {
+        investigation: if case.recompile.is_some() {
+            t!("check.planning_time.fix.recompile_hint")
+        } else if case.count > 1 {
             t!("view.compilation.investigate.multiple")
         } else {
             t!("view.compilation.investigate.retained")
         },
-        verify: t!("view.compilation.verify"),
+        verify: if case.recompile.is_some() {
+            t!("view.compilation.verify.recompile")
+        } else {
+            t!("view.compilation.verify")
+        },
     }
 }
 
@@ -129,4 +173,4 @@ fn invalid() -> Error {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

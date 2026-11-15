@@ -2,6 +2,7 @@ use super::*;
 mod activity;
 mod cache_entry_memory;
 mod cleanup;
+mod compilation;
 mod diagnostics;
 mod object_definitions;
 mod populations;

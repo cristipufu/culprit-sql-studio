@@ -50,6 +50,8 @@ fn replies(final_window: ReadResult<Vec<Rec>>, final_catalog: Vec<Rec>) -> Vec<R
         Ok(vec![definition]),
         Ok(vec![Rec::of(&[("minutes", Val::Int(60))])]),
         Ok(vec![]),
+        Ok(vec![crate::query_store::tests::compilation_row()]),
+        Ok(vec![crate::signals::tests::database_compilation_row()]),
         final_window,
         Ok(vec![layout()]),
         Ok(final_catalog),
@@ -65,8 +67,79 @@ fn azure_replies(final_window: Rec) -> Vec<ReadResult<Vec<Rec>>> {
     let azure_layout = replace(&layout(), &[("engine_edition", Val::Int(5))]);
     script[0] = Ok(vec![azure_layout.clone()]);
     script[2] = Ok(vec![azure_window()]);
-    script[10] = Ok(vec![azure_layout]);
+    script[12] = Ok(vec![azure_layout]);
     script
+}
+
+#[tokio::test]
+async fn compiler_policy_is_read_once_on_workload_owner_then_published_only_after_authority_and_quiet_close() {
+    let sql = "SELECT id FROM dbo.orders WHERE id=987654321 OPTION (RECOMPILE)";
+    let row = definition_row(sql);
+    let mut columns = row.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    columns.extend([("engine_internal", Val::Int(0)), ("cloud_internal", Val::Int(0))]);
+    let definition = Rec::of(&columns);
+    for outcome in ["quiet", "changed", "cancelled", "unconfirmed"] {
+        let final_window = if outcome == "changed" {
+            replace(&window(), &[("database_name", Val::Text("another-db".into()))])
+        } else {
+            window()
+        };
+        let mut script = replies(Ok(vec![final_window]), groups());
+        script[5] = Ok(vec![lengths(&definition)]);
+        script[6] = Ok(vec![definition.clone()]);
+        script[9] = if outcome == "cancelled" {
+            Err(crate::read::ReadError::Stopped(CollectionStop::Cancelled))
+        } else {
+            Ok(vec![replace(
+                &crate::query_store::tests::compilation_row(),
+                &[
+                    ("query_initial_compile_at", Val::Text("2020-01-01T06:00:00Z".into())),
+                    ("count_compiles", Val::Int(12)),
+                    ("avg_compile_duration", Val::Float(500_000.0)),
+                ],
+            )])
+        };
+        let mut native = FakeRead::new(script);
+        if outcome == "unconfirmed" {
+            native.shutdown = SourceShutdown::Unconfirmed;
+        }
+        let mut reader = Reader::new(&mut native);
+        let mut workloads = acquire(&mut reader, &options()).await;
+        let shutdown = reader.close().await;
+        workloads.finish_compilation(60, shutdown);
+        let mut snapshot: Snapshot =
+            serde_json::from_str(include_str!("../../../../../../fixtures/mssql-demo.json")).unwrap();
+        let mut coverage = Coverage::default();
+        workloads.take_compilation().apply(&mut snapshot, &mut coverage);
+        assert_eq!(native.closed, 1);
+        assert_eq!(
+            native.calls.len(),
+            if outcome == "cancelled" {
+                10
+            } else if outcome == "changed" {
+                12
+            } else {
+                14
+            }
+        );
+        if outcome == "quiet" {
+            let raw = snapshot.operations.query_compilation.unwrap();
+            let culprit_core::telemetry::OperationalFact::MssqlQueryCompilation(fact) = &raw.observations[0].fact
+            else {
+                panic!()
+            };
+            assert_eq!(fact.compilations, "12");
+            assert!(fact.statement.is_available());
+            assert!(workloads.populations.iter().all(|(_, part)| {
+                part.workload.as_ref().unwrap().queries[0].costs.as_ref().unwrap().compile_history.is_some()
+            }));
+        } else {
+            assert!(snapshot.operations.query_compilation.is_none(), "{outcome}");
+            assert!(workloads.participants().iter().all(|participant| {
+                participant.query.costs.as_ref().is_none_or(|costs| costs.compile_history.is_none())
+            }));
+        }
+    }
 }
 
 #[tokio::test]
@@ -100,7 +173,7 @@ async fn completed_query_store_identity_replaces_endpoint_only_snapshot_identity
             Some(&crate::query_store::decode::query_identity(&summary_row()).unwrap())
         );
     }
-    assert_eq!(reader.queries(), 12, "logical identity uses the existing initial and final window reads");
+    assert_eq!(reader.queries(), 14, "logical identity brackets the same two compiler reads within the held owner");
 }
 
 #[tokio::test]
@@ -120,7 +193,7 @@ async fn changed_database_physical_incarnation_or_role_withholds_every_group_bef
         assert_eq!(CollectionStop::from_error(reader.retirement_reason().unwrap()), CollectionStop::SourceChanged);
         assert_eq!(
             reader.queries(),
-            10,
+            12,
             "{field}: no catalog, borrowed result or fresh source follows the failed identity check"
         );
         assert_eq!(reader.close().await, SourceShutdown::Quiescent);
@@ -145,7 +218,7 @@ async fn completed_unknown_azure_identity_keeps_history_but_cannot_promote_an_en
         identity,
         culprit_core::DatabaseIdentity::server(Engine::Mssql, "culprit_demo", "saved-alias.invalid", 1433, None)
     );
-    assert_eq!(reader.queries(), 12);
+    assert_eq!(reader.queries(), 14);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
 
@@ -165,7 +238,7 @@ async fn every_group_uses_its_own_runtime_with_one_shared_definition_and_final_n
         assert_eq!(workload.window_end.as_deref(), Some("2020-01-01T07:00:00Z"));
         assert_eq!(workload.window_hours, 1.0);
     }
-    assert_eq!(reader.queries(), 12, "later groups reuse datasets and the original incarnation-qualified text");
+    assert_eq!(reader.queries(), 14, "all groups share the original datasets and one compilation acquisition");
     assert!(reader.is_population_batch());
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
@@ -175,6 +248,7 @@ async fn empty_or_partial_readable_groups_do_not_start_an_unrelated_native_cache
     let mut script = replies(Ok(vec![window()]), groups());
     script[3] = Ok(Vec::new());
     let _ = script.drain(5..7); // No selected query definitions exist in this native empty population.
+    let _ = script.drain(7..9); // No query participants require compilation history.
     let mut reader = Reader::new(FakeRead::new(script));
     let workloads = acquire(&mut reader, &options()).await;
     assert!(workloads.populations.iter().all(|(_, part)| {
@@ -195,7 +269,7 @@ async fn empty_or_partial_readable_groups_do_not_start_an_unrelated_native_cache
     assert!(workloads.populations[0].1.workload.is_some());
     assert!(workloads.populations[1].1.workload.is_none());
     assert!(!workloads.allows_cache_fallback(), "one useful partial group prevents redundant default cache work");
-    assert_eq!(reader.queries(), 12);
+    assert_eq!(reader.queries(), 14);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
 
@@ -232,8 +306,45 @@ async fn any_final_catalog_change_withholds_all_provisional_populations_and_forb
     }));
     assert_eq!(CollectionStop::from_error(reader.retirement_reason().unwrap()), CollectionStop::SourceChanged);
     assert!(!reader.is_population_batch(), "provisional datasets/definitions are released on native authority loss");
-    assert_eq!(reader.queries(), 12);
+    assert_eq!(reader.queries(), 14);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn empty_duplicate_or_malformed_final_authority_keeps_its_original_failure_and_forbids_fallback() {
+    for (rows, expected) in [
+        (vec![], crate::read::invalid_data()),
+        (vec![window(), window()], CollectionStop::RowLimit.error()),
+        (
+            vec![replace(&window(), &[("window_clock", Val::Text("not-a-native-clock".into()))])],
+            crate::read::invalid_data(),
+        ),
+    ] {
+        let mut reader = Reader::new(FakeRead::new(replies(Ok(rows), groups())));
+        let mut workloads = acquire(&mut reader, &options()).await;
+        assert!(workloads.stop_followup);
+        assert!(!workloads.allows_cache_fallback(), "a failed final proof cannot start an independent cache read");
+        assert!(workloads.pending_compilation.is_none());
+        assert!(workloads.requested.workload.is_none());
+        assert!(workloads.populations.iter().all(|(_, part)| part.workload.is_none() && part.database.is_none()));
+        for part in std::iter::once(&workloads.requested).chain(workloads.populations.iter().map(|(_, part)| part)) {
+            let outcomes = part.outcome.outcomes();
+            let source = outcomes.iter().find(|source| source.source == sources::QUERY_STORE.name).unwrap();
+            assert_eq!(source.state, culprit_core::SourceState::Unavailable);
+            assert_eq!(source.reason.as_deref(), Some(expected.message.as_str()));
+        }
+        let mut snapshot: Snapshot =
+            serde_json::from_str(include_str!("../../../../../../fixtures/mssql-demo.json")).unwrap();
+        let mut coverage = Coverage::default();
+        workloads.take_compilation().apply(&mut snapshot, &mut coverage);
+        assert!(snapshot.operations.query_compilation.is_none());
+        let outcomes = coverage.outcomes();
+        let compiler = outcomes.iter().find(|source| source.source == sources::QUERY_COMPILATION.name).unwrap();
+        assert_eq!(compiler.state, culprit_core::SourceState::Unavailable);
+        assert_eq!(compiler.reason.as_deref(), Some(expected.message.as_str()));
+        assert_eq!(reader.queries(), 12, "no catalog or fresh native source follows the failed final proof");
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
 }
 
 #[tokio::test]
@@ -272,6 +383,6 @@ async fn failed_final_native_verification_preserves_unconfirmed_closure_without_
     let workloads = acquire(&mut reader, &options()).await;
     assert!(workloads.populations.iter().all(|(_, part)| part.workload.is_none()));
     assert!(!workloads.allows_cache_fallback());
-    assert_eq!(reader.queries(), 10, "no layout/catalog SQL follows the failed owner check");
+    assert_eq!(reader.queries(), 12, "no layout/catalog SQL follows the failed owner check");
     assert_eq!(reader.close().await, SourceShutdown::Unconfirmed);
 }

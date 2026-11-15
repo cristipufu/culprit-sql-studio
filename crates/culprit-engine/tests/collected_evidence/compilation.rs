@@ -2,12 +2,40 @@ use super::fixture::Fixture;
 use culprit_collector::{
     analytical::{
         evidence::{EvidenceFamily, EvidenceGapReason},
-        test_support::query_compilation,
+        test_support::{query_compilation, query_compilation_policy_evidence},
     },
     delivery::recovery::RecoveryRecords,
 };
 use culprit_core::{Engine, ErrorDetail, SourceOutcome, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
+
+#[tokio::test]
+async fn scan_enriched_compilation_policy_requires_full_authenticated_statement_not_warehouse_preview() {
+    let (source, records) = query_compilation_policy_evidence();
+    let expected = records[0].clone();
+    let fixture = Fixture::new(source.clone(), records).await;
+    let before = fixture.recovery_object_reads();
+    let preview = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    assert!(!preview.is_read_complete());
+    let limited = collected_resources::compilation(&preview).unwrap();
+    assert!(limited.report.entries.is_empty(), "a truncated warehouse SQL preview cannot establish the policy");
+    assert_eq!(fixture.recovery_object_reads(), before);
+    let capture = fixture.read_families_with_recovery(&[EvidenceFamily::OperationalSamples], Default::default()).await;
+    assert!(capture.is_read_complete());
+    assert_eq!(capture.metrics().recovery_objects, 1);
+    assert_eq!(fixture.recovery_object_reads(), before + 1);
+    let analysis = collected_resources::compilation(&capture).unwrap();
+    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.context.records[0].row.record, expected);
+    let entry = &analysis.report.entries[0];
+    assert!(entry.explanation.contains(&culprit_core::format::duration(6_000.0)));
+    assert!(entry.investigation.contains("keep the hint if"));
+    assert!(entry.metrics.iter().any(|metric| metric.is("view.compilation.metric.lifetime_duration")));
+    assert!(analysis.report.limitations.contains(&culprit_core::t!("view.compilation.limit.policy")));
+    let raw = serde_json::to_string(&analysis.context.records).unwrap();
+    assert!(!raw.contains("private-compilation-value"));
+    assert!(raw.contains("OPTION (RECOMPILE)"));
+}
 
 async fn recorded() -> (CollectionDescription, Vec<TelemetryRecord>) {
     let archive = query_compilation("fixture:compilation", &digest(b"fixture schema"));

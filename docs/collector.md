@@ -296,9 +296,17 @@ synthetic workload, attach separately captured SQL or establish parameter-sensit
 `compilation` explains a database-target `query-compilation` capture through the same pure view used by scans,
 the Health panel and MCP output. Exact counts and separate average, last and maximum compile-memory measurements
 retain the complete native query identity and its lifetime. Collector read bounds do not replace native compilation
-clocks. These records do not establish a current compiler, a memory owner, the reason for recompilation or a
-selected-window compilation rate. Partial, unavailable and complete-empty evidence stay distinct; an empty
+clocks. These records do not establish a current compiler, a memory owner or a selected-window compilation rate.
+Partial, unavailable and complete-empty evidence stay distinct; an empty
 per-query selection cannot erase separately collected database-wide compilation totals.
+
+When a scan already holds a complete statement definition with the exact native query incarnation, its explicit
+`OPTION (RECOMPILE)` policy can explain repeated expensive recorded compilation independently of runtime-window
+comparability. The binding reuses acquired definitions and adds no source query. The same pure explanation accepts
+retained authenticated policy evidence; previews, truncated SQL, matching query numbers and neighboring captures
+cannot supply it. Standalone compilation-counter capture does not fetch statement definitions, so policy remains
+unavailable there. An explicit policy is not proof of every individual compilation cause, harmful plan reuse,
+concurrent compilers or current memory pressure.
 
 `cleanup` explains retained cleanup horizons and version-store observations through the scan's pure view.
 PostgreSQL `cleanup` captures retain sessions, prepared transactions and replication slots, their separate data

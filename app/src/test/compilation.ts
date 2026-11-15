@@ -10,6 +10,8 @@ export function compilationObservation(index = 0): OperationalObservation {
     source: COMPILATION_SOURCE,
     key: String(index).padStart(64, "a"),
     fact: { kind: "mssql-query-compilation", data: {
+      statement: { state: "unavailable", reason: "not-collected" },
+      origin: "unknown",
       identity: { query_id: String(index + 3), qualifiers: {
         context_settings_id: "5", object_id: "1999", query_hash: "0123456789ABCDEF",
         initial_compile_at: "2020-01-01T06:00:00Z",

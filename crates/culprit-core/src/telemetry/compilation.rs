@@ -34,6 +34,10 @@ impl CompilationSnapshot {
 pub struct MssqlQueryCompilation {
     /// Native references are scoped by the capture's database, not a different profile's definition ID.
     pub identity: NativeQueryIdentity,
+    /// Complete bounded original definition, qualified against this exact query incarnation. It may have been
+    /// read before these counters; availability is independent and a prefix cannot establish statement policy.
+    pub statement: DefinitionPayload,
+    pub origin: StatementOrigin,
     pub last_compile_at: String,
     pub compilations: String,
     pub average_duration_us: f64,
@@ -64,6 +68,7 @@ impl MssqlQueryCompilation {
     }
     pub fn is_valid(&self) -> bool {
         self.identity.is_valid()
+            && self.statement.is_valid()
             && valid_counter(&self.identity.query_id)
             && self.identity.qualifiers.get("context_settings_id").is_some_and(|value| valid_counter(value))
             && self.identity.qualifiers.get("object_id").is_some_and(|value| value.parse::<i64>().is_ok())
@@ -88,6 +93,8 @@ mod tests {
     use super::*;
     fn observation() -> MssqlQueryCompilation {
         MssqlQueryCompilation {
+            statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+            origin: StatementOrigin::Unknown,
             identity: NativeQueryIdentity {
                 query_id: "3".into(),
                 qualifiers: [
@@ -181,6 +188,42 @@ mod tests {
         assert_eq!(restored, row);
         assert_eq!(restored.first_compile_at().unwrap(), "2020-01-01T06:00:00.153333300Z");
         assert_eq!(restored.key().unwrap(), row.key().unwrap());
+    }
+
+    #[test]
+    fn compilation_statement_has_one_payload_path_and_redaction_preserves_native_origin_and_identity() {
+        let mut native = observation();
+        native.origin = StatementOrigin::Application;
+        native.statement = DefinitionPayload::sql(
+            "SELECT id FROM dbo.orders WHERE id=912345 OPTION (RECOMPILE)",
+            crate::Engine::Mssql,
+        );
+        let key = native.key().unwrap();
+        let mut fact = OperationalFact::MssqlQueryCompilation(Box::new(native));
+        fact.redact(crate::Engine::Mssql);
+        let record = TelemetryRecord::Operational(OperationalObservation {
+            source: "query-compilation".into(),
+            key: key.clone(),
+            fact,
+        });
+        let fields = record.definition_payloads().collect::<Vec<_>>();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].pointer, "/record/data/fact/data/statement");
+        let DefinitionPayload::Available { text, .. } = fields[0].payload else { panic!() };
+        assert!(!text.contains("912345"));
+        assert!(text.contains("OPTION (RECOMPILE)"));
+        let TelemetryRecord::Operational(OperationalObservation {
+            fact: OperationalFact::MssqlQueryCompilation(native),
+            ..
+        }) = &record
+        else {
+            panic!()
+        };
+        assert_eq!(native.origin, StatementOrigin::Application);
+        assert_eq!(native.key().unwrap(), key);
+        let mut value = serde_json::to_value(native).unwrap();
+        value["statement"]["sha256"] = serde_json::json!(digest(b"wrong-payload"));
+        assert!(!serde_json::from_value::<MssqlQueryCompilation>(value).unwrap().is_valid());
     }
 
     fn captured() -> CompilationSnapshot {

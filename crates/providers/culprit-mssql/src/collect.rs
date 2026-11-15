@@ -24,6 +24,7 @@ struct WorkloadPart {
     database: Option<crate::database_identity::Context>,
     workload: Option<Workload>,
     query_identities: std::collections::HashMap<String, culprit_core::telemetry::NativeQueryIdentity>,
+    compilation_statements: std::collections::HashMap<String, crate::query_store::costs::CompilationStatement>,
     waits: Vec<WaitStat>,
     outcome: Outcome,
     catalog: Option<culprit_core::RuntimePopulationCatalog>,
@@ -46,6 +47,7 @@ impl WorkloadPart {
         self.database = result.database;
         self.waits = result.waits;
         self.query_identities = result.query_identities;
+        self.compilation_statements = result.compilation_statements;
         self.workload = Some(result.workload);
     }
 }
@@ -170,21 +172,22 @@ pub(crate) fn server_state_unreadable(outcome: &mut Outcome, probe: &Probe) {
     }
 }
 
-async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &SnapshotOptions) -> Result<WorkloadPart> {
+async fn collect_workload(
+    provider: &MssqlProvider,
+    probe: &Probe,
+    options: &SnapshotOptions,
+) -> Result<(WorkloadPart, signals::CompilationRead)> {
     let mut part = WorkloadPart::default();
     query_store_account(&mut part.outcome, probe);
 
     if probe.query_store_readable() {
         let grant = || probe.grant_hint();
         let mut reader = crate::query_store::Reader::open(provider.pool.clone());
-        let result = workload::from_query_store(&mut reader, options).await;
+        let result = workload::read_query_store(&mut reader, options).await;
         part.catalog = reader.population_catalog().cloned();
-        let result = if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
-            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
-        } else {
-            result
-        };
-        let stop_followup = result.as_ref().err().is_some_and(crate::read::stops_remaining_reads);
+        let mut stop_followup = result.as_ref().err().is_some_and(crate::read::stops_remaining_reads);
+        let mut pending = None;
+        let mut failed_compilation = signals::CompilationRead::default();
         if let Some(result) = part.outcome.read(
             &sources::QUERY_STORE,
             result.map_err(|error| {
@@ -192,16 +195,42 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
             }),
         ) {
             part.accept(&sources::QUERY_STORE, Capability::QueryStore, result);
-            return Ok(part);
+            let participants = part.participants();
+            if !participants.is_empty() {
+                pending = Some(signals::read_compilations(&mut reader, &participants).await);
+            }
+            drop(participants);
+            match workload::finish_query_store(&mut reader, &mut part.outcome, options.window_in_minutes()).await {
+                Ok(window) => {
+                    part.finish_window(&window, crate::query_store::window_sql::WindowVerification::Unchanged)
+                }
+                Err(error) => {
+                    stop_followup = true;
+                    part = populations::failed_part(&error, part.catalog.clone());
+                    failed_compilation = signals::CompilationRead::failed(&error);
+                    pending = None;
+                }
+            }
         }
-        if stop_followup {
-            return Ok(part);
+        if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+        }
+        if let Some(pending) = pending {
+            let compilation = pending.finish(
+                options.window_in_minutes(),
+                &mut part.participants(),
+                culprit_core::telemetry::SourceShutdown::Quiescent,
+            );
+            return Ok((part, compilation));
+        }
+        if stop_followup || part.workload.is_some() {
+            return Ok((part, failed_compilation));
         }
     }
     if options.workload_population.is_some() {
-        return Ok(part);
+        return Ok((part, Default::default()));
     }
-    collect_plan_cache(provider, probe, options, part).await
+    collect_plan_cache(provider, probe, options, part).await.map(|part| (part, Default::default()))
 }
 
 async fn collect_plan_cache(
@@ -538,8 +567,9 @@ async fn acquire(
         },
     });
     let mut client = ReadSession::application(provider.pool.clone());
+    let compilation = workloads.take_compilation();
     let mut participants = workloads.participants();
-    signals::collect(&mut client, provider, &probe, options, &mut participants, &mut snapshot).await;
+    signals::collect(&mut client, provider, &probe, &mut participants, compilation, &mut snapshot).await;
     drop(participants);
     if client.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
@@ -591,6 +621,7 @@ mod tests {
             database: None,
             workload,
             query_identities: Default::default(),
+            compilation_statements: Default::default(),
             waits: vec![],
             plans_parsed: 1,
             plan_errors,

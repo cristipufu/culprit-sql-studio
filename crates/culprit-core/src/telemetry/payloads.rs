@@ -140,6 +140,7 @@ impl OperationalFact {
             }
             Self::PostgresLog(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::MssqlStatementGrants(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
+            Self::MssqlQueryCompilation(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::Space(_)
             | Self::SessionMemory(_)
             | Self::Sequence(_)
@@ -158,7 +159,6 @@ impl OperationalFact {
             | Self::MssqlTable(_)
             | Self::MssqlStatistics(_)
             | Self::MssqlMissingIndex(_)
-            | Self::MssqlQueryCompilation(_)
             | Self::MssqlCachedRuntime(_)
             | Self::MssqlOutOfMemory(_)
             | Self::MysqlErrorLog(_)

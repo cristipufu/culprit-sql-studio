@@ -15,6 +15,67 @@ use culprit_core::{
 };
 
 #[tokio::test]
+async fn original_agreeing_population_definitions_supply_policy_only_after_quiet_native_close_without_extra_reads() {
+    use crate::query_store::costs::CompilationStatement;
+    use culprit_core::telemetry::{DefinitionPayload, PayloadUnavailable, StatementOrigin};
+    let identities = compilation_identities();
+    let original = &identities["3"];
+    let statement = CompilationStatement {
+        identity: original.clone(),
+        origin: StatementOrigin::Application,
+        statement: DefinitionPayload::sql("SELECT id FROM dbo.orders OPTION (RECOMPILE)", culprit_core::Engine::Mssql),
+    };
+    for outcome in ["agree", "missing", "conflict", "wrong-identity", "unconfirmed"] {
+        let mut changed = statement.clone();
+        if outcome == "conflict" {
+            changed.statement =
+                DefinitionPayload::sql("SELECT id FROM dbo.changed OPTION (RECOMPILE)", culprit_core::Engine::Mssql);
+        }
+        if outcome == "wrong-identity" {
+            changed.identity.qualifiers.insert("context_settings_id".into(), "99".into());
+        }
+        let mut queries = [query_without_costs(), query_without_costs()];
+        let mut participants = unpartitioned_participants(&mut queries, &identities);
+        participants[0].compilation_statement = Some(&statement);
+        participants[1].compilation_statement = if outcome == "missing" { None } else { Some(&changed) };
+        let mut io =
+            FakeRead::new(vec![Ok(vec![compilation_row()]), Ok(vec![database_compilation_row()])]).with_query_limit(2);
+        if outcome == "unconfirmed" {
+            io.shutdown = SourceShutdown::Unconfirmed;
+        }
+        let mut coverage = Coverage::default();
+        let read = collect_query_compilations(Reader::new(&mut io), 30, &mut participants, &mut coverage).await;
+        drop(participants);
+        assert_eq!(io.calls.len(), 2, "{outcome}");
+        assert_eq!(io.closed, 1);
+        assert!(!io.calls[0].sql.contains("query_store_query_text"));
+        if outcome == "unconfirmed" {
+            assert!(read.snapshot.is_none());
+            assert!(queries.iter().all(|query| query.costs.is_none()));
+            continue;
+        }
+        let snapshot = read.snapshot.unwrap();
+        let culprit_core::telemetry::OperationalFact::MssqlQueryCompilation(native) = &snapshot.observations[0].fact
+        else {
+            panic!()
+        };
+        assert_eq!(native.compilations, "9007199254740993");
+        assert_eq!(native.statement.is_available(), outcome == "agree");
+        if outcome == "missing" {
+            assert_eq!(native.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
+            assert_eq!(
+                coverage.outcomes()[0].state,
+                SourceState::Collected,
+                "missing optional SQL does not invalidate counter coverage"
+            );
+        }
+        if matches!(outcome, "conflict" | "wrong-identity") {
+            assert_eq!(coverage.outcomes()[0].state, SourceState::Partial);
+        }
+    }
+}
+
+#[tokio::test]
 async fn matching_native_identity_retains_compile_history_without_borrowing_runtime_lifetime() {
     let row = replace(
         &compilation_row(),
@@ -249,12 +310,14 @@ async fn same_query_id_with_different_native_incarnation_is_withheld_only_for_th
         QueryParticipant {
             query: iterator.next().unwrap(),
             identity: Some(original),
+            compilation_statement: None,
             kind: Some(WorkloadKind::QueryStore),
             runtime_scope: QueryStoreScope::Local,
         },
         QueryParticipant {
             query: iterator.next().unwrap(),
             identity: Some(&changed),
+            compilation_statement: None,
             kind: Some(WorkloadKind::QueryStore),
             runtime_scope: QueryStoreScope::Local,
         },

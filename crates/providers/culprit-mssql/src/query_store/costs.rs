@@ -5,6 +5,9 @@ use crate::{
 };
 use culprit_core::{Result, telemetry::canonical_time};
 
+mod statement;
+pub(crate) use statement::{CompilationStatement, bind_statement};
+
 pub(crate) const COMPILATION_COLUMNS: &str = concat!(
     super::catalog_sql::query_identity_columns!("q.query_id"),
     r#",
@@ -35,6 +38,8 @@ OPTION(MAXDOP 1)"#
 
 pub(crate) struct Compilation {
     pub identity: culprit_core::telemetry::NativeQueryIdentity,
+    pub statement: culprit_core::telemetry::DefinitionPayload,
+    pub origin: culprit_core::telemetry::StatementOrigin,
     pub count: u64,
     pub avg_duration_us: f64,
     pub memory: Option<culprit_core::CompilationMemory>,
@@ -53,6 +58,10 @@ impl Compilation {
         Ok(Self {
             first_at: identity.qualifiers.get("initial_compile_at").cloned().ok_or_else(invalid_data)?,
             identity,
+            statement: culprit_core::telemetry::DefinitionPayload::Unavailable {
+                reason: culprit_core::telemetry::PayloadUnavailable::NotCollected,
+            },
+            origin: culprit_core::telemetry::StatementOrigin::Unknown,
             count: integer(row, "count_compiles")?.try_into().map_err(|_| invalid_data())?,
             avg_duration_us: crate::read::required_nonnegative_number(row, "avg_compile_duration")?,
             memory: memory.is_measured().then_some(memory),
@@ -63,6 +72,8 @@ impl Compilation {
     pub fn observation(&self) -> culprit_core::telemetry::MssqlQueryCompilation {
         culprit_core::telemetry::MssqlQueryCompilation {
             identity: self.identity.clone(),
+            statement: self.statement.clone(),
+            origin: self.origin,
             last_compile_at: self.last_at.clone(),
             compilations: self.count.to_string(),
             average_duration_us: self.avg_duration_us,

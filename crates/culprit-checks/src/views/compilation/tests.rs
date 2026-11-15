@@ -1,8 +1,10 @@
 use super::*;
 use culprit_core::{CompilationMemory, ResetMarker, telemetry::*};
 
-fn observation(count: &str) -> OperationalObservation {
+pub(crate) fn observation(count: &str) -> OperationalObservation {
     let native = MssqlQueryCompilation {
+        statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+        origin: StatementOrigin::Unknown,
         identity: NativeQueryIdentity {
             query_id: "42".into(),
             qualifiers: [
@@ -27,7 +29,7 @@ fn observation(count: &str) -> OperationalObservation {
     }
 }
 
-fn native(row: &mut OperationalObservation) -> &mut MssqlQueryCompilation {
+pub(crate) fn native(row: &mut OperationalObservation) -> &mut MssqlQueryCompilation {
     let OperationalFact::MssqlQueryCompilation(native) = &mut row.fact else { panic!("compilation") };
     native
 }

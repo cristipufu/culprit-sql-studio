@@ -21,6 +21,29 @@ const PLAN: &str = r#"<ShowPlanXML><BatchSequence><Batch><Statements>
 EstimateRows="1" EstimatedTotalSubtreeCost="0"><ConstantScan /></RelOp></QueryPlan>
 </StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#;
 
+#[tokio::test]
+async fn already_read_complete_native_definition_supplies_private_compilation_policy_without_another_query() {
+    let sql = "SELECT id FROM dbo.orders WHERE id=987654321 OPTION (RECOMPILE)";
+    let row = definition_row(sql);
+    let mut columns = row.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    columns.extend([("engine_internal", Val::Int(0)), ("cloud_internal", Val::Int(0))]);
+    let replies = complete_replies(Rec::of(&columns), None, summary_row());
+    let expected_queries = replies.len();
+    let mut io = FakeRead::new(replies);
+    let mut reader = Reader::new(&mut io);
+    let mut options = options();
+    options.plans = 0;
+    let result = from_query_store(&mut reader, &options).await.unwrap();
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    assert_eq!(io.calls.len(), expected_queries);
+    let statement = &result.compilation_statements["3"];
+    assert_eq!(statement.identity, result.query_identities["3"]);
+    assert_eq!(statement.origin, culprit_core::telemetry::StatementOrigin::Application);
+    let culprit_core::telemetry::DefinitionPayload::Available { text, .. } = &statement.statement else { panic!() };
+    assert!(text.contains("OPTION (RECOMPILE)"));
+    assert!(!text.contains("987654321"));
+}
+
 pub(super) fn options() -> SnapshotOptions {
     SnapshotOptions { window_minutes: 60, plans: 1, ..Default::default() }
 }

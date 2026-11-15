@@ -63,6 +63,8 @@ compile-pressure  Instance compilation context
                   SQL Server · Shared compilation counters provide context for this database's literal query families; measured Query Store costs establish its compilation impact.
 compile-queue     Compiler admission
                   SQL Server · Requests in this database delayed by compiler admission, with recent per-query compile-memory evidence where available.
+compilation-policy  Repeated compilation policy
+                  SQL Server · An explicit statement recompile directive accompanies expensive repeated compilation over this retained query entry's lifetime.
 worker-pressure   Running out of workers or connections
                   SQL Server, PostgreSQL, MySQL/MariaDB · SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.
 held-cleanup      A long open transaction holds cleanup back

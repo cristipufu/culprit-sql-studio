@@ -215,6 +215,12 @@
       "title": "Compiler admission"
     },
     {
+      "check": "compilation-policy",
+      "reason": "This scan did not record the required source's collection outcome.",
+      "status": "insufficient-evidence",
+      "title": "Repeated compilation policy"
+    },
+    {
       "check": "worker-pressure",
       "reason": "The required pressure measurement was not recorded by this scan.",
       "status": "insufficient-evidence",
@@ -2307,6 +2313,7 @@
         "memory-queue",
         "compile-pressure",
         "compile-queue",
+        "compilation-policy",
         "worker-pressure",
         "held-cleanup",
         "network-wait",

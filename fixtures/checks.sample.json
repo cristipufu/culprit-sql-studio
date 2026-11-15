@@ -417,6 +417,16 @@
     "title": "Compiler admission"
   },
   {
+    "category": "queries",
+    "description": "An explicit statement recompile directive accompanies expensive repeated compilation over this retained query entry's lifetime.",
+    "engines": [
+      "mssql"
+    ],
+    "id": "compilation-policy",
+    "requires": [],
+    "title": "Repeated compilation policy"
+  },
+  {
     "category": "configuration",
     "description": "SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.",
     "engines": [

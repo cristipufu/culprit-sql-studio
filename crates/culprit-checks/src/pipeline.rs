@@ -523,6 +523,8 @@ mod tests {
         let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
         let source = "embedded.compilation-observations";
         let native = MssqlQueryCompilation {
+            statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+            origin: StatementOrigin::Unknown,
             identity: NativeQueryIdentity {
                 query_id: "42".into(),
                 qualifiers: [

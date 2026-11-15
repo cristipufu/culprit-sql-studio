@@ -11,6 +11,7 @@ mod activity;
 mod cache_entry_memory;
 mod cached_runtime;
 mod cleanup;
+mod compilation;
 mod diagnostics;
 mod object_definitions;
 mod observations;

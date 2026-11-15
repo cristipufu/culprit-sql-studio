@@ -10,11 +10,31 @@ pub(super) struct Workloads {
     populations: Vec<(NativeIdentity, WorkloadPart)>,
     catalog: Option<RuntimePopulationCatalog>,
     stop_followup: bool,
+    pending_compilation: Option<signals::PendingCompilationRead>,
+    compilation: signals::CompilationRead,
 }
 
 impl Workloads {
     fn single(requested: WorkloadPart) -> Self {
-        Self { catalog: requested.catalog.clone(), requested, populations: Vec::new(), stop_followup: false }
+        Self {
+            catalog: requested.catalog.clone(),
+            requested,
+            populations: Vec::new(),
+            stop_followup: false,
+            pending_compilation: None,
+            compilation: Default::default(),
+        }
+    }
+
+    pub(super) fn take_compilation(&mut self) -> signals::CompilationRead {
+        std::mem::take(&mut self.compilation)
+    }
+
+    fn finish_compilation(&mut self, minutes: u32, shutdown: SourceShutdown) {
+        if let Some(pending) = self.pending_compilation.take() {
+            let compilation = pending.finish(minutes, &mut self.participants(), shutdown);
+            self.compilation = compilation;
+        }
     }
 
     pub(super) fn participants(&mut self) -> Vec<signals::QueryParticipant<'_>> {
@@ -60,7 +80,9 @@ impl Workloads {
     }
 
     fn fail_provisional(&mut self, error: &culprit_core::Error) {
-        self.stop_followup |= crate::read::stops_remaining_reads(error);
+        self.pending_compilation = None;
+        self.compilation = signals::CompilationRead::failed(error);
+        self.stop_followup = true;
         self.requested = failed_part(error, self.catalog.clone());
         for (_, part) in &mut self.populations {
             *part = failed_part(error, self.catalog.clone());
@@ -69,7 +91,7 @@ impl Workloads {
 }
 
 impl WorkloadPart {
-    fn participants(&mut self) -> Vec<signals::QueryParticipant<'_>> {
+    pub(super) fn participants(&mut self) -> Vec<signals::QueryParticipant<'_>> {
         let Some(workload) = &mut self.workload else { return Vec::new() };
         let runtime_scope = match (&workload.population_catalog, &workload.population) {
             (Some(catalog), None) if catalog.is_valid() && !catalog.partitioned => QueryStoreScope::Local,
@@ -79,13 +101,21 @@ impl WorkloadPart {
             _ => QueryStoreScope::Unknown,
         };
         let identities = &self.query_identities;
+        let statements = &self.compilation_statements;
         let kind = workload.kind;
         workload
             .queries
             .iter_mut()
             .map(|query| {
                 let identity = identities.get(&query.id);
-                signals::QueryParticipant { query, identity, kind, runtime_scope: runtime_scope.clone() }
+                let compilation_statement = statements.get(&query.id);
+                signals::QueryParticipant {
+                    query,
+                    identity,
+                    compilation_statement,
+                    kind,
+                    runtime_scope: runtime_scope.clone(),
+                }
             })
             .collect()
     }
@@ -104,7 +134,7 @@ impl WorkloadPart {
         snapshot.bind_identity(identity);
     }
 
-    fn finish_window(
+    pub(super) fn finish_window(
         &mut self,
         window: &crate::query_store::window_sql::FrozenWindow,
         verification: crate::query_store::window_sql::WindowVerification,
@@ -132,16 +162,24 @@ pub(super) async fn collect(
     automatic: bool,
 ) -> Result<Workloads> {
     if !automatic || options.workload_population.is_some() {
-        return Ok(Workloads::single(collect_workload(provider, probe, options).await?));
+        let (part, compilation) = collect_workload(provider, probe, options).await?;
+        let mut workloads = Workloads::single(part);
+        workloads.compilation = compilation;
+        return Ok(workloads);
     }
     if !probe.query_store_readable() {
-        return Ok(Workloads::single(collect_workload(provider, probe, options).await?));
+        let (part, compilation) = collect_workload(provider, probe, options).await?;
+        let mut workloads = Workloads::single(part);
+        workloads.compilation = compilation;
+        return Ok(workloads);
     }
     let mut reader = crate::query_store::Reader::open(provider.pool.clone());
     let mut workloads = acquire(&mut reader, options).await;
-    if reader.close().await == SourceShutdown::Unconfirmed {
+    let shutdown = reader.close().await;
+    if shutdown == SourceShutdown::Unconfirmed {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
+    workloads.finish_compilation(options.window_in_minutes(), shutdown);
     if workloads.allows_cache_fallback() {
         workloads.requested = collect_plan_cache(provider, probe, options, workloads.requested).await?;
     }
@@ -163,6 +201,8 @@ async fn acquire<R: NativeRead>(reader: &mut crate::query_store::Reader<R>, opti
         populations: Vec::new(),
         catalog: Some(catalog.clone()),
         stop_followup: false,
+        pending_compilation: None,
+        compilation: Default::default(),
     };
     let selectors = if catalog.partitioned {
         catalog.populations.iter().map(|population| Some(population.identity.clone())).collect()
@@ -180,13 +220,13 @@ async fn acquire<R: NativeRead>(reader: &mut crate::query_store::Reader<R>, opti
             Err(CollectionStop::ByteLimit.error())
         } else {
             match reader.select_batch_population(selector.as_ref()).await {
-                Ok(()) => workload::from_query_store(reader, &selected).await,
+                Ok(()) => workload::read_query_store(reader, &selected).await,
                 Err(error) => Err(error),
             }
         };
         let mut part = WorkloadPart { catalog: Some(catalog.clone()), ..Default::default() };
         let result = result.and_then(|result| {
-            retained.retain(&result.workload)?;
+            retained.retain(&result.workload, &result.compilation_statements)?;
             Ok(result)
         });
         if let Err(error) = &result
@@ -205,6 +245,12 @@ async fn acquire<R: NativeRead>(reader: &mut crate::query_store::Reader<R>, opti
             Some(selector) => workloads.populations.push((selector, part)),
             None => workloads.requested = part,
         }
+    }
+    if terminal_error.is_none()
+        && workloads.participants().iter().any(|participant| participant.kind == Some(WorkloadKind::QueryStore))
+    {
+        let pending = signals::read_compilations(reader, &workloads.participants()).await;
+        workloads.pending_compilation = Some(pending);
     }
     let verification = match terminal_error {
         Some(error) => Err(error),
@@ -236,7 +282,7 @@ async fn acquire<R: NativeRead>(reader: &mut crate::query_store::Reader<R>, opti
     workloads
 }
 
-fn failed_part(error: &culprit_core::Error, catalog: Option<RuntimePopulationCatalog>) -> WorkloadPart {
+pub(super) fn failed_part(error: &culprit_core::Error, catalog: Option<RuntimePopulationCatalog>) -> WorkloadPart {
     let mut part = WorkloadPart { catalog, ..Default::default() };
     part.outcome.source_failed(&sources::QUERY_STORE, error);
     part

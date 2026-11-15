@@ -147,7 +147,7 @@ pub fn assert_runtime_distribution_capture(
     assert_eq!(source.observation.snapshot().unwrap().dataset, SnapshotDataset::RuntimeDistributions);
 }
 
-fn assert_operational_capture(
+pub fn assert_operational_capture(
     capture: &crate::analytical::evidence::EvidenceCapture,
     source: &CollectionDescription,
     records: &[TelemetryRecord],
@@ -599,6 +599,11 @@ pub fn cumulative_queries(destination: &str, schema: &str) -> Recovery {
 }
 
 pub fn query_compilation(destination: &str, schema: &str) -> Recovery {
+    let (source, records) = query_compilation_evidence();
+    Recovery::capture(destination, schema, source, records, 20_000)
+}
+
+pub fn query_compilation_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
     let (mut manifest, _) = fixture();
     let source = culprit_core::source_id::QUERY_COMPILATION;
     manifest.source.source = "query-compilation-fixture".into();
@@ -610,6 +615,8 @@ pub fn query_compilation(destination: &str, schema: &str) -> Recovery {
         sources: vec![StateSourceCoverage::collected(source.into(), 1)],
     });
     let compilation = MssqlQueryCompilation {
+        statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+        origin: StatementOrigin::Unknown,
         identity: NativeQueryIdentity {
             query_id: "42".into(),
             qualifiers: [
@@ -636,7 +643,30 @@ pub fn query_compilation(destination: &str, schema: &str) -> Recovery {
         key: compilation.key().unwrap(),
         fact: OperationalFact::MssqlQueryCompilation(Box::new(compilation)),
     });
-    Recovery::capture(destination, schema, manifest.source, vec![record], 20_000)
+    (manifest.source, vec![record])
+}
+
+/// Models a scan retaining its already-acquired exact definition, not a standalone counter reader fetching SQL.
+pub fn query_compilation_policy_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let (source, mut records) = query_compilation_evidence();
+    let TelemetryRecord::Operational(OperationalObservation {
+        fact: OperationalFact::MssqlQueryCompilation(native),
+        ..
+    }) = &mut records[0]
+    else {
+        unreachable!()
+    };
+    native.statement = DefinitionPayload::sql(
+        &format!(
+            "SELECT {} FROM dbo.orders WHERE token='private-compilation-value' OPTION (RECOMPILE)",
+            vec!["[field]"; 300].join(", ")
+        ),
+        culprit_core::Engine::Mssql,
+    );
+    native.origin = StatementOrigin::Application;
+    native.compilations = "12".into();
+    native.average_duration_us = 500_000.0;
+    (source, records)
 }
 
 pub fn native_counter_sets() -> (CollectionDescription, Vec<TelemetryRecord>) {

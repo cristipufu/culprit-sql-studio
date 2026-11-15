@@ -19,8 +19,12 @@ impl WorkloadBudget {
     pub(super) fn exhausted(&self) -> bool {
         self.exhausted
     }
-    pub(super) fn retain(&mut self, workload: &Workload) -> Result<()> {
-        match serialized_size(workload, self.remaining) {
+    pub(super) fn retain(
+        &mut self,
+        workload: &Workload,
+        statements: &std::collections::HashMap<String, crate::query_store::costs::CompilationStatement>,
+    ) -> Result<()> {
+        match serialized_size(&(workload, statements), self.remaining) {
             Ok(bytes) => {
                 self.remaining -= bytes;
                 Ok(())
