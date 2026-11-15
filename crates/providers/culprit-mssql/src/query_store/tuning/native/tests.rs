@@ -280,3 +280,37 @@ async fn application_plan_scope_requires_visible_positively_unpartitioned_native
     assert!(LAYOUT.contains("sys.query_store_runtime_stats"));
     assert!(!forced_plans_sql(true).contains("query_store_plan_forcing_locations"));
 }
+
+#[tokio::test]
+async fn shared_recommendation_interpretation_requires_finite_means_and_exact_native_aborted_counts() {
+    let facts =
+        read_kind(&mut FakeRead::new(vec![Ok(vec![recommendation_row()])]), Kind::Recommendations, &layout(), 3)
+            .await
+            .unwrap()
+            .unwrap();
+    let TuningFact::Recommendation(native) = &facts[0] else { panic!("native recommendation") };
+    for (bad, good, expected) in [
+        (Some(10.0), Some(2.5), Some(0.75)),
+        (Some(10.0), Some(20.0), Some(0.0)),
+        (Some(0.0), Some(0.0), None),
+        (None, Some(2.5), None),
+        (Some(10.0), None, None),
+        (Some(f64::INFINITY), Some(2.5), None),
+        (Some(10.0), Some(f64::NAN), None),
+        (Some(10.0), Some(-1.0), None),
+    ] {
+        let mut value = native.as_ref().clone();
+        value.regressed.avg_cpu_us = bad;
+        value.recommended.avg_cpu_us = good;
+        assert_eq!(value.estimated_cpu_reduction(), expected);
+    }
+    assert!(
+        native.regressed_has_more_aborted_executions(),
+        "adjacent integers above2^53 are compared before floating conversion"
+    );
+    let mut reversed = native.as_ref().clone();
+    std::mem::swap(&mut reversed.regressed.aborted, &mut reversed.recommended.aborted);
+    assert!(!reversed.regressed_has_more_aborted_executions());
+    reversed.regressed.aborted = None;
+    assert!(!reversed.regressed_has_more_aborted_executions(), "missing is not a measured zero");
+}

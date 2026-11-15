@@ -162,6 +162,10 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis cleanup --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis cached-plans --json
+culprit collect evidence read --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --family tuning-observations --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis tuning --json
 ```
 
 `memory-failures` selects the retained SQL Server OOM analysis; `native-failures` selects native structured
@@ -212,6 +216,13 @@ The optional object and byte limit flags require `--with-recovery-payloads`. Lim
 families and native batches in this command, independently of warehouse response and projection-proof budgets.
 Invalid limits fail before configuration or credential resolution. A recovery budget too small for the required
 batches fails the command without downloading a partial selection or presenting truncated bodies as complete.
+
+`tuning` explains one database-target `tuning` capture from `tuning-observations`. Native recommendations,
+automatic tuning options, forced-plan counters and Query Store hints retain their exact source, scope and original
+row references. Unknown scopes, unavailable definitions and native source failures remain distinct from warehouse
+read gaps. Recommendation-time CPU comparisons and exact aborted-run counts do not establish current savings.
+The analysis does not attach another capture's workload, infer a live query from an ID, or supply executable scripts.
+Large script or hint previews use the same explicit, bounded recovery option described above.
 
 `statement-work` reads database-target `statement-counters` captures. It preserves native query identities, point
 clocks and reset qualification, and shares the scan's temporary-work explanation. Typed native metrics distinguish

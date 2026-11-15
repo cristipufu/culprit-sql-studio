@@ -5,6 +5,7 @@ mod diagnostics;
 mod object_definitions;
 mod queries;
 mod source_partitions;
+mod tuning;
 use crate::{catalog::SchemaCatalog, client::QueryRequest, response::QueryTable, schema::Schema};
 use async_trait::async_trait;
 use culprit_collector::{

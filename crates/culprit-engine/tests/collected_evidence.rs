@@ -18,6 +18,7 @@ mod session_memory;
 mod statement_work;
 mod task_space;
 mod temporary_space;
+mod tuning;
 mod variant_family;
 mod waits;
 use fixture::Fixture;

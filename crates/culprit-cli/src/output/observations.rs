@@ -36,6 +36,23 @@ pub(crate) fn cleanup(report: &culprit_core::CleanupReport) -> String {
     )
 }
 
+pub(crate) fn tuning(report: &culprit_core::TuningReport) -> String {
+    let title = report.title.render();
+    let summary = report.summary.render();
+    let limitations = report.limitations.iter().map(|message| message.render()).collect::<Vec<_>>();
+    let titles =
+        report.entries.iter().take(super::BRIEF_FINDING_LIMIT).map(|entry| entry.title.render()).collect::<Vec<_>>();
+    render(
+        Summary {
+            title: &title,
+            summary: &summary,
+            source: SourceQualification::Multiple(&report.sources),
+            limitations: &limitations,
+        },
+        titles.iter().map(String::as_str),
+    )
+}
+
 pub(crate) fn compilation(report: &CompilationReport) -> String {
     render(
         Summary {

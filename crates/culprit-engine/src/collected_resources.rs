@@ -10,6 +10,8 @@ mod cached_plans;
 pub use cached_plans::cached_plans;
 mod cleanup;
 pub use cleanup::cleanup;
+mod tuning;
+pub use tuning::tuning;
 mod compilation;
 pub use compilation::compilation;
 mod request_memory;

@@ -15,6 +15,7 @@ mod object_definitions;
 mod observations;
 mod queries;
 mod source_partitions;
+mod tuning;
 mod waits;
 
 struct Fixture {

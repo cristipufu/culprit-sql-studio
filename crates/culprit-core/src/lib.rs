@@ -60,6 +60,7 @@ pub mod sql;
 pub mod statement_work_report;
 pub mod task_space_report;
 pub mod telemetry;
+pub mod tuning_report;
 pub mod verification;
 pub mod wait_resources;
 pub mod waits;
@@ -151,6 +152,7 @@ pub use signals::{
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_work_report::{StatementWorkEntry, StatementWorkReport};
 pub use task_space_report::*;
+pub use tuning_report::{TuningExplanation, TuningReport};
 pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_reports};
 pub use wait_resources::{ObservedWaitResource, WaitResourceKind};
 pub use waits::{

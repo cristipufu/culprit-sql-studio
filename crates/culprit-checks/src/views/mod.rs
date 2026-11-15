@@ -23,4 +23,5 @@ pub mod sql_lint;
 pub mod statement_work;
 pub mod task_space;
 pub mod temporary_work;
+pub mod tuning;
 pub mod waits;

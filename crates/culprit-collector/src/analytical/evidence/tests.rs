@@ -9,6 +9,7 @@ mod activity;
 mod diagnostics;
 mod empty;
 mod object_definitions;
+mod tuning;
 
 #[tokio::test]
 async fn query_reconstruction_keeps_native_closure_outcomes_units_and_redacted_payloads_exact() {

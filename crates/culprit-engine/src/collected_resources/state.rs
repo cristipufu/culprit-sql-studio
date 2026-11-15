@@ -82,6 +82,22 @@ impl<'a> CapturedState<'a> {
             .collect()
     }
 
+    pub fn tuning(&self) -> Result<Vec<&'a TuningObservation>> {
+        if self.family != EvidenceFamily::TuningObservations {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        self.capture
+            .records()
+            .iter()
+            .filter_map(|record| {
+                let TelemetryRecord::Tuning(observation) = &record.row().record else {
+                    return Some(Err(invalid()));
+                };
+                (observation.source == self.coverage.source).then_some(Ok(observation))
+            })
+            .collect()
+    }
+
     pub fn outcome(&self, rows: usize) -> Result<SourceOutcome> {
         if rows > self.coverage.records as usize {
             return Err(invalid());
@@ -127,6 +143,9 @@ fn native_state(
                 if definition.is_valid() =>
             {
                 &definition.source
+            }
+            (TelemetryRecord::Tuning(observation), EvidenceFamily::TuningObservations) if observation.is_valid() => {
+                &observation.source
             }
             _ => return Err(invalid()),
         };

@@ -66,7 +66,7 @@ pub(crate) mod maintenance;
 pub(crate) mod pressure;
 pub(crate) mod queries;
 pub(crate) mod signals;
-pub(crate) mod tuning;
+pub mod tuning;
 
 /// Every area's checks, in the order they run: each area lists its own (`<area>::CHECKS`), so a new check is its file
 /// and one line in its area.

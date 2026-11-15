@@ -46,6 +46,24 @@ pub struct NativeTuningRecommendation {
     pub is_revertable: Option<bool>,
 }
 
+impl NativeTuningRecommendation {
+    /// Only recommendation-time native means are compared. This is not measured elapsed work saved or a prediction.
+    pub fn estimated_cpu_reduction(&self) -> Option<f64> {
+        let (bad, good) = (self.regressed.avg_cpu_us?, self.recommended.avg_cpu_us?);
+        (bad.is_finite() && bad > 0.0 && good.is_finite() && good >= 0.0).then(|| ((bad - good) / bad).clamp(0.0, 1.0))
+    }
+
+    /// Compare original exact counts, before any display conversion can collapse adjacent values above 2^53.
+    pub fn regressed_has_more_aborted_executions(&self) -> bool {
+        self.regressed
+            .aborted
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
+            .zip(self.recommended.aborted.as_deref().and_then(|value| value.parse::<u64>().ok()))
+            .is_some_and(|(bad, good)| bad > good)
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct NativeForcedPlan {

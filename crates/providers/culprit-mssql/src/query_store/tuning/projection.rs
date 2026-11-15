@@ -71,16 +71,8 @@ pub(super) fn append_application(advice: &mut TuningAdvice, fact: TuningFact) {
     match fact {
         TuningFact::AutomaticOption(value) => advice.automatic_tuning.push(value),
         TuningFact::Recommendation(value) => {
-            let gain = match (value.regressed.avg_cpu_us, value.recommended.avg_cpu_us) {
-                (Some(bad), Some(good)) if bad > 0.0 => Some(((bad - good) / bad).clamp(0.0, 1.0)),
-                _ => None,
-            };
-            let error_prone = match (&value.regressed.aborted, &value.recommended.aborted) {
-                (Some(bad), Some(good)) => {
-                    bad.parse::<u64>().ok().zip(good.parse::<u64>().ok()).is_some_and(|(bad, good)| bad > good)
-                }
-                _ => false,
-            };
+            let gain = value.estimated_cpu_reduction();
+            let error_prone = value.regressed_has_more_aborted_executions();
             advice.recommendations.push(TuningRecommendation {
                 name: value.name,
                 kind: value.kind,

@@ -61,3 +61,10 @@ pub struct CollectedCompilationAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::CompilationReport,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedTuningAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::TuningReport,
+}

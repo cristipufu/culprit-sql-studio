@@ -100,6 +100,7 @@ enum Family {
     OperationalSamples,
     ActivityObservations,
     ObjectDefinitions,
+    TuningObservations,
     QueryDefinitions,
     PlanDefinitions,
     QueryRuntime,
@@ -112,6 +113,7 @@ impl From<Family> for EvidenceFamily {
             Family::OperationalSamples => Self::OperationalSamples,
             Family::ActivityObservations => Self::ActivityObservations,
             Family::ObjectDefinitions => Self::ObjectDefinitions,
+            Family::TuningObservations => Self::TuningObservations,
             Family::QueryDefinitions => Self::QueryDefinitions,
             Family::PlanDefinitions => Self::PlanDefinitions,
             Family::QueryRuntime => Self::QueryRuntime,
@@ -134,11 +136,13 @@ enum Analysis {
     CachedPlans,
     Compilation,
     Cleanup,
+    Tuning,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
         match self {
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
+            Self::Tuning => vec![EvidenceFamily::TuningObservations],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
                 EvidenceFamily::PlanDefinitions,
@@ -244,6 +248,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::Compilation) => {
             let analysis = culprit_engine::collected_resources::compilation(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::compilation(&analysis.report))?;
+        }
+        Some(Analysis::Tuning) => {
+            let analysis = culprit_engine::collected_resources::tuning(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::tuning(&analysis.report))?;
         }
         Some(Analysis::Cleanup) => {
             let analysis = culprit_engine::collected_resources::cleanup(&capture)?;

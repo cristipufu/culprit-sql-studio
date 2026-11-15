@@ -23,7 +23,10 @@ pub use query_cohorts::{
     QueryCohortCase, assert_query_cohort_capture, query_cohort_evidence, query_cohort_evidence_cases,
 };
 mod tuning;
-pub use tuning::{assert_tuning_scope_projection, change_tuning_plan_scope, tuning_scope_evidence};
+pub use tuning::{
+    TuningCase, assert_tuning_capture, assert_tuning_scope_projection, change_tuning_plan_scope, tuning_evidence,
+    tuning_evidence_cases, tuning_scope_evidence,
+};
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
 mod cleanup;

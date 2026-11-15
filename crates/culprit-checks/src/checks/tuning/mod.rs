@@ -11,6 +11,7 @@ use culprit_core::Check;
 
 use crate::support::*;
 
+pub use crate::views::tuning::explain;
 mod query_family;
 mod scope;
 mod tuning_advice;
