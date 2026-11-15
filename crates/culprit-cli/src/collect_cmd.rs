@@ -35,11 +35,13 @@ pub(crate) struct OnceArgs {
     connection: String,
     #[arg(long,value_name="FILE",help=culprit_core::t!("collection.cli.resource"))]
     resource: Option<PathBuf>,
-    #[arg(long, value_enum, default_value_t=CollectionChoice::QueryHistory, help=culprit_core::t!("collection.cli.collection"))]
-    collection: CollectionChoice,
-    #[arg(long,requires="until",required_unless_present="collection",required_if_eq_any=[("collection","query-history"),("collection","resource-history"),("collection","deadlock-history")],help=culprit_core::t!("collection.cli.from"))]
+    #[arg(long, value_enum, help=culprit_core::t!("collection.cli.collection"))]
+    collection: Option<CollectionChoice>,
+    #[arg(long,value_name="FILE",conflicts_with_all=["collection","from","until"],help=culprit_core::t!("collection.cli.selection"))]
+    selection: Option<PathBuf>,
+    #[arg(long,requires="until",required_unless_present_any=["collection","selection"],required_if_eq_any=[("collection","query-history"),("collection","resource-history"),("collection","deadlock-history")],help=culprit_core::t!("collection.cli.from"))]
     from: Option<String>,
-    #[arg(long,requires="from",required_unless_present="collection",required_if_eq_any=[("collection","query-history"),("collection","resource-history"),("collection","deadlock-history")],help=culprit_core::t!("collection.cli.until"))]
+    #[arg(long,requires="from",required_unless_present_any=["collection","selection"],required_if_eq_any=[("collection","query-history"),("collection","resource-history"),("collection","deadlock-history")],help=culprit_core::t!("collection.cli.until"))]
     until: Option<String>,
     #[arg(long,required_unless_present="outbox",conflicts_with="outbox",help=culprit_core::t!("collection.cli.output"))]
     output: Option<PathBuf>,
@@ -98,23 +100,38 @@ impl ResourcesArgs {
 
 fn requested_subject(path: Option<&std::path::Path>) -> Result<culprit_core::telemetry::CollectionSubject> {
     use culprit_core::telemetry::{CollectionSubject, SharedResourceIdentity};
-    use std::io::Read;
     const MAX_RESOURCE_IDENTITY_BYTES: u64 = 64 * 1024;
     let Some(path) = path else { return Ok(CollectionSubject::Database) };
     let invalid = || culprit_core::Error::invalid(culprit_core::t!("collection.invalid_subject"));
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .map_err(|_| invalid())?
-        .take(MAX_RESOURCE_IDENTITY_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| invalid())?;
-    if bytes.len() as u64 > MAX_RESOURCE_IDENTITY_BYTES {
-        return Err(invalid());
-    }
-    let resource: SharedResourceIdentity = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    let resource: SharedResourceIdentity = native_json(path, MAX_RESOURCE_IDENTITY_BYTES, invalid)?;
     let subject = CollectionSubject::Shared { resource };
     subject.validate()?;
     Ok(subject)
+}
+
+fn requested_selection(path: &std::path::Path) -> Result<culprit_core::telemetry::CollectionSelection> {
+    const MAX_SELECTION_BYTES: u64 = 1024 * 1024;
+    native_json(path, MAX_SELECTION_BYTES, || {
+        culprit_core::Error::invalid(culprit_core::t!("collection.invalid_selection"))
+    })
+}
+
+fn native_json<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+    max_bytes: u64,
+    invalid: impl Fn() -> culprit_core::Error,
+) -> Result<T> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|_| invalid())?
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid())?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(invalid());
+    }
+    serde_json::from_slice(&bytes).map_err(|_| invalid())
 }
 
 #[derive(Args)]
@@ -280,14 +297,17 @@ impl CollectionChoice {
 impl OnceArgs {
     fn request(&self) -> Result<CollectionRequest> {
         use culprit_core::telemetry::CollectionSelection;
+        let collection = self.collection.unwrap_or(CollectionChoice::QueryHistory);
         let selection =
-            if let Some(dataset) = self.collection.snapshot_dataset() {
+            if let Some(path) = &self.selection {
+                requested_selection(path)?
+            } else if let Some(dataset) = collection.snapshot_dataset() {
                 if self.from.is_some() || self.until.is_some() {
                     return Err(culprit_core::Error::invalid(culprit_core::t!("collection.snapshot_no_window")));
                 }
                 CollectionSelection::Snapshot { dataset }
             } else {
-                match self.collection {
+                match collection {
                     CollectionChoice::Activity => {
                         if self.from.is_some() || self.until.is_some() {
                             return Err(culprit_core::Error::invalid(culprit_core::t!("activity.cli.no_window")));
@@ -303,9 +323,9 @@ impl OnceArgs {
                         let until = self.until.clone().ok_or_else(|| {
                             culprit_core::Error::invalid(culprit_core::t!("collection.invalid_interval"))
                         })?;
-                        if matches!(self.collection, CollectionChoice::QueryHistory) {
+                        if matches!(collection, CollectionChoice::QueryHistory) {
                             CollectionSelection::QueryHistory { from, until }
-                        } else if matches!(self.collection, CollectionChoice::DeadlockHistory) {
+                        } else if matches!(collection, CollectionChoice::DeadlockHistory) {
                             CollectionSelection::DeadlockHistory { from, until }
                         } else {
                             CollectionSelection::ResourceHistory { from, until }
@@ -429,6 +449,38 @@ pub(crate) fn schema(args: SchemaArgs, out: &Out) -> Result<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_explicit_selection_file_never_falls_back_to_default_history_or_echoes_its_contents() {
+        use clap::Parser;
+        use culprit_core::telemetry::CollectionSelection;
+        let directory = std::env::temp_dir().join(format!("culprit-native-selection-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("selection.json");
+        std::fs::write(&path, serde_json::to_vec(&CollectionSelection::Activity).unwrap()).unwrap();
+        let base =
+            ["culprit", "collect", "once", "fixture", "--output", "capture", "--selection", path.to_str().unwrap()];
+        let cli = crate::Cli::try_parse_from(base).unwrap();
+        let crate::Command::Collect(super::CollectCommand::Once(args)) = cli.command else { panic!() };
+        assert!(matches!(args.request().unwrap().selection, CollectionSelection::Activity));
+        assert!(crate::Cli::try_parse_from(base.into_iter().chain(["--collection", "activity"])).is_err());
+        assert!(
+            crate::Cli::try_parse_from(base.into_iter().chain([
+                "--from",
+                "2020-01-01T00:00:00Z",
+                "--until",
+                "2020-01-01T01:00:00Z",
+            ]))
+            .is_err()
+        );
+        for invalid in [vec![b'x'; 1024 * 1024 + 1], b"{\"secret-selection-canary\":\"never-echo-this\"}".to_vec()] {
+            std::fs::write(&path, invalid).unwrap();
+            let error = args.request().unwrap_err();
+            assert!(!error.to_string().contains("secret-selection-canary"));
+            assert!(!error.to_string().contains("never-echo-this"));
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn resource_discovery_and_capture_require_explicit_bounded_native_identity() {
         use clap::Parser;

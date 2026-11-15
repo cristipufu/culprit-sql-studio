@@ -200,7 +200,7 @@ async fn first_or_second_azure_pressure_deferral_stops_optional_work_without_mor
     let mut replies = successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
     replies[3] = Ok(vec![]);
     let mut native = reader(replies);
-    let (snapshot, coverage) = crate::page_waits::collect_from(&mut native).await;
+    let (snapshot, coverage) = crate::page_waits::collect_from(&mut native, false).await;
     assert!(snapshot.is_none());
     assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Unavailable);
     assert!(coverage.outcomes()[0].reason.as_ref().unwrap().contains("resource sample"));
@@ -549,7 +549,7 @@ async fn distinct_page_and_participant_limits_are_partial_without_querying_overf
     replies[CHECK_AFTER] = Ok(admitted);
     replies[SQL_TEXT] = Ok((0..64).map(|index| details(42 + index, "SELECT 1")).collect());
     let mut reader = super::tests::reader(replies);
-    let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader).await;
+    let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader, false).await;
     assert_eq!(snapshot.unwrap().observations.len(), 64);
     assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Partial);
     assert!(matches!(&reader.io.calls[1].parameters[0], Parameter::Integer(65)));
@@ -559,7 +559,7 @@ async fn distinct_page_and_participant_limits_are_partial_without_querying_overf
 #[tokio::test]
 async fn an_empty_coordinator_capture_is_partial_and_does_not_read_pages_or_sql() {
     let mut reader = reader(vec![Ok(vec![context()]), Ok(vec![context()]), Ok(vec![context()])]);
-    let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader).await;
+    let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader, false).await;
     assert!(snapshot.unwrap().observations.is_empty());
     assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Partial);
     assert_eq!(reader.query_count(), 3);
@@ -752,7 +752,7 @@ async fn cancellation_deadline_and_budget_stops_forbid_further_native_work_and_c
             Ok(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]),
             Err(ReadError::Stopped(stop)),
         ]);
-        let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader).await;
+        let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader, false).await;
         assert!(snapshot.is_none());
         assert_eq!(reader.query_count(), 3);
         assert_eq!(reader.io.closed, 1);
@@ -760,7 +760,7 @@ async fn cancellation_deadline_and_budget_stops_forbid_further_native_work_and_c
     }
     let mut reader = reader(successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]));
     reader.io.shutdown = SourceShutdown::Unconfirmed;
-    let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader).await;
+    let (snapshot, coverage) = crate::page_waits::collect_from(&mut reader, false).await;
     assert!(snapshot.is_none());
     assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Unavailable);
     assert_eq!(reader.io.closed, 1);

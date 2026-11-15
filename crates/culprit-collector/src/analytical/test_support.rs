@@ -33,6 +33,11 @@ pub use tuning::{
 };
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
+mod cache_entry_memory;
+pub use cache_entry_memory::{
+    CacheEntryMemoryCase, assert_cache_entry_memory_capture, cache_entry_memory_evidence,
+    cache_entry_memory_evidence_cases,
+};
 mod cleanup;
 mod observations;
 pub use cleanup::{
@@ -47,7 +52,7 @@ pub use request_memory::request_memory_evidence_cases;
 mod session_memory;
 pub use session_memory::session_memory_evidence_cases;
 mod page_waits;
-pub use page_waits::{page_wait_evidence_cases, page_wait_tamper_cases};
+pub use page_waits::{page_wait_evidence_cases, page_wait_tamper_cases, shared_page_wait_evidence_cases};
 mod statement_work;
 pub use statement_work::statement_work_evidence_cases;
 mod statement_grants;
@@ -90,8 +95,33 @@ pub fn assert_page_wait_capture(
     records: &[TelemetryRecord],
 ) {
     assert_operational_capture(capture, source, records);
-    assert!(source.target.database().is_some());
     assert_eq!(source.observation.snapshot().unwrap().dataset, SnapshotDataset::PageWaitTargets);
+    for record in records {
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) = record
+        else {
+            panic!()
+        };
+        assert!(page.fits_source_scope(source));
+        if let Some(target) = &page.target
+            && let PageTargetScope::SharedResource { context } = &target.scope
+        {
+            assert_eq!(context.target, source.target);
+            assert_eq!(context.partition, source.partition);
+            assert_eq!(page.request.database.as_deref(), Some("db"));
+            assert_eq!(target.header.database_id, 2);
+        }
+    }
+}
+
+pub fn assert_page_wait_scope_projection(details: &serde_json::Value, source: &CollectionDescription) {
+    if matches!(source.target, CollectionTarget::Shared(_)) {
+        let context = details.pointer("/target/scope/context").expect("shared context reference");
+        assert_eq!(context["target"], serde_json::json!({"key":source.target.telemetry_id().unwrap()}));
+        assert!(context["partition"]["key"].as_str().is_some_and(valid_digest));
+        let public = serde_json::to_string(details).unwrap();
+        assert!(!public.contains("private-tempdb-machine-canary"));
+        assert!(!public.contains("private-tempdb-instance-canary"));
+    }
 }
 
 pub fn assert_statement_work_capture(

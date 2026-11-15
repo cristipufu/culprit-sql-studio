@@ -12,6 +12,22 @@ impl<R: NativeRead> ActivityReader<R> {
         &mut self,
         focus: &ActivityWaitFocus,
     ) -> Result<FocusedPageWaitCapture> {
+        self.capture_page_wait_focus(focus, None).await
+    }
+
+    pub(crate) async fn capture_shared_tempdb_page_wait_focus(
+        &mut self,
+        focus: &ActivityWaitFocus,
+        resource: &SharedResourceIdentity,
+    ) -> Result<FocusedPageWaitCapture> {
+        self.capture_page_wait_focus(focus, Some(resource)).await
+    }
+
+    async fn capture_page_wait_focus(
+        &mut self,
+        focus: &ActivityWaitFocus,
+        resource: Option<&SharedResourceIdentity>,
+    ) -> Result<FocusedPageWaitCapture> {
         if !focus.is_valid()
             || focus.source != culprit_core::source_id::SESSIONS
             || RequestLocator::from_identity(&focus.statement_identity).is_none()
@@ -22,7 +38,10 @@ impl<R: NativeRead> ActivityReader<R> {
         if focus.database_writable.is_none() {
             return Err(CollectionStop::SourceUnavailable.error());
         }
-        let initial = context::initial(self).await?;
+        let initial = match resource {
+            Some(resource) => context::initial_shared(self, resource).await?,
+            None => context::initial(self).await?,
+        };
         let current = initial.capture_context()?;
         if current.writable.is_none() {
             return Err(CollectionStop::SourceUnavailable.error());

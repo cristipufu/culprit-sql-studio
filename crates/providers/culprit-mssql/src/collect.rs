@@ -553,6 +553,7 @@ async fn acquire(
     let (page_waits, page_wait_coverage) = crate::page_waits::collect(
         provider.pool.clone(),
         options.collect_page_wait_targets,
+        options.collect_shared_resources,
         provider.endpoint_host.clone(),
         provider.endpoint_port,
     )

@@ -3,6 +3,7 @@ use culprit_core::{
 };
 use culprit_engine::collected_evidence;
 
+mod cache_entry_memory;
 mod cached_plans;
 mod cleanup;
 mod cohorts;

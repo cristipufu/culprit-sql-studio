@@ -14,7 +14,7 @@ fn subject(kind: RecipeSubject) -> CollectionSubject {
         },
     }
 }
-fn selection(selector: RecipeSelector) -> CollectionSelection {
+async fn selection(selector: RecipeSelector) -> CollectionSelection {
     let from = "2020-01-01T06:00:00Z".to_owned();
     let until = "2020-01-01T07:00:00Z".to_owned();
     match selector {
@@ -34,14 +34,17 @@ fn selection(selector: RecipeSelector) -> CollectionSelection {
                 &crate::activity::page_targets::tests::page_wait(42, "PAGELATCH_EX", "7:1:4144"),
             )),
         },
+        RecipeSelector::CacheEntryMemory => {
+            CollectionSelection::CacheEntryMemory { focus: Box::new(crate::cache_entry_memory::tests::focus().await) }
+        }
         RecipeSelector::Collection(TelemetryCollection::Diagnostics) => {
             panic!("derived diagnostics are not a native source")
         }
     }
 }
 
-#[test]
-fn every_declared_recipe_uses_exactly_one_actual_constructor_without_native_work() {
+#[tokio::test]
+async fn every_declared_recipe_uses_exactly_one_actual_constructor_without_native_work() {
     let declarations = declarations();
     assert!(!declarations.is_empty());
     let mut ids = BTreeSet::new();
@@ -51,11 +54,18 @@ fn every_declared_recipe_uses_exactly_one_actual_constructor_without_native_work
         assert_eq!(descriptor.cost, RecipeCostQualification::Unqualified);
         assert_eq!(descriptor.version, 1);
         for &kind in registration.subjects {
-            let request = CollectionRequest {
-                subject: subject(kind),
-                selection: selection(descriptor.selector),
-                budget: descriptor.budget.clone(),
-            };
+            let mut selection = selection(descriptor.selector).await;
+            let subject = subject(kind);
+            if let (CollectionSelection::FocusedPageWait { focus }, CollectionSubject::Shared { resource }) =
+                (&mut selection, &subject)
+            {
+                // This constructor-only fixture names an original instance member; no native authority is acquired.
+                let SourcePartition::InstanceLocal { member, .. } = &mut focus.partition else {
+                    panic!("a shared follow-up requires the original native member")
+                };
+                *member = Some(resource.clone());
+            }
+            let request = CollectionRequest { subject, selection, budget: descriptor.budget.clone() };
             assert!(descriptor.accepts(&request));
             assert_eq!(REGISTRATIONS.iter().filter(|entry| entry.accepts(&request)).count(), 1, "{}", descriptor.id);
             let source =
@@ -69,11 +79,11 @@ fn every_declared_recipe_uses_exactly_one_actual_constructor_without_native_work
     }
 }
 
-#[test]
-fn a_focused_selector_can_never_fall_back_to_the_broad_page_population() {
+#[tokio::test]
+async fn a_focused_selector_can_never_fall_back_to_the_broad_page_population() {
     let request = CollectionRequest {
         subject: CollectionSubject::Database,
-        selection: selection(RecipeSelector::FocusedPageWait),
+        selection: selection(RecipeSelector::FocusedPageWait).await,
         budget: CollectionBudget::default(),
     };
     let selected = REGISTRATIONS.iter().filter(|recipe| recipe.accepts(&request)).collect::<Vec<_>>();
@@ -96,7 +106,7 @@ fn unregistered_datasets_or_subjects_return_unsupported_without_a_native_connect
         (SnapshotDataset::StatementCounters, RecipeSubject::Database),
         (SnapshotDataset::MemoryFailures, RecipeSubject::Database),
         (SnapshotDataset::Operational, RecipeSubject::Shared(SharedResourceKind::Pool)),
-        (SnapshotDataset::PageWaitTargets, RecipeSubject::Shared(SharedResourceKind::Instance)),
+        (SnapshotDataset::PageWaitTargets, RecipeSubject::Shared(SharedResourceKind::Pool)),
     ] {
         let request = CollectionRequest {
             subject: subject(kind),
@@ -121,12 +131,12 @@ fn specialized_descriptors_take_their_envelopes_from_native_profile_owners() {
     assert_eq!(oom.budget.max_queries, 8, "six native phases and two named snapshot-clock calls");
 }
 
-#[test]
-fn caller_defaults_do_not_silently_cap_an_explicit_larger_history_capture() {
+#[tokio::test]
+async fn caller_defaults_do_not_silently_cap_an_explicit_larger_history_capture() {
     let recipe = REGISTRATIONS.iter().find(|recipe| recipe.id == "mssql.query-history").unwrap();
     let request = CollectionRequest {
         subject: CollectionSubject::Database,
-        selection: selection(recipe.selector),
+        selection: selection(recipe.selector).await,
         budget: CollectionBudget::upper_limits(),
     };
     assert!(request.validate().is_ok());
@@ -137,12 +147,12 @@ fn caller_defaults_do_not_silently_cap_an_explicit_larger_history_capture() {
     assert_eq!(source.query_count(), 0);
 }
 
-#[test]
-fn native_dispatch_enforces_profile_envelopes_and_every_stricter_caller_limit() {
+#[tokio::test]
+async fn native_dispatch_enforces_profile_envelopes_and_every_stricter_caller_limit() {
     let recipe = REGISTRATIONS.iter().find(|recipe| recipe.id == "mssql.focused-page-wait").unwrap();
     let request = CollectionRequest {
         subject: CollectionSubject::Database,
-        selection: selection(recipe.selector),
+        selection: selection(recipe.selector).await,
         budget: CollectionBudget {
             page_rows: 10_000,
             max_snapshot_rows: 100_000,

@@ -1,6 +1,7 @@
 pub mod actual;
 pub mod advice;
 pub mod blocking;
+pub mod cache_entry_memory_report;
 pub mod cached_plan_report;
 pub mod changes;
 pub mod check;
@@ -72,6 +73,7 @@ pub mod xml;
 pub use actual::{ActualSummary, NodeProgress, NodeRuntime, NodeState, QueryProgress, actual_summary, self_times};
 pub use advice::*;
 pub use blocking::{BlockNode, Blocking, BlockingChain, HeadKind, LockWait};
+pub use cache_entry_memory_report::{CacheEntryContextDifference, CacheEntryMemoryExplanation, CacheEntryMemoryReport};
 pub use cached_plan_report::{
     CachedPlanEntry, CachedPlanIdentity, CachedPlanLimit, CachedPlanLimitation, CachedPlanPayload, CachedPlanReport,
     CollectedCachedPlanAnalysis,

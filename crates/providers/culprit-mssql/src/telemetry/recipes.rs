@@ -127,9 +127,23 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
     )
     .bounded(crate::page_waits::bounded_budget),
+    Registration::database(
+        "mssql.shared-tempdb-page-wait-targets",
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)),
+        |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
+    )
+    .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
+    .bounded(crate::page_waits::bounded_budget),
     Registration::database("mssql.focused-page-wait", RecipeSelector::FocusedPageWait, |pool, request, host, port| {
         Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
     })
+    .bounded(page_waits::focused_budget),
+    Registration::database(
+        "mssql.focused-shared-tempdb-page-wait",
+        RecipeSelector::FocusedPageWait,
+        |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
+    )
+    .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
     .bounded(page_waits::focused_budget),
     Registration::database(
         "mssql.current-request-memory",
@@ -137,6 +151,14 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?)),
     )
     .bounded(crate::request_memory::bounded_budget),
+    Registration::database(
+        "mssql.cache-entry-memory",
+        RecipeSelector::CacheEntryMemory,
+        |pool, request, host, port| {
+            Ok(Box::new(cache_entry_memory::CacheEntryMemorySource::new(pool, request, host, port)?))
+        },
+    )
+    .bounded(crate::cache_entry_memory::bounded_budget),
     Registration::database(
         "mssql.task-space",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::TaskSpace)),

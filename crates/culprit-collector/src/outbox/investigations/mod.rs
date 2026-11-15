@@ -83,7 +83,12 @@ pub(crate) struct RestoredInput {
 }
 
 pub(super) fn eligible(request: &CollectionRequest) -> bool {
-    matches!(request.selection, CollectionSelection::Activity | CollectionSelection::FocusedPageWait { .. })
+    // This controller keeps database-scoped episodes. Explicit shared captures still retain and deliver their facts,
+    // but need a separately authenticated cross-resource intent before they can revise an original database episode.
+    matches!(
+        (&request.selection, &request.subject),
+        (CollectionSelection::Activity | CollectionSelection::FocusedPageWait { .. }, CollectionSubject::Database)
+    )
 }
 
 fn encode(value: &impl serde::Serialize) -> Result<String> {

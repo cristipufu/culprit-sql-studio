@@ -83,9 +83,37 @@ pub(super) fn focused_observation(identity: IdentityDetail) -> String {
 }
 
 pub(super) fn headers() -> String {
+    headers_in("DB_ID()", "sys", "a.database_id=DB_ID()")
+}
+
+pub(super) fn shared_tempdb_headers() -> String {
+    headers_in("2", "tempdb.sys", "a.database_id=2 AND DB_ID(N'tempdb')=2")
+}
+
+pub(super) fn headers_with_shared_tempdb() -> String {
+    // Distinct XML populations fence the function arguments before relational optimization. WHERE alone
+    // cannot guarantee that a function will never see a foreign page from the other branch.
+    let request = header_select("DB_ID()", "sys", "a.database_id=DB_ID()", "/pages/request_database/page");
+    let shared =
+        header_select("2", "tempdb.sys", "a.database_id=2 AND DB_ID(N'tempdb')=2", "/pages/shared_tempdb/page");
+    format!("{}\n{request}\nUNION ALL\n{shared}\nOPTION(MAXDOP 1,LOOP JOIN)", header_clock())
+}
+
+fn headers_in(database: &str, catalog: &str, guard: &str) -> String {
+    format!(
+        "{}\n{}\nOPTION(MAXDOP 1,LOOP JOIN)",
+        header_clock(),
+        header_select(database, catalog, guard, "/pages/page")
+    )
+}
+
+fn header_clock() -> &'static str {
+    "DECLARE /* culprit */ @targets xml=CAST(@P1 AS xml),@at datetime2=SYSUTCDATETIME();"
+}
+
+fn header_select(database: &str, catalog: &str, guard: &str, path: &str) -> String {
     format!(
         r#"
-DECLARE /* culprit */ @targets xml=CAST(@P1 AS xml),@at datetime2=SYSUTCDATETIME();
 SELECT /* culprit */
  a.ordinal,a.database_id AS target_database_id,a.file_id AS target_file_id,a.page_id AS target_page_id,
  CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
@@ -98,17 +126,16 @@ SELECT /* culprit */
  i.index_id AS catalog_index_id,i.name AS index_name,i.type AS index_type,
  part.partition_id AS catalog_partition_id,part.hobt_id AS catalog_hobt_id,
  part.partition_number AS catalog_partition_number
-FROM @targets.nodes('/pages/page') t(n)
+FROM @targets.nodes('{path}') t(n)
 CROSS APPLY(SELECT t.n.value('@ordinal[1]','int') AS ordinal,t.n.value('@database[1]','int') AS database_id,
  t.n.value('@file[1]','int') AS file_id,t.n.value('@page[1]','int') AS page_id) a
-OUTER APPLY sys.dm_db_page_info(DB_ID(),a.file_id,a.page_id,'LIMITED') p
-LEFT JOIN sys.database_files f ON f.file_id=a.file_id
-LEFT JOIN sys.all_objects o ON o.object_id=p.object_id
-LEFT JOIN sys.schemas s ON s.schema_id=o.schema_id
-LEFT JOIN sys.indexes i ON i.object_id=p.object_id AND i.index_id=p.index_id
-LEFT JOIN sys.partitions part ON part.object_id=p.object_id AND part.index_id=p.index_id AND part.partition_id=p.partition_id
-WHERE a.database_id=DB_ID()
-OPTION(MAXDOP 1,LOOP JOIN)"#,
+OUTER APPLY sys.dm_db_page_info({database},a.file_id,a.page_id,'LIMITED') p
+LEFT JOIN {catalog}.database_files f ON f.file_id=a.file_id
+LEFT JOIN {catalog}.all_objects o ON o.object_id=p.object_id
+LEFT JOIN {catalog}.schemas s ON s.schema_id=o.schema_id
+LEFT JOIN {catalog}.indexes i ON i.object_id=p.object_id AND i.index_id=p.index_id
+LEFT JOIN {catalog}.partitions part ON part.object_id=p.object_id AND part.index_id=p.index_id AND part.partition_id=p.partition_id
+WHERE {guard}"#,
         header = fields::projection()
     )
 }

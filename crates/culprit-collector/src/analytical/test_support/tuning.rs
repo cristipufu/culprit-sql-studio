@@ -92,11 +92,11 @@ pub fn assert_tuning_scope_projection(row: &ExportedRecord, logical: &Map<String
     for field in row.record.definition_payloads() {
         let pointer = field.pointer.strip_prefix("/record/data/fact/data").expect("native tuning payload");
         let reference = logical["Details"].pointer(pointer).expect("projected native payload reference");
-        assert_eq!(reference["pointer"], field.pointer);
+        assert_eq!(reference["pointer"], field.pointer.as_ref());
         // These fixtures retain unavailable payloads. Preparation adds their exact recovery pointer without
         // changing the native unavailable reason or any plan scope, counter, query or plan reference.
         assert!(matches!(field.payload, DefinitionPayload::Unavailable { .. }));
-        expected_details.pointer_mut(pointer).unwrap()["pointer"] = Value::String(field.pointer.into());
+        expected_details.pointer_mut(pointer).unwrap()["pointer"] = Value::String(field.pointer.to_string());
     }
     assert_eq!(logical["Details"], expected_details);
     assert_eq!(logical["DetailSha256"], digest(&serde_json::to_vec(&expected_details).unwrap()));

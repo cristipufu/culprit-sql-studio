@@ -238,10 +238,30 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             observation.redact(engine);
             observation.request.client = None;
             if let Some(target) = &mut observation.target {
+                if let crate::telemetry::PageTargetScope::SharedResource { context } = &mut target.scope {
+                    redact_read_context(context);
+                }
                 redact_native_identity(&mut target.database);
                 redact_native_identity(&mut target.file);
                 if let Some(object) = &mut target.object {
                     redact_native_qualifiers(&mut object.native);
+                }
+                match target.scope.bind_identities(target.database.clone(), target.file.clone()) {
+                    Ok((database, file)) => {
+                        target.database = database;
+                        target.file = file;
+                    }
+                    Err(_) => {
+                        observation.target = None;
+                        observation.resolution = crate::telemetry::PageWaitResolution::UnverifiedSource;
+                        observation.statement_identity = None;
+                        observation.plan_identity = None;
+                        if let Some(crate::telemetry::PageIndexOperations::Observed { relation, .. }) =
+                            &mut observation.index_operations
+                        {
+                            *relation = crate::telemetry::PageIndexOperationRelation::UnverifiedTarget;
+                        }
+                    }
                 }
             }
             if let Some(crate::telemetry::PageIndexOperations::Observed { object: Some(object), .. }) =

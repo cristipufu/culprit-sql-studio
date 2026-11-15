@@ -12,6 +12,7 @@ enum PublicObservation<'a> {
     Activity(&'a ActivitySnapshotDescription),
     Snapshot(&'a StateSnapshotDescription),
     FocusedPageWaitContext { snapshot: &'a StateSnapshotDescription, result: Box<FocusResult<'a>> },
+    CacheEntryMemoryContext { snapshot: &'a StateSnapshotDescription, focus_key: String },
     DiagnosticContext(Value),
 }
 #[derive(Serialize)]
@@ -41,6 +42,9 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::RetainedEvents(value) => PublicObservation::RetainedEvents(value),
         SourceObservation::Activity(value) => PublicObservation::Activity(value),
         SourceObservation::Snapshot(value) => PublicObservation::Snapshot(value),
+        SourceObservation::CacheEntryMemory { snapshot, focus } => {
+            PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }
+        }
         SourceObservation::FocusedPageWait { snapshot, result } => PublicObservation::FocusedPageWaitContext {
             snapshot,
             result: Box::new(FocusResult {

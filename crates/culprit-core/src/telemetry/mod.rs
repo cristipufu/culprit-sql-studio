@@ -9,6 +9,7 @@ use crate::{DatabaseIdentity, Error, ErrorCode, Result, t};
 
 mod activity;
 mod admission;
+mod cache_entry_memory;
 mod cached_definitions;
 mod cached_statements;
 mod catalog;
@@ -77,6 +78,7 @@ mod tuning;
 mod wait_semantics;
 pub use activity::*;
 pub use admission::*;
+pub use cache_entry_memory::*;
 pub use cached_definitions::*;
 pub use cached_statements::*;
 pub use catalog::*;
@@ -260,9 +262,17 @@ impl CollectionRequest {
         self.subject.validate()?;
         self.budget.validate()?;
         match &self.selection {
-            CollectionSelection::FocusedPageWait { focus } => {
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::CacheEntryMemory } => {
+                return Err(CollectionStop::InvalidPage.error());
+            }
+            CollectionSelection::CacheEntryMemory { focus } => {
                 self.subject.require_database()?;
                 if !focus.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::FocusedPageWait { focus } => {
+                if !focus.is_valid_for(&self.subject) {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
@@ -496,6 +506,27 @@ impl TelemetryRecord {
                 row.fact.redact(source.target.engine());
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
+                    (_, OperationalFact::PageWait(page)) => {
+                        accepted
+                            && page.fits_source_scope(source)
+                            && match &source.observation {
+                                SourceObservation::FocusedPageWait { result, .. } => {
+                                    result.focus.matches_capture_scope(source) && result.accepts_observation(page)
+                                }
+                                _ => true,
+                            }
+                    }
+                    (
+                        SourceObservation::CacheEntryMemory { snapshot, focus },
+                        OperationalFact::MssqlCacheEntryMemory(entry),
+                    ) => {
+                        accepted
+                            && ObservationBounds::new(&snapshot.observed_from, &snapshot.observed_until)
+                                .is_some_and(|bounds| bounds.contains(&entry.observed_at))
+                            && focus.accepts_entry(entry)
+                    }
+                    (SourceObservation::CacheEntryMemory { .. }, _)
+                    | (_, OperationalFact::MssqlCacheEntryMemory(_)) => false,
                     (SourceObservation::Diagnostics(description), OperationalFact::DiagnosticRevision(revision)) => {
                         accepted
                             && revision.controller_version == description.controller_version

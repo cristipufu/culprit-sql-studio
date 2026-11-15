@@ -42,6 +42,7 @@ impl CollectionBudget {
 #[ts(export)]
 pub enum RecipeSelector {
     Collection(TelemetryCollection),
+    CacheEntryMemory,
     FocusedPageWait,
 }
 
@@ -51,6 +52,8 @@ mod tests;
 impl RecipeSelector {
     pub fn matches(&self, request: &CollectionRequest) -> bool {
         match (self, &request.selection) {
+            (Self::CacheEntryMemory, CollectionSelection::CacheEntryMemory { .. }) => true,
+            (Self::Collection(_), CollectionSelection::CacheEntryMemory { .. }) => false,
             (Self::FocusedPageWait, CollectionSelection::FocusedPageWait { .. }) => true,
             (Self::Collection(_), CollectionSelection::FocusedPageWait { .. }) => false,
             (Self::Collection(collection), _) => *collection == request.collection(),

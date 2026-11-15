@@ -50,6 +50,9 @@ pub(super) fn record(
                 }
                 *scope = serde_json::to_value(original).map_err(|_| invalid())?;
             }
+            if stream == TelemetryStream::OperationalSamples && text(values, "FactKind")? == "page-wait" {
+                crate::analytical::page_target_contexts::restore(&mut details, &range.manifest().source)?;
+            }
             fact_record(stream, values, *details)?
         }
         TelemetryStream::QueryDefinitions

@@ -173,7 +173,75 @@ pub struct PageWaitObject {
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum PageTargetScope {
+    RequestDatabase,
+    /// The native resource reader's authority is independent of the affected request's database.
+    SharedResource {
+        context: Box<NativeReadContext>,
+    },
+}
+
+impl PageTargetScope {
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::RequestDatabase => true,
+            Self::SharedResource { context } => {
+                context.has_qualified_local_owner()
+                    && matches!((&context.target, &context.partition), (
+                        CollectionTarget::Shared(resource),
+                        SourcePartition::InstanceLocal { member: Some(member), .. }
+                    ) if resource == member)
+            }
+        }
+    }
+
+    /// Content binding only. This does not manufacture native authority or a new physical generation: the
+    /// provider must independently verify the resource, native identities and source bounds.
+    pub fn bind_identities(
+        &self,
+        database: NativeIdentity,
+        file: NativeIdentity,
+    ) -> Result<(NativeIdentity, NativeIdentity)> {
+        let Some(scope) = self.binding_key()? else { return Ok((database, file)) };
+        let database = database.qualified("page_target_scope", &scope);
+        let database_key = digest(&serde_json::to_vec(&database).map_err(|_| CollectionStop::InvalidPage.error())?);
+        let file = file.qualified("page_target_scope", scope).qualified("page_target_database", database_key);
+        Ok((database, file))
+    }
+
+    fn binding_key(&self) -> Result<Option<String>> {
+        match self {
+            Self::RequestDatabase => Ok(None),
+            Self::SharedResource { context } => {
+                if !self.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                serde_json::to_vec(&(&context.target, &context.partition))
+                    .map(|bytes| Some(digest(&bytes)))
+                    .map_err(|_| CollectionStop::InvalidPage.error())
+            }
+        }
+    }
+
+    fn matches_identities(&self, database: &NativeIdentity, file: &NativeIdentity) -> bool {
+        let Ok(Some(scope)) = self.binding_key() else {
+            return matches!(self, Self::RequestDatabase)
+                && !database.qualifiers.contains_key("page_target_scope")
+                && !file.qualifiers.contains_key("page_target_scope")
+                && !file.qualifiers.contains_key("page_target_database");
+        };
+        let Ok(bytes) = serde_json::to_vec(database) else { return false };
+        database.qualifiers.get("page_target_scope") == Some(&scope)
+            && file.qualifiers.get("page_target_scope") == Some(&scope)
+            && file.qualifiers.get("page_target_database") == Some(&digest(&bytes))
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
 pub struct MappedPageTarget {
+    pub scope: PageTargetScope,
     pub identity_basis: PageTargetIdentityBasis,
     pub database: NativeIdentity,
     pub file: NativeIdentity,
@@ -247,8 +315,10 @@ impl PageIndexOperations {
 
 impl MappedPageTarget {
     pub fn is_valid(&self) -> bool {
-        self.database.is_valid()
+        self.scope.is_valid()
+            && self.database.is_valid()
             && self.file.is_valid()
+            && self.scope.matches_identities(&self.database, &self.file)
             && self.header.is_valid()
             && (self.kind == PageWaitTargetKind::Unclassified
                 || self.kind == classify_sql_server_page_header(&self.header))
@@ -310,6 +380,38 @@ pub struct PageWaitObservedWait<'a> {
 }
 
 impl PageWaitObservation {
+    /// Shared target authority must come from this exact captured source. The affected request's database is
+    /// independent; an instance target does not move that request into the temporary database.
+    pub fn fits_source_scope(&self, source: &CollectionDescription) -> bool {
+        let Some(snapshot) = source.observation.snapshot() else { return false };
+        let Some(bounds) = ObservationBounds::new(&snapshot.observed_from, &snapshot.observed_until) else {
+            return false;
+        };
+        if !self.is_valid()
+            || !source.partition_is_consistent()
+            || snapshot.dataset != SnapshotDataset::PageWaitTargets
+            || !bounds.contains(&self.observed_from)
+            || !bounds.contains(&self.observed_until)
+        {
+            return false;
+        }
+        match self.target.as_ref().map(|target| &target.scope) {
+            Some(PageTargetScope::SharedResource { context }) => {
+                context.target == source.target
+                    && context.partition == source.partition
+                    && bounds.contains(&context.observed_from)
+                    && bounds.contains(&context.observed_until)
+            }
+            Some(PageTargetScope::RequestDatabase) => {
+                source.target.database().is_some_and(|database| self.fits_database_capture(&database.database))
+            }
+            None => match &source.target {
+                CollectionTarget::Database(database) => self.fits_database_capture(&database.database),
+                CollectionTarget::Shared(_) => source.is_partition_qualified(),
+            },
+        }
+    }
+
     pub fn observed_wait(&self) -> PageWaitObservedWait<'_> {
         match &self.task_wait {
             Some(task) => PageWaitObservedWait {
@@ -385,6 +487,18 @@ impl PageWaitObservation {
                 target.is_valid()
                     && self.request.scope == ActivityScopeBasis::RequestDatabase
                     && self.observed_address.as_ref().is_some_and(|address| address.matches_header(&target.header))
+                    && match &target.scope {
+                        PageTargetScope::RequestDatabase => true,
+                        PageTargetScope::SharedResource { context } => {
+                            let Some(shared) = ObservationBounds::new(&context.observed_from, &context.observed_until)
+                            else {
+                                return false;
+                            };
+                            shared.contains(&self.observed_from)
+                                && bounds.contains(&context.observed_until)
+                                && checks.into_iter().flatten().all(|check| shared.contains(&check.observed_at))
+                        }
+                    }
             })
             && self.index_operations.as_ref().is_none_or(|point| point.fits_observation(self, &bounds))
     }
@@ -416,6 +530,12 @@ impl PageWaitSnapshot {
                     && row.source == self.source
                     && bounds.contains(&row.observed_from)
                     && bounds.contains(&row.observed_until)
+                    && row.target.as_ref().is_none_or(|target| match &target.scope {
+                        PageTargetScope::RequestDatabase => true,
+                        PageTargetScope::SharedResource { context } => {
+                            bounds.contains(&context.observed_from) && bounds.contains(&context.observed_until)
+                        }
+                    })
                     && row.key().is_ok_and(|key| keys.insert(key))
             })
     }

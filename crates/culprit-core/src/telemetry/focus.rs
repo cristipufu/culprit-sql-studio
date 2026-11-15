@@ -28,6 +28,37 @@ pub struct ActivityWaitFocus {
 }
 
 impl ActivityWaitFocus {
+    /// A shared follow-up needs the original native member; a database route cannot confer shared authority.
+    pub fn is_valid_for(&self, subject: &CollectionSubject) -> bool {
+        self.is_valid()
+            && match subject {
+                CollectionSubject::Database => true,
+                CollectionSubject::Shared { resource } => matches!(
+                    &self.partition,
+                    SourcePartition::InstanceLocal { member: Some(member), .. } if member == resource
+                ),
+            }
+    }
+
+    /// Scope consistency only. The native reader still rechecks the original participant and both resource owners;
+    /// the caller separately authenticates the original parent. Database and instance epochs have distinct meaning.
+    pub fn matches_capture_scope(&self, source: &CollectionDescription) -> bool {
+        if !self.is_valid() || !source.partition_is_consistent() {
+            return false;
+        }
+        match &source.target {
+            CollectionTarget::Database(_) => self.target == source.target && self.partition == source.partition,
+            CollectionTarget::Shared(resource) => {
+                self.is_valid_for(&CollectionSubject::Shared { resource: resource.clone() })
+                    && source.is_partition_qualified()
+                    && matches!(
+                        &source.partition,
+                        SourcePartition::InstanceLocal { member: Some(member), .. } if member == resource
+                    )
+            }
+        }
+    }
+
     /// The caller resolves the exact receipt through the outbox/recovery owner before invoking this comparison.
     pub fn matches_parent(
         &self,

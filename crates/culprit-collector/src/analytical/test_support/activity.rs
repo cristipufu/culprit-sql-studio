@@ -163,8 +163,8 @@ pub fn assert_activity_capture(
     for record in rows {
         let expected = ExportedRecord::new(source, capture.capture(), record.clone()).unwrap();
         assert!(capture.records().iter().any(|row| row.row() == &expected), "exact native activity metadata");
+        super::assert_redacted_definition_payloads(&expected.record);
     }
     let encoded = serde_json::to_string(capture.records()).unwrap();
     assert!(!encoded.contains("private-activity-canary"));
-    assert!(!encoded.contains("9264"));
 }

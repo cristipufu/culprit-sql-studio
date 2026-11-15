@@ -25,6 +25,7 @@ pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
 pub(crate) async fn collect(
     pool: Arc<Pool>,
     requested: bool,
+    include_shared: bool,
     host: String,
     port: u16,
 ) -> (Option<PageWaitSnapshot>, Coverage) {
@@ -42,7 +43,7 @@ pub(crate) async fn collect(
         identity: IdentityDetail::Endpoint,
     };
     match ActivityReader::open(pool, options, host, port) {
-        Ok(mut reader) => collect_from(&mut reader).await,
+        Ok(mut reader) => collect_from(&mut reader, include_shared).await,
         Err(error) => {
             let mut coverage = Coverage::default();
             coverage.source_failed(&sources::PAGE_WAIT_TARGETS, &error);
@@ -53,8 +54,9 @@ pub(crate) async fn collect(
 
 pub(crate) async fn collect_from<R: NativeRead>(
     reader: &mut ActivityReader<R>,
+    include_shared: bool,
 ) -> (Option<PageWaitSnapshot>, Coverage) {
-    let result = reader.capture_page_wait_targets().await;
+    let result = reader.capture_scan_page_wait_targets(include_shared).await;
     let result = if reader.close().await == SourceShutdown::Unconfirmed {
         Err(CollectionStop::CancellationUnconfirmed.error())
     } else {

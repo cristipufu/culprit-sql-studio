@@ -41,6 +41,7 @@ pub enum CollectionSelection {
     ResourceHistory { from: String, until: String },
     DeadlockHistory { from: String, until: String },
     Activity,
+    CacheEntryMemory { focus: Box<CacheEntryMemoryFocus> },
     FocusedPageWait { focus: Box<ActivityWaitFocus> },
     Diagnostics { parent: DiagnosticCaptureRef, controller_version: u32, step_id: String },
     Snapshot { dataset: SnapshotDataset },
@@ -52,6 +53,7 @@ impl CollectionSelection {
             Self::ResourceHistory { .. } => TelemetryCollection::ResourceHistory,
             Self::DeadlockHistory { .. } => TelemetryCollection::DeadlockHistory,
             Self::Activity => TelemetryCollection::Activity,
+            Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
             Self::FocusedPageWait { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
             Self::Diagnostics { .. } => TelemetryCollection::Diagnostics,
             Self::Snapshot { dataset } => TelemetryCollection::Snapshot(*dataset),
@@ -286,6 +288,7 @@ pub enum SourceObservation {
     RetainedSamples(SampleHistoryDescription),
     RetainedEvents(EventHistoryDescription),
     Activity(ActivitySnapshotDescription),
+    CacheEntryMemory { snapshot: StateSnapshotDescription, focus: Box<CacheEntryMemoryFocus> },
     FocusedPageWait { snapshot: StateSnapshotDescription, result: Box<ActivityWaitFocusResult> },
     Diagnostics(DiagnosticCaptureDescription),
     Snapshot(StateSnapshotDescription),
@@ -298,6 +301,7 @@ impl SourceObservation {
             Self::RetainedSamples(_) => TelemetryCollection::ResourceHistory,
             Self::RetainedEvents(_) => TelemetryCollection::DeadlockHistory,
             Self::Activity(_) => TelemetryCollection::Activity,
+            Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
             Self::FocusedPageWait { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
             Self::Diagnostics(_) => TelemetryCollection::Diagnostics,
             Self::Snapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
@@ -314,6 +318,7 @@ impl SourceObservation {
                 TelemetryRange::TimeWindow { from: history.from.clone(), until: history.until.clone() }
             }
             Self::Activity(_) => TelemetryRange::Current,
+            Self::CacheEntryMemory { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
             Self::FocusedPageWait { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::Diagnostics(description) => TelemetryRange::Focused { key: description.work_key()? },
             Self::Snapshot(_) | Self::PagedSnapshot(_) => TelemetryRange::Current,
@@ -333,9 +338,12 @@ impl SourceObservation {
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
             Self::Activity(snapshot) => snapshot.is_valid(),
+            Self::CacheEntryMemory { snapshot, focus } => {
+                snapshot.is_valid() && focus.is_valid() && snapshot.dataset == SnapshotDataset::CacheEntryMemory
+            }
             Self::FocusedPageWait { snapshot, result } => snapshot.is_valid() && result.is_valid(),
             Self::Diagnostics(description) => description.is_valid(),
-            Self::Snapshot(snapshot) => snapshot.is_valid(),
+            Self::Snapshot(snapshot) => snapshot.dataset != SnapshotDataset::CacheEntryMemory && snapshot.is_valid(),
             Self::PagedSnapshot(_) => false,
         }
     }
@@ -353,13 +361,17 @@ impl SourceObservation {
     }
     pub fn snapshot(&self) -> Option<&StateSnapshotDescription> {
         match self {
-            Self::Snapshot(snapshot) | Self::FocusedPageWait { snapshot, .. } => Some(snapshot),
+            Self::Snapshot(snapshot)
+            | Self::FocusedPageWait { snapshot, .. }
+            | Self::CacheEntryMemory { snapshot, .. } => Some(snapshot),
             _ => None,
         }
     }
     pub fn accepts_snapshot_record(&self, stream: TelemetryStream, source: &str) -> bool {
         match self {
-            Self::Snapshot(snapshot) | Self::FocusedPageWait { snapshot, .. } => snapshot.accepts(stream, source),
+            Self::Snapshot(snapshot)
+            | Self::FocusedPageWait { snapshot, .. }
+            | Self::CacheEntryMemory { snapshot, .. } => snapshot.accepts(stream, source),
             Self::Diagnostics(_) => stream == TelemetryStream::OperationalSamples && source == DIAGNOSTICS_SOURCE,
             Self::PagedSnapshot(snapshot) => snapshot.accepts(stream, source),
             _ => false,
@@ -377,6 +389,9 @@ impl SourceObservation {
                 count(TelemetryStream::ActivityObservations) == u64::from(snapshot.observations)
             }
             Self::FocusedPageWait { snapshot, .. } => {
+                count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
+            }
+            Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
             Self::Diagnostics(description) => {
@@ -444,7 +459,11 @@ impl CollectionDescription {
         }
     }
     pub fn matches_request(&self, request: &CollectionRequest) -> bool {
-        if self.source.is_empty() || !self.partition_is_consistent() || !request.subject.accepts(&self.target) {
+        if request.validate().is_err()
+            || self.source.is_empty()
+            || !self.partition_is_consistent()
+            || !request.subject.accepts(&self.target)
+        {
             return false;
         }
         if let (SourceObservation::Activity(snapshot), CollectionSelection::Activity) =
@@ -466,8 +485,8 @@ impl CollectionDescription {
             return snapshot.is_valid()
                 && result.is_valid()
                 && &result.focus == focus.as_ref()
-                && self.target == focus.target
-                && self.partition == focus.partition
+                && focus.is_valid_for(&request.subject)
+                && focus.matches_capture_scope(self)
                 && snapshot.dataset == SnapshotDataset::PageWaitTargets
                 && snapshot.records <= request.budget.max_snapshot_rows
                 && snapshot.observed_from == result.observed_from
@@ -484,6 +503,17 @@ impl CollectionDescription {
                 && &description.step_id == step_id
                 && description.records.saturating_add(description.checkpoint_records)
                     <= request.budget.max_snapshot_rows;
+        }
+        if let (
+            SourceObservation::CacheEntryMemory { snapshot, focus: original },
+            CollectionSelection::CacheEntryMemory { focus },
+        ) = (&self.observation, &request.selection)
+        {
+            return focus.is_valid()
+                && original == focus
+                && snapshot.is_valid()
+                && snapshot.dataset == SnapshotDataset::CacheEntryMemory
+                && snapshot.records <= request.budget.max_snapshot_rows;
         }
         if let (SourceObservation::Snapshot(snapshot), CollectionSelection::Snapshot { dataset }) =
             (&self.observation, &request.selection)

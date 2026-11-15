@@ -2,10 +2,11 @@
 import type { NativeIdentity } from "./NativeIdentity";
 import type { PageHeaderFacts } from "./PageHeaderFacts";
 import type { PageTargetIdentityBasis } from "./PageTargetIdentityBasis";
+import type { PageTargetScope } from "./PageTargetScope";
 import type { PageWaitObject } from "./PageWaitObject";
 import type { PageWaitTargetKind } from "./PageWaitTargetKind";
 
-export type MappedPageTarget = { identity_basis: PageTargetIdentityBasis, database: NativeIdentity, file: NativeIdentity, header: PageHeaderFacts, kind: PageWaitTargetKind, 
+export type MappedPageTarget = { scope: PageTargetScope, identity_basis: PageTargetIdentityBasis, database: NativeIdentity, file: NativeIdentity, header: PageHeaderFacts, kind: PageWaitTargetKind, 
 /**
  * Missing catalog visibility preserves the header without inventing an object or index label.
  */

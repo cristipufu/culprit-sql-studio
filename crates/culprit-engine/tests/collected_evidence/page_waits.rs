@@ -1,7 +1,7 @@
 use super::fixture::Fixture;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason},
-    test_support::page_wait_evidence_cases,
+    test_support::{page_wait_evidence_cases, shared_page_wait_evidence_cases},
 };
 use culprit_core::{Snapshot, SourceOutcome, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
@@ -47,7 +47,18 @@ fn scan(source: &CollectionDescription, rows: &[TelemetryRecord]) -> Snapshot {
 #[tokio::test]
 async fn authenticated_page_targets_reuse_scan_explanations_and_reference_original_waiters_once() {
     for (source, rows) in page_wait_evidence_cases() {
-        let expected = culprit_checks::analyze(scan(&source, &rows)).page_waits.unwrap();
+        let expected = if source.target.database().is_some() {
+            culprit_checks::analyze(scan(&source, &rows)).page_waits.unwrap()
+        } else {
+            let coverage = &source.observation.snapshot().unwrap().sources[0];
+            let outcome = SourceOutcome {
+                source: coverage.source.clone(),
+                state: coverage.state,
+                reason: None,
+                reason_message: None,
+            };
+            culprit_checks::page_waits::explain(&observations(&rows), Some(&outcome)).unwrap()
+        };
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete(), "{:?}", capture.gaps());
@@ -323,9 +334,10 @@ async fn missing_page_rows_and_publication_are_store_gaps_without_rewriting_nati
     assert_eq!(result.context.read_gaps[0].reason, EvidenceGapReason::NotPublished);
 }
 
-#[tokio::test]
-async fn page_investigation_rejects_wrong_subject_dataset_family_database_and_observation_bounds() {
-    for shape in ["shared-target", "dataset", "family", "database", "before-bounds", "after-bounds"] {
+#[test]
+fn page_export_rejects_wrong_subject_dataset_database_and_observation_bounds_before_archiving() {
+    let capture = CaptureIdentity { observation_id: "invalid-page-scope".into(), revision: None };
+    for shape in ["shared-target", "dataset", "database", "before-bounds", "after-bounds"] {
         let (mut source, mut rows) = page_wait_evidence_cases().remove(0);
         let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(row), .. }) =
             &mut rows[0]
@@ -345,23 +357,141 @@ async fn page_investigation_rejects_wrong_subject_dataset_family_database_and_ob
                 let SourceObservation::Snapshot(native) = &mut source.observation else { panic!() };
                 native.dataset = SnapshotDataset::Operational;
             }
-            "family" => {}
             "database" => row.request.database = Some("another-db".into()),
             "before-bounds" => row.observed_from = "2020-01-01T11:59:59Z".into(),
             "after-bounds" => row.observed_until = "2020-01-01T12:00:02Z".into(),
             _ => unreachable!(),
         }
-        let fixture = Fixture::new(source, rows).await;
-        let family =
-            if shape == "family" { EvidenceFamily::ResourceSamples } else { EvidenceFamily::OperationalSamples };
-        let capture = fixture.read_families(&[family]).await;
-        let error = collected_resources::page_waits(&capture).unwrap_err();
-        let problem = if matches!(shape, "shared-target" | "dataset" | "family") {
-            DeliveryProblem::UnsupportedSchema
-        } else {
-            DeliveryProblem::Integrity
-        };
-        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(problem)), "{shape}");
+        let error = ExportedRecord::new(&source, &capture, rows[0].clone()).unwrap_err();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage, "{shape}");
+    }
+}
+
+#[tokio::test]
+async fn an_unrelated_archive_family_cannot_acquire_page_target_semantics() {
+    let (source, rows) = page_wait_evidence_cases().remove(0);
+    let fixture = Fixture::new(source, rows).await;
+    let capture = fixture.read_families(&[EvidenceFamily::ResourceSamples]).await;
+    assert_eq!(
+        collected_resources::page_waits(&capture).unwrap_err().detail,
+        Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::UnsupportedSchema))
+    );
+}
+
+#[tokio::test]
+async fn explicit_shared_snapshots_and_focus_retain_actual_resource_authority_and_the_original_application_waiter() {
+    let mut focused = 0;
+    for (source, rows) in shared_page_wait_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let reads_before = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let analyzed = collected_resources::page_waits(&capture).unwrap();
+        assert_eq!(analyzed.context.source.target, source.target);
+        assert_eq!(analyzed.context.source.partition, source.partition);
+        assert_eq!(analyzed.report.source_state, Some(source.observation.snapshot().unwrap().sources[0].state));
+        assert_eq!(fixture.recovery_object_reads(), reads_before);
+        for original in observations(&rows) {
+            let restored = analyzed
+                .context
+                .records
+                .iter()
+                .find_map(|record| match &record.row.record {
+                    TelemetryRecord::Operational(OperationalObservation {
+                        fact: OperationalFact::PageWait(page),
+                        ..
+                    }) => Some(page.as_ref()),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(restored, original);
+            assert_eq!(restored.request.database.as_deref(), Some("db"));
+            assert!(matches!(restored.target.as_ref().unwrap().scope, PageTargetScope::SharedResource { .. }));
+            assert!(
+                restored
+                    .request
+                    .wait
+                    .as_ref()
+                    .unwrap()
+                    .owners
+                    .iter()
+                    .all(|owner| matches!(owner, ActivityWaitOwner::Unknown { .. }))
+            );
+            assert!(restored.fits_source_scope(&source));
+            for field in ["owner", "epoch", "bounds"] {
+                let mut wrong = source.clone();
+                match field {
+                    "owner" => {
+                        let CollectionTarget::Shared(resource) = &mut wrong.target else { panic!() };
+                        resource.native.id = "wrong-native-owner".into();
+                    }
+                    "epoch" => {
+                        let SourcePartition::InstanceLocal { epoch, .. } = &mut wrong.partition else { panic!() };
+                        *epoch = Some("wrong-native-epoch".into());
+                    }
+                    "bounds" => {
+                        let frame = match &mut wrong.observation {
+                            SourceObservation::Snapshot(frame)
+                            | SourceObservation::FocusedPageWait { snapshot: frame, .. } => frame,
+                            _ => panic!(),
+                        };
+                        frame.observed_from = restored.observed_from.clone();
+                    }
+                    _ => unreachable!(),
+                }
+                assert!(!restored.fits_source_scope(&wrong), "{field}");
+            }
+        }
+        if let SourceObservation::FocusedPageWait { result, .. } = &source.observation {
+            focused += 1;
+            assert!(result.focus.target.database().is_some());
+            assert!(matches!(source.target, CollectionTarget::Shared(_)));
+            assert!(result.focus.matches_capture_scope(&source));
+            assert!(result.accepts_observation(observations(&rows)[0]));
+        }
+    }
+    assert_eq!(focused, 1, "the shared focused path is a real archived adapter case");
+}
+
+#[tokio::test]
+async fn an_empty_shared_focused_result_still_requires_the_original_native_member_and_captured_source_scope() {
+    let (mut source, _) = shared_page_wait_evidence_cases()
+        .into_iter()
+        .find(|(source, _)| matches!(source.observation, SourceObservation::FocusedPageWait { .. }))
+        .unwrap();
+    let SourceObservation::FocusedPageWait { snapshot, result } = &mut source.observation else { panic!() };
+    snapshot.records = 0;
+    snapshot.sources[0] = StateSourceCoverage::observed(snapshot.sources[0].source.clone(), 0, false);
+    result.request = PageWaitRequestState::Missing;
+    result.wait = PageWaitRelation::Unqualified;
+    let fixture = Fixture::new(source.clone(), vec![]).await;
+    let captured = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let analyzed = collected_resources::page_waits(&captured).unwrap();
+    assert!(analyzed.report.entries.is_empty());
+    assert_eq!(analyzed.report.source_state, Some(SourceState::Partial));
+    for change in ["target-owner", "partition-owner"] {
+        let mut wrong = source.clone();
+        match change {
+            "target-owner" => {
+                let CollectionTarget::Shared(resource) = &mut wrong.target else { panic!() };
+                resource.native.id = "another-native-instance".into();
+            }
+            "partition-owner" => {
+                let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut wrong.partition else {
+                    panic!()
+                };
+                member.native.id = "another-native-instance".into();
+            }
+            _ => unreachable!(),
+        }
+        assert!(wrong.observation.covers_request());
+        let fixture = Fixture::new(wrong, vec![]).await;
+        let captured = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        assert!(captured.records().is_empty());
+        assert_eq!(
+            collected_resources::page_waits(&captured).unwrap_err().detail,
+            Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)),
+            "{change}"
+        );
     }
 }
 

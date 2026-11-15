@@ -192,6 +192,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::Sequences
                     | SnapshotDataset::Cleanup
                     | SnapshotDataset::StatementGrants
+                    | SnapshotDataset::CacheEntryMemory
                     | SnapshotDataset::IndexOperations
                     | SnapshotDataset::Tables
                     | SnapshotDataset::ForeignKeys

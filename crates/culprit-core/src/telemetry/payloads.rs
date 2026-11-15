@@ -1,12 +1,13 @@
 //! One inventory of definition payloads and their locations in the native export contract.
 use super::*;
+use std::borrow::Cow;
 
 pub struct DefinitionReference<'a> {
-    pub pointer: &'static str,
+    pub pointer: Cow<'static, str>,
     pub payload: &'a DefinitionPayload,
 }
-fn reference<'a>(pointer: &'static str, payload: &'a DefinitionPayload) -> DefinitionReference<'a> {
-    DefinitionReference { pointer, payload }
+fn reference<'a>(pointer: impl Into<Cow<'static, str>>, payload: &'a DefinitionPayload) -> DefinitionReference<'a> {
+    DefinitionReference { pointer: pointer.into(), payload }
 }
 impl TelemetryRecord {
     pub fn definition_payloads(&self) -> impl Iterator<Item = DefinitionReference<'_>> {
@@ -14,9 +15,9 @@ impl TelemetryRecord {
             Self::QueryDefinition(row) => Some(reference("/record/data/sql", &row.sql)),
             Self::PlanDefinition(row) => Some(reference("/record/data/plan", &row.plan)),
             Self::Activity(row) => Some(reference("/record/data/statement", &row.statement)),
-            Self::Operational(row) => return row.fact.definition_fields().into_iter().flatten(),
-            Self::Tuning(row) => return row.fact.definition_fields().into_iter().flatten(),
-            Self::ObjectDefinition(row) => return row.fact.definition_fields().into_iter().flatten(),
+            Self::Operational(row) => return row.fact.definition_fields().into_iter(),
+            Self::Tuning(row) => return row.fact.definition_fields().into_iter(),
+            Self::ObjectDefinition(row) => return row.fact.definition_fields().into_iter(),
             Self::QueryRuntime(_)
             | Self::QueryWaits(_)
             | Self::ResourceSample(_)
@@ -26,14 +27,14 @@ impl TelemetryRecord {
             | Self::Replication(_)
             | Self::Setting(_) => None,
         };
-        [payload, None].into_iter().flatten()
+        payload.into_iter().collect::<Vec<_>>().into_iter()
     }
 }
 impl ObjectDefinitionFact {
     pub fn definition_payloads(&self) -> impl Iterator<Item = DefinitionReference<'_>> {
-        self.definition_fields().into_iter().flatten()
+        self.definition_fields().into_iter()
     }
-    fn definition_fields(&self) -> [Option<DefinitionReference<'_>>; 2] {
+    fn definition_fields(&self) -> Vec<DefinitionReference<'_>> {
         let payload = match self {
             Self::NativeCatalog(catalog) => {
                 return [
@@ -45,7 +46,10 @@ impl ObjectDefinitionFact {
                         .predicate
                         .as_ref()
                         .map(|value| reference("/record/data/fact/data/predicate/payload", &value.payload)),
-                ];
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
             }
             Self::Statement(statement) => Some(reference("/record/data/fact/data/sql", &statement.sql)),
             Self::MssqlColumn(column) => {
@@ -58,7 +62,10 @@ impl ObjectDefinitionFact {
                         .computed
                         .as_ref()
                         .map(|value| reference("/record/data/fact/data/computed/payload", &value.payload)),
-                ];
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
             }
             Self::MssqlCheckConstraint(value) => {
                 Some(reference("/record/data/fact/data/definition/payload", &value.definition.payload))
@@ -71,7 +78,10 @@ impl ObjectDefinitionFact {
                 return [
                     Some(reference("/record/data/fact/data/statement/payload", &value.statement.payload)),
                     Some(reference("/record/data/fact/data/estimated_plan/payload", &value.estimated_plan.payload)),
-                ];
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
             }
             Self::RetainedPlan(value) => {
                 Some(reference("/record/data/fact/data/definition/plan", &value.definition.plan))
@@ -81,11 +91,11 @@ impl ObjectDefinitionFact {
             }
             Self::MssqlForeignKey(_) | Self::MssqlObject(_) | Self::MssqlDmlTrigger(_) => None,
         };
-        [payload, None]
+        payload.into_iter().collect()
     }
 }
 impl OperationalFact {
-    fn definition_fields(&self) -> [Option<DefinitionReference<'_>>; 2] {
+    fn definition_fields(&self) -> Vec<DefinitionReference<'_>> {
         let payload = match self {
             Self::CatalogCounters(value) => {
                 return [
@@ -99,7 +109,20 @@ impl OperationalFact {
                         .predicate
                         .as_ref()
                         .map(|value| reference("/record/data/fact/data/catalog/predicate/payload", &value.payload)),
-                ];
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+            }
+            Self::MssqlCacheEntryMemory(value) => {
+                return value
+                    .statements
+                    .iter()
+                    .enumerate()
+                    .map(|(index, statement)| {
+                        reference(format!("/record/data/fact/data/statements/{index}/statement"), &statement.statement)
+                    })
+                    .collect();
             }
             Self::MssqlIndex(value) => {
                 value.filter.as_ref().map(|value| reference("/record/data/fact/data/filter/payload", &value.payload))
@@ -141,17 +164,17 @@ impl OperationalFact {
             | Self::MysqlErrorLog(_)
             | Self::SuspectPages { .. } => None,
         };
-        [payload, None]
+        payload.into_iter().collect()
     }
 }
 impl TuningFact {
-    fn definition_fields(&self) -> [Option<DefinitionReference<'_>>; 2] {
+    fn definition_fields(&self) -> Vec<DefinitionReference<'_>> {
         let payload = match self {
             Self::Recommendation(value) => Some(reference("/record/data/fact/data/script", &value.script)),
             Self::QueryHint(value) => Some(reference("/record/data/fact/data/hint", &value.hint)),
             Self::AutomaticOption(_) | Self::ForcedPlan(_) => None,
         };
-        [payload, None]
+        payload.into_iter().collect()
     }
 }
 
@@ -170,7 +193,7 @@ mod tests {
         let fields = record.definition_payloads().collect::<Vec<_>>();
         assert_eq!(fields.len(), 1);
         for field in fields {
-            assert_eq!(value.pointer(field.pointer).unwrap(), &serde_json::to_value(field.payload).unwrap());
+            assert_eq!(value.pointer(field.pointer.as_ref()).unwrap(), &serde_json::to_value(field.payload).unwrap());
         }
     }
 }

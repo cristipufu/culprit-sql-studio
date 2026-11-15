@@ -206,7 +206,8 @@ observed event, digest or database label is context, not the allocating statemen
 mode sums unrelated amounts, derives a rate from one observation, constructs a synthetic database snapshot or
 reconnects to the monitored server. Their report entries reference the original native facts by key and identity.
 
-`page-waits` explains a database-target `page-wait-targets` capture through the scan's pure view. It distinguishes
+`page-waits` explains database or explicitly assigned shared-resource `page-wait-targets` captures, including
+focused captures, through the scan's pure view. It distinguishes
 memory-page contention from page I/O and references the original request and wait resource. Page mapping and
 request rechecks are independent: checked current page metadata can remain after an original wait or request ends.
 Before/after clocks distinguish a matching statement, a changed request and a wait that is no longer observed.
@@ -220,11 +221,23 @@ Verified SQL Server headers distinguish PFS, GAM, SGAM and IAM maps from heap an
 address the observed allocation mechanism; page-I/O waits retain storage guidance. These classes do not establish
 which writer caused contention or qualify an application-database reader to inspect shared tempdb.
 
+The SQL Server shared-tempdb reader separately verifies the native instance, process, tempdb and selected files.
+The affected request keeps its application database; the mapped page keeps its shared-resource owner. Scans reuse
+that reader when both page-target and shared-resource collection are selected. One population supplies at most eight
+targeted page addresses, within the existing read envelope. Shared source names remain private to authenticated
+recovery metadata; warehouse facts retain opaque owner references. Automatic escalation from a database episode
+to a shared-resource investigation still requires cross-resource intent and production-cost qualification.
+The captured waiter population remains partial; an empty result cannot establish that the whole instance had no
+tempdb contention.
+
 `cached-plans` analyzes `cached-definitions` or `retained-plans` captures from `object-definitions`. It reuses the native
 plan parsers and existing plan insights. SQL Server statement selection requires one matching native hash, or one
 unambiguous statement when the hash is unavailable. Original module metadata can establish a cached TVP input;
 another capture's module header cannot supply missing historical metadata. Estimated rows, actual rows and cache
 execution counters remain separate. Yugabyte node-cache counters retain node scope and use the Yugabyte parser.
+Available SQL Server parameter metadata retains names, types and explicit availability states. A native comparison
+describes only compiled/runtime representations in the same selected actual plan; literals and new value hashes
+are not retained. That difference alone establishes neither parameter skew nor harmful cached-plan reuse.
 The derived report references exact definitions and omits duplicate SQL/XML and executable change SQL. Truncated
 warehouse previews remain explicit recovery gaps; this mode does not fetch the missing native body automatically.
 Add `--with-recovery-payloads` to either `read` or `analyze` to permit bounded native recovery reads. For example:
@@ -260,6 +273,19 @@ Last/minimum/maximum values are not combined into a synthetic execution, and a b
 cache row does not prove recovery. Native partial/unavailable coverage and warehouse decoding gaps stay distinct;
 readable positive entries survive a gap without rewriting the original source header. Complete statement text that
 exceeds the UTF-8 warehouse preview uses the same explicit bounded recovery option; no source query is executed.
+
+`cache-entry-memory` explains selected native cache objects from `operational-samples`. Each object's bytes and
+lookup/reference counters appear once even when several selected statements share it. Native cache lookups are
+separate from execution and compilation counts. Different recorded cache-key attributes can explain separate
+contexts for the same exact batch and statement; they do not establish wasted memory or current memory pressure.
+The authenticated capture retains the exact original statement selectors. Missing selectors cannot trigger a
+cache-wide search, and an ordinary snapshot cannot bypass selection or publish an empty selected-cache report.
+
+Use `collect once --selection FILE` for an exact serialized `CollectionSelection`, with the normal output and
+budget flags. The JSON file is limited to 1 MiB and replaces `--collection`, `--from` and `--until`. A cache-memory
+selection uses `kind: "cache-entry-memory"` and a `focus` containing the original `NativeReadContext` and selected
+`CachedStatementContext` values. Obtain those from captured source/definition evidence; a query hash alone is
+insufficient. This investigation remains cost-unqualified and does not expand default scans.
 
 `runtime-distributions` inspects a database-target `runtime-distributions` capture. Every distribution retains its
 own native statement identity, observation clock, source, reset qualification and population. Native histogram

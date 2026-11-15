@@ -69,6 +69,16 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if let SourceObservation::CacheEntryMemory { snapshot, focus } = &self.observation
+            && (!focus.is_valid()
+                || focus.context.target != self.target
+                || focus.context.partition != self.partition
+                || !snapshot.is_valid()
+                || snapshot.dataset != SnapshotDataset::CacheEntryMemory
+                || ObservationBounds::new(&focus.context.observed_until, &snapshot.observed_from).is_none())
+        {
+            return false;
+        }
         if let SourceObservation::Diagnostics(description) = &self.observation
             && (!description.is_valid()
                 || description

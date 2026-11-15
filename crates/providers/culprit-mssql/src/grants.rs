@@ -1,5 +1,4 @@
 //! One native cache relation and decoder retain original statement-grant observations for scans and telemetry.
-mod projection;
 use crate::{
     read::{NativeRead, Parameter, ReadError, integer, invalid_data, optional_integer, optional_text},
     value::Rec,
@@ -92,7 +91,10 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<StatementGrantStatist
         if measured { Ok(optional_integer(row, name)?.map(|value| value.to_string())) } else { Ok(None) }
     };
     let value = StatementGrantStatistics {
-        statement: projection::statement(&context, optional_text(row, "text_prefix")?.as_deref()),
+        statement: crate::cached_statements::statement_from_prefix(
+            &context,
+            optional_text(row, "text_prefix")?.as_deref(),
+        ),
         context,
         available_columns: layout.columns.clone(),
         executions: measured.then(|| integer(row, "execution_count").map(|value| value.to_string())).transpose()?,

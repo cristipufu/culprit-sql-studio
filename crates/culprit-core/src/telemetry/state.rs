@@ -16,6 +16,7 @@ pub enum SnapshotDataset {
     Replication,
     Settings,
     PlanCacheSummary,
+    CacheEntryMemory,
     Tuning,
     StatementGrants,
     CurrentRequestMemory,
@@ -52,6 +53,7 @@ impl SnapshotDataset {
             | Self::Cleanup
             | Self::Operational
             | Self::PlanCacheSummary
+            | Self::CacheEntryMemory
             | Self::StatementGrants
             | Self::CurrentRequestMemory
             | Self::SessionMemory
@@ -445,6 +447,7 @@ pub enum OperationalFact {
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
     MssqlStatementGrants(Box<StatementGrantStatistics>),
+    MssqlCacheEntryMemory(Box<MssqlCacheEntryMemory>),
     MssqlIndexOperations(Box<MssqlIndexOperations>),
     MssqlTable(Box<MssqlTableSnapshot>),
     MssqlStatistics(Box<MssqlStatisticsSnapshot>),
@@ -477,6 +480,7 @@ impl OperationalFact {
             Self::RuntimeDistribution(observation) => observation.key(),
             Self::DiagnosticRevision(revision) => Ok(revision.id.clone()),
             Self::MssqlStatementGrants(grants) => grants.context.identity.key(),
+            Self::MssqlCacheEntryMemory(entry) => entry.key(),
             Self::MssqlIndexOperations(index) => index.identity.key(),
             Self::MssqlTable(table) => table.identity.key(),
             Self::MssqlStatistics(statistics) => statistics.key(),
@@ -507,6 +511,7 @@ impl OperationalFact {
             Self::PostgresLog(observation) => observation.redact(),
             Self::SessionMemory(_) => {}
             Self::PageWait(observation) => observation.redact(engine),
+            Self::MssqlCacheEntryMemory(entry) => entry.redact(engine),
             Self::TaskSpace(observation) => observation.redact(engine),
             Self::MssqlStatementGrants(grants) => {
                 if let DefinitionPayload::Available { text, .. } = &grants.statement {
@@ -578,6 +583,7 @@ impl OperationalFact {
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),
             Self::MssqlStatementGrants(grants) => grants.is_valid(),
+            Self::MssqlCacheEntryMemory(entry) => entry.is_valid(),
             Self::MssqlIndexOperations(index) => index.is_valid(),
             Self::MssqlTable(table) => table.is_valid(),
             Self::MssqlStatistics(statistics) => statistics.is_valid(),

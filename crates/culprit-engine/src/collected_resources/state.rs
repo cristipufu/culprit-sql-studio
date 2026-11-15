@@ -123,9 +123,7 @@ fn native_state(
     dataset: SnapshotDataset,
     family: EvidenceFamily,
 ) -> Result<&StateSnapshotDescription> {
-    let SourceObservation::Snapshot(native) = &capture.source().observation else {
-        return Err(DeliveryProblem::UnsupportedSchema.error());
-    };
+    let native = capture.source().observation.snapshot().ok_or_else(|| DeliveryProblem::UnsupportedSchema.error())?;
     if native.dataset != dataset || dataset.stream() != family.stream() || !capture.families().contains(&family) {
         return Err(DeliveryProblem::UnsupportedSchema.error());
     }

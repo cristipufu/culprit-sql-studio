@@ -175,7 +175,7 @@ async fn pressure_cancellation_and_timeouts_stop_all_follow_up_sql_and_owned_clo
             let mut supplied = replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
             supplied[phase] = Err(ReadError::Stopped(stop));
             let mut native = reader(supplied);
-            let (snapshot, coverage) = crate::page_waits::collect_from(&mut native).await;
+            let (snapshot, coverage) = crate::page_waits::collect_from(&mut native, false).await;
             assert!(snapshot.is_none());
             assert_eq!(native.query_count(), phase as u32 + 1);
             assert_eq!(native.io.closed, 1);
@@ -233,7 +233,7 @@ async fn regressed_native_point_clock_and_unconfirmed_close_cannot_publish_count
 
     let mut native = reader(replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]));
     native.io.shutdown = SourceShutdown::Unconfirmed;
-    let (captured, coverage) = crate::page_waits::collect_from(&mut native).await;
+    let (captured, coverage) = crate::page_waits::collect_from(&mut native, false).await;
     assert!(captured.is_none());
     assert_eq!(native.io.closed, 1);
     assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Unavailable);

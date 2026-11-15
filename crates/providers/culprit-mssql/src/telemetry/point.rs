@@ -67,6 +67,7 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::Sequences
         | SnapshotDataset::Cleanup
         | SnapshotDataset::StatementGrants
+        | SnapshotDataset::CacheEntryMemory
         | SnapshotDataset::IndexOperations
         | SnapshotDataset::Tables
         | SnapshotDataset::ForeignKeys

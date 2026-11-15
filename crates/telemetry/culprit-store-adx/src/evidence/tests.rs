@@ -8,6 +8,7 @@ use culprit_core::telemetry::*;
 use serde_json::json;
 
 mod activity;
+mod cache_entry_memory;
 mod cached_runtime;
 mod cleanup;
 mod diagnostics;

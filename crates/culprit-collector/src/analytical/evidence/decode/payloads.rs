@@ -34,7 +34,7 @@ pub(super) fn details(values: &Map<String, Value>, references: &References<'_>) 
 
 pub(super) fn validate_inventory(references: &References<'_>, record: &TelemetryRecord) -> Result<()> {
     let expected = record.definition_payloads().map(|field| field.pointer).collect::<BTreeSet<_>>();
-    if !expected.iter().copied().eq(references.keys().copied()) {
+    if !expected.iter().map(|pointer| pointer.as_ref()).eq(references.keys().copied()) {
         return Err(invalid());
     }
     Ok(())

@@ -13,6 +13,7 @@ mod index_context;
 mod native_tests;
 mod participants;
 mod rows;
+mod shared_tempdb;
 mod sql;
 mod task_waits;
 #[cfg(test)]
@@ -35,8 +36,17 @@ pub(crate) struct PageWaitCapture {
 }
 pub(crate) struct PageWaitGuard(context::LookupContext);
 impl PageWaitCapture {
+    pub(crate) fn collection_target(&self) -> CollectionTarget {
+        match &self.guard.0.shared {
+            Some(shared) if self.guard.0.shared_only => shared.target(),
+            _ => self.context.database.clone().into(),
+        }
+    }
     pub(crate) fn source_partition(&self) -> Result<SourcePartition> {
-        self.guard.0.authority.source_partition()
+        match &self.guard.0.shared {
+            Some(shared) if self.guard.0.shared_only => Ok(shared.partition()),
+            _ => self.guard.0.authority.source_partition(),
+        }
     }
     pub(crate) fn task_visibility_unavailable(&self) -> bool {
         self.guard.0.task_visibility == Some(false)
@@ -82,10 +92,31 @@ impl Candidate {
 impl<R: NativeRead> ActivityReader<R> {
     /// The caller owns confirmed close and stages the returned data until that close succeeds.
     pub(crate) async fn capture_page_wait_targets(&mut self) -> Result<PageWaitCapture> {
+        self.capture_scan_page_wait_targets(false).await
+    }
+
+    pub(crate) async fn capture_scan_page_wait_targets(&mut self, include_shared: bool) -> Result<PageWaitCapture> {
         if !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
             return Err(invalid_data());
         }
-        let initial = context::initial(self).await?;
+        let initial = context::initial_scan(self, include_shared).await?;
+        let population = self.page_population().await?;
+        if !initial.matches_initial(&population.frame) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        self.capture_selected_page_wait_targets(population, initial, LookupAdmission::ObservedPopulation).await
+    }
+
+    /// Caller admission must independently own this actual shared resource. The reader verifies that native
+    /// resource on its existing connection; a configured route/name never grants shared-target authority.
+    pub(crate) async fn capture_shared_tempdb_page_wait_targets(
+        &mut self,
+        resource: &SharedResourceIdentity,
+    ) -> Result<PageWaitCapture> {
+        if !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
+            return Err(invalid_data());
+        }
+        let initial = context::initial_shared(self, resource).await?;
         let population = self.page_population().await?;
         if !initial.matches_initial(&population.frame) {
             return Err(CollectionStop::SourceChanged.error());
@@ -107,12 +138,14 @@ impl<R: NativeRead> ActivityReader<R> {
         if candidates.is_empty() {
             return self.finish_page_capture(frame, candidates, limited, initial).await;
         }
-        if let Some(unavailable) = initial.unavailable() {
-            for candidate in &mut candidates {
-                if candidate.is_pending() {
-                    candidate.withhold(unavailable);
-                }
+        for candidate in &mut candidates {
+            if candidate.is_pending()
+                && let Some(unavailable) = candidate.address.and_then(|address| initial.unavailable_for(address))
+            {
+                candidate.withhold(unavailable);
             }
+        }
+        if !candidates.iter().any(Candidate::is_pending) {
             if admission == LookupAdmission::ObservedPopulation {
                 self.enrich_page_participants(&mut frame, &keys).await?;
             }
@@ -149,7 +182,7 @@ impl<R: NativeRead> ActivityReader<R> {
             return self.finish_page_capture(frame, candidates, limited, initial).await;
         }
         self.admit_page_headers(&initial).await?;
-        let headers_before = match self.page_headers(&addresses).await {
+        let headers_before = match self.page_headers(&addresses, &initial).await {
             Ok(rows) => rows,
             Err(error) if stops_remaining_reads(&error) => return Err(error),
             Err(error) => {
@@ -159,13 +192,23 @@ impl<R: NativeRead> ActivityReader<R> {
             }
         };
         self.enrich_page_participants(&mut frame, &keys).await?;
-        let index_read = index_context::ReadPlan::prepare(&mut self.io, &initial, &headers_before).await?;
+        // The existing index function/catalog route is application-database scoped. A shared page does not
+        // authorize that call against tempdb; its missing targeted index attribution remains explicit.
+        let index_read = if initial.shared_only {
+            index_context::ReadPlan::Empty
+        } else {
+            index_context::ReadPlan::prepare(&mut self.io, &initial, &headers_before).await?
+        };
         self.admit_page_headers(&initial).await?;
         let index_points = index_read.acquire(&mut self.io).await?;
         for candidate in &mut candidates {
             candidate.index_operations = candidate.address.and_then(|address| index_points.get(&address).cloned());
+            if candidate.address.is_some_and(|address| initial.shared_for(address).is_some()) && candidate.is_pending()
+            {
+                candidate.index_operations = Some(PageIndexOperations::Unavailable);
+            }
         }
-        let headers_after = match self.page_headers(&addresses).await {
+        let headers_after = match self.page_headers(&addresses, &initial).await {
             Ok(rows) => rows,
             Err(error) if stops_remaining_reads(&error) => return Err(error),
             Err(error) => {
@@ -185,6 +228,7 @@ impl<R: NativeRead> ActivityReader<R> {
         if !initial.same_source(&final_context) {
             return Err(CollectionStop::SourceChanged.error());
         }
+        initial.shared = final_context.shared.clone();
         for candidate in &mut candidates {
             if !candidate.is_pending() {
                 continue;
@@ -250,7 +294,7 @@ impl<R: NativeRead> ActivityReader<R> {
                 Err(_) => candidate.withhold(PageWaitResolution::UnverifiedSource),
             }
         }
-        finish(frame, candidates, limited, initial, final_context.authority.activity.at)
+        finish(frame, candidates, limited, initial, final_context.observed_until().to_owned())
     }
 
     async fn admit_page_headers(&mut self, context: &context::LookupContext) -> Result<()> {
@@ -293,26 +337,56 @@ impl<R: NativeRead> ActivityReader<R> {
         {
             return Err(CollectionStop::SourceChanged.error());
         }
-        finish(frame, candidates, limited, initial, checked.authority.activity.at)
+        let until = checked.observed_until().to_owned();
+        let mut initial = initial;
+        initial.shared = checked.shared;
+        finish(frame, candidates, limited, initial, until)
     }
 
-    async fn page_headers(&mut self, addresses: &BTreeSet<PageAddress>) -> Result<BTreeMap<PageAddress, HeaderRecord>> {
-        if addresses.is_empty() || addresses.len() > MAX_PAGES {
+    async fn page_headers(
+        &mut self,
+        addresses: &BTreeSet<PageAddress>,
+        context: &context::LookupContext,
+    ) -> Result<BTreeMap<PageAddress, HeaderRecord>> {
+        if addresses.is_empty()
+            || addresses.len() > MAX_PAGES
+            || addresses.iter().any(|address| !context.accepts(*address))
+        {
             return Err(invalid_data());
         }
+        let shared = addresses.iter().any(|address| context.shared_for(*address).is_some());
+        let request_database = addresses.iter().any(|address| context.shared_for(*address).is_none());
+        let groups: &[(&str, Option<bool>)] = if shared && request_database {
+            &[("request_database", Some(false)), ("shared_tempdb", Some(true))]
+        } else {
+            &[("", None)]
+        };
         let mut xml = String::from("<pages>");
-        for (ordinal, address) in addresses.iter().enumerate() {
-            xml.push_str(&format!(
-                "<page ordinal=\"{ordinal}\" database=\"{}\" file=\"{}\" page=\"{}\"/>",
-                address.database, address.file, address.page
-            ));
+        for (name, shared_group) in groups {
+            if !name.is_empty() {
+                xml.push_str(&format!("<{name}>"));
+            }
+            for (ordinal, address) in addresses.iter().enumerate() {
+                if shared_group.is_some_and(|shared| shared != context.shared_for(*address).is_some()) {
+                    continue;
+                }
+                xml.push_str(&format!(
+                    "<page ordinal=\"{ordinal}\" database=\"{}\" file=\"{}\" page=\"{}\"/>",
+                    address.database, address.file, address.page
+                ));
+            }
+            if !name.is_empty() {
+                xml.push_str(&format!("</{name}>"));
+            }
         }
         xml.push_str("</pages>");
-        let rows = self
-            .io
-            .query(&sql::headers(), vec![Parameter::Text(xml)], addresses.len())
-            .await
-            .map_err(ReadError::into_error)?;
+        let sql = match (shared, request_database) {
+            (true, true) => sql::headers_with_shared_tempdb(),
+            (true, false) => sql::shared_tempdb_headers(),
+            _ => sql::headers(),
+        };
+        let rows =
+            self.io.query(&sql, vec![Parameter::Text(xml)], addresses.len()).await.map_err(ReadError::into_error)?;
         if rows.len() != addresses.len() {
             return Err(invalid_data());
         }
@@ -358,8 +432,7 @@ fn select(
             let state = match address {
                 None => LookupState::Unresolved(PageWaitResolution::UnrecognizedAddress),
                 Some(address)
-                    if address.database != context.authority.database_id
-                        || record.facts.scope != ActivityScopeBasis::RequestDatabase =>
+                    if !context.accepts(address) || record.facts.scope != ActivityScopeBasis::RequestDatabase =>
                 {
                     LookupState::Unresolved(PageWaitResolution::OutsideDatabase)
                 }
@@ -430,12 +503,21 @@ fn finish(
     frame: ActivityFrame,
     candidates: Vec<Candidate>,
     limited: bool,
-    guard: context::LookupContext,
+    mut guard: context::LookupContext,
     until: String,
 ) -> Result<PageWaitCapture> {
     let context = guard.capture_context()?;
     let records: BTreeMap<_, _> =
         frame.records.into_iter().enumerate().map(|(index, row)| (index, row.into_redacted_observation())).collect();
+    if let Some(shared) = &mut guard.shared {
+        for candidate in &candidates {
+            if let LookupState::Observed { target } = &candidate.state
+                && matches!(target.scope, PageTargetScope::SharedResource { .. })
+            {
+                shared.retain_file(target)?;
+            }
+        }
+    }
     let observations = candidates
         .into_iter()
         .map(|candidate| {
@@ -491,7 +573,7 @@ fn chronological(instants: &[&str]) -> bool {
 }
 
 fn mapped_target(context: &context::LookupContext, record: &HeaderRecord) -> Result<MappedPageTarget> {
-    let (basis, database) = context.database_identity()?;
+    let (basis, database) = context.database_identity(record.address)?;
     let guid = record.catalog.file_guid.as_ref().ok_or_else(invalid_data)?;
     if record.catalog.file_state != Some(0) || record.catalog.file_type != Some(0) {
         return Err(invalid_data());
@@ -517,7 +599,13 @@ fn mapped_target(context: &context::LookupContext, record: &HeaderRecord) -> Res
     if let Some(created) = &record.catalog.file_create_lsn {
         file = file.qualified("create_lsn", created);
     }
+    let scope = match context.shared_for(record.address) {
+        Some(shared) => PageTargetScope::SharedResource { context: Box::new(shared.read_context()?) },
+        None => PageTargetScope::RequestDatabase,
+    };
+    let (database, file) = scope.bind_identities(database, file)?;
     let target = MappedPageTarget {
+        scope,
         identity_basis: basis,
         database,
         file,

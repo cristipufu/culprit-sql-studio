@@ -158,7 +158,7 @@ async fn task_cancellation_limits_source_fences_and_unconfirmed_close_never_publ
             Ok(vec![task_row("0000000000000101", 1)]),
             Err(ReadError::Stopped(stop)),
         ]);
-        let (snapshot, coverage) = crate::page_waits::collect_from(&mut native).await;
+        let (snapshot, coverage) = crate::page_waits::collect_from(&mut native, false).await;
         assert!(snapshot.is_none());
         assert_eq!(native.query_count(), 3);
         assert_eq!(native.io.closed, 1);
@@ -172,7 +172,7 @@ async fn task_cancellation_limits_source_fences_and_unconfirmed_close_never_publ
     let mut io = FakeRead::new(replies(vec![task_row("0000000000000101", 1)]));
     io.shutdown = SourceShutdown::Unconfirmed;
     let mut native = support::reader_with_native(io);
-    let (snapshot, _) = crate::page_waits::collect_from(&mut native).await;
+    let (snapshot, _) = crate::page_waits::collect_from(&mut native, false).await;
     assert!(snapshot.is_none());
     assert_eq!(native.io.closed, 1);
 }
@@ -224,7 +224,7 @@ async fn unverified_task_visibility_keeps_readable_coordinators_and_empty_frames
             vec![Ok(vec![support::context()]), Ok(vec![empty]), Ok(vec![support::context()])]
         };
         let mut native = support::reader(replies);
-        let (snapshot, coverage) = crate::page_waits::collect_from(&mut native).await;
+        let (snapshot, coverage) = crate::page_waits::collect_from(&mut native, false).await;
         assert_eq!(snapshot.unwrap().observations.len(), usize::from(present));
         let outcome = &coverage.outcomes()[0];
         assert_eq!(outcome.state, culprit_core::SourceState::Partial);

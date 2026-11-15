@@ -2,7 +2,7 @@
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Value, json};
 
-pub const PREPARATION_VERSION: u32 = 4;
+pub const PREPARATION_VERSION: u32 = 5;
 const MAX_PREVIEW_BYTES: usize = 1024;
 const MAX_INLINE_DETAIL_BYTES: usize = 128 * 1024;
 
@@ -10,7 +10,7 @@ pub fn prepare(input: &mut Value, record: &TelemetryRecord, target: &CollectionT
     input["_projection"] = json!({"payloads":[]});
     for field in record.definition_payloads() {
         let pointer = field.pointer;
-        let payload = input.pointer_mut(pointer).ok_or_else(invalid)?;
+        let payload = input.pointer_mut(pointer.as_ref()).ok_or_else(invalid)?;
         let mut reference = payload_reference(payload)?;
         reference["pointer"] = json!(pointer);
         *payload = reference.clone();
@@ -63,6 +63,13 @@ fn fact(input: &mut Value, key: &str) -> Result<()> {
     detail(input, details)
 }
 fn operational(input: &mut Value, row: &OperationalObservation) -> Result<()> {
+    if let OperationalFact::PageWait(page) = &row.fact
+        && let Some(target) = &page.target
+        && let PageTargetScope::SharedResource { context } = &target.scope
+    {
+        *input.pointer_mut("/record/data/fact/data/target/scope/context").ok_or_else(invalid)? =
+            super::page_target_contexts::project(context)?;
+    }
     if let OperationalFact::DiagnosticRevision(revision) = &row.fact {
         // The authenticated recovery description owns every original native scope. This opaque reference also
         // preserves older replica epochs without duplicating private database or compute-member identity.

@@ -1,6 +1,7 @@
 use super::*;
 use crate::Engine;
 mod index_operations;
+mod shared;
 mod tasks;
 
 const SOURCE: &str = crate::source_id::PAGE_WAIT_TARGETS;
@@ -14,6 +15,7 @@ fn resource() -> ObservedWaitResource {
 
 fn target() -> MappedPageTarget {
     MappedPageTarget {
+        scope: PageTargetScope::RequestDatabase,
         identity_basis: PageTargetIdentityBasis::LocalDatabaseFileEpoch,
         database: NativeIdentity::new("5").qualified("database_guid", "native-database-guid"),
         file: NativeIdentity::new("1").qualified("file_guid", "native-file-guid"),
@@ -435,7 +437,7 @@ fn ordinary_redaction_preserves_native_client_context_and_the_payload_inventory_
     let fields = record.definition_payloads().collect::<Vec<_>>();
     assert_eq!(fields.len(), 1);
     let json = serde_json::json!({"record": &record});
-    assert_eq!(json.pointer(fields[0].pointer).unwrap(), &serde_json::to_value(fields[0].payload).unwrap());
+    assert_eq!(json.pointer(fields[0].pointer.as_ref()).unwrap(), &serde_json::to_value(fields[0].payload).unwrap());
 }
 
 #[test]

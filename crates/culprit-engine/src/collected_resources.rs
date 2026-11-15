@@ -8,6 +8,8 @@ mod state;
 use state::CapturedState;
 mod cached_plans;
 pub use cached_plans::cached_plans;
+mod cache_entry_memory;
+pub use cache_entry_memory::cache_entry_memory;
 mod cleanup;
 pub use cleanup::cleanup;
 mod tuning;

@@ -281,7 +281,7 @@ async fn source_changes_after_frozen_page_delivery_cannot_verify_the_capture() {
 async fn scans_and_frozen_collection_export_the_same_exact_index_point_and_qualification() {
     let rows = vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")];
     let mut scan_reader = reader(crate::activity::page_targets::tests::index_operations::replies(rows.clone()));
-    let (scan, coverage) = crate::page_waits::collect_from(&mut scan_reader).await;
+    let (scan, coverage) = crate::page_waits::collect_from(&mut scan_reader, false).await;
     let scan = scan.unwrap();
     assert_eq!(coverage.outcomes()[0].state, culprit_core::SourceState::Partial);
     assert_eq!(crate::activity::memory::tests::closed(&scan_reader), 1);

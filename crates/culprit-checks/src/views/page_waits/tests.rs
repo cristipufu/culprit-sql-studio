@@ -41,6 +41,7 @@ pub(crate) fn observation(session: &str, kind: WaitResourceKind) -> PageWaitObse
         observed_address: Some(PageWaitAddress { database_id: 7, file_id: 1, page_id: 4144 }),
         resolution: PageWaitResolution::ObservedAtBothBounds,
         target: Some(Box::new(MappedPageTarget {
+            scope: PageTargetScope::RequestDatabase,
             identity_basis: PageTargetIdentityBasis::LocalDatabaseFileEpoch,
             database: NativeIdentity::new("7").qualified("instance_epoch", "native-epoch"),
             file: NativeIdentity::new("native-file-guid"),

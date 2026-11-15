@@ -140,6 +140,18 @@ pub(crate) fn compilation(report: &CompilationReport) -> String {
     )
 }
 
+pub(crate) fn cache_entry_memory(report: &culprit_core::CacheEntryMemoryReport) -> String {
+    render(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
+            limitations: &report.limitations,
+        },
+        report.entries.iter().map(|entry| entry.title.as_str()),
+    )
+}
+
 pub(crate) fn cached_plans(report: &CachedPlanReport) -> String {
     let titles = report
         .entries

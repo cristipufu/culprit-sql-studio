@@ -99,6 +99,7 @@ pub mod source_id {
     pub const SHARED_MEMORY_ALLOCATIONS: &str = "shared memory allocations";
     pub const SHARED_RESOURCE_DETAILS: &str = "shared-resource-details";
     pub const CURRENT_REQUEST_MEMORY: &str = "current request memory";
+    pub const CACHE_ENTRY_MEMORY: &str = "cache entry memory";
     pub const SESSION_MEMORY: &str = "session memory";
     pub const PAGE_WAIT_TARGETS: &str = "page wait targets";
     pub const TASK_SPACE: &str = "task space";
@@ -203,6 +204,7 @@ pub mod source_id {
         SHARED_MEMORY_ALLOCATIONS,
         SHARED_RESOURCE_DETAILS,
         CURRENT_REQUEST_MEMORY,
+        CACHE_ENTRY_MEMORY,
         SESSION_MEMORY,
         PAGE_WAIT_TARGETS,
         TASK_SPACE,

@@ -45,7 +45,19 @@ pub(super) fn focused_budget(requested: &CollectionBudget) -> CollectionBudget {
 }
 impl<R: NativeRead> PageWaitSource<R> {
     pub(super) fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {
-        request.subject.require_database()?;
+        request.validate()?;
+        if !matches!(
+            &request.subject,
+            CollectionSubject::Database
+                | CollectionSubject::Shared {
+                    resource: SharedResourceIdentity { kind: SharedResourceKind::Instance, .. }
+                }
+        ) {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::t!("collection.unsupported"),
+            ));
+        }
         if !matches!(
             request.selection,
             CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }
@@ -59,15 +71,28 @@ impl<R: NativeRead> PageWaitSource<R> {
 #[async_trait::async_trait]
 impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
     async fn observe(&mut self, request: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
-        let (captured, result) = match &request.selection {
-            CollectionSelection::FocusedPageWait { focus } => {
+        let (captured, result) = match (&request.selection, &request.subject) {
+            (CollectionSelection::FocusedPageWait { focus }, CollectionSubject::Database) => {
                 let focused = self.reader.capture_focused_page_wait_targets(focus).await?;
                 (focused.capture, Some(focused.result))
             }
-            _ => (self.reader.capture_page_wait_targets().await?, None),
+            (CollectionSelection::FocusedPageWait { focus }, CollectionSubject::Shared { resource }) => {
+                let focused = self.reader.capture_shared_tempdb_page_wait_focus(focus, resource).await?;
+                (focused.capture, Some(focused.result))
+            }
+            (
+                CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets },
+                CollectionSubject::Database,
+            ) => (self.reader.capture_page_wait_targets().await?, None),
+            (
+                CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets },
+                CollectionSubject::Shared { resource },
+            ) => (self.reader.capture_shared_tempdb_page_wait_targets(resource).await?, None),
+            _ => return Err(invalid_data()),
         };
         let task_visibility_unavailable = captured.task_visibility_unavailable();
         let partition = captured.source_partition()?;
+        let target = captured.collection_target();
         let records = captured
             .snapshot
             .observations
@@ -102,7 +127,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
         };
         let description = CollectionDescription {
             partition,
-            target: captured.context.database.into(),
+            target,
             source: sources::PAGE_WAIT_TARGETS.name.into(),
             continuity: SourceContinuity::Unverified,
             observation,

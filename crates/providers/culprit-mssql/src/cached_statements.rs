@@ -1,11 +1,13 @@
 //! Native statement identity, database ownership and provenance shared by cache projections.
 mod details;
+mod statement;
 use crate::{
     read::{integer, invalid_data, optional_boolean, optional_counter, optional_text, signed_integer, text},
     value::Rec,
 };
 use culprit_core::{Result, telemetry::*};
 pub(crate) use details::read as details;
+pub(crate) use statement::statement_from_prefix;
 
 pub(crate) fn relation() -> &'static str {
     "FROM sys.dm_exec_query_stats qs CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) pa OUTER APPLY sys.dm_exec_sql_text(qs.sql_handle) st"

@@ -183,7 +183,7 @@ fn resource_ids_remain_native_and_export_payloads_and_redaction_use_the_existing
     let fields = record.definition_payloads().collect::<Vec<_>>();
     assert_eq!(fields.len(), 1);
     let json = serde_json::json!({"record": &record});
-    assert_eq!(json.pointer(fields[0].pointer).unwrap(), &serde_json::to_value(fields[0].payload).unwrap());
+    assert_eq!(json.pointer(fields[0].pointer.as_ref()).unwrap(), &serde_json::to_value(fields[0].payload).unwrap());
     value.redact(crate::Engine::Mssql);
     assert_eq!(
         value.request.as_ref().unwrap().client.as_ref().unwrap().application.as_deref(),

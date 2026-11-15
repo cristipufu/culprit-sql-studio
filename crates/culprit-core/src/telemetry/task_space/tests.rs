@@ -195,7 +195,10 @@ fn task_outer_source_and_key_are_bound_and_payload_inventory_points_to_the_exact
     let fields = record.definition_payloads().collect::<Vec<_>>();
     assert_eq!(fields.len(), 1);
     let serialized = serde_json::json!({"record":&record});
-    assert_eq!(serialized.pointer(fields[0].pointer).unwrap(), &serde_json::to_value(fields[0].payload).unwrap());
+    assert_eq!(
+        serialized.pointer(fields[0].pointer.as_ref()).unwrap(),
+        &serde_json::to_value(fields[0].payload).unwrap()
+    );
 }
 
 #[test]

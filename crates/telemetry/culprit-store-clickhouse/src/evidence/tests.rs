@@ -1,5 +1,6 @@
 use super::*;
 mod activity;
+mod cache_entry_memory;
 mod cleanup;
 mod diagnostics;
 mod object_definitions;
@@ -421,6 +422,9 @@ async fn page_wait_reads_preserve_original_requests_mapping_failures_and_exact_n
             .await
             .unwrap();
         test_support::assert_page_wait_capture(&result, &source, &records);
+        let published = serde_json::to_string(&fixture.rows).unwrap();
+        assert!(!published.contains("private-tempdb-machine-canary"));
+        assert!(!published.contains("private-tempdb-instance-canary"));
         assert_eq!(result.metrics().pages as usize, records.len());
         assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
         let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
@@ -428,6 +432,7 @@ async fn page_wait_reads_preserve_original_requests_mapping_failures_and_exact_n
         if let Some(first) = fixture.rows.first() {
             let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
             let original: Value = serde_json::from_str(first[column].as_str().unwrap()).unwrap();
+            test_support::assert_page_wait_scope_projection(&original, &source);
             for details in test_support::page_wait_tamper_cases(&original) {
                 let mut tampered = first.clone();
                 tampered[column] = json!(serde_json::to_string(&details).unwrap());

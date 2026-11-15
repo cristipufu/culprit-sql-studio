@@ -27,8 +27,8 @@ async fn local_limited_header_projection_preserves_native_file_epoch_and_bounded
             );
             let address = PageAddress { database: initial.authority.database_id, file: 1, page: 0 };
             let selected = BTreeSet::from([address]);
-            let before = reader.page_headers(&selected).await.unwrap();
-            let after = reader.page_headers(&selected).await.unwrap();
+            let before = reader.page_headers(&selected, &initial).await.unwrap();
+            let after = reader.page_headers(&selected, &initial).await.unwrap();
             let first = &before[&address];
             let last = &after[&address];
             assert!(address.matches(&first.header).unwrap());

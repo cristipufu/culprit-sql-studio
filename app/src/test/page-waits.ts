@@ -32,6 +32,7 @@ export function pageWait(session = "42", page = 42): PageWaitObservation {
     statement_identity: { id: "native-statement-handle", qualifiers: { statement_start_offset: "0" } },
     plan_identity: { id: "native-plan-handle", qualifiers: {} }, resource, resolution: "observed-at-both-bounds",
     target: {
+      scope: { kind: "request-database" },
       identity_basis: "local-database-file-epoch", database: { id: "5", qualifiers: { epoch: "native-database-epoch" } }, file: { id: "1", qualifiers: { epoch: "native-file-epoch" } },
       header: { database_id: 5, file_id: 1, page_id: page, header_version: 1, page_type: 2, level: 0, object_id: "128", index_id: "1", partition_id: null, allocation_unit_id: "9223372036854775807", lsn: "000001:000002:0003", next_file_id: null, next_page_id: null },
       kind: "index-leaf", object: { native: { id: "128", qualifiers: {} }, schema: "dbo", name: "orders", index_name: "orders_id" },

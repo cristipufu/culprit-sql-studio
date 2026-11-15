@@ -69,6 +69,65 @@ fn one_original_row_and_native_token_are_required_without_interpreting_provider_
 }
 
 #[test]
+fn a_shared_followup_keeps_the_database_parent_and_verifies_a_distinct_native_resource_epoch() {
+    let resource = SharedResourceIdentity {
+        engine: crate::Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("native-machine"),
+        native: NativeIdentity::new("native-member"),
+    };
+    let mut original = focus();
+    original.partition =
+        SourcePartition::InstanceLocal { member: Some(resource.clone()), epoch: Some(original.epoch.clone()) };
+    let request = CollectionRequest {
+        subject: CollectionSubject::Shared { resource: resource.clone() },
+        selection: CollectionSelection::FocusedPageWait { focus: Box::new(original.clone()) },
+        budget: CollectionBudget::default(),
+    };
+    request.validate().unwrap();
+    let snapshot = StateSnapshotDescription {
+        dataset: SnapshotDataset::PageWaitTargets,
+        observed_from: "2020-01-01T00:00:01Z".into(),
+        observed_until: "2020-01-01T00:00:02Z".into(),
+        records: 0,
+        sources: vec![StateSourceCoverage::observed("page-targets".into(), 0, false)],
+    };
+    let mut source = CollectionDescription {
+        target: CollectionTarget::Shared(resource),
+        partition: SourcePartition::InstanceLocal {
+            member: match &request.subject {
+                CollectionSubject::Shared { resource } => Some(resource.clone()),
+                _ => unreachable!(),
+            },
+            epoch: Some("native-shared-process-epoch".into()),
+        },
+        source: "page-targets".into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::FocusedPageWait {
+            result: Box::new(ActivityWaitFocusResult {
+                focus: original.clone(),
+                observed_from: snapshot.observed_from.clone(),
+                observed_until: snapshot.observed_until.clone(),
+                source: FocusSourceState::Matched,
+                request: PageWaitRequestState::Missing,
+                wait: PageWaitRelation::Unqualified,
+            }),
+            snapshot,
+        },
+    };
+    assert!(source.matches_request(&request));
+    assert!(original.target.database().is_some(), "the original waiter stays in its application database");
+    let mut wrong_subject = request.clone();
+    let CollectionSubject::Shared { resource } = &mut wrong_subject.subject else { panic!() };
+    resource.native.id = "another-native-member".into();
+    assert!(wrong_subject.validate().is_err());
+    assert!(!source.matches_request(&wrong_subject));
+    source.partition = SourcePartition::InstanceLocal { member: None, epoch: None };
+    assert!(!original.matches_capture_scope(&source));
+    assert!(!source.matches_request(&request));
+}
+
+#[test]
 fn focus_identity_binds_original_receipt_and_client_without_a_warehouse_range_requirement() {
     let first = focus();
     let key = first.key().unwrap();

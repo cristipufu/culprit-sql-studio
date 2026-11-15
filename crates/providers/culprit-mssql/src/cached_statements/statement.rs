@@ -4,7 +4,7 @@ use culprit_core::{
     telemetry::{CachedStatementContext, DefinitionPayload, PayloadUnavailable},
 };
 
-pub(super) fn statement(context: &CachedStatementContext, prefix: Option<&str>) -> DefinitionPayload {
+pub(crate) fn statement_from_prefix(context: &CachedStatementContext, prefix: Option<&str>) -> DefinitionPayload {
     let unavailable = |reason| DefinitionPayload::Unavailable { reason };
     if !context.identity.has_sql_handle() || !context.identity.has_plan_handle() {
         return unavailable(PayloadUnavailable::SourceUnavailable);

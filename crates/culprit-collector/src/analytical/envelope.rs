@@ -128,7 +128,9 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
             context["observed_from"] = json!(snapshot.observed_from);
             context["observed_until"] = json!(snapshot.observed_until);
         }
-        SourceObservation::Snapshot(snapshot) | SourceObservation::FocusedPageWait { snapshot, .. } => {
+        SourceObservation::Snapshot(snapshot)
+        | SourceObservation::FocusedPageWait { snapshot, .. }
+        | SourceObservation::CacheEntryMemory { snapshot, .. } => {
             context["dataset"] = json!(snapshot.dataset);
             context["observed_from"] = json!(snapshot.observed_from);
             context["observed_until"] = json!(snapshot.observed_until);

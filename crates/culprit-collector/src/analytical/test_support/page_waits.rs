@@ -70,7 +70,7 @@ pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRe
         cases.push((vec![record(observed)], culprit_core::SourceState::Partial));
     }
     cases.extend(task_wait_cases());
-    cases
+    let mut cases = cases
         .into_iter()
         .map(|(records, state)| {
             let mut source = manifest.source.clone();
@@ -91,7 +91,133 @@ pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRe
             });
             (source, records)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    cases.extend(shared_page_wait_evidence_cases());
+    cases
+}
+
+/// Source-owned shared snapshots retain the original application waiter. Names are privacy canaries; no
+/// current native owner, cache population or causal writer responsibility is inferred from this fixture.
+pub fn shared_page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
+    let (manifest, _) = fixture();
+    let resource = SharedResourceIdentity {
+        engine: culprit_core::Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("private-tempdb-machine-canary"),
+        native: NativeIdentity::new("private-tempdb-instance-canary"),
+    };
+    let partition = SourcePartition::InstanceLocal {
+        member: Some(resource.clone()),
+        epoch: Some("native-tempdb-process-epoch".into()),
+    };
+    let mut first = observation("81", "2:1:42", WaitResourceKind::MemoryPage, 42);
+    first.request.statement_identity = first.statement_identity.clone();
+    first.observed_address.as_mut().unwrap().database_id = 2;
+    let scope = PageTargetScope::SharedResource {
+        context: Box::new(NativeReadContext {
+            target: CollectionTarget::Shared(resource.clone()),
+            partition: partition.clone(),
+            observed_from: "2020-01-01T12:00:00.100000000Z".into(),
+            observed_until: first.observed_until.clone(),
+            database_writable: None,
+        }),
+    };
+    let target = first.target.as_mut().unwrap();
+    target.header.database_id = 2;
+    target.header.page_type = Some(11);
+    target.header.object_id = None;
+    target.header.index_id = None;
+    target.header.partition_id = None;
+    target.object = None;
+    target.kind = PageWaitTargetKind::Pfs;
+    let (database, file) = scope
+        .bind_identities(
+            NativeIdentity::new("2")
+                .qualified("database_guid", "native-tempdb-guid")
+                .qualified("created_without_offset", "2020-01-01T04:00:00.0000000"),
+            NativeIdentity::new("native-tempdb-file").qualified("create_lsn", "0"),
+        )
+        .unwrap();
+    target.scope = scope;
+    target.database = database;
+    target.file = file;
+    first.index_operations = Some(PageIndexOperations::Unavailable);
+    let mut source = manifest.source;
+    source.target = CollectionTarget::Shared(resource);
+    source.partition = partition;
+    source.source = "shared-page-target-capture".into();
+    source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
+        dataset: SnapshotDataset::PageWaitTargets,
+        observed_from: "2020-01-01T12:00:00Z".into(),
+        observed_until: "2020-01-01T12:00:01Z".into(),
+        records: 1,
+        sources: vec![StateSourceCoverage::observed(culprit_core::source_id::PAGE_WAIT_TARGETS.into(), 1, false)],
+    });
+    let mut empty = source.clone();
+    let SourceObservation::Snapshot(snapshot) = &mut empty.observation else { unreachable!() };
+    snapshot.records = 0;
+    snapshot.sources[0] = StateSourceCoverage::observed(culprit_core::source_id::PAGE_WAIT_TARGETS.into(), 0, false);
+    let mut unavailable = empty.clone();
+    let SourceObservation::Snapshot(snapshot) = &mut unavailable.observation else { unreachable!() };
+    snapshot.sources[0] = StateSourceCoverage::unavailable(
+        culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
+        culprit_core::ErrorCode::PermissionDenied,
+        None,
+    );
+    let mut focused = source.clone();
+    let mut snapshot = source.observation.snapshot().unwrap().clone();
+    snapshot.observed_from = "2020-01-01T12:00:00.050000000Z".into();
+    let (mut parent, _) = activity_evidence_cases().remove(0);
+    parent.source = culprit_core::source_id::SESSIONS.into();
+    parent.partition = SourcePartition::InstanceLocal {
+        member: match &source.partition {
+            SourcePartition::InstanceLocal { member, .. } => member.clone(),
+            _ => unreachable!(),
+        },
+        epoch: Some("native-original-database-epoch".into()),
+    };
+    let SourceObservation::Activity(frame) = &mut parent.observation else { unreachable!() };
+    frame.epoch = Some("native-original-database-epoch".into());
+    frame.database_writable = Some(true);
+    frame.native_rows = 1;
+    frame.observations = 1;
+    frame.coverage = StateSourceCoverage::observed(parent.source.clone(), 1, false);
+    let original_at = frame.at.clone();
+    let original_capture = Recovery::capture(
+        "fixture:page-parent",
+        &digest(b"fixture-schema"),
+        parent,
+        vec![TelemetryRecord::from(first.request.clone())],
+        920,
+    );
+    let manifest = &original_capture.manifest;
+    let original =
+        ExportedRecord::new(&manifest.source, &manifest.capture, TelemetryRecord::from(first.request.clone())).unwrap();
+    let focus = ActivityWaitFocus {
+        target: manifest.source.target.clone(),
+        source: manifest.source.source.clone(),
+        partition: manifest.source.partition.clone(),
+        database_writable: Some(true),
+        epoch: "native-original-database-epoch".into(),
+        original_observed_at: original_at,
+        parent: DiagnosticEvidenceRef::from_export(&manifest.source, &manifest.capture_manifest_sha256, &original, 0)
+            .unwrap(),
+        statement_identity: first.request.statement_identity.clone().unwrap(),
+        resource: first.resource.clone(),
+        original: first.request.clone(),
+    };
+    focused.observation = SourceObservation::FocusedPageWait {
+        snapshot: snapshot.clone(),
+        result: Box::new(ActivityWaitFocusResult {
+            focus,
+            observed_from: snapshot.observed_from.clone(),
+            observed_until: snapshot.observed_until.clone(),
+            source: FocusSourceState::Matched,
+            request: PageWaitRequestState::SameStatement,
+            wait: PageWaitRelation::OriginalObserved,
+        }),
+    };
+    vec![(source, vec![record(first.clone())]), (empty, vec![]), (unavailable, vec![]), (focused, vec![record(first)])]
 }
 
 fn task_wait_cases() -> Vec<(Vec<TelemetryRecord>, culprit_core::SourceState)> {
@@ -227,6 +353,12 @@ pub fn page_wait_tamper_cases(original: &serde_json::Value) -> Vec<serde_json::V
         if original.pointer("/task_wait/blocking_session_id") == Some(&json!(91)) { json!(-4) } else { json!(91) };
     [
         ("/target/header/page_id", json!(999)),
+        ("/target/scope/context/target/key", json!(digest(b"wrong shared owner"))),
+        ("/target/scope/context/partition/key", json!(digest(b"wrong native epoch"))),
+        ("/target/scope/context/observed_from", json!("2020-01-01T11:59:59Z")),
+        ("/target/scope/context/observed_until", json!("2020-01-01T12:00:02Z")),
+        ("/target/database/qualifiers/database_guid", json!("wrong-tempdb-incarnation")),
+        ("/target/file/qualifiers/page_target_database", json!(digest(b"wrong tempdb file namespace"))),
         ("/observed_address/page_id", json!(999)),
         ("/after_check/wait", changed_wait),
         ("/before_check/observed_at", json!("2020-01-01T12:00:00.400000000Z")),
@@ -307,6 +439,7 @@ fn observation(session: &str, address: &str, kind: WaitResourceKind, page: u32) 
         observed_address: Some(PageWaitAddress { database_id: 5, file_id: 1, page_id: page }),
         resolution: PageWaitResolution::ObservedAtBothBounds,
         target: Some(Box::new(MappedPageTarget {
+            scope: PageTargetScope::RequestDatabase,
             identity_basis: PageTargetIdentityBasis::LocalDatabaseFileEpoch,
             database: NativeIdentity::new("5").qualified("database_guid", "native-database-guid"),
             file: NativeIdentity::new("native-file-guid").qualified("create_lsn", "00000001:00000001:0001"),

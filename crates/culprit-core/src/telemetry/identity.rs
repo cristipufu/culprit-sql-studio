@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 25;
+pub const EXPORT_FORMAT_VERSION: u32 = 26;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -49,6 +49,9 @@ impl CollectionDescription {
             }
             SourceObservation::FocusedPageWait { result, .. } => {
                 source_scoped_id(domain, self, &(result.focus.key()?, identity))
+            }
+            SourceObservation::CacheEntryMemory { focus, .. } => {
+                source_scoped_id(domain, self, &(focus.key()?, identity))
             }
             SourceObservation::Diagnostics(description) => {
                 source_scoped_id(domain, self, &(description.work_key()?, identity))
