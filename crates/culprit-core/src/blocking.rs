@@ -425,6 +425,7 @@ mod tests {
 
     fn session(id: &str, state: &str, blocked_by: Option<&str>) -> Session {
         Session {
+            action_target: None,
             id: id.into(),
             user: Some("app".into()),
             application: None,

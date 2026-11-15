@@ -8,9 +8,11 @@ import { t } from "./i18n";
 function markup(live: LiveState): string {
   return renderToStaticMarkup(<BlockingChains
     blocking={live.blocking!}
+    connection="pg-demo"
+    route={live.session_action_route ?? null}
     actions={live.session_actions}
     actionsNote={live.session_actions_note}
-    onInterrupt={async () => {}}
+    onInterrupt={async () => "signal-sent"}
     onLocate={() => {}}
   />);
 }
@@ -70,6 +72,8 @@ test("a qualified sleeping owner without transaction evidence retains its native
   chain.transaction_ms = null;
   chain.tree.context!.state = "sleeping";
   chain.tree.context!.transaction_ms = null;
+  chain.tree.context!.action_target!.activity.request = null;
+  chain.tree.context!.action_target!.statement = null;
   const html = markup(live);
   expect(html).toContain('<span class="pill head">sleeping</span>');
   expect(html).not.toContain(t("ui.blocking_chains.head.idle_in_transaction"));

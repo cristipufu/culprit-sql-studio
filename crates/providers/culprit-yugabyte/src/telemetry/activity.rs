@@ -109,15 +109,7 @@ async fn capture<R: culprit_postgres::wire::NoticeRead>(
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
             database_writable: None,
-            epoch: Some(digest(
-                format!(
-                    "{}|{}|{}|ysql-activity-v1",
-                    before.node,
-                    before.probe.oid,
-                    before.probe.started.as_deref().ok_or_else(native::invalid)?
-                )
-                .as_bytes(),
-            )),
+            epoch: Some(before.activity_epoch().ok_or_else(native::invalid)?),
             observed_from: canonical_time(&before.probe.now)?,
             observed_until: canonical_time(&after.probe.now)?,
             at: read.frame.at,

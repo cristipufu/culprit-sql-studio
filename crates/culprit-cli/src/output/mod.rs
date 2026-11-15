@@ -10,8 +10,8 @@ use std::path::Path;
 
 use clap::ValueEnum;
 use culprit_core::{
-    AuthKind, CheckInfo, Engine, Environment, Error, Finding, LockedCheck, QueryStat, Report, ServerInfo, Severity,
-    format, t,
+    AuthKind, CheckInfo, Engine, Environment, Error, Finding, LockedCheck, QueryStat, Report, ServerInfo,
+    SessionActionOutcome, Severity, format, t,
 };
 use culprit_engine::{ConnectionInfo, DiscoveryResult, ImportCandidate};
 use serde_json::{Value, json};
@@ -114,6 +114,15 @@ impl Out {
     /// Print a value as JSON (for commands whose output is already the right shape).
     pub fn value(&self, value: &Value) {
         self.json(value)
+    }
+
+    pub fn session_signal(&self, session: &str, outcome: SessionActionOutcome) {
+        let message = t!("cli.live.signal_sent", session = session);
+        if self.format == Format::Json {
+            self.json(&json!({"ok": true, "session": session, "outcome": outcome, "message": message}));
+        } else {
+            self.done(&message);
+        }
     }
 
     /// Text styled for a terminal (plain when piped or NO_COLOR is set).

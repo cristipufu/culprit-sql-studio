@@ -7,6 +7,9 @@ use crate::model::Capability;
 pub(super) struct Mssql;
 
 impl EngineSpec for Mssql {
+    fn session_id_format(&self) -> SessionIdFormat {
+        SessionIdFormat::NativeId
+    }
     fn cleanup_evidence(&self) -> CleanupEvidence {
         CleanupEvidence::LoggedAndVersionedTransactions
     }

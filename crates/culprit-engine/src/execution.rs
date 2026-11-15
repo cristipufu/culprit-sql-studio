@@ -3,7 +3,8 @@
 
 use crate::{ConnectionInfo, catalog, connection::Connections, deadlocks, reporting::Reports};
 use culprit_core::{
-    DeadlockReport, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Report, Result, ResultSet, SessionAction, t,
+    DeadlockReport, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Report, Result, ResultSet, SessionAction,
+    SessionActionOutcome, SessionActionRequest, SessionActionTarget, t,
 };
 
 pub(crate) struct Execution<'a> {
@@ -439,8 +440,8 @@ impl Execution<'_> {
 
     /// Sessions, blocking and waits, plus what Live may do to other sessions here (nothing on production).
     pub(crate) async fn live(&self, name: &str) -> Result<LiveState> {
-        let info = self.connections.connection(name)?;
-        let observed = self.connections.observed_provider(name).await?;
+        let route = self.connections.saved_route(name)?;
+        let observed = self.connections.observed_provider_at_route(&route).await?;
         let provider = observed.provider();
         let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             let mut live = self.connections.forget_rejected(name, provider.live().await)?;
@@ -454,13 +455,27 @@ impl Execution<'_> {
                         Vec::new()
                     }
                 };
-                live.blocking = culprit_core::blocking::analyze(info.engine, &live.sessions, &locks, &[]);
+                live.blocking = culprit_core::blocking::analyze(route.stored.engine, &live.sessions, &locks, &[]);
             }
-            if info.environment.is_production() {
+            self.connections.require_current_route(&route)?;
+            if route.stored.environment.is_production() {
                 live.session_actions = Vec::new();
                 live.session_actions_note = Some(t!("engine.execution.production_sessions"));
+                live.session_action_route = None;
+                for session in &mut live.sessions {
+                    session.action_target = None;
+                }
             } else {
-                live.session_actions = provider.session_actions();
+                let supported = provider.session_actions();
+                live.session_actions.retain(|action| supported.contains(action));
+                live.session_action_route = (!live.session_actions.is_empty()).then(|| route.action_route());
+                if !live.sessions.is_empty()
+                    && !supported.is_empty()
+                    && live.session_actions.is_empty()
+                    && live.session_actions_note.is_none()
+                {
+                    live.session_actions_note = Some(t!("model.session_action.unavailable"));
+                }
             }
             Ok(live)
         })
@@ -486,26 +501,34 @@ impl Execution<'_> {
         observed.finish(result).await
     }
 
-    /// Cancel another session's statement or end the session. Refused on production connections, whatever the caller says.
-    pub(crate) async fn interrupt_session(&self, name: &str, session: &str, action: SessionAction) -> Result<()> {
-        let info = self.connections.connection(name)?;
-        if info.environment.is_production() {
+    /// Revalidate the original saved route and native target before signalling. Production always refuses.
+    pub(crate) async fn interrupt_session(&self, request: &SessionActionRequest) -> Result<SessionActionOutcome> {
+        let name = &request.route.connection;
+        let route = self.connections.saved_route(name)?;
+        if route.stored.environment.is_production() {
             return Err(Error::new(
                 ErrorCode::PermissionDenied,
-                t!("engine.execution.interrupt_production", name = &info.name),
+                t!("engine.execution.interrupt_production", name = name),
             )
             .with_hint(t!("engine.execution.interrupt_production_hint")));
         }
-        info.engine.spec().validate_session_id(session)?;
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
+        request.validate()?;
+        if route.revision != request.route.revision || route.stored.engine != request.target.context.target.engine() {
+            return Err(SessionActionTarget::changed());
+        }
+        let observed = self.connections.observed_provider_at_route(&route).await?;
+        let provider = observed.provider();
+        let action = request.action;
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             if !provider.session_actions().contains(&action) {
                 return Err(Error::new(
                     ErrorCode::Unsupported,
                     match action {
-                        SessionAction::Cancel => t!("engine.execution.no_cancel", engine = info.engine.to_string()),
+                        SessionAction::Cancel => {
+                            t!("engine.execution.no_cancel", engine = route.stored.engine.to_string())
+                        }
                         SessionAction::Terminate => {
-                            t!("engine.execution.no_terminate", engine = info.engine.to_string())
+                            t!("engine.execution.no_terminate", engine = route.stored.engine.to_string())
                         }
                     },
                 )
@@ -514,9 +537,11 @@ impl Execution<'_> {
                     SessionAction::Terminate => t!("engine.execution.no_terminate_hint"),
                 }));
             }
-            self.connections.forget_rejected(name, provider.interrupt_session(session, action).await)
+            self.connections.require_current_route(&route)?;
+            self.connections.forget_rejected(name, provider.interrupt_session(&request.target, action).await)
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 
     /// `confirmed` is the caller's explicit, per-action consent to execute on production.

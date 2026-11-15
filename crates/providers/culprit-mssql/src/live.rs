@@ -1,37 +1,54 @@
 use std::collections::BTreeMap;
 
-use culprit_core::{Error, ErrorCode, LiveState, Result, Session, SessionAction, WaitStat, session_number};
+use culprit_core::{Error, ErrorCode, LiveState, Result, Session, SessionAction, WaitStat};
 
-use crate::conn::{Pool, execute};
-use crate::read::rows as query;
+use crate::conn::Pool;
 use crate::waits::{BENIGN_WAITS, wait_type_category};
+mod actions;
+pub(crate) use actions::interrupt;
+#[cfg(test)]
+mod tests;
 
 const LIVE_ACTIVITY_ROWS: u32 = 10_000;
 const LIVE_ACTIVITY_PAGE_BYTES: u32 = 8 * 1024 * 1024;
 const LIVE_STATEMENT_TIMEOUT_MS: u32 = 10_000;
+const LIVE_ACTION_QUERIES: u32 = 9;
 
-pub(crate) async fn collect(pool: std::sync::Arc<Pool>, host: String, port: u16) -> Result<LiveState> {
+pub(crate) async fn collect(
+    pool: std::sync::Arc<Pool>,
+    host: String,
+    port: u16,
+    qualify_actions: bool,
+) -> Result<LiveState> {
     use crate::activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions};
     use culprit_core::telemetry::CollectionBudget;
-    let options = ReadOptions {
-        budget: CollectionBudget {
-            max_snapshot_rows: LIVE_ACTIVITY_ROWS,
-            page_bytes: LIVE_ACTIVITY_PAGE_BYTES,
-            statement_timeout_ms: LIVE_STATEMENT_TIMEOUT_MS,
-            ..CollectionBudget::default()
-        },
-        scope: ActivityScope::Visible,
-        identity: IdentityDetail::Endpoint,
+    let mut budget = CollectionBudget {
+        max_snapshot_rows: LIVE_ACTIVITY_ROWS,
+        page_bytes: LIVE_ACTIVITY_PAGE_BYTES,
+        statement_timeout_ms: LIVE_STATEMENT_TIMEOUT_MS,
+        ..CollectionBudget::default()
     };
+    if qualify_actions {
+        budget.max_queries = LIVE_ACTION_QUERIES;
+    }
+    let options = ReadOptions { budget, scope: ActivityScope::Visible, identity: IdentityDetail::Endpoint };
     let mut reader = ActivityReader::open(pool, options, host, port)?;
-    collect_from(&mut reader).await
+    collect_qualified_from(&mut reader, qualify_actions).await
 }
 
+#[cfg(test)]
 pub(crate) async fn collect_from<R: crate::read::NativeRead>(
     reader: &mut crate::activity::ActivityReader<R>,
 ) -> Result<LiveState> {
+    collect_qualified_from(reader, false).await
+}
+
+async fn collect_qualified_from<R: crate::read::NativeRead>(
+    reader: &mut crate::activity::ActivityReader<R>,
+    qualify_actions: bool,
+) -> Result<LiveState> {
     use culprit_core::telemetry::{CollectionStop, SourceShutdown};
-    let result = read(reader).await;
+    let result = read(reader, qualify_actions).await;
     if reader.close().await == SourceShutdown::Unconfirmed {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
@@ -40,16 +57,34 @@ pub(crate) async fn collect_from<R: crate::read::NativeRead>(
 
 pub(crate) async fn read<R: crate::read::NativeRead>(
     reader: &mut crate::activity::ActivityReader<R>,
+    qualify_actions: bool,
 ) -> Result<LiveState> {
     use culprit_core::telemetry::ActivityDetailStatus;
+    let before = if qualify_actions {
+        actions::optional_authority(crate::activity::database_context::initial(reader).await)?
+    } else {
+        None
+    };
     let mut frame = reader.observe().await?;
     let keys = frame.keys();
     let limit = reader.sql_limit();
     let details = reader.enrich(&mut frame, &keys, true, limit).await?;
-    let mut sessions: Vec<_> = frame.records.iter().map(session_of).collect();
+    let context = actions::complete_authority(reader, before.as_ref(), &frame.context).await?;
+    let mut sessions: Vec<_> = frame.records.iter().map(|row| session_of(row, context.as_ref())).collect();
     sessions.sort_by(|a, b| b.elapsed_ms.partial_cmp(&a.elapsed_ms).unwrap_or(std::cmp::Ordering::Equal));
-    let notes = if matches!(details, ActivityDetailStatus::Unavailable { .. }) {
+    let mut notes = if matches!(details, ActivityDetailStatus::Unavailable { .. }) {
         vec![culprit_core::t!("provider.mssql.activity.details_unavailable")]
+    } else {
+        Vec::new()
+    };
+    if qualify_actions && context.is_none() {
+        notes.push(culprit_core::t!("model.session_action.unavailable"));
+    }
+    let session_actions = if qualify_actions
+        && sessions.iter().any(|session| {
+            session.action_target.as_ref().is_some_and(|target| target.is_valid_for(SessionAction::Terminate))
+        }) {
+        vec![SessionAction::Terminate]
     } else {
         Vec::new()
     };
@@ -58,39 +93,11 @@ pub(crate) async fn read<R: crate::read::NativeRead>(
         taken_at: frame.context.at,
         waits: current_waits(&sessions),
         sessions,
-        session_actions: Vec::new(),
+        session_actions,
         session_actions_note: None,
+        session_action_route: None,
         blocking: None,
     })
-}
-
-/// SQL Server has no way to stop another session's statement short of `KILL`, which ends the session and rolls back its
-/// transaction. Culprit's own sessions and system sessions are refused.
-pub(crate) async fn interrupt(pool: &std::sync::Arc<Pool>, session: &str, action: SessionAction) -> Result<()> {
-    let id = session_number(session)?;
-    if action == SessionAction::Cancel {
-        return Err(cancel_unsupported());
-    }
-    let target = format!(
-        "SELECT CAST(is_user_process AS int) AS user_process, program_name, CASE WHEN session_id = @@SPID THEN 1 ELSE 0 END AS own \
-         FROM sys.dm_exec_sessions WHERE session_id = {id}"
-    );
-    let rows = pool
-        .observe(|c| {
-            let sql = target.clone();
-            Box::pin(async move { query(c, &sql).await })
-        })
-        .await?;
-    let Some(row) = rows.first() else {
-        return Err(session_gone(id));
-    };
-    if row.f64("own") == Some(1.0) || row.str("program_name").is_some_and(|p| p.eq_ignore_ascii_case("culprit")) {
-        return Err(own_session(id));
-    }
-    if row.f64("user_process") != Some(1.0) {
-        return Err(system_session(id));
-    }
-    pool.with(|c| Box::pin(async move { execute(c, &format!("KILL {id}")).await })).await
 }
 
 /// Cancelling a statement, which SQL Server can only do by ending its session.
@@ -114,7 +121,10 @@ pub(crate) fn system_session(id: u64) -> Error {
 fn number(value: Option<&str>) -> Option<f64> {
     value.and_then(|value| value.parse().ok())
 }
-fn session_of(record: &crate::activity::ActivityRecord) -> Session {
+fn session_of(
+    record: &crate::activity::ActivityRecord,
+    context: Option<&culprit_core::telemetry::NativeReadContext>,
+) -> Session {
     use culprit_core::telemetry::ActivityWaitOwner;
     let facts = &record.facts;
     let counters = facts.counters();
@@ -131,6 +141,7 @@ fn session_of(record: &crate::activity::ActivityRecord) -> Session {
     let sql = if facts.key.request.is_some() { &record.current_sql } else { &record.previous_sql };
     Session {
         id: facts.key.session.id.clone(),
+        action_target: actions::target(record, context),
         user: client.and_then(|client| client.user.clone()),
         application: client.and_then(|client| client.application.clone()).filter(|value| !value.is_empty()),
         host: client.and_then(|client| client.host.clone()),

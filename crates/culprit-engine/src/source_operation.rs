@@ -28,6 +28,17 @@ impl ObservedProvider<'_> {
     }
 }
 impl<'a> Connections<'a> {
+    pub(crate) async fn observed_provider_at_route(
+        &self,
+        route: &crate::connection::SavedRoute,
+    ) -> Result<ObservedProvider<'a>> {
+        let operation = self.source_operation(&route.name, None).await?;
+        match self.provider_at_route(route).await {
+            Ok(provider) => Ok(ObservedProvider { provider, operation }),
+            Err(error) => operation.finish(Err(error), SourceShutdown::Quiescent).await,
+        }
+    }
+
     pub(crate) async fn observed_provider(&self, name: &str) -> Result<ObservedProvider<'a>> {
         let operation = self.source_operation(name, None).await?;
         match self.provider(name).await {

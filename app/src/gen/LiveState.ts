@@ -2,6 +2,7 @@
 import type { Blocking } from "./Blocking";
 import type { Session } from "./Session";
 import type { SessionAction } from "./SessionAction";
+import type { SessionActionRoute } from "./SessionActionRoute";
 import type { WaitStat } from "./WaitStat";
 
 export type LiveState = { notes: Array<string>, taken_at: string, sessions: Array<Session>, waits: Array<WaitStat>, 
@@ -13,6 +14,10 @@ session_actions: Array<SessionAction>,
  * Why `session_actions` is empty, in plain language.
  */
 session_actions_note: string | null, 
+/**
+ * The exact saved route that produced action candidates. Only the workspace can bind this route.
+ */
+session_action_route?: SessionActionRoute, 
 /**
  * Who blocks whom, as chains under each head blocker, when anyone waits on a lock.
  */

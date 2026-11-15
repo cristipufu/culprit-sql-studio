@@ -6,7 +6,7 @@ use culprit_auth::{DeviceCodePrompt, SignInEvent};
 use culprit_core::Verification;
 use culprit_core::{
     Drift, Error, ErrorCode, ExplainMode, LiveState, Plan, PlanDiff, Report, Result, ResultSet, ServerInfo,
-    SessionAction, SnapshotOptions,
+    SessionActionOutcome, SessionActionRequest, SnapshotOptions,
 };
 use culprit_engine::SshConfig;
 use culprit_engine::export::{ExportFile, ExportFormat, ExportOptions};
@@ -516,8 +516,8 @@ async fn wait_sample(ws: Ws<'_>, name: String, seconds: u32) -> Result<culprit_c
 }
 
 #[tauri::command]
-async fn interrupt_session(ws: Ws<'_>, name: String, session: String, action: SessionAction) -> Result<()> {
-    ws.interrupt_session(&name, &session, action).await
+async fn interrupt_session(ws: Ws<'_>, request: SessionActionRequest) -> Result<SessionActionOutcome> {
+    ws.interrupt_session(&request).await
 }
 
 /// What changed between two periods on a connection (Query Store intervals, or Culprit's own scans).

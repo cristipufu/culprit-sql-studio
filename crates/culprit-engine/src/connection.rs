@@ -14,8 +14,8 @@ use crate::{
     secrets::SecretStore,
     store::{self, Paths, Store, StoredConnection},
 };
-#[cfg(feature = "collector")]
 mod route;
+pub(crate) use route::SavedRoute;
 
 /// Conventional SQLite file suffixes, also exposed by the public workspace API.
 pub const DATABASE_FILE_EXTENSIONS: [&str; 4] = ["db", "sqlite", "sqlite3", "db3"];
@@ -545,9 +545,29 @@ impl Connections<'_> {
         self.provider_from_saved(name, &stored, stored.ssh.clone()).await
     }
 
-    #[cfg(feature = "collector")]
     pub(crate) fn route_revision(&self, name: &str) -> Result<String> {
         route::revision(&self.store.get(name)?)
+    }
+
+    pub(crate) fn saved_route(&self, name: &str) -> Result<SavedRoute> {
+        let stored = self.store.get(name)?;
+        Ok(SavedRoute { name: name.to_owned(), revision: route::revision(&stored)?, stored })
+    }
+
+    pub(crate) fn require_current_route(&self, route: &SavedRoute) -> Result<()> {
+        if self.route_revision(&route.name)? != route.revision {
+            return Err(culprit_core::SessionActionTarget::changed());
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn provider_at_route(&self, route: &SavedRoute) -> Result<Box<dyn Provider>> {
+        // Authentication and construction both use this immutable snapshot. Never re-read a replacement route
+        // after validating a prior one, including while credentials or an SSH tunnel are being resolved.
+        self.require_current_route(route)?;
+        let spec = self.saved_spec(&route.name, &route.stored, route.stored.ssh.clone()).await?;
+        self.require_current_route(route)?;
+        self.open_provider(&spec)
     }
 
     /// Validate the same immutable saved metadata that will supply authentication and native construction.

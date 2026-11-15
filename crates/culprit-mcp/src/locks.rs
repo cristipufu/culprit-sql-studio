@@ -112,6 +112,7 @@ mod tests {
     use super::*;
     fn live() -> LiveState {
         LiveState {
+            session_action_route: None,
             taken_at: "2026-11-12T00:00:00Z".into(),
             notes: vec![],
             sessions: vec![],

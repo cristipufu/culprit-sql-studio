@@ -47,7 +47,11 @@ async fn live_native_workspace_session_progress_and_cancel() {
     .await
     .unwrap()
     .unwrap();
-    let id = format!("{}/{}/{}", row.string("node"), row.string("pid"), row.string("started"));
+    let original_id = format!("{}/{}/{}", row.string("node"), row.string("pid"), row.string("started"));
+    let (node, pid, generation) = culprit_core::ysql_session_target(&original_id).unwrap();
+    let id = Engine::Yugabyte
+        .spec()
+        .live_session_id(&culprit_core::telemetry::NativeActivityIdentity { id: format!("{node}/{pid}"), generation });
     let ws = Workspace::open_in(&dir).with_secrets(Arc::new(Memory::default()));
     ws.add_connection(NewConnection {
         name: "native-session-test".into(),
@@ -67,13 +71,12 @@ async fn live_native_workspace_session_progress_and_cancel() {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         };
-        ws.interrupt_session("native-session-test", &id, SessionAction::Cancel).await?;
+        let original = ws.live("native-session-test").await?.action_request(&id, SessionAction::Cancel)?;
+        assert_eq!(ws.interrupt_session(&original).await?, culprit_core::SessionActionOutcome::SignalSent);
         Ok::<_, Error>(progress)
     }
     .await;
-    // Clean up this test's verified backend even when a Workspace regression rejects its native id.
-    let direct = culprit_yugabyte::YugabyteProvider::new(&spec).unwrap();
-    let _ = direct.interrupt_session(&id, SessionAction::Cancel).await;
+    // Await the bounded owned workload even on refusal; never mint an ID-only cleanup action or retry an uncertain signal.
     let stopped = sleeping.await.unwrap();
     drop(ws);
     let _ = std::fs::remove_dir_all(dir);
@@ -107,7 +110,7 @@ impl Provider for ParserProvider {
         Err(Error::invalid("not used"))
     }
     async fn live(&self) -> Result<LiveState> {
-        Err(Error::invalid("not used"))
+        Ok(crate::session_actions::support::live(Engine::Mssql, "123"))
     }
     async fn explain(&self, sql: &str, _: ExplainMode) -> Result<Plan> {
         self.calls.lock().unwrap().push((format!("explain: {sql}"), 0));
@@ -119,7 +122,11 @@ impl Provider for ParserProvider {
     fn session_actions(&self) -> Vec<culprit_core::SessionAction> {
         vec![culprit_core::SessionAction::Terminate]
     }
-    async fn interrupt_session(&self, _: &str, _: culprit_core::SessionAction) -> Result<()> {
+    async fn interrupt_session(
+        &self,
+        _: &culprit_core::SessionActionTarget,
+        _: culprit_core::SessionAction,
+    ) -> Result<culprit_core::SessionActionOutcome> {
         Err(Error::new(ErrorCode::AuthFailed, "test authentication failure"))
     }
     async fn period_stats(
@@ -313,10 +320,9 @@ async fn session_and_optional_event_authentication_failures_invalidate_only_the_
                 .unwrap();
             assert!(out.notes.iter().any(|n| n.contains("Database change events were unavailable")));
         } else {
-            assert_eq!(
-                ws.interrupt_session("first", "123", culprit_core::SessionAction::Terminate).await.unwrap_err().code,
-                ErrorCode::AuthFailed
-            );
+            let request =
+                ws.live("first").await.unwrap().action_request("123", culprit_core::SessionAction::Terminate).unwrap();
+            assert_eq!(ws.interrupt_session(&request).await.unwrap_err().code, ErrorCode::AuthFailed);
         }
         assert_eq!(*secrets.forgotten.lock().unwrap(), vec!["first"]);
         assert!(secrets.get("first").unwrap().is_some());

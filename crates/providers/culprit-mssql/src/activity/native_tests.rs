@@ -115,7 +115,7 @@ async fn local_blocking_uses_the_shared_reader_for_live_and_export_at_compatibil
     let exported_blocker = exported.iter().find(|row| row.key.session.id == blocker_id).unwrap();
     assert_eq!(exported_blocker.client.as_ref().unwrap().application.as_deref(), Some("culprit"));
     assert_eq!(exported_blocker.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
-    let live = crate::live::collect(pool.clone(), "127.0.0.1".into(), port).await.unwrap();
+    let live = crate::live::collect(pool.clone(), "127.0.0.1".into(), port, false).await.unwrap();
     assert!(live.notes.is_empty());
     let live_waiter = live.sessions.iter().find(|session| session.id == waiter_id).unwrap();
     assert_eq!(live_waiter.blocked_by.as_deref(), Some(blocker_id.as_str()));
@@ -130,7 +130,7 @@ async fn local_blocking_uses_the_shared_reader_for_live_and_export_at_compatibil
     result.unwrap();
     drop(waiter);
     drop(blocker);
-    let after = crate::live::collect(pool.clone(), "127.0.0.1".into(), port).await.unwrap();
+    let after = crate::live::collect(pool.clone(), "127.0.0.1".into(), port, false).await.unwrap();
     assert!(!after.sessions.iter().any(|session| session.id == waiter_id || session.id == blocker_id));
     // The shared source returns only fully drained statistics sessions to the existing pool.
     let mut reused = pool.get().await.unwrap();

@@ -203,7 +203,7 @@ impl ActivityReader {
     }
 }
 impl<R: NativeRead> ActivityReader<R> {
-    fn new(io: R, options: ReadOptions, host: String, port: u16) -> Self {
+    pub(crate) fn new(io: R, options: ReadOptions, host: String, port: u16) -> Self {
         Self { io, options, host, port, observed: false }
     }
     pub(crate) fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {

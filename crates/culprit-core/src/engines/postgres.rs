@@ -43,6 +43,9 @@ const USER_SETTINGS: &[&str] = &[
 ];
 
 impl EngineSpec for Postgres {
+    fn session_id_format(&self) -> SessionIdFormat {
+        SessionIdFormat::NativeId
+    }
     fn cleanup_evidence(&self) -> CleanupEvidence {
         CleanupEvidence::TransactionHorizons
     }

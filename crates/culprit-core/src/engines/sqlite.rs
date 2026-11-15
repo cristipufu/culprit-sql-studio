@@ -7,6 +7,9 @@ use crate::dialect::{NewIndex, keys, unique};
 pub(super) struct Sqlite;
 
 impl EngineSpec for Sqlite {
+    fn session_id_format(&self) -> SessionIdFormat {
+        SessionIdFormat::NativeId
+    }
     fn cleanup_evidence(&self) -> CleanupEvidence {
         CleanupEvidence::FileLock
     }

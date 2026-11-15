@@ -497,7 +497,8 @@ culprit findings [<conn>]             findings from the latest snapshot
 culprit show <finding-id>             one finding in full, including the agent brief
 culprit top <conn> [--by time|cpu|reads|executions] [-n 20]
 culprit explain <conn> (--sql <sql> | --file <path> | --query-id <id>) [--analyze]
-culprit live <conn> [--cancel <id> | --kill <id>]   actions refused on production
+culprit live <conn> [--cancel <id> | --kill <id>] [--observation <live.json>]
+                                      actions require the original JSON observation; refused on production
 culprit drift <a> <b>                 indexes, columns, settings that differ between two connections (or report files)
 culprit changes <conn> [--since <time> | --recent 6h] [--no-cloud]
                                       queries slower/faster/new/stopped, each with what changed around it

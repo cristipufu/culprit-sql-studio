@@ -1,6 +1,7 @@
 import type { BlockNode } from "../gen/BlockNode";
 import type { LiveState } from "../gen/LiveState";
 import type { Session } from "../gen/Session";
+import { sessionActionRoute, sessionActionTarget } from "./session-actions";
 
 function session(id: string, blockedBy: string | null): Session {
   return {
@@ -20,6 +21,7 @@ function session(id: string, blockedBy: string | null): Session {
     reads: 100,
     sql: `SELECT original_request_${id}`,
     waiting_on_lock: blockedBy !== null,
+    action_target: sessionActionTarget(id),
   };
 }
 
@@ -39,6 +41,7 @@ export function blockingEvidence(): LiveState {
     sessions: [head, middle, waiter],
     session_actions: ["cancel", "terminate"],
     session_actions_note: null,
+    session_action_route: sessionActionRoute(),
     blocking: {
       waiting: 2,
       chains: [{

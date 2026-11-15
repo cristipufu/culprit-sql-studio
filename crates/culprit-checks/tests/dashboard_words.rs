@@ -856,6 +856,7 @@ Plans Info Plans: 1 plan has suggestions to review.
 
 fn session(id: &str, state: &str) -> Session {
     serde_json::from_value(json!({"id": id, "state": state})).unwrap_or_else(|_| Session {
+        action_target: None,
         id: id.into(),
         user: None,
         application: None,
@@ -879,6 +880,7 @@ fn session(id: &str, state: &str) -> Session {
 fn live(sessions: Vec<Session>, chains: bool) -> LiveState {
     let blocking = chains.then(|| culprit_core::blocking::analyze(Engine::Postgres, &sessions, &[], &[])).flatten();
     LiveState {
+        session_action_route: None,
         notes: Vec::new(),
         taken_at: "2026-10-11T12:00:00Z".into(),
         sessions,

@@ -26,6 +26,7 @@ import type { WaitsReport } from "../gen/WaitsReport";
 import type { Api, UpdateProgress } from "./api";
 import { demoSecurityInfo, validateDemoSettings } from "./demo-security";
 import { samePopulation } from "./report-selection";
+import { sessionActionIsCurrent } from "./session-actions";
 import { demoCloud } from "./demo-cloud";
 import { demoRows } from "./demo-rows";
 import { previewSql } from "./schema-model";
@@ -276,8 +277,8 @@ export async function demoApi(): Promise<Api> {
       live: {
         ...view.live,
         taken_at: new Date().toISOString(),
-        session_actions: production || !connection ? [] : sessionActions(connection.engine),
-        session_actions_note: production ? t("ui.demo_api.production_sessions") : null,
+        session_actions: production || !connection ? [] : view.live.session_actions.filter((action) => sessionActions(connection.engine).includes(action)),
+        session_actions_note: production ? t("ui.demo_api.production_sessions") : view.live.session_actions_note ?? (!view.live.session_actions.length ? t("model.session_action.unavailable") : null),
       },
     };
   };
@@ -557,9 +558,15 @@ export async function demoApi(): Promise<Api> {
     },
     screenshot: () => desktopOnly(t("ui.demo_api.screenshot")),
     live: async (name) => (await liveView(name)).live!,
-    interruptSession: async (name, session) => {
+    interruptSession: async (request) => {
       await new Promise((r) => setTimeout(r, 300));
-      endedSessions.set(name, new Set([...(endedSessions.get(name) ?? []), session]));
+      const name = request.route.connection;
+      const live = (await liveView(name)).live;
+      if (!live) return unsupported();
+      const eligible = live.sessions.filter((session) => sessionActionIsCurrent(request, name, live.session_action_route ?? null, session, live.session_actions));
+      if (eligible.length !== 1) throw { code: "invalid_input", message: t("model.session_action.changed"), hint: t("model.session_action.changed_hint") };
+      if (request.action === "terminate") endedSessions.set(name, new Set([...(endedSessions.get(name) ?? []), eligible[0]!.id]));
+      return "signal-sent";
     },
     changes: async (name) => {
       await new Promise((r) => setTimeout(r, 350));

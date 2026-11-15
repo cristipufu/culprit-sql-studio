@@ -32,7 +32,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use culprit_core::{
     ConnectionSpec, Engine, Environment, Error, ExplainMode, LiveState, Plan, PlanKind, Provider, Result, ResultSet,
-    ServerInfo, Session, SessionAction, Snapshot, SnapshotOptions, WaitStat, t,
+    ServerInfo, Session, SessionAction, SessionActionOutcome, SessionActionTarget, Snapshot, SnapshotOptions, WaitStat,
+    t,
 };
 use serde_json::Value;
 use tokio_postgres::Client;
@@ -296,8 +297,15 @@ impl Provider for PostgresProvider {
         self.explain_wire(sql, mode, true, false).await
     }
 
-    async fn interrupt_session(&self, session: &str, action: SessionAction) -> Result<()> {
-        sessions::interrupt(&self.connector, session, action).await
+    async fn interrupt_session(
+        &self,
+        target: &SessionActionTarget,
+        action: SessionAction,
+    ) -> Result<SessionActionOutcome> {
+        if self.spec.environment.is_production() {
+            return Err(SessionActionTarget::production());
+        }
+        sessions::interrupt(&self.connector, target, action).await
     }
 
     async fn lock_waits(&self) -> Result<Vec<culprit_core::LockWait>> {
@@ -389,6 +397,11 @@ impl Provider for PostgresProvider {
         let mut reader = crate::read::ReadSession::new(self.connector.clone(), budget.clone());
         let result = async {
             let meta = crate::native::metadata::read(&mut reader, &self.connector.host, self.connector.port).await?;
+            let action_context = if self.spec.environment.is_production() {
+                None
+            } else {
+                sessions::Context::observe(&mut reader, &meta).await?
+            };
             let mut frame = crate::native::activity::observe(&mut reader, &meta, &budget).await?;
             crate::native::activity::blockers(
                 &mut reader,
@@ -406,11 +419,20 @@ impl Provider for PostgresProvider {
                 .saturating_sub(1024)
                 .min(budget.max_sql_bytes as usize);
             crate::native::activity::enrich(&mut reader, &mut frame, &keys, cap, true).await?;
+            let action_context = match action_context {
+                Some(context) => context.recheck(&mut reader, &self.connector.host, self.connector.port).await?,
+                None => None,
+            };
             let now = frame.at.clone();
             let sessions: Vec<Session> = frame
                 .records
                 .iter()
-                .map(crate::native::activity::project)
+                .map(|record| {
+                    let mut session = crate::native::activity::project(record);
+                    session.action_target =
+                        action_context.as_ref().and_then(|context| sessions::target(context, record));
+                    session
+                })
                 .filter(|row| row.application.as_deref() != Some("culprit"))
                 .collect();
             let mut waits: Vec<WaitStat> = Vec::new();
@@ -429,13 +451,15 @@ impl Provider for PostgresProvider {
                 &frame.locks,
                 &crate::native::activity::unqualified_owner_ids(&frame),
             );
+            let session_actions = sessions::offered_actions(&sessions, self.spec.environment);
             Ok(LiveState {
                 notes: Vec::new(),
                 taken_at: now,
                 sessions,
                 waits,
-                session_actions: Vec::new(),
+                session_actions,
                 session_actions_note: None,
+                session_action_route: None,
                 blocking,
             })
         }

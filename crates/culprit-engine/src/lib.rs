@@ -61,7 +61,8 @@ use std::sync::Arc;
 
 use culprit_core::{
     Check, CheckInfo, ConnectionSpec, DeadlockReport, Drift, Engine, Environment, Error, ExplainMode, LiveState,
-    LockedCheck, Plan, Provider, Report, Result, ResultSet, ServerInfo, SessionAction, SnapshotOptions,
+    LockedCheck, Plan, Provider, Report, Result, ResultSet, ServerInfo, SessionActionOutcome, SessionActionRequest,
+    SnapshotOptions,
 };
 
 pub use agent::{AgentAccess, ApprovalOutcome, ApprovalRequest, AuditEntry, AuditOutcome};
@@ -673,8 +674,8 @@ impl Workspace {
     }
 
     /// Cancel another session's statement or end the session. Refused on production connections, whatever the caller says.
-    pub async fn interrupt_session(&self, name: &str, session: &str, action: SessionAction) -> Result<()> {
-        self.execution_service().interrupt_session(name, session, action).await
+    pub async fn interrupt_session(&self, request: &SessionActionRequest) -> Result<SessionActionOutcome> {
+        self.execution_service().interrupt_session(request).await
     }
 
     /// `confirmed` is the caller's explicit, per-action consent to execute on production.

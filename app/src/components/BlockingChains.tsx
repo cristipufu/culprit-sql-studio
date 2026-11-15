@@ -3,17 +3,21 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { BlockNode } from "../gen/BlockNode";
 import type { Blocking } from "../gen/Blocking";
 import type { BlockingChain } from "../gen/BlockingChain";
-import type { Session } from "../gen/Session";
 import type { SessionAction } from "../gen/SessionAction";
-import { errorMessage } from "../lib/api";
+import type { SessionActionOutcome } from "../gen/SessionActionOutcome";
+import type { SessionActionRequest } from "../gen/SessionActionRequest";
+import type { SessionActionRoute } from "../gen/SessionActionRoute";
 import { duration, oneLine } from "../lib/format";
 import { t } from "../lib/i18n";
+import { SessionActionControls } from "./SessionActionControls";
 
 type Props = {
   blocking: Blocking;
+  connection: string;
+  route: SessionActionRoute | null;
   actions: SessionAction[];
   actionsNote: string | null;
-  onInterrupt: (session: Session, action: SessionAction) => Promise<void>;
+  onInterrupt: (request: SessionActionRequest) => Promise<SessionActionOutcome>;
   onLocate: (session: string) => void;
 };
 
@@ -31,17 +35,17 @@ function headLabel(kind: BlockingChain["head_kind"]): string {
 }
 
 /** Every chain, biggest first: a calm card with the head blocker, the story, and the tree of who waits behind whom. */
-export function BlockingChains({ blocking, actions, actionsNote, onInterrupt, onLocate }: Props) {
+export function BlockingChains({ blocking, connection, route, actions, actionsNote, onInterrupt, onLocate }: Props) {
   return (
     <div className="block-chains" role="group" aria-label={t("ui.blocking_chains.label", { count: blocking.waiting })}>
       {blocking.chains.map((chain, i) => (
-        <ChainCard key={chain.head} chain={chain} actions={actions} actionsNote={actionsNote} onInterrupt={onInterrupt} onLocate={onLocate} defaultOpen={i < 2} />
+        <ChainCard key={chain.head} chain={chain} connection={connection} route={route} actions={actions} actionsNote={actionsNote} onInterrupt={onInterrupt} onLocate={onLocate} defaultOpen={i < 2} />
       ))}
     </div>
   );
 }
 
-function ChainCard({ chain, actions, actionsNote, onInterrupt, onLocate, defaultOpen }: Omit<Props, "blocking"> & { chain: BlockingChain; defaultOpen: boolean }) {
+function ChainCard({ chain, connection, route, actions, actionsNote, onInterrupt, onLocate, defaultOpen }: Omit<Props, "blocking"> & { chain: BlockingChain; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [adviceOpen, setAdviceOpen] = useState(false);
   const [clamped, setClamped] = useState(false);
@@ -101,7 +105,7 @@ function ChainCard({ chain, actions, actionsNote, onInterrupt, onLocate, default
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {open ? t("ui.blocking_chains.hide_tree") : t("ui.blocking_chains.show_tree")}
         </button>
         <span className="spacer" />
-        {head && actions.length > 0 && <HeadActions head={head} actions={actions} onInterrupt={onInterrupt} />}
+        {head && actions.length > 0 && <SessionActionControls connection={connection} route={route} session={head} actions={actions} variant="blocker" execute={onInterrupt} />}
         {actions.length === 0 && actionsNote && (
           <span className="muted block-note" title={actionsNote}>
             <Lock size={11} /> {t("ui.blocking_chains.production")}
@@ -153,62 +157,5 @@ function TreeRow({ node, depth, onLocate, isHead = false }: { node: BlockNode; d
         <TreeRow key={c.session} node={c} depth={depth + 1} onLocate={onLocate} />
       ))}
     </>
-  );
-}
-
-/** The words for an action on the head blocker: its button, its confirmation (naming the session) and what it does. */
-function copy(action: SessionAction, session: string): { button: string; confirm: string; explain: string } {
-  switch (action) {
-    case "cancel":
-      return { button: t("ui.blocking_chains.cancel.button"), confirm: t("ui.blocking_chains.cancel.confirm", { session }), explain: t("ui.blocking_chains.cancel.explain") };
-    case "terminate":
-      return { button: t("ui.blocking_chains.terminate.button"), confirm: t("ui.blocking_chains.terminate.confirm", { session }), explain: t("ui.blocking_chains.terminate.explain") };
-  }
-}
-
-function HeadActions({ head, actions, onInterrupt }: { head: Session; actions: SessionAction[]; onInterrupt: (session: Session, action: SessionAction) => Promise<void> }) {
-  const [state, setState] = useState<{ status: "idle" } | { status: "confirm"; action: SessionAction } | { status: "busy" } | { status: "error"; message: string }>({ status: "idle" });
-  const offered = actions.filter((a) => a !== "cancel" || head.state === "active");
-  const run = async (action: SessionAction) => {
-    setState({ status: "busy" });
-    try {
-      await onInterrupt(head, action);
-      setState({ status: "idle" });
-    } catch (e) {
-      setState({ status: "error", message: errorMessage(e).message });
-    }
-  };
-  if (state.status === "busy") return <span className="spinner" role="status" aria-label={t("ui.common.working")} />;
-  if (state.status === "error")
-    return (
-      <span className="inline-confirm">
-        <span className="error-text" title={state.message}>
-          {state.message}
-        </span>
-        <button type="button" className="btn ghost small" onClick={() => setState({ status: "idle" })}>
-          {t("ui.common.ok")}
-        </button>
-      </span>
-    );
-  if (state.status === "confirm")
-    return (
-      <span className="inline-confirm" onKeyDown={(e) => e.key === "Escape" && setState({ status: "idle" })}>
-        <span className="muted">{copy(state.action, head.id).explain}</span>
-        <button type="button" className="btn danger small" autoFocus onClick={() => run(state.action)}>
-          {copy(state.action, head.id).confirm}
-        </button>
-        <button type="button" className="btn ghost small" onClick={() => setState({ status: "idle" })}>
-          {t("ui.blocking_chains.keep")}
-        </button>
-      </span>
-    );
-  return (
-    <span className="block-actions">
-      {offered.map((a) => (
-        <button type="button" key={a} className="btn small" title={copy(a, head.id).explain} onClick={() => setState({ status: "confirm", action: a })}>
-          {copy(a, head.id).button}
-        </button>
-      ))}
-    </span>
   );
 }

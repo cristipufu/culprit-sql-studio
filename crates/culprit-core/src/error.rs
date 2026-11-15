@@ -29,6 +29,7 @@ pub enum ErrorDetail {
     ActualPlanExecutionPopulationUnverified,
     ActualPlanIdentityUnverified,
     ConnectionSecurity,
+    SessionActionChanged,
     CollectionStopped(crate::telemetry::CollectionStop),
     Outbox(crate::telemetry::OutboxProblem),
     Delivery(crate::telemetry::DeliveryProblem),

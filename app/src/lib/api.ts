@@ -49,7 +49,8 @@ import type { WaitsReport } from "../gen/WaitsReport";
 import type { Engine } from "../gen/Engine";
 import type { StatementCheck } from "../gen/StatementCheck";
 import type { Verification } from "../gen/Verification";
-import type { SessionAction } from "../gen/SessionAction";
+import type { SessionActionRequest } from "../gen/SessionActionRequest";
+import type { SessionActionOutcome } from "../gen/SessionActionOutcome";
 import type { SignInEvent } from "../gen/SignInEvent";
 import type { ErrorDetail } from "../gen/ErrorDetail";
 
@@ -123,7 +124,7 @@ export interface Api {
   waits(name: string, windowMinutes: number | null): Promise<WaitsReport | null>;
   /** What the server waits on right now, sampled for `seconds`. */
   waitSample(name: string, seconds: number): Promise<WaitSample>;
-  interruptSession(name: string, session: string, action: SessionAction): Promise<void>;
+  interruptSession(request: SessionActionRequest): Promise<SessionActionOutcome>;
   previewTable(name: string, options: TablePreviewOptions, signal?: AbortSignal): Promise<TablePreview>;
   run(name: string, sql: string, limit: number, confirmed: boolean): Promise<ResultSet>;
   /** What changed between two periods: Query Store intervals, or Culprit's own scans. */
@@ -238,7 +239,7 @@ async function desktopApi(): Promise<Api> {
     live: (name) => invoke("live", { name }),
     waits: (name, windowMinutes) => invoke("waits", { name, windowMinutes }),
     waitSample: (name, seconds) => invoke("wait_sample", { name, seconds }),
-    interruptSession: (name, session, action) => invoke("interrupt_session", { name, session, action }),
+    interruptSession: (request) => invoke("interrupt_session", { request }),
     previewTable: (name, options, signal) => preview("preview_table", { name, options }, signal),
     run: (name, sql, limit, confirmed) => invoke("run_sql", { name, sql, limit, confirmed }),
     changes: (name, request) => invoke("changes", { name, request }),

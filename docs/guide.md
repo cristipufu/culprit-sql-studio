@@ -91,7 +91,14 @@ Or open the desktop app: saved connections are listed in the sidebar, grouped by
 
 Entra ID connections use your `az login`. Without the Azure CLI (or when it's signed out), Culprit signs in with a device code instead: the app shows the code, the CLI prints it when you're at a terminal. Access tokens stay in memory, the refresh token in the OS keychain; `culprit auth logout` forgets it. Scripts and agents never block on a sign-in: they get an error with a hint.
 
-On non-production connections, Live can cancel a session's statement or end the session (`culprit live <conn> --cancel <id>` / `--kill <id>`). Production connections refuse both, in the CLI and the app.
+On non-production connections, Live can request cancellation of an observed request or termination of its whole session. Culprit rechecks the original native identity before signalling; the database's numeric signalling API still allows a concurrent-change race. Success confirms signal acceptance, not completed cancellation, exit or rollback. Production connections refuse both actions.
+
+The CLI requires the original JSON observation. Capture it before selecting a session, then pass the same file with `--cancel` or `--kill`:
+
+```sh
+culprit live shop-staging --json > /tmp/culprit-live.json
+culprit live shop-staging --cancel 42 --observation /tmp/culprit-live.json
+```
 
 ### SSH jump hosts
 

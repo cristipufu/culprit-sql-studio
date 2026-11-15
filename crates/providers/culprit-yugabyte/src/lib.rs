@@ -214,15 +214,16 @@ impl Provider for YugabyteProvider {
         })
         .await
     }
-    async fn interrupt_session(&self, id: &str, action: culprit_core::SessionAction) -> Result<()> {
+    async fn interrupt_session(
+        &self,
+        target: &culprit_core::SessionActionTarget,
+        action: culprit_core::SessionAction,
+    ) -> Result<culprit_core::SessionActionOutcome> {
         deadline(OBSERVE_TIMEOUT, async {
             if self.spec.environment.is_production() {
-                return Err(Error::new(
-                    culprit_core::ErrorCode::PermissionDenied,
-                    t!("provider.yugabyte.error.production_sessions"),
-                ));
+                return Err(culprit_core::SessionActionTarget::production());
             }
-            sessions::interrupt(&self.connector, id, action).await
+            sessions::interrupt(&self.connector, target, action).await
         })
         .await
     }

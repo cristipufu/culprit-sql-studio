@@ -2,15 +2,20 @@ import { Lock, Pause, Play } from "lucide-react";
 import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BlockingChains } from "../components/BlockingChains";
 import type { LiveState } from "../gen/LiveState";
+import type { ConnectionInfo } from "../gen/ConnectionInfo";
 import type { Session } from "../gen/Session";
 import type { SessionAction } from "../gen/SessionAction";
+import type { SessionActionOutcome } from "../gen/SessionActionOutcome";
+import type { SessionActionRequest } from "../gen/SessionActionRequest";
+import type { SessionActionRoute } from "../gen/SessionActionRoute";
+import { SessionActionControls } from "../components/SessionActionControls";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { can, serverName } from "../lib/engines";
 import { count, dateLocale, duration, oneLine } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { t } from "../lib/i18n";
 import { waitResourceLabel } from "../lib/wait-resources";
-import { currentReport, setState, toast, useStore } from "../lib/store";
+import { currentReport, setState, useStore } from "../lib/store";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
 import { slot, withElements } from "../lib/message-parts";
@@ -49,12 +54,18 @@ export function Live({ connection }: { connection: string }) {
       </div>
     );
   }
-  return <LiveSessions connection={connection} />;
+  return <LiveSessions key={connection} connection={connection} />;
 }
 
+type LiveRead = { owner: ConnectionInfo | undefined; value: LiveState };
+type LiveError = { owner: ConnectionInfo | undefined; value: ApiError };
+
 function LiveSessions({ connection }: { connection: string }) {
-  const [state, setLive] = useState<LiveState | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
+  const owner = useStore((s) => s.connections.find((c) => c.name === connection));
+  const [read, setLive] = useState<LiveRead | null>(null);
+  const [failure, setError] = useState<LiveError | null>(null);
+  const state = read && read.owner === owner ? read.value : null;
+  const error = failure && failure.owner === owner ? failure.value : null;
   const [paused, setPaused] = useState(false);
   const [showIdle, setShowIdle] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -63,7 +74,7 @@ function LiveSessions({ connection }: { connection: string }) {
   const [history, setHistory] = useState<Sample[]>([]);
   const [located, setLocated] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const engine = useStore((s) => s.connections.find((c) => c.name === connection)?.engine ?? "postgres");
+  const engine = owner?.engine ?? "postgres";
   const recentDeadlocks = useStore((s) => currentReport(s)?.snapshot.deadlocks?.deadlocks.length ?? 0);
   const tableRef = useRef<HTMLDivElement>(null);
   const stopped = paused || hidden || tab !== "sessions";
@@ -108,11 +119,11 @@ function LiveSessions({ connection }: { connection: string }) {
       try {
         const next = await (await api()).live(connection);
         if (cancelled) return;
-        setLive(next);
+        setLive({ owner, value: next });
         setError(null);
       } catch (e) {
         const error = errorMessage(e);
-        if (!cancelled) setError(error);
+        if (!cancelled) setError({ owner, value: error });
         // An engine that can't answer won't answer on the next tick either.
         if (error.code === "unsupported") return;
       }
@@ -123,7 +134,7 @@ function LiveSessions({ connection }: { connection: string }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [connection, stopped, refresh]);
+  }, [connection, owner, stopped, refresh]);
 
   const locate = (id: string) => {
     setLocated(id);
@@ -131,12 +142,13 @@ function LiveSessions({ connection }: { connection: string }) {
     setTimeout(() => setLocated((l) => (l === id ? null : l)), 1800);
   };
 
-  const interrupt = async (session: Session, action: SessionAction) => {
-    await (await api()).interruptSession(connection, session.id, action);
-    toast(action === "cancel" ? t("ui.live.cancelled", { session: session.id }) : t("ui.live.ended", { session: session.id }));
+  const interrupt = async (request: SessionActionRequest): Promise<SessionActionOutcome> => {
+    const outcome = await (await api()).interruptSession(request);
     setRefresh((n) => n + 1);
+    return outcome;
   };
-  const actions = state?.session_actions ?? [];
+  const actions = error ? [] : state?.session_actions ?? [];
+  const route = state?.session_action_route ?? null;
 
   const sessions = state?.sessions ?? [];
   const blocked = sessions.filter((s) => s.blocked_by);
@@ -200,6 +212,8 @@ function LiveSessions({ connection }: { connection: string }) {
       ) : chains.length > 0 && state?.blocking ? (
         <BlockingChains
           blocking={state.blocking}
+          connection={connection}
+          route={route}
           actions={actions}
           actionsNote={state.session_actions_note}
           onInterrupt={interrupt}
@@ -247,7 +261,7 @@ function LiveSessions({ connection }: { connection: string }) {
           </thead>
           <tbody>
             {visible.map((s) => (
-              <SessionRow key={s.id} session={s} isHead={heads.includes(s.id)} located={located === s.id} actions={actions} onInterrupt={interrupt} open={watching === s.id} onOpen={() => setWatching((w) => (w === s.id ? null : s.id))} />
+              <SessionRow key={s.id} connection={connection} route={route} session={s} isHead={heads.includes(s.id)} located={located === s.id} actions={actions} onInterrupt={interrupt} open={watching === s.id} onOpen={() => setWatching((w) => (w === s.id ? null : s.id))} />
             ))}
           </tbody>
         </table>
@@ -297,16 +311,9 @@ function Sparkline({ samples }: { samples: Sample[] }) {
   );
 }
 
-/** What a session action's buttons say; `confirm` names the session. */
-function actionCopy(action: SessionAction, session: string): { button: string; confirm: string; explain: string } {
-  return action === "cancel"
-    ? { button: t("ui.common.cancel"), confirm: t("ui.live.action.cancel_confirm", { session }), explain: t("ui.live.action.cancel_explain") }
-    : { button: t("ui.live.action.end"), confirm: t("ui.live.action.end_confirm", { session }), explain: t("ui.live.action.end_explain") };
-}
-
-type RowAction = { status: "idle" } | { status: "confirm"; action: SessionAction } | { status: "busy" } | { status: "error"; message: string };
-
 function SessionRow({
+  connection,
+  route,
   session: s,
   isHead,
   located = false,
@@ -315,31 +322,22 @@ function SessionRow({
   open,
   onOpen,
 }: {
+  connection: string;
+  route: SessionActionRoute | null;
   session: Session;
   isHead: boolean;
   located?: boolean;
   actions: SessionAction[];
-  onInterrupt: (session: Session, action: SessionAction) => Promise<void>;
+  onInterrupt: (request: SessionActionRequest) => Promise<SessionActionOutcome>;
   /** Its progress panel is showing. */
   open: boolean;
   /** Show (or hide) how far along its running statement is. */
   onOpen: () => void;
 }) {
-  const [row, setRow] = useState<RowAction>({ status: "idle" });
-  const offered = actions.filter((a) => a !== "cancel" || s.state === "active");
-  const run = async (action: SessionAction) => {
-    setRow({ status: "busy" });
-    try {
-      await onInterrupt(s, action);
-      setRow({ status: "idle" });
-    } catch (e) {
-      setRow({ status: "error", message: errorMessage(e).message });
-    }
-  };
   return (
     <tr
       data-session={s.id}
-      className={`row ${row.status === "confirm" ? "confirming" : ""} ${s.transaction_ms != null && (s.state === "idle in transaction" || s.state === "sleeping") ? "idle-tx" : ""} ${located ? "located" : ""} ${open ? "selected" : ""} ${s.state !== "idle" ? "openable" : ""}`}
+      className={`row ${s.transaction_ms != null && (s.state === "idle in transaction" || s.state === "sleeping") ? "idle-tx" : ""} ${located ? "located" : ""} ${open ? "selected" : ""} ${s.state !== "idle" ? "openable" : ""}`}
       tabIndex={s.state !== "idle" ? 0 : undefined}
       aria-expanded={s.state !== "idle" ? open : undefined}
       title={s.state !== "idle" ? t("ui.live.progress_title", { key: "Enter" }) : undefined}
@@ -369,33 +367,7 @@ function SessionRow({
       <td className="muted">{s.application ?? ""}</td>
       {actions.length > 0 && (
         <td className="r session-actions">
-          {row.status === "idle" &&
-            offered.map((a) => (
-              <button type="button" key={a} className="btn ghost small" title={actionCopy(a, s.id).explain} onClick={() => setRow({ status: "confirm", action: a })}>
-                {actionCopy(a, s.id).button}
-              </button>
-            ))}
-          {row.status === "confirm" && (
-            <span className="inline-confirm" onKeyDown={(e) => e.key === "Escape" && setRow({ status: "idle" })}>
-              <button type="button" className="btn danger small" autoFocus title={actionCopy(row.action, s.id).explain} onClick={() => run(row.action)}>
-                {actionCopy(row.action, s.id).confirm}
-              </button>
-              <button type="button" className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
-                {t("ui.live.keep")}
-              </button>
-            </span>
-          )}
-          {row.status === "busy" && <span className="spinner" />}
-          {row.status === "error" && (
-            <span className="inline-confirm">
-              <span className="error-text" title={row.message}>
-                {row.message}
-              </span>
-              <button type="button" className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
-                {t("ui.common.ok")}
-              </button>
-            </span>
-          )}
+          <SessionActionControls connection={connection} route={route} session={s} actions={actions} variant="row" execute={onInterrupt} />
         </td>
       )}
     </tr>

@@ -58,6 +58,20 @@ pub fn query_layout(query_id: bool, backend_types: &str, extra_columns: &str, li
         "",
     )
 }
+/// The same native metadata projection for one observed backend, without a database-wide activity walk.
+pub fn target_query(query_id: bool, pid: u32, backend_types: &str, extra_columns: &str) -> String {
+    metadata_query(
+        query_id,
+        extra_columns,
+        &format!(
+            "SELECT * FROM pg_catalog.pg_stat_activity WHERE pid={pid} AND pid<>pg_catalog.pg_backend_pid()
+             AND datid=(SELECT oid FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database())
+             AND backend_type IN ({backend_types})"
+        ),
+        1,
+        "",
+    )
+}
 fn metadata_query(query_id: bool, extra_columns: &str, selection: &str, limit: usize, ctes: &str) -> String {
     let query_id = if query_id { "a.query_id::text" } else { "NULL::text" };
     format!(
@@ -85,7 +99,7 @@ fn waiting_on_lock(row: &Row) -> Option<bool> {
     // negative lock inventory, particularly when this decoder is used by YSQL.
     (row.text("wait_event_type").as_deref() == Some("Lock")).then_some(true)
 }
-fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
+pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
     let pid = text(&row, "pid")?;
     pid.parse::<u32>().map_err(|_| invalid())?;
     let state = text(&row, "state")?;
@@ -166,6 +180,13 @@ fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
     };
     Ok(ActivityRecord { facts, row, sql: None })
 }
+
+/// Match the native SQL projection's UTC microsecond spelling without rounding a finer supplied timestamp.
+pub fn generation_timestamp(value: &str) -> Result<String> {
+    let canonical = canonical_time(value)?;
+    let microseconds = canonical.strip_suffix("000Z").ok_or_else(invalid)?;
+    Ok(format!("{microseconds}Z"))
+}
 pub(crate) async fn observe<R: QueryRead>(
     reader: &mut R,
     meta: &Metadata,
@@ -227,7 +248,7 @@ async fn read_baseline<R: QueryRead>(
             return Err(invalid());
         }
         if row.text("pid").is_some() && records.len() < limit {
-            records.push(decode(row, database_oid)?);
+            records.push(decode_row(row, database_oid)?);
         }
     }
     ActivityEvidence::validate(&records.iter().filter_map(|row| row.facts.clone()).collect::<Vec<_>>())?;
@@ -318,6 +339,7 @@ pub(crate) fn project(record: &ActivityRecord) -> Session {
         _ => None,
     };
     Session {
+        action_target: None,
         id: row.string("pid"),
         user: row.text("username"),
         application: row.text("application_name").filter(|value| !value.is_empty()),

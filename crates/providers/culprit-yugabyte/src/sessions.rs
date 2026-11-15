@@ -1,9 +1,11 @@
 use crate::probe::{self, node_id};
 use crate::read::query;
-use culprit_core::{Engine, Environment, Error, ErrorCode, LiveState, LockWait, Result, Session, SessionAction, t};
-use culprit_postgres::wire::{Connector, INTERACTIVE, NativeRead, ReadSession};
+use culprit_core::{Engine, Environment, Error, LiveState, LockWait, Result, Session, t};
+use culprit_postgres::wire::{Connector, NativeRead, ReadSession};
 use serde_json::Value;
 use std::collections::HashMap;
+mod actions;
+pub(crate) use actions::interrupt;
 
 fn text(v: &Value, key: &str) -> Option<String> {
     v.get(key)?.as_str().map(str::to_string)
@@ -18,12 +20,21 @@ pub(crate) fn literal(s: &str) -> String {
 
 pub(crate) async fn live(connector: &Connector, environment: Environment) -> Result<LiveState> {
     let mut observed = crate::read::application(connector.clone(), std::time::Duration::ZERO);
-    let result = read_live(&mut observed, environment).await;
-    observed.close().await;
+    let result = read_live(&mut observed, connector, environment).await;
+    if observed.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+        return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+    }
     result
 }
-async fn read_live(observed: &mut ReadSession, environment: Environment) -> Result<LiveState> {
+async fn read_live(observed: &mut ReadSession, connector: &Connector, environment: Environment) -> Result<LiveState> {
     let p = probe::read_from(observed).await?;
+    let source = if environment.is_production() {
+        None
+    } else {
+        optional_context(
+            crate::native::metadata::from_probe(observed, &connector.host, connector.port, p.clone()).await,
+        )?
+    };
     if p.global {
         crate::global::nodes_from(observed).await?;
     }
@@ -31,6 +42,13 @@ async fn read_live(observed: &mut ReadSession, environment: Environment) -> Resu
     let count = observed.notices();
     let rows=query(observed,&format!("SELECT to_jsonb(a)::text AS sample FROM {relation} a WHERE datname={}
         AND backend_type IN ('client backend','yb-conn-mgr worker connection') AND COALESCE(application_name,'') <> 'culprit' LIMIT 1001",literal(&p.database))).await?;
+    let action_context = match source {
+        Some(before) => {
+            optional_context(crate::native::metadata::read(observed, &connector.host, connector.port).await)?
+                .and_then(|after| before.completed_action_context(&after))
+        }
+        None => None,
+    };
     let mut notes = vec![];
     if !p.global {
         notes.push(match p.node.as_deref() {
@@ -60,9 +78,13 @@ async fn read_live(observed: &mut ReadSession, environment: Environment) -> Resu
             notes.push(t!("provider.yugabyte.sessions.unknown_node"));
         }
         let started = text(&v, "backend_start").unwrap_or_default();
-        let id = format!("{}/{pid}/{started}", node.as_deref().unwrap_or("unknown"));
-        if let Some(node) = node {
-            backends.insert((node, pid.to_string()), id.clone());
+        let original = node.as_deref().and_then(|node| actions::original(&v, &p, node));
+        let id = original
+            .as_ref()
+            .map(|row| Engine::Yugabyte.spec().live_session_id(&row.key.session))
+            .unwrap_or_else(|| format!("{}/{pid}/{started}", node.as_deref().unwrap_or("unknown")));
+        if let Some(node) = &node {
+            backends.insert((node.clone(), pid.to_string()), id.clone());
         }
         if let Some(tx) = text(&v, "yb_backend_xid") {
             transactions.insert(tx.replace('-', ""), id.clone());
@@ -72,6 +94,9 @@ async fn read_live(observed: &mut ReadSession, environment: Environment) -> Resu
             notes.push(t!("provider.yugabyte.sessions.hidden"));
         }
         sessions.push(Session {
+            action_target: original
+                .as_ref()
+                .and_then(|original| actions::target(&v, original, action_context.as_ref(), node.as_deref()?)),
             id,
             user: text(&v, "usename"),
             application: text(&v, "application_name"),
@@ -145,22 +170,20 @@ async fn read_live(observed: &mut ReadSession, environment: Environment) -> Resu
     notes.sort();
     notes.dedup();
     let blocking = culprit_core::blocking::analyze(Engine::Yugabyte, &sessions, &waits, &[]);
+    let session_actions = actions::offered(&sessions, environment);
     Ok(LiveState {
         taken_at: p.now,
         sessions,
         waits: vec![],
         notes,
         blocking,
-        session_actions: if environment.is_production() || p.node.is_none() {
-            vec![]
-        } else {
-            Engine::Yugabyte.spec().session_actions()
-        },
+        session_actions,
         session_actions_note: if environment.is_production() {
             Some(t!("provider.yugabyte.sessions.actions_production"))
         } else {
             Some(t!("provider.yugabyte.sessions.actions_rules"))
         },
+        session_action_route: None,
     })
 }
 
@@ -168,22 +191,26 @@ pub(crate) fn target(id: &str) -> Result<(String, i32, String)> {
     culprit_core::ysql_session_target(id)
 }
 
-pub(crate) async fn interrupt(connector: &Connector, id: &str, action: SessionAction) -> Result<()> {
-    let (node, pid, started) = target(id)?;
-    let function = match action {
-        SessionAction::Cancel => "pg_cancel_backend",
-        SessionAction::Terminate => "pg_terminate_backend",
-    };
-    let client = connector.connect(INTERACTIVE).await?;
-    let row=culprit_postgres::wire::query_one(&client,&format!("SELECT pg_catalog.{function}(a.pid) AS stopped FROM pg_catalog.pg_stat_activity a
-        WHERE a.pid={pid} AND a.datname=pg_catalog.current_database() AND a.backend_type='client backend'
-        AND a.pid <> pg_catalog.pg_backend_pid() AND COALESCE(a.application_name,'') <> 'culprit'
-        AND a.backend_start={}::timestamptz AND pg_catalog.replace(pg_catalog.yb_get_local_tserver_uuid()::text,'-','')={}",literal(&started),literal(&node))).await?;
-    if row.is_some_and(|r| r.flag("stopped")) {
-        Ok(())
-    } else {
-        Err(Error::new(ErrorCode::NotFound, t!("provider.yugabyte.error.session_gone"))
-            .with_hint(t!("provider.yugabyte.error.session_gone_hint")))
+fn optional_context<T>(result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Ok(context) => Ok(Some(context)),
+        Err(error)
+            if (error.detail.is_none()
+                && matches!(
+                    error.code,
+                    culprit_core::ErrorCode::PermissionDenied | culprit_core::ErrorCode::Unsupported
+                ))
+                || matches!(
+                    error.detail,
+                    Some(culprit_core::ErrorDetail::CollectionStopped(
+                        culprit_core::telemetry::CollectionStop::SourceUnavailable
+                            | culprit_core::telemetry::CollectionStop::InvalidPage
+                    ))
+                ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
     }
 }
 

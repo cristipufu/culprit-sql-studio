@@ -21,6 +21,9 @@ fn index_hiding(server: &ServerInfo) -> Option<&'static str> {
 }
 
 impl EngineSpec for Mysql {
+    fn session_id_format(&self) -> SessionIdFormat {
+        SessionIdFormat::NativeId
+    }
     fn cleanup_evidence(&self) -> CleanupEvidence {
         CleanupEvidence::SharedUndoReadViews
     }

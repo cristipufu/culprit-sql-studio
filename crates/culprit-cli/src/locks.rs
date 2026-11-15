@@ -218,6 +218,7 @@ mod tests {
         ])).unwrap();
         let blocking = culprit_core::blocking::analyze(culprit_core::Engine::Postgres, &sessions, &[], unqualified);
         LiveState {
+            session_action_route: None,
             taken_at: "2026-11-15T10:00:00Z".into(),
             sessions,
             blocking,

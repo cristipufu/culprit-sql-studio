@@ -63,6 +63,7 @@ fn storage_status_uses_file_identity_instead_of_ids_or_display_text() {
 
 fn session(id: &str, state: &str) -> Session {
     Session {
+        action_target: None,
         id: id.into(),
         user: None,
         application: None,
@@ -86,6 +87,7 @@ fn session(id: &str, state: &str) -> Session {
 fn live(sessions: Vec<Session>, engine: Engine) -> LiveState {
     let blocking = culprit_core::blocking::analyze(engine, &sessions, &[], &[]);
     LiveState {
+        session_action_route: None,
         notes: Vec::new(),
         taken_at: "2026-10-11T12:00:00Z".into(),
         sessions,

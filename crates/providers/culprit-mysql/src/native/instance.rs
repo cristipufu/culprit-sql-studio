@@ -49,17 +49,48 @@ pub(crate) async fn platform<R: QueryRead>(reader: &mut R) -> Result<Platform> {
 }
 
 impl Platform {
+    pub(crate) fn from_connection(context: &super::metadata::ConnectionContext) -> Self {
+        Self {
+            version: context.version.clone(),
+            flavor: context.flavor,
+            performance_schema: context.performance_schema,
+            observed_at: context.at.clone(),
+            connection_id: context.connection_id,
+            login: context.login.clone(),
+            server_id: context.server_id,
+            server_name: context.server_name.clone(),
+        }
+    }
     /// Only call after the owning source has qualified the native product and UUID availability.
     pub(crate) async fn identify<R: QueryRead>(&self, reader: &mut R, configuration: &Rec) -> Result<Identity> {
-        let uuid = text(configuration, "server_uuid")?.to_ascii_lowercase();
-        if !valid_uuid(&uuid) {
-            return Err(invalid());
-        }
-        let resource = SharedResourceIdentity {
-            engine: Engine::Mysql,
-            kind: SharedResourceKind::Instance,
-            namespace: NativeIdentity::new("mysql-server").qualified("server_uuid", &uuid),
-            native: NativeIdentity::new(uuid),
+        let resource = match self.flavor {
+            Flavor::Mysql => {
+                let uuid = text(configuration, "server_uuid")?.to_ascii_lowercase();
+                if !valid_uuid(&uuid) {
+                    return Err(invalid());
+                }
+                SharedResourceIdentity {
+                    engine: Engine::Mysql,
+                    kind: SharedResourceKind::Instance,
+                    namespace: NativeIdentity::new("mysql-server").qualified("server_uuid", &uuid),
+                    native: NativeIdentity::new(uuid),
+                }
+            }
+            Flavor::Mariadb => {
+                let uid = text(configuration, "server_uid")?;
+                if uid.len() != 28
+                    || !uid.ends_with('=')
+                    || !uid[..27].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
+                {
+                    return Err(invalid());
+                }
+                SharedResourceIdentity {
+                    engine: Engine::Mysql,
+                    kind: SharedResourceKind::Instance,
+                    namespace: NativeIdentity::new("mariadb-server-uid"),
+                    native: NativeIdentity::new(uid),
+                }
+            }
         };
         if !resource.is_valid() {
             return Err(invalid());
@@ -78,6 +109,7 @@ impl Platform {
 
 fn valid_uuid(uuid: &str) -> bool {
     uuid.len() == 36
+        && uuid.bytes().any(|value| value.is_ascii_hexdigit() && value != b'0')
         && uuid.bytes().enumerate().all(|(offset, value)| {
             if matches!(offset, 8 | 13 | 18 | 23) { value == b'-' } else { value.is_ascii_hexdigit() }
         })

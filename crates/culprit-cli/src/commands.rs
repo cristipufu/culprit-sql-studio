@@ -2,13 +2,12 @@
 
 use std::path::PathBuf;
 
-use culprit_core::{Error, ExplainMode, Result, SessionAction, Severity, t};
+use culprit_core::{Error, ExplainMode, Result, Severity, t};
 use culprit_engine::Workspace;
 
 use crate::output::Out;
 use crate::{
-    ChangesArgs, ExplainArgs, FindingsArgs, LiveArgs, RunArgs, SavedCommand, ScanArgs, TopArgs, fail_code, load,
-    report_file,
+    ChangesArgs, ExplainArgs, FindingsArgs, RunArgs, SavedCommand, ScanArgs, TopArgs, fail_code, load, report_file,
 };
 
 pub(super) async fn doctor(ws: &Workspace, connection: &str, out: &Out) -> Result<u8> {
@@ -53,37 +52,6 @@ pub(super) fn show(
 pub(super) fn top(ws: &Workspace, args: TopArgs, out: &Out) -> Result<u8> {
     let report = load(ws, &args.connection, args.report.as_ref())?;
     out.top(&report, args.by, args.limit);
-    Ok(0)
-}
-
-pub(super) async fn live(ws: &Workspace, args: LiveArgs, out: &Out) -> Result<u8> {
-    let target = match (args.cancel, args.kill) {
-        (Some(id), _) => Some((id, SessionAction::Cancel)),
-        (None, Some(id)) => Some((id, SessionAction::Terminate)),
-        (None, None) => None,
-    };
-    if let Some((id, action)) = target {
-        ws.interrupt_session(&args.connection, &id, action).await?;
-        out.done(&match action {
-            SessionAction::Cancel => t!("cli.live.cancelled", session = &id),
-            SessionAction::Terminate => t!("cli.live.ended", session = &id),
-        });
-        return Ok(0);
-    }
-    if let Some(session) = args.progress.as_deref() {
-        let mut first = true;
-        loop {
-            let progress = ws.query_progress(&args.connection, session, first || !args.watch).await?;
-            out.query_progress(&progress, !first);
-            if !args.watch || !progress.running {
-                return Ok(0);
-            }
-            first = false;
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
-    }
-    let live = ws.live(&args.connection).await?;
-    out.live(&live);
     Ok(0)
 }
 

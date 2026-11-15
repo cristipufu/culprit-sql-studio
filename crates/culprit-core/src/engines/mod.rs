@@ -86,6 +86,24 @@ pub enum CleanupEvidence {
     Unavailable,
 }
 
+/// How Live labels an already qualified native actor. This formats an identity; it does not discover one.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum SessionIdFormat {
+    NativeId,
+    NativeIdAndGeneration,
+}
+
+impl SessionIdFormat {
+    pub fn display(self, identity: &crate::telemetry::NativeActivityIdentity) -> String {
+        match self {
+            Self::NativeId => identity.id.clone(),
+            Self::NativeIdAndGeneration => format!("{}/{}", identity.id, identity.generation),
+        }
+    }
+}
+
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
     fn evidence_presentation(&self) -> EvidencePresentation;
@@ -194,6 +212,12 @@ pub trait EngineSpec: Send + Sync {
     /// What may be done to another session from Live, outside production.
     fn session_actions(&self) -> Vec<SessionAction> {
         Vec::new()
+    }
+
+    fn session_id_format(&self) -> SessionIdFormat;
+
+    fn live_session_id(&self, identity: &crate::telemetry::NativeActivityIdentity) -> String {
+        self.session_id_format().display(identity)
     }
 
     /// Validate a Live session's engine-specific identity before resolving credentials or issuing an operation.
@@ -451,6 +475,7 @@ pub struct EngineFacts {
     pub products: Vec<ProductFacts>,
     pub abilities: EngineAbilities,
     pub session_actions: Vec<SessionAction>,
+    pub session_id_format: SessionIdFormat,
     pub waiting_state: String,
     pub connect: Connect,
     /// Message keys: what a scan of it can't establish.
@@ -525,6 +550,7 @@ impl Engine {
             label: spec.label().into(),
             abilities,
             session_actions: spec.session_actions(),
+            session_id_format: spec.session_id_format(),
             waiting_state: spec.waiting_state().into(),
             connect: spec.connect(),
             limitations: spec.limitation_keys().iter().map(|key| key.to_string()).collect(),

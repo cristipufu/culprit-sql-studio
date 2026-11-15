@@ -4305,12 +4305,19 @@ table.grid tr.row .session-actions .btn.ghost {
 
 table.grid tr.row:hover .session-actions .btn.ghost,
 table.grid tr.row .session-actions .btn.ghost:focus-visible,
-table.grid tr.row.confirming .session-actions .btn.ghost {
+table.grid tr.row:has(td.session-actions .inline-confirm) .session-actions .btn.ghost {
   opacity: 1;
 }
 
-table.grid tr.row.confirming td {
+table.grid tr.row:has(td.session-actions .inline-confirm) td {
   background: var(--high-bg);
+}
+
+.inline-confirm.session-action-confirm {
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 32rem;
+  white-space: normal;
 }
 
 .inline-confirm {

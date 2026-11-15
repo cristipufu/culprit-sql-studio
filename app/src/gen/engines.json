@@ -36,6 +36,7 @@
     "session_actions": [
       "terminate"
     ],
+    "session_id_format": "native-id",
     "waiting_state": "suspended",
     "connect": {
       "choice": "SQL Server",
@@ -174,6 +175,7 @@
       "cancel",
       "terminate"
     ],
+    "session_id_format": "native-id",
     "waiting_state": "active",
     "connect": {
       "choice": "PostgreSQL",
@@ -332,6 +334,7 @@
       "cancel",
       "terminate"
     ],
+    "session_id_format": "native-id-and-generation",
     "waiting_state": "active",
     "connect": {
       "choice": "YugabyteDB",
@@ -501,6 +504,7 @@
       "cancel",
       "terminate"
     ],
+    "session_id_format": "native-id",
     "waiting_state": "active",
     "connect": {
       "choice": "MySQL / MariaDB",
@@ -669,6 +673,7 @@
       "sign_in": false
     },
     "session_actions": [],
+    "session_id_format": "native-id",
     "waiting_state": "active",
     "connect": {
       "choice": "SQLite",

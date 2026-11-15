@@ -6,6 +6,26 @@ use culprit_postgres::wire::{INTERACTIVE, query_one, tagged};
 // serialize fixture mutations instead of adding production retries for an artificial cross-test race.
 static LIVE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+fn unqualified_action_target() -> culprit_core::SessionActionTarget {
+    use culprit_core::telemetry::*;
+    culprit_core::SessionActionTarget {
+        context: NativeReadContext {
+            target: culprit_core::DatabaseIdentity::server(Engine::Yugabyte, "shop", "invalid.example", 5433, None)
+                .into(),
+            partition: SourcePartition::Target,
+            observed_from: "2020-01-01T00:00:00Z".into(),
+            observed_until: "2020-01-01T00:00:00Z".into(),
+            database_writable: None,
+        },
+        activity: ActivityKey {
+            session: NativeActivityIdentity { id: "unknown".into(), generation: "unknown".into() },
+            request: None,
+            transaction: None,
+        },
+        statement: None,
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires dev/yugabyte and CULPRIT_YSQL_TEST_PORT"]
 async fn live_partitioned_indexes_preserve_physical_catalog_and_cluster_usage() {
@@ -719,8 +739,12 @@ async fn refusals_before_connecting_in_english() {
         "Production measurements require a proven read-only YSQL statement"
     );
     assert_eq!(
-        production.interrupt_session("x", culprit_core::SessionAction::Cancel).await.unwrap_err().message,
-        "Culprit does not cancel or end sessions on a production connection"
+        production
+            .interrupt_session(&unqualified_action_target(), culprit_core::SessionAction::Cancel)
+            .await
+            .unwrap_err()
+            .message,
+        "Session signals are disabled on production connections."
     );
 }
 
@@ -832,17 +856,6 @@ async fn live_native_catalog_workload_sessions_and_stale_identity_guards() {
             .is_err(),
         "a late error must survive collector truncation"
     );
-    let own_identity = query_one(&client, &format!(
-        "SELECT replace(yb_get_local_tserver_uuid()::text,'-','') AS node,pid::text,{} AS started FROM pg_stat_activity WHERE pid=pg_backend_pid()",
-        crate::probe::timestamp("backend_start")
-    )).await.unwrap().unwrap();
-    let monitor =
-        format!("{}/{}/{}", own_identity.string("node"), own_identity.string("pid"), own_identity.string("started"));
-    assert_eq!(
-        provider.interrupt_session(&monitor, culprit_core::SessionAction::Terminate).await.unwrap_err().code,
-        culprit_core::ErrorCode::NotFound
-    );
-    assert!(query_one(&client, "SELECT 1 AS monitor_still_alive").await.unwrap().is_some());
     client.batch_execute(&tagged("SET application_name='culprit_native_session_test'")).await.unwrap();
     let own = query_one(&client, "SELECT pg_backend_pid()::text AS pid").await.unwrap().unwrap().string("pid");
     let live = provider.live().await.unwrap();
@@ -852,14 +865,16 @@ async fn live_native_catalog_workload_sessions_and_stale_identity_guards() {
         .find(|s| s.application.as_deref() == Some("culprit_native_session_test") && s.id.contains(&format!("/{own}/")))
         .unwrap();
     assert_eq!(observed.id.split('/').count(), 3);
-    let mut stale: Vec<_> = observed.id.split('/').map(str::to_string).collect();
-    stale[2] = "2000-01-01T00:00:00Z".into();
-    assert_eq!(
-        provider.interrupt_session(&stale.join("/"), culprit_core::SessionAction::Cancel).await.unwrap_err().code,
-        culprit_core::ErrorCode::NotFound
-    );
-    stale[0] = "00000000000000000000000000000000".into();
-    assert!(provider.interrupt_session(&stale.join("/"), culprit_core::SessionAction::Terminate).await.is_err());
+    let original = observed.action_target.as_ref().expect("qualified original native session");
+    let mut stale = original.clone();
+    stale.activity.session.generation = "2000-01-01T00:00:00Z".into();
+    assert!(provider.interrupt_session(&stale, culprit_core::SessionAction::Terminate).await.is_err());
+    stale.activity.session.id = format!("00000000000000000000000000000000/{own}");
+    assert!(provider.interrupt_session(&stale, culprit_core::SessionAction::Terminate).await.is_err());
+    client.batch_execute(&tagged("SET application_name='culprit'")).await.unwrap();
+    assert!(provider.interrupt_session(original, culprit_core::SessionAction::Terminate).await.is_err());
+    assert!(query_one(&client, "SELECT 1 AS monitor_still_alive").await.unwrap().is_some());
+    client.batch_execute(&tagged("SET application_name='culprit_native_session_test'")).await.unwrap();
     assert!(query_one(&client, "SELECT 1 AS still_alive").await.unwrap().is_some());
     let active = provider.connector.connect(INTERACTIVE).await.unwrap();
     active.batch_execute(&tagged("SET application_name='culprit_native_progress_test'")).await.unwrap();
@@ -886,14 +901,23 @@ async fn live_native_catalog_workload_sessions_and_stale_identity_guards() {
     let sample = provider.wait_sample(1).await.unwrap();
     assert_eq!(sample.engine, Engine::Yugabyte);
     assert!(sample.seconds >= 1.0 && sample.active_sessions.is_some_and(|n| n >= 1.0));
-    provider.interrupt_session(&running.id, culprit_core::SessionAction::Cancel).await.unwrap();
+    assert_eq!(
+        provider
+            .interrupt_session(
+                running.action_target.as_ref().expect("qualified original request"),
+                culprit_core::SessionAction::Cancel
+            )
+            .await
+            .unwrap(),
+        culprit_core::SessionActionOutcome::SignalSent
+    );
     assert!(sleeper.await.unwrap().is_err(), "only this test's verified sleeping backend is canceled");
     let mut production = local_spec();
     production.environment = culprit_core::Environment::Production;
     let production = YugabyteProvider::new(&production).unwrap();
     assert!(production.live().await.unwrap().session_actions.is_empty());
     assert_eq!(
-        production.interrupt_session(&observed.id, culprit_core::SessionAction::Cancel).await.unwrap_err().code,
+        production.interrupt_session(original, culprit_core::SessionAction::Cancel).await.unwrap_err().code,
         culprit_core::ErrorCode::PermissionDenied
     );
 }

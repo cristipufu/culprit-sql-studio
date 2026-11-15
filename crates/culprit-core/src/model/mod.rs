@@ -6,9 +6,12 @@ use ts_rs::TS;
 
 use crate::provider::SnapshotOptions;
 
+mod session_action;
 #[cfg(test)]
 mod tests;
 mod workload;
+
+pub use session_action::{SessionActionOutcome, SessionActionRequest, SessionActionRoute, SessionActionTarget};
 
 pub use workload::{
     Cadence, CounterScope, CounterSet, PER_DAY_MIN_HOURS, PlanHistory, PlanHistoryKind, PlanVariant, QueryStat,
@@ -842,6 +845,10 @@ impl Snapshot {
 #[ts(export)]
 pub struct Session {
     pub id: String,
+    /// A source-issued observation for administrative signalling; a displayed ID alone grants no action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub action_target: Option<SessionActionTarget>,
     pub user: Option<String>,
     pub application: Option<String>,
     pub host: Option<String>,
@@ -877,6 +884,10 @@ pub struct LiveState {
     pub session_actions: Vec<SessionAction>,
     /// Why `session_actions` is empty, in plain language.
     pub session_actions_note: Option<String>,
+    /// The exact saved route that produced action candidates. Only the workspace can bind this route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_action_route: Option<SessionActionRoute>,
     /// Who blocks whom, as chains under each head blocker, when anyone waits on a lock.
     pub blocking: Option<crate::blocking::Blocking>,
 }

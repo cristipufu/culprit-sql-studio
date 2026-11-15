@@ -220,12 +220,19 @@ async fn live_cluster_aggregation_resets_resources_and_pooled_session_guards() {
         let progress = provider.query_progress(&session.id, true).await?;
         // Connect directly to that same node, so a wrong-node guard cannot hide a missing worker guard.
         let local = YugabyteProvider::new(&spec(Endpoint::Third, "yugabyte")).unwrap();
-        let interrupted = local.interrupt_session(&session.id, culprit_core::SessionAction::Cancel).await;
-        Ok::<_, Error>((progress, interrupted))
+        let local_live = local.live().await?;
+        let worker = local_live
+            .sessions
+            .iter()
+            .find(|row| row.id == session.id)
+            .ok_or_else(|| Error::internal("pooled worker missing on its own node"))?;
+        assert!(session.action_target.is_none());
+        assert!(worker.action_target.is_none(), "a local pooled worker cannot become a logical-client action target");
+        Ok::<_, Error>(progress)
     })
     .await;
     let copied = tokio::time::timeout(POOLED_OBSERVATION_BUDGET, copy.as_mut().finish()).await;
-    let (progress, interrupted) = observed.expect("pooled worker observation exceeded its budget").unwrap();
+    let progress = observed.expect("pooled worker observation exceeded its budget").unwrap();
     assert!(
         progress.running && progress.plan.is_none() && progress.phase.is_none(),
         "running={}, state={:?}, phase={:?}, note={:?}",
@@ -235,7 +242,6 @@ async fn live_cluster_aggregation_resets_resources_and_pooled_session_guards() {
         progress.note
     );
     assert!(progress.note.as_deref().unwrap().contains("reusable Connection Manager worker"));
-    assert_eq!(interrupted.unwrap_err().code, culprit_core::ErrorCode::NotFound);
     assert_eq!(
         copied.expect("pooled COPY completion exceeded its budget").unwrap(),
         0,

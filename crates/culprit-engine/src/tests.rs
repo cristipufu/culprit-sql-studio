@@ -1,5 +1,8 @@
 use super::*;
-use culprit_core::{AuthKind, ErrorCode};
+use culprit_core::{AuthKind, ErrorCode, SessionAction};
+
+#[path = "../tests/session_actions/support.rs"]
+mod session_action_support;
 
 fn temp_home(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("culprit-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()))
@@ -176,7 +179,7 @@ fn a_name_given_to_another_connection_never_shows_the_removed_ones_reports() {
 }
 
 /// Records interrupts; supports cancelling statements only.
-struct Sessions(Engine, Arc<std::sync::Mutex<Vec<(String, SessionAction)>>>);
+struct Sessions(Engine, Arc<std::sync::Mutex<Vec<(culprit_core::SessionActionTarget, SessionAction)>>>);
 
 #[async_trait::async_trait]
 impl Provider for Sessions {
@@ -193,15 +196,13 @@ impl Provider for Sessions {
         Err(Error::new(ErrorCode::Unsupported, "test double"))
     }
     async fn live(&self) -> Result<LiveState> {
-        Ok(LiveState {
-            notes: Vec::new(),
-            taken_at: String::new(),
-            sessions: Vec::new(),
-            waits: Vec::new(),
-            session_actions: Vec::new(),
-            session_actions_note: None,
-            blocking: None,
-        })
+        let native = match self.0.spec().session_id_format() {
+            culprit_core::engines::SessionIdFormat::NativeId => "42",
+            culprit_core::engines::SessionIdFormat::NativeIdAndGeneration => "3d2d9e10-555b-4ae2-a683-a8402505e416/42",
+        };
+        let mut live = session_action_support::live(self.0, native);
+        live.session_actions = self.session_actions();
+        Ok(live)
     }
     async fn run(&self, _: &str, _: usize) -> Result<ResultSet> {
         Err(Error::new(ErrorCode::Unsupported, "test double"))
@@ -209,9 +210,13 @@ impl Provider for Sessions {
     fn session_actions(&self) -> Vec<SessionAction> {
         vec![SessionAction::Cancel]
     }
-    async fn interrupt_session(&self, session: &str, action: SessionAction) -> Result<()> {
-        self.1.lock().unwrap().push((session.to_string(), action));
-        Ok(())
+    async fn interrupt_session(
+        &self,
+        target: &culprit_core::SessionActionTarget,
+        action: SessionAction,
+    ) -> Result<culprit_core::SessionActionOutcome> {
+        self.1.lock().unwrap().push((target.clone(), action));
+        Ok(culprit_core::SessionActionOutcome::SignalSent)
     }
     async fn query_progress(&self, session: &str, _: bool) -> Result<culprit_core::QueryProgress> {
         Ok(culprit_core::QueryProgress::idle(session, self.0, "2026-10-24T00:00:00Z".into()))
@@ -244,20 +249,23 @@ async fn sessions_are_never_interrupted_on_production() {
 
     let prod = ws.live("shop-prod").await.unwrap();
     assert!(prod.session_actions.is_empty() && prod.session_actions_note.is_some());
-    let e = ws.interrupt_session("shop-prod", "42", SessionAction::Cancel).await.unwrap_err();
+    let e = ws
+        .interrupt_session(&session_action_support::unbound_request("shop-prod", SessionAction::Cancel))
+        .await
+        .unwrap_err();
     assert_eq!(e.code, ErrorCode::PermissionDenied);
 
-    assert_eq!(ws.live("shop-dev").await.unwrap().session_actions, vec![SessionAction::Cancel]);
-    assert_eq!(
-        ws.interrupt_session("shop-dev", "42", SessionAction::Terminate).await.unwrap_err().code,
-        ErrorCode::Unsupported
-    );
-    assert_eq!(
-        ws.interrupt_session("shop-dev", "4 2", SessionAction::Cancel).await.unwrap_err().code,
-        ErrorCode::InvalidInput
-    );
-    ws.interrupt_session("shop-dev", "42", SessionAction::Cancel).await.unwrap();
-    assert_eq!(*calls.lock().unwrap(), vec![("42".to_string(), SessionAction::Cancel)]);
+    let dev = ws.live("shop-dev").await.unwrap();
+    assert_eq!(dev.session_actions, vec![SessionAction::Cancel]);
+    let request = dev.action_request("42", SessionAction::Cancel).unwrap();
+    let mut unsupported = request.clone();
+    unsupported.action = SessionAction::Terminate;
+    assert_eq!(ws.interrupt_session(&unsupported).await.unwrap_err().code, ErrorCode::Unsupported);
+    let mut unknown = request.clone();
+    unknown.target.activity.session.generation.clear();
+    assert_eq!(ws.interrupt_session(&unknown).await.unwrap_err().code, ErrorCode::Unsupported);
+    assert_eq!(ws.interrupt_session(&request).await.unwrap(), culprit_core::SessionActionOutcome::SignalSent);
+    assert_eq!(*calls.lock().unwrap(), vec![(request.target, SessionAction::Cancel)]);
     let _ = std::fs::remove_dir_all(home);
 }
 
@@ -290,17 +298,16 @@ async fn native_sessions_keep_complete_identity_for_progress_and_actions() {
     assert_eq!(progress.engine, Engine::Yugabyte);
     for malformed in ["42", "node/42/2026-10-23T21:00:00Z"] {
         assert_eq!(ws.query_progress("yb-dev", malformed, false).await.unwrap_err().code, ErrorCode::InvalidInput);
-        assert_eq!(
-            ws.interrupt_session("yb-dev", malformed, SessionAction::Cancel).await.unwrap_err().code,
-            ErrorCode::InvalidInput
-        );
     }
-    assert_eq!(
-        ws.interrupt_session("yb-prod", id, SessionAction::Cancel).await.unwrap_err().code,
-        ErrorCode::PermissionDenied
-    );
-    ws.interrupt_session("yb-dev", id, SessionAction::Cancel).await.unwrap();
-    assert_eq!(*calls.lock().unwrap(), vec![(id.to_string(), SessionAction::Cancel)]);
+    let live = ws.live("yb-dev").await.unwrap();
+    let request = live.action_request(id, SessionAction::Cancel).unwrap();
+    let mut production = request.clone();
+    production.route.connection = "yb-prod".into();
+    assert_eq!(ws.interrupt_session(&production).await.unwrap_err().code, ErrorCode::PermissionDenied);
+    assert_eq!(ws.interrupt_session(&request).await.unwrap(), culprit_core::SessionActionOutcome::SignalSent);
+    assert_eq!(request.target.activity.session.id, "3d2d9e10-555b-4ae2-a683-a8402505e416/42");
+    assert_eq!(request.target.activity.session.generation, "2026-10-23T21:00:00.123456Z");
+    assert_eq!(*calls.lock().unwrap(), vec![(request.target, SessionAction::Cancel)]);
     let _ = std::fs::remove_dir_all(home);
 }
 

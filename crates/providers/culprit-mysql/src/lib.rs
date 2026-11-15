@@ -36,7 +36,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use culprit_core::{
     ConnectionSpec, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, PlanKind, Provider, Result, ResultSet,
-    ServerInfo, Session, SessionAction, Snapshot, SnapshotOptions, WaitStat, format, t,
+    ServerInfo, Session, SessionAction, SessionActionOutcome, SessionActionTarget, Snapshot, SnapshotOptions, WaitStat,
+    format, t,
 };
 use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
@@ -44,7 +45,7 @@ use mysql_async::{Conn, Value};
 use serde_json::Value as Json;
 
 use connect::{Connector, Flavor, Scope, map_error};
-use rows::{explain_one, query, query_one, tagged, value_text};
+use rows::{explain_one, query_one, tagged, value_text};
 
 /// Identity of this crate's collector and native-plan parser, including a build revision when supplied.
 pub fn component_version() -> culprit_core::ComponentVersion {
@@ -234,8 +235,15 @@ impl Provider for MysqlProvider {
         Ok(plan)
     }
 
-    async fn interrupt_session(&self, session: &str, action: SessionAction) -> Result<()> {
-        sessions::interrupt(&self.connector, session, action).await
+    async fn interrupt_session(
+        &self,
+        target: &SessionActionTarget,
+        action: SessionAction,
+    ) -> Result<SessionActionOutcome> {
+        if self.spec.environment.is_production() {
+            return Err(SessionActionTarget::production());
+        }
+        sessions::interrupt(self.connector.clone(), target, action).await
     }
 
     async fn lock_waits(&self) -> Result<Vec<culprit_core::LockWait>> {
@@ -307,35 +315,31 @@ impl Provider for MysqlProvider {
 
     async fn live(&self) -> Result<LiveState> {
         let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
-        let now = query_one(&mut conn, "SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS now")
-            .await?
-            .map(|row| row.string("now"))
-            .unwrap_or_default();
-        let flavor = self.connector.flavor();
-        // MariaDB's process list also has the time in milliseconds and progress for ALTER TABLE, LOAD DATA and others.
-        let extra = match flavor {
-            Flavor::Mariadb => "p.TIME_MS AS ms, p.PROGRESS AS progress, p.STAGE AS stage, p.MAX_STAGE AS max_stage",
-            Flavor::Mysql => "NULL AS ms, NULL AS progress, NULL AS stage, NULL AS max_stage",
-        };
-        let rows = query(
-            &mut conn,
-            &format!(
-                "SELECT p.ID AS id, p.USER AS user_name, p.HOST AS host, p.DB AS db, p.COMMAND AS command, p.TIME AS seconds,
-                        p.STATE AS state, p.INFO AS info, {extra},
-                        TIMESTAMPDIFF(MICROSECOND, t.trx_started, NOW(6)) / 1000 AS trx_ms
-                   FROM information_schema.PROCESSLIST p
-                   LEFT JOIN information_schema.INNODB_TRX t ON t.trx_mysql_thread_id = p.ID
-                  WHERE p.ID <> CONNECTION_ID() AND p.COMMAND NOT IN ('Daemon', 'Binlog Dump', 'Binlog Dump GTID')
-                    AND p.USER <> 'system user'"
-            ),
-        )
-        .await?;
-        let deadlocks::BlockingEvidence { blockers, locks, resources, mut notes } =
-            deadlocks::blocking_evidence(&mut conn, flavor).await;
-        let last_statements = deadlocks::last_statements(&mut conn).await;
-        conn.close().await;
+        let acquired = async {
+            let now = query_one(&mut conn, "SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS now")
+                .await?
+                .map(|row| row.string("now"))
+                .unwrap_or_default();
+            let flavor = self.connector.flavor();
+            // MariaDB's process list also has the time in milliseconds and progress for ALTER TABLE, LOAD DATA and others.
+            let extra = match flavor {
+                Flavor::Mariadb => {
+                    "p.TIME_MS AS ms, p.PROGRESS AS progress, p.STAGE AS stage, p.MAX_STAGE AS max_stage"
+                }
+                Flavor::Mysql => "NULL AS ms, NULL AS progress, NULL AS stage, NULL AS max_stage",
+            };
+            let rows =
+                sessions::live_rows(&mut conn, &self.connector, self.spec.environment.is_production(), extra).await?;
+            let blocking = deadlocks::blocking_evidence(&mut conn, flavor).await;
+            let last_statements = deadlocks::last_statements(&mut conn).await;
+            Ok((now, rows, blocking, last_statements))
+        }
+        .await;
+        let (now, rows, blocking, last_statements) = crate::read::confirmed_result(&mut conn, acquired).await?;
+        let deadlocks::BlockingEvidence { blockers, locks, resources, mut notes } = blocking;
 
         let sessions: Vec<Session> = rows
+            .rows
             .iter()
             .filter(|r| {
                 !r.text("info").is_some_and(|i| {
@@ -354,6 +358,7 @@ impl Provider for MysqlProvider {
                 let active = state == "active";
                 let wait = if active { r.text("state").filter(|s| !s.is_empty()) } else { None };
                 Session {
+                    action_target: rows.target(r),
                     blocked_by: blockers.get(&id).cloned(),
                     user: r.text("user_name"),
                     application: None,
@@ -401,13 +406,15 @@ impl Provider for MysqlProvider {
             notes.push(unresolved_metadata_lock());
         }
         let blocking = culprit_core::blocking::analyze(Engine::Mysql, &sessions, &locks, &[]);
+        let session_actions = rows.session_actions();
         Ok(LiveState {
             notes,
             taken_at: now,
             sessions,
             waits,
-            session_actions: Vec::new(),
+            session_actions,
             session_actions_note: None,
+            session_action_route: None,
             blocking,
         })
     }

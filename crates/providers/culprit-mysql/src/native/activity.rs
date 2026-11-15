@@ -39,19 +39,7 @@ pub(crate) async fn observe<R: QueryRead>(
     if !meta.connection.performance_schema {
         return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
     }
-    let consumers = reader.read(
-        "SELECT NAME AS name, ENABLED AS enabled FROM performance_schema.setup_consumers WHERE NAME IN ('global_instrumentation','thread_instrumentation','events_statements_current')",
-        vec![], 4,
-    ).await?;
-    let enabled: std::collections::BTreeSet<_> = consumers
-        .iter()
-        .filter(|row| row.text("enabled").as_deref() == Some("YES"))
-        .filter_map(|row| row.text("name"))
-        .collect();
-    let instrumented = consumers.len() == 3
-        && ["global_instrumentation", "thread_instrumentation", "events_statements_current"]
-            .iter()
-            .all(|name| enabled.contains(*name));
+    let instrumented = instrumentation_enabled(reader).await?;
     let limit = budget.max_snapshot_rows as usize;
     let rows = sessions(reader, &meta.connection.database_name, limit + 1).await?;
     if rows.len() > limit + 1 {
@@ -88,22 +76,53 @@ pub(crate) async fn observe<R: QueryRead>(
     Ok(Frame { observations, native_rows: rows.len() as u32, at, coverage })
 }
 
-async fn sessions<R: QueryRead>(reader: &mut R, database: &str, limit: usize) -> Result<Vec<Rec>> {
-    let sql = format!("SELECT t.PROCESSLIST_ID AS id, t.THREAD_ID AS thread_id, t.PROCESSLIST_DB AS db,
-        t.PROCESSLIST_USER AS user_name, t.PROCESSLIST_HOST AS host, t.PROCESSLIST_COMMAND AS command,
-        t.PROCESSLIST_STATE AS state, t.PROCESSLIST_TIME AS seconds, t.INSTRUMENTED AS instrumented,
+pub(crate) async fn instrumentation_enabled<R: QueryRead>(reader: &mut R) -> Result<bool> {
+    let consumers = reader.read(
+        "SELECT NAME AS name, ENABLED AS enabled FROM performance_schema.setup_consumers WHERE NAME IN ('global_instrumentation','thread_instrumentation','events_statements_current')",
+        vec![], 4,
+    ).await?;
+    let enabled: std::collections::BTreeSet<_> = consumers
+        .iter()
+        .filter(|row| row.text("enabled").as_deref() == Some("YES"))
+        .filter_map(|row| row.text("name"))
+        .collect();
+    Ok(consumers.len() == 3
+        && ["global_instrumentation", "thread_instrumentation", "events_statements_current"]
+            .iter()
+            .all(|name| enabled.contains(*name)))
+}
+
+pub(crate) const GENERATION_COLUMNS: &str = "t.THREAD_ID AS thread_id, t.INSTRUMENTED AS instrumented,
         e.EVENT_ID AS event_id, e.TIMER_START AS timer_start, e.TIMER_WAIT AS elapsed_ps, e.END_EVENT_ID AS end_event_id,
         e.CURRENT_SCHEMA AS request_db, e.DIGEST AS query_hash,
-        DATE_FORMAT(UTC_TIMESTAMP(6), '%Y-%m-%dT%H:%i:%s.%fZ') AS observed_at
+        DATE_FORMAT(UTC_TIMESTAMP(6), '%Y-%m-%dT%H:%i:%s.%fZ') AS observed_at";
+
+pub(crate) fn target_query() -> String {
+    format!("SELECT t.PROCESSLIST_ID AS id, t.PROCESSLIST_DB AS db,
+        t.PROCESSLIST_USER AS user_name, t.PROCESSLIST_HOST AS host, t.PROCESSLIST_COMMAND AS command,
+        t.PROCESSLIST_STATE AS state, t.PROCESSLIST_TIME AS seconds, t.PROCESSLIST_INFO AS info, {GENERATION_COLUMNS}
+        FROM performance_schema.threads t LEFT JOIN performance_schema.events_statements_current e ON e.THREAD_ID=t.THREAD_ID
+        WHERE t.TYPE='FOREGROUND' AND t.PROCESSLIST_ID=? AND t.PROCESSLIST_ID<>CONNECTION_ID()
+          AND t.PROCESSLIST_DB=? AND t.PROCESSLIST_COMMAND NOT IN ('Daemon','Binlog Dump','Binlog Dump GTID')
+          AND t.PROCESSLIST_USER<>'system user' LIMIT 1")
+}
+
+async fn sessions<R: QueryRead>(reader: &mut R, database: &str, limit: usize) -> Result<Vec<Rec>> {
+    let sql = format!("SELECT t.PROCESSLIST_ID AS id, t.PROCESSLIST_DB AS db,
+        t.PROCESSLIST_USER AS user_name, t.PROCESSLIST_HOST AS host, t.PROCESSLIST_COMMAND AS command,
+        t.PROCESSLIST_STATE AS state, t.PROCESSLIST_TIME AS seconds, {GENERATION_COLUMNS}
         FROM performance_schema.threads t LEFT JOIN performance_schema.events_statements_current e ON e.THREAD_ID=t.THREAD_ID
         WHERE t.TYPE='FOREGROUND' AND t.PROCESSLIST_ID<>CONNECTION_ID() AND t.PROCESSLIST_DB=?
           AND t.PROCESSLIST_COMMAND NOT IN ('Daemon','Binlog Dump','Binlog Dump GTID') LIMIT {limit}");
     reader.read(&sql, vec![Value::from(database)], limit).await
 }
-fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -> Result<Option<ActivityObservation>> {
+pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -> Result<Option<ActivityObservation>> {
     let Some(command) = row.native_text("command")?.filter(|value| !value.is_empty()) else { return Ok(None) };
     let Some(session_id) = row.unsigned("id")? else { return Ok(None) };
     let Some(thread_id) = row.unsigned("thread_id")? else { return Ok(None) };
+    if session_id == 0 || thread_id == 0 {
+        return Ok(None);
+    }
     let idle = command == "Sleep";
     let elapsed = row.unsigned("elapsed_ps")?;
     let event = row.unsigned("event_id")?;

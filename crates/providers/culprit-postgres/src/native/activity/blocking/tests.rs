@@ -95,7 +95,7 @@ fn lock(pid: u32) -> Row {
 fn activity_frame(rows: Vec<Row>) -> ActivityFrame {
     ActivityFrame {
         at: AT.into(),
-        records: rows.into_iter().map(|row| decode(row, "42").unwrap()).collect(),
+        records: rows.into_iter().map(|row| decode_row(row, "42").unwrap()).collect(),
         locks: Vec::new(),
     }
 }

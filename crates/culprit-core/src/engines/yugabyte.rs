@@ -29,6 +29,9 @@ pub fn session_target(session: &str) -> crate::Result<(String, i32, String)> {
 }
 
 impl EngineSpec for Yugabyte {
+    fn session_id_format(&self) -> SessionIdFormat {
+        SessionIdFormat::NativeIdAndGeneration
+    }
     fn cleanup_evidence(&self) -> CleanupEvidence {
         CleanupEvidence::Unavailable
     }

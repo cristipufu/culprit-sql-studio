@@ -4,6 +4,31 @@
 use super::*;
 
 #[test]
+fn live_actor_labels_use_explicit_engine_facts_without_changing_native_activity_keys() {
+    use SessionIdFormat::*;
+    let cases = [
+        (Engine::Mssql, NativeId),
+        (Engine::Postgres, NativeId),
+        (Engine::Yugabyte, NativeIdAndGeneration),
+        (Engine::Mysql, NativeId),
+        (Engine::Sqlite, NativeId),
+    ];
+    assert_eq!(cases.map(|case| case.0), Engine::ALL);
+    let identity = crate::telemetry::NativeActivityIdentity {
+        id: "native-node/42".into(),
+        generation: "2026-11-15T12:00:00Z".into(),
+    };
+    for (engine, expected) in cases {
+        assert_eq!(engine.spec().session_id_format(), expected);
+        assert_eq!(engine.facts().session_id_format, expected);
+        assert_eq!(engine.spec().live_session_id(&identity), expected.display(&identity));
+    }
+    assert_eq!(identity.id, "native-node/42");
+    assert_eq!(NativeId.display(&identity), "native-node/42");
+    assert_eq!(NativeIdAndGeneration.display(&identity), "native-node/42/2026-11-15T12:00:00Z");
+}
+
+#[test]
 fn cleanup_evidence_semantics_are_required_for_every_engine_and_shared_with_frontend_facts() {
     use CleanupEvidence::*;
     let cases = [

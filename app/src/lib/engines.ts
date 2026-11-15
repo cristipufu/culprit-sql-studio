@@ -4,6 +4,7 @@ import type { DatabaseProduct } from "../gen/DatabaseProduct";
 import type { EngineFacts } from "../gen/EngineFacts";
 import type { Plan } from "../gen/Plan";
 import type { SessionAction } from "../gen/SessionAction";
+import type { NativeActivityIdentity } from "../gen/NativeActivityIdentity";
 import engines from "../gen/engines.json";
 import { t } from "./i18n";
 
@@ -83,6 +84,14 @@ export function refusal(engine: Engine, ability: Ability): { code: "unsupported"
 /** What Live may do to another session on this engine, outside production. */
 export function sessionActions(engine: Engine): SessionAction[] {
   return FACTS[engine].session_actions;
+}
+
+/** The provider's Live label for a native actor; the generation remains separate in the evidence key. */
+export function liveSessionId(engine: Engine, identity: NativeActivityIdentity): string {
+  switch (FACTS[engine].session_id_format) {
+    case "native-id": return identity.id;
+    case "native-id-and-generation": return `${identity.id}/${identity.generation}`;
+  }
 }
 
 /** The engine's word for a statement that is waiting ("suspended" on SQL Server). */

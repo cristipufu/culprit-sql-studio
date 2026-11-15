@@ -81,7 +81,7 @@ mod workload;
 use async_trait::async_trait;
 use culprit_core::{
     ConnectionSpec, Engine, Environment, ExplainMode, LiveState, Plan, Provider, Result, ResultSet, ServerInfo,
-    SessionAction, Snapshot, SnapshotOptions,
+    SessionAction, SessionActionOutcome, SessionActionTarget, Snapshot, SnapshotOptions,
 };
 
 pub use ado::parse_ado;
@@ -184,7 +184,13 @@ impl Provider for MssqlProvider {
     }
 
     async fn live(&self) -> Result<LiveState> {
-        live::collect(self.pool.clone(), self.endpoint_host.clone(), self.endpoint_port).await
+        live::collect(
+            self.pool.clone(),
+            self.endpoint_host.clone(),
+            self.endpoint_port,
+            !self.environment.is_production(),
+        )
+        .await
     }
 
     async fn lock_waits(&self) -> Result<Vec<culprit_core::LockWait>> {
@@ -229,8 +235,15 @@ impl Provider for MssqlProvider {
         result
     }
 
-    async fn interrupt_session(&self, session: &str, action: SessionAction) -> Result<()> {
-        live::interrupt(&self.pool, session, action).await
+    async fn interrupt_session(
+        &self,
+        target: &SessionActionTarget,
+        action: SessionAction,
+    ) -> Result<SessionActionOutcome> {
+        if self.environment.is_production() {
+            return Err(SessionActionTarget::production());
+        }
+        live::interrupt(&self.pool, &self.endpoint_host, self.endpoint_port, target, action).await
     }
 
     async fn period_stats(

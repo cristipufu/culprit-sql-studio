@@ -141,7 +141,8 @@ async fn refusals_say_what_they_said() {
         ws.explain_hypothetical("dev", "SELECT 1", &["DROP TABLE orders".into()]).await,
     ));
     out.push(said(dir, "verify no index", ws.verify_index("dev", "SELECT 1", &[]).await));
-    out.push(said(dir, "cancel on production", ws.interrupt_session("prod", "42", SessionAction::Cancel).await));
+    let production = crate::session_actions::support::unbound_request("prod", SessionAction::Cancel);
+    out.push(said(dir, "cancel on production", ws.interrupt_session(&production).await));
     out.push(said(dir, "plan with no text", culprit_engine::export_plan(&plan(), "t", ExportFormat::Native, &options)));
     pin("errors-refusals", &out.join("\n"));
 }

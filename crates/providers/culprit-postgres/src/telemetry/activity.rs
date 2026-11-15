@@ -104,9 +104,7 @@ async fn capture<R: crate::read::QueryRead>(
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
             database_writable: None,
-            epoch: Some(digest(
-                format!("{}|{}|{}|pg-activity-v1", before.database_oid, before.started_at, before.version).as_bytes(),
-            )),
+            epoch: Some(before.activity_epoch()),
             observed_from: canonical_time(&before.at)?,
             observed_until: canonical_time(&after.at)?,
             at: read.frame.at,

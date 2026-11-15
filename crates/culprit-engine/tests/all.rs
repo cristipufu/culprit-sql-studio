@@ -28,6 +28,7 @@ mod plugin;
 mod population_scans;
 mod provenance;
 mod services;
+mod session_actions;
 mod share;
 mod sqlite_memory_failures;
 mod table_growth;

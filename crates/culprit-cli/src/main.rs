@@ -10,6 +10,7 @@ mod dashboard_cmd;
 mod evidence_cmd;
 mod fleet_cmd;
 mod lint_cmd;
+mod live_cmd;
 mod locks;
 mod logs_cmd;
 mod outbox_cmd;
@@ -388,14 +389,17 @@ enum SavedCommand {
 }
 
 #[derive(Args)]
+#[command(group(clap::ArgGroup::new("session_signal").args(["cancel", "kill"])))]
 struct LiveArgs {
     connection: String,
     /// Stop the statement this session is running; the session stays connected (PostgreSQL, MySQL).
-    #[arg(long, value_name = "SESSION", conflicts_with = "kill")]
+    #[arg(long, value_name = "SESSION", conflicts_with = "kill", requires = "observation")]
     cancel: Option<String>,
     /// End this session; its open transaction rolls back.
-    #[arg(long, value_name = "SESSION")]
+    #[arg(long, value_name = "SESSION", requires = "observation")]
     kill: Option<String>,
+    #[arg(long, value_name = "FILE", requires = "session_signal", help = t!("cli.live.observation_help"))]
+    observation: Option<PathBuf>,
     /// How far along this session's running statement is: per-operator progress on SQL Server, the plan with elapsed
     /// time and command progress on PostgreSQL and MySQL.
     #[arg(long, value_name = "SESSION", conflicts_with_all = ["cancel", "kill"])]
@@ -569,7 +573,7 @@ fn dispatch<'a>(command: Command, ws: Workspace, out: &'a Out) -> CommandTask<'a
         Command::Verify(args) => Box::pin(async move { share_cmd::verify(&ws, args, out).await }),
         Command::Digest(args) => Box::pin(async move { share_cmd::digest(&ws, args, out) }),
         Command::Export(args) => Box::pin(async move { share_cmd::export(&ws, args) }),
-        Command::Live(args) => Box::pin(async move { commands::live(&ws, args, out).await }),
+        Command::Live(args) => Box::pin(async move { live_cmd::run(&ws, args, out).await }),
         Command::Blocking { connection } => Box::pin(async move { locks::blocking(&ws, &connection, out).await }),
         Command::Deadlocks(args) => Box::pin(async move { locks::deadlocks(&ws, args, out).await }),
         Command::Run(args) => Box::pin(async move { commands::run_query(&ws, args, out).await }),

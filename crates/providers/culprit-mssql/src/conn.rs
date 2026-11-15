@@ -295,21 +295,6 @@ impl Pool {
         let result = f(&mut reader).await;
         reader.finish(result).await
     }
-
-    /// Run exactly once. A transport error cannot prove that submitted work stopped, so it must not trigger replay.
-    pub(crate) async fn with<T, F>(&self, f: F) -> Result<T>
-    where
-        F: for<'c> FnOnce(&'c mut MsClient) -> BoxFuture<'c, tiberius::Result<T>>,
-    {
-        let mut client = self.get().await?;
-        match f(&mut client).await {
-            Ok(value) => {
-                self.put(client);
-                Ok(value)
-            }
-            Err(err) => Err(map_error(err)),
-        }
-    }
 }
 
 /// What a login without the monitoring permission is told to ask for.

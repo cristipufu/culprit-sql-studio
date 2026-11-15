@@ -143,7 +143,7 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use culprit_core::{ConnectionSpec, SessionAction};
+    use culprit_core::ConnectionSpec;
 
     // What a running statement's progress says, word for word.
     #[test]
@@ -167,8 +167,6 @@ mod tests {
     async fn a_session_that_is_no_pid_in_english() {
         let connector = Connector::new(&ConnectionSpec { host: "localhost".into(), ..Default::default() }).unwrap();
         let error = query_progress(&connector, "99999999999").await.err().unwrap();
-        assert_eq!(error.message, "'99999999999' is not a pid");
-        let error = crate::sessions::interrupt(&connector, "99999999999", SessionAction::Cancel).await.err().unwrap();
         assert_eq!(error.message, "'99999999999' is not a pid");
     }
 }

@@ -4,7 +4,9 @@ use ts_rs::TS;
 
 use crate::actual::QueryProgress;
 use crate::error::{Error, ErrorCode, Result};
-use crate::model::{Engine, LiveState, ResultSet, ServerInfo, SessionAction, Snapshot};
+use crate::model::{
+    Engine, LiveState, ResultSet, ServerInfo, SessionAction, SessionActionOutcome, SessionActionTarget, Snapshot,
+};
 use crate::plan::Plan;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -280,9 +282,14 @@ pub trait Provider: Send + Sync {
         self.engine().spec().session_actions()
     }
 
-    /// Cancel another session's statement or end the session. `session` is an id from `live()`. Implementations refuse
-    /// Culprit's own sessions and system sessions; callers enforce environment rules (never on production).
-    async fn interrupt_session(&self, _session: &str, _action: SessionAction) -> Result<()> {
+    /// Recheck an original native observation before signalling. Implementations refuse changed sources,
+    /// generations, Culprit's own sessions and system sessions. Numeric signalling is not generation-atomic;
+    /// success means signal acceptance, not confirmed completion. Never reconnect or retry a possibly sent signal.
+    async fn interrupt_session(
+        &self,
+        _target: &SessionActionTarget,
+        _action: SessionAction,
+    ) -> Result<SessionActionOutcome> {
         Err(Error::new(ErrorCode::Unsupported, format!("{} sessions can't be ended from Culprit", self.engine())))
     }
 

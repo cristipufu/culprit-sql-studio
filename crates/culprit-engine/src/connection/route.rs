@@ -2,6 +2,18 @@
 use super::*;
 use serde::Serialize;
 
+pub(crate) struct SavedRoute {
+    pub name: String,
+    pub stored: StoredConnection,
+    pub revision: String,
+}
+
+impl SavedRoute {
+    pub(crate) fn action_route(&self) -> culprit_core::SessionActionRoute {
+        culprit_core::SessionActionRoute { connection: self.name.clone(), revision: self.revision.clone() }
+    }
+}
+
 #[derive(Serialize)]
 struct RouteMetadata<'a> {
     engine: Engine,
