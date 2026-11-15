@@ -3,7 +3,6 @@ import { expect, test, type Page } from "@playwright/test";
 import { openConnection } from "./demo";
 import type { IndexAdvice } from "../src/gen/IndexAdvice";
 import type { ConnectionInfo } from "../src/gen/ConnectionInfo";
-import type { Report } from "../src/gen/Report";
 import type { Api } from "../src/lib/api";
 
 type AdviceCacheProbeWindow = typeof window & { adviceRequests: string[] };
@@ -173,11 +172,15 @@ test("Connection takeaways refresh when language changes with no report open", a
 test("Workload source labels refresh with the report without displaying its counter identity", async ({ page }) => {
   await openConnection(page, "pg-demo");
   await page.evaluate(async ([apiPath, languagePath]) => {
-    const client = await (await import(apiPath!)).api() as { latestReport: (name: string, window: number | null) => Promise<Report | null> };
+    const client = await (await import(apiPath!)).api() as Pick<Api, "latestReport">;
     const { language } = await import(languagePath!);
     const original = client.latestReport;
-    client.latestReport = async (name, window) => {
-      const report = await original(name, window);
+    client.latestReport = async (name, windowMinutes, population) => {
+      if (population === undefined) throw new Error("The exact default/group selector must be explicit");
+      const report = await original(name, windowMinutes, population);
+      if (report && windowMinutes !== null && report.snapshot.options?.window_minutes !== windowMinutes) {
+        throw new Error("A language reread changed the requested report window");
+      }
       return report && {
         ...report,
         snapshot: {

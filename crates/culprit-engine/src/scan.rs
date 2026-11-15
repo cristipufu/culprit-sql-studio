@@ -7,7 +7,12 @@ use std::{
     time::Instant,
 };
 
-use culprit_core::{Check, CollectorNote, ErrorCode, Provider, Report, Result, Snapshot, SnapshotOptions};
+use culprit_core::{
+    Check, CollectorNote, ErrorCode, PopulationSnapshots, Provider, Report, Result, RuntimePopulationCatalog, Snapshot,
+    SnapshotOptions,
+};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{analysis, history, query_log, reports, trends};
 
@@ -23,6 +28,22 @@ pub(crate) struct Scan<'a> {
     taken_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Independent reports from one bounded acquisition. Catalog membership is not a combined runtime denominator.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct PopulationReports {
+    pub requested: Report,
+    pub populations: Vec<Report>,
+    pub catalog: Option<RuntimePopulationCatalog>,
+}
+
+struct SharedEvidence {
+    deadlocks: Option<culprit_core::DeadlockReport>,
+    notes: Vec<CollectorNote>,
+    recorded: Vec<culprit_core::ChangeEvent>,
+    collection: culprit_core::CollectionProvenance,
+}
+
 impl<'a> Scan<'a> {
     /// Start the clock before authentication, as the public scan operation always has.
     pub fn begin(dir: PathBuf, checks: &'a [Arc<dyn Check>]) -> Self {
@@ -33,30 +54,44 @@ impl<'a> Scan<'a> {
     pub async fn collect_inputs(
         self,
         provider: &dyn Provider,
-        mut snapshot: Snapshot,
+        snapshots: PopulationSnapshots,
         name: &str,
         options: &SnapshotOptions,
         log: Option<QueryLog<'_>>,
-    ) -> Result<CollectedScan> {
+    ) -> Result<CollectedPopulationScan> {
+        snapshots.validate(options)?;
+        let PopulationSnapshots { mut requested, populations, catalog } = snapshots;
+        let snapshot = &mut requested;
         // What was asked for, recorded once for every provider: the saved report is found by its window.
         if snapshot.options.is_none() {
             snapshot.options = Some(options.clone());
         }
-        record_unreported_optional_sources(&mut snapshot, options);
-        if let Some(log) = log {
-            query_log::attach(provider, &mut snapshot, log.path, options, log.discovered).await?;
+        record_unreported_optional_sources(snapshot, options);
+        // An application log has no native execution-group identity. It can supply the default view, while an
+        // explicit native selection must retain its own unavailable evidence instead of borrowing log timings.
+        if let Some(log) = log.filter(|_| options.workload_population.is_none() || snapshot.workload.is_some()) {
+            query_log::attach(provider, snapshot, log.path, options, log.discovered).await?;
         }
-        snapshot.id = self.taken_at.format("%Y%m%dT%H%M%S%.3fZ").to_string();
-        snapshot.taken_at = self.taken_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        snapshot.connection = name.to_string();
-        snapshot.duration_ms = self.started.elapsed().as_secs_f64() * 1000.0;
-        let dir = self.dir;
+        self.stamp(snapshot, name)?;
+        let dir = self.dir.clone();
         // What the database dated itself since the previous scan (schema, settings), for the change timeline.
         let summary_dir = dir.clone();
-        let previous = crate::run_blocking(move || Ok(reports::latest_summary(&summary_dir, None))).await?;
+        let selectors = std::iter::once(&requested)
+            .chain(populations.iter())
+            .map(|snapshot| snapshot.options.as_ref().and_then(|options| options.workload_population.clone()))
+            .collect::<Vec<_>>();
+        let previous = crate::run_blocking(move || {
+            selectors
+                .iter()
+                .map(|population| reports::latest_selected_summary(&summary_dir, None, population.as_ref()))
+                .collect::<Result<Vec<_>>>()
+        })
+        .await?;
         let since = previous
-            .as_ref()
-            .map(|p| p.taken_at.clone())
+            .iter()
+            .map(|previous| previous.as_ref().map(|summary| summary.taken_at.clone()))
+            .collect::<Option<Vec<_>>>()
+            .and_then(|times| times.into_iter().min())
             .unwrap_or_else(|| (self.taken_at - chrono::Duration::days(trends::HISTORY_DAYS as i64)).to_rfc3339());
         // Deadlocks over the scan's window, a day at least: graphs where the engine keeps them, Postgres's counter.
         // Neither fails the scan.
@@ -65,19 +100,23 @@ impl<'a> Scan<'a> {
             crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.deadlocks(deadlock_hours)),
             crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.recorded_changes(&since))
         );
-        match deadlocks {
-            Ok(found) => snapshot.deadlocks = Some(found),
-            Err(e) if e.code == ErrorCode::Unsupported => {}
+        let mut auxiliary_notes = Vec::new();
+        let deadlocks = match deadlocks {
+            Ok(found) => Some(found),
+            Err(e) if e.code == ErrorCode::Unsupported => None,
             Err(e) if crate::source_operation::native_shutdown_uncertain(&e) => {
                 return Err(e);
             }
-            Err(e) => snapshot.notes.push(CollectorNote {
-                message_source: None,
-                collector: "deadlocks".into(),
-                message: e.message,
-                table: None,
-            }),
-        }
+            Err(e) => {
+                auxiliary_notes.push(CollectorNote {
+                    message_source: None,
+                    collector: "deadlocks".into(),
+                    message: e.message,
+                    table: None,
+                });
+                None
+            }
+        };
         crate::ensure_source_quiet(provider)?;
         let recorded = match recorded {
             Ok(found) => found,
@@ -86,7 +125,7 @@ impl<'a> Scan<'a> {
                 return Err(e);
             }
             Err(e) => {
-                snapshot.notes.push(CollectorNote {
+                auxiliary_notes.push(CollectorNote {
                     message_source: None,
                     collector: "changes".into(),
                     message: e.message,
@@ -95,12 +134,84 @@ impl<'a> Scan<'a> {
                 Vec::new()
             }
         };
-        let collection = culprit_core::CollectionProvenance {
-            collector: provider.collector_version(),
-            started_at: snapshot.taken_at.clone(),
-            completed_at: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+        let evidence = SharedEvidence {
+            deadlocks,
+            notes: auxiliary_notes,
+            recorded,
+            collection: culprit_core::CollectionProvenance {
+                collector: provider.collector_version(),
+                started_at: requested.taken_at.clone(),
+                completed_at: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+            },
         };
-        Ok(CollectedScan { dir, checks: self.checks.to_vec(), snapshot, recorded, previous, collection })
+        let mut previous = previous.into_iter();
+        let requested = self.prepare(requested, name, options, &evidence, previous.next().flatten())?;
+        let populations = populations
+            .into_iter()
+            .zip(previous)
+            .map(|(snapshot, previous)| {
+                let selected = snapshot
+                    .options
+                    .clone()
+                    .ok_or_else(|| culprit_core::telemetry::CollectionStop::InvalidPage.error())?;
+                self.prepare(snapshot, name, &selected, &evidence, previous)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(CollectedPopulationScan { requested, populations, catalog })
+    }
+
+    fn stamp(&self, snapshot: &mut Snapshot, name: &str) -> Result<()> {
+        let id = self.taken_at.format("%Y%m%dT%H%M%S%.3fZ").to_string();
+        snapshot.id = match snapshot.options.as_ref().and_then(|options| options.workload_population.as_ref()) {
+            Some(population) => format!("{id}-population-{}", reports::population_key(population)?),
+            None => id,
+        };
+        snapshot.taken_at = self.taken_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        snapshot.connection = name.to_owned();
+        snapshot.duration_ms = self.started.elapsed().as_secs_f64() * 1000.0;
+        Ok(())
+    }
+
+    fn prepare(
+        &self,
+        mut snapshot: Snapshot,
+        name: &str,
+        options: &SnapshotOptions,
+        evidence: &SharedEvidence,
+        previous: Option<reports::ReportSummary>,
+    ) -> Result<CollectedScan> {
+        self.stamp(&mut snapshot, name)?;
+        record_unreported_optional_sources(&mut snapshot, options);
+        if let Some(deadlocks) = &evidence.deadlocks {
+            snapshot.deadlocks = Some(deadlocks.clone());
+        }
+        snapshot.notes.extend_from_slice(&evidence.notes);
+        Ok(CollectedScan {
+            dir: self.dir.clone(),
+            checks: self.checks.to_vec(),
+            snapshot,
+            recorded: evidence.recorded.clone(),
+            previous,
+            collection: evidence.collection.clone(),
+        })
+    }
+}
+
+/// The native owner has completed before any of these independent inputs can be analyzed or persisted.
+pub(crate) struct CollectedPopulationScan {
+    requested: CollectedScan,
+    populations: Vec<CollectedScan>,
+    catalog: Option<RuntimePopulationCatalog>,
+}
+
+impl CollectedPopulationScan {
+    pub async fn finish(self) -> Result<PopulationReports> {
+        let requested = self.requested.finish().await?;
+        let mut populations = Vec::with_capacity(self.populations.len());
+        for collected in self.populations {
+            populations.push(collected.finish().await?);
+        }
+        Ok(PopulationReports { requested, populations, catalog: self.catalog })
     }
 }
 
@@ -296,7 +407,16 @@ mod tests {
         let options = SnapshotOptions::default();
         let scan = workspace.scan("unused", &options);
         let with_log = workspace.scan_with_log("unused", &options, None);
-        for bytes in [std::mem::size_of_val(&scan), std::mem::size_of_val(&with_log)] {
+        let populations = workspace.scan_populations("unused", &options);
+        let verify = workspace.verify("unused", &[]);
+        let verify_at = workspace.verify_at("unused", "report", &[]);
+        for bytes in [
+            std::mem::size_of_val(&scan),
+            std::mem::size_of_val(&with_log),
+            std::mem::size_of_val(&populations),
+            std::mem::size_of_val(&verify),
+            std::mem::size_of_val(&verify_at),
+        ] {
             assert!(bytes <= 4096, "scan retains {bytes} inline bytes; observation state belongs on the heap");
         }
         assert!(!root.path().join("source-admission").exists());

@@ -33,23 +33,20 @@ impl Workspace {
         options: &ExportOptions,
     ) -> Result<ExportFile> {
         let report = self.latest_report(name, None)?.ok_or_else(|| not_scanned(name))?;
-        let finding = report.findings.iter().find(|f| f.id == id).ok_or_else(|| {
-            Error::not_found(t!("engine.share.no_finding", id = id, name = name))
-                .with_hint(t!("engine.share.no_finding_hint", name = name))
-        })?;
-        let stem = export::file_stem(&finding.title);
-        Ok(match format {
-            ExportFormat::Html => ExportFile {
-                name: format!("{stem}.html"),
-                contents: export::finding_html(&report, finding, options),
-                format,
-            },
-            _ => ExportFile {
-                name: format!("{stem}.md"),
-                contents: export::finding_markdown(&report, finding, options),
-                format: ExportFormat::Markdown,
-            },
-        })
+        finding_export(&report, name, id, format, options)
+    }
+
+    /// Export from the exact report displayed by a client. Stable finding IDs do not select a population or window.
+    pub fn export_finding_at(
+        &self,
+        name: &str,
+        report_id: &str,
+        id: &str,
+        format: ExportFormat,
+        options: &ExportOptions,
+    ) -> Result<ExportFile> {
+        let report = self.report_service().report_at(name, report_id)?;
+        finding_export(&report, name, id, format, options)
     }
 
     /// Every finding of the latest scan.
@@ -79,30 +76,93 @@ impl Workspace {
         options: &ExportOptions,
     ) -> Result<ExportFile> {
         let plan = self.query_plan(name, query_id, plan_id).await?;
-        let title = match plan_id {
-            Some(id) => t!("engine.share.plan_of_query_id", plan = id, query = query_id),
-            None => t!("engine.share.plan_of_query", query = query_id),
-        };
-        export_plan(&plan, &title, format, options)
+        query_plan_export(&plan, query_id, plan_id, format, options)
+    }
+
+    /// Export the plan selected from this exact report, including its native query/plan and workload context.
+    pub async fn export_query_plan_at(
+        &self,
+        name: &str,
+        report_id: &str,
+        query_id: &str,
+        plan_id: Option<&str>,
+        format: ExportFormat,
+        options: &ExportOptions,
+    ) -> Result<ExportFile> {
+        let plan = self.query_plan_at(name, query_id, plan_id, Some(report_id)).await?;
+        query_plan_export(&plan, query_id, plan_id, format, options)
     }
 
     /// Re-scan `name` with the same window as its latest scan and compare, finding by finding. `ids` empty checks every
     /// finding the earlier scan had.
     pub async fn verify(&self, name: &str, ids: &[String]) -> Result<Verification> {
+        Box::pin(self.verify_observation(name, None, ids)).await
+    }
+
+    /// Re-scan and compare the exact saved report's native population and window, without a default-report fallback.
+    pub async fn verify_at(&self, name: &str, report_id: &str, ids: &[String]) -> Result<Verification> {
+        Box::pin(self.verify_observation(name, Some(report_id), ids)).await
+    }
+
+    async fn verify_observation(&self, name: &str, report_id: Option<&str>, ids: &[String]) -> Result<Verification> {
         let report_name = name.to_owned();
+        let report_id = report_id.map(str::to_owned);
         let before = self
             .report_service()
-            .background(move |reports| reports.plan_report(&report_name, None))
+            .background(move |reports| reports.plan_report(&report_name, report_id.as_deref()))
             .await?
             .ok_or_else(|| {
                 Error::not_found(t!("engine.share.verify_unscanned", name = name))
                     .with_hint(t!("engine.share.verify_unscanned_hint", name = name))
             })?;
-        let options = before.snapshot.options.clone().unwrap_or_else(SnapshotOptions::default);
+        let mut options = before.snapshot.options.clone().unwrap_or_else(SnapshotOptions::default);
+        if let Some(population) = before.snapshot.workload.as_ref().and_then(|workload| workload.population.clone()) {
+            options.workload_population = Some(population);
+        }
         let after = self.scan(name, &options).await?;
         let ids = ids.to_vec();
         crate::run_blocking(move || Ok(compare_reports(&before, &after, &ids))).await
     }
+}
+
+fn query_plan_export(
+    plan: &Plan,
+    query_id: &str,
+    plan_id: Option<&str>,
+    format: ExportFormat,
+    options: &ExportOptions,
+) -> Result<ExportFile> {
+    let title = match plan_id {
+        Some(id) => t!("engine.share.plan_of_query_id", plan = id, query = query_id),
+        None => t!("engine.share.plan_of_query", query = query_id),
+    };
+    export_plan(plan, &title, format, options)
+}
+
+fn finding_export(
+    report: &culprit_core::Report,
+    name: &str,
+    id: &str,
+    format: ExportFormat,
+    options: &ExportOptions,
+) -> Result<ExportFile> {
+    let finding = report.findings.iter().find(|finding| finding.id == id).ok_or_else(|| {
+        Error::not_found(t!("engine.share.no_finding", id = id, name = name))
+            .with_hint(t!("engine.share.no_finding_hint", name = name))
+    })?;
+    let stem = export::file_stem(&finding.title);
+    Ok(match format {
+        ExportFormat::Html => ExportFile {
+            name: format!("{stem}.html"),
+            contents: export::finding_html(report, finding, options),
+            format,
+        },
+        _ => ExportFile {
+            name: format!("{stem}.md"),
+            contents: export::finding_markdown(report, finding, options),
+            format: ExportFormat::Markdown,
+        },
+    })
 }
 
 /// `name` has no saved scan to export.

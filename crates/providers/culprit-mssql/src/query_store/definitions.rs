@@ -18,6 +18,7 @@ pub(crate) enum Kind {
     Query,
     Plan,
 }
+#[derive(Clone)]
 pub(crate) struct Definition {
     pub id: String,
     pub origin: culprit_core::telemetry::StatementOrigin,

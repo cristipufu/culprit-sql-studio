@@ -235,21 +235,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
     let window_minutes = options.window_in_minutes();
     let rows = reader.summary(window_minutes).await?;
     let window = reader.window(window_minutes).await?;
-    let mut by_query: BTreeMap<String, QueryAgg> = BTreeMap::new();
-    for row in rows {
-        let query_id = row.identity.query_id.clone();
-        let entry = by_query.entry(query_id.clone()).or_insert_with(|| QueryAgg {
-            query_id,
-            identity: Some(row.identity.clone()),
-            plans: Vec::new(),
-        });
-        if entry.identity.as_ref() != Some(&row.identity) || entry.plans.iter().any(|plan| plan.plan_id == row.plan_id)
-        {
-            return Err(reader.source_changed());
-        }
-        entry.plans.push(PlanAgg::from_query_store(row));
-    }
-    let all: Vec<QueryAgg> = by_query.into_values().collect();
+    let all = aggregate_runtime(rows).map_err(|_| reader.source_changed())?;
     let total_time_ms: f64 = all.iter().map(QueryAgg::total_ms).sum();
     let total_cpu_ms: f64 = all.iter().map(|q| q.sum(|p| p.cpu_ms)).sum();
     let total_executions: f64 = all.iter().map(QueryAgg::executions).sum();
@@ -264,18 +250,10 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
     let log_sum_unrepresentable =
         runtime_costs.values().all(|costs| costs.log_bytes.is_some()) && total_log_bytes.is_none();
 
-    let mut selected = select_top(&all, options.top_queries as usize);
     // The queries the optimizer asked for a missing index for, when SQL Server says which (2019+, Azure SQL), join the
     // top ones, so the missing-index finding can name them. A failure here leaves the finding without them.
-    if let Ok(rows) = reader.read_rows(crate::query_store::catalog_sql::MISSING_INDEX_ASKERS_SQL).await {
-        let askers: HashSet<String> = rows.iter().map(|r| r.string("query_id")).collect();
-        let mut extra: Vec<&QueryAgg> = all
-            .iter()
-            .filter(|q| askers.contains(&q.query_id) && !selected.iter().any(|s| s.query_id == q.query_id))
-            .collect();
-        extra.sort_by(|a, b| b.executions().total_cmp(&a.executions()));
-        selected.extend(extra.into_iter().take(MAX_ASKERS));
-    }
+    let askers = reader.missing_index_askers().await.unwrap_or_default();
+    let selected = select_queries(&all, options.top_queries as usize, &askers);
     let ids: Vec<String> = selected.iter().map(|q| q.query_id.clone()).collect();
     let query_identities = selected
         .iter()
@@ -288,7 +266,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         .collect::<HashMap<_, _>>();
 
     let texts = reader
-        .definitions(&ids, crate::query_store::definitions::Kind::Query, 256 * 1024)
+        .query_definitions(&ids, &query_identities, 256 * 1024)
         .await?
         .into_iter()
         .map(|row| (row.id.clone(), row))
@@ -304,8 +282,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         .take(options.plans as usize)
         .filter_map(|query| query.current_plan().map(|plan| plan.plan_id.clone()))
         .collect();
-    let definitions =
-        reader.definitions(&plan_ids, crate::query_store::definitions::Kind::Plan, 2 * 1024 * 1024).await?;
+    let definitions = reader.plan_definitions(&plan_ids, &plan_identities, 2 * 1024 * 1024).await?;
     if definitions.iter().any(|definition| {
         let expected = plan_identities.get(&definition.id);
         expected.is_none() || definition.plan.as_ref() != expected
@@ -375,7 +352,11 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         match crate::timeline::collect(reader, window_minutes, window_hours, window_end.as_deref(), &trend_ids).await {
             Ok(Some((timeline, trends))) => (Some(timeline), trends),
             Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
-            _ => (None, HashMap::new()),
+            Err(error) => {
+                coverage.partial(&crate::sources::QUERY_STORE, error.message_source());
+                (None, HashMap::new())
+            }
+            Ok(None) => (None, HashMap::new()),
         };
 
     let mut plans_parsed = 0;
@@ -434,7 +415,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         timeline.end = window_end.clone().ok_or_else(crate::read::invalid_data)?;
     }
 
-    let population = reader.selected_population();
+    let population = reader.selected_population()?;
     let population_catalog = reader.population_catalog().cloned();
     let source_message = population.as_ref().and_then(|selected| {
         population_catalog
@@ -609,6 +590,10 @@ async fn verify_runtime_window<R: NativeRead>(
     reader: &mut crate::query_store::Reader<R>,
     coverage: &mut Coverage,
 ) -> culprit_core::Result<()> {
+    if reader.is_population_batch() {
+        // These are provisional inputs. The batch owner performs one real post-dataset check before any publish.
+        return Ok(());
+    }
     use crate::query_store::window_sql::WindowVerification;
     match reader.verify_window().await? {
         WindowVerification::Unchanged => Ok(()),
@@ -623,6 +608,57 @@ async fn verify_runtime_window<R: NativeRead>(
             Err(culprit_core::telemetry::CollectionStop::SourceChanged.error())
         }
     }
+}
+
+fn aggregate_runtime(rows: Vec<crate::query_store::runtime::PlanSummary>) -> culprit_core::Result<Vec<QueryAgg>> {
+    let mut by_query: BTreeMap<String, QueryAgg> = BTreeMap::new();
+    for row in rows {
+        let query_id = row.identity.query_id.clone();
+        let entry = by_query.entry(query_id.clone()).or_insert_with(|| QueryAgg {
+            query_id,
+            identity: Some(row.identity.clone()),
+            plans: Vec::new(),
+        });
+        if entry.identity.as_ref() != Some(&row.identity) || entry.plans.iter().any(|plan| plan.plan_id == row.plan_id)
+        {
+            return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+        }
+        entry.plans.push(PlanAgg::from_query_store(row));
+    }
+    Ok(by_query.into_values().collect())
+}
+
+fn select_queries<'a>(all: &'a [QueryAgg], limit: usize, askers: &[crate::value::Rec]) -> Vec<&'a QueryAgg> {
+    let mut selected = select_top(all, limit);
+    let askers = askers.iter().map(|row| row.string("query_id")).collect::<HashSet<_>>();
+    let mut extra = all
+        .iter()
+        .filter(|query| {
+            askers.contains(&query.query_id) && !selected.iter().any(|selected| selected.query_id == query.query_id)
+        })
+        .collect::<Vec<_>>();
+    extra.sort_by(|a, b| b.executions().total_cmp(&a.executions()));
+    selected.extend(extra.into_iter().take(MAX_ASKERS));
+    selected
+}
+
+pub(crate) fn population_trend_queries(
+    summaries: &[crate::query_store::runtime::PlanSummary],
+    top_queries: usize,
+    askers: &[crate::value::Rec],
+) -> culprit_core::Result<Vec<String>> {
+    let mut populations = BTreeMap::new();
+    for summary in summaries {
+        populations.entry(summary.population).or_insert_with(Vec::new).push(summary.clone());
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for summaries in populations.into_values() {
+        let all = aggregate_runtime(summaries)?;
+        for query in select_queries(&all, top_queries, askers).into_iter().take(TREND_QUERIES) {
+            ids.insert(query.query_id.clone());
+        }
+    }
+    Ok(ids.into_iter().collect())
 }
 
 fn note_unknown_waits(coverage: &mut Coverage, categories: &std::collections::BTreeSet<String>) {

@@ -60,7 +60,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
     await copyAndTell(finding.fix.sql, t("ui.finding_detail.fix_copied"));
   };
   const copyBrief = async () => {
-    const brief = await (await api()).brief(report.snapshot.connection, finding.id, report.snapshot.options?.window_minutes ?? null);
+    const brief = await (await api()).brief(report.snapshot.connection, report.snapshot.id, finding.id);
     await copyAndTell(brief, t("ui.finding_detail.brief_copied"));
   };
   const canOpenFix = canOpenFixInEditor(finding.fix?.sql, report.snapshot.server.engine);

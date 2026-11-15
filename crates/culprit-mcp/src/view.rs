@@ -725,6 +725,7 @@ pub fn changes(c: &Changes) -> Value {
     json!({
         "connection": c.connection,
         "source": c.source,
+        "population": c.population,
         "recent": c.recent,
         "baseline": c.baseline,
         "baseline_coverage": round(c.baseline_coverage, 2),

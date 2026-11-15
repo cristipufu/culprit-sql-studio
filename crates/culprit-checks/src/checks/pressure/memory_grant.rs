@@ -61,7 +61,7 @@ fn oversized_grants(snapshot: &Snapshot) -> Vec<OversizedGrant<'_>> {
         .filter(|g| g.executions >= 5.0 && g.avg_granted_kb >= 50.0 * MB && g.avg_used_kb <= g.avg_granted_kb * 0.25)
         .filter(still_oversized)
         .map(|grant| {
-            let query = by_hash(snapshot, &grant.query_hash);
+            let query = query_for_unscoped_grant(snapshot, &grant.query_hash);
             // What the grant costs this query is its own time waiting for memory, not all of its time: the rest is
             // running, which a smaller grant doesn't change.
             let impact = query.and_then(|q| {
@@ -147,3 +147,6 @@ fn memory_grant_finding(_: &Snapshot, o: OversizedGrant<'_>) -> Finding {
     f.verify = vec![t!("check.memory_grant.verify")];
     f
 }
+
+#[cfg(test)]
+mod scope_tests;

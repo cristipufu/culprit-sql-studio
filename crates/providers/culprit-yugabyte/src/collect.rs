@@ -43,6 +43,7 @@ async fn observe(
     }
     let workload = workload::read(session, &probe, options.top_queries, &mut coverage).await;
     let mut snapshot = Snapshot {
+        runtime_populations: None,
         format: SNAPSHOT_FORMAT,
         id: probe.now.replace(['-', ':'], ""),
         connection: name.into(),

@@ -100,6 +100,8 @@ pub struct QueryPeriods {
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct PeriodData {
     pub source: TimelineSource,
+    /// The actual source-owned execution population shared by both periods. None means unpartitioned data.
+    pub population: Option<crate::telemetry::NativeIdentity>,
     pub baseline: Period,
     pub recent: Period,
     pub baseline_total: PeriodStats,
@@ -192,6 +194,7 @@ pub struct Changes {
     pub connection: String,
     pub engine: Engine,
     pub source: TimelineSource,
+    pub population: Option<crate::telemetry::NativeIdentity>,
     pub baseline: Period,
     pub recent: Period,
     pub baseline_total: PeriodStats,
@@ -275,6 +278,7 @@ pub fn compare(connection: &str, engine: Engine, data: PeriodData, options: &Com
         connection: connection.to_string(),
         engine,
         source: data.source,
+        population: data.population,
         baseline: data.baseline,
         recent: data.recent,
         baseline_total: data.baseline_total,
@@ -717,6 +721,7 @@ mod tests {
         }
         PeriodData {
             source: TimelineSource::QueryStore,
+            population: None,
             baseline: Period { start: "2026-10-11T06:00:00Z".into(), end: "2026-10-11T10:00:00Z".into() },
             recent: Period { start: "2026-10-11T10:00:00Z".into(), end: "2026-10-11T14:00:00Z".into() },
             baseline_total,

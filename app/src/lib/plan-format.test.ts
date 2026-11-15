@@ -38,3 +38,19 @@ test("Plan renderer preserves Rust's explanations, variants and retained measure
   check(addPlan(old.plan, "Captured plan", "Demo query", { show: false, query: old.query }) === opened, "The same plan object was duplicated");
   removePlan(opened); removePlan(reopened);
 });
+
+test("One plan object opened from two execution-group reports retains independent immutable source references", () => {
+  const value = fromRust<{ plan: Plan; query: QueryStat }>(samples.find((sample) => sample.name === "retained-old")!);
+  const firstSource = { connection: "fixture", reportId: "saved-group-17", queryId: value.query.id, planId: value.query.plan_id ?? null };
+  const secondSource = { ...firstSource, reportId: "saved-group-18" };
+  const first = addPlan(value.plan, "First group", "Captured fixture", { show: false, source: firstSource, query: value.query });
+  const second = addPlan(value.plan, "Second group", "Captured fixture", { show: false, source: secondSource, query: value.query });
+  try {
+    if (first === second) throw new Error("Equal native plan objects erased the owning report");
+    firstSource.reportId = "changed external reference";
+    const retained = getPlans().items.find((plan) => plan.id === first)!;
+    if (retained.source?.reportId !== "saved-group-17") throw new Error("An external mutation changed captured source ownership");
+    if (getPlans().items.find((plan) => plan.id === second)?.source?.reportId !== "saved-group-18") throw new Error("The second group borrowed the first report");
+    if (addPlan(value.plan, "First group again", "Captured fixture", { show: false, source: { ...secondSource, reportId: "saved-group-17" }, query: value.query }) !== first) throw new Error("An exact repeated source duplicated its own captured plan");
+  } finally { removePlan(first); removePlan(second); }
+});

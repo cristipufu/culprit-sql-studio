@@ -382,6 +382,7 @@ pub(crate) fn snapshot_with_handle(
         coverage.source_failed(&crate::sources::WAL_FILE, &culprit_core::Error::internal(journal_mode_unknown()));
     }
     let mut snapshot = Snapshot {
+        runtime_populations: None,
         identity: None,
         sources: Vec::new(),
         format: SNAPSHOT_FORMAT,

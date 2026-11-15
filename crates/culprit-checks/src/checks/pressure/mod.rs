@@ -154,7 +154,12 @@ fn kb(value: f64) -> String {
     format::bytes(value * 1024.0)
 }
 
-fn by_hash<'a>(snapshot: &'a Snapshot, hash: &str) -> Option<&'a QueryStat> {
+/// Cached grant history carries no execution-population identity. A matching hash cannot bind it to a scoped
+/// workload, even when the native catalog currently offers only that one population.
+fn query_for_unscoped_grant<'a>(snapshot: &'a Snapshot, hash: &str) -> Option<&'a QueryStat> {
+    if snapshot.workload.as_ref()?.population.is_some() {
+        return None;
+    }
     app_queries(snapshot).find(|q| q.query_hash.as_deref().is_some_and(|h| h.eq_ignore_ascii_case(hash)))
 }
 

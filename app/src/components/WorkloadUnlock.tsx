@@ -8,6 +8,8 @@ import { keys } from "../lib/keys";
 import { t } from "../lib/i18n";
 import { copyAndTell } from "../lib/clipboard";
 import { canOpenFixInEditor } from "../lib/editor-sql";
+import { queryHistoryEmptyState } from "../lib/query-history";
+import { QueryHistoryEmpty } from "./QueryHistoryEmpty";
 
 /** "Culprit reads … only", for each source of query statistics. */
 const READS_ONLY: Partial<Record<Capability, () => string>> = {
@@ -23,6 +25,7 @@ const READS_ONLY: Partial<Record<Capability, () => string>> = {
  * and offers the exact statement: copy it, or open it in the editor (which asks before it changes a production database).
  */
 export function WorkloadUnlock({ report }: { report: Report }) {
+  if (queryHistoryEmptyState(report)?.kind === "choose-group") return <QueryHistoryEmpty report={report} className="unlock" />;
   if (report.snapshot.workload || !report.summary.no_workload) return null;
   const missing: MissingCapability | undefined = report.snapshot.server.missing.find((m) => m.capability === report.summary.no_workload_capability);
   if (!missing) return null;

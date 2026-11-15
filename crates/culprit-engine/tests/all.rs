@@ -25,6 +25,7 @@ mod plan_samples;
 mod plan_view;
 mod plans;
 mod plugin;
+mod population_scans;
 mod provenance;
 mod services;
 mod share;

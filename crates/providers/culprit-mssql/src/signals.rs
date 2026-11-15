@@ -5,7 +5,10 @@
 use std::collections::HashMap;
 
 use culprit_core::telemetry::NativeQueryIdentity;
-use culprit_core::{Coverage, Pressure, Signal, SignalScope, SignalUnit, Snapshot, SnapshotOptions};
+use culprit_core::{
+    Coverage, Pressure, QueryStat, QueryStoreScope, Signal, SignalScope, SignalUnit, Snapshot, SnapshotOptions,
+    WorkloadKind,
+};
 
 use crate::probe::Probe;
 use crate::query_store::Reader;
@@ -17,6 +20,15 @@ use crate::sources;
 #[path = "signals/compilation_tests.rs"]
 mod compilation_tests;
 
+/// Each original workload keeps its native query incarnation and runtime population. Borrowing participants
+/// avoids a pooled workload and permits one independent native acquisition for every selected population.
+pub(crate) struct QueryParticipant<'a> {
+    pub query: &'a mut QueryStat,
+    pub identity: Option<&'a NativeQueryIdentity>,
+    pub kind: Option<WorkloadKind>,
+    pub runtime_scope: QueryStoreScope,
+}
+
 /// Collect every signal into `snapshot`, each source read through `sources::read`: these add detail and lock nothing,
 /// so a failure is a note.
 pub(crate) async fn collect(
@@ -24,24 +36,25 @@ pub(crate) async fn collect(
     pool: std::sync::Arc<crate::conn::Pool>,
     probe: &Probe,
     options: &SnapshotOptions,
-    query_identities: &HashMap<String, NativeQueryIdentity>,
+    participants: &mut [QueryParticipant<'_>],
     snapshot: &mut Snapshot,
 ) {
     let mut coverage = Coverage::default();
     snapshot.operations.query_compilation = None;
-    if let Some(workload) =
-        snapshot.workload.as_mut().filter(|workload| workload.kind() == Some(culprit_core::WorkloadKind::QueryStore))
-    {
+    if participants.iter().any(|participant| participant.kind == Some(WorkloadKind::QueryStore)) {
         let compiles = collect_query_compilations(
             Reader::open(pool.clone()),
             options.window_in_minutes(),
-            &mut workload.queries,
-            query_identities,
+            participants,
             &mut coverage,
         )
         .await;
         snapshot.operations.query_compilation = compiles.snapshot;
-        culprit_core::signals::fill_row_bytes(&mut workload.queries);
+        for participant in
+            participants.iter_mut().filter(|participant| participant.kind == Some(WorkloadKind::QueryStore))
+        {
+            culprit_core::signals::fill_row_bytes(std::slice::from_mut(participant.query));
+        }
         snapshot.pressure.get_or_insert_with(Pressure::default).signals.extend(compiles.signals);
     }
     if probe.can_read_dmvs() {
@@ -50,13 +63,9 @@ pub(crate) async fn collect(
     attach_table_metadata(client, snapshot, &mut coverage).await;
     let pressure = snapshot.pressure.get_or_insert_with(Pressure::default);
     if probe.can_read_dmvs() {
-        let hashes: Vec<String> = snapshot
-            .workload
-            .as_ref()
-            .into_iter()
-            .flat_map(|w| &w.queries)
-            .filter_map(|q| q.query_hash.clone())
-            .collect();
+        // These native hash selectors collect shared cache candidates once. They do not assign grants or requests
+        // to a Query Store population, even when that population contains the same statement hash.
+        let hashes = participant_hashes(participants);
         if !hashes.is_empty()
             && let Some(grants) = crate::grants::collect_application(
                 pool.clone(),
@@ -85,6 +94,15 @@ pub(crate) async fn collect(
     }
     crate::replication::collect(pool, probe, snapshot).await;
     coverage.append_to(snapshot);
+}
+
+fn participant_hashes(participants: &[QueryParticipant<'_>]) -> Vec<String> {
+    participants
+        .iter()
+        .filter_map(|participant| participant.query.query_hash.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 // ── per query ──────────────────────────────────────────────────────────────────────────────────────
@@ -134,13 +152,18 @@ struct CompilationRead {
 async fn collect_query_compilations<R: NativeRead>(
     mut reader: Reader<R>,
     window_minutes: u32,
-    queries: &mut [culprit_core::QueryStat],
-    query_identities: &HashMap<String, NativeQueryIdentity>,
+    participants: &mut [QueryParticipant<'_>],
     coverage: &mut Coverage,
 ) -> CompilationRead {
     let observed_from = chrono::Utc::now().to_rfc3339();
-    clear_compilations(queries);
-    let ids: Vec<String> = queries.iter().map(|query| query.id.clone()).collect();
+    clear_compilations(participants);
+    let ids: Vec<String> = participants
+        .iter()
+        .filter(|participant| participant.kind == Some(WorkloadKind::QueryStore))
+        .map(|participant| participant.query.id.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let compilations = match reader.compilations(&ids).await {
         Err(error) if crate::read::stops_remaining_reads(&error) => {
             let _ = reader.close().await;
@@ -159,8 +182,8 @@ async fn collect_query_compilations<R: NativeRead>(
     let compilations = coverage.read(&sources::QUERY_COMPILATION, compilations);
     let captured = compilations.as_ref().map(|rows| compilation_snapshot(rows, observed_from, observed_until));
     let snapshot = captured.and_then(|result| coverage.read(&sources::QUERY_COMPILATION, result));
-    let complete = compilations
-        .is_none_or(|compilations| attach_compilations(queries, compilations, query_identities, window_minutes));
+    let complete =
+        compilations.is_none_or(|compilations| attach_compilations(participants, compilations, window_minutes));
     let signals = coverage.read(&sources::QUERY_COMPILATION, database).unwrap_or_default();
     if !complete {
         coverage.partial(
@@ -189,8 +212,10 @@ fn compilation_snapshot(
 }
 
 /// Compilation history keeps its own lifetime even when runtime costs are unavailable.
-fn clear_compilations(queries: &mut [culprit_core::QueryStat]) {
-    for q in queries {
+fn clear_compilations(participants: &mut [QueryParticipant<'_>]) {
+    for participant in participants.iter_mut().filter(|participant| participant.kind == Some(WorkloadKind::QueryStore))
+    {
+        let q = &mut participant.query;
         let mut costs = q.costs.take().unwrap_or_default();
         costs.plan_ms = None;
         costs.plans = None;
@@ -201,21 +226,22 @@ fn clear_compilations(queries: &mut [culprit_core::QueryStat]) {
 
 /// Compilation history keeps its own lifetime; only the original native definition can authorize its SQL link.
 fn attach_compilations(
-    queries: &mut [culprit_core::QueryStat],
+    participants: &mut [QueryParticipant<'_>],
     compilations: Vec<Compilation>,
-    query_identities: &HashMap<String, NativeQueryIdentity>,
     window_minutes: u32,
 ) -> bool {
     let compiles = compilations.into_iter().map(|row| (row.identity.query_id.clone(), row)).collect::<HashMap<_, _>>();
     let mut complete = true;
-    for q in queries {
+    for participant in participants.iter_mut().filter(|participant| participant.kind == Some(WorkloadKind::QueryStore))
+    {
+        let q = &mut participant.query;
         if let Some(c) = compiles.get(&q.id)
-            && query_identities.get(&q.id) == Some(&c.identity)
+            && participant.identity == Some(&c.identity)
         {
             let mut costs = q.costs.take().unwrap_or_default();
             let within_window = c.within_window(window_minutes);
             costs.compile_history = Some(c.history(window_minutes));
-            if within_window {
+            if within_window && participant.runtime_scope == QueryStoreScope::Local {
                 costs.plan_ms = Some(c.total_ms());
                 costs.plans = Some(c.count as f64);
             }
@@ -393,6 +419,24 @@ mod tests {
         [(identity.query_id.clone(), identity)].into()
     }
 
+    pub(super) fn unpartitioned_participants<'a>(
+        queries: &'a mut [QueryStat],
+        identities: &'a HashMap<String, NativeQueryIdentity>,
+    ) -> Vec<QueryParticipant<'a>> {
+        queries
+            .iter_mut()
+            .map(|query| {
+                let identity = identities.get(&query.id);
+                QueryParticipant {
+                    query,
+                    identity,
+                    kind: Some(WorkloadKind::QueryStore),
+                    runtime_scope: QueryStoreScope::Local,
+                }
+            })
+            .collect()
+    }
+
     #[tokio::test]
     async fn query_compilation_is_independent_and_never_survives_unconfirmed_native_shutdown() {
         for shutdown in
@@ -405,9 +449,13 @@ mod tests {
             io.shutdown = shutdown;
             let mut queries = vec![query_without_costs()];
             let mut coverage = Coverage::default();
-            let signals =
-                collect_query_compilations(Reader::new(io), 60, &mut queries, &compilation_identities(), &mut coverage)
-                    .await;
+            let signals = collect_query_compilations(
+                Reader::new(io),
+                60,
+                &mut unpartitioned_participants(&mut queries, &compilation_identities()),
+                &mut coverage,
+            )
+            .await;
             if shutdown == culprit_core::telemetry::SourceShutdown::Unconfirmed {
                 assert!(queries[0].costs.is_none(), "unsettled native work cannot publish fresh per-query evidence");
                 assert!(signals.signals.is_empty());

@@ -3,6 +3,8 @@ use crate::{i18n::Message, telemetry::NativeIdentity};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use ts_rs::TS;
+mod snapshots;
+pub use snapshots::PopulationSnapshots;
 
 pub const MAX_RUNTIME_POPULATIONS: usize = 128;
 const MAX_POPULATION_METADATA_BYTES: usize = 256 * 1024;

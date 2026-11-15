@@ -39,6 +39,9 @@ pub struct VerifiedFinding {
 #[ts(export)]
 pub struct Verification {
     pub connection: String,
+    /// Exact saved inputs, when they have report IDs. Clients must not substitute a newer cache entry.
+    pub before_report_id: Option<String>,
+    pub after_report_id: Option<String>,
     pub before_taken_at: String,
     pub after_taken_at: String,
     /// One sentence: "2 of 3 fixed; 1 still present. 1 new finding."
@@ -180,6 +183,8 @@ pub fn compare_reports(before: &Report, after: &Report, ids: &[String]) -> Verif
         })
         .collect();
     Verification {
+        before_report_id: (!before.snapshot.id.is_empty()).then(|| before.snapshot.id.clone()),
+        after_report_id: (!after.snapshot.id.is_empty()).then(|| after.snapshot.id.clone()),
         connection: after.snapshot.connection.clone(),
         before_taken_at: before.snapshot.taken_at.clone(),
         after_taken_at: after.snapshot.taken_at.clone(),

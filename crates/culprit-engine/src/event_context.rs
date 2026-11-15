@@ -5,7 +5,7 @@ use crate::{
     ConnectionInfo, EventLog, EventsRequest, changes, cloud, connection::Connections, history, marks,
     reporting::Reports, reports, trends,
 };
-use culprit_core::{Engine, Error, ErrorCode, Result, t};
+use culprit_core::{Error, ErrorCode, Result, t};
 
 pub(crate) struct Events<'a> {
     pub connections: Connections<'a>,
@@ -26,12 +26,14 @@ impl Events<'_> {
     /// rules everywhere. Query Store answers from its own intervals (any period it still keeps); sources that only keep
     /// running totals answer from Culprit's saved scans, so periods snap to the scans nearest to what was asked.
     pub(crate) async fn changes(&self, name: &str, request: &changes::ChangeRequest) -> Result<culprit_core::Changes> {
+        request.validate()?;
         let info = self.connections.connection(name)?;
         let report_name = name.to_owned();
+        let requested_population = request.workload_population.clone();
         let context = self
             .reports
             .background(move |reports| {
-                let latest = reports.latest_report(&report_name, None)?;
+                let latest = reports.latest_population_report(&report_name, None, requested_population.as_ref())?;
                 let workload = latest.as_ref().and_then(|r| r.snapshot.workload.as_ref());
                 Ok(ComparisonContext {
                     counters: latest.as_ref().and_then(trends::Counters::of),
@@ -56,15 +58,25 @@ impl Events<'_> {
         if !info.engine.abilities().periods {
             return Err(info.engine.refused(culprit_core::Ability::Periods));
         }
-        let windowed = context.windowed.unwrap_or(info.engine == Engine::Mssql);
+        let windowed =
+            context.windowed.unwrap_or(info.engine.spec().evidence_presentation().workload_windowed_by_default);
         if windowed {
             let (baseline, recent) = changes::resolve(request, (context.since.unwrap_or(now - 86_400.0), now))?;
             let observed = self.connections.observed_provider(name).await?;
             let provider = observed.provider();
             let compared = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
-                if let Some(data) =
-                    self.connections.forget_rejected(name, provider.period_stats(&baseline, &recent).await)?
-                {
+                if let Some(data) = self.connections.forget_rejected(
+                    name,
+                    provider.period_stats(&baseline, &recent, request.workload_population.as_ref()).await,
+                )? {
+                    if request
+                        .workload_population
+                        .as_ref()
+                        .is_some_and(|population| data.population.as_ref() != Some(population))
+                        || data.population.as_ref().is_some_and(|population| !population.is_valid())
+                    {
+                        return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+                    }
                     let compare_name = name.to_owned();
                     let compare_options = options.clone();
                     let engine = info.engine;
@@ -107,7 +119,12 @@ impl Events<'_> {
                 let history: Vec<trends::Counters> =
                     reports::counters_history(&reports.paths.reports_dir(&report_name), &at)
                         .into_iter()
-                        .filter(|c| latest_counters.as_ref().is_none_or(|l| l.same_series(c)))
+                        .filter(|c| match &latest_counters {
+                            Some(latest) => latest.same_series(c),
+                            None => c.measurement.as_ref().is_some_and(|measurement| {
+                                measurement.population == compare_request.workload_population
+                            }),
+                        })
                         .collect();
                 let times: Vec<f64> =
                     history.iter().filter_map(|c| culprit_core::changes::epoch(&c.taken_at)).collect();

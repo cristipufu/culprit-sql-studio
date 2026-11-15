@@ -179,7 +179,12 @@ publish opaque scope references and restore them only from that authenticated ma
 Execution populations are separate from connected compute. `RuntimePopulationCatalog` carries source-owned native
 alternatives and display messages; `NativeRuntimePopulationCatalog` retains the same facts without display labels.
 `Workload.population` enters `MeasurementContext` before trends, differences or disappearance checks. Explicit scan
-selectors own separate report-cache pointers. No common consumer decodes a group ID or chooses one by its label.
+selectors own separate report-cache pointers. `Provider::snapshot_populations` supplies independent workloads from
+one bounded acquisition; `Workspace::scan_populations` analyzes and saves those inputs after the native owner ends.
+The requested overview and each exact population keep separate report IDs and cache pointers. Discovery remains in
+`Snapshot.runtime_populations` when no workload is available. No common consumer decodes a group ID or chooses one
+by its label. Period comparisons retain their actual population, and finding/plan exports and verification address
+the exact saved report rather than a later cache entry.
 
 Snapshot index advice carries a separate `OperationalStats.index_usage_scope`. `AllReadMembers` establishes the
 read-serving population throughout the counters' recorded period; `ConnectedMember` and `ObservedMembers` preserve
@@ -196,7 +201,15 @@ cannot reconstruct a delta from table totals. Raw positive counts remain context
 another group's impact, quiet-history or plan-forcing explanation. Plan mutation SQL also requires a known writable
 management mode and includes the exact native group when scoped. Native database-wide index recommendations do
 not borrow one group's workload costs or bypass the read-member cleanup gate. Native tuning observations retain
-their scope in raw keys and both warehouses' physical receipt proofs; typed SDK tuning readback remains unfinished.
+their scope in raw keys and both warehouses' physical receipt proofs. Standalone typed tuning readback uses the same
+pure explanations without inventing a query-runtime join or current management authority.
+
+Query-global compilation history remains independent of replica-group runtime. Comparable planning costs require
+both matching observation periods and native population scope. Unscoped cached grant history keeps its positive
+measurements without borrowing a scoped workload's query links, memory waits, costs or quiet-history classification.
+Connected-cache actual plans currently carry no
+execution-group proof, so scoped report requests receive a typed limitation before opening a provider. A native
+query/plan ID alone cannot attach that measured execution or its table/workload context to another group.
 
 A source can explicitly declare a plan-independent runtime cohort. The source owns which native dimensions
 establish comparable populations; common analysis never strips native qualifiers to guess them. Exact query

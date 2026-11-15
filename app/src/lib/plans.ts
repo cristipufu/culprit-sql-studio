@@ -23,7 +23,7 @@ export type LoadedPlan = {
   source?: PlanSource;
 };
 
-export type PlanSource = { connection: string; queryId: string; planId: string | null };
+export type PlanSource = { connection: string; reportId: string; queryId: string; planId: string | null };
 
 export type PlansState = {
   items: LoadedPlan[];
@@ -62,9 +62,11 @@ export function usePlans<T>(select: (s: PlansState) => T): T {
 /** Add a plan and show it. The same plan object sent twice (e.g. "Open in Plans" again) is not duplicated. */
 export function addPlan(plan: Plan, name: string, origin: string, options: { show?: boolean; source?: PlanSource; query?: QueryStat } = {}): string {
   sampleRequest.invalidate();
-  const existing = state.items.find((p) => p.plan === plan);
+  const existing = state.items.find((p) => p.plan === plan && p.source?.connection === options.source?.connection
+    && p.source?.reportId === options.source?.reportId && p.source?.queryId === options.source?.queryId
+    && p.source?.planId === options.source?.planId);
   const id = existing?.id ?? `p${++counter}`;
-  if (!existing) update({ items: [...state.items, { id, name, origin, plan, source: options.source, query: options.query && structuredClone(options.query) }] });
+  if (!existing) update({ items: [...state.items, { id, name, origin, plan, source: options.source && { ...options.source }, query: options.query && structuredClone(options.query) }] });
   if (options.show ?? true) {
     update({ selected: id, mode: "single", error: null });
     setState({ view: "plans" });

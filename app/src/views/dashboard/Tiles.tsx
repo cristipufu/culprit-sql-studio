@@ -15,6 +15,7 @@ import { scan, setState } from "../../lib/store";
 import { openLive } from "../Live";
 import { slot, tx, withElements } from "../../lib/message-parts";
 import { rememberQueryTab } from "../Queries";
+import { queryHistoryEmptyState } from "../../lib/query-history";
 
 /** Open a query in Queries, on one of its tabs. */
 export function openQuery(id: string, tab?: "summary" | "plan" | "history"): void {
@@ -78,6 +79,12 @@ export function Frame({ tile, action, onOpen, className = "", children, foot }: 
       {foot !== undefined ? foot : tile.detail ? <p className="dash-detail">{tile.detail}</p> : null}
     </section>
   );
+}
+
+/** Missing default history can require a group choice rather than a database feature or permission change. */
+export function QueryHistoryFrame({ tile, report }: { tile: Tile; report: Report }) {
+  const state = queryHistoryEmptyState(report);
+  return <Frame tile={state?.kind === "choose-group" ? { ...tile, takeaway: state.detail, detail: state.sourceReason } : tile} />;
 }
 
 export function metricText(tile: Tile, key: string): string | null {
@@ -274,8 +281,8 @@ export function IndexesTile({ tile }: { tile: Tile }) {
   );
 }
 
-export function PlansTile({ tile }: { tile: Tile }) {
-  if (tile.status === "unavailable") return <Frame tile={tile} />;
+export function PlansTile({ tile, report }: { tile: Tile; report: Report }) {
+  if (!report.snapshot.workload || tile.status === "unavailable") return <QueryHistoryFrame tile={tile} report={report} />;
   const captured = metricValue(tile, "captured");
   const flagged = metricValue(tile, "flagged");
   const top = tile.items[0]?.query_id;
@@ -304,6 +311,7 @@ export function PlansTile({ tile }: { tile: Tile }) {
 }
 
 export function StatisticsTile({ tile, report }: { tile: Tile; report: Report }) {
+  if (queryHistoryEmptyState(report)?.kind === "choose-group") return <QueryHistoryFrame tile={tile} report={report} />;
   // Statements from a log the application writes (SQLite): the step is a setting on the connection, not SQL.
   if (!report.snapshot.workload && report.snapshot.server.missing.some((m) => m.capability === "query-log")) {
     return (

@@ -189,7 +189,7 @@ pub(crate) fn summary_sql(with_tempdb: bool, with_log: bool, population: super::
     // locations are an independent catalog; keep them unknown without issuing another source read.
     let forcing = match population {
         super::replicas::Population::Unpartitioned => "MAX(CAST(p.is_forced_plan AS int))",
-        super::replicas::Population::ReplicaGroup(_) => "CAST(NULL AS int)",
+        super::replicas::Population::ReplicaGroup(_) | super::replicas::Population::AllGroups => "CAST(NULL AS int)",
     };
     let (log, log_complete) = if with_log {
         (

@@ -24,14 +24,17 @@ identify an HTTP endpoint such as `GET odata/QueueItems` without application-pro
 | Evidence | Scope and current support |
 |---|---|
 | Query Store history | Shared database history, with native replica groups kept separate. `READ_CAPTURE_SECONDARY` permits capture; `READ_ONLY` only establishes readability. Raw telemetry retains every native group and outcome in the selected interval. |
-| A scan's Query Store workload | One exact native group, selected with `scan --workload-population <ID>`. A sole observed group can be selected automatically. Multiple groups require a selection rather than blended averages. `--full` exposes the observed catalog when a workload or cache fallback is available. |
+| A scan's Query Store workload | One exact native group per report. Ordinary scans acquire the shared history once and save separate group reports. Select a report with `scan --workload-population <ID>` or the desktop's Query history picker; the default overview never blends groups. `--full` retains the observed catalog even when no workload is available. |
+| Period comparison | `changes --workload-population <ID>` compares the same native group throughout. Baseline coverage uses that group's runtime witnesses; a shared interval calendar cannot establish its query absence. |
+| Retained actual plans | A scoped query-history report cannot attach the current connection's last actual execution without native execution-group proof. The app explains this limitation and keeps the captured plan inspectable. |
 | Activity baseline | The connected member's requests and waits. Hyperscale qualification requires native database/replica identity and a positively readable process epoch. Missing identity preserves partial raw observations; it cannot establish incident continuity, recovery or focused follow-up authority. |
 | Other detailed telemetry | Existing source-specific primary restrictions remain in place until each reader's replica semantics and production cost are qualified. |
 
-The SDK exposes the same `SnapshotOptions.workload_population` selector and a separate saved-report cache through
-`Workspace::latest_population_report`. Population selection is not a replica routing option. The desktop picker,
-automatic analysis of every group, and multi-group period comparisons are not implemented yet. A failed Query Store
-and cache read cannot currently carry its catalog through `Workload`.
+The SDK exposes the same `SnapshotOptions.workload_population` selector, `Workspace::scan_populations` for the
+independent reports, and a separate cache through `Workspace::latest_population_report`. The desktop remembers each
+group's window and uses exact saved report references for finding and plan actions. Population selection changes
+query-history analysis; it is not a replica routing option. Discovery travels separately from the workload, so a
+failed Query Store or cache read can still explain the observed alternatives.
 
 Query Store's replica catalog contains observed role history, not a current physical-member inventory. Group-specific
 plan forcing stays unknown unless its native forcing location was read. Supported Azure SQL configurations, including

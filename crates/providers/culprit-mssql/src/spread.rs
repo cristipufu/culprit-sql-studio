@@ -5,10 +5,7 @@ use culprit_core::{Coverage, QueryStat, Result, telemetry::NativePlanIdentity};
 
 use crate::{
     plan_xml,
-    query_store::{
-        Reader,
-        definitions::{Definition, Kind},
-    },
+    query_store::{Reader, definitions::Definition},
     read::NativeRead,
 };
 
@@ -58,7 +55,7 @@ async fn attach_other_parameters<R: NativeRead>(
     if wanted.is_empty() {
         return Ok(());
     }
-    let definitions = match reader.definitions(&wanted, Kind::Plan, MAX_PLAN_BYTES).await {
+    let definitions = match reader.plan_definitions(&wanted, identities, MAX_PLAN_BYTES).await {
         Ok(definitions) => definitions,
         Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
         Err(error) => {

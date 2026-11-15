@@ -10,6 +10,7 @@ use culprit_core::{
     telemetry::{CollectionBudget, CollectionStop, NativeIdentity, SourceShutdown},
 };
 use std::sync::Arc;
+mod batch;
 const MAX_RESULT_ROWS: usize = 10_000;
 const SNAPSHOT_BYTES: u32 = 8 * 1024 * 1024;
 const SNAPSHOT_TIMEOUT_MS: u32 = 120_000;
@@ -21,6 +22,19 @@ pub(crate) struct Reader<R = ReadSession> {
     stopped: Option<culprit_core::Error>,
     requested_population: Option<NativeIdentity>,
     population_catalog: Option<RuntimePopulationCatalog>,
+    native_layout: Option<NativeLayout>,
+    replica_catalog: Option<super::replicas::Catalog>,
+    connection_generation: Option<u64>,
+    batch: Option<batch::Batch>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct NativeLayout {
+    tempdb: bool,
+    log_bytes: bool,
+    waits: bool,
+    variants: super::variants_sql::Availability,
+    mode: super::mode::ReadMode,
+    partitioned: bool,
 }
 #[derive(Clone, Copy)]
 struct RuntimeLayout {
@@ -30,6 +44,30 @@ struct RuntimeLayout {
     variants: super::variants_sql::Availability,
     population: super::replicas::Population,
     mode: super::mode::ReadMode,
+}
+impl NativeLayout {
+    fn decode(row: &Rec) -> Result<Self> {
+        let flag = |name| match integer(row, name)? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(invalid_data()),
+        };
+        let mode =
+            super::mode::ReadMode::from_native(&crate::read::text(row, "actual_state_desc")?).ok_or_else(|| {
+                culprit_core::Error::new(
+                    culprit_core::ErrorCode::Unsupported,
+                    culprit_core::t!("collection.query_store_unavailable"),
+                )
+            })?;
+        Ok(Self {
+            tempdb: flag("tempdb")?,
+            log_bytes: flag("log_bytes")?,
+            waits: super::window_sql::waits_supported(row)?,
+            variants: super::variants_sql::Availability::decode(row, "variants")?,
+            mode,
+            partitioned: flag("replicas")?,
+        })
+    }
 }
 impl Reader {
     pub(crate) fn open(pool: Arc<Pool>) -> Self {
@@ -43,7 +81,18 @@ impl Reader {
 }
 impl<R: NativeRead> Reader<R> {
     pub(crate) fn new(io: R) -> Self {
-        Self { io, layout: None, window: None, stopped: None, requested_population: None, population_catalog: None }
+        Self {
+            io,
+            layout: None,
+            window: None,
+            stopped: None,
+            requested_population: None,
+            population_catalog: None,
+            native_layout: None,
+            replica_catalog: None,
+            connection_generation: None,
+            batch: None,
+        }
     }
     pub(crate) fn select_population(&mut self, requested: Option<&NativeIdentity>) -> Result<()> {
         self.admit()?;
@@ -61,11 +110,18 @@ impl<R: NativeRead> Reader<R> {
     pub(crate) fn population_catalog(&self) -> Option<&RuntimePopulationCatalog> {
         self.population_catalog.as_ref()
     }
-    pub(crate) fn selected_population(&self) -> Option<NativeIdentity> {
-        self.layout.and_then(|layout| layout.population.identity())
+    pub(crate) fn selected_population(&self) -> Result<Option<NativeIdentity>> {
+        self.layout.map(|layout| layout.population.identity()).transpose().map(Option::flatten)
     }
     pub(crate) fn accepts_local_capture(&self) -> Option<bool> {
         self.layout.map(|layout| layout.mode.accepts_local_capture())
+    }
+    pub(crate) fn is_population_batch(&self) -> bool {
+        self.batch.is_some()
+    }
+    /// An owned whole-read stop is distinct from a source-local result cap such as one oversized dataset.
+    pub(crate) fn retirement_reason(&self) -> Option<&culprit_core::Error> {
+        self.stopped.as_ref()
     }
     pub(crate) async fn population(&mut self) -> Result<super::replicas::Population> {
         Ok(self.runtime_layout().await?.population)
@@ -82,6 +138,8 @@ impl<R: NativeRead> Reader<R> {
     fn observe_failure(&mut self, error: &culprit_core::Error) {
         if crate::read::stops_remaining_reads(error) {
             self.stopped = Some(error.clone());
+            // Cached rows are provisional until the one owning native window/catalog check succeeds.
+            self.batch = None;
             if let Some(window) = &mut self.window {
                 window.invalidate_endpoint();
             }
@@ -100,12 +158,7 @@ impl<R: NativeRead> Reader<R> {
         self.read(sql, vec![parameter], MAX_RESULT_ROWS).await
     }
     pub(crate) async fn read(&mut self, sql: &str, parameters: Vec<Parameter>, limit: usize) -> Result<Vec<Rec>> {
-        self.admit()?;
-        let result = self.io.query(sql, parameters, limit + 1).await.map_err(ReadError::into_error);
-        if let Err(error) = &result {
-            self.observe_failure(error);
-        }
-        let rows = result?;
+        let rows = self.query_native(sql, parameters, limit + 1).await.map_err(ReadError::into_error)?;
         if rows.len() > limit {
             return Err(CollectionStop::RowLimit.error());
         }
@@ -143,30 +196,48 @@ impl<R: NativeRead> Reader<R> {
         if let Some(layout) = self.layout {
             return Ok(layout);
         }
+        let native = self.native_layout().await?;
+        let population = match &self.replica_catalog {
+            Some(catalog) => match catalog.select(self.requested_population.as_ref()) {
+                Ok(population) => population,
+                Err(error) => {
+                    self.stopped = Some(error.clone());
+                    return Err(error);
+                }
+            },
+            None if self.requested_population.is_some() => {
+                let error = culprit_core::Error::new(
+                    culprit_core::ErrorCode::Unsupported,
+                    culprit_core::t!("provider.mssql.query_store.population_missing"),
+                );
+                self.stopped = Some(error.clone());
+                return Err(error);
+            }
+            None => super::replicas::Population::Unpartitioned,
+        };
+        let layout = RuntimeLayout {
+            tempdb: native.tempdb,
+            log_bytes: native.log_bytes,
+            waits: native.waits,
+            variants: native.variants,
+            mode: native.mode,
+            population,
+        };
+        self.layout = Some(layout);
+        Ok(layout)
+    }
+
+    async fn native_layout(&mut self) -> Result<NativeLayout> {
+        self.admit()?;
+        if let Some(layout) = self.native_layout {
+            return Ok(layout);
+        }
         let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
         let [row] = rows.as_slice() else { return Err(invalid_data()) };
-        let tempdb = match integer(row, "tempdb")? {
-            0 => false,
-            1 => true,
-            _ => return Err(invalid_data()),
-        };
-        let log_bytes = match integer(row, "log_bytes")? {
-            0 => false,
-            1 => true,
-            _ => return Err(invalid_data()),
-        };
-        let variants = super::variants_sql::Availability::decode(row, "variants")?;
-        let mode =
-            super::mode::ReadMode::from_native(&crate::read::text(row, "actual_state_desc")?).ok_or_else(|| {
-                culprit_core::Error::new(
-                    culprit_core::ErrorCode::Unsupported,
-                    culprit_core::t!("collection.query_store_unavailable"),
-                )
-            })?;
-        let waits = super::window_sql::waits_supported(row)?;
-        let population = match integer(row, "replicas")? {
-            0 => {
-                if mode == super::mode::ReadMode::ReadCaptureSecondary {
+        let layout = NativeLayout::decode(row)?;
+        match layout.partitioned {
+            false => {
+                if layout.mode == super::mode::ReadMode::ReadCaptureSecondary {
                     let error = culprit_core::Error::new(
                         culprit_core::ErrorCode::Unsupported,
                         culprit_core::t!("provider.mssql.query_store.population_unavailable"),
@@ -175,34 +246,45 @@ impl<R: NativeRead> Reader<R> {
                     return Err(error);
                 }
                 self.population_catalog = Some(super::replicas::unpartitioned_catalog());
-                if self.requested_population.is_some() {
-                    let error = culprit_core::Error::new(
-                        culprit_core::ErrorCode::Unsupported,
-                        culprit_core::t!("provider.mssql.query_store.population_missing"),
-                    );
-                    self.stopped = Some(error.clone());
-                    return Err(error);
-                }
-                super::replicas::Population::Unpartitioned
             }
-            1 => {
+            true => {
                 let rows =
                     self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
                 let catalog = super::replicas::Catalog::decode(&rows).map_err(|_| self.source_changed())?;
                 self.population_catalog = Some(catalog.population_catalog()?);
-                match catalog.select(self.requested_population.as_ref()) {
-                    Ok(population) => population,
-                    Err(error) => {
-                        self.stopped = Some(error.clone());
-                        return Err(error);
-                    }
-                }
+                self.replica_catalog = Some(catalog);
             }
-            _ => return Err(invalid_data()),
-        };
-        let layout = RuntimeLayout { tempdb, log_bytes, waits, variants, population, mode };
-        self.layout = Some(layout);
+        }
+        self.native_layout = Some(layout);
         Ok(layout)
+    }
+
+    async fn query_native(
+        &mut self,
+        sql: &str,
+        parameters: Vec<Parameter>,
+        row_limit: usize,
+    ) -> crate::read::ReadResult<Vec<Rec>> {
+        self.admit().map_err(ReadError::Source)?;
+        let result = self.io.query(sql, parameters, row_limit).await;
+        match &result {
+            Err(ReadError::Source(error)) => self.observe_failure(error),
+            Err(ReadError::Stopped(stop)) => self.observe_failure(&stop.error()),
+            Ok(_) => (),
+        }
+        let rows = result?;
+        let generation = self.io.connection_generation();
+        if self.connection_generation.is_some() && generation != self.connection_generation {
+            return Err(ReadError::Source(self.source_changed()));
+        }
+        self.connection_generation = generation;
+        let charged = self.batch.as_mut().map(|batch| batch.charge(&rows)).transpose();
+        if let Err(error) = charged {
+            self.stopped = Some(error.clone());
+            self.batch = None;
+            return Err(ReadError::Source(error));
+        }
+        Ok(rows)
     }
     pub(crate) async fn verify_window(&mut self) -> Result<super::window_sql::WindowVerification> {
         let mut window = self.window.as_ref().ok_or_else(invalid_data)?.clone();
@@ -224,17 +306,51 @@ impl<R: NativeRead> Reader<R> {
     }
     pub(crate) async fn verify_population(&mut self) -> Result<()> {
         self.admit()?;
+        if self.is_population_batch() {
+            return self.verify_batch_catalog().await;
+        }
         let layout = self.layout.ok_or_else(invalid_data)?;
         if let super::replicas::Population::ReplicaGroup(_) = layout.population {
             let rows = self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
             let current = super::replicas::Catalog::decode(&rows).map_err(|_| self.source_changed())?;
-            if current.select(layout.population.identity().as_ref()).ok() != Some(layout.population) {
+            if current.select(layout.population.identity()?.as_ref()).ok() != Some(layout.population) {
                 return Err(self.source_changed());
             }
         }
         Ok(())
     }
+    async fn verify_batch_catalog(&mut self) -> Result<()> {
+        let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
+        let [row] = rows.as_slice() else { return Err(self.source_changed()) };
+        if NativeLayout::decode(row).ok() != self.native_layout {
+            return Err(self.source_changed());
+        }
+        if let Some(original) = self.replica_catalog.clone() {
+            let rows = self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
+            let current = super::replicas::Catalog::decode(&rows).map_err(|_| self.source_changed())?;
+            if current != original {
+                return Err(self.source_changed());
+            }
+        }
+        Ok(())
+    }
+    pub(crate) async fn finish_population_batch(
+        &mut self,
+    ) -> Result<(super::window_sql::FrozenWindow, super::window_sql::WindowVerification)> {
+        self.admit()?;
+        if !self.is_population_batch() {
+            return Err(invalid_data());
+        }
+        let verification = self.verify_window().await?;
+        if verification == super::window_sql::WindowVerification::RuntimePopulationChanged {
+            return Err(self.source_changed());
+        }
+        Ok((self.window.as_ref().ok_or_else(invalid_data)?.clone(), verification))
+    }
     pub(crate) async fn summary(&mut self, window_minutes: u32) -> Result<Vec<PlanSummary>> {
+        if self.batch.is_some() {
+            return self.batch_summary(window_minutes).await;
+        }
         let window = self.window(window_minutes).await?;
         let layout = self.layout.ok_or_else(invalid_data)?;
         let result = self
@@ -265,6 +381,9 @@ impl<R: NativeRead> Reader<R> {
     ) -> Result<Vec<super::waits::Summary>> {
         if plan_ids.is_some_and(|ids| ids.is_empty()) {
             return Ok(Vec::new());
+        }
+        if self.batch.is_some() {
+            return self.batch_waits(window_minutes, plan_ids).await;
         }
         let window = self.window(window_minutes).await?;
         if window.capture == culprit_core::telemetry::WaitCaptureState::Unavailable {
@@ -338,14 +457,7 @@ impl<R: NativeRead> NativeRead for Reader<R> {
         parameters: Vec<Parameter>,
         row_limit: usize,
     ) -> crate::read::ReadResult<Vec<Rec>> {
-        self.admit().map_err(ReadError::Source)?;
-        let result = self.io.query(sql, parameters, row_limit).await;
-        match &result {
-            Err(ReadError::Source(error)) => self.observe_failure(error),
-            Err(ReadError::Stopped(stop)) => self.observe_failure(&stop.error()),
-            Ok(_) => (),
-        }
-        result
+        self.query_native(sql, parameters, row_limit).await
     }
     fn queries(&self) -> u32 {
         self.io.queries()

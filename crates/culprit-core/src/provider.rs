@@ -7,7 +7,7 @@ use crate::error::{Error, ErrorCode, Result};
 use crate::model::{Engine, LiveState, ResultSet, ServerInfo, SessionAction, Snapshot};
 use crate::plan::Plan;
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct SnapshotOptions {
     /// An exact execution population offered by the selected native workload source. This selects statistics,
@@ -157,6 +157,17 @@ pub trait Provider: Send + Sync {
     /// scan without identity compares with no other. Its query plans carry their facts, as [`Provider::explain`]'s do.
     async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot>;
 
+    /// Acquire shared facts once and return independently selected native workload populations. The requested
+    /// snapshot preserves the caller's exact selector; an unselected multi-population source cannot choose one.
+    /// Implementations share one total native budget and settle every source before returning success.
+    async fn snapshot_populations(
+        &self,
+        connection: &str,
+        options: &SnapshotOptions,
+    ) -> Result<crate::PopulationSnapshots> {
+        crate::PopulationSnapshots::single(self.snapshot(connection, options).await?, options)
+    }
+
     /// The plan of `sql`. A plan carries its facts (`Plan::facts`, each step's `PlanNode::facts`): the inputs every
     /// check and insight reads. A provider for an engine Culprit parses hands the engine's native plan text to
     /// `culprit_engine::plans::parse_plan`; one for another engine fills the facts in, leaving unknown what it doesn't
@@ -231,7 +242,11 @@ pub trait Provider: Send + Sync {
         &self,
         _baseline: &crate::changes::Period,
         _recent: &crate::changes::Period,
+        population: Option<&crate::telemetry::NativeIdentity>,
     ) -> Result<Option<crate::changes::PeriodData>> {
+        if population.is_some() {
+            return Err(Error::new(ErrorCode::Unsupported, crate::t!("model.workload.population_unavailable")));
+        }
         Ok(None)
     }
 

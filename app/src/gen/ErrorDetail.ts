@@ -7,4 +7,4 @@ import type { StatementProblem } from "./StatementProblem";
 /**
  * Facts a caller can act on independently of a localized error message or hint.
  */
-export type ErrorDetail = { "statement": StatementProblem } | "actual-plan-statistics-unavailable" | "connection-security" | { "collection-stopped": CollectionStop } | { "outbox": OutboxProblem } | { "delivery": DeliveryProblem };
+export type ErrorDetail = { "statement": StatementProblem } | "actual-plan-statistics-unavailable" | "actual-plan-execution-population-unverified" | "connection-security" | { "collection-stopped": CollectionStop } | { "outbox": OutboxProblem } | { "delivery": DeliveryProblem };

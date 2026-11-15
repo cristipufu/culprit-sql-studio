@@ -14,16 +14,18 @@ use crate::{
     read::{NativeRead, ReadSession},
     resources, signals, sources, workload,
 };
+mod populations;
 
 /// What a part of the scan's sources could read: the shared account every provider keeps (`culprit_core::Coverage`).
 type Outcome = Coverage;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct WorkloadPart {
     workload: Option<Workload>,
     query_identities: std::collections::HashMap<String, culprit_core::telemetry::NativeQueryIdentity>,
     waits: Vec<WaitStat>,
     outcome: Outcome,
+    catalog: Option<culprit_core::RuntimePopulationCatalog>,
 }
 
 impl WorkloadPart {
@@ -166,19 +168,17 @@ pub(crate) fn server_state_unreadable(outcome: &mut Outcome, probe: &Probe) {
     }
 }
 
-async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &SnapshotOptions) -> WorkloadPart {
+async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &SnapshotOptions) -> Result<WorkloadPart> {
     let mut part = WorkloadPart::default();
-    let dmv = probe.can_read_dmvs();
     query_store_account(&mut part.outcome, probe);
-    let mut population_catalog = None;
 
     if probe.query_store_readable() {
         let grant = || probe.grant_hint();
         let mut reader = crate::query_store::Reader::open(provider.pool.clone());
         let result = workload::from_query_store(&mut reader, options).await;
-        population_catalog = reader.population_catalog().cloned();
+        part.catalog = reader.population_catalog().cloned();
         let result = if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
-            Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error())
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
         } else {
             result
         };
@@ -190,21 +190,39 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
             }),
         ) {
             part.accept(&sources::QUERY_STORE, Capability::QueryStore, result);
-            return part;
+            return Ok(part);
         }
         if stop_followup {
-            return part;
+            return Ok(part);
         }
     }
+    if options.workload_population.is_some() {
+        return Ok(part);
+    }
+    collect_plan_cache(provider, probe, options, part).await
+}
 
+async fn collect_plan_cache(
+    provider: &MssqlProvider,
+    probe: &Probe,
+    options: &SnapshotOptions,
+    mut part: WorkloadPart,
+) -> Result<WorkloadPart> {
+    let dmv = probe.can_read_dmvs();
     if !dmv {
         plan_cache_unreadable(&mut part.outcome, probe);
-        return part;
+        return Ok(part);
     }
     let mut client = ReadSession::application(provider.pool.clone());
     let plan_cache = workload::from_plan_cache(&mut client, options).await;
     let plan_cache = client.finish(plan_cache).await;
-    if let Some(mut result) = part.outcome.read(
+    if plan_cache.as_ref().err().is_some_and(|error| {
+        culprit_core::telemetry::CollectionStop::from_error(error)
+            == culprit_core::telemetry::CollectionStop::CancellationUnconfirmed
+    }) {
+        return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+    }
+    if let Some(result) = part.outcome.read(
         &sources::PLAN_CACHE,
         plan_cache.map_err(|error| {
             if error.code == culprit_core::ErrorCode::PermissionDenied {
@@ -214,10 +232,9 @@ async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &Sna
             }
         }),
     ) {
-        result.workload.population_catalog = population_catalog;
         part.accept(&sources::PLAN_CACHE, Capability::PlanCache, result);
     }
-    part
+    Ok(part)
 }
 
 /// Returns `Some(created)` only when the database creation timestamp is strictly newer than the server's start time
@@ -411,13 +428,36 @@ pub(crate) async fn snapshot(
     connection: &str,
     options: &SnapshotOptions,
 ) -> Result<Snapshot> {
+    let (shared, workloads) = Box::pin(acquire(provider, connection, options, false)).await?;
+    Ok(workloads.project_requested(*shared))
+}
+
+pub(crate) async fn snapshot_populations(
+    provider: &MssqlProvider,
+    connection: &str,
+    options: &SnapshotOptions,
+) -> Result<culprit_core::PopulationSnapshots> {
+    let (shared, workloads) = Box::pin(acquire(provider, connection, options, true)).await?;
+    workloads.project(*shared, options)
+}
+
+async fn acquire(
+    provider: &MssqlProvider,
+    connection: &str,
+    options: &SnapshotOptions,
+    automatic: bool,
+) -> Result<(Box<Snapshot>, populations::Workloads)> {
+    // Selector syntax is source-owned and must fail before the probe opens any native session.
+    if let Some(population) = &options.workload_population {
+        crate::query_store::replicas::requested_group(population)?;
+    }
     let started = Instant::now();
     let taken_at = chrono::Utc::now();
     let probe = provider.pool.observe(|c| Box::pin(probe::run(c))).await?;
     let probe_ref = &probe;
 
-    let (workload_part, schema_part, misc_part, resource_part) = tokio::join!(
-        collect_workload(provider, probe_ref, options),
+    let (workloads, schema_part, misc_part, resource_part) = tokio::join!(
+        populations::collect(provider, probe_ref, options, automatic),
         provider.on_session(move |mut c| async move {
             let part = collect_schema(&mut c, probe_ref).await;
             (part, c)
@@ -428,6 +468,7 @@ pub(crate) async fn snapshot(
         }),
         collect_resources(provider, probe_ref),
     );
+    let mut workloads = workloads?;
     let schema_part = schema_part?;
     let mut misc_part = misc_part?;
     provider.pool.ensure_available()?;
@@ -444,7 +485,6 @@ pub(crate) async fn snapshot(
             outcome.missing_capability(m);
         }
     }
-    outcome.merge(workload_part.outcome);
     outcome.merge(schema_part.outcome);
     outcome.merge(misc_part.outcome);
     outcome.merge(resource_part.outcome);
@@ -454,9 +494,8 @@ pub(crate) async fn snapshot(
     let sources = outcome.outcomes();
     let (have, missing, notes) = outcome.finish();
 
-    let waits = if workload_part.waits.is_empty() { misc_part.waits } else { workload_part.waits };
     let tables = schema_part.tables;
-    let mut snapshot = Snapshot {
+    let mut snapshot = Box::new(Snapshot {
         identity: None,
         sources,
         format: SNAPSHOT_FORMAT,
@@ -466,14 +505,15 @@ pub(crate) async fn snapshot(
         taken_at: taken_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         duration_ms: started.elapsed().as_secs_f64() * 1_000.0,
         server: probe::server_info(&probe, have, missing),
-        workload: workload_part.workload,
+        runtime_populations: None,
+        workload: None,
         tables,
         indexes: schema_part.indexes,
         columns: schema_part.columns,
         foreign_keys: schema_part.foreign_keys,
         missing_indexes: schema_part.missing_indexes,
         statistics: schema_part.statistics,
-        waits,
+        waits: misc_part.waits,
         resources: resource_part.samples,
         settings: misc_part.settings,
         pressure: misc_part.pressure,
@@ -494,17 +534,11 @@ pub(crate) async fn snapshot(
             cleanup: misc_part.cleanup,
             ..Default::default()
         },
-    };
+    });
     let mut client = ReadSession::application(provider.pool.clone());
-    signals::collect(
-        &mut client,
-        provider.pool.clone(),
-        &probe,
-        options,
-        &workload_part.query_identities,
-        &mut snapshot,
-    )
-    .await;
+    let mut participants = workloads.participants();
+    signals::collect(&mut client, provider.pool.clone(), &probe, options, &mut participants, &mut snapshot).await;
+    drop(participants);
     if client.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
     }
@@ -541,7 +575,7 @@ pub(crate) async fn snapshot(
         None,
     ));
     snapshot.duration_ms = started.elapsed().as_secs_f64() * 1_000.0;
-    Ok(snapshot)
+    Ok((snapshot, workloads))
 }
 
 #[cfg(test)]

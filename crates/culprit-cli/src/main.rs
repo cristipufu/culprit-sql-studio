@@ -58,6 +58,8 @@ struct Cli {
 #[derive(Args)]
 struct ChangesArgs {
     connection: String,
+    #[arg(long, value_parser = parse_workload_population, value_name = "ID", help = t!("cli.scan.workload_population"))]
+    workload_population: Option<culprit_core::telemetry::NativeIdentity>,
     /// Compare everything since this moment (RFC 3339, e.g. a deploy) with the same length of time before it.
     #[arg(long)]
     since: Option<String>,
@@ -78,6 +80,7 @@ struct ChangesArgs {
 impl ChangesArgs {
     fn request(&self) -> culprit_engine::changes::ChangeRequest {
         culprit_engine::changes::ChangeRequest {
+            workload_population: self.workload_population.clone(),
             since: self.since.clone(),
             recent_hours: self.recent,
             min_executions: self.min_runs,
@@ -729,6 +732,27 @@ mod tests {
                 "only the source can interpret its exact IDs"
             );
         }
+    }
+
+    #[test]
+    fn changes_carries_the_exact_workload_population_to_the_comparison_request() {
+        let cli = Cli::try_parse_from([
+            "culprit",
+            "changes",
+            "shop",
+            "--workload-population",
+            "native-group-7",
+            "--recent",
+            "6h",
+            "--no-cloud",
+        ])
+        .unwrap();
+        let Command::Changes(args) = cli.command else { panic!("parsed changes") };
+        let request = args.request();
+        assert_eq!(request.workload_population, Some(culprit_core::telemetry::NativeIdentity::new("native-group-7")));
+        assert_eq!(request.recent_hours, Some(6.0));
+        assert_eq!(request.cloud, Some(false));
+        assert!(Cli::try_parse_from(["culprit", "changes", "shop", "--workload-population", "bad\nidentity"]).is_err());
     }
 
     #[test]

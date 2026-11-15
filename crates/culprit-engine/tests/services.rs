@@ -92,6 +92,7 @@ struct ParserProvider {
     types: Vec<String>,
     reject_read: bool,
     calls: Arc<Mutex<Vec<(String, usize)>>>,
+    period_population: Arc<Mutex<Option<Option<culprit_core::telemetry::NativeIdentity>>>>,
 }
 
 #[async_trait]
@@ -125,9 +126,12 @@ impl Provider for ParserProvider {
         &self,
         baseline: &culprit_core::Period,
         recent: &culprit_core::Period,
+        population: Option<&culprit_core::telemetry::NativeIdentity>,
     ) -> Result<Option<culprit_core::changes::PeriodData>> {
+        self.calls.lock().unwrap().push((format!("periods:{population:?}"), 0));
         Ok(Some(culprit_core::changes::PeriodData {
             source: culprit_core::TimelineSource::QueryStore,
+            population: self.period_population.lock().unwrap().clone().unwrap_or_else(|| population.cloned()),
             baseline: baseline.clone(),
             recent: recent.clone(),
             baseline_total: Default::default(),
@@ -157,6 +161,7 @@ fn workspace(tag: &str, types: &[&str], reject_read: bool) -> (Workspace, Parser
         types: types.iter().map(|s| (*s).into()).collect(),
         reject_read,
         calls: Arc::new(Mutex::new(Vec::new())),
+        period_population: Arc::new(Mutex::new(None)),
     };
     let replay = provider.clone();
     let ws = Workspace::open_in(&dir).with_provider(
@@ -168,6 +173,37 @@ fn workspace(tag: &str, types: &[&str], reject_read: bool) -> (Workspace, Parser
         .unwrap(),
     );
     (ws, provider, dir)
+}
+
+#[tokio::test]
+async fn period_comparisons_preserve_exact_source_population_and_reject_substitutes() {
+    use culprit_core::telemetry::{CollectionStop, NativeIdentity};
+    use culprit_engine::changes::ChangeRequest;
+    let (ws, provider, dir) = workspace("period-population", &["SELECT"], false);
+    add(&ws, "shop", None);
+    let request =
+        ChangeRequest { workload_population: Some(NativeIdentity::new("7")), cloud: Some(false), ..Default::default() };
+    let result = ws.changes("shop", &request).await.unwrap();
+    assert_eq!(result.population, request.workload_population);
+    assert_eq!(provider.calls.lock().unwrap().len(), 1);
+    for actual in [None, Some(NativeIdentity::new("1")), Some(NativeIdentity::new(""))] {
+        *provider.period_population.lock().unwrap() = Some(actual);
+        let error = ws.changes("shop", &request).await.unwrap_err();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn invalid_period_population_is_rejected_before_connection_or_provider_work() {
+    use culprit_core::telemetry::NativeIdentity;
+    use culprit_engine::changes::ChangeRequest;
+    let (ws, provider, dir) = workspace("invalid-period-population", &["SELECT"], false);
+    let request =
+        ChangeRequest { workload_population: Some(NativeIdentity::new("bad\nidentity")), ..Default::default() };
+    assert_eq!(ws.changes("not-configured", &request).await.unwrap_err().code, ErrorCode::InvalidInput);
+    assert!(provider.calls.lock().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 fn add(ws: &Workspace, name: &str, password: Option<&str>) {

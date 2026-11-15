@@ -10,7 +10,8 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { canOpenQueryInEditor, prepareQueryForEditor, prepareRawQueryTextForEditor } from "../lib/editor-sql";
 import { count, duration, percent } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
-import { t } from "../lib/i18n";
+import { t, useLanguage } from "../lib/i18n";
+import { samePopulation } from "../lib/report-selection";
 import { querySummary } from "../lib/query-summary";
 import { eventTime, useEventsVersion } from "../lib/events";
 import { changeRequest, setState } from "../lib/store";
@@ -131,6 +132,7 @@ function toInputLocal(iso: string | null | undefined): string {
 }
 
 export default function WhatChanged({ report, request, onClose }: { report: Report; request: ChangeRequest; onClose: () => void }) {
+  const language = useLanguage();
   const [state, setLocal] = useState<State>({ status: "loading" });
   const [open, setOpen] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -150,12 +152,19 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
     setCursor(0);
     api()
       .then((client) => client.changes(connection, asked))
-      .then((changes) => !cancelled && setLocal({ status: "ready", changes }))
+      .then((changes) => {
+        if (cancelled) return;
+        if (asked.workload_population != null && !samePopulation(changes.population ?? null, asked.workload_population)) {
+          setLocal({ status: "error", error: { code: "invalid_input", message: t("ui.population_picker.report_scope_mismatch"), hint: null } });
+          return;
+        }
+        setLocal({ status: "ready", changes });
+      })
       .catch((e) => !cancelled && setLocal({ status: "error", error: errorMessage(e) }));
     return () => {
       cancelled = true;
     };
-  }, [connection, asked, marks]);
+  }, [connection, asked, marks, language]);
 
   const changes = state.status === "ready" ? state.changes : null;
   const rows = useMemo(() => (changes ? changes.queries.filter((q) => q.status !== "unchanged" || showUnchanged) : []), [changes, showUnchanged]);

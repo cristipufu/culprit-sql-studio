@@ -7,7 +7,7 @@ import type { Report } from "../gen/Report";
 import { ago, byPeriod, bytes, count, duration, percent } from "../lib/format";
 import { workloadSource, windowPhrase, windowUnknown } from "../lib/rates";
 import { useHotkeys } from "../lib/hotkeys";
-import { key, t } from "../lib/i18n";
+import { key, t, useLanguage } from "../lib/i18n";
 import { changeRequest, setState, useStore } from "../lib/store";
 import { planFlags, trendNote, WorkloadTrend } from "../components/Trends";
 import { chartEvents } from "../components/ChangeTimeline";
@@ -20,6 +20,7 @@ import { HealthLine, WaitsVital, type WaitsTab } from "../components/Waits";
 import { FindingDetail } from "./FindingDetail";
 import { actionability, actionLabel, isActionable } from "../lib/findings";
 import { can } from "../lib/engines";
+import { queryHistoryEmptyState } from "../lib/query-history";
 
 const CATEGORIES: Category[] = ["indexes", "queries", "maintenance", "configuration"];
 
@@ -60,6 +61,7 @@ function requestedRange(request: ChangeRequest | null, end: number): Range | nul
 }
 
 export function Overview({ report }: { report: Report }) {
+  const language = useLanguage();
   const selected = useStore((s) => s.finding);
   const dismissed = useStore((s) => s.dismissed);
   const changes = useStore((s) => s.changes);
@@ -186,7 +188,7 @@ export function Overview({ report }: { report: Report }) {
           <WhatChanged report={report} request={changes} onClose={() => setState({ changes: null })} />
         </Suspense>
       ) : current ? (
-        <FindingDetail key={current.id} report={report} finding={current} />
+        <FindingDetail key={JSON.stringify([report.snapshot.connection, report.snapshot.id, current.id, language])} report={report} finding={current} />
       ) : (
         <div className="empty">
           <h3>{t("ui.overview.select")}</h3>
@@ -227,6 +229,7 @@ function Header({
   if (changes?.since) flags.push({ at: Date.parse(changes.since), label: t("ui.overview.since_flag"), tone: "anchor" });
   // Under 20 hours of history a "per day" figure would be an extrapolation: show what was measured, and over how long.
   const short = w != null && w.window_hours < 20;
+  const emptyHistory = queryHistoryEmptyState(report);
   const span = !w
     ? ""
     : w.log != null
@@ -251,7 +254,7 @@ function Header({
               ? short
                 ? span
                 : t("ui.overview.workload_hint", { span, queryCount: w.query_count, queries: count(w.query_count), runCount: perDay(w.total_executions, w.window_hours), runs: count(perDay(w.total_executions, w.window_hours)) })
-              : t("ui.overview.no_workload")}
+              : emptyHistory?.kind === "choose-group" ? emptyHistory.detail : t("ui.overview.no_workload")}
           </div>
         </div>
         <WaitsVital report={report} onOpen={onOpenWaits} />
@@ -309,6 +312,8 @@ function perDay(value: number, hours: number): number {
 }
 
 function headlineTail(report: Report): string {
+  const empty = queryHistoryEmptyState(report);
+  if (empty?.kind === "choose-group") return empty.detail;
   const w = report.snapshot.workload;
   const share = report.summary.top_share;
   const span = w ? windowPhrase(w) : "";

@@ -155,13 +155,18 @@ fn selected_summary_path(
     population: Option<&culprit_core::telemetry::NativeIdentity>,
 ) -> Result<PathBuf> {
     let Some(population) = population else { return Ok(summary_path(dir, window_minutes)) };
+    let key = population_key(population)?;
+    let window = window_minutes.map(window_label).unwrap_or_else(|| "any".into());
+    Ok(dir.join(format!("latest-{window}-population-{key}.json")))
+}
+
+/// The complete source-owned identity determines filenames; native IDs are never interpolated into paths.
+pub(crate) fn population_key(population: &culprit_core::telemetry::NativeIdentity) -> Result<String> {
     if !population.is_valid() {
         return Err(culprit_core::telemetry::CollectionStop::InvalidPage.error());
     }
     let encoded = serde_json::to_vec(population).map_err(|error| Error::internal(error.to_string()))?;
-    let key = culprit_core::telemetry::digest(&encoded);
-    let window = window_minutes.map(window_label).unwrap_or_else(|| "any".into());
-    Ok(dir.join(format!("latest-{window}-population-{key}.json")))
+    Ok(culprit_core::telemetry::digest(&encoded))
 }
 
 fn summary_of(report: &Report) -> ReportSummary {
@@ -214,7 +219,8 @@ fn may_replace_latest(old: &ReportSummary, new: &ReportSummary) -> bool {
     fn time(summary: &ReportSummary) -> Option<chrono::DateTime<chrono::Utc>> {
         let at = chrono::DateTime::parse_from_rfc3339(&summary.taken_at).ok()?.to_utc();
         // Workspace timestamps have second precision, but their IDs distinguish scans within that second.
-        let precise = chrono::NaiveDateTime::parse_from_str(&summary.id, "%Y%m%dT%H%M%S%.fZ")
+        let timestamp = summary.id.split_inclusive('Z').next().unwrap_or_default();
+        let precise = chrono::NaiveDateTime::parse_from_str(timestamp, "%Y%m%dT%H%M%S%.fZ")
             .ok()
             .map(|t| t.and_utc())
             .filter(|id| at.timestamp_subsec_nanos() == 0 && id.timestamp() == at.timestamp());
@@ -870,6 +876,27 @@ mod tests {
         );
         assert!(latest_selected_summary(&dir, None, Some(&NativeIdentity::new(""))).is_err());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn selected_latest_pointers_keep_millisecond_order_when_scans_finish_out_of_order() {
+        use culprit_core::telemetry::NativeIdentity;
+        let root = tempfile::tempdir().unwrap();
+        let population = NativeIdentity::new("17").qualified("native-context", "exact");
+        let suffix = population_key(&population).unwrap();
+        let newer_id = format!("20261101T120000.900Z-population-{suffix}");
+        let older_id = format!("20261101T120000.100Z-population-{suffix}");
+        for id in [&newer_id, &older_id] {
+            let mut report = fixture_report(id, 60);
+            report.snapshot.options.as_mut().unwrap().workload_population = Some(population.clone());
+            report.snapshot.workload.as_mut().unwrap().population = Some(population.clone());
+            save(root.path(), &report).unwrap();
+        }
+        for window in [None, Some(60)] {
+            assert_eq!(latest_selected_summary(root.path(), window, Some(&population)).unwrap().unwrap().id, newer_id);
+        }
+        assert!(latest_summary(root.path(), None).is_none());
+        assert_eq!(list(root.path()).unwrap().len(), 2);
     }
 
     /// A connection scanned by another version keeps that version's files: its reports aren't read, so they are passed

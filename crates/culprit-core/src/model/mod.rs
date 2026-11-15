@@ -714,6 +714,11 @@ pub struct Snapshot {
     pub taken_at: String,
     pub duration_ms: f64,
     pub server: ServerInfo,
+    /// Alternatives discovered by the native workload source, even when no workload could be read.
+    /// A catalog is neither a selected population nor proof of current physical-replica ownership.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub runtime_populations: Option<crate::RuntimePopulationCatalog>,
     pub workload: Option<Workload>,
     pub tables: Vec<TableStat>,
     pub indexes: Vec<IndexStat>,

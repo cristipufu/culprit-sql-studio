@@ -17,6 +17,7 @@ import type { PlanCacheUse } from "./PlanCacheUse";
 import type { Pressure } from "./Pressure";
 import type { QueryFamily } from "./QueryFamily";
 import type { ResourceSample } from "./ResourceSample";
+import type { RuntimePopulationCatalog } from "./RuntimePopulationCatalog";
 import type { ServerInfo } from "./ServerInfo";
 import type { Setting } from "./Setting";
 import type { SizeBaseline } from "./SizeBaseline";
@@ -28,7 +29,12 @@ import type { TuningAdvice } from "./TuningAdvice";
 import type { WaitStat } from "./WaitStat";
 import type { Workload } from "./Workload";
 
-export type Snapshot = { operations: OperationalStats, format: number, id: string, connection: string, environment: Environment, taken_at: string, duration_ms: number, server: ServerInfo, workload: Workload | null, tables: Array<TableStat>, indexes: Array<IndexStat>, columns: Array<ColumnInfo>, foreign_keys: Array<ForeignKey>, missing_indexes: Array<MissingIndex>, statistics: Array<StatisticsInfo>, waits: Array<WaitStat>, resources: Array<ResourceSample>, settings: Array<Setting>, notes: Array<CollectorNote>, 
+export type Snapshot = { operations: OperationalStats, format: number, id: string, connection: string, environment: Environment, taken_at: string, duration_ms: number, server: ServerInfo, 
+/**
+ * Alternatives discovered by the native workload source, even when no workload could be read.
+ * A catalog is neither a selected population nor proof of current physical-replica ownership.
+ */
+runtime_populations?: RuntimePopulationCatalog, workload: Workload | null, tables: Array<TableStat>, indexes: Array<IndexStat>, columns: Array<ColumnInfo>, foreign_keys: Array<ForeignKey>, missing_indexes: Array<MissingIndex>, statistics: Array<StatisticsInfo>, waits: Array<WaitStat>, resources: Array<ResourceSample>, settings: Array<Setting>, notes: Array<CollectorNote>, 
 /**
  * Pressure signals from cheap counters (compiles, memory grants, cache hits, open transactions).
  */

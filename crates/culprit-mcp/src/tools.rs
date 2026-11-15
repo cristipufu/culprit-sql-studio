@@ -52,6 +52,8 @@ pub struct DeadlocksArgs {
 pub struct WhatChangedArgs {
     /// A connection name from list_connections.
     pub connection: String,
+    /// Exact native execution-population ID from the saved report's population catalog. Omit for the default view.
+    pub workload_population: Option<String>,
     /// Compare everything since this moment (RFC 3339, e.g. a deploy time) with the same length of time before it.
     pub since: Option<String>,
     /// The recent period as the last N hours (default 1; PostgreSQL and MySQL default to the time since the previous scan).
@@ -621,6 +623,7 @@ impl CulpritMcp {
                 let a: WhatChangedArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let request = culprit_engine::changes::ChangeRequest {
+                    workload_population: a.workload_population.map(culprit_core::telemetry::NativeIdentity::new),
                     since: a.since,
                     recent_hours: a.recent_hours,
                     min_executions: a.min_runs,

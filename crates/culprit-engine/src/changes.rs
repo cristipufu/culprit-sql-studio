@@ -16,6 +16,8 @@ use crate::trends::{self, Counters, QueryMeta, StepKind};
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct ChangeRequest {
+    /// Compare only this exact source-owned execution population; no other group's history is a fallback.
+    pub workload_population: Option<culprit_core::telemetry::NativeIdentity>,
     /// Compare everything since this moment with the same length of time before it (a deploy, a plan change).
     #[serde(default)]
     pub since: Option<String>,
@@ -42,6 +44,13 @@ pub struct ChangeRequest {
 }
 
 impl ChangeRequest {
+    pub fn validate(&self) -> Result<()> {
+        if self.workload_population.as_ref().is_some_and(|population| !population.is_valid()) {
+            return Err(Error::invalid(t!("engine.changes.population_invalid")));
+        }
+        Ok(())
+    }
+
     /// No period asked for: use the default comparison.
     pub fn is_default(&self) -> bool {
         self.since.is_none()
@@ -236,6 +245,7 @@ pub fn from_scans(history: &[Counters], baseline: &Period, recent: &Period) -> P
         .filter(|(at, _)| *at <= cutoff)
         .max_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, c)| c);
+    data.population = anchor.and_then(|c| c.measurement.as_ref()).and_then(|m| m.population.clone());
     let mut points: Vec<(f64, &Counters)> = history
         .iter()
         .filter(|c| anchor.is_some_and(|a| c.same_series(a)))
@@ -652,5 +662,32 @@ mod tests {
         let changes = culprit_core::changes::compare("shop", Engine::Postgres, data, &CompareOptions::default());
         assert!(changes.summary.starts_with("Can't compare yet."), "{}", changes.summary);
         assert!(!changes.summary.contains("No queries ran"));
+    }
+
+    #[test]
+    fn period_history_retains_one_native_population_without_borrowing_neighbor_counters() {
+        use culprit_core::telemetry::NativeIdentity;
+        let mut history = Vec::new();
+        for (group, hours, values) in
+            [("1", [0, 6, 12], [10_000.0, 50_000.0, 100_000.0]), ("7", [1, 7, 13], [100.0, 250.0, 650.0])]
+        {
+            for (hour, value) in hours.into_iter().zip(values) {
+                let mut point = counters(
+                    &format!("2026-10-11T{hour:02}:00:00Z"),
+                    [value, value],
+                    &[("same-query-id", value, value, None)],
+                );
+                point.measurement.as_mut().unwrap().population = Some(NativeIdentity::new(group));
+                history.push(point);
+            }
+        }
+        let (baseline, recent) = default_scan_periods(&history).unwrap();
+        let data = from_scans(&history, &baseline, &recent);
+        assert_eq!(data.population, Some(NativeIdentity::new("7")));
+        assert_eq!(data.baseline_total.executions, 150.0);
+        assert_eq!(data.recent_total.executions, 400.0);
+        let changes = culprit_core::changes::compare("shop", Engine::Postgres, data, &CompareOptions::default());
+        assert_eq!(changes.population, Some(NativeIdentity::new("7")));
+        assert_eq!(changes.queries.len(), 1);
     }
 }

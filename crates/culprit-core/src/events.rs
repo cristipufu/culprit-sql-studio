@@ -441,6 +441,7 @@ mod tests {
             q.recent.iter().for_each(|s| recent_total.add(s));
         }
         let data = PeriodData {
+            population: None,
             source: TimelineSource::Scans,
             baseline: Period { start: "2026-10-11T08:00:00Z".into(), end: "2026-10-11T12:00:00Z".into() },
             recent: Period { start: "2026-10-11T12:00:00Z".into(), end: "2026-10-11T16:00:00Z".into() },

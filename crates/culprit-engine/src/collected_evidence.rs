@@ -149,6 +149,7 @@ fn snapshot(
         taken_at: capture.collected_until().into(),
         duration_ms: 0.0,
         server,
+        runtime_populations: None,
         workload,
         tables: vec![],
         indexes: vec![],

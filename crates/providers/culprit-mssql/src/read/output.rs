@@ -26,7 +26,7 @@ impl Output {
         self.0.finish().await
     }
 }
-pub(super) fn value_bytes(row: &Rec) -> usize {
+pub(crate) fn value_bytes(row: &Rec) -> usize {
     row.columns().fold(0usize, |total, (_, value)| {
         total.saturating_add(match value {
             Val::Text(value) => value.len(),

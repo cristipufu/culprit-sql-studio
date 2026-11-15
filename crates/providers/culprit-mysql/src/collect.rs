@@ -125,6 +125,7 @@ pub async fn snapshot(
     server.missing = missing;
 
     let mut snapshot = Snapshot {
+        runtime_populations: None,
         identity: None,
         sources,
         format: SNAPSHOT_FORMAT,

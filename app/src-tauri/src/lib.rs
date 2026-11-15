@@ -233,12 +233,25 @@ fn for_ui(mut report: Report) -> Report {
     // Workspace scan/read paths have already run the full analysis and plan presentation pipeline.
     // Replay evidence stays with the saved report; the UI only needs the prepared view and its provenance.
     report.evidence = None;
+    if let Some(catalog) = &mut report.snapshot.runtime_populations {
+        population_labels_for_ui(catalog);
+    }
     if let Some(workload) = report.snapshot.workload.as_mut() {
+        if let Some(catalog) = &mut workload.population_catalog {
+            population_labels_for_ui(catalog);
+        }
         for plan in workload.queries.iter_mut().filter_map(|q| q.plan.as_mut()) {
             plan.raw = None;
         }
     }
     report
+}
+
+/// Provider messages are rendered by the backend catalog; the app renders their resulting native labels as text.
+fn population_labels_for_ui(catalog: &mut culprit_core::RuntimePopulationCatalog) {
+    for population in &mut catalog.populations {
+        population.label = culprit_core::i18n::Message::Text { text: population.label.render() };
+    }
 }
 
 /// The workload window the app asked for, in minutes, within what a scan reads.
@@ -247,19 +260,34 @@ fn requested_window(window_minutes: Option<u32>) -> Option<u32> {
 }
 
 #[tauri::command]
-async fn latest_report(ws: Ws<'_>, name: String, window_minutes: Option<u32>) -> Result<Option<Report>> {
+async fn latest_report(
+    ws: Ws<'_>,
+    name: String,
+    window_minutes: Option<u32>,
+    population: Option<culprit_core::telemetry::NativeIdentity>,
+) -> Result<Option<Report>> {
     blocking_workspace(ws.inner().clone(), move |ws| {
-        Ok(ws.latest_report(&name, requested_window(window_minutes))?.map(for_ui))
+        Ok(ws.latest_population_report(&name, requested_window(window_minutes), population.as_ref())?.map(for_ui))
     })
     .await
 }
 
 #[tauri::command]
-async fn scan(ws: Ws<'_>, name: String, window_minutes: Option<u32>) -> Result<Report> {
+async fn report_at(ws: Ws<'_>, name: String, report_id: String) -> Result<Report> {
+    blocking_workspace(ws.inner().clone(), move |ws| ws.report_at(&name, &report_id).map(for_ui)).await
+}
+
+#[tauri::command]
+async fn scan(
+    ws: Ws<'_>,
+    name: String,
+    window_minutes: Option<u32>,
+    population: Option<culprit_core::telemetry::NativeIdentity>,
+) -> Result<Report> {
     let defaults = SnapshotOptions::default();
     let window = requested_window(window_minutes).unwrap_or(defaults.window_in_minutes());
-    let options = defaults.with_window_minutes(window);
-    ws.scan(&name, &options).await.map(for_ui)
+    let options = SnapshotOptions { workload_population: population, ..defaults.with_window_minutes(window) };
+    ws.scan_populations(&name, &options).await.map(|reports| for_ui(reports.requested))
 }
 
 /// Word what the app reads from now on (findings, notes, plan insights) in `code`, the language the app is shown in.
@@ -271,13 +299,10 @@ fn set_language(code: String) -> bool {
 
 /// The brief a coding agent is given: in English whatever the app's language, report and all.
 #[tauri::command]
-async fn brief(ws: Ws<'_>, name: String, finding_id: String, window_minutes: Option<u32>) -> Result<String> {
+async fn brief(ws: Ws<'_>, name: String, report_id: String, finding_id: String) -> Result<String> {
     blocking_workspace(ws.inner().clone(), move |ws| {
         culprit_core::i18n::scope("en", || {
-            let window = requested_window(window_minutes);
-            let selected = ws.latest_report(&name, window)?;
-            let report = if selected.is_none() && window.is_some() { ws.latest_report(&name, None)? } else { selected }
-                .ok_or_else(|| Error::not_found(format!("No report for {name}")))?;
+            let report = ws.report_at(&name, &report_id)?;
             let finding = report
                 .findings
                 .iter()
@@ -383,28 +408,33 @@ async fn export_diff(ws: Ws<'_>, request: ExportDiffRequest) -> Result<ExportFil
 async fn export_query_plan(
     ws: Ws<'_>,
     name: String,
+    report_id: String,
     query_id: String,
     plan_id: Option<String>,
     format: ExportFormat,
     options: ExportOptions,
 ) -> Result<ExportFile> {
-    ws.export_query_plan(&name, &query_id, plan_id.as_deref(), format, &options).await
+    ws.export_query_plan_at(&name, &report_id, &query_id, plan_id.as_deref(), format, &options).await
 }
 
 #[tauri::command]
 async fn export_finding(
     ws: Ws<'_>,
     name: String,
+    report_id: String,
     finding_id: String,
     format: ExportFormat,
     options: ExportOptions,
 ) -> Result<ExportFile> {
-    blocking_workspace(ws.inner().clone(), move |ws| ws.export_finding(&name, &finding_id, format, &options)).await
+    blocking_workspace(ws.inner().clone(), move |ws| {
+        ws.export_finding_at(&name, &report_id, &finding_id, format, &options)
+    })
+    .await
 }
 
 #[tauri::command]
-async fn verify_findings(ws: Ws<'_>, name: String, ids: Vec<String>) -> Result<Verification> {
-    ws.verify(&name, &ids).await
+async fn verify_findings(ws: Ws<'_>, name: String, report_id: String, ids: Vec<String>) -> Result<Verification> {
+    ws.verify_at(&name, &report_id, &ids).await
 }
 
 #[tauri::command]
@@ -901,6 +931,7 @@ pub fn run_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
             cancel_sign_in,
             open_sign_in_page,
             latest_report,
+            report_at,
             scan,
             brief,
             explain,
@@ -1006,6 +1037,47 @@ mod workspace_write_tests {
 
 #[cfg(test)]
 mod report_projection_tests {
+    #[test]
+    fn ui_renders_population_messages_without_changing_native_selection_or_catalog_context() {
+        use culprit_core::{RuntimePopulation, RuntimePopulationCatalog, telemetry::NativeIdentity};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mssql-demo.json");
+        let mut report = culprit_engine::reading::open(&path).unwrap();
+        let identity = NativeIdentity::new("17").qualified("native-context", "9007199254740993");
+        let label = culprit_core::message!(
+            "provider.mssql.query_store.population_group",
+            group = "17",
+            role = "source role <img>"
+        );
+        let rendered = label.render();
+        let catalog = RuntimePopulationCatalog {
+            source: "fixture.runtime".into(),
+            partitioned: true,
+            requires_selection: false,
+            populations: vec![RuntimePopulation {
+                identity: identity.clone(),
+                label,
+                native_properties: [("native-history".into(), "opaque metadata <script>".into())].into(),
+            }],
+        };
+        report.snapshot.runtime_populations = Some(catalog.clone());
+        let workload = report.snapshot.workload.as_mut().unwrap();
+        workload.population = Some(identity.clone());
+        workload.population_catalog = Some(catalog);
+        report.snapshot.options.as_mut().unwrap().workload_population = Some(identity.clone());
+        let ui = super::for_ui(report);
+        for catalog in [
+            ui.snapshot.runtime_populations.as_ref().unwrap(),
+            ui.snapshot.workload.as_ref().unwrap().population_catalog.as_ref().unwrap(),
+        ] {
+            let population = &catalog.populations[0];
+            assert_eq!(population.identity, identity);
+            assert_eq!(population.native_properties["native-history"], "opaque metadata <script>");
+            assert_eq!(population.label, culprit_core::i18n::Message::Text { text: rendered.clone() });
+        }
+        assert_eq!(ui.snapshot.workload.as_ref().unwrap().population.as_ref(), Some(&identity));
+        assert_eq!(ui.snapshot.options.as_ref().unwrap().workload_population.as_ref(), Some(&identity));
+    }
+
     #[test]
     fn ui_omits_replay_copies_and_native_text_while_keeping_provenance_and_views() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mssql-demo.json");

@@ -16,6 +16,8 @@ import type { Engine } from "../gen/Engine";
 import { can, isMariadb, serverName, waitSampling } from "../lib/engines";
 import { t, useLanguage } from "../lib/i18n";
 import { slot, withElements } from "../lib/message-parts";
+import { queryHistoryEmptyState } from "../lib/query-history";
+import { QueryHistoryEmpty } from "./QueryHistoryEmpty";
 
 type Loaded = { status: "loading" } | { status: "ready"; report: WaitsReport | null } | { status: "error"; error: ApiError };
 
@@ -125,7 +127,7 @@ export default function WaitsPanel({
             ) : activity ? (
               <ActivityHistoryView activity={activity} selected={selected} onSelect={setSelected} onClose={onClose} />
             ) : !loaded.report || !current ? (
-              <NoHistory engine={report.snapshot.server.engine} product={report.snapshot.server.product} reason={report.snapshot.sources?.find((s) => s.source === "docdb-activity-history")?.reason} onSample={sampling ? () => setTab("now") : undefined} />
+              <NoHistory report={report} engine={report.snapshot.server.engine} product={report.snapshot.server.product} reason={report.snapshot.sources?.find((s) => s.source === "docdb-activity-history")?.reason} onSample={sampling ? () => setTab("now") : undefined} />
             ) : (
               <WaitsView report={loaded.report} current={current} onSelect={setSelected} onClose={onClose} onSample={() => setTab("now")} />
             ))}
@@ -174,7 +176,8 @@ const NO_WAIT_HISTORY: Record<Engine, () => string> = {
   sqlite: () => t("ui.waits_panel.no_history.sqlite"),
 };
 
-function NoHistory({ engine, product, reason, onSample }: { engine: Engine; product: string; reason?: string | null; onSample?: () => void }) {
+function NoHistory({ report, engine, product, reason, onSample }: { report: Report; engine: Engine; product: string; reason?: string | null; onSample?: () => void }) {
+  if (queryHistoryEmptyState(report)?.kind === "choose-group") return <QueryHistoryEmpty report={report} className="waits-empty" />;
   return (
     <div className="waits-empty">
       <h3>{t("ui.waits_panel.no_history_title")}</h3>

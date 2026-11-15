@@ -575,6 +575,51 @@ button.update-item:hover {
   white-space: nowrap;
 }
 
+.population-picker {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.population-picker > .picker {
+  min-width: 0;
+  max-width: 230px;
+}
+
+.population-picker .population-choice {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.population-menu {
+  width: min(390px, calc(100vw - 285px));
+  max-height: min(440px, 70vh);
+  overflow-y: auto;
+}
+
+.population-menu .menu-item {
+  height: auto;
+  min-height: 32px;
+  padding-block: 7px;
+  gap: 8px;
+}
+
+.population-option {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.population-option .menu-sub {
+  display: block;
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  white-space: normal;
+}
+
+.population-picker svg {
+  flex-shrink: 0;
+}
+
 .menu {
   position: absolute;
   top: 32px;

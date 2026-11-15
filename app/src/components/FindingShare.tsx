@@ -1,16 +1,17 @@
 import { CircleAlert, CircleCheck, ClipboardCopy, FileCode, Info, RotateCw, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Finding } from "../gen/Finding";
 import type { Report } from "../gen/Report";
 import type { VerifiedFinding } from "../gen/VerifiedFinding";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { useHotkeys } from "../lib/hotkeys";
-import { t } from "../lib/i18n";
+import { language, subscribe, t } from "../lib/i18n";
+import { LatestRequest } from "../lib/requests";
 import { deliver, exportOptions } from "../lib/share";
-import { getState, setState } from "../lib/store";
+import { getState, showVerifiedReport } from "../lib/store";
 import { ShareMenu } from "./ShareMenu";
 
-type Result = { status: "running" } | { status: "done"; item: VerifiedFinding; summary: string; newCount: number } | { status: "error"; error: ApiError };
+type Result = { status: "running" } | { status: "done"; item: VerifiedFinding; summary: string; newCount: number; afterReportId: string | null } | { status: "error"; error: ApiError };
 
 /** "Share" (copy for a PR, save HTML) for the action bar. */
 export function FindingShareMenu({ report, finding }: { report: Report; finding: Finding }) {
@@ -24,7 +25,7 @@ export function FindingShareMenu({ report, finding }: { report: Report; finding:
           label: t("ui.finding_share.copy_pr"),
           hint: t("ui.finding_share.copy_pr_hint"),
           redacts: true,
-          run: (redact) => deliver(api().then((c) => c.exportFinding(name, finding.id, "markdown", exportOptions(redact))), "copy", redact),
+          run: (redact) => deliver(api().then((c) => c.exportFinding(name, report.snapshot.id, finding.id, "markdown", exportOptions(redact))), "copy", redact),
         },
         {
           id: "html",
@@ -32,7 +33,7 @@ export function FindingShareMenu({ report, finding }: { report: Report; finding:
           label: t("ui.finding_share.save_html"),
           hint: t("ui.finding_share.save_html_hint"),
           redacts: true,
-          run: (redact) => deliver(api().then((c) => c.exportFinding(name, finding.id, "html", exportOptions(redact))), "save", redact),
+          run: (redact) => deliver(api().then((c) => c.exportFinding(name, report.snapshot.id, finding.id, "html", exportOptions(redact))), "save", redact),
         },
       ]}
     />
@@ -42,20 +43,38 @@ export function FindingShareMenu({ report, finding }: { report: Report; finding:
 /** "Verify fix": re-scan and say whether this finding is gone, without leaving it. Shortcut V. */
 export function useVerify(report: Report, finding: Finding) {
   const [result, setResult] = useState<Result | null>(null);
+  const alive = useRef(true);
+  const owner = useRef(new LatestRequest());
+  const code = language();
+  useEffect(() => {
+    alive.current = true;
+    const stop = subscribe(() => { owner.current.invalidate(); setResult(null); });
+    return () => { alive.current = false; owner.current.invalidate(); stop(); };
+  }, []);
   const run = async () => {
     if (result?.status === "running") return;
+    const owns = owner.current.start();
+    const current = () => {
+      const view = getState();
+      return alive.current && owns() && language() === code && view.active === report.snapshot.connection
+        && view.report.status === "ready" && view.report.report.snapshot.id === report.snapshot.id;
+    };
     setResult({ status: "running" });
     try {
-      const v = await (await api()).verifyFindings(report.snapshot.connection, [finding.id]);
+      const client = await api();
+      if (!current()) return;
+      const v = await client.verifyFindings(report.snapshot.connection, report.snapshot.id, [finding.id]);
+      if (!current()) return;
+      if (v.before_report_id !== report.snapshot.id) throw new Error(t("ui.population_picker.report_scope_mismatch"));
       const item = v.findings[0];
       if (!item) throw new Error(t("ui.finding_share.no_status"));
-      setResult({ status: "done", item, summary: v.summary, newCount: v.new_findings.length });
+      setResult({ status: "done", item, summary: v.summary, newCount: v.new_findings.length, afterReportId: v.after_report_id ?? null });
     } catch (e) {
-      setResult({ status: "error", error: errorMessage(e) });
+      if (current()) setResult({ status: "error", error: errorMessage(e) });
     }
   };
   useHotkeys({ v: run });
-  return { result, run, clear: () => setResult(null) };
+  return { result, run, clear: () => { owner.current.invalidate(); setResult(null); } };
 }
 
 export function VerifyButton({ running, onRun }: { running: boolean; onRun: () => void }) {
@@ -89,14 +108,8 @@ export function VerifyResult({ result, report, onClose }: { result: Result | nul
   const title =
     item.status === "fixed" ? t("ui.finding_share.fixed") : item.status === "still-present" ? t("ui.finding_share.still_present") : t("ui.finding_share.cant_tell");
   const showNewScan = async () => {
-    const name = report.snapshot.connection;
-    const fresh = await (await api()).latestReport(name, getState().windowMinutes);
-    if (!fresh || getState().active !== name) return;
-    const keep = getState().finding;
-    setState({
-      report: { status: "ready", report: fresh, scanning: false, scanError: null },
-      finding: keep && fresh.findings.some((f) => f.id === keep) ? keep : fresh.findings[0]?.id ?? null,
-    });
+    if (result.afterReportId === null) return;
+    await showVerifiedReport(report, result.afterReportId);
     onClose();
   };
   return (
@@ -116,9 +129,9 @@ export function VerifyResult({ result, report, onClose }: { result: Result | nul
             {t("ui.finding_share.new_findings", { n: newCount })}
           </div>
         )}
-        <button type="button" className="link" onClick={showNewScan}>
+        {result.afterReportId !== null && <button type="button" className="link" onClick={showNewScan}>
           {t("ui.finding_share.show_new_scan")}
-        </button>
+        </button>}
       </div>
       <button type="button" className="btn icon ghost" aria-label={t("ui.common.close")} onClick={onClose}>
         <X size={13} />

@@ -17,8 +17,6 @@ pub(crate) fn bucket_minutes(history_hours: f64, interval_minutes: u32) -> u32 {
         .unwrap_or_else(|| interval_minutes.max(1440))
 }
 
-use crate::query_store::series_sql::{INTERVAL_SQL, per_query_sql, totals_sql};
-
 /// The workload timeline plus a trend for each of `query_ids`, aligned to the same buckets.
 pub(crate) async fn collect<R: crate::read::NativeRead>(
     reader: &mut crate::query_store::Reader<R>,
@@ -27,18 +25,14 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
     window_end: Option<&str>,
     query_ids: &[String],
 ) -> culprit_core::Result<Option<(Timeline, HashMap<String, QueryTrend>)>> {
-    let population = reader.population().await?;
-    let interval = match reader.read_rows(INTERVAL_SQL).await {
-        Ok(rows) => {
-            rows.first().and_then(|row| row.f64("minutes")).map(|minutes| minutes.max(1.0) as u32).unwrap_or(60)
-        }
+    let interval = match reader.series_interval().await {
+        Ok(minutes) => minutes,
         Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
         Err(_) => 60,
     };
     let minutes = bucket_minutes(history_hours.min(f64::from(window_minutes) / 60.0), interval);
-    let totals: Vec<(i64, f64, f64)> = reader
-        .window_rows(&totals_sql(minutes, population), window_minutes)
-        .await?
+    let (total_rows, query_rows) = reader.series_rows(window_minutes, minutes, query_ids).await?;
+    let totals: Vec<(i64, f64, f64)> = total_rows
         .iter()
         .filter_map(|r| Some((r.f64("bucket")? as i64, r.f64_or_zero("total_ms"), r.f64_or_zero("executions"))))
         .collect();
@@ -60,22 +54,19 @@ pub(crate) async fn collect<R: crate::read::NativeRead>(
         timeline.executions[i] = runs.round();
     }
 
-    let ids = crate::workload::id_list(query_ids);
     let mut trends: HashMap<String, QueryTrend> = query_ids
         .iter()
         .map(|id| (id.clone(), QueryTrend { time_ms: vec![Some(0.0); len], executions: vec![Some(0.0); len] }))
         .collect();
-    if ids != "NULL" {
-        for r in reader.window_rows(&per_query_sql(minutes, &ids, population), window_minutes).await? {
-            let Some(bucket) = r.f64("bucket").map(|b| b as i64) else { continue };
-            let Some(trend) = trends.get_mut(&r.string("query_id")) else { continue };
-            if bucket < first || bucket > last {
-                continue;
-            }
-            let i = (bucket - first) as usize;
-            trend.time_ms[i] = Some(round(r.f64_or_zero("total_ms")));
-            trend.executions[i] = Some(r.f64_or_zero("executions").round());
+    for r in query_rows {
+        let Some(bucket) = r.f64("bucket").map(|b| b as i64) else { continue };
+        let Some(trend) = trends.get_mut(&r.string("query_id")) else { continue };
+        if bucket < first || bucket > last {
+            continue;
         }
+        let i = (bucket - first) as usize;
+        trend.time_ms[i] = Some(round(r.f64_or_zero("total_ms")));
+        trend.executions[i] = Some(r.f64_or_zero("executions").round());
     }
     Ok(Some((timeline, trends)))
 }

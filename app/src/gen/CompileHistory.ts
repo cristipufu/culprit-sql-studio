@@ -3,7 +3,8 @@ import type { CompilationMemory } from "./CompilationMemory";
 
 /**
  * Exact compile totals for one retained Query Store entry. Query Store does not timestamp every compilation, so
- * totals can be compared with windowed runs only when the entry's first compile falls inside that window.
+ * totals can be compared with windowed runs only when the entry's first compile falls inside that window and the
+ * native compilation population matches those runs. `within_window` records time qualification, not that scope proof.
  */
 export type CompileHistory = { count: number, total_ms: number, first_at: string | null, last_at: string | null, within_window: boolean, 
 /**

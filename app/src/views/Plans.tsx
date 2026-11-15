@@ -269,7 +269,7 @@ function Single({ item }: { item: LoadedPlan }) {
                   api().then((c) =>
                     file.native
                       ? c.exportPlan(plan, item.name, "native", exportOptions(redact))
-                      : c.exportQueryPlan(item.source!.connection, item.source!.queryId, item.source!.planId, "native", exportOptions(redact)),
+                      : c.exportQueryPlan(item.source!.connection, item.source!.reportId, item.source!.queryId, item.source!.planId, "native", exportOptions(redact)),
                   ),
                   "save",
                   redact,

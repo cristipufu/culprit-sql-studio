@@ -540,6 +540,31 @@ fn sharing_preserves_safe_native_unpartitioned_proof_without_inventing_it() {
 }
 
 #[test]
+fn top_level_population_discovery_never_shares_private_catalog_names_or_invents_unpartitioned_proof() {
+    let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+    let safe = snapshot.workload.as_ref().unwrap().population_catalog.clone().unwrap();
+    snapshot.workload = None;
+    snapshot.runtime_populations = Some(safe.clone());
+    assert_eq!(redact_snapshot(&snapshot).runtime_populations, Some(safe));
+    let catalog = snapshot.runtime_populations.as_mut().unwrap();
+    catalog.partitioned = true;
+    catalog.populations.push(crate::RuntimePopulation {
+        identity: crate::telemetry::NativeIdentity::new("private-top-level-group"),
+        label: crate::i18n::Message::from("private-top-level-member"),
+        native_properties: [("replica_name".into(), "private-top-level-endpoint".into())].into(),
+    });
+    let shared = redact_snapshot(&snapshot);
+    assert!(shared.runtime_populations.is_none());
+    let encoded = serde_json::to_string(&shared).unwrap();
+    for private in ["private-top-level-group", "private-top-level-member", "private-top-level-endpoint"] {
+        assert!(!encoded.contains(private));
+    }
+    assert_eq!(serde_json::to_value(&shared).unwrap(), serde_json::to_value(redact_snapshot(&shared)).unwrap());
+    snapshot.runtime_populations = None;
+    assert!(redact_snapshot(&snapshot).runtime_populations.is_none());
+}
+
+#[test]
 fn plan_facts_and_plugin_fix_sql_share_the_same_redaction_boundary() {
     let mut report: crate::Report =
         serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.report.json")).unwrap();

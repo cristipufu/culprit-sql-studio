@@ -164,6 +164,14 @@ impl Provider for MssqlProvider {
         collect::snapshot(self, connection, options).await
     }
 
+    async fn snapshot_populations(
+        &self,
+        connection: &str,
+        options: &SnapshotOptions,
+    ) -> Result<culprit_core::PopulationSnapshots> {
+        collect::snapshot_populations(self, connection, options).await
+    }
+
     async fn explain(&self, sql: &str, mode: ExplainMode) -> Result<Plan> {
         let mut client = self.user_session().await?;
         match mode {
@@ -227,8 +235,10 @@ impl Provider for MssqlProvider {
         &self,
         baseline: &culprit_core::changes::Period,
         recent: &culprit_core::changes::Period,
+        population: Option<&culprit_core::telemetry::NativeIdentity>,
     ) -> Result<Option<culprit_core::changes::PeriodData>> {
         let mut reader = query_store::Reader::open(self.pool.clone());
+        reader.select_population(population)?;
         let result = periods::collect(&mut reader, baseline, recent).await;
         if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
             return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());

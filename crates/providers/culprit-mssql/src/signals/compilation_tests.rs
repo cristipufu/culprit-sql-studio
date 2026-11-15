@@ -1,5 +1,5 @@
 use super::{
-    tests::{compilation_identities, database_compilation_row, query_without_costs},
+    tests::{compilation_identities, database_compilation_row, query_without_costs, unpartitioned_participants},
     *,
 };
 use crate::{
@@ -30,8 +30,7 @@ async fn matching_native_identity_retains_compile_history_without_borrowing_runt
     let signals = collect_query_compilations(
         Reader::new(FakeRead::new(vec![Ok(vec![row]), Ok(vec![database_compilation_row()])])),
         30,
-        &mut queries,
-        &compilation_identities(),
+        &mut unpartitioned_participants(&mut queries, &compilation_identities()),
         &mut coverage,
     )
     .await;
@@ -67,8 +66,7 @@ async fn recycled_native_query_qualifiers_cannot_attach_compilation_to_earlier_s
         let signals = collect_query_compilations(
             Reader::new(FakeRead::new(vec![Ok(vec![changed]), Ok(vec![database_compilation_row()])])),
             60,
-            &mut queries,
-            &compilation_identities(),
+            &mut unpartitioned_participants(&mut queries, &compilation_identities()),
             &mut coverage,
         )
         .await;
@@ -88,8 +86,7 @@ async fn absent_definition_or_compilation_stays_unknown_without_retaining_an_old
         collect_query_compilations(
             Reader::new(FakeRead::new(vec![Ok(rows), Ok(vec![database_compilation_row()])])),
             60,
-            &mut queries,
-            &identities,
+            &mut unpartitioned_participants(&mut queries, &identities),
             &mut coverage,
         )
         .await;
@@ -110,8 +107,7 @@ async fn one_unknown_query_does_not_erase_an_independently_matched_compilation()
             Ok(vec![database_compilation_row()]),
         ])),
         60,
-        &mut queries,
-        &compilation_identities(),
+        &mut unpartitioned_participants(&mut queries, &compilation_identities()),
         &mut coverage,
     )
     .await;
@@ -128,8 +124,7 @@ async fn native_timeout_or_cancellation_prevents_followup_sql_and_clears_unadmit
         let signals = collect_query_compilations(
             Reader::new(FakeRead::new(vec![Err(ReadError::Stopped(stop))])),
             60,
-            &mut queries,
-            &compilation_identities(),
+            &mut unpartitioned_participants(&mut queries, &compilation_identities()),
             &mut coverage,
         )
         .await;
@@ -170,4 +165,156 @@ fn assert_compilation_withheld(query: &culprit_core::QueryStat) {
     let costs = query.costs.as_ref().unwrap();
     assert_eq!(costs.failed, Some(1.0), "independent runtime costs remain intact");
     assert!(costs.plan_ms.is_none() && costs.plans.is_none() && costs.compile_history.is_none());
+}
+
+// Borrow the existing native fixture so this owner can inspect exact query and closure accounting afterward.
+#[async_trait::async_trait]
+impl NativeRead for &mut FakeRead {
+    async fn query(
+        &mut self,
+        sql: &str,
+        parameters: Vec<crate::read::Parameter>,
+        limit: usize,
+    ) -> crate::read::ReadResult<Vec<crate::value::Rec>> {
+        <FakeRead as NativeRead>::query(self, sql, parameters, limit).await
+    }
+    fn queries(&self) -> u32 {
+        <FakeRead as NativeRead>::queries(self)
+    }
+    async fn close(&mut self) -> SourceShutdown {
+        <FakeRead as NativeRead>::close(self).await
+    }
+}
+
+#[tokio::test]
+async fn replica_participants_share_one_compilation_acquisition_without_borrowing_global_compile_tax() {
+    let mut queries = vec![
+        query_with_previous_compilation(),
+        query_with_previous_compilation(),
+        query_with_previous_compilation(),
+        query_without_costs(),
+    ];
+    queries[0].query_hash = Some("0x0123456789ABCDEF".into());
+    queries[1].query_hash = queries[0].query_hash.clone();
+    queries[2].query_hash = queries[0].query_hash.clone();
+    queries[3].query_hash = Some("0xFEDCBA9876543210".into());
+    let identities = compilation_identities();
+    let mut participants = unpartitioned_participants(&mut queries, &identities);
+    participants[0].runtime_scope = QueryStoreScope::ReplicaGroup { id: "7".into() };
+    participants[1].runtime_scope = QueryStoreScope::ReplicaGroup { id: "8".into() };
+    participants[2].runtime_scope = QueryStoreScope::Unknown;
+    participants[3].kind = Some(WorkloadKind::PlanCache);
+    participants[3].identity = None;
+    participants[3].runtime_scope = QueryStoreScope::Unknown;
+    assert_eq!(participant_hashes(&participants), ["0x0123456789ABCDEF", "0xFEDCBA9876543210"]);
+    let mut io = FakeRead::new(vec![
+        Ok(vec![replace(&compilation_row(), &[("compiling_s", Val::Int(60))])]),
+        Ok(vec![database_compilation_row()]),
+    ])
+    .with_query_limit(2);
+    let mut coverage = Coverage::default();
+    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    drop(participants);
+    for query in &queries[..3] {
+        let costs = query.costs.as_ref().unwrap();
+        assert!(
+            costs.compile_history.as_ref().unwrap().within_window,
+            "time bounds alone are not population qualification"
+        );
+        assert!(costs.plan_ms.is_none() && costs.plans.is_none());
+        assert_eq!(costs.failed, Some(1.0));
+    }
+    assert!(
+        queries[3].costs.is_none(),
+        "Query Store compilation cannot attach to a cache participant sharing its numeric ID"
+    );
+    assert_eq!(captured.snapshot.unwrap().observations.len(), 1, "one raw native history is retained once");
+    assert_eq!(captured.signals.len(), 2, "database totals remain one independent native context");
+    assert_eq!(io.calls.len(), 2);
+    assert_eq!(io.closed, 1);
+    let crate::read::Parameter::Text(ids) = &io.calls[0].parameters[0] else { panic!("native query IDs") };
+    assert_eq!(ids, "<ids><id id=\"3\"/></ids>", "duplicate population references do not expand native selection");
+    assert_eq!(coverage.outcomes()[0].state, SourceState::Collected);
+}
+
+#[tokio::test]
+async fn same_query_id_with_different_native_incarnation_is_withheld_only_for_that_participant() {
+    let identities = compilation_identities();
+    let original = &identities["3"];
+    let mut changed = original.clone();
+    *changed.qualifiers.get_mut("context_settings_id").unwrap() = "99".into();
+    let mut queries = [query_with_previous_compilation(), query_with_previous_compilation()];
+    let mut iterator = queries.iter_mut();
+    let mut participants = vec![
+        QueryParticipant {
+            query: iterator.next().unwrap(),
+            identity: Some(original),
+            kind: Some(WorkloadKind::QueryStore),
+            runtime_scope: QueryStoreScope::Local,
+        },
+        QueryParticipant {
+            query: iterator.next().unwrap(),
+            identity: Some(&changed),
+            kind: Some(WorkloadKind::QueryStore),
+            runtime_scope: QueryStoreScope::Local,
+        },
+    ];
+    let mut io = FakeRead::new(vec![Ok(vec![compilation_row()]), Ok(vec![database_compilation_row()])]);
+    let mut coverage = Coverage::default();
+    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    drop(participants);
+    assert!(queries[0].costs.as_ref().unwrap().compile_history.is_some());
+    assert_compilation_withheld(&queries[1]);
+    assert!(captured.snapshot.is_some());
+    assert_eq!(captured.signals.len(), 2);
+    assert_eq!(coverage.outcomes()[0].state, SourceState::Partial);
+    assert_eq!(io.calls.len(), 2);
+}
+
+#[tokio::test]
+async fn unconfirmed_compilation_owner_clears_every_selected_population_without_fresh_shared_totals() {
+    let identities = compilation_identities();
+    let mut queries = vec![query_with_previous_compilation(), query_with_previous_compilation()];
+    let mut participants = unpartitioned_participants(&mut queries, &identities);
+    for participant in &mut participants {
+        participant.runtime_scope = QueryStoreScope::Unknown;
+    }
+    let mut io = FakeRead::new(vec![Ok(vec![compilation_row()]), Ok(vec![database_compilation_row()])]);
+    io.shutdown = SourceShutdown::Unconfirmed;
+    let mut coverage = Coverage::default();
+    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    drop(participants);
+    for query in &queries {
+        assert_compilation_withheld(query);
+    }
+    assert!(captured.snapshot.is_none() && captured.signals.is_empty());
+    assert_eq!(io.closed, 1);
+    assert_eq!(coverage.outcomes()[0].state, SourceState::Unavailable);
+}
+
+#[tokio::test]
+async fn failed_query_compilation_keeps_only_independent_database_context_and_explicit_partial_source() {
+    let identities = compilation_identities();
+    let mut queries = vec![query_with_previous_compilation(), query_with_previous_compilation()];
+    let mut participants = unpartitioned_participants(&mut queries, &identities);
+    let mut io = FakeRead::new(vec![
+        Err(ReadError::Source(culprit_core::Error::new(
+            culprit_core::ErrorCode::PermissionDenied,
+            "fixture source denied",
+        ))),
+        Ok(vec![database_compilation_row()]),
+    ]);
+    let mut coverage = Coverage::default();
+    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    drop(participants);
+    for query in &queries {
+        assert_compilation_withheld(query);
+    }
+    assert!(captured.snapshot.is_none());
+    assert_eq!(captured.signals.len(), 2);
+    let outcome = &coverage.outcomes()[0];
+    assert_eq!(outcome.state, SourceState::Partial);
+    assert!(outcome.reason.is_some(), "successful independent context cannot erase the source's failure reason");
+    assert_eq!(io.calls.len(), 2);
+    assert_eq!(io.closed, 1);
 }

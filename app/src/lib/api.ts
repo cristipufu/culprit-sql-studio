@@ -31,6 +31,7 @@ import type { ImportSource } from "../gen/ImportSource";
 import type { LiveState } from "../gen/LiveState";
 import type { Mark } from "../gen/Mark";
 import type { NewConnection } from "../gen/NewConnection";
+import type { NativeIdentity } from "../gen/NativeIdentity";
 import type { ParsedConnection } from "../gen/ParsedConnection";
 import type { Plan } from "../gen/Plan";
 import type { QueryProgress } from "../gen/QueryProgress";
@@ -85,9 +86,10 @@ export interface Api {
   onSignIn(listener: (event: SignInEvent) => void): Promise<() => void>;
   cancelSignIn(): Promise<void>;
   openSignInPage(): Promise<void>;
-  latestReport(name: string, windowMinutes: number | null): Promise<Report | null>;
-  scan(name: string, windowMinutes: number | null): Promise<Report>;
-  brief(name: string, findingId: string, windowMinutes: number | null): Promise<string>;
+  latestReport(name: string, windowMinutes: number | null, population: NativeIdentity | null): Promise<Report | null>;
+  reportAt(name: string, reportId: string): Promise<Report>;
+  scan(name: string, windowMinutes: number | null, population: NativeIdentity | null): Promise<Report>;
+  brief(name: string, reportId: string, findingId: string): Promise<string>;
   explain(name: string, sql: string, mode: ExplainMode, confirmed: boolean): Promise<Plan>;
   queryPlan(name: string, queryId: string, planId: string | null, reportId?: string): Promise<Plan>;
   /** The actual plan of the query's last run as the engine kept it (SQL Server 2019+); never runs the query. */
@@ -108,10 +110,10 @@ export interface Api {
   exportPlan(plan: Plan, title: string, format: ExportFormat, options: ExportOptions): Promise<ExportFile>;
   exportDiff(a: Plan, b: Plan, nameA: string, nameB: string, format: ExportFormat, options: ExportOptions, connection?: string | null): Promise<ExportFile>;
   /** A plan of a query from the latest scan, with its original text when the engine keeps it (.sqlplan). */
-  exportQueryPlan(name: string, queryId: string, planId: string | null, format: ExportFormat, options: ExportOptions): Promise<ExportFile>;
-  exportFinding(name: string, findingId: string, format: ExportFormat, options: ExportOptions): Promise<ExportFile>;
-  /** Re-scan and compare with the latest scan, finding by finding. */
-  verifyFindings(name: string, ids: string[]): Promise<Verification>;
+  exportQueryPlan(name: string, reportId: string, queryId: string, planId: string | null, format: ExportFormat, options: ExportOptions): Promise<ExportFile>;
+  exportFinding(name: string, reportId: string, findingId: string, format: ExportFormat, options: ExportOptions): Promise<ExportFile>;
+  /** Re-scan and compare with the displayed exact report, finding by finding. */
+  verifyFindings(name: string, reportId: string, ids: string[]): Promise<Verification>;
   /** Writes into the Downloads folder and returns the path; the browser demo downloads instead. */
   saveFile(name: string, contents: string): Promise<string>;
   /** Copies a PNG of `area`, exactly as the window shows it, to the clipboard. Desktop app on macOS only. */
@@ -210,9 +212,10 @@ async function desktopApi(): Promise<Api> {
     },
     cancelSignIn: () => invoke("cancel_sign_in"),
     openSignInPage: () => invoke("open_sign_in_page"),
-    latestReport: (name, windowMinutes) => invoke("latest_report", { name, windowMinutes }),
-    scan: (name, windowMinutes) => invoke("scan", { name, windowMinutes }),
-    brief: (name, findingId, windowMinutes) => invoke("brief", { name, findingId, windowMinutes }),
+    latestReport: (name, windowMinutes, population) => invoke("latest_report", { name, windowMinutes, population }),
+    reportAt: (name, reportId) => invoke("report_at", { name, reportId }),
+    scan: (name, windowMinutes, population) => invoke("scan", { name, windowMinutes, population }),
+    brief: (name, reportId, findingId) => invoke("brief", { name, reportId, findingId }),
     explain: (name, sql, mode, confirmed) => invoke("explain", { name, sql, mode, confirmed }),
     queryPlan: (name, queryId, planId, reportId) => invoke("query_plan", { name, queryId, planId, reportId }),
     lastActualPlan: (name, queryId, planId, reportId) => invoke("last_actual_plan", { name, queryId, planId, reportId }),
@@ -227,9 +230,9 @@ async function desktopApi(): Promise<Api> {
     exportPlan: (plan, title, format, options) => invoke("export_plan", { plan: format === "native" ? plan : { ...plan, raw: null }, title, format, options }),
     exportDiff: (a, b, nameA, nameB, format, options, connection) =>
       invoke("export_diff", { request: { a: { ...a, raw: null }, b: { ...b, raw: null }, nameA, nameB, format, options, connection: connection ?? null } }),
-    exportQueryPlan: (name, queryId, planId, format, options) => invoke("export_query_plan", { name, queryId, planId, format, options }),
-    exportFinding: (name, findingId, format, options) => invoke("export_finding", { name, findingId, format, options }),
-    verifyFindings: (name, ids) => invoke("verify_findings", { name, ids }),
+    exportQueryPlan: (name, reportId, queryId, planId, format, options) => invoke("export_query_plan", { name, reportId, queryId, planId, format, options }),
+    exportFinding: (name, reportId, findingId, format, options) => invoke("export_finding", { name, reportId, findingId, format, options }),
+    verifyFindings: (name, reportId, ids) => invoke("verify_findings", { name, reportId, ids }),
     saveFile: (name, contents) => invoke("save_file", { name, contents }),
     screenshot: (area) => invoke("screenshot", { area }),
     live: (name) => invoke("live", { name }),

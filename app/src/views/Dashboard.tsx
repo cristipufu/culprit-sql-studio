@@ -33,6 +33,7 @@ import {
   openFinding,
   openQuery,
   PlansTile,
+  QueryHistoryFrame,
   queryLabel,
   severityOf,
   SignalsTile,
@@ -151,7 +152,7 @@ export default function Dashboard({ report, connection }: { report: Report; conn
         <HealthTile tile={tile("health")} onOpen={() => openWaits("health")} />
         <DeadlocksTile tile={tile("deadlocks")} report={report} />
         <IndexesTile tile={tile("indexes")} />
-        <PlansTile tile={tile("plans")} />
+        <PlansTile tile={tile("plans")} report={report} />
         <SignalsTile tile={tile("storage")} action={t("ui.dashboard.action.storage")} onOpen={() => openWaits("health")} />
         <SignalsTile tile={tile("connections")} action={t("ui.dashboard.action.all_signals")} onOpen={() => openWaits("health")} />
         <SignalsTile tile={tile("replication")} action={t("ui.dashboard.action.replication")} onOpen={() => openWaits("health")} />
@@ -229,7 +230,7 @@ function DbTimeTile({ tile, report }: { tile: Tile; report: Report }) {
       ),
     [log],
   );
-  if (!w || tile.status === "unavailable") return <Frame tile={tile} />;
+  if (!w || tile.status === "unavailable") return <QueryHistoryFrame tile={tile} report={report} />;
   // SQLite keeps no history: a query log is one period, with nothing to compare it to.
   const periods = can(report.snapshot.server.engine, "periods");
   const flags = planFlags(w, compareSince);
@@ -366,7 +367,7 @@ function perRun(report: Report, q: QueryStat): string {
 
 function TopQueriesTile({ tile, report }: { tile: Tile; report: Report }) {
   const w = report.snapshot.workload;
-  if (!w || tile.status === "unavailable") return <Frame tile={tile} />;
+  if (!w || tile.status === "unavailable") return <QueryHistoryFrame tile={tile} report={report} />;
   const byId = new Map<string, QueryStat>(w.queries.map((q) => [q.id, q]));
   const top = tile.items[0]?.query_id;
   return (

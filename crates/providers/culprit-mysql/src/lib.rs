@@ -278,7 +278,10 @@ impl Provider for MysqlProvider {
         &self,
         baseline: &culprit_core::changes::Period,
         recent: &culprit_core::changes::Period,
+        population: Option<&culprit_core::telemetry::NativeIdentity>,
     ) -> Result<Option<culprit_core::changes::PeriodData>> {
+        SnapshotOptions { workload_population: population.cloned(), ..Default::default() }
+            .require_default_workload_population()?;
         let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
         let probe = probe::probe(&mut conn, &self.connector).await?;
         if probe.performance_schema || !probe.slow_log_table() {

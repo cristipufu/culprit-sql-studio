@@ -168,6 +168,9 @@ pub fn redact_baseline(reference: &mut crate::BaselineReference) {
 pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     let engine = snapshot.server.engine;
     let mut s = snapshot.clone();
+    if !s.runtime_populations.as_ref().is_some_and(|catalog| catalog.is_valid() && !catalog.partitioned) {
+        s.runtime_populations = None;
+    }
     if let Some(identity) = &mut s.identity {
         redact_identity(identity);
     }

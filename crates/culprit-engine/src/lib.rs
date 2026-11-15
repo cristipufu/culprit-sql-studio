@@ -76,6 +76,7 @@ pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
 pub use provider_registration::{ProviderRegistration, RecipeCostVerifier};
 pub use reports::ReportSummary;
+pub use scan::PopulationReports;
 use secrets::SecretStore;
 pub use share::{export_diff, export_plan};
 use store::{Paths, Store};
@@ -427,7 +428,13 @@ impl Workspace {
     ) -> Result<Report> {
         // The owned observation retains provider, snapshot and analysis state. Keep that state off callers'
         // async frames so nested consumers (verification, MCP and desktop tasks) retain decoding stack space.
-        Box::pin(self.scan_observation(name, options, query_log)).await
+        Box::pin(self.scan_observation(name, options, query_log)).await.map(|reports| reports.requested)
+    }
+
+    /// Analyze each native execution population from one provider acquisition and save its own exact report.
+    /// The requested overview is independent of those reports; their execution totals are never pooled.
+    pub async fn scan_populations(&self, name: &str, options: &SnapshotOptions) -> Result<PopulationReports> {
+        Box::pin(self.scan_observation(name, options, None)).await
     }
 
     async fn scan_observation(
@@ -435,7 +442,7 @@ impl Workspace {
         name: &str,
         options: &SnapshotOptions,
         query_log: Option<&std::path::Path>,
-    ) -> Result<Report> {
+    ) -> Result<PopulationReports> {
         let saved = self.store.get(name)?.query_log.map(std::path::PathBuf::from);
         let found = if query_log.is_none() && saved.is_none() { self.discover_query_log(name) } else { None };
         let query_log = query_log.or(saved.as_deref()).or(found.as_deref());
@@ -443,10 +450,11 @@ impl Workspace {
         let observed = self.connection_service().observed_provider(name).await?;
         let provider = observed.provider();
         let result = async {
-            let snapshot = self.connection_service().forget_rejected(name, provider.snapshot(name, options).await)?;
+            let snapshots =
+                self.connection_service().forget_rejected(name, provider.snapshot_populations(name, options).await)?;
             ensure_source_quiet(provider)?;
             let log = query_log.map(|path| scan::QueryLog { path, discovered: found.is_some() });
-            scan.collect_inputs(provider, snapshot, name, options, log).await
+            scan.collect_inputs(provider, snapshots, name, options, log).await
         }
         .await;
         let collected = observed.finish(result).await?;
@@ -467,6 +475,11 @@ impl Workspace {
         population: Option<&culprit_core::telemetry::NativeIdentity>,
     ) -> Result<Option<Report>> {
         self.report_service().latest_population_report(name, window_minutes, population)
+    }
+
+    /// Re-analyze this connection's exact saved input; never substitute a latest report from another selection.
+    pub fn report_at(&self, name: &str, report_id: &str) -> Result<Report> {
+        self.report_service().report_at(name, report_id)
     }
 
     /// The newest saved snapshot for `name`, without re-parsing execution plans or re-running the check pipeline.

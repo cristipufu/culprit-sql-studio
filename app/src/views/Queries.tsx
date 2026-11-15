@@ -25,6 +25,7 @@ import { compareSince } from "./Overview";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
 import { slot, withElements } from "../lib/message-parts";
+import { QueryHistoryEmpty } from "../components/QueryHistoryEmpty";
 
 const PAGE_SIZE = 100;
 type QueryEntry = { query: QueryStat; figures: Figures; search: string };
@@ -138,12 +139,7 @@ export function Queries({ report }: { report: Report }) {
   }, [current?.id, pageStart, sort]);
 
   if (!workload) {
-    return (
-      <div className="empty">
-        <h3>{t("ui.queries.no_history")}</h3>
-        <p>{report.summary.no_workload ?? t("ui.queries.no_history_detail")}</p>
-      </div>
-    );
+    return <QueryHistoryEmpty report={report} />;
   }
 
   // Per-day only over windows long enough to mean it; measured totals otherwise. A burst, or fewer runs than days, is
@@ -523,8 +519,8 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
       if (!mounted.current) return;
       // The faster plan is the baseline, so the comparison reads "the slow plan does X where the fast one does Y".
       const speed = (id: string) => variants.find((v) => v.id === id)?.mean_time_ms ?? 0;
-      const a = { plan: first, name: nameOf(dominant), origin, source: { connection, queryId: query.id, planId: dominant }, query: query.plan_history?.kind === "cache" ? undefined : { ...query, plan_id: dominant } };
-      const b = { plan: second, name: nameOf(other), origin, source: { connection, queryId: query.id, planId: other }, query: query.plan_history?.kind === "cache" ? undefined : { ...query, plan_id: other } };
+      const a = { plan: first, name: nameOf(dominant), origin, source: { connection, reportId: report.snapshot.id, queryId: query.id, planId: dominant }, query: query.plan_history?.kind === "cache" ? undefined : { ...query, plan_id: dominant } };
+      const b = { plan: second, name: nameOf(other), origin, source: { connection, reportId: report.snapshot.id, queryId: query.id, planId: other }, query: query.plan_history?.kind === "cache" ? undefined : { ...query, plan_id: other } };
       if (speed(dominant) <= speed(other)) compare(a, b);
       else compare(b, a);
     } catch (e) {
@@ -551,7 +547,7 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
             </button>
           )}
           {state.status === "ready" && (
-            <button type="button" className="btn ghost" title={t("ui.queries.open_in_plans_title")} onClick={() => addPlan(state.plan, nameOf(planId), origin, { source: { connection, queryId: query.id, planId }, query: planQuery ? { ...planQuery, plan_id: planId } : undefined })}>
+            <button type="button" className="btn ghost" title={t("ui.queries.open_in_plans_title")} onClick={() => addPlan(state.plan, nameOf(planId), origin, { source: { connection, reportId: report.snapshot.id, queryId: query.id, planId }, query: planQuery ? { ...planQuery, plan_id: planId } : undefined })}>
               <SquareArrowOutUpRight size={13} /> {t("ui.queries.open_in_plans")}
             </button>
           )}

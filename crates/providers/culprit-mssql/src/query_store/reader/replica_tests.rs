@@ -53,7 +53,7 @@ async fn only_a_known_unpartitioned_layout_can_omit_the_actual_native_population
     let mut reader =
         Reader::new(FakeRead::new(vec![Ok(vec![layout_row()]), Ok(vec![window_row()]), Ok(vec![summary_row()])]));
     reader.summary(60).await.unwrap();
-    assert!(reader.selected_population().is_none());
+    assert!(reader.selected_population().unwrap().is_none());
     let catalog = reader.population_catalog().unwrap();
     assert!(
         catalog.is_valid() && !catalog.partitioned && !catalog.requires_selection && catalog.populations.is_empty()
@@ -79,7 +79,7 @@ async fn ambiguous_groups_retain_the_catalog_without_reading_or_pooling_runtime(
         catalog.populations.iter().map(|population| population.identity.id.as_str()).collect::<Vec<_>>(),
         ["1", "7"]
     );
-    assert!(reader.selected_population().is_none());
+    assert!(reader.selected_population().unwrap().is_none());
     assert!(reader.summary(60).await.is_err());
     assert!(reader.waits(60, None).await.is_err());
     assert_eq!(reader.queries(), 2);
@@ -96,8 +96,14 @@ async fn one_selected_native_group_scopes_runtime_waits_and_trends_to_the_same_f
         Ok(vec![runtime(7)]),
         Ok(vec![wait(7)]),
         Ok(vec![Rec::of(&[("minutes", Val::Int(60))])]),
-        Ok(vec![Rec::of(&[("bucket", Val::Int(bucket)), ("total_ms", Val::Float(4.0)), ("executions", Val::Int(2))])]),
         Ok(vec![Rec::of(&[
+            ("replica_group_id", Val::Int(7)),
+            ("bucket", Val::Int(bucket)),
+            ("total_ms", Val::Float(4.0)),
+            ("executions", Val::Int(2)),
+        ])]),
+        Ok(vec![Rec::of(&[
+            ("replica_group_id", Val::Int(7)),
             ("query_id", Val::Int(3)),
             ("bucket", Val::Int(bucket)),
             ("total_ms", Val::Float(4.0)),
@@ -121,7 +127,7 @@ async fn one_selected_native_group_scopes_runtime_waits_and_trends_to_the_same_f
     assert_eq!(timeline.executions, [2.0]);
     assert_eq!(trends["3"].time_ms, [Some(4.0)]);
     reader.verify_window().await.unwrap();
-    assert_eq!(reader.selected_population(), Some(NativeIdentity::new("7")));
+    assert_eq!(reader.selected_population().unwrap(), Some(NativeIdentity::new("7")));
     assert_eq!(reader.queries(), 10);
     for index in [3, 4, 6, 7] {
         let query = &reader.io.calls[index];
@@ -170,7 +176,7 @@ async fn missing_or_failed_catalog_is_unknown_and_cannot_become_unpartitioned_or
         let mut reader = Reader::new(FakeRead::new(vec![Ok(vec![layout()]), catalog]));
         assert!(reader.summary(60).await.is_err());
         assert!(reader.population_catalog().is_none());
-        assert!(reader.selected_population().is_none());
+        assert!(reader.selected_population().unwrap().is_none());
         assert_eq!(reader.queries(), 2);
         assert_eq!(reader.close().await, SourceShutdown::Quiescent);
     }
@@ -203,7 +209,16 @@ fn period_comparisons_and_unpartitioned_layouts_use_the_same_native_population_r
         super::super::period_sql::per_plan_sql("'2020-01-01'", "'2020-01-02'", "'2020-01-03'", population),
     ] {
         assert!(sql.contains("AND rs.replica_group_id=7 AND"));
+        assert!(sql.contains("SELECT rs.replica_group_id"));
+        assert!(sql.contains("GROUP BY replica_group_id"));
     }
+    let coverage = super::super::period_sql::coverage_sql("'2020-01-01'", "'2020-01-02'", population).unwrap();
+    assert!(coverage.contains("EXISTS (SELECT 1 FROM sys.query_store_runtime_stats rs"));
+    assert!(coverage.contains("rs.runtime_stats_interval_id=i.runtime_stats_interval_id AND rs.replica_group_id=7"));
+    let unpartitioned_coverage =
+        super::super::period_sql::coverage_sql("'2020-01-01'", "'2020-01-02'", Population::Unpartitioned).unwrap();
+    assert!(!unpartitioned_coverage.contains("sys.query_store_runtime_stats rs"));
+    assert!(super::super::period_sql::coverage_sql("'2020-01-01'", "'2020-01-02'", Population::AllGroups).is_err());
     let unpartitioned = runtime::summary_sql(false, false, Population::Unpartitioned);
     assert!(unpartitioned.contains("CAST(NULL AS bigint) AS replica_group_id"));
     assert!(!unpartitioned.contains("rs.replica_group_id"));

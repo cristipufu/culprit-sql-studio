@@ -24,11 +24,13 @@ pub(crate) struct Catalog {
     groups: Vec<ReplicaGroup>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Population {
     /// The native runtime layout has no replica dimension. This is not an invented replica ID.
     Unpartitioned,
     ReplicaGroup(i64),
+    /// One native acquisition groups rows by their actual replica ID. This is never a selected/exported identity.
+    AllGroups,
 }
 
 impl Population {
@@ -36,29 +38,30 @@ impl Population {
     /// the group never becomes a query/plan identity or a physical compute-member identity.
     pub(crate) fn predicate(self, alias: &str) -> String {
         match self {
-            Self::Unpartitioned => "1=1".into(),
+            Self::Unpartitioned | Self::AllGroups => "1=1".into(),
             Self::ReplicaGroup(group) => format!("{alias}.replica_group_id={group}"),
         }
     }
 
-    pub(crate) fn identity(self) -> Option<NativeIdentity> {
+    pub(crate) fn identity(self) -> Result<Option<NativeIdentity>> {
         match self {
-            Self::Unpartitioned => None,
-            Self::ReplicaGroup(group) => Some(NativeIdentity::new(group.to_string())),
+            Self::Unpartitioned => Ok(None),
+            Self::ReplicaGroup(group) => Ok(Some(NativeIdentity::new(group.to_string()))),
+            Self::AllGroups => Err(invalid_data()),
         }
     }
 
     pub(crate) fn projection(self, alias: &str) -> String {
         match self {
             Self::Unpartitioned => "CAST(NULL AS bigint) AS replica_group_id".into(),
-            Self::ReplicaGroup(_) => format!("{alias}.replica_group_id"),
+            Self::ReplicaGroup(_) | Self::AllGroups => format!("{alias}.replica_group_id"),
         }
     }
 
     pub(crate) fn group_by(self, alias: &str) -> String {
         match self {
             Self::Unpartitioned => String::new(),
-            Self::ReplicaGroup(_) => format!(",{alias}.replica_group_id"),
+            Self::ReplicaGroup(_) | Self::AllGroups => format!(",{alias}.replica_group_id"),
         }
     }
 

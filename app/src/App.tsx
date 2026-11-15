@@ -7,6 +7,7 @@ import { ScreenshotButton } from "./components/ScreenshotButton";
 import { SignInDialog } from "./components/SignInDialog";
 import { Sidebar } from "./components/Sidebar";
 import { WindowPicker } from "./components/WindowPicker";
+import { PopulationPicker } from "./components/PopulationPicker";
 import { editorScope } from "./lib/editor-tabs";
 import { when, windowSpan } from "./lib/format";
 import { useHotkeys } from "./lib/hotkeys";
@@ -23,6 +24,7 @@ import { startUpdateChecks } from "./lib/updates";
 import { workloadSource, windowUnknown } from "./lib/rates";
 import { errorMessage } from "./lib/api";
 import { toast as notify } from "./lib/store";
+import { queryHistoryEmptyState } from "./lib/query-history";
 
 const Editor = lazy(() => import("./views/Editor"));
 // Where a connection opens; its skeleton (and stylesheet) are in the main bundle so the grid never jumps.
@@ -130,15 +132,18 @@ export function App() {
 }
 
 function TopBar() {
+  const active = useStore((s) => s.active);
   const view = useStore((s) => s.view);
   const environment = useStore((s) => s.connections.find((c) => c.name === s.active)?.environment);
   const report = useStore((s) => (s.report.status === "ready" ? s.report : null));
   const engine = useStore((s) => s.connections.find((c) => c.name === s.active)?.engine);
   const w = report?.report.snapshot.workload;
-  // Before the report loads, SQL Server keeps the picker's place; a scan without query history has nothing to window.
-  // An application's log covers its own period: there's no window to choose.
-  const windowed = w ? w.windowed && w.log == null : engine != null && evidencePresentation(engine).workload_windowed_by_default && !report;
-  const noHistory = report && !w ? report.report.summary.no_workload : undefined;
+  const populations = useStore((s) => s.populationCatalog);
+  const selectedPopulation = useStore((s) => s.workloadPopulation);
+  // A native population catalog keeps the source's window control available even when the default has no workload.
+  // An application's log covers its own period.
+  const windowed = w ? w.windowed && w.log == null : engine != null && evidencePresentation(engine).workload_windowed_by_default && (!report || populations !== null);
+  const noHistory = report ? queryHistoryEmptyState(report.report) : null;
   const showsWorkload = view === "dashboard" || view === "overview" || view === "queries" || view === "schema";
   if (view === "plans") {
     return (
@@ -153,6 +158,7 @@ function TopBar() {
   return (
     <header className="topbar" data-tauri-drag-region>
       <h1>{viewTitle(view)}</h1>
+      {showsWorkload && <PopulationPicker connection={active} catalog={populations} selected={selectedPopulation} actual={w?.population ?? null} />}
       {showsWorkload && windowed && <WindowPicker coveredHours={w?.window_hours ?? null} source={w ? workloadSource(w) : null} />}
       {showsWorkload && w?.log != null && (
         <span
@@ -171,8 +177,8 @@ function TopBar() {
         </span>
       )}
       {showsWorkload && report && !w && (
-        <span className="context" title={noHistory ?? t("ui.app.no_statement_statistics")}>
-          {t("ui.app.no_query_history")}
+        <span className="context" title={noHistory?.sourceReason ?? noHistory?.detail ?? t("ui.app.no_statement_statistics")}>
+          {noHistory?.kind === "choose-group" ? noHistory.detail : t("ui.app.no_query_history")}
         </span>
       )}
       {showsWorkload && !windowed && w && w.log == null && (

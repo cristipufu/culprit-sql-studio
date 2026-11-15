@@ -2,7 +2,7 @@
 mod native_tests;
 mod output;
 use output::Output;
-pub(crate) use output::ReadBatch;
+pub(crate) use output::{ReadBatch, value_bytes};
 use std::{sync::Arc, time::Duration};
 
 use culprit_core::{

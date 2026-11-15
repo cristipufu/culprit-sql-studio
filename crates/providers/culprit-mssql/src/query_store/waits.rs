@@ -94,22 +94,48 @@ impl Summary {
     }
 }
 pub(crate) fn summary_sql(by_plan: bool, population: super::replicas::Population) -> String {
-    let declaration = if by_plan { "DECLARE /* culprit */ @ids xml=CONVERT(xml,@P2);\n" } else { "" };
+    summary_query(by_plan, by_plan, population == super::replicas::Population::AllGroups, population)
+}
+
+/// A batch reads every plan once. Exact native identities qualify later in-memory plan joins.
+pub(crate) fn all_plans_sql(population: super::replicas::Population) -> String {
+    summary_query(true, false, true, population)
+}
+
+fn summary_query(
+    by_plan: bool,
+    selected_plans: bool,
+    native_identities: bool,
+    population: super::replicas::Population,
+) -> String {
+    let declaration = if selected_plans { "DECLARE /* culprit */ @ids xml=CONVERT(xml,@P2);\n" } else { "" };
     let plan = if by_plan { "ws.plan_id," } else { "" };
-    let selected = if by_plan {
+    let selected = if selected_plans {
         " AND ws.plan_id IN(SELECT x.value('@id[1]','bigint') FROM @ids.nodes('/ids/id') n(x))"
     } else {
         ""
     };
+    let (identity, identity_group) = if native_identities {
+        (
+            format!(
+                "{},{},",
+                super::catalog_sql::query_identity_columns!("q.query_id"),
+                super::catalog_sql::plan_identity_columns!("p", "")
+            ),
+            ",q.query_id,q.context_settings_id,q.object_id,q.query_hash,q.initial_compile_start_time,p.plan_id,p.query_plan_hash,p.initial_compile_start_time",
+        )
+    } else {
+        (String::new(), "")
+    };
     format!(
-        r#"{window_declaration}{declaration}{RELATION}SELECT /* culprit */ {population_projection},{plan} ws.wait_category,ws.wait_category_desc,SUM(ws.total_query_wait_time_ms) AS wait_ms
+        r#"{window_declaration}{declaration}{RELATION}SELECT /* culprit */ {identity}{population_projection},{plan} ws.wait_category,ws.wait_category_desc,SUM(ws.total_query_wait_time_ms) AS wait_ms
 FROM culprit_waits ws
 JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id=ws.runtime_stats_interval_id
 JOIN sys.query_store_plan p ON p.plan_id=ws.plan_id
 JOIN sys.query_store_query q ON q.query_id=p.query_id
 JOIN sys.query_store_query_text t ON t.query_text_id=q.query_text_id
 WHERE {window_membership} AND {population} AND {workload}{selected}
-GROUP BY {plan} ws.wait_category,ws.wait_category_desc{population_group} OPTION(MAXDOP 1)"#,
+GROUP BY {plan} ws.wait_category,ws.wait_category_desc{population_group}{identity_group} OPTION(MAXDOP 1)"#,
         workload = crate::statement_origin::application_candidates_sql("t.query_sql_text"),
         window_declaration = super::window_sql::DECLARATION,
         window_membership = super::window_sql::MEMBERSHIP,

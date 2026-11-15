@@ -186,6 +186,21 @@ impl Execution<'_> {
         let report_id = report_id.map(str::to_owned);
         let report =
             self.reports.background(move |reports| reports.plan_report(&report_name, report_id.as_deref())).await?;
+        if report.as_ref().is_some_and(|report| {
+            let snapshot = &report.snapshot;
+            snapshot.options.as_ref().is_some_and(|options| options.workload_population.is_some())
+                || snapshot.workload.as_ref().is_some_and(|workload| {
+                    workload.population.is_some()
+                        || workload.population_catalog.as_ref().is_some_and(|catalog| catalog.partitioned)
+                })
+                || snapshot.runtime_populations.as_ref().is_some_and(|catalog| catalog.partitioned)
+        }) {
+            // The current provider API returns connected-cache XML without execution-group provenance. Native
+            // query/plan IDs cannot attach that execution or its table/workload context to another population.
+            return Err(Error::new(ErrorCode::Unsupported, t!("engine.execution.actual_population_unverified"))
+                .with_hint(t!("engine.execution.actual_population_unverified_hint"))
+                .with_detail(culprit_core::ErrorDetail::ActualPlanExecutionPopulationUnverified));
+        }
         let observed = self.connections.observed_provider(name).await?;
         let provider = observed.provider();
         let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
