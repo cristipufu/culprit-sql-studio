@@ -236,7 +236,8 @@ fn entry(line: &str) -> Option<Entry> {
                 lookup(&v, "startTimeUnixNano").and_then(unix_nanos).filter(|&n| n >= 1_000_000_000_000_000_000)?;
             Some(Moment { epoch: nanos as f64 / 1_000_000_000.0, zoned: true })
         });
-    let request_id = ["request_id", "requestId", "http.request_id", "trace_id", "traceId"]
+    // A distributed trace can contain several requests; only an explicit request identifier groups calls by request.
+    let request_id = ["request_id", "requestId", "http.request_id"]
         .iter()
         .find_map(|k| lookup(&v, k)?.as_str())
         .map(str::trim)
@@ -314,6 +315,32 @@ mod tests {
     }
 
     #[test]
+    fn trace_identifiers_do_not_establish_a_request_in_any_supported_envelope() {
+        for line in [
+            r#"{"sql":"SELECT value FROM items","ms":2,"trace_id":"shared-trace"}"#,
+            r#"{"sql":"SELECT value FROM items","ms":2,"fields":{"traceId":"shared-trace"}}"#,
+            r#"{"sql":"SELECT value FROM items","ms":2,"attributes":{"trace_id":"shared-trace"}}"#,
+            r#"{"sql":"SELECT value FROM items","ms":2,"spanAttributes":[{"key":"traceId","value":{"stringValue":"shared-trace"}}]}"#,
+        ] {
+            let observed = entry(line).unwrap();
+            assert_eq!(observed.request_id, None, "{line}");
+            assert_eq!((observed.sql.as_str(), observed.ms), ("SELECT value FROM items", 2.0));
+        }
+    }
+
+    #[test]
+    fn explicit_request_aliases_are_preserved_alongside_trace_identifiers() {
+        for line in [
+            r#"{"sql":"SELECT value FROM items","ms":2,"request_id":" req-17 ","traceId":"shared-trace"}"#,
+            r#"{"sql":"SELECT value FROM items","ms":2,"trace_id":"shared-trace","fields":{"requestId":"req-17"}}"#,
+            r#"{"sql":"SELECT value FROM items","ms":2,"traceId":"shared-trace","attributes":{"http.request_id":"req-17"}}"#,
+            r#"{"sql":"SELECT value FROM items","ms":2,"trace_id":"shared-trace","spanAttributes":[{"key":"request_id","value":{"stringValue":"req-17"}}]}"#,
+        ] {
+            assert_eq!(entry(line).unwrap().request_id.as_deref(), Some("req-17"), "{line}");
+        }
+    }
+
+    #[test]
     fn opentelemetry_spans_and_tracing_fields_are_parsed() {
         // OpenTelemetry flat attributes + startTimeUnixNano/endTimeUnixNano + traceId
         let otel_flat = r#"{"traceId":"4bf92f3577b34da6a3ce929d0e0e4736","startTimeUnixNano":"1760529600000000000","endTimeUnixNano":"1760529600012500000","attributes":{"db.system":"sqlite","db.statement":"SELECT * FROM orders WHERE customer_id = ?"}}"#;
@@ -321,7 +348,7 @@ mod tests {
         let e = entry(otel_flat).unwrap();
         assert_eq!(e.sql, "SELECT * FROM orders WHERE customer_id = ?");
         assert!((e.ms - 12.5).abs() < 1e-6);
-        assert_eq!(e.request_id.as_deref(), Some("4bf92f3577b34da6a3ce929d0e0e4736"));
+        assert_eq!(e.request_id, None, "a trace identifies no request boundary");
         assert!(e.at.is_some_and(|m| m.zoned && (m.epoch - 1_760_529_600.0).abs() < 1e-3));
 
         // OTLP JSON key-value array format with `db.query.text` and error status
@@ -330,7 +357,7 @@ mod tests {
         assert_eq!(e.sql, "INSERT INTO orders (id) VALUES (?)");
         assert!((e.ms - 3.2).abs() < 1e-6);
         assert_eq!(e.error_code, Some("SQLITE_BUSY"));
-        assert_eq!(e.request_id, None, "all-zero traceId is ignored");
+        assert_eq!(e.request_id, None, "a trace identifies no request boundary");
 
         // Rust tracing-subscriber JSON format (`fields` envelope + microseconds)
         let tracing_line = r#"{"timestamp":"2026-10-15T12:00:05Z","level":"INFO","fields":{"db.statement":"UPDATE orders SET status = 'shipped' WHERE id = $1","duration_us":1500,"request_id":"req-99"}}"#;

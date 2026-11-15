@@ -107,3 +107,67 @@ fn request_counts_need_explicit_nonempty_ids_and_never_export_them() {
     assert_eq!((r.requests, r.repeated_requests, r.most_calls), (3, 3, 12));
     assert!(!serde_json::to_string(&w).unwrap().contains("private-request"));
 }
+
+#[test]
+fn sql_spans_in_one_trace_do_not_establish_request_repetition_or_change_observed_work() {
+    let records: Vec<_> = (0..12)
+        .map(|span| {
+            serde_json::json!({
+                "sql": format!("SELECT * FROM items WHERE id = {span}"),
+                "ms": span + 1,
+                "at": format!("2026-10-15T12:00:{span:02}Z"),
+            })
+        })
+        .collect();
+    let plain: Vec<_> = records.iter().map(serde_json::Value::to_string).collect();
+    let (format, aggregator) = culprit_querylog::read(plain.iter().map(String::as_str), Engine::Sqlite).unwrap();
+    let baseline = aggregator.workload(format, 50);
+    assert_eq!((baseline.total_executions, baseline.total_time_ms, baseline.queries.len()), (12.0, 78.0, 1));
+    assert!(baseline.queries[0].requests.is_none());
+
+    for trace_key in ["trace_id", "traceId"] {
+        let spans: Vec<_> = records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| {
+                let mut span = record.clone();
+                span[trace_key] = serde_json::json!("private-trace-shared-by-several-requests");
+                span["spanId"] = serde_json::json!(format!("sql-span-{index}"));
+                span.to_string()
+            })
+            .collect();
+        let (format, aggregator) = culprit_querylog::read(spans.iter().map(String::as_str), Engine::Sqlite).unwrap();
+        assert_eq!(aggregator.entries(), 12);
+        assert!(!aggregator.limited());
+        let observed = aggregator.workload(format, 50);
+        assert!(observed.queries.iter().all(|query| query.requests.is_none()), "{trace_key}");
+        assert_eq!(serde_json::to_value(&observed).unwrap(), serde_json::to_value(&baseline).unwrap(), "{trace_key}");
+    }
+}
+
+#[test]
+fn explicit_request_aliases_keep_repetition_counts_when_a_trace_is_also_present() {
+    for request_key in ["request_id", "requestId", "http.request_id"] {
+        let mut lines = Vec::new();
+        for request in 0..3 {
+            for call in 0..12 {
+                let mut record = serde_json::json!({
+                    "sql": format!("SELECT * FROM items WHERE id = {call}"),
+                    "ms": 1,
+                    "trace_id": "private-shared-trace",
+                    "traceId": "another-private-trace",
+                });
+                record[request_key] = serde_json::json!(format!("private-explicit-request-{request}"));
+                lines.push(record.to_string());
+            }
+        }
+        let (format, aggregator) = culprit_querylog::read(lines.iter().map(String::as_str), Engine::Sqlite).unwrap();
+        let workload = aggregator.workload(format, 50);
+        assert_eq!((workload.total_executions, workload.total_time_ms, workload.queries.len()), (36.0, 36.0, 1));
+        let evidence = workload.queries[0].requests.as_ref().unwrap();
+        assert_eq!((evidence.requests, evidence.repeated_requests, evidence.most_calls), (3, 3, 12), "{request_key}");
+        assert!(!evidence.sample_truncated);
+        let exported = serde_json::to_string(&workload).unwrap();
+        assert!(!exported.contains("private-explicit-request") && !exported.contains("private-shared-trace"));
+    }
+}
