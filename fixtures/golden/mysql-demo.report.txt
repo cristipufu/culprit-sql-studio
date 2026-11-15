@@ -740,10 +740,10 @@ brief:
 
 === plan 04cd7be9c366fadc
 insight temp-table-sort · low severity · impact no share stated
-  title: Groups 499K rows in an internal temporary table, then sorts them (filesort)
-  detail: The rows don't arrive in the order the GROUP BY / DISTINCT needs, so MySQL builds a temporary table (on disk once it outgrows tmp_table_size) and sorts the result.
-  fix: An index whose leading columns match the GROUP BY may let MySQL group in index order and reduce grouping work. An ORDER BY that differs from the grouping, especially an aggregate such as COUNT(*) DESC, can still need a temporary table and sort. Filter rows before grouping, or keep a pre-aggregated result, to reduce that work.
-  verify: Explain again: look for grouping in index order or fewer rows entering the temporary table. A temporary table and sort for a different ORDER BY can remain; compare on-disk temporary tables on new runs to check the spill itself.
+  title: Groups 499K rows using an internal temporary table, then sorts the result (filesort)
+  detail: The selected native plan uses an internal temporary table for grouping. This identifies intermediate work; it does not by itself establish a missing index or a memory-limit cause. The native filesort is a separate sorting step. Its name does not establish disk I/O or the time spent sorting. A temporary-table strategy alone establishes neither storage placement, elapsed impact nor a safe memory setting.
+  fix: Compare filtering and projection before grouping, and test an index aligned with the grouping keys where the selected plan can use it. Preserve result semantics; ordering by an aggregate may still need a temporary table and sort.
+  verify: Compare equivalent inputs and concurrency: intermediate rows, native temporary-work or sort measurements, latency and CPU. A remaining temporary table or filesort can be the correct plan. Digest totals alone do not identify this operator or execution.
 note: MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
 shares: `Sort` (using filesort) and `Group` (using temporary table) have no cost of their own in the plan, so no share is given.
 

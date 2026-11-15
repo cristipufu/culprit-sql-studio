@@ -6,9 +6,20 @@ import type { PlanConversion } from "./PlanConversion";
 import type { PlanExecutionMode } from "./PlanExecutionMode";
 import type { PlanIndexColumns } from "./PlanIndexColumns";
 import type { PlanParentRelationship } from "./PlanParentRelationship";
+import type { PlanTemporaryTableUse } from "./PlanTemporaryTableUse";
 import type { RelationalInput } from "./RelationalInput";
 
 export type PlanNodeFacts = { 
+/**
+ * A positive native temporary-table operation. None supplies no positive observation; Unknown preserves
+ * an explicit temporary-table marker whose purpose is not established by its native wrapper.
+ */
+temporary_table?: PlanTemporaryTableUse, 
+/**
+ * MySQL/MariaDB's native filesort strategy, independent of temporary-table use. A filesort can stay in
+ * memory; this flag establishes neither disk I/O nor measured elapsed cost. Missing stays unknown.
+ */
+filesort?: boolean, 
 /**
  * Separately qualified native access estimates and measurements. `PlanNode.rows_read` can contain an
  * estimated fallback and cannot authorize comparisons requiring actual access provenance.

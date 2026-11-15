@@ -220,10 +220,10 @@ note: MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANA
   verify: Explain again: the subquery appears once, joined, instead of as a per-row SubPlan / DEPENDENT SUBQUERY.
 == tests/insights/mysql-filesort-temp.json
 note: MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
-[temp-table-sort] Sorts the groups in a temporary table (filesort)
-  detail: Grouping already reads an index in order; MySQL then sorts the grouped result, because the query orders by an aggregate or by columns the index doesn't provide.
-  fix: Ordering by an aggregate (COUNT(*) DESC) always needs this sort: keep the grouped set small with a selective WHERE, or add a LIMIT so only the top groups are kept.
-  verify: Explain again: the sort's input is the groups you expect, not every row.
+[temp-table-sort] Sorts aggregate results using an internal temporary table (filesort)
+  detail: The native ordering step sorts aggregate results. This does not establish that grouping read an index in order or which ORDER BY expression required the work. The native filesort is a separate sorting step. Its name does not establish disk I/O or the time spent sorting. A temporary-table strategy alone establishes neither storage placement, elapsed impact nor a safe memory setting.
+  fix: Compare the rows entering aggregation and the size of its result. Test equivalent filtering or projection changes; sorting aggregate results may remain necessary.
+  verify: Compare equivalent inputs and concurrency: intermediate rows, native temporary-work or sort measurements, latency and CPU. A remaining temporary table or filesort can be the correct plan. Digest totals alone do not identify this operator or execution.
 == tests/insights/mysql-function.json
 note: MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
 == tests/insights/mysql-join-buffer.json

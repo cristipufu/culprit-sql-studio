@@ -2,6 +2,7 @@ mod compilation;
 mod parameters;
 mod relational_inputs;
 mod spills;
+mod temporary;
 
 #[test]
 fn timescale_chunk_advice_targets_the_hypertable_with_native_ddl() {
@@ -377,15 +378,20 @@ fn a_temporary_table_on_the_grouping_differs_from_sorting_the_groups() {
     group.children = vec![scan()];
     let mut sort = node(1, "Sort", NodeKind::Sort);
     sort.detail = Some("using filesort, using temporary table".into());
+    sort.facts_mut().temporary_table = Some(crate::plan_facts::PlanTemporaryTableUse::Ordering);
+    sort.facts_mut().filesort = Some(true);
     sort.est_rows = 499_000.0;
     sort.children = vec![group.clone()];
     let t = title(&plan(Engine::Mysql, sort.clone())).expect("the sort of the groups");
-    assert!(t.starts_with("Sorts the groups"), "{t}");
+    assert!(t.starts_with("Sorts aggregate results"), "{t}");
 
     // MySQL: the grouping itself needs a temporary table.
     group.detail = Some("using temporary table".into());
+    group.facts_mut().temporary_table = Some(crate::plan_facts::PlanTemporaryTableUse::Grouping);
+    group.facts_mut().filesort = Some(false);
     sort.children = vec![group];
     sort.detail = Some("using filesort".into());
+    sort.facts_mut().temporary_table = None;
     let t = title(&plan(Engine::Mysql, sort)).expect("grouping in a temporary table");
     assert!(t.starts_with("Groups 499K rows"), "{t}");
 
@@ -393,18 +399,20 @@ fn a_temporary_table_on_the_grouping_differs_from_sorting_the_groups() {
     let mut temp = node(2, "Temporary table", NodeKind::Other);
     temp.est_rows = 499_000.0;
     temp.children = vec![scan()];
+    temp.facts_mut().temporary_table = Some(crate::plan_facts::PlanTemporaryTableUse::Unknown);
     let mut sort = node(1, "Sort", NodeKind::Sort);
     sort.est_rows = 499_000.0;
     sort.children = vec![temp];
+    sort.facts_mut().filesort = Some(true);
     let mut p = plan(Engine::Mysql, sort);
     p.facts_mut().flavor = Some("MariaDB".into());
     let found = insights(&p).into_iter().find(|i| i.rule == "temp-table-sort").expect("MariaDB's shape");
-    assert!(found.title.contains("then sorts them"), "{}", found.title);
-    assert!(found.detail.contains("MariaDB"), "{}", found.detail);
+    assert!(found.title.starts_with("Sorts 499K rows from an internal temporary result"), "{}", found.title);
+    assert!(found.detail.contains("purpose is unresolved"), "{}", found.detail);
 }
 
 #[test]
-fn grouping_in_index_order_does_not_remove_aggregate_order_materialization() {
+fn qualified_grouping_and_unresolved_temporary_results_keep_distinct_investigations() {
     for mariadb in [false, true] {
         let mut scan = node(3, "Table scan", NodeKind::Scan);
         scan.est_rows = 499_000.0;
@@ -413,25 +421,32 @@ fn grouping_in_index_order_does_not_remove_aggregate_order_materialization() {
         group.detail = Some("using temporary table".into());
         group.est_rows = 499_000.0;
         group.children = vec![scan];
+        group.facts_mut().temporary_table = Some(if mariadb {
+            crate::plan_facts::PlanTemporaryTableUse::Unknown
+        } else {
+            crate::plan_facts::PlanTemporaryTableUse::Grouping
+        });
         let mut sort = node(1, "Sort", NodeKind::Sort);
         sort.est_rows = 499_000.0;
         sort.children = vec![group];
+        sort.facts_mut().filesort = Some(true);
         let mut p = plan(Engine::Mysql, sort);
         p.statement = Some(
             "SELECT customer_id, channel, SUM(total) AS spent FROM orders GROUP BY customer_id, channel ORDER BY spent DESC LIMIT 20".into(),
         );
         if mariadb {
-            p.props.insert("flavor".into(), "MariaDB".into());
+            p.facts_mut().flavor = Some("MariaDB".into());
         }
         let found =
             insights(&p).into_iter().find(|i| i.rule == "temp-table-sort").expect("grouping in a temporary table");
-        assert!(
-            found.fix.contains("may let") && found.fix.contains("can still need a temporary table and sort"),
-            "{}",
-            found.fix
-        );
-        assert!(!found.fix.contains("with no temporary table"), "{}", found.fix);
-        assert!(found.verify.contains("can remain") && found.verify.contains("on new runs"), "{}", found.verify);
+        if mariadb {
+            assert!(found.fix.contains("selected query block"), "{}", found.fix);
+            assert!(found.detail.contains("purpose is unresolved"), "{}", found.detail);
+        } else {
+            assert!(found.fix.contains("aligned with the grouping keys"), "{}", found.fix);
+            assert!(found.fix.contains("may still need a temporary table and sort"), "{}", found.fix);
+        }
+        assert!(found.verify.contains("can be the correct plan") && found.verify.contains("Digest totals alone"));
     }
 }
 
@@ -2507,12 +2522,16 @@ fn rarely_said() -> Vec<(&'static str, Plan)> {
     // MySQL's temporary tables: grouping without a sort, and an ORDER BY alone.
     let mut group = node(1, "Group", NodeKind::Aggregate);
     group.detail = Some("using temporary table".into());
+    group.facts_mut().temporary_table = Some(crate::plan_facts::PlanTemporaryTableUse::Grouping);
+    group.facts_mut().filesort = Some(false);
     group.est_rows = 50_000.0;
     let mut p = plan(Engine::Mysql, group);
     p.statement = Some("SELECT status, count(*) FROM orders GROUP BY status".into());
     out.push(("temporary table, grouping", p));
     let mut ordered = node(1, "Sort", NodeKind::Sort);
     ordered.detail = Some("using temporary table; using filesort".into());
+    ordered.facts_mut().temporary_table = Some(crate::plan_facts::PlanTemporaryTableUse::Ordering);
+    ordered.facts_mut().filesort = Some(true);
     ordered.est_rows = 50_000.0;
     let mut p = plan(Engine::Mysql, ordered);
     p.statement = Some("SELECT * FROM a JOIN b ON a.id = b.a_id ORDER BY b.created_at".into());
@@ -2829,15 +2848,15 @@ const RARELY_SAID: &str = r##"== automatic index, no columns
   fix: Inspect the sort’s input rows and width and the session’s sort_buffer_size. Reduce unnecessary sorting work where possible; test any session-memory change under representative concurrency before choosing a value. For this sort, test whether an access path can supply the required order.
   verify: Compare equivalent input and concurrency: merge passes or temporary-file work, latency and CPU. Measure the effect of any session-memory change; a zero pass count is not required for a better result.
 == temporary table, grouping
-[temp-table-sort] Collects 50K rows in an internal temporary table
-  detail: The rows don't arrive in the order the GROUP BY / DISTINCT needs, so MySQL builds a temporary table (on disk once it outgrows tmp_table_size) and sorts the result.
-  fix: An index whose leading columns match the GROUP BY may let MySQL group in index order and reduce grouping work. An ORDER BY that differs from the grouping, especially an aggregate such as COUNT(*) DESC, can still need a temporary table and sort. Filter rows before grouping, or keep a pre-aggregated result, to reduce that work.
-  verify: Explain again: look for grouping in index order or fewer rows entering the temporary table. A temporary table and sort for a different ORDER BY can remain; compare on-disk temporary tables on new runs to check the spill itself.
+[temp-table-sort] Groups 50K rows using an internal temporary table
+  detail: The selected native plan uses an internal temporary table for grouping. This identifies intermediate work; it does not by itself establish a missing index or a memory-limit cause. A temporary-table strategy alone establishes neither storage placement, elapsed impact nor a safe memory setting.
+  fix: Compare filtering and projection before grouping, and test an index aligned with the grouping keys where the selected plan can use it. Preserve result semantics; ordering by an aggregate may still need a temporary table and sort.
+  verify: Compare equivalent inputs and concurrency: intermediate rows, native temporary-work or sort measurements, latency and CPU. A remaining temporary table or filesort can be the correct plan. Digest totals alone do not identify this operator or execution.
 == temporary table, order by
-[temp-table-sort] Collects 50K rows in an internal temporary table to sort them (filesort)
-  detail: The ORDER BY isn't on the table the join reads first, so MySQL collects the joined rows in a temporary table (on disk once it outgrows tmp_table_size) and sorts them.
-  fix: Order by columns of the table the join reads first, with an index that returns them in that order; or sort fewer rows with a more selective WHERE or a LIMIT.
-  verify: Explain again: no "using temporary" on the sort.
+[temp-table-sort] Sorts 50K rows using an internal temporary result (filesort)
+  detail: The native ordering step uses an internal temporary result and a filesort. This does not establish that the join order is wrong. The native filesort is a separate sorting step. Its name does not establish disk I/O or the time spent sorting. A temporary-table strategy alone establishes neither storage placement, elapsed impact nor a safe memory setting.
+  fix: Inspect the actual ORDER BY keys and rows entering this step. Test an index that supplies the required ordering where the native plan can use it, or reduce intermediate rows and columns without changing the result.
+  verify: Compare equivalent inputs and concurrency: intermediate rows, native temporary-work or sort measurements, latency and CPU. A remaining temporary table or filesort can be the correct plan. Digest totals alone do not identify this operator or execution.
 == eager spool, no table
 [eager-spool] SQL Server builds a temporary index on the table every time this runs
   detail: The Index Spool copies 0 rows of the table into a temporary index in tempdb on each run and drops it afterwards, because no index fits the lookup.
@@ -2900,7 +2919,7 @@ rule workers-short [Postgres]: Fewer parallel workers started than planned
 rule jit [Postgres]: JIT compilation taking a large share of the run
 rule correlated-subquery [Postgres, Yugabyte, Mysql]: A subquery run once per outer row
 rule join-buffer [Mysql]: A join without an index (join buffer / hash join over a scan)
-rule temp-table-sort [Mysql]: Grouping in a temporary table, then a filesort
+rule temp-table-sort [Mysql]: Internal temporary work and sorting
 rule index-ignored [Mysql]: An index was possible but the whole table was read
 note generic estimated: Some("This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.")
 note generic sqlite estimated: Some("Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.")

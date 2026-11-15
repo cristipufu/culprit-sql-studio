@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use culprit_core::plan_facts::PlanTemporaryTableUse;
 use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result, t};
 use serde_json::{Map, Value};
 
@@ -194,8 +195,8 @@ fn wrapper(key: &str, map: &Map<String, Value>, cx: &Context, id: &mut u32) -> P
         detail.push("using filesort");
     }
     if temporary {
-        // An internal temporary table, in memory unless it outgrows tmp_table_size; the workload's on-disk temp table
-        // count says whether it actually spilled, so this is a detail rather than a spill warning.
+        // Native plan strategy only. Storage engines, versioned limits and mmap paths need independent evidence;
+        // neither this marker nor filesort establishes disk work or a memory-limit cause.
         detail.push("using temporary table");
     }
     if !detail.is_empty() {
@@ -206,6 +207,14 @@ fn wrapper(key: &str, map: &Map<String, Value>, cx: &Context, id: &mut u32) -> P
     node.subtree_cost = sort_cost + node.children.iter().map(|c| c.subtree_cost).sum::<f64>();
     node.est_rows = node.children.last().map(|c| c.est_rows).unwrap_or(0.0);
     copy_node_facts(map, &mut node);
+    if temporary {
+        node.facts_mut().temporary_table = Some(match key {
+            "grouping_operation" => PlanTemporaryTableUse::Grouping,
+            "duplicates_removal" => PlanTemporaryTableUse::DuplicateRemoval,
+            "ordering_operation" => PlanTemporaryTableUse::Ordering,
+            _ => PlanTemporaryTableUse::Unknown,
+        });
+    }
     node
 }
 
@@ -237,7 +246,9 @@ fn union_result(map: &Map<String, Value>, cx: &Context, id: &mut u32) -> PlanNod
     let mut node = new_node(id, "Union", NodeKind::Other);
     if flag(map, "using_temporary_table") {
         node.detail = Some("using temporary table".into());
+        node.facts_mut().temporary_table = Some(PlanTemporaryTableUse::Materialization);
     }
+    node.facts_mut().filesort = map.get("using_filesort").and_then(Value::as_bool);
     node.children = map
         .get("query_specifications")
         .and_then(Value::as_array)
@@ -333,6 +344,14 @@ fn table_node(table: &Map<String, Value>, cx: &Context, id: &mut u32) -> PlanNod
     node.subtree_cost = own + children.iter().map(|c| c.subtree_cost).sum::<f64>();
     node.children = children;
     copy_node_facts(table, &mut node);
+    if table
+        .get("materialized_from_subquery")
+        .and_then(|value| value.get("query_block"))
+        .and_then(Value::as_object)
+        .is_some()
+    {
+        node.facts_mut().temporary_table = Some(PlanTemporaryTableUse::Materialization);
+    }
     if let Some(cost) = table.get("cost_info").and_then(Value::as_object) {
         for (k, v) in cost {
             node.props.insert(k.clone(), scalar_text(v));
@@ -365,6 +384,12 @@ pub fn unquote(condition: &str) -> String {
 pub(crate) fn copy_node_facts(map: &Map<String, Value>, node: &mut PlanNode) {
     copy_scalars(map, &mut node.props);
     let facts = node.facts_mut();
+    if let Some(value) = map.get("using_filesort").and_then(Value::as_bool) {
+        facts.filesort = Some(value);
+    }
+    if flag(map, "using_temporary_table") && facts.temporary_table.is_none() {
+        facts.temporary_table = Some(PlanTemporaryTableUse::Unknown);
+    }
     if let Some(value) = number_field(map, "rows_produced_per_join").and_then(culprit_core::plan_facts::nonnegative) {
         facts.rows_produced_per_join = Some(value);
     }
@@ -554,6 +579,8 @@ fn tokenize(sql: &str) -> Vec<String> {
     out
 }
 
+#[cfg(test)]
+mod temporary_tests;
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result, t};
 
 use crate::plan_json::{aliases, unquote};
+use culprit_core::plan_facts::PlanTemporaryTableUse;
 
 struct Line {
     depth: usize,
@@ -141,6 +142,18 @@ fn node_from(text: &str, names: &HashMap<String, (Option<String>, String)>, sche
     let (op, rest) = split_op(head);
     let mut node = blank(id, &op, kind_of(&op));
     node.props.insert("line".into(), head.to_string());
+    // These are native TREE operators, not SQL-text guesses or display-property inference.
+    // https://dev.mysql.com/blog-archive/mysql-explain-analyze/
+    node.facts_mut().temporary_table = match op.as_str() {
+        "Aggregate using temporary table" => Some(PlanTemporaryTableUse::Grouping),
+        "Temporary table with deduplication" => Some(PlanTemporaryTableUse::DuplicateRemoval),
+        value if value.starts_with("Materialize") => Some(PlanTemporaryTableUse::Materialization),
+        value if value.starts_with("Temporary table") => Some(PlanTemporaryTableUse::Unknown),
+        _ => None,
+    };
+    if node.kind == NodeKind::Sort {
+        node.facts_mut().filesort = Some(true);
+    }
 
     match op.as_str() {
         "Filter" => node.predicate = rest.map(|r| unquote(r.trim_start_matches(": ").trim())),

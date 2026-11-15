@@ -3322,6 +3322,7 @@
                 "conditions": [],
                 "conversions": [],
                 "expression_cache": false,
+                "filesort": false,
                 "possible_index_names": [],
                 "user_functions": []
               },
@@ -3672,6 +3673,7 @@
                 "conditions": [],
                 "conversions": [],
                 "expression_cache": false,
+                "filesort": true,
                 "possible_index_names": [],
                 "user_functions": []
               },
@@ -4436,6 +4438,7 @@
                     "conditions": [],
                     "conversions": [],
                     "expression_cache": false,
+                    "filesort": true,
                     "possible_index_names": [],
                     "user_functions": []
                   },

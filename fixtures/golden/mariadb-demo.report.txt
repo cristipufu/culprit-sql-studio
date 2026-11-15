@@ -467,10 +467,10 @@ brief:
 
 === plan 375c64398248650e
 insight temp-table-sort · low severity · impact no share stated
-  title: Groups 500K rows in an internal temporary table, then sorts them (filesort)
-  detail: The rows don't arrive in the order the GROUP BY / DISTINCT needs, so MariaDB builds a temporary table (on disk once it outgrows tmp_table_size) and sorts the result.
-  fix: An index whose leading columns match the GROUP BY may let MariaDB group in index order and reduce grouping work. An ORDER BY that differs from the grouping, especially an aggregate such as COUNT(*) DESC, can still need a temporary table and sort. Filter rows before grouping, or keep a pre-aggregated result, to reduce that work.
-  verify: Explain again: look for grouping in index order or fewer rows entering the temporary table. A temporary table and sort for a different ORDER BY can remain; compare on-disk temporary tables on new runs to check the spill itself.
+  title: Sorts 500K rows from an internal temporary result (filesort)
+  detail: The native plan identifies an internal temporary result whose purpose is unresolved. Missing or unrelated SQL cannot establish whether it serves grouping, duplicate removal, windowing or another operation. The native filesort is a separate sorting step. Its name does not establish disk I/O or the time spent sorting. A temporary-table strategy alone establishes neither storage placement, elapsed impact nor a safe memory setting.
+  fix: Inspect the selected query block to determine the temporary result’s purpose. Reduce unnecessary intermediate rows or columns only through a semantically equivalent query.
+  verify: Compare equivalent inputs and concurrency: intermediate rows, native temporary-work or sort measurements, latency and CPU. A remaining temporary table or filesort can be the correct plan. Digest totals alone do not identify this operator or execution.
 note: MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.
 shares: `Sort` (sum(orders.total) desc) and `Temporary table` have no cost of their own in the plan, so no share is given.
 

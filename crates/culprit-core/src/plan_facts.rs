@@ -150,9 +150,32 @@ pub enum ExecutionProtection {
     RolledBackTransaction,
 }
 
+/// A temporary intermediate result explicitly identified by the selected native plan. This records its
+/// operation, never storage placement, allocation size, spill duration or a memory-limit cause.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum PlanTemporaryTableUse {
+    Grouping,
+    DuplicateRemoval,
+    Ordering,
+    Materialization,
+    Unknown,
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct PlanNodeFacts {
+    /// A positive native temporary-table operation. None supplies no positive observation; Unknown preserves
+    /// an explicit temporary-table marker whose purpose is not established by its native wrapper.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub temporary_table: Option<PlanTemporaryTableUse>,
+    /// MySQL/MariaDB's native filesort strategy, independent of temporary-table use. A filesort can stay in
+    /// memory; this flag establishes neither disk I/O nor measured elapsed cost. Missing stays unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub filesort: Option<bool>,
     /// Separately qualified native access estimates and measurements. `PlanNode.rows_read` can contain an
     /// estimated fallback and cannot authorize comparisons requiring actual access provenance.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "access_rows::deserialize")]

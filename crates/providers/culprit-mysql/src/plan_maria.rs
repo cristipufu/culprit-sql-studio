@@ -7,6 +7,7 @@
 //! adds measured `r_*` members to every operation: loops, rows per loop, the share kept by the condition, time and
 //! pages. A running statement's `SHOW ANALYZE` has the same members, counted so far.
 
+use culprit_core::plan_facts::PlanTemporaryTableUse;
 use culprit_core::{Engine, NodeKind, NodeRuntime, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result, t};
 use serde_json::{Map, Value};
 
@@ -176,8 +177,16 @@ fn operations(map: &Map<String, Value>, cx: &Context, id: &mut u32, costed: bool
         match key.as_str() {
             "table" => out.push(table_node(inner, None, cx, id, costed)),
             "read_sorted_file" => out.extend(operations(inner, cx, id, costed)),
-            "filesort" => out.push(wrapper("Sort", NodeKind::Sort, inner, cx, id, costed)),
-            "temporary_table" => out.push(wrapper("Temporary table", NodeKind::Other, inner, cx, id, costed)),
+            "filesort" => {
+                let mut node = wrapper("Sort", NodeKind::Sort, inner, cx, id, costed);
+                node.facts_mut().filesort = Some(true);
+                out.push(node);
+            }
+            "temporary_table" => {
+                let mut node = wrapper("Temporary table", NodeKind::Other, inner, cx, id, costed);
+                node.facts_mut().temporary_table = Some(PlanTemporaryTableUse::Unknown);
+                out.push(node);
+            }
             "duplicates_removal" => out.push(wrapper("Distinct", NodeKind::Aggregate, inner, cx, id, costed)),
             "window_functions_computation" => out.push(wrapper("Window", NodeKind::Compute, inner, cx, id, costed)),
             _ => {}
@@ -402,6 +411,7 @@ fn table_node(
     if let Some(block) = table.get("materialized").and_then(|m| m.get("query_block")).and_then(Value::as_object) {
         let mut child = query_block(block, cx, id, costed);
         child.op = "Materialized subquery".into();
+        node.facts_mut().temporary_table = Some(PlanTemporaryTableUse::Materialization);
         children.push(child);
     }
     // Without optimizer costs (before MariaDB 11.0), rows examined across all loops stand in for cost.

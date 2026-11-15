@@ -180,7 +180,8 @@
                   "conversions": [],
                   "user_functions": [],
                   "columns_without_statistics": [],
-                  "possible_index_names": []
+                  "possible_index_names": [],
+                  "filesort": true
                 },
                 "children": [
                   {
@@ -213,7 +214,9 @@
                       "conversions": [],
                       "user_functions": [],
                       "columns_without_statistics": [],
-                      "possible_index_names": []
+                      "possible_index_names": [],
+                      "filesort": false,
+                      "temporary_table": "grouping"
                     },
                     "children": [
                       {
@@ -377,7 +380,8 @@
                   "conversions": [],
                   "user_functions": [],
                   "columns_without_statistics": [],
-                  "possible_index_names": []
+                  "possible_index_names": [],
+                  "filesort": true
                 },
                 "children": [
                   {
@@ -815,7 +819,8 @@
                   "conversions": [],
                   "user_functions": [],
                   "columns_without_statistics": [],
-                  "possible_index_names": []
+                  "possible_index_names": [],
+                  "filesort": true
                 },
                 "children": [
                   {
