@@ -418,6 +418,9 @@ impl ActivityEvidence {
     pub fn validate(rows: &[ActivityObservation]) -> Result<()> {
         ActivityIndex::new(rows).map(|_| ())
     }
+    pub fn validate_references<'a>(rows: impl IntoIterator<Item = &'a ActivityObservation>) -> Result<()> {
+        ActivityIndex::new(rows).map(|_| ())
+    }
     /// Follow previously observed blockers when current native lock details cannot establish their status.
     pub fn context_for(rows: &[ActivityObservation], roots: &BTreeSet<ActivityKey>) -> Result<BTreeSet<ActivityKey>> {
         let ActivityIndex { by_key, by_session } = ActivityIndex::new(rows)?;
@@ -475,7 +478,7 @@ struct ActivityIndex<'a> {
     by_session: BTreeMap<NativeActivityIdentity, Vec<&'a ActivityObservation>>,
 }
 impl<'a> ActivityIndex<'a> {
-    fn new(rows: &'a [ActivityObservation]) -> Result<Self> {
+    fn new(rows: impl IntoIterator<Item = &'a ActivityObservation>) -> Result<Self> {
         let mut by_key = BTreeMap::new();
         let mut by_session: BTreeMap<NativeActivityIdentity, Vec<&ActivityObservation>> = BTreeMap::new();
         let mut generations = BTreeMap::new();

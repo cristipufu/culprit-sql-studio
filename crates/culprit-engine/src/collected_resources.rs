@@ -16,6 +16,8 @@ mod tuning;
 pub use tuning::tuning;
 mod compilation;
 pub use compilation::compilation;
+mod maintenance;
+pub use maintenance::maintenance;
 mod request_memory;
 pub use request_memory::request_memory;
 mod session_memory;

@@ -9,6 +9,7 @@ mod cleanup;
 mod cohorts;
 mod compilation;
 mod fixture;
+mod maintenance;
 mod memory_failures;
 mod native_failures;
 mod page_waits;

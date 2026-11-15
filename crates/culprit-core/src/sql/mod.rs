@@ -9,6 +9,7 @@ use ts_rs::TS;
 mod defaults;
 mod inspect;
 mod lexer;
+mod maintenance;
 mod preview;
 mod procedure_parameters;
 mod relational_inputs;
@@ -27,6 +28,7 @@ pub use lexer::{
     dollar_tag, identifier_parts, line_end, quoted_end, skip_quoted_bytes, unquote_identifier,
 };
 pub(crate) use lexer::{balanced_parens, split_top_level_and, strip_outer_parens};
+pub use maintenance::maintenance_statement;
 pub use preview::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions, table_preview_sql};
 pub use procedure_parameters::mssql_procedure_table_parameters;
 pub use relational_inputs::{mssql_declared_table_variable, mssql_direct_table_parameter};

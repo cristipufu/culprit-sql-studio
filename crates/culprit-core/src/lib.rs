@@ -33,6 +33,7 @@ pub mod io_accounting;
 #[cfg(test)]
 mod label_tests;
 pub mod limits;
+pub mod maintenance;
 pub mod measurement;
 pub mod memory_participants;
 pub mod model;
@@ -115,6 +116,7 @@ pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
 pub use io_accounting::{FileIoContext, IoAccounting};
+pub use maintenance::*;
 pub use measurement::*;
 pub use memory_participants::{MemoryParticipantExplanation, MemoryParticipantsReport};
 pub use model::*;

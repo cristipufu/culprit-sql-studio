@@ -10,6 +10,7 @@ pub mod compilation;
 pub mod dashboard;
 pub(crate) mod digest;
 pub mod drift;
+pub mod maintenance;
 pub mod memory_failures;
 mod memory_participants;
 pub mod native_failures;

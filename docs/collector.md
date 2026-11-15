@@ -173,6 +173,8 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis compilation --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis maintenance --with-recovery-payloads --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis cleanup --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis cached-plans --json
@@ -307,6 +309,16 @@ retained authenticated policy evidence; previews, truncated SQL, matching query 
 cannot supply it. Standalone compilation-counter capture does not fetch statement definitions, so policy remains
 unavailable there. An explicit policy is not proof of every individual compilation cause, harmful plan reuse,
 concurrent compilers or current memory pressure.
+
+`maintenance` explains current maintenance statements and their participation in blocking from an authenticated
+activity capture. It reuses captured statements, request/session generations and native wait-owner relationships;
+it does not query operation progress or locks again. Complete SQL identifies the operation, while missing SQL stays
+unclassified. The report distinguishes a maintenance request waiting on another owner from a session running
+maintenance that blocks captured requests. A session-level blocker does not establish which request acquired its
+locks, especially when several requests share that session. Raw statement text stays in the original evidence;
+the report carries references, explanations and explicit gaps. Full text outside the warehouse preview requires
+the same bounded recovery option. This mode does not establish operation-specific resource consumption, an object
+target or completed/paused/failed maintenance history from a current statement alone.
 
 `cleanup` explains retained cleanup horizons and version-store observations through the scan's pure view.
 PostgreSQL `cleanup` captures retain sessions, prepared transactions and replication slots, their separate data

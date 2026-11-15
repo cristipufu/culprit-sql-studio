@@ -45,26 +45,12 @@ fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_sel
         panic!()
     };
     assert_eq!(args.analysis.families().len(), 4);
-    let parsed = crate::Cli::try_parse_from([
-        "culprit",
-        "collect",
-        "evidence",
-        "analyze",
-        "--config",
-        "archive.json",
-        "--range",
-        &range,
-        "--analysis",
-        "cached-plans",
-        "--json",
-    ])
-    .unwrap();
-    let crate::Command::Collect(crate::collect_cmd::CollectCommand::Evidence(EvidenceCommand::Analyze(args))) =
-        parsed.command
-    else {
-        panic!()
-    };
-    assert_eq!(args.analysis.families(), [EvidenceFamily::ObjectDefinitions]);
+    for (name, family) in
+        [("cached-plans", EvidenceFamily::ObjectDefinitions), ("maintenance", EvidenceFamily::ActivityObservations)]
+    {
+        let args = analyze_args(name, &["--json"]);
+        assert_eq!(args.analysis.families(), [family]);
+    }
     for name in [
         "memory-failures",
         "native-failures",
@@ -494,6 +480,7 @@ async fn group_selection_on_non_query_analysis_stops_before_opening_configuratio
         "runtime-distributions",
         "cached-plans",
         "compilation",
+        "maintenance",
         "cleanup",
         "tuning",
     ] {

@@ -139,12 +139,14 @@ enum Analysis {
     RuntimeDistributions,
     CachedPlans,
     Compilation,
+    Maintenance,
     Cleanup,
     Tuning,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
         match self {
+            Self::Maintenance => vec![EvidenceFamily::ActivityObservations],
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
             Self::Queries => vec![
@@ -261,6 +263,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::Compilation) => {
             let analysis = culprit_engine::collected_resources::compilation(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::compilation(&analysis.report))?;
+        }
+        Some(Analysis::Maintenance) => {
+            let analysis = culprit_engine::collected_resources::maintenance(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::maintenance(&analysis.report))?;
         }
         Some(Analysis::Tuning) => {
             let analysis = culprit_engine::collected_resources::tuning(&capture)?;
