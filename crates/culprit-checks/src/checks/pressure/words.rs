@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::waits::snapshot_with;
-use culprit_core::{GrantStat, OpenTransaction, ResourceSample, Setting, Signal, SignalScope, WaitStat};
+use culprit_core::{OpenTransaction, ResourceSample, Setting, Signal, SignalScope, WaitStat};
 
 /// Every word a finding shows, a part a line, with what it concludes beside: what these tests pin.
 pub(crate) fn words(f: &Finding) -> String {
@@ -180,37 +180,28 @@ fn tier_limit_words() {
     pin(vec![("cpu", at(0)), ("data-io", at(1)), ("log-write", at(2)), ("workers", at(3))], TIER_LIMIT);
 }
 
-fn grant(hash: &str) -> GrantStat {
-    GrantStat {
-        query_hash: hash.into(),
-        executions: 40.0,
-        avg_granted_kb: 2.0 * 1024.0 * 1024.0,
-        avg_used_kb: 40.0 * 1024.0,
-        max_granted_kb: 3.0 * 1024.0 * 1024.0,
-        last_granted_kb: None,
-        last_used_kb: None,
-    }
-}
-
 #[test]
 fn memory_grant_words() {
-    let mut running = with_signals(Engine::Mssql, vec![sig("memory-grants-pending", 6.0)]);
-    let q = &mut running.workload.as_mut().unwrap().queries[0];
-    q.waits =
-        vec![WaitStat { category: "Memory".into(), wait_type: None, wait_ms: q.total_time_ms * 0.1, tasks: None }];
-    let hash = q.query_hash.clone().unwrap();
-    running.pressure.as_mut().unwrap().grants = vec![grant(&hash)];
-    let mut gone = with_signals(Engine::Mssql, vec![]);
-    stopped(&mut gone);
-    gone.pressure.as_mut().unwrap().grants = vec![grant(&hash)];
-    let mut unknown = with_signals(Engine::Mssql, vec![]);
-    unknown.pressure.as_mut().unwrap().grants = vec![grant("0xFFFF")];
+    let mut named = with_signals(Engine::Mssql, vec![sig("memory-grants-pending", 6.0)]);
+    crate::statement_grant_fixture::install(&mut named);
+    let mut last_balanced = named.clone();
+    let row = &mut last_balanced.pressure.as_mut().unwrap().grants[0].observations[0];
+    row.last_grant_kibibytes = Some("102400".into());
+    row.last_used_kibibytes = Some("61440".into());
+    row.min_grant_kibibytes = Some("102400".into());
+    let mut unknown = named.clone();
+    let read = &mut unknown.pressure.as_mut().unwrap().grants[0];
+    read.description.partition = culprit_core::telemetry::SourcePartition::InstanceLocal { member: None, epoch: None };
+    read.observations[0].statement = culprit_core::telemetry::DefinitionPayload::Unavailable {
+        reason: culprit_core::telemetry::PayloadUnavailable::Restricted,
+    };
+    let words = |snapshot: &Snapshot| {
+        let finding = memory_grant(snapshot).remove(0);
+        // Exact native identity and read isolation are asserted in scope_tests; these pins isolate user wording.
+        words(&finding).replacen(&finding.id, "memory-grant:<native-entry>", 1)
+    };
     pin(
-        vec![
-            ("running", said(&MemoryGrantCheck, &running)),
-            ("stopped", said(&MemoryGrantCheck, &gone)),
-            ("unknown", said(&MemoryGrantCheck, &unknown)),
-        ],
+        vec![("named", words(&named)), ("last-balanced", words(&last_balanced)), ("unknown-owner", words(&unknown))],
         MEMORY_GRANT,
     );
 }
@@ -495,7 +486,7 @@ fn held_cleanup_words() {
 // What each scenario said before its words moved to locales/en.json, which they must still say.
 const INFOS: &[(&str, &str)] = &[(
     "infos",
-    r#"memory-grant: Queries that reserve far more memory than they use: Statements whose memory grant (reserved before they run, for sorts and hashes) is many times what they use, so other queries queue for memory.
+    r#"memory-grant: Recorded memory grant/use imbalance: Native cache entries whose recorded mean grant is large relative to mean use. These lifetime counters do not identify a current pressure cause.
 memory-queue: Queries waiting in line for memory: Waiting for memory takes a real amount of time (a minute an hour or more), or queries in this database were queueing for a memory grant when the scan ran.
 compile-pressure: Instance compilation context: Shared compilation counters provide context for this database's literal query families; measured Query Store costs establish its compilation impact.
 compile-queue: Compiler admission: Requests in this database delayed by compiler admission, with recent per-query compile-memory evidence where available.
@@ -628,46 +619,77 @@ verify: Re-scan: worker threads should stay under 95% for most of the time (the 
 ];
 const MEMORY_GRANT: &[(&str, &str)] = &[
     (
-        "running",
-        r#"memory-grant:7 · High · High · OptionalImprovement · score 45.00
-title: A read from customers reserves 2.0 GB of memory per run and uses 40.0 MB
-summary: Before each run SQL Server sets aside 2.0 GB to sort and hash, sized by how many rows it expects; runs use 40.0 MB (2%). While a run holds memory it doesn't use, other queries can queue for it (RESOURCE_SEMAPHORE). It ran 40 times since its plan was cached; the largest grant was 3.0 GB.
-impact: 2.0 GB reserved, 40.0 MB used
-metric: Reserved per run
-metric: Used per run
-metric: Runs
-fix: Fix the row estimate that sizes the grant: refresh statistics on the tables it reads and look in its plan for estimates far above actual rows. On SQL Server 2019+ (compatibility level 150+) memory grant feedback shrinks repeated grants by itself. As a stopgap, cap the grant on this statement.
-sql: -- Stopgap, appended to the statement: limit its grant to 5% of query memory
-OPTION (MAX_GRANT_PERCENT = 5);
-verify: Re-scan: memory reserved per run should be close to memory used."#,
+        "named",
+        r#"memory-grant:<native-entry> · Low · High · Information · score 8.00
+title: Cached grant history for SELECT value FROM dbo.grant_input
+summary: This retained cache entry records mean granted memory of 2.0 GB and mean used memory of 40.0 MB; recorded executions: 40. These totals record a large gap between mean grant and mean use. They do not establish the cause of a memory wait. Last-grant and last-use counters describe a retained latest execution; they do not establish current pressure or verify recovery.
+impact: Recorded cache-entry grant/use imbalance
+metric: Recorded mean grant
+metric: Recorded mean use
+metric: Recorded executions: 40
+metric: Native total grants: 83886080 KiB
+metric: Native total use: 1638400 KiB
+metric: Native last grant: 2097152 KiB
+metric: Native last use: 40960 KiB
+metric: Native minimum grant: 1048576 KiB
+metric: Native minimum use: 10240 KiB
+metric: Native maximum grant: 3145728 KiB
+metric: Native maximum use: 81920 KiB
+fix: During the symptom, capture waiting requests and simultaneous grant holders. After establishing identity, compare representative actual plans, parameters, estimates, grant use and spills before choosing a remedy. Confirm feedback eligibility and behavior before relying on it; lifetime averages alone justify no grant cap.
+verify: Under representative parameters and concurrency, compare grant use, waits, spills and execution time for the same native entry or a qualified successor. A balanced last execution, reset, eviction or missing row alone does not prove recovery.
+caveat: Cache counters cover their own entry lifetime, not concurrent holdings or current pressure. Separate reads can overlap and are not added together.
+caveat: A matching query hash does not identify a current request, execution group or pressure cause. Cache-entry identity does not establish application ownership.
+caveat: Minimum and maximum grant/use counters may describe different executions; they are not combined into a synthetic run.
+caveat: Collection was partial. Retained positive measurements do not establish complete cache or workload coverage."#,
     ),
     (
-        "stopped",
-        r#"memory-grant:7 · Medium · High · OptionalImprovement · score 22.00
-title: A read from customers reserved 2.0 GB of memory per run and used 40.0 MB
-summary: Before each run SQL Server sets aside 2.0 GB to sort and hash, sized by how many rows it expects; runs use 40.0 MB (2%). While a run holds memory it doesn't use, other queries can queue for it (RESOURCE_SEMAPHORE). It ran 40 times since its plan was cached; the largest grant was 3.0 GB.
-impact: 2.0 GB reserved, 40.0 MB used
-metric: Reserved per run
-metric: Used per run
-metric: Runs
-fix: Fix the row estimate that sizes the grant: refresh statistics on the tables it reads and look in its plan for estimates far above actual rows. On SQL Server 2019+ (compatibility level 150+) memory grant feedback shrinks repeated grants by itself. As a stopgap, cap the grant on this statement.
-sql: -- Stopgap, appended to the statement: limit its grant to 5% of query memory
-OPTION (MAX_GRANT_PERCENT = 5);
-verify: Re-scan: memory reserved per run should be close to memory used."#,
+        "last-balanced",
+        r#"memory-grant:<native-entry> · Low · High · Information · score 8.00
+title: Cached grant history for SELECT value FROM dbo.grant_input
+summary: This retained cache entry records mean granted memory of 2.0 GB and mean used memory of 40.0 MB; recorded executions: 40. These totals record a large gap between mean grant and mean use. They do not establish the cause of a memory wait. Last-grant and last-use counters describe a retained latest execution; they do not establish current pressure or verify recovery.
+impact: Recorded cache-entry grant/use imbalance
+metric: Recorded mean grant
+metric: Recorded mean use
+metric: Recorded executions: 40
+metric: Native total grants: 83886080 KiB
+metric: Native total use: 1638400 KiB
+metric: Native last grant: 102400 KiB
+metric: Native last use: 61440 KiB
+metric: Native minimum grant: 102400 KiB
+metric: Native minimum use: 10240 KiB
+metric: Native maximum grant: 3145728 KiB
+metric: Native maximum use: 81920 KiB
+fix: During the symptom, capture waiting requests and simultaneous grant holders. After establishing identity, compare representative actual plans, parameters, estimates, grant use and spills before choosing a remedy. Confirm feedback eligibility and behavior before relying on it; lifetime averages alone justify no grant cap.
+verify: Under representative parameters and concurrency, compare grant use, waits, spills and execution time for the same native entry or a qualified successor. A balanced last execution, reset, eviction or missing row alone does not prove recovery.
+caveat: Cache counters cover their own entry lifetime, not concurrent holdings or current pressure. Separate reads can overlap and are not added together.
+caveat: A matching query hash does not identify a current request, execution group or pressure cause. Cache-entry identity does not establish application ownership.
+caveat: Minimum and maximum grant/use counters may describe different executions; they are not combined into a synthetic run.
+caveat: Collection was partial. Retained positive measurements do not establish complete cache or workload coverage."#,
     ),
     (
-        "unknown",
-        r#"memory-grant:0xFFFF · Medium · High · OptionalImprovement · score 22.00
-title: A query reserves 2.0 GB of memory per run and uses 40.0 MB
-summary: Before each run SQL Server sets aside 2.0 GB to sort and hash, sized by how many rows it expects; runs use 40.0 MB (2%). While a run holds memory it doesn't use, other queries can queue for it (RESOURCE_SEMAPHORE). It ran 40 times since its plan was cached; the largest grant was 3.0 GB.
-impact: 2.0 GB reserved, 40.0 MB used
-metric: Reserved per run
-metric: Used per run
-metric: Runs
-fix: Fix the row estimate that sizes the grant: refresh statistics on the tables it reads and look in its plan for estimates far above actual rows. On SQL Server 2019+ (compatibility level 150+) memory grant feedback shrinks repeated grants by itself. As a stopgap, cap the grant on this statement.
-sql: -- Stopgap, appended to the statement: limit its grant to 5% of query memory
-OPTION (MAX_GRANT_PERCENT = 5);
-verify: Re-scan: memory reserved per run should be close to memory used."#,
+        "unknown-owner",
+        r#"memory-grant:<native-entry> · Low · High · Information · score 8.00
+title: Cached grant history without statement text
+summary: This retained cache entry records mean granted memory of 2.0 GB and mean used memory of 40.0 MB; recorded executions: 40. These totals record a large gap between mean grant and mean use. They do not establish the cause of a memory wait. Last-grant and last-use counters describe a retained latest execution; they do not establish current pressure or verify recovery.
+impact: Recorded cache-entry grant/use imbalance
+metric: Recorded mean grant
+metric: Recorded mean use
+metric: Recorded executions: 40
+metric: Native total grants: 83886080 KiB
+metric: Native total use: 1638400 KiB
+metric: Native last grant: 2097152 KiB
+metric: Native last use: 40960 KiB
+metric: Native minimum grant: 1048576 KiB
+metric: Native minimum use: 10240 KiB
+metric: Native maximum grant: 3145728 KiB
+metric: Native maximum use: 81920 KiB
+fix: During the symptom, capture waiting requests and simultaneous grant holders. After establishing identity, compare representative actual plans, parameters, estimates, grant use and spills before choosing a remedy. Confirm feedback eligibility and behavior before relying on it; lifetime averages alone justify no grant cap.
+verify: Under representative parameters and concurrency, compare grant use, waits, spills and execution time for the same native entry or a qualified successor. A balanced last execution, reset, eviction or missing row alone does not prove recovery.
+caveat: Cache counters cover their own entry lifetime, not concurrent holdings or current pressure. Separate reads can overlap and are not added together.
+caveat: A matching query hash does not identify a current request, execution group or pressure cause. Cache-entry identity does not establish application ownership.
+caveat: Minimum and maximum grant/use counters may describe different executions; they are not combined into a synthetic run.
+caveat: The native member or process generation is unknown. These observations remain bound to their original read.
+caveat: Collection was partial. Retained positive measurements do not establish complete cache or workload coverage."#,
     ),
 ];
 const NETWORK_WAIT: &[(&str, &str)] = &[
@@ -763,10 +785,10 @@ const MEMORY_QUEUE: &[(&str, &str)] = &[
         "one-pending",
         r#"memory-queue:server · Low · Low · OptionalImprovement · score 8.00
 title: 1 query in this database was waiting for a memory grant when the scan ran
-summary: When the scan ran, 1 query was waiting for a grant before it could start. A query needs its memory grant to sort or hash before it starts; when the pool is spoken for, the rest wait. The usual cause is a few queries that reserve far more than they use.
+summary: When the scan ran, 1 query was waiting for a grant before it could start. A query can wait when available query memory cannot satisfy its grant request. Wait totals and pending-request counts alone do not identify a holder, oversized grant or root cause.
 impact: 1 waiting
 metric: Waiting now
-fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
+fix: During the queue, capture waiting requests and simultaneous holders, their granted/used memory and native source owner. Check concurrency, grant sizing and the applicable memory limit before choosing a change; cached averages alone identify no holder or cause.
 verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant.
 caveat: Seen once, when the scan ran, with nothing on record before it: sample Where time goes → Right now a few times before acting on it."#,
     ),
@@ -774,10 +796,10 @@ caveat: Seen once, when the scan ran, with nothing on record before it: sample W
         "pending",
         r#"memory-queue:server · Medium · Low · OptionalImprovement · score 22.00
 title: 6 queries in this database were waiting for a memory grant when the scan ran
-summary: When the scan ran, 6 queries were waiting for a grant before they could start. A query needs its memory grant to sort or hash before it starts; when the pool is spoken for, the rest wait. The usual cause is a few queries that reserve far more than they use.
+summary: When the scan ran, 6 queries were waiting for a grant before they could start. A query can wait when available query memory cannot satisfy its grant request. Wait totals and pending-request counts alone do not identify a holder, oversized grant or root cause.
 impact: 6 waiting
 metric: Waiting now
-fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
+fix: During the queue, capture waiting requests and simultaneous holders, their granted/used memory and native source owner. Check concurrency, grant sizing and the applicable memory limit before choosing a change; cached averages alone identify no holder or cause.
 verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant.
 caveat: Seen once, when the scan ran, with nothing on record before it: sample Where time goes → Right now a few times before acting on it."#,
     ),
@@ -785,10 +807,10 @@ caveat: Seen once, when the scan ran, with nothing on record before it: sample W
         "grant-history",
         r#"memory-queue:server · Medium · Medium · OptionalImprovement · score 22.00
 title: Queries waited 36 h for memory grants since SQL Server started 3 days ago
-summary: Since SQL Server started 3 days ago, this database's queries waited 36 h for memory grants (RESOURCE_SEMAPHORE), about 30 min an hour on average; when isn't recorded. A query needs its memory grant to sort or hash before it starts; when the pool is spoken for, the rest wait. The usual cause is a few queries that reserve far more than they use.
+summary: Since SQL Server started 3 days ago, this database's queries waited 36 h for memory grants (RESOURCE_SEMAPHORE), about 30 min an hour on average; when isn't recorded. A query can wait when available query memory cannot satisfy its grant request. Wait totals and pending-request counts alone do not identify a holder, oversized grant or root cause.
 impact: 36 h grant waits
 metric: Grant waits since start
-fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
+fix: During the queue, capture waiting requests and simultaneous holders, their granted/used memory and native source owner. Check concurrency, grant sizing and the applicable memory limit before choosing a change; cached averages alone identify no holder or cause.
 verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
     (
@@ -799,19 +821,19 @@ summary: Waits for memory are 100% of all waiting in the last 5 hours, about 1 h
 impact: 100% of waits
 metric: Share of waits
 metric: Memory waits per hour
-fix: Sample Where time goes → Right now while it happens to see which wait it is. For grant waits (RESOURCE_SEMAPHORE), shrink the biggest over-sized grants (the memory-grant findings); for allocation waits (CMEMTHREAD), parameterize one-off statements so fewer compile, and keep parallelism in check.
+fix: Sample Where time goes → Right now while it happens and retain the native wait and participants. For RESOURCE_SEMAPHORE, compare simultaneous grant holders and waiters; for CMEMTHREAD, identify the contended memory object before choosing a compilation or parallelism change.
 verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
     (
         "shared",
         r#"memory-queue:server · Medium · High · OptionalImprovement · score 62.00
 title: 2 queries in this database were waiting for a memory grant when the scan ran
-summary: Waits for memory are 100% of all waiting in the time since SQL Server started 3 days ago, about 5 h an hour, across every database on the instance. They include memory grants and memory allocations inside the server; the totals don't say which. When the scan ran, 2 queries were waiting for a grant before they could start. A query needs its memory grant to sort or hash before it starts; when the pool is spoken for, the rest wait. The usual cause is a few queries that reserve far more than they use.
+summary: Waits for memory are 100% of all waiting in the time since SQL Server started 3 days ago, about 5 h an hour, across every database on the instance. They include memory grants and memory allocations inside the server; the totals don't say which. When the scan ran, 2 queries were waiting for a grant before they could start. A query can wait when available query memory cannot satisfy its grant request. Wait totals and pending-request counts alone do not identify a holder, oversized grant or root cause.
 impact: 100% of waits
 metric: Share of waits
 metric: Memory waits per hour
 metric: Waiting now
-fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
+fix: During the queue, capture waiting requests and simultaneous holders, their granted/used memory and native source owner. Check concurrency, grant sizing and the applicable memory limit before choosing a change; cached averages alone identify no holder or cause.
 verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
     (
@@ -822,7 +844,7 @@ summary: Waits for memory are 100% of all waiting in the time since SQL Server s
 impact: 100% of waits
 metric: Share of waits
 metric: Memory waits per hour
-fix: Sample Where time goes → Right now while it happens to see which wait it is. For grant waits (RESOURCE_SEMAPHORE), shrink the biggest over-sized grants (the memory-grant findings); for allocation waits (CMEMTHREAD), parameterize one-off statements so fewer compile, and keep parallelism in check.
+fix: Sample Where time goes → Right now while it happens and retain the native wait and participants. For RESOURCE_SEMAPHORE, compare simultaneous grant holders and waiters; for CMEMTHREAD, identify the contended memory object before choosing a compilation or parallelism change.
 verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
 ];

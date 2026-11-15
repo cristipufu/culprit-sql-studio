@@ -8,6 +8,7 @@ impl SnapshotRecipe for Indexes {
     const DATASET: SnapshotDataset = SnapshotDataset::Indexes;
     const NAME: &'static str = "index-state";
     const SOURCE: &'static Source = &crate::sources::INDEXES;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>> {
         Ok(Some(indexes::Layout {

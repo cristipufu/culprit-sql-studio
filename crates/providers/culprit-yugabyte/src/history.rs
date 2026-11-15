@@ -125,6 +125,7 @@ pub(crate) async fn collect(
             continue;
         }
         plans.entry(query).or_default().push(PlanVariant {
+            native_identity: None,
             id,
             executions: calls,
             total_time_ms: ms,

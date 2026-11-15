@@ -554,52 +554,48 @@ fn zero_waits_verify_only_the_category_actually_measured() {
 }
 
 #[test]
-fn zero_grants_verify_but_leaving_the_sample_or_cache_does_not() {
-    let mut s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
-    s.workload.as_mut().unwrap().queries.truncate(1);
-    let hash = "0x0123456789ABCDEF".to_string();
-    s.workload.as_mut().unwrap().queries[0].query_hash = Some(hash.clone());
-    s.pressure.get_or_insert_default().grants = vec![culprit_core::GrantStat {
-        query_hash: hash,
-        executions: 100.0,
-        avg_granted_kb: 100_000.0,
-        avg_used_kb: 1000.0,
-        max_granted_kb: 100_000.0,
-        last_granted_kb: Some(100_000.0),
-        last_used_kb: Some(1000.0),
-    }];
-    let before = culprit_checks::analyze(s.clone());
-    let finding = before.findings.iter().find(|f| f.check == "memory-grant").unwrap();
+fn cached_grant_changes_and_eviction_do_not_prove_current_pressure_recovery() {
+    let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+    crate::statement_grant_fixture::install(&mut snapshot);
+    let before = culprit_checks::analyze(snapshot.clone());
+    let finding = before.findings.iter().find(|finding| finding.check == "memory-grant").unwrap();
+    assert_eq!(finding.actionability, culprit_core::Actionability::Information);
+    assert!(finding.queries.is_empty());
     let previous = culprit_checks::digest(&before, None, 100, 0);
-    let mut recent_zero = s.clone();
-    let grant = &mut recent_zero.pressure.as_mut().unwrap().grants[0];
-    grant.last_granted_kb = Some(0.0);
-    grant.last_used_kb = Some(0.0);
-    let after_recent_zero = culprit_checks::analyze(recent_zero);
-    assert_eq!(
-        culprit_core::compare_reports(&before, &after_recent_zero, std::slice::from_ref(&finding.id)).findings[0]
-            .status,
-        culprit_core::VerifyStatus::Fixed,
-        "known zero latest grants override oversized historical averages"
-    );
-    let grant = &mut s.pressure.as_mut().unwrap().grants[0];
-    grant.avg_granted_kb = 0.0;
-    grant.avg_used_kb = 0.0;
-    grant.max_granted_kb = 0.0;
-    grant.last_granted_kb = Some(0.0);
-    grant.last_used_kb = Some(0.0);
-    let after = culprit_checks::analyze(s.clone());
     let verify = |after: &culprit_core::Report| {
         culprit_core::compare_reports(&before, after, std::slice::from_ref(&finding.id)).findings[0].status
     };
-    assert_eq!(verify(&after), culprit_core::VerifyStatus::Fixed);
-    assert!(
-        culprit_checks::digest_since(&after, &previous, 100, 0).since.unwrap().fixed.iter().any(|f| f.id == finding.id)
+    let row = &mut snapshot.pressure.as_mut().unwrap().grants[0].observations[0];
+    row.last_grant_kibibytes = Some("0".into());
+    row.last_used_kibibytes = Some("0".into());
+    row.min_grant_kibibytes = Some("0".into());
+    row.min_used_kibibytes = Some("0".into());
+    assert_eq!(
+        verify(&culprit_checks::analyze(snapshot.clone())),
+        culprit_core::VerifyStatus::StillPresent,
+        "one balanced last execution cannot erase native lifetime imbalance"
     );
-    s.pressure.as_mut().unwrap().grants[0].executions = 1.0;
-    assert_eq!(verify(&culprit_checks::analyze(s.clone())), culprit_core::VerifyStatus::Unknown);
-    s.pressure.as_mut().unwrap().grants.clear();
-    let after = culprit_checks::analyze(s);
+    let row = &mut snapshot.pressure.as_mut().unwrap().grants[0].observations[0];
+    row.total_grant_kibibytes = Some("0".into());
+    row.total_used_kibibytes = Some("0".into());
+    row.max_grant_kibibytes = Some("0".into());
+    row.max_used_kibibytes = Some("0".into());
+    let after = culprit_checks::analyze(snapshot.clone());
+    assert_eq!(
+        verify(&after),
+        culprit_core::VerifyStatus::Unknown,
+        "changed native lifetime totals need identity/reset qualification and contemporary pressure evidence"
+    );
+    assert!(
+        !culprit_checks::digest_since(&after, &previous, 100, 0)
+            .since
+            .unwrap()
+            .fixed
+            .iter()
+            .any(|entry| entry.id == finding.id)
+    );
+    snapshot.pressure.as_mut().unwrap().grants.clear();
+    let after = culprit_checks::analyze(snapshot);
     assert_eq!(verify(&after), culprit_core::VerifyStatus::Unknown);
     assert!(
         !culprit_checks::digest_since(&after, &previous, 100, 0)
@@ -607,7 +603,7 @@ fn zero_grants_verify_but_leaving_the_sample_or_cache_does_not() {
             .unwrap()
             .fixed
             .iter()
-            .any(|f| f.id == finding.id)
+            .any(|entry| entry.id == finding.id)
     );
 }
 
@@ -655,7 +651,6 @@ fn failed_statement_detail_sources_prevent_clean_assessments() {
         (QueryMeasure::Planning, source_id::QUERY_COSTS),
         (QueryMeasure::Jit, source_id::QUERY_COSTS),
         (QueryMeasure::LogBytes, source_id::QUERY_COSTS),
-        (QueryMeasure::Grants, source_id::GRANTS),
         (QueryMeasure::Histograms, source_id::HISTOGRAMS),
     ] {
         let mut s = snapshot();

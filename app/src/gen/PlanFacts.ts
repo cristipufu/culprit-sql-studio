@@ -4,9 +4,14 @@ import type { ExecutionProtection } from "./ExecutionProtection";
 import type { PlanChangedColumn } from "./PlanChangedColumn";
 import type { PlanConversion } from "./PlanConversion";
 import type { PlanSampleSource } from "./PlanSampleSource";
+import type { RetainedPlanProvenance } from "./RetainedPlanProvenance";
 import type { TriggerTiming } from "./TriggerTiming";
 
 export type PlanFacts = { 
+/**
+ * Retained native cache evidence. Read ownership is separate from the earlier execution's unknown population.
+ */
+retained?: RetainedPlanProvenance, 
 /**
  * Protection confirmed by the native provider for this measured execution. An imported or retained plan cannot
  * establish how Culprit executed it, and therefore leaves this unknown.

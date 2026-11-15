@@ -1,6 +1,8 @@
 use super::plan::is_measurement;
 use super::*;
 
+mod native_context;
+
 #[test]
 fn recorded_messages_and_capability_actions_do_not_retain_private_collector_details() {
     let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();

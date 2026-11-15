@@ -4,6 +4,12 @@ use culprit_core::telemetry::CollectionStop;
 
 pub(crate) fn row() -> Rec {
     Rec::of(&[
+        ("database_name", Val::Text("culprit_demo".into())),
+        ("engine_edition", Val::Int(3)),
+        ("updateability", Val::Text("READ_WRITE".into())),
+        ("native_identity_rows", Val::Int(0)),
+        ("incarnation", Val::Null),
+        ("physical_incarnation", Val::Null),
         ("window_clock", Val::Text("2020-01-01T07:00:00Z".into())),
         ("intervals_retained", Val::Int(1)),
         ("native_intervals", Val::Text("<intervals><interval id=\"1\" starts=\"2020-01-01T06:00:00Z\" ends=\"2020-01-01T07:00:00Z\"/></intervals>".into())),
@@ -16,6 +22,7 @@ pub(crate) fn row() -> Rec {
 
 pub(crate) fn layout_row() -> Rec {
     Rec::of(&[
+        ("engine_edition", Val::Int(3)),
         ("tempdb", Val::Int(0)),
         ("log_bytes", Val::Int(0)),
         ("waits", Val::Int(1)),
@@ -23,6 +30,18 @@ pub(crate) fn layout_row() -> Rec {
         ("replicas", Val::Int(0)),
         ("actual_state_desc", Val::Text("READ_WRITE".into())),
     ])
+}
+
+pub(crate) fn azure_row() -> Rec {
+    replace(
+        &row(),
+        &[
+            ("engine_edition", Val::Int(5)),
+            ("native_identity_rows", Val::Int(1)),
+            ("incarnation", Val::Text("logical-database-guid".into())),
+            ("physical_incarnation", Val::Text("physical-database-guid".into())),
+        ],
+    )
 }
 
 pub(crate) fn open_row(clock: &str, elapsed_seconds: f64) -> Rec {
@@ -80,7 +99,7 @@ fn no_native_intervals_is_not_an_invented_observation_period_or_measured_wait_ze
     let unsupported = replace(&original, &[("wait_stats_capture_mode_desc", Val::Null)]);
     assert_eq!(FrozenWindow::decode(&unsupported, 60, false).unwrap().capture, WaitCaptureState::Unavailable);
     assert!(FrozenWindow::decode(&unsupported, 60, true).is_err());
-    assert!(!metadata_sql(false, false).contains("o.wait_stats_capture_mode_desc"));
+    assert!(!metadata_sql(false, false, 3).contains("o.wait_stats_capture_mode_desc"));
 }
 
 #[test]
@@ -96,8 +115,8 @@ fn partial_interval_endpoint_and_hours_retain_native_precision_without_rounding_
         &[("window_end", Val::Text("2020-01-01T06:37:35Z".into())), ("window_hours", Val::Float(2255.0 / 3600.0))],
     );
     assert!(FrozenWindow::decode(&rounded_forward, 60, true).is_err());
-    assert!(metadata_sql(true, false).contains("DATEDIFF_BIG(nanosecond"));
-    assert!(!metadata_sql(true, false).contains("datetime2(0)"));
+    assert!(metadata_sql(true, false, 3).contains("DATEDIFF_BIG(nanosecond"));
+    assert!(!metadata_sql(true, false, 3).contains("datetime2(0)"));
 }
 
 #[test]
@@ -190,4 +209,44 @@ fn malformed_duplicated_or_overflowing_interval_membership_cannot_authorize_nati
         FrozenWindow::decode(&replace(&original, &[("native_intervals", Val::Text(xml))]), 60, true).err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::RowLimit);
     assert!(FrozenWindow::decode(&replace(&original, &[("window_hours", Val::Float(2.0))]), 60, true).is_err());
+}
+
+#[test]
+fn database_incarnation_physical_generation_and_role_are_independent_completion_guards() {
+    let original = azure_row();
+    for changes in [
+        vec![("database_name", Val::Text("another-database".into()))],
+        vec![("incarnation", Val::Text("recreated-logical-database".into()))],
+        vec![("physical_incarnation", Val::Text("moved-physical-database".into()))],
+        vec![("updateability", Val::Text("READ_ONLY".into()))],
+        vec![
+            ("engine_edition", Val::Int(8)),
+            ("native_identity_rows", Val::Int(0)),
+            ("incarnation", Val::Null),
+            ("physical_incarnation", Val::Null),
+        ],
+        vec![("native_identity_rows", Val::Int(0)), ("incarnation", Val::Null), ("physical_incarnation", Val::Null)],
+    ] {
+        let mut window = FrozenWindow::decode(&original, 60, true).unwrap();
+        assert_eq!(window.verify(&replace(&original, &changes)).unwrap(), WindowVerification::RuntimePopulationChanged);
+        assert!(!window.retained && window.end.is_none() && window.hours == 0.0);
+        assert_eq!(
+            window.database.incarnation.as_deref(),
+            Some("logical-database-guid"),
+            "the failed recheck cannot replace original provenance"
+        );
+    }
+}
+
+#[test]
+fn two_unknown_native_identities_preserve_history_without_fabricating_a_guid_or_asymmetric_completion() {
+    let unknown = replace(
+        &azure_row(),
+        &[("native_identity_rows", Val::Int(0)), ("incarnation", Val::Null), ("physical_incarnation", Val::Null)],
+    );
+    let mut window = FrozenWindow::decode(&unknown, 60, true).unwrap();
+    assert_eq!(window.verify(&unknown).unwrap(), WindowVerification::Unchanged);
+    assert!(window.retained && window.database.incarnation.is_none());
+    assert_eq!(window.verify(&azure_row()).unwrap(), WindowVerification::RuntimePopulationChanged);
+    assert!(!window.retained && window.end.is_none());
 }

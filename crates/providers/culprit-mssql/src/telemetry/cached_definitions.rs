@@ -10,6 +10,7 @@ pub(super) struct Layout {
 #[async_trait::async_trait]
 impl SnapshotRecipe for CachedDefinitions {
     type Layout = Layout;
+    const INSTANCE_LOCAL: bool = true;
     const DATASET: SnapshotDataset = SnapshotDataset::CachedDefinitions;
     const NAME: &'static str = "cached-definitions-state";
     const SOURCE: &'static Source = &crate::sources::PLAN_CACHE;

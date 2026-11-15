@@ -94,12 +94,34 @@ async fn unknown_native_qualifiers_remain_distinct_without_a_declared_cohort() {
 #[tokio::test]
 async fn authenticated_cohort_equality_authorizes_fragments_without_removing_raw_identity() {
     let (source, mut records) = query_cohort_evidence(QueryCohortCase::PlanVariation);
+    let expected_query = records
+        .iter()
+        .find_map(|record| match record {
+            TelemetryRecord::QueryDefinition(query) => Some(query.identity.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let expected_plans = records
+        .iter()
+        .filter_map(|record| match record {
+            TelemetryRecord::PlanDefinition(plan) => Some((plan.id.clone(), plan.identity.clone())),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
     for id in ["fragment-1", "fragment-2", "fragment-3"] {
         runtime(&mut records, id).key.native.qualifiers.insert("source-row-token".into(), id.into());
     }
     let fixture = Fixture::new(source, records).await;
     let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
-    assert_eq!(one(&analysis).plans.len(), 2);
+    let query = one(&analysis);
+    assert_eq!(query.plans.len(), 2);
+    assert_eq!(query.native_identity.as_ref(), Some(&expected_query));
+    assert_ne!(query.id, expected_query.query_id, "native selectors remain separate from scoped cohort IDs");
+    for variant in &query.plans {
+        assert_eq!(variant.native_identity.as_ref(), expected_plans.get(&variant.id));
+    }
+    let expected_attached = query.plan.as_ref().and(query.plan_id.as_ref()).and_then(|id| expected_plans.get(id));
+    assert_eq!(query.native_plan_identity.as_ref(), expected_attached);
     let [input] = analysis.analyses[0].query_inputs.as_slice() else { panic!() };
     assert!(input.references.plan.is_none(), "a multi-plan group has no single original plan reference");
     assert_eq!(input.measurements.len(), 3);

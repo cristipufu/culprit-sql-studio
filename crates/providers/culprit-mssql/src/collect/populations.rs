@@ -24,6 +24,24 @@ impl Workloads {
             .collect()
     }
 
+    pub(super) fn database_identity(
+        &self,
+        database: &str,
+        host: &str,
+        port: u16,
+    ) -> Result<culprit_core::DatabaseIdentity> {
+        let mut contexts = std::iter::once(&self.requested)
+            .chain(self.populations.iter().map(|(_, part)| part))
+            .filter_map(|part| part.database.as_ref());
+        let Some(context) = contexts.next() else {
+            return Ok(culprit_core::DatabaseIdentity::server(Engine::Mssql, database, host, port, None));
+        };
+        if context.database != database || contexts.any(|other| other != context) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        Ok(context.identity(host, port))
+    }
+
     pub(super) fn project(self, shared: Snapshot, options: &SnapshotOptions) -> Result<PopulationSnapshots> {
         retention::project(shared, self, options)
     }
@@ -92,6 +110,7 @@ impl WorkloadPart {
         verification: crate::query_store::window_sql::WindowVerification,
     ) {
         let Some(workload) = &mut self.workload else { return };
+        self.database = Some(window.database.clone());
         workload.window_start = window.start.clone();
         workload.window_end = window.end.clone();
         workload.window_hours = window.hours;

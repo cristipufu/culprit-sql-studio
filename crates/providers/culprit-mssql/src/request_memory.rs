@@ -10,7 +10,7 @@ use culprit_core::{Coverage, Result, telemetry::*};
 use std::sync::Arc;
 
 const MAX_ROWS: u32 = 200;
-const MAX_QUERIES: u32 = 5; // Initial context, columns, grants, guarded current SQL, final context.
+const MAX_QUERIES: u32 = 9; // Local owner3 +columns1 +grants1 +guarded SQL1 +local recheck3; Azure needs6.
 
 pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
     CollectionBudget {
@@ -51,12 +51,19 @@ pub(crate) async fn collect(
         }
     }
 }
-async fn staged<R: NativeRead>(reader: &mut ActivityReader<R>) -> Result<crate::activity::memory::MemoryCapture> {
+async fn staged<R: NativeRead>(reader: &mut ActivityReader<R>) -> Result<(RequestMemorySnapshot, bool)> {
     let captured = reader.capture_memory().await?;
-    if !reader.verify_memory_context(&captured.context).await? {
-        return Err(CollectionStop::SourceChanged.error());
+    let context = reader.verify_memory_context(&captured.owner).await?;
+    let snapshot = RequestMemorySnapshot {
+        context,
+        source: sources::CURRENT_REQUEST_MEMORY.name.into(),
+        observed_at: captured.context.at,
+        observations: captured.observations,
+    };
+    if !snapshot.is_valid() {
+        return Err(crate::read::invalid_data());
     }
-    Ok(captured)
+    Ok((snapshot, captured.complete_scope))
 }
 async fn collect_from<R: NativeRead>(reader: &mut ActivityReader<R>) -> (Option<RequestMemorySnapshot>, Coverage) {
     let result = staged(reader).await;
@@ -66,21 +73,22 @@ async fn collect_from<R: NativeRead>(reader: &mut ActivityReader<R>) -> (Option<
         result
     };
     let mut coverage = Coverage::default();
-    let (result, complete_scope, observed_at) = match result {
-        Ok(captured) => (Ok(captured.observations), captured.complete_scope, Some(captured.context.at)),
-        Err(error) => (Err(error), true, None),
-    };
-    let rows = coverage.read_rows(&sources::CURRENT_REQUEST_MEMORY, result);
-    if !complete_scope {
-        coverage
-            .partial(&sources::CURRENT_REQUEST_MEMORY, culprit_core::message!("provider.mssql.request_memory.partial"));
+    match result {
+        Ok((snapshot, complete_scope)) => {
+            coverage.completed(&sources::CURRENT_REQUEST_MEMORY, snapshot.observations.len());
+            if !complete_scope {
+                coverage.partial(
+                    &sources::CURRENT_REQUEST_MEMORY,
+                    culprit_core::message!("provider.mssql.request_memory.partial"),
+                );
+            }
+            (Some(snapshot), coverage)
+        }
+        Err(error) => {
+            coverage.source_failed(&sources::CURRENT_REQUEST_MEMORY, &error);
+            (None, coverage)
+        }
     }
-    let snapshot = rows.zip(observed_at).map(|(observations, observed_at)| RequestMemorySnapshot {
-        source: sources::CURRENT_REQUEST_MEMORY.name.into(),
-        observed_at,
-        observations,
-    });
-    (snapshot, coverage)
 }
 
 #[cfg(test)]

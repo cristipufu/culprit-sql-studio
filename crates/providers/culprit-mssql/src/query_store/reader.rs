@@ -29,6 +29,7 @@ pub(crate) struct Reader<R = ReadSession> {
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct NativeLayout {
+    edition: i64,
     tempdb: bool,
     log_bytes: bool,
     waits: bool,
@@ -38,6 +39,7 @@ struct NativeLayout {
 }
 #[derive(Clone, Copy)]
 struct RuntimeLayout {
+    edition: i64,
     tempdb: bool,
     log_bytes: bool,
     waits: bool,
@@ -60,6 +62,7 @@ impl NativeLayout {
                 )
             })?;
         Ok(Self {
+            edition: integer(row, "engine_edition")?,
             tempdb: flag("tempdb")?,
             log_bytes: flag("log_bytes")?,
             waits: super::window_sql::waits_supported(row)?,
@@ -172,7 +175,7 @@ impl<R: NativeRead> Reader<R> {
         let layout = self.runtime_layout().await?;
         let rows = self
             .read(
-                &super::window_sql::metadata_sql(layout.waits, false),
+                &super::window_sql::metadata_sql(layout.waits, false, layout.edition),
                 vec![Parameter::Integer(i64::from(window_minutes))],
                 1,
             )
@@ -185,7 +188,7 @@ impl<R: NativeRead> Reader<R> {
                 return Err(error);
             }
         };
-        if !window.retained {
+        if !window.retained || window.database.edition != layout.edition {
             return Err(self.source_changed());
         }
         self.window = Some(window.clone());
@@ -216,6 +219,7 @@ impl<R: NativeRead> Reader<R> {
             None => super::replicas::Population::Unpartitioned,
         };
         let layout = RuntimeLayout {
+            edition: native.edition,
             tempdb: native.tempdb,
             log_bytes: native.log_bytes,
             waits: native.waits,

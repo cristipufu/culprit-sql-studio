@@ -18,6 +18,7 @@ mod columns;
 mod compiler_gateways;
 mod conn;
 mod constraints;
+mod database_identity;
 pub mod deadlocks;
 mod foreign_keys;
 mod grants;
@@ -25,6 +26,7 @@ mod index_operations;
 mod indexes;
 mod instance;
 mod live;
+mod local_source;
 mod memory_clerks;
 mod memory_failures;
 mod missing_indexes;
@@ -267,8 +269,11 @@ impl Provider for MssqlProvider {
         definition.payload.text().map(plan_xml::parse).transpose()
     }
 
-    async fn last_actual_plan(&self, query_id: &str, plan_id: Option<&str>) -> Result<Plan> {
-        actual::last_actual_plan(&self.pool, query_id, plan_id).await
+    async fn last_actual_plan(
+        &self,
+        request: &culprit_core::telemetry::RetainedActualPlanRequest,
+    ) -> Result<culprit_core::telemetry::RetainedActualPlan> {
+        actual::last_actual_plan(&self.pool, &self.endpoint_host, self.endpoint_port, request).await
     }
 
     async fn query_progress(&self, session: &str, _with_plan: bool) -> Result<culprit_core::QueryProgress> {

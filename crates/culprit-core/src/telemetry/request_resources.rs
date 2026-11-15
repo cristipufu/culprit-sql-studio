@@ -11,6 +11,7 @@ pub const MAX_REQUEST_MEMORY_OBSERVATIONS: usize = 4096;
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct RequestMemorySnapshot {
+    pub context: NativeReadContext,
     pub source: String,
     pub observed_at: String,
     pub observations: Vec<ExecutionGrantObservation>,
@@ -19,12 +20,18 @@ pub struct RequestMemorySnapshot {
 impl RequestMemorySnapshot {
     pub fn is_valid(&self) -> bool {
         let Ok(at) = canonical_time(&self.observed_at) else { return false };
+        let Some(database) = self.context.target.database() else { return false };
         let mut keys = BTreeSet::new();
-        valid_key(&self.source)
+        self.context.is_valid()
+            && matches!(self.context.partition, SourcePartition::InstanceLocal { .. })
+            && ObservationBounds::new(&self.context.observed_from, &self.context.observed_until)
+                .is_some_and(|bounds| bounds.contains(&self.observed_at))
+            && valid_key(&self.source)
             && self.observations.len() <= MAX_REQUEST_MEMORY_OBSERVATIONS
             && self.observations.iter().all(|row| {
                 row.is_valid()
                     && row.source == self.source
+                    && row.fits_database_capture(&database.database)
                     && canonical_time(&row.observed_at).is_ok_and(|observed| observed == at)
                     && row.key().is_ok_and(|key| keys.insert(key))
             })

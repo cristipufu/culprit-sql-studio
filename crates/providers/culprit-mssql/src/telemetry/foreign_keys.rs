@@ -8,6 +8,7 @@ impl SnapshotRecipe for ForeignKeys {
     const DATASET: SnapshotDataset = SnapshotDataset::ForeignKeys;
     const NAME: &'static str = "foreign-key-state";
     const SOURCE: &'static Source = &crate::sources::FOREIGN_KEYS;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<()>> {
         Ok(Some(()))

@@ -2,7 +2,7 @@
 use super::IdentityDetail;
 
 #[derive(Clone, Copy)]
-pub(super) enum QueryPolicy {
+pub(crate) enum QueryPolicy {
     Activity,
     /// This diagnostic must not request execution workspace memory while investigating grant pressure.
     MemoryDiagnostic,
@@ -19,7 +19,7 @@ impl QueryPolicy {
 }
 
 /// Context and visibility are identical for the ordinary activity and explicit request-resource profiles.
-pub(super) fn frame_query(rows: &str, identity: IdentityDetail, policy: QueryPolicy) -> String {
+pub(crate) fn frame_query(rows: &str, identity: IdentityDetail, policy: QueryPolicy) -> String {
     format!("{FRAME_CLOCK}{}", frame_select(rows, identity, policy))
 }
 

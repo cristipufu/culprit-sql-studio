@@ -4,8 +4,8 @@
 
 use culprit_core::waits::category_key;
 use culprit_core::{
-    Category, CheckInfo, CleanupHolder, Confidence, Engine, Finding, Fix, GrantStat, Metric, Pressure, QueryStat,
-    Severity, SignalStatus, SignalUnit, Snapshot, SubjectKind, TransactionActivity, Unit, format,
+    Category, CheckInfo, CleanupHolder, Confidence, Engine, Finding, Fix, Metric, Pressure, QueryStat, Severity,
+    SignalStatus, SignalUnit, Snapshot, SubjectKind, TransactionActivity, Unit, format,
 };
 
 use culprit_core::{Check, key, t};
@@ -53,7 +53,6 @@ pub(crate) const CHECKS: &[&dyn Check] = &[
     &RowLockWaitsCheck,
 ];
 
-const MB: f64 = 1024.0;
 /// A minute of waiting an hour: below it, a share of waiting is a share of very little.
 const MINUTE_MS: f64 = 60_000.0;
 
@@ -148,19 +147,6 @@ fn capitalize(s: &str) -> String {
 /// and agent briefs, which must not name the connection. They only need to be stable within one connection's reports.
 fn server_key(_: &Snapshot) -> String {
     "server".to_string()
-}
-
-fn kb(value: f64) -> String {
-    format::bytes(value * 1024.0)
-}
-
-/// Cached grant history carries no execution-population identity. A matching hash cannot bind it to a scoped
-/// workload, even when the native catalog currently offers only that one population.
-fn query_for_unscoped_grant<'a>(snapshot: &'a Snapshot, hash: &str) -> Option<&'a QueryStat> {
-    if snapshot.workload.as_ref()?.population.is_some() {
-        return None;
-    }
-    app_queries(snapshot).find(|q| q.query_hash.as_deref().is_some_and(|h| h.eq_ignore_ascii_case(hash)))
 }
 
 /// A PostgreSQL size setting ("1GB", "512MB", "64kB", or a bare number of MB as `max_wal_size` reports it) in MB.

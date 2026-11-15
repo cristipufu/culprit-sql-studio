@@ -1,6 +1,9 @@
 //! The baseline persists native metadata before any optional SQL or owner investigation.
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions, database_context::DatabaseContext},
+    activity::{
+        ActivityReader, ActivityScope, IdentityDetail, ReadOptions,
+        database_context::{self, Context},
+    },
     conn::Pool,
     query_store::decode,
 };
@@ -94,7 +97,7 @@ impl TelemetrySource for ActivitySource {
 pub(crate) async fn capture<R: crate::read::NativeRead>(
     reader: &mut ActivityReader<R>,
 ) -> Result<(CollectionDescription, Vec<ActivityObservation>)> {
-    let before = AuthorityRead::admit(DatabaseContext::initial(reader).await)?;
+    let before = AuthorityRead::admit(database_context::initial(reader).await)?;
     let mut baseline = reader.observe_baseline().await?;
     // Activity DMVs describe the member actually connected, including documented readable replicas. This
     // eligibility is source-specific: no cache/history/memory/resource primary gate is changed here.
@@ -102,8 +105,8 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
         return Err(culprit_core::Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
     }
     let after = AuthorityRead::admit(match &before.context {
-        Some(context) => DatabaseContext::recheck(reader, context).await,
-        None => DatabaseContext::initial(reader).await,
+        Some(context) => database_context::recheck(reader, context).await,
+        None => database_context::initial(reader).await,
     })?;
     for context in [&before.context, &after.context].into_iter().flatten() {
         if !context.matches_frame(&baseline.frame.context) {
@@ -149,7 +152,7 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
     }
     let at = baseline.frame.context.at;
     let database_writable = baseline.frame.context.writable;
-    let member = before.context.as_ref().and_then(DatabaseContext::source_instance);
+    let member = before.context.as_ref().and_then(Context::source_instance);
     let partition = SourcePartition::InstanceLocal { member, epoch: context.epoch.clone() };
     let observations = export_observations(baseline.frame.records);
     let activity = ActivitySnapshotDescription {
@@ -179,11 +182,11 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
 /// A completed metadata authority failure cannot erase the independent native actor frame. Terminal
 /// ownership/budget failures still stop all follow-up work and require the enclosing source to close.
 struct AuthorityRead {
-    context: Option<DatabaseContext>,
+    context: Option<Context>,
     error_code: Option<ErrorCode>,
 }
 impl AuthorityRead {
-    fn admit(result: Result<DatabaseContext>) -> Result<Self> {
+    fn admit(result: Result<Context>) -> Result<Self> {
         match result {
             Ok(context) => Ok(Self { error_code: context.qualification_error, context: Some(context) }),
             Err(error) if crate::read::stops_remaining_reads(&error) => Err(error),

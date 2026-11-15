@@ -16,6 +16,7 @@ mod populations;
 mod request_memory;
 mod runtime_distributions;
 mod session_memory;
+mod statement_grants;
 mod statement_work;
 mod task_space;
 mod temporary_space;

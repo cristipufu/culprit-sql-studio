@@ -17,12 +17,14 @@ const MIN_NATIVE_MAJOR: i64 = 11;
 const NATIVE_EDITIONS: &[i64] = &[2, 3, 4, 5, 8];
 
 pub(crate) struct MemoryFrame {
+    pub owner: crate::local_source::Context,
     pub context: ActivityContext,
     pub complete_scope: bool,
     activity: ActivityFrame,
     grants: Vec<ExecutionGrantObservation>,
 }
 pub(crate) struct MemoryCapture {
+    pub owner: crate::local_source::Context,
     pub context: ActivityContext,
     pub complete_scope: bool,
     pub observations: Vec<ExecutionGrantObservation>,
@@ -62,17 +64,34 @@ impl<R: NativeRead> ActivityReader<R> {
         let mut frame = self.observe_memory().await?;
         self.enrich_memory(&mut frame).await?;
         let context = frame.context.clone();
+        let owner = frame.owner.clone();
         let complete_scope = frame.complete_scope;
-        Ok(MemoryCapture { context, complete_scope, observations: frame.into_observations()? })
+        Ok(MemoryCapture { context, owner, complete_scope, observations: frame.into_observations()? })
     }
     pub(crate) async fn observe_memory(&mut self) -> Result<MemoryFrame> {
         if self.observed || !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
             return Err(invalid_data());
         }
         self.observed = true;
-        let initial = self.memory_context().await?;
+        let (initial, native_context) = crate::local_source::read_initial(
+            &mut self.io,
+            &self.host,
+            self.port,
+            IdentityDetail::Endpoint,
+            crate::local_source::Detail::Authority,
+        )
+        .await?;
+        if !initial.database_wide {
+            return Err(ActivityContext::visibility_error(&native_context, &initial.activity)?);
+        }
         if matches!(self.options.identity, IdentityDetail::AzureDatabase) {
-            crate::read::require_primary(initial.writable)?;
+            if initial.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
+                return Err(culprit_core::Error::new(
+                    culprit_core::ErrorCode::Unsupported,
+                    culprit_core::t!("collection.azure_sql_only"),
+                ));
+            }
+            crate::read::require_primary(initial.activity.writable)?;
         }
         let layout = fields::Layout::read(&mut self.io).await?;
         let limit = (self.options.budget.max_snapshot_rows as usize).min(MAX_REQUEST_MEMORY_OBSERVATIONS);
@@ -86,7 +105,7 @@ impl<R: NativeRead> ActivityReader<R> {
             .await
             .map_err(ReadError::into_error)?;
         let context = self.decode_memory_context(native.first().ok_or_else(invalid_data)?)?;
-        if !same_owner(&initial, &context) {
+        if !initial.matches_frame(&context) {
             return Err(CollectionStop::SourceChanged.error());
         }
         if native.len() > limit {
@@ -113,9 +132,9 @@ impl<R: NativeRead> ActivityReader<R> {
         }
         let activity = ActivityFrame { context: context.clone(), records };
         ActivityEvidence::validate(&activity.observations())?;
-        let complete_scope =
-            grants.iter().all(|row| row.request_association == RequestGrantAssociation::GenerationChecked);
-        Ok(MemoryFrame { context, complete_scope, activity, grants })
+        let complete_scope = initial.is_qualified()
+            && grants.iter().all(|row| row.request_association == RequestGrantAssociation::GenerationChecked);
+        Ok(MemoryFrame { context, owner: initial, complete_scope, activity, grants })
     }
     pub(crate) async fn enrich_memory(&mut self, frame: &mut MemoryFrame) -> Result<ActivityDetailStatus> {
         let selected = frame.activity.keys();
@@ -129,17 +148,22 @@ impl<R: NativeRead> ActivityReader<R> {
         )
         .await
     }
-    pub(crate) async fn verify_memory_context(&mut self, initial: &ActivityContext) -> Result<bool> {
-        Ok(same_owner(initial, &self.memory_context().await?))
-    }
-    async fn memory_context(&mut self) -> Result<ActivityContext> {
-        let native = self
-            .io
-            .query(&sql::context(self.options.identity), vec![Parameter::Integer(1)], 1)
-            .await
-            .map_err(ReadError::into_error)?;
-        let [row] = native.as_slice() else { return Err(invalid_data()) };
-        self.decode_memory_context(row)
+    pub(crate) async fn verify_memory_context(
+        &mut self,
+        initial: &crate::local_source::Context,
+    ) -> Result<NativeReadContext> {
+        let (current, native_context) = crate::local_source::read_again(
+            &mut self.io,
+            &self.host,
+            self.port,
+            initial,
+            crate::local_source::Detail::Authority,
+        )
+        .await?;
+        if !current.database_wide {
+            return Err(ActivityContext::visibility_error(&native_context, &current.activity)?);
+        }
+        initial.completed(&current)
     }
     fn decode_memory_context(&self, row: &Rec) -> Result<ActivityContext> {
         if !NATIVE_EDITIONS.contains(&integer(row, "edition")?) || integer(row, "major")? < MIN_NATIVE_MAJOR {
@@ -152,9 +176,6 @@ impl<R: NativeRead> ActivityReader<R> {
     }
 }
 
-fn same_owner(initial: &ActivityContext, current: &ActivityContext) -> bool {
-    initial.same_source(current)
-}
 fn native_time(row: &Rec, name: &str) -> Result<Option<String>> {
     optional_text(row, name)?.map(|value| crate::sql_time::native_time(&value)).transpose()
 }

@@ -145,6 +145,9 @@ pub fn redact_plan(plan: &Plan) -> Plan {
     };
     {
         let f = &mut redacted.facts;
+        // Cache handles and current query references are private lookup proof, not shareable plan measurements.
+        // Clearing this optional proof preserves the typed measurements without fabricating native tokens.
+        f.retained = None;
         f.flavor = f.flavor.as_deref().map(|v| redact_strings(v, plan.engine));
         f.server_version = f.server_version.as_deref().map(|v| redact_strings(v, plan.engine));
         f.memory_grant_warning = f.memory_grant_warning.as_deref().map(|v| redact_strings(v, plan.engine));

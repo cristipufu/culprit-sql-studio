@@ -381,21 +381,6 @@ impl Signal {
     }
 }
 
-/// Memory a query reserves to sort and hash, against what it uses (SQL Server plan cache).
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
-#[ts(export)]
-pub struct GrantStat {
-    pub query_hash: String,
-    pub executions: f64,
-    pub avg_granted_kb: f64,
-    pub avg_used_kb: f64,
-    pub max_granted_kb: f64,
-    /// The most recent run's grant and use: memory grant feedback (SQL Server 2019+) shrinks a repeated grant, and the
-    /// averages over the plan's life still carry the early oversized ones. `None` when the engine doesn't say.
-    pub last_granted_kb: Option<f64>,
-    pub last_used_kb: Option<f64>,
-}
-
 /// What holds cleanup back: an open transaction in a session, or (PostgreSQL) a replication slot or a prepared
 /// transaction, which keep the VACUUM horizon where they started just as a session does.
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -492,7 +477,7 @@ pub struct Pressure {
     /// How long the "since startup" signals cover.
     pub uptime_hours: Option<f64>,
     pub signals: Vec<Signal>,
-    pub grants: Vec<GrantStat>,
+    pub grants: Vec<crate::telemetry::StatementGrantSnapshot>,
     pub oldest_transaction: Option<OpenTransaction>,
     /// Bounded native cleanup retainers and source visibility. Data and catalog horizons remain independent.
     #[serde(skip_serializing_if = "Option::is_none")]

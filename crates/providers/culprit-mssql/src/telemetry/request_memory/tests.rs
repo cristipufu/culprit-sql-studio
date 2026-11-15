@@ -37,6 +37,7 @@ fn source(final_context: crate::value::Rec) -> MemorySource<FakeRead> {
     );
     let reader = reader_with_identity(
         vec![
+            Ok(vec![crate::grants::tests::platform()]),
             Ok(vec![context()]),
             Ok(columns()),
             Ok(vec![row(), other]),
@@ -56,9 +57,9 @@ async fn explicit_request_memory_pages_export_the_same_typed_participants_and_gu
     assert_eq!(snapshot.dataset, SnapshotDataset::CurrentRequestMemory);
     assert_eq!(snapshot.records, 2);
     assert_eq!(snapshot.sources[0].state, culprit_core::SourceState::Collected);
-    assert_eq!(source.query_count(), 4);
+    assert_eq!(source.query_count(), 5);
     assert!(source.finish().await.is_err());
-    assert_eq!(source.query_count(), 4);
+    assert_eq!(source.query_count(), 5);
     let mut cursor = None;
     let mut states = Vec::new();
     loop {
@@ -88,9 +89,9 @@ async fn explicit_request_memory_pages_export_the_same_typed_participants_and_gu
     }
     assert_eq!(states, [ExecutionGrantState::Granted, ExecutionGrantState::Waiting]);
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
-    assert_eq!(source.query_count(), 5);
+    assert_eq!(source.query_count(), 6);
     assert!(source.finish().await.is_err());
-    assert_eq!(source.query_count(), 5);
+    assert_eq!(source.query_count(), 6);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
 
@@ -116,18 +117,25 @@ async fn changed_physical_identity_and_wrong_cursors_cannot_verify_or_reopen_a_c
     wrong.describe().await.unwrap();
     assert!(wrong.read_page(TelemetryStream::OperationalSamples, Some("1")).await.is_err());
     assert!(wrong.finish().await.is_err());
-    assert_eq!(wrong.query_count(), 4);
+    assert_eq!(wrong.query_count(), 5);
     assert_eq!(wrong.close().await, SourceShutdown::Quiescent);
 }
 
 #[tokio::test]
-async fn non_azure_database_profiles_are_rejected_before_grants_without_falling_back_to_instance_reads() {
-    let not_azure = replace(&context(), &[("edition", Val::Int(8)), ("major", Val::Int(12))]);
-    let reader = reader_with_identity(vec![Ok(vec![not_azure])], IdentityDetail::AzureDatabase);
+async fn non_azure_database_profiles_keep_their_original_refusal_before_grant_reading() {
+    let native = replace(&crate::instance::test_support::metadata(), &[("edition", Val::Int(8))]);
+    let reader = reader_with_identity(
+        vec![
+            Ok(vec![native]),
+            Ok(vec![crate::instance::test_support::epoch(100)]),
+            Ok(vec![crate::activity::database_context::tests::row(8)]),
+        ],
+        IdentityDetail::AzureDatabase,
+    );
     let mut source = MemorySource::from_reader(reader, &request()).unwrap();
     assert_eq!(source.describe().await.unwrap_err().code, culprit_core::ErrorCode::Unsupported);
-    assert_eq!(source.query_count(), 1);
+    assert_eq!(source.query_count(), 3);
     assert!(source.describe().await.is_err());
-    assert_eq!(source.query_count(), 1);
+    assert_eq!(source.query_count(), 3);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }

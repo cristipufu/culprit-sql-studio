@@ -27,6 +27,7 @@ pub enum ErrorDetail {
     Statement(crate::sql::StatementProblem),
     ActualPlanStatisticsUnavailable,
     ActualPlanExecutionPopulationUnverified,
+    ActualPlanIdentityUnverified,
     ConnectionSecurity,
     CollectionStopped(crate::telemetry::CollectionStop),
     Outbox(crate::telemetry::OutboxProblem),

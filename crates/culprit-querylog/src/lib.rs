@@ -318,6 +318,8 @@ impl Aggregator {
             .map(|(key, s)| {
                 let mean = s.total_ms / s.runs.max(1.0);
                 QueryStat {
+                    native_identity: None,
+                    native_plan_identity: None,
                     requests: (!s.requests.is_empty()).then(|| culprit_core::operations::RequestEvidence {
                         requests: s.requests.len() as u32,
                         repeated_requests: s.requests.values().filter(|v| **v >= 10).count() as u32,

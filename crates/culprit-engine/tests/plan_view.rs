@@ -4,10 +4,15 @@ mod inputs;
 use async_trait::async_trait;
 use culprit_core::{
     Engine, Error, ExplainMode, LiveState, Plan, Provider, Result, ResultSet, ServerInfo, Snapshot, SnapshotOptions,
+    telemetry::*,
 };
 
 #[derive(Clone)]
-struct PlanReader(Plan);
+struct PlanReader {
+    plan: Plan,
+    provenance: RetainedPlanProvenance,
+    native_plans: std::collections::BTreeMap<String, NativePlanIdentity>,
+}
 
 #[async_trait]
 impl Provider for PlanReader {
@@ -21,7 +26,7 @@ impl Provider for PlanReader {
         Err(Error::invalid("not needed"))
     }
     async fn explain(&self, _: &str, _: ExplainMode) -> Result<Plan> {
-        Ok(self.0.clone())
+        Ok(self.plan.clone())
     }
     async fn live(&self) -> Result<LiveState> {
         Err(Error::invalid("not needed"))
@@ -30,28 +35,110 @@ impl Provider for PlanReader {
         Err(Error::invalid("not needed"))
     }
     async fn stored_plan(&self, _: &str, _: &str) -> Result<Option<Plan>> {
-        Ok(Some(self.0.clone()))
+        Ok(Some(self.plan.clone()))
     }
-    async fn last_actual_plan(&self, _: &str, _: Option<&str>) -> Result<Plan> {
-        Ok(self.0.clone())
+    async fn last_actual_plan(&self, request: &RetainedActualPlanRequest) -> Result<RetainedActualPlan> {
+        request.validate()?;
+        let mut plan = self.plan.clone();
+        plan.kind = culprit_core::PlanKind::Actual;
+        assert_eq!(request.query_id, self.provenance.query.as_ref().unwrap().query_id);
+        let mut provenance = self.provenance.clone();
+        provenance.native_plan = request.plan_id.as_ref().and_then(|id| self.native_plans.get(id)).cloned();
+        Ok(RetainedActualPlan { plan, provenance })
     }
+
     async fn query_progress(&self, session: &str, _: bool) -> Result<culprit_core::QueryProgress> {
         let mut progress = culprit_core::QueryProgress::idle(session, Engine::Mssql, "2026-10-10T00:00:00Z".into());
         progress.running = true;
-        progress.plan = Some(self.0.clone());
+        progress.plan = Some(self.plan.clone());
         Ok(progress)
     }
+}
+
+fn known_retained_fixture() -> (inputs::Case, PlanReader, culprit_core::DatabaseIdentity) {
+    let mut case = inputs::cases().into_iter().find(|case| case.name == "slow-variant").unwrap();
+    let query = case.query.as_mut().unwrap();
+    let native_query = NativeQueryIdentity {
+        query_id: "7001".into(),
+        qualifiers: [
+            ("context_settings_id".into(), "5".into()),
+            ("object_id".into(), "0".into()),
+            ("query_hash".into(), "0123456789ABCDEF".into()),
+            ("initial_compile_at".into(), "2026-10-09T06:00:00.000000000Z".into()),
+        ]
+        .into(),
+    };
+    query.native_identity = Some(native_query.clone());
+    let mut native_plans = std::collections::BTreeMap::new();
+    for (index, variant) in query.plans.iter_mut().enumerate() {
+        let identity = NativePlanIdentity {
+            plan_id: (9001 + index).to_string(),
+            query: native_query.clone(),
+            qualifiers: [
+                ("plan_hash".into(), "0011223344556677".into()),
+                ("initial_compile_at".into(), "2026-10-09T06:00:00.000000000Z".into()),
+            ]
+            .into(),
+        };
+        variant.native_identity = Some(identity.clone());
+        native_plans.insert(identity.plan_id.clone(), identity);
+    }
+    query.native_plan_identity = query
+        .plans
+        .iter()
+        .find(|variant| Some(&variant.id) == query.plan_id.as_ref())
+        .and_then(|variant| variant.native_identity.clone());
+    let mut target =
+        culprit_core::DatabaseIdentity::server(Engine::Mssql, "culprit_demo", "replay.invalid", 1433, None);
+    target.incarnation = Some("owned-test-database-incarnation".into());
+    let provenance = RetainedPlanProvenance {
+        read: NativeReadContext {
+            target: target.clone().into(),
+            partition: SourcePartition::InstanceLocal {
+                member: Some(SharedResourceIdentity {
+                    engine: Engine::Mssql,
+                    kind: SharedResourceKind::Instance,
+                    namespace: NativeIdentity::new("owned-test-machine"),
+                    native: NativeIdentity::new("owned-test-instance"),
+                }),
+                epoch: Some("owned-test-process-epoch".into()),
+            },
+            observed_from: "2026-10-10T00:00:00Z".into(),
+            observed_until: "2026-10-10T00:00:01Z".into(),
+            database_writable: Some(true),
+        },
+        statement: CachedStatementContext {
+            identity: CachedStatementIdentity {
+                plan_handle: "0x0102".into(),
+                sql_handle: "0x0304".into(),
+                statement_start_bytes: 0,
+                statement_end_bytes: -1,
+                created_without_offset: "2026-10-09T06:00:00.003".into(),
+                plan_generation: "1".into(),
+            },
+            database_id: 7,
+            query_hash: None,
+            origin: StatementOrigin::Application,
+            monitoring_template_id: None,
+            source_text_bytes: None,
+            source_text_complete: false,
+        },
+        query: Some(native_query),
+        native_plan: None,
+    };
+    let reader = PlanReader { plan: case.plan.clone(), provenance, native_plans };
+    (case, reader, target)
 }
 
 #[tokio::test]
 async fn workspace_plan_endpoints_project_the_selected_variant_and_execution_state() {
     let home = std::env::temp_dir().join(format!("culprit-plan-view-{}", std::process::id()));
-    let mut case = inputs::cases().into_iter().find(|c| c.name == "slow-variant").unwrap();
+    let (mut case, mut reader, target) = known_retained_fixture();
     let query = case.query.take().unwrap();
     let query_id = query.id.clone();
     // Deliberately stale input: all endpoints must replace it with their own context.
     case.plan.view.as_mut().unwrap().cost_note = Some("obsolete".into());
-    let reader = PlanReader(case.plan.clone());
+    reader.plan = case.plan.clone();
     let ws = culprit_engine::Workspace::open_in(&home).with_provider(
         Engine::Mssql,
         culprit_engine::ProviderRegistration::new(
@@ -70,14 +157,13 @@ async fn workspace_plan_endpoints_project_the_selected_variant_and_execution_sta
     .unwrap();
     let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
     snapshot.connection = "replayed".into();
+    snapshot.identity = Some(target);
     snapshot.workload.as_mut().unwrap().queries = vec![query];
     let report = culprit_checks::analyze(snapshot);
     culprit_engine::reports::save(&ws.paths().reports_dir("replayed"), &report).unwrap();
     for id in ["slow", "fast", "unmeasured"] {
-        for plan in [
-            ws.query_plan_at("replayed", &query_id, Some(id), Some(&report.snapshot.id)).await.unwrap(),
-            ws.last_actual_plan_at("replayed", &query_id, Some(id), Some(&report.snapshot.id)).await.unwrap(),
-        ] {
+        {
+            let plan = ws.query_plan_at("replayed", &query_id, Some(id), Some(&report.snapshot.id)).await.unwrap();
             let view = plan.view.unwrap();
             if id == "unmeasured" {
                 assert!(view.query.is_none());
@@ -89,6 +175,19 @@ async fn workspace_plan_endpoints_project_the_selected_variant_and_execution_sta
                 assert_ne!(note, "obsolete");
             }
         }
+        if id == "unmeasured" {
+            let error =
+                ws.last_actual_plan_at("replayed", &query_id, Some(id), Some(&report.snapshot.id)).await.unwrap_err();
+            assert!(matches!(error.detail, Some(culprit_core::ErrorDetail::ActualPlanIdentityUnverified)));
+            continue;
+        }
+        let retained =
+            ws.last_actual_plan_at("replayed", &query_id, Some(id), Some(&report.snapshot.id)).await.unwrap();
+        assert!(retained.view.as_ref().unwrap().query.is_none());
+        assert!(retained.facts().retained.is_some());
+        assert!(retained.insights.as_ref().unwrap().items.iter().all(|item| item.fix_sql.is_none()));
+        let note = retained.view.as_ref().unwrap().cost_note.as_deref().unwrap_or_default();
+        assert!(!note.contains("322 pages a run") && !note.contains("20 ms"));
     }
     let explained = ws.explain("replayed", "SELECT 1", ExplainMode::Estimated, false).await.unwrap();
     assert!(explained.view.is_some());
@@ -98,6 +197,141 @@ async fn workspace_plan_endpoints_project_the_selected_variant_and_execution_sta
     assert_eq!(view.kind, culprit_core::PlanKind::Estimated);
     assert!(view.actual.is_none());
     std::fs::remove_dir_all(home).unwrap();
+}
+
+fn retained_workspace(
+    query: culprit_core::QueryStat,
+    target: Option<culprit_core::DatabaseIdentity>,
+    reader: Option<PlanReader>,
+) -> (tempfile::TempDir, culprit_engine::Workspace, culprit_core::Report) {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = culprit_engine::Workspace::open_in(directory.path()).with_provider(
+        Engine::Mssql,
+        culprit_engine::ProviderRegistration::new(
+            std::sync::Arc::new(move |_| match &reader {
+                Some(reader) => Ok(Box::new(reader.clone())),
+                None => panic!("unverified retained-plan identity must fail before provider creation"),
+            }),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    workspace
+        .add_connection(culprit_engine::NewConnection {
+            name: "replayed".into(),
+            input: "mssql://reader@replay.invalid/culprit_demo".into(),
+            auth: Some(culprit_core::AuthKind::None),
+            environment: culprit_core::Environment::Development,
+            ..Default::default()
+        })
+        .unwrap();
+    let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+    snapshot.connection = "replayed".into();
+    snapshot.identity = target;
+    snapshot.workload.as_mut().unwrap().queries = vec![query];
+    let report = culprit_checks::analyze(snapshot);
+    culprit_engine::reports::save(&workspace.paths().reports_dir("replayed"), &report).unwrap();
+    (directory, workspace, report)
+}
+
+#[tokio::test]
+async fn missing_report_query_plan_or_target_identity_refuses_retained_reads_before_provider_creation() {
+    enum MissingIdentity {
+        Query,
+        Plan,
+        Target,
+    }
+    for missing in [MissingIdentity::Query, MissingIdentity::Plan, MissingIdentity::Target] {
+        let (mut case, _, target) = known_retained_fixture();
+        let mut query = case.query.take().unwrap();
+        let mut target = Some(target);
+        match missing {
+            MissingIdentity::Query => query.native_identity = None,
+            MissingIdentity::Plan => {
+                query.native_plan_identity = None;
+                query.plans.iter_mut().find(|variant| variant.id == "slow").unwrap().native_identity = None;
+            }
+            MissingIdentity::Target => target = None,
+        }
+        let query_id = query.id.clone();
+        let (_directory, workspace, report) = retained_workspace(query, target, None);
+        let error = workspace
+            .last_actual_plan_at("replayed", &query_id, Some("slow"), Some(&report.snapshot.id))
+            .await
+            .unwrap_err();
+        assert!(matches!(error.detail, Some(culprit_core::ErrorDetail::ActualPlanIdentityUnverified)));
+    }
+}
+
+#[tokio::test]
+async fn an_engine_without_retained_plans_keeps_its_capability_refusal_without_requiring_native_lookup_proof() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = culprit_engine::Workspace::open_in(directory.path()).with_provider(
+        Engine::Postgres,
+        culprit_engine::ProviderRegistration::new(
+            std::sync::Arc::new(|_| panic!("a refused capability cannot create a native provider")),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    workspace
+        .add_connection(culprit_engine::NewConnection {
+            name: "replayed".into(),
+            input: "postgres://reader@replay.invalid/sample".into(),
+            auth: Some(culprit_core::AuthKind::None),
+            ..Default::default()
+        })
+        .unwrap();
+    let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
+    snapshot.connection = "replayed".into();
+    let query_id = snapshot.queries()[0].id.clone();
+    assert!(snapshot.queries()[0].native_identity.is_none());
+    let report = culprit_checks::analyze(snapshot);
+    culprit_engine::reports::save(&workspace.paths().reports_dir("replayed"), &report).unwrap();
+    let error =
+        workspace.last_actual_plan_at("replayed", &query_id, None, Some(&report.snapshot.id)).await.unwrap_err();
+    assert_eq!(error.code, culprit_core::ErrorCode::Unsupported);
+    assert!(error.detail.is_none(), "the normal unsupported capability still permits the UI's measured-run path");
+    assert_eq!(error.message, Engine::Postgres.refused(culprit_core::Ability::LastActualPlan).message);
+}
+
+#[tokio::test]
+async fn reused_native_query_plan_ids_or_a_different_current_database_do_not_authorize_retained_output() {
+    enum ChangedIdentity {
+        QueryContext,
+        PlanGeneration,
+        Target,
+    }
+    for changed in [ChangedIdentity::QueryContext, ChangedIdentity::PlanGeneration, ChangedIdentity::Target] {
+        let (mut case, mut reader, target) = known_retained_fixture();
+        match changed {
+            ChangedIdentity::QueryContext => {
+                let query = reader.provenance.query.as_mut().unwrap();
+                query.qualifiers.insert("context_settings_id".into(), "6".into());
+                for plan in reader.native_plans.values_mut() {
+                    plan.query = query.clone();
+                }
+            }
+            ChangedIdentity::PlanGeneration => {
+                for plan in reader.native_plans.values_mut() {
+                    plan.qualifiers.insert("initial_compile_at".into(), "2026-10-09T07:00:00.000000000Z".into());
+                }
+            }
+            ChangedIdentity::Target => {
+                let mut different = target.clone();
+                different.incarnation = Some("different-current-database-incarnation".into());
+                reader.provenance.read.target = different.into();
+            }
+        }
+        let query = case.query.take().unwrap();
+        let query_id = query.id.clone();
+        let (_directory, workspace, report) = retained_workspace(query, Some(target), Some(reader));
+        let error = workspace
+            .last_actual_plan_at("replayed", &query_id, Some("slow"), Some(&report.snapshot.id))
+            .await
+            .unwrap_err();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+    }
 }
 
 #[test]

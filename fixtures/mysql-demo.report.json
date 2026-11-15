@@ -1900,7 +1900,7 @@
         "table": "orders"
       }
     ],
-    "format": 6,
+    "format": 7,
     "histograms": [
       {
         "buckets": 4.0,

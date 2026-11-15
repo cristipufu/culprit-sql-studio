@@ -255,9 +255,12 @@ pub trait Provider: Send + Sync {
         Ok(None)
     }
 
-    /// The actual plan of a query's most recent run as the engine kept it, without running the query (SQL Server 2019+
-    /// with LAST_QUERY_PLAN_STATS). Ids are the workload's query and plan ids.
-    async fn last_actual_plan(&self, _query_id: &str, _plan_id: Option<&str>) -> Result<Plan> {
+    /// Read an independently retained actual plan without executing the query. Native provenance qualifies the
+    /// read and statement relation; it does not assign the retained execution to a workload population.
+    async fn last_actual_plan(
+        &self,
+        _request: &crate::telemetry::RetainedActualPlanRequest,
+    ) -> Result<crate::telemetry::RetainedActualPlan> {
         Err(self.engine().refused(crate::model::Ability::LastActualPlan))
     }
 

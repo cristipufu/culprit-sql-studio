@@ -116,6 +116,7 @@ impl OperationalFact {
                 Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
             }
             Self::PostgresLog(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
+            Self::MssqlStatementGrants(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::Space(_)
             | Self::SessionMemory(_)
             | Self::Sequence(_)
@@ -130,7 +131,6 @@ impl OperationalFact {
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)
-            | Self::MssqlStatementGrants(_)
             | Self::MssqlIndexOperations(_)
             | Self::MssqlTable(_)
             | Self::MssqlStatistics(_)

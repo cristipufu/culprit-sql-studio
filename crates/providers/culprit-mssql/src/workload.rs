@@ -203,6 +203,7 @@ pub(crate) fn id_list(ids: &[String]) -> String {
 }
 
 pub(crate) struct WorkloadResult {
+    pub(crate) database: Option<crate::database_identity::Context>,
     pub(crate) workload: Workload,
     /// Earliest runtime identities remain private to this scan's later native attribution reads.
     pub(crate) query_identities: HashMap<String, NativeQueryIdentity>,
@@ -449,7 +450,15 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
         min_logged_ms: None,
         log: None,
     };
-    Ok(WorkloadResult { workload, query_identities, waits, plans_parsed, plan_errors, coverage })
+    Ok(WorkloadResult {
+        database: Some(window.database),
+        workload,
+        query_identities,
+        waits,
+        plans_parsed,
+        plan_errors,
+        coverage,
+    })
 }
 
 fn to_query_stat(
@@ -464,6 +473,7 @@ fn to_query_stat(
         .plans
         .iter()
         .map(|p| PlanVariant {
+            native_identity: p.identity.clone(),
             id: p.plan_id.clone(),
             executions: p.executions,
             total_time_ms: p.total_ms,
@@ -482,6 +492,8 @@ fn to_query_stat(
     variants.sort_by(|a, b| b.total_time_ms.total_cmp(&a.total_time_ms));
     let (parameters, sql) = split_parameters(text.and_then(|definition| definition.payload.text()).unwrap_or_default());
     QueryStat {
+        native_identity: q.identity.clone(),
+        native_plan_identity: plan.as_ref().and_then(|_| q.current_plan()).and_then(|plan| plan.identity.clone()),
         variant_family: text.and_then(|definition| definition.variant_family.clone()),
         plan_history: None,
         resolved_write_target: None,
@@ -802,6 +814,7 @@ pub(crate) async fn from_plan_cache(
         log: None,
     };
     Ok(WorkloadResult {
+        database: None,
         workload,
         query_identities: HashMap::new(),
         waits: Vec::new(),

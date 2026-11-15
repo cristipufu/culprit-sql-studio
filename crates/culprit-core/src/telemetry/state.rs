@@ -508,6 +508,11 @@ impl OperationalFact {
             Self::SessionMemory(_) => {}
             Self::PageWait(observation) => observation.redact(engine),
             Self::TaskSpace(observation) => observation.redact(engine),
+            Self::MssqlStatementGrants(grants) => {
+                if let DefinitionPayload::Available { text, .. } = &grants.statement {
+                    grants.statement = DefinitionPayload::sql(text, engine);
+                }
+            }
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
@@ -521,7 +526,6 @@ impl OperationalFact {
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)
-            | Self::MssqlStatementGrants(_)
             | Self::MssqlIndexOperations(_)
             | Self::MssqlTable(_)
             | Self::MssqlStatistics(_)

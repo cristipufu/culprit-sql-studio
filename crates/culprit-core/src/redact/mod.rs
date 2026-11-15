@@ -86,6 +86,27 @@ fn redact_native_qualifiers(identity: &mut crate::telemetry::NativeIdentity) {
     }
 }
 
+fn redact_target(target: &mut crate::telemetry::CollectionTarget) {
+    match target {
+        crate::telemetry::CollectionTarget::Database(identity) => redact_identity(identity),
+        crate::telemetry::CollectionTarget::Shared(identity) => redact_resource_identity(identity),
+    }
+}
+
+fn redact_partition(partition: &mut crate::telemetry::SourcePartition) {
+    if let crate::telemetry::SourcePartition::InstanceLocal { member, epoch } = partition {
+        if let Some(member) = member {
+            redact_resource_identity(member);
+        }
+        *epoch = epoch.as_deref().map(opaque);
+    }
+}
+
+fn redact_read_context(context: &mut crate::telemetry::NativeReadContext) {
+    redact_target(&mut context.target);
+    redact_partition(&mut context.partition);
+}
+
 pub fn redact_measurement(measurement: &mut crate::MeasurementContext) {
     redact_identity(&mut measurement.database);
     if let Some(population) = &mut measurement.population {
@@ -383,6 +404,9 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             redact_baseline(reference);
         }
         for q in &mut w.queries {
+            // Shared query labels and metrics are not authority for a current native lookup.
+            q.native_identity = None;
+            q.native_plan_identity = None;
             q.text = redact_sql(&q.text, engine);
             q.plan = q.plan.as_ref().map(redact_plan);
             if let Some(history) = &mut q.plan_history {
@@ -395,6 +419,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
                 history.captured_plan = history.captured_plan.as_ref().map(redact_plan);
             }
             for p in &mut q.plans {
+                p.native_identity = None;
                 p.compiled = None;
             }
         }
@@ -424,10 +449,23 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             }
         }
         if let Some(grants) = &mut p.request_memory {
+            redact_read_context(&mut grants.context);
             for grant in &mut grants.observations {
                 grant.redact(engine);
                 if let Some(request) = &mut grant.request {
                     request.client = None;
+                }
+            }
+        }
+        for read in &mut p.grants {
+            redact_target(&mut read.description.target);
+            redact_partition(&mut read.description.partition);
+            read.capture.observation_id = opaque(&read.capture.observation_id);
+            // A shared artifact retains read distinction, not an address into the owner's private outbox.
+            read.capture.revision = None;
+            for row in &mut read.observations {
+                if let crate::telemetry::DefinitionPayload::Available { text, .. } = &row.statement {
+                    row.statement = crate::telemetry::DefinitionPayload::sql(text, engine);
                 }
             }
         }
@@ -564,6 +602,8 @@ pub fn redact_finding(finding: &Finding, engine: Engine) -> Finding {
     let mut f = finding.clone();
     // Original editor locations authorize edits only in the original private document.
     f.facts.statement = None;
+    // A standalone finding has no shared snapshot against which to rebuild its private read/row reference.
+    f.facts.statement_grant = None;
     f.title = prose(&f.title);
     f.summary = prose(&f.summary);
     f.caveats = f.caveats.iter().map(|c| prose(c)).collect();

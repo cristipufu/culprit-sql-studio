@@ -8,6 +8,7 @@ impl SnapshotRecipe for Columns {
     const DATASET: SnapshotDataset = SnapshotDataset::Columns;
     const NAME: &'static str = "column-state";
     const SOURCE: &'static Source = &crate::sources::COLUMNS;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, budget: &CollectionBudget) -> Result<Option<usize>> {
         Ok(Some(MAX_CATALOG_EXPRESSION_BYTES.min(budget.max_sql_bytes as usize)))

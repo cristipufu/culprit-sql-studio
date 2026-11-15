@@ -192,9 +192,9 @@
     },
     {
       "check": "memory-grant",
-      "reason": "This scan did not record the measurements this check needs.",
-      "status": "insufficient-evidence",
-      "title": "Queries that reserve far more memory than they use"
+      "reason": "This source was not recorded, was not applicable, or did not expose visible objects. No clean result can be established from its absence.",
+      "status": "unavailable",
+      "title": "Recorded memory grant/use imbalance"
     },
     {
       "check": "memory-queue",
@@ -3448,7 +3448,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 6,
+    "format": 7,
     "histograms": null,
     "id": "20261011T121347.162Z",
     "identity": {
@@ -4337,278 +4337,7 @@
           "writes": 60.0
         }
       ],
-      "grants": [
-        {
-          "avg_granted_kb": 14904.0,
-          "avg_used_kb": 596.551724137931,
-          "executions": 58.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 14904.0,
-          "query_hash": "0x538D93CAC1A21CF3"
-        },
-        {
-          "avg_granted_kb": 97448.0,
-          "avg_used_kb": 16800.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 97448.0,
-          "query_hash": "0xB93AFEAC88B87A44"
-        },
-        {
-          "avg_granted_kb": 10274.0,
-          "avg_used_kb": 1260.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 11688.0,
-          "query_hash": "0x7DD3A80BED46C41C"
-        },
-        {
-          "avg_granted_kb": 10266.666666666666,
-          "avg_used_kb": 1197.3333333333333,
-          "executions": 3.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 13336.0,
-          "query_hash": "0xCA2A071DE2E5CB4E"
-        },
-        {
-          "avg_granted_kb": 38872.0,
-          "avg_used_kb": 13560.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 38872.0,
-          "query_hash": "0x26B5AF33C3FE80E4"
-        },
-        {
-          "avg_granted_kb": 5464.0,
-          "avg_used_kb": 1096.0,
-          "executions": 5.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 5464.0,
-          "query_hash": "0xB7580776ABAF5C89"
-        },
-        {
-          "avg_granted_kb": 2672.0,
-          "avg_used_kb": 329.77777777777777,
-          "executions": 9.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 2672.0,
-          "query_hash": "0x2E70EF6C50F8B425"
-        },
-        {
-          "avg_granted_kb": 3760.0,
-          "avg_used_kb": 392.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3760.0,
-          "query_hash": "0x79A740AB01010E76"
-        },
-        {
-          "avg_granted_kb": 6296.0,
-          "avg_used_kb": 960.0,
-          "executions": 2.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 6408.0,
-          "query_hash": "0xA82DBA5F031BB8DE"
-        },
-        {
-          "avg_granted_kb": 8704.0,
-          "avg_used_kb": 1408.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 8704.0,
-          "query_hash": "0xC6BEBE5FF49E8119"
-        },
-        {
-          "avg_granted_kb": 3312.0,
-          "avg_used_kb": 912.0,
-          "executions": 3.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3312.0,
-          "query_hash": "0x111E3E5969A5D833"
-        },
-        {
-          "avg_granted_kb": 3232.0,
-          "avg_used_kb": 960.0,
-          "executions": 3.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3232.0,
-          "query_hash": "0x499E6D8549462667"
-        },
-        {
-          "avg_granted_kb": 2112.0,
-          "avg_used_kb": 442.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 2112.0,
-          "query_hash": "0x851AB8B7F8AA5975"
-        },
-        {
-          "avg_granted_kb": 6528.0,
-          "avg_used_kb": 32.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 6528.0,
-          "query_hash": "0x2A6AABAD09433795"
-        },
-        {
-          "avg_granted_kb": 6240.0,
-          "avg_used_kb": 1264.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 6240.0,
-          "query_hash": "0x9ED977B68BF6BDF8"
-        },
-        {
-          "avg_granted_kb": 7528.0,
-          "avg_used_kb": 2592.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 7528.0,
-          "query_hash": "0x3DF2B9A646FEB7F0"
-        },
-        {
-          "avg_granted_kb": 3392.0,
-          "avg_used_kb": 960.0,
-          "executions": 2.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3432.0,
-          "query_hash": "0x1E1D244420C4CF14"
-        },
-        {
-          "avg_granted_kb": 6328.0,
-          "avg_used_kb": 1584.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 6328.0,
-          "query_hash": "0x618F4B31843C5BC7"
-        },
-        {
-          "avg_granted_kb": 5624.0,
-          "avg_used_kb": 960.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 5624.0,
-          "query_hash": "0x447B66D0CE677154"
-        },
-        {
-          "avg_granted_kb": 3104.0,
-          "avg_used_kb": 784.0,
-          "executions": 2.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3104.0,
-          "query_hash": "0xCC3150A6157C7C1A"
-        },
-        {
-          "avg_granted_kb": 1088.0,
-          "avg_used_kb": 16.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 1088.0,
-          "query_hash": "0x243C1C62E0CA19B4"
-        },
-        {
-          "avg_granted_kb": 6456.0,
-          "avg_used_kb": 2240.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 6456.0,
-          "query_hash": "0x8908531C5A846D44"
-        },
-        {
-          "avg_granted_kb": 1024.0,
-          "avg_used_kb": 0.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 1024.0,
-          "query_hash": "0x484FA8388BE0B441"
-        },
-        {
-          "avg_granted_kb": 1024.0,
-          "avg_used_kb": 16.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 1024.0,
-          "query_hash": "0x5E54E6762DCA7E03"
-        },
-        {
-          "avg_granted_kb": 1024.0,
-          "avg_used_kb": 16.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 1024.0,
-          "query_hash": "0xD4C09FC424B514A4"
-        },
-        {
-          "avg_granted_kb": 1024.0,
-          "avg_used_kb": 16.0,
-          "executions": 4.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 1024.0,
-          "query_hash": "0xF5C3CFD762D1282A"
-        },
-        {
-          "avg_granted_kb": 5712.0,
-          "avg_used_kb": 1928.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 5712.0,
-          "query_hash": "0xD02C0FE32C192DC3"
-        },
-        {
-          "avg_granted_kb": 3240.0,
-          "avg_used_kb": 672.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3240.0,
-          "query_hash": "0x52EE73CE6AAD32B5"
-        },
-        {
-          "avg_granted_kb": 3408.0,
-          "avg_used_kb": 960.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3408.0,
-          "query_hash": "0xA7A4F409DDE32082"
-        },
-        {
-          "avg_granted_kb": 3208.0,
-          "avg_used_kb": 888.0,
-          "executions": 1.0,
-          "last_granted_kb": null,
-          "last_used_kb": null,
-          "max_granted_kb": 3208.0,
-          "query_hash": "0x320D04EAEE594F1A"
-        }
-      ],
+      "grants": [],
       "numa_nodes": null,
       "oldest_transaction": null,
       "replicas": [],
@@ -5306,6 +5035,16 @@
         "reason": null,
         "source": "file latency",
         "state": "collected"
+      },
+      {
+        "reason": "This source was not recorded, was not applicable, or did not expose visible objects. No clean result can be established from its absence.",
+        "reason_message": {
+          "arguments": {},
+          "key": "evidence.source_not_recorded",
+          "kind": "catalog"
+        },
+        "source": "memory grants per query",
+        "state": "unavailable"
       }
     ],
     "statistics": [

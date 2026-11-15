@@ -1,7 +1,7 @@
 //! Page capability is separate from the shared native database authority.
 use super::super::{
     ActivityFrame, ActivityReader,
-    database_context::{self, ContextDetail, DatabaseContext},
+    database_context::{self, Context, Detail},
 };
 use crate::read::{NativeRead, boolean};
 use culprit_core::{
@@ -11,7 +11,7 @@ use culprit_core::{
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct LookupContext {
-    pub authority: DatabaseContext,
+    pub authority: Context,
     pub unavailable: Option<PageWaitResolution>,
     /// Population visibility is not a database epoch or an absence proof. Focused coordinator reads set None.
     pub task_visibility: Option<bool>,
@@ -43,17 +43,17 @@ impl LookupContext {
 }
 
 pub(super) async fn initial<R: NativeRead>(reader: &mut ActivityReader<R>) -> Result<LookupContext> {
-    let (authority, row) = database_context::read_initial(reader, ContextDetail::PageLookup).await?;
+    let (authority, row) = database_context::read_initial(reader, Detail::PageLookup).await?;
     qualify(authority, &row)
 }
 pub(super) async fn read<R: NativeRead>(
     reader: &mut ActivityReader<R>,
     initial: &LookupContext,
 ) -> Result<LookupContext> {
-    let (authority, row) = database_context::read_again(reader, &initial.authority, ContextDetail::PageLookup).await?;
+    let (authority, row) = database_context::read_again(reader, &initial.authority, Detail::PageLookup).await?;
     qualify(authority, &row)
 }
-fn qualify(authority: DatabaseContext, row: &crate::value::Rec) -> Result<LookupContext> {
+fn qualify(authority: Context, row: &crate::value::Rec) -> Result<LookupContext> {
     if !authority.database_wide {
         return Err(super::super::ActivityContext::visibility_error(row, &authority.activity)?);
     }

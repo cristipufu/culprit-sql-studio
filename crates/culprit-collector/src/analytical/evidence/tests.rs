@@ -9,6 +9,7 @@ mod activity;
 mod diagnostics;
 mod empty;
 mod object_definitions;
+mod statement_grants;
 mod tuning;
 
 #[tokio::test]

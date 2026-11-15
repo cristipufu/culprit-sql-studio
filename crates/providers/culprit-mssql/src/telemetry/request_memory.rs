@@ -1,6 +1,6 @@
 //! Frozen paging and capture ownership stay generic; native grant/request reading is shared with explicit scans.
 use crate::{
-    activity::{ActivityContext, ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
     conn::Pool,
     read::{NativeRead, ReadSession},
     sources,
@@ -13,7 +13,7 @@ pub(super) struct MemorySource<R: NativeRead = ReadSession> {
 }
 struct MemoryObservationReader<R: NativeRead> {
     reader: ActivityReader<R>,
-    context: Option<ActivityContext>,
+    context: Option<crate::local_source::Context>,
 }
 impl MemorySource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
@@ -51,8 +51,8 @@ impl<R: NativeRead> culprit_read::ObservationReader for MemoryObservationReader<
             })
             .collect::<Result<Vec<_>>>()?;
         let description = CollectionDescription {
-            partition: culprit_core::telemetry::SourcePartition::Target,
-            target: captured.context.database.clone().into(),
+            partition: captured.owner.source_partition()?,
+            target: captured.owner.activity.database.clone().into(),
             source: sources::CURRENT_REQUEST_MEMORY.name.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Snapshot(StateSnapshotDescription {
@@ -67,11 +67,15 @@ impl<R: NativeRead> culprit_read::ObservationReader for MemoryObservationReader<
                 )],
             }),
         };
-        self.context = Some(captured.context);
+        self.context = Some(captured.owner);
         Ok(culprit_read::FrozenObservation { description, records })
     }
     async fn verify(&mut self, _: &CollectionDescription) -> Result<bool> {
-        self.reader.verify_memory_context(self.context.as_ref().ok_or_else(crate::read::invalid_data)?).await
+        match self.reader.verify_memory_context(self.context.as_ref().ok_or_else(crate::read::invalid_data)?).await {
+            Ok(_) => Ok(true),
+            Err(error) if CollectionStop::from_error(&error) == CollectionStop::SourceChanged => Ok(false),
+            Err(error) => Err(error),
+        }
     }
     fn query_count(&self) -> u32 {
         self.reader.query_count()

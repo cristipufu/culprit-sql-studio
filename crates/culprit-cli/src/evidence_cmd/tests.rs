@@ -73,6 +73,7 @@ fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_sel
         "page-waits",
         "task-space",
         "statement-work",
+        "statement-grants",
         "runtime-distributions",
         "compilation",
         "cleanup",
@@ -317,6 +318,62 @@ fn tuning_text_uses_existing_source_qualification_and_bounded_titles_without_pay
     );
     assert!(output.contains("native-source") && output.contains("Unknown scope remains unknown"));
     assert!(!output.contains("native-context-only"));
+}
+
+#[test]
+fn cached_statement_grants_use_operational_archive_reads_with_explicit_recovery_opt_in() {
+    for options in [vec![], vec!["--with-recovery-payloads"]] {
+        let args = analyze_args("statement-grants", &options);
+        assert!(args.analysis == Analysis::StatementGrants);
+        let request = args.common.request(args.analysis.families(), Format::Json).unwrap();
+        assert_eq!(request.families, [EvidenceFamily::OperationalSamples]);
+        assert_eq!(request.budget.recovery_payloads.is_some(), !options.is_empty());
+    }
+}
+
+#[test]
+fn cached_grant_text_preserves_independent_qualification_and_bounds_entry_explanations() {
+    use culprit_core::{
+        StatementGrantExplanation, StatementGrantReport, i18n::Message, telemetry::CachedStatementIdentity,
+    };
+    let entry = StatementGrantExplanation {
+        snapshot_key: "read-key".into(),
+        observation_key: "entry-key".into(),
+        identity: CachedStatementIdentity {
+            plan_handle: "0x0102".into(),
+            sql_handle: "0x0304".into(),
+            statement_start_bytes: 0,
+            statement_end_bytes: -1,
+            created_without_offset: "2020-01-01T01:00:00.003".into(),
+            plan_generation: "1".into(),
+        },
+        title: Message::from("X".repeat(1500)),
+        explanation: Message::from("Y".repeat(2000)),
+        metrics: vec![],
+        investigation: Message::from("capture simultaneous participants"),
+        verify: Message::from("compare representative work"),
+    };
+    let report = StatementGrantReport {
+        sources: vec![culprit_core::SourceOutcome {
+            source: "native-grants".into(),
+            state: culprit_core::SourceState::Partial,
+            reason: None,
+            reason_message: None,
+        }],
+        reads: vec![],
+        title: Message::from("Cached grant history"),
+        summary: Message::from("Retained native entries"),
+        limitations: vec![Message::from("Native lifetime counters do not identify current pressure owners")],
+        entries: vec![entry; 20],
+    };
+    let output = observations::statement_grants(&report);
+    assert_eq!(output.matches('•').count(), crate::output::BRIEF_FINDING_LIMIT);
+    assert!(output.chars().filter(|character| *character == 'X').count() < 1500 * crate::output::BRIEF_FINDING_LIMIT);
+    assert!(!output.contains(&"Y".repeat(2000)));
+    assert!(
+        output.contains("native-grants")
+            && output.contains("Native lifetime counters do not identify current pressure owners")
+    );
 }
 
 fn analyze_args(analysis: &str, options: &[&str]) -> AnalyzeArgs {

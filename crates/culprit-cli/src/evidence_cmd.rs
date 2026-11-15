@@ -134,6 +134,7 @@ enum Analysis {
     PageWaits,
     TaskSpace,
     StatementWork,
+    StatementGrants,
     RuntimeDistributions,
     CachedPlans,
     Compilation,
@@ -158,6 +159,7 @@ impl Analysis {
             | Self::PageWaits
             | Self::TaskSpace
             | Self::StatementWork
+            | Self::StatementGrants
             | Self::RuntimeDistributions
             | Self::Compilation
             | Self::Cleanup => {
@@ -237,6 +239,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::StatementWork) => {
             let analysis = culprit_engine::collected_resources::statement_work(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::statement_work(&analysis.report))?;
+        }
+        Some(Analysis::StatementGrants) => {
+            let analysis = culprit_engine::collected_resources::statement_grants(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::statement_grants(&analysis.report))?;
         }
         Some(Analysis::RuntimeDistributions) => {
             let analysis = culprit_engine::collected_resources::runtime_distributions(&capture)?;

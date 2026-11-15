@@ -50,6 +50,10 @@ mod page_waits;
 pub use page_waits::{page_wait_evidence_cases, page_wait_tamper_cases};
 mod statement_work;
 pub use statement_work::statement_work_evidence_cases;
+mod statement_grants;
+pub use statement_grants::{
+    StatementGrantCase, assert_statement_grant_capture, statement_grant_evidence, statement_grant_evidence_cases,
+};
 mod runtime_distributions;
 pub use runtime_distributions::runtime_distribution_evidence_cases;
 mod task_space;

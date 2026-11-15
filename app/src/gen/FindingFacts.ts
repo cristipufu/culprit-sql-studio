@@ -13,6 +13,7 @@ import type { FindingRuntimeVariation } from "./FindingRuntimeVariation";
 import type { NothingToCheck } from "./NothingToCheck";
 import type { PlanBaseline } from "./PlanBaseline";
 import type { StatementEvidence } from "./StatementEvidence";
+import type { StatementGrantReference } from "./StatementGrantReference";
 import type { WorkloadDependency } from "./WorkloadDependency";
 
 export type FindingFacts = { 
@@ -28,6 +29,10 @@ cause?: FindingCause,
  * Whether the linked statements establish the finding or merely provide context.
  */
 workload_dependency?: WorkloadDependency, 
+/**
+ * An exact original cached grant entry, independent of workload query references or current ownership.
+ */
+statement_grant?: StatementGrantReference, 
 /**
  * The affected table when the displayed subject is a particular index instead.
  */

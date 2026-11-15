@@ -14,6 +14,8 @@ pub(super) trait SnapshotRecipe: Send + Sync {
     const NAME: &'static str;
     const SOURCE: &'static Source;
     const REQUIRES_FULL_METADATA: bool = false;
+    /// Connected-cache facts need a checked native compute member and process epoch, independent of history groups.
+    const INSTANCE_LOCAL: bool;
     async fn layout<R: NativeRead>(&self, reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>>;
     fn query(&self, layout: &Self::Layout) -> String;
     fn decode(&self, row: &Rec, layout: &Self::Layout) -> Result<TelemetryRecord>;
@@ -44,6 +46,7 @@ struct NativeSnapshotReader<D: SnapshotRecipe, R> {
     host: String,
     port: u16,
     physical: Option<String>,
+    local: Option<crate::local_source::Context>,
     layout: Option<D::Layout>,
 }
 impl<D: SnapshotRecipe> StreamedSnapshot<D> {
@@ -63,6 +66,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
             host,
             port,
             physical: None,
+            local: None,
             layout: None,
         };
         Ok(Self { inner: culprit_read::SnapshotSource::new(reader, request)? })
@@ -72,18 +76,37 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
 impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for NativeSnapshotReader<D, R> {
     type Row = Rec;
     async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
-        description::ensure_supported(&mut self.io).await?;
-        let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
-        let (observed_from, metadata_visible) = state::clock(&mut self.io).await?;
+        let (target, partition, observed_from, metadata_visible) = if D::INSTANCE_LOCAL {
+            let context = crate::local_source::Context::read(&mut self.io, &self.host, self.port).await?;
+            // Source locality does not expand this recipe's independently qualified platform or role policy.
+            if context.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
+                return Err(culprit_core::Error::new(
+                    culprit_core::ErrorCode::Unsupported,
+                    culprit_core::t!("collection.azure_sql_only"),
+                ));
+            }
+            crate::read::require_primary(context.activity.writable)?;
+            let partition = context.source_partition()?;
+            let observed_from = context.activity.at.clone();
+            let target = context.activity.database.clone().into();
+            let visible = if D::REQUIRES_FULL_METADATA { state::clock(&mut self.io).await?.1 } else { true };
+            self.local = Some(context);
+            (target, partition, observed_from, visible)
+        } else {
+            description::ensure_supported(&mut self.io).await?;
+            let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
+            let (at, visible) = state::clock(&mut self.io).await?;
+            self.physical = Some(physical);
+            (database.into(), SourcePartition::Target, at, visible)
+        };
         if D::REQUIRES_FULL_METADATA && !metadata_visible {
             return Err(crate::catalog_visibility::unavailable());
         }
         crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
-        self.physical = Some(physical);
         Ok(CollectionDescription {
-            partition: culprit_core::telemetry::SourcePartition::Target,
-            target: database.into(),
+            partition,
+            target,
             source: D::NAME.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
@@ -123,6 +146,41 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
     async fn recheck(&mut self, initial: &CollectionDescription) -> Result<culprit_read::SnapshotRecheck> {
         if let Some(layout) = &self.layout {
             self.recipe.recheck(&mut self.io, layout).await?;
+        }
+        if let Some(before) = &self.local {
+            let after = before.recheck(&mut self.io, &self.host, self.port).await?;
+            let context = match before.completed(&after) {
+                Ok(context) => context,
+                Err(error) if CollectionStop::from_error(&error) == CollectionStop::SourceChanged => {
+                    return Ok(culprit_read::SnapshotRecheck {
+                        unchanged: false,
+                        observed_until: String::new(),
+                        scopes: vec![],
+                    });
+                }
+                Err(error) => return Err(error),
+            };
+            if initial.target != context.target || initial.partition != context.partition {
+                return Err(CollectionStop::SourceChanged.error());
+            }
+            let visible = if D::REQUIRES_FULL_METADATA { state::clock(&mut self.io).await?.1 } else { true };
+            let scope = if self.layout.is_none() {
+                culprit_read::SnapshotScope::NotApplicable { source: D::SOURCE.name.into() }
+            } else {
+                culprit_read::SnapshotScope::Available {
+                    source: D::SOURCE.name.into(),
+                    complete: context.partition.is_qualified()
+                        && before.database_wide
+                        && after.database_wide
+                        && visible,
+                    error_code: (!visible).then_some(culprit_core::ErrorCode::PermissionDenied),
+                }
+            };
+            return Ok(culprit_read::SnapshotRecheck {
+                unchanged: true,
+                observed_until: context.observed_until,
+                scopes: vec![scope],
+            });
         }
         let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
         if initial.target.database() != Some(&database) || self.physical.as_ref() != Some(&physical) {

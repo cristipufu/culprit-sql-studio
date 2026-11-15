@@ -282,6 +282,8 @@ pub fn workload(
             let total: f64 = sorted.iter().sum();
             let trend = timeline.as_ref().map(|(t, _)| query_trend(runs, &prints, &g.key, t));
             QueryStat {
+                native_identity: None,
+                native_plan_identity: None,
                 plan_history: None,
                 variant_family: None,
                 resolved_write_target: None,

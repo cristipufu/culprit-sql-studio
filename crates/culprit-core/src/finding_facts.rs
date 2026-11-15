@@ -16,6 +16,10 @@ pub struct FindingFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub workload_dependency: Option<WorkloadDependency>,
+    /// An exact original cached grant entry, independent of workload query references or current ownership.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub statement_grant: Option<StatementGrantReference>,
     /// The affected table when the displayed subject is a particular index instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -68,6 +72,16 @@ pub struct FindingFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub uncosted_plan_explained: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct StatementGrantReference {
+    pub snapshot_key: String,
+    pub observation_key: String,
+    /// Read and native tuple locate a unique original row; consumers do not recreate the opaque hashes.
+    pub capture: crate::telemetry::CaptureIdentity,
+    pub identity: crate::telemetry::CachedStatementIdentity,
 }
 
 /// Observed runtime shape, independent of translated explanations, suspected causes or proposed plan changes.

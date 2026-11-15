@@ -1,0 +1,83 @@
+import { expect, test } from "@playwright/test";
+import english from "../../locales/en.json" with { type: "json" };
+import type { State } from "../src/lib/store";
+import { GRANT_SOURCE, ORIGINAL_CACHED_SQL, OTHER_CACHED_SQL, statementGrant, statementGrantRead, statementGrantReference } from "../src/test/statement-grants";
+import { openConnection, waitForReport } from "./demo";
+
+test("an independent cached-grant finding shows exact original SQL without a workload query or source action", async ({ page }, info) => {
+  await openConnection(page, "mssql-demo");
+  await waitForReport(page);
+  const selected = statementGrant();
+  const read = statementGrantRead([statementGrant("0x0506", OTHER_CACHED_SQL), selected]);
+  const reference = statementGrantReference(read, selected);
+  await page.evaluate(async ({ path, read, reference, source }) => {
+    const { getState, setState } = await import(path) as { getState: () => State; setState: (patch: Partial<State>) => void };
+    const state = getState();
+    if (state.report.status !== "ready") throw new Error("A settled report is required");
+    const report = structuredClone(state.report.report);
+    if (!report.snapshot.identity) throw new Error("The fixture must identify its database");
+    read.description.target = { scope: "database", identity: structuredClone(report.snapshot.identity) };
+    if (!report.snapshot.pressure) throw new Error("The fixture must contain pressure context");
+    report.snapshot.pressure.grants = [read];
+    report.snapshot.sources = (report.snapshot.sources ?? []).filter((outcome) => outcome.source !== source);
+    report.snapshot.sources.push({ source, state: "partial", reason: null });
+    const finding = structuredClone(report.findings.find((candidate) => candidate.facts != null));
+    if (!finding?.facts) throw new Error("The finding fixture must contain structured facts");
+    finding.id = "memory-grant:browser-original-entry";
+    finding.check = "memory-grant";
+    finding.category = "queries";
+    finding.actionability = "information";
+    finding.severity = "low";
+    finding.title = "Recorded cached-entry grant imbalance";
+    finding.summary = "Original native cache counters are independent of a current memory-pressure owner.";
+    finding.queries = [];
+    finding.metrics = [];
+    finding.fix = null;
+    finding.verify = [];
+    finding.caveats = [];
+    finding.inactive = false;
+    finding.facts.statement_grant = reference;
+    finding.facts.workload_dependency = "independent";
+    finding.impact.db_time_share = null;
+    finding.impact.time_ms_per_day = null;
+    report.findings = [finding];
+    setState({ report: { ...state.report, report }, view: "overview", finding: finding.id });
+  }, { path: "/src/lib/store.ts", read, reference, source: GRANT_SOURCE });
+  const section = page.getByRole("region", { name: english["ui.statement_grants.evidence"], exact: true });
+  await expect(section).toBeVisible();
+  await expect(section.locator("pre")).toHaveText(ORIGINAL_CACHED_SQL);
+  await expect(section).not.toContainText(OTHER_CACHED_SQL);
+  await expect(section.locator("script")).toHaveCount(0);
+  await expect(section.getByRole("button")).toHaveCount(0);
+  await expect(section).toContainText("2026-11-01T06:00:00Z");
+  await expect(section).toContainText("member-a");
+  const screenshot = info.outputPath("original-cached-statement.png");
+  await section.screenshot({ path: screenshot });
+  await info.attach("original-cached-statement", { path: screenshot, contentType: "image/png" });
+
+  await page.evaluate(async (path) => {
+    const { getState, setState } = await import(path) as { getState: () => State; setState: (patch: Partial<State>) => void };
+    const state = getState();
+    if (state.report.status !== "ready") throw new Error("A ready report is required");
+    const report = structuredClone(state.report.report);
+    const row = report.snapshot.pressure?.grants[0]?.observations.find((row) => row.context.identity.plan_handle === "0x0102");
+    if (!row) throw new Error("The original native row is required");
+    row.statement = { state: "unavailable", reason: "restricted" };
+    setState({ report: { ...state.report, report } });
+  }, "/src/lib/store.ts");
+  await expect(section.locator("pre")).toHaveCount(0);
+  await expect(section).not.toContainText(english["ui.statement_grants.missing"]);
+
+  await page.evaluate(async (path) => {
+    const { getState, setState } = await import(path) as { getState: () => State; setState: (patch: Partial<State>) => void };
+    const state = getState();
+    if (state.report.status !== "ready") throw new Error("A ready report is required");
+    const report = structuredClone(state.report.report);
+    const read = report.snapshot.pressure?.grants[0];
+    if (!read?.capture.revision) throw new Error("An exact capture revision is required");
+    read.capture.revision.sequence = "13";
+    setState({ report: { ...state.report, report } });
+  }, "/src/lib/store.ts");
+  await expect(section).toContainText(english["ui.statement_grants.missing"]);
+  await expect(section.locator("pre")).toHaveCount(0);
+});

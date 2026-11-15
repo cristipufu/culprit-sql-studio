@@ -195,22 +195,38 @@ test("Finding actions and the verified view use exact saved references instead o
   ]);
 });
 
-test("A typed unqualified execution-group actual plan offers no measure-once or setting workaround", async ({ page }) => {
-  await controlledGroups(page);
-  await chooseGroup(page, /^Write group/);
-  await expect.poll(async () => (await state(page)).report).toBe("fixture-mssql-demo-17-10080");
-  await page.evaluate(async ({ path, message, hint }) => {
-    const client = await (await import(path)).api() as Api;
-    client.lastActualPlan = async () => { throw { code: "unsupported", message, hint, detail: "actual-plan-execution-population-unverified" }; };
-  }, { path: "/src/lib/api.ts", message: english["engine.execution.actual_population_unverified"], hint: english["engine.execution.actual_population_unverified_hint"] });
-  await page.getByRole("tab", { name: english["ui.queries.tab.plan"], exact: false }).click();
-  await page.getByRole("tab", { name: english["ui.common.last_run"], exact: true }).click();
-  const missing = page.locator(".actual-missing");
-  await expect(missing).toContainText(english["engine.execution.actual_population_unverified"]);
-  await expect(missing.getByRole("button", { name: english["ui.actual_run.measure"], exact: false })).toHaveCount(0);
-  await expect(missing.locator(".am-code")).toHaveCount(0);
-  await expect(missing.getByRole("button", { name: english["ui.common.open_in_editor"], exact: true })).toBeVisible();
-});
+for (const refusal of [
+  {
+    name: "An unqualified execution-group actual plan",
+    detail: "actual-plan-execution-population-unverified",
+    message: english["engine.execution.actual_population_unverified"],
+    hint: english["engine.execution.actual_population_unverified_hint"],
+  },
+  {
+    name: "An actual plan without saved native identity",
+    detail: "actual-plan-identity-unverified",
+    message: english["engine.execution.actual_identity_unverified"],
+    hint: english["engine.execution.actual_identity_unverified_hint"],
+  },
+] as const) {
+  test(`${refusal.name} offers no measure-once or setting workaround`, async ({ page }) => {
+    await controlledGroups(page);
+    await chooseGroup(page, /^Write group/);
+    await expect.poll(async () => (await state(page)).report).toBe("fixture-mssql-demo-17-10080");
+    await page.evaluate(async ({ path, message, hint, detail }) => {
+      const client = await (await import(path)).api() as Api;
+      client.lastActualPlan = async () => { throw { code: "unsupported", message, hint, detail }; };
+    }, { path: "/src/lib/api.ts", ...refusal });
+    await page.getByRole("tab", { name: english["ui.queries.tab.plan"], exact: false }).click();
+    await page.getByRole("tab", { name: english["ui.common.last_run"], exact: true }).click();
+    const missing = page.locator(".actual-missing");
+    await expect(missing).toContainText(refusal.message);
+    await expect(missing).toContainText(refusal.hint);
+    await expect(missing.getByRole("button", { name: english["ui.actual_run.measure"], exact: false })).toHaveCount(0);
+    await expect(missing.locator(".am-code")).toHaveCount(0);
+    await expect(missing.getByRole("button", { name: english["ui.common.open_in_editor"], exact: true })).toBeVisible();
+  });
+}
 
 test("A late or failing group cache and a language reread cannot replace another exact selection", async ({ page }) => {
   await controlledGroups(page);

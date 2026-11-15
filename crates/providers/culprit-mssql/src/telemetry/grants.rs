@@ -10,8 +10,9 @@ pub(super) struct Grants;
 impl SnapshotRecipe for Grants {
     type Layout = Layout;
     const DATASET: SnapshotDataset = SnapshotDataset::StatementGrants;
-    const NAME: &'static str = "statement-grant-cache";
+    const NAME: &'static str = crate::sources::GRANTS.name;
     const SOURCE: &'static Source = &crate::sources::GRANTS;
+    const INSTANCE_LOCAL: bool = true;
     async fn layout<R: NativeRead>(&self, reader: &mut R, _budget: &CollectionBudget) -> Result<Option<Layout>> {
         Layout::read(reader).await
     }

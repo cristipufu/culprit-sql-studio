@@ -4,6 +4,10 @@ use culprit_core::{DatabaseIdentity, collected_resource_analysis::CollectedMemor
 
 pub fn request_memory(capture: &EvidenceCapture) -> Result<CollectedMemoryParticipantsAnalysis> {
     let input = CapturedState::new(capture, SnapshotDataset::CurrentRequestMemory)?;
+    let context = NativeReadContext::from_snapshot(capture.source()).map_err(|_| invalid())?;
+    if !matches!(context.partition, SourcePartition::InstanceLocal { .. }) {
+        return Err(invalid());
+    }
     let database = input.database()?;
     let bounds = input.bounds()?;
     let mut observed_point = None;

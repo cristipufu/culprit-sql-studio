@@ -9,6 +9,7 @@ impl SnapshotRecipe for QueryCompilation {
     const DATASET: SnapshotDataset = SnapshotDataset::QueryCompilation;
     const NAME: &'static str = "query-compilation-state";
     const SOURCE: &'static Source = &crate::sources::QUERY_COMPILATION;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
 
     async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<()>> {

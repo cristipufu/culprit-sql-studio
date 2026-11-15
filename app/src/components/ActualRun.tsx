@@ -104,12 +104,13 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
 
   const settingOff = state.error.detail === "actual-plan-statistics-unavailable";
   const populationUnverified = state.error.detail === "actual-plan-execution-population-unverified";
-  const canRun = !populationUnverified && runnable(query.text);
+  const identityUnverified = state.error.detail === "actual-plan-identity-unverified";
+  const canRun = !populationUnverified && !identityUnverified && runnable(query.text);
   return (
     <div className="actual-missing">
       <div className="am-title">{settingOff ? t("ui.actual_run.setting_off") : state.error.message}</div>
       <p className="am-body">
-        {populationUnverified ? state.error.hint : settingOff ? (
+        {populationUnverified || identityUnverified ? state.error.hint : settingOff ? (
           tx("ui.actual_run.setting_explain", {}, { setting: <span className="mono">LAST_QUERY_PLAN_STATS</span> })
         ) : evidencePresentation(engine).retained_actual_plans ? (
           state.error.hint

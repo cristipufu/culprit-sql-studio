@@ -155,8 +155,6 @@ async fn prove_native_grants(
     let holder_id = requests.first().unwrap().session.clone();
     let waiter_id = requests.last().unwrap().session.clone();
     let mut qualification = pool.connect(SessionKind::User).await.unwrap();
-    assert_no_execution_grant(&mut qualification, &sql::context(IdentityDetail::Endpoint), vec![Parameter::Integer(1)])
-        .await;
     assert_no_execution_grant(&mut qualification, &fields::inventory_sql(), vec![]).await;
     let layout = fields::observed_layout(&frame.grants.first().unwrap().available_columns);
     assert_no_execution_grant(
@@ -175,7 +173,7 @@ async fn prove_native_grants(
     .await;
     drop(qualification);
     reader.enrich_memory(&mut frame).await.unwrap();
-    let context = frame.context.clone();
+    let owner = frame.owner.clone();
     let rows = frame.into_observations().unwrap();
     let holder = rows
         .iter()
@@ -210,8 +208,8 @@ async fn prove_native_grants(
     let native_holder = native.iter().find(|row| row.string("session_id") == holder_id).unwrap();
     assert_eq!(holder.granted_kibibytes, optional_counter(native_holder, "granted_memory_kb").unwrap());
     drop(baseline);
-    assert!(reader.verify_memory_context(&context).await.unwrap());
-    assert_eq!(reader.query_count(), 5);
+    assert!(reader.verify_memory_context(&owner).await.unwrap().has_qualified_local_owner());
+    assert_eq!(reader.query_count(), 9, "local owner3 + columns1 + grants1 + guarded SQL1 + local recheck3");
     let metrics = reader.read_metrics().unwrap();
     assert!(metrics.is_valid());
     assert!(metrics.templates.iter().all(|metric| metric.timeouts == 0 && metric.unconfirmed_cancellations == 0));

@@ -4,7 +4,7 @@ use crate::{
         Reader,
         replicas::tests::row as replica,
         tests::{definition_row, summary_row},
-        window_sql::tests::{layout_row, row as window_row},
+        window_sql::tests::{azure_row, layout_row, row as window_row},
     },
     read::ReadResult,
     resources::test_support::{FakeRead, replace},
@@ -54,6 +54,99 @@ fn replies(final_window: ReadResult<Vec<Rec>>, final_catalog: Vec<Rec>) -> Vec<R
         Ok(vec![layout()]),
         Ok(final_catalog),
     ]
+}
+
+fn azure_window() -> Rec {
+    replace(&azure_row(), &[("wait_stats_capture_mode_desc", Val::Null)])
+}
+
+fn azure_replies(final_window: Rec) -> Vec<ReadResult<Vec<Rec>>> {
+    let mut script = replies(Ok(vec![final_window]), groups());
+    let azure_layout = replace(&layout(), &[("engine_edition", Val::Int(5))]);
+    script[0] = Ok(vec![azure_layout.clone()]);
+    script[2] = Ok(vec![azure_window()]);
+    script[10] = Ok(vec![azure_layout]);
+    script
+}
+
+#[tokio::test]
+async fn completed_query_store_identity_replaces_endpoint_only_snapshot_identity_for_every_exact_group() {
+    let mut reader = Reader::new(FakeRead::new(azure_replies(azure_window())));
+    let workloads = acquire(&mut reader, &options()).await;
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    let mut snapshot: Box<Snapshot> =
+        serde_json::from_str(include_str!("../../../../../../fixtures/mssql-demo.json")).unwrap();
+    snapshot.options = Some(options());
+    snapshot.workload = None;
+    let endpoint =
+        culprit_core::DatabaseIdentity::server(Engine::Mssql, "culprit_demo", "saved-alias.invalid", 1433, None);
+    snapshot.bind_identity(endpoint.clone());
+    let identity = workloads.database_identity(&snapshot.server.database, "saved-alias.invalid", 1433).unwrap();
+    assert_ne!(identity.telemetry_id().unwrap(), endpoint.telemetry_id().unwrap());
+    assert_eq!(identity.incarnation.as_deref(), Some("logical-database-guid"));
+    let alias = workloads.database_identity(&snapshot.server.database, "another-alias.invalid", 1433).unwrap();
+    assert_eq!(identity.telemetry_id().unwrap(), alias.telemetry_id().unwrap());
+    assert!(workloads.database_identity("another-database", "saved-alias.invalid", 1433).is_err());
+    snapshot.bind_identity(identity.clone());
+    let batch = workloads.project(*snapshot, &options()).unwrap();
+    assert_eq!(batch.requested.identity.as_ref(), Some(&identity));
+    assert!(batch.requested.workload.is_none(), "the unselected overview does not fabricate pooled history");
+    for snapshot in &batch.populations {
+        assert_eq!(snapshot.identity.as_ref(), Some(&identity));
+        assert_eq!(snapshot.workload_measurement().unwrap().database, identity);
+        let query = &snapshot.workload.as_ref().unwrap().queries[0];
+        assert_eq!(
+            query.native_identity.as_ref(),
+            Some(&crate::query_store::decode::query_identity(&summary_row()).unwrap())
+        );
+    }
+    assert_eq!(reader.queries(), 12, "logical identity uses the existing initial and final window reads");
+}
+
+#[tokio::test]
+async fn changed_database_physical_incarnation_or_role_withholds_every_group_before_publication_or_fallback() {
+    for (field, value) in [
+        ("database_name", "another-database"),
+        ("incarnation", "recreated-logical-database"),
+        ("physical_incarnation", "moved-physical-database"),
+        ("updateability", "READ_ONLY"),
+    ] {
+        let changed = replace(&azure_window(), &[(field, Val::Text(value.into()))]);
+        let mut reader = Reader::new(FakeRead::new(azure_replies(changed)));
+        let workloads = acquire(&mut reader, &options()).await;
+        assert!(workloads.requested.workload.is_none());
+        assert!(workloads.populations.iter().all(|(_, part)| part.workload.is_none() && part.database.is_none()));
+        assert!(!workloads.allows_cache_fallback());
+        assert_eq!(CollectionStop::from_error(reader.retirement_reason().unwrap()), CollectionStop::SourceChanged);
+        assert_eq!(
+            reader.queries(),
+            10,
+            "{field}: no catalog, borrowed result or fresh source follows the failed identity check"
+        );
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn completed_unknown_azure_identity_keeps_history_but_cannot_promote_an_endpoint_namespace() {
+    let unknown = replace(
+        &azure_window(),
+        &[("native_identity_rows", Val::Int(0)), ("incarnation", Val::Null), ("physical_incarnation", Val::Null)],
+    );
+    let mut script = azure_replies(unknown.clone());
+    script[2] = Ok(vec![unknown]);
+    let mut reader = Reader::new(FakeRead::new(script));
+    let workloads = acquire(&mut reader, &options()).await;
+    assert!(workloads.populations.iter().all(|(_, part)| part.workload.is_some()));
+    assert!(!workloads.allows_cache_fallback());
+    let identity = workloads.database_identity("culprit_demo", "saved-alias.invalid", 1433).unwrap();
+    assert!(identity.incarnation.is_none());
+    assert_eq!(
+        identity,
+        culprit_core::DatabaseIdentity::server(Engine::Mssql, "culprit_demo", "saved-alias.invalid", 1433, None)
+    );
+    assert_eq!(reader.queries(), 12);
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
 
 #[tokio::test]

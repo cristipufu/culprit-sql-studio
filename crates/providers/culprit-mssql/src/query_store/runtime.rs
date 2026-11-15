@@ -239,7 +239,7 @@ GROUP BY p.query_id,rs.plan_id,q.context_settings_id,q.object_id,q.query_hash,q.
 mod tests;
 
 pub(crate) const LAYOUT: &str = concat!(
-    r#"SELECT /* culprit */
+    r#"SELECT /* culprit */ CAST(SERVERPROPERTY('EngineEdition') AS int) AS engine_edition,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_tempdb_space_used') THEN 1 ELSE 0 END AS tempdb,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_log_bytes_used') THEN 1 ELSE 0 END AS log_bytes,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'replica_group_id') THEN 1 ELSE 0 END AS replicas,

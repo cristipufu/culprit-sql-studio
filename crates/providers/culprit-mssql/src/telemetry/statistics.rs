@@ -8,6 +8,7 @@ impl SnapshotRecipe for Statistics {
     const DATASET: SnapshotDataset = SnapshotDataset::Statistics;
     const NAME: &'static str = "statistics-state";
     const SOURCE: &'static Source = &crate::sources::STATISTICS;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<()>> {
         Ok(Some(()))

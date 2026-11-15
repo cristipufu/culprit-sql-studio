@@ -3,7 +3,7 @@ use crate::{
     query_store::{
         Reader,
         tests::{definition_row, summary_row},
-        window_sql::tests::row as window_row,
+        window_sql::tests::{azure_row, row as window_row},
     },
     read::{ReadError, ReadResult},
     resources::test_support::{FakeRead, replace},
@@ -32,6 +32,7 @@ fn unavailable_waits_window() -> Rec {
 pub(super) fn runtime_replies(summary: Vec<Rec>) -> Vec<ReadResult<Vec<Rec>>> {
     vec![
         Ok(vec![Rec::of(&[
+            ("engine_edition", Val::Int(3)),
             ("tempdb", Val::Int(0)),
             ("replicas", Val::Int(0)),
             ("actual_state_desc", Val::Text("READ_WRITE".into())),
@@ -95,7 +96,13 @@ async fn original_runtime_identity_authorizes_definition_plan_and_same_populatio
         &definition_row(SQL),
         &[("query_initial_compile_at", Val::Text("2020-01-01T08:00:00.000000000+02:00".into()))],
     );
-    let mut reader = Reader::new(FakeRead::new(complete_replies(definition, Some(plan_row()), summary_row())));
+    let mut replies = complete_replies(definition, Some(plan_row()), summary_row());
+    let layout = replies[0].as_ref().unwrap()[0].clone();
+    replies[0] = Ok(vec![replace(&layout, &[("engine_edition", Val::Int(5))])]);
+    let native_window = replace(&azure_row(), &[("wait_stats_capture_mode_desc", Val::Null)]);
+    replies[1] = Ok(vec![native_window.clone()]);
+    *replies.last_mut().unwrap() = Ok(vec![native_window]);
+    let mut reader = Reader::new(FakeRead::new(replies));
     let result = from_query_store(&mut reader, &options()).await.unwrap();
     let query = &result.workload.queries[0];
     assert_eq!(query.id, "3");
@@ -109,10 +116,37 @@ async fn original_runtime_identity_authorizes_definition_plan_and_same_populatio
     assert_eq!(result.plan_errors, 0);
     let original = crate::query_store::decode::query_identity(&summary_row()).unwrap();
     assert_eq!(result.query_identities.get("3"), Some(&original));
+    assert_eq!(query.native_identity.as_ref(), Some(&original));
+    let original_plan = crate::query_store::decode::plan_identity(&summary_row()).unwrap().unwrap();
+    assert_eq!(query.native_plan_identity.as_ref(), Some(&original_plan));
+    assert_eq!(query.plans[0].native_identity.as_ref(), Some(&original_plan));
+    let database = result.database.as_ref().expect("the same Query Store reader observed the database identity");
+    assert_eq!(database.database, "culprit_demo");
+    assert_eq!(database.identity("saved-alias.invalid", 1433).incarnation.as_deref(), Some("logical-database-guid"));
     assert_eq!(result.workload.window_hours, 1.0);
     assert_eq!(result.workload.window_end.as_deref(), Some("2020-01-01T07:00:00Z"));
     assert_eq!(reader.queries(), 11, "outcomes and log volume require no later runtime read");
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+}
+
+#[test]
+fn cache_aggregates_cannot_acquire_a_query_store_identity_from_a_shape_or_representative_plan() {
+    let query = QueryAgg {
+        query_id: "0x0123456789ABCDEF".into(),
+        identity: None,
+        plans: vec![PlanAgg {
+            plan_id: "0x0123456789ABCDEF".into(),
+            executions: 2.0,
+            total_ms: 4.0,
+            ..Default::default()
+        }],
+    };
+    let stat = to_query_stat(&query, None, Some(crate::plan_xml::parse(PLAN).unwrap()), Vec::new());
+    assert!(stat.native_identity.is_none());
+    assert!(stat.native_plan_identity.is_none());
+    assert!(stat.plans[0].native_identity.is_none());
+    assert_eq!(stat.executions, 2.0);
+    assert_eq!(stat.total_time_ms, 4.0);
 }
 
 #[tokio::test]
@@ -236,6 +270,7 @@ async fn terminal_definition_failure_preserves_shutdown_and_forbids_followup() {
 
 fn with_log_capability(mut replies: Vec<ReadResult<Vec<Rec>>>) -> Vec<ReadResult<Vec<Rec>>> {
     replies[0] = Ok(vec![Rec::of(&[
+        ("engine_edition", Val::Int(3)),
         ("tempdb", Val::Int(0)),
         ("replicas", Val::Int(0)),
         ("actual_state_desc", Val::Text("READ_WRITE".into())),

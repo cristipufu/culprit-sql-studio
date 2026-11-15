@@ -28,6 +28,7 @@ struct Interval {
 
 #[derive(Clone)]
 pub(crate) struct FrozenWindow {
+    pub database: crate::database_identity::Context,
     minutes: u32,
     clock: String,
     native_xml: String,
@@ -41,6 +42,7 @@ pub(crate) struct FrozenWindow {
 }
 impl FrozenWindow {
     pub(crate) fn decode(row: &Rec, minutes: u32, waits_supported: bool) -> Result<Self> {
+        let database = crate::database_identity::Context::from_window(row)?;
         let clock = text(row, "window_clock")?;
         parse_time(&clock)?;
         let native_xml = text(row, "native_intervals")?;
@@ -114,6 +116,7 @@ impl FrozenWindow {
             _ => return Err(invalid_data()),
         };
         Ok(Self {
+            database,
             minutes,
             clock,
             native_xml,
@@ -133,11 +136,14 @@ impl FrozenWindow {
         Parameter::Text(self.native_xml.clone())
     }
     pub(crate) fn verify_query(&self) -> (String, Vec<Parameter>) {
-        (metadata_sql(self.waits_supported, true), vec![self.parameter()])
+        (metadata_sql(self.waits_supported, true, self.database.edition), vec![self.parameter()])
     }
     pub(crate) fn verify(&mut self, row: &Rec) -> Result<WindowVerification> {
         let current = Self::decode(row, self.minutes, self.waits_supported)?;
-        if self.intervals != current.intervals || parse_time(&current.clock)? < parse_time(&self.clock)? {
+        if self.database != current.database
+            || self.intervals != current.intervals
+            || parse_time(&current.clock)? < parse_time(&self.clock)?
+        {
             self.invalidate_endpoint();
             return Ok(WindowVerification::RuntimePopulationChanged);
         }
@@ -174,7 +180,7 @@ fn parse_time(value: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
     chrono::DateTime::parse_from_rfc3339(value).map_err(|_| invalid_data())
 }
 
-pub(crate) fn metadata_sql(waits_supported: bool, verifying: bool) -> String {
+pub(crate) fn metadata_sql(waits_supported: bool, verifying: bool, edition: i64) -> String {
     let (declaration, selection, bounds) = if verifying {
         (
             DECLARATION,
@@ -184,18 +190,20 @@ pub(crate) fn metadata_sql(waits_supported: bool, verifying: bool) -> String {
     } else {
         ("", "i.end_time>=DATEADD(minute,-@P1,@at) AND i.start_time<=@at".to_owned(), "@selected")
     };
+    let identity_declaration = crate::database_identity::window_declaration(edition);
+    let identity_columns = crate::database_identity::window_columns(edition);
     let capture = if waits_supported { "o.wait_stats_capture_mode_desc" } else { "CAST(NULL AS nvarchar(60))" };
     let start = utc_offset_precise_iso("b.starts");
     let end = utc_offset_precise_iso(CAPPED_END);
     let limit = MAX_INTERVALS + 1;
     format!(
-        r#"{declaration}
+        r#"{identity_declaration}{declaration}
 DECLARE /* culprit */ @at datetimeoffset=SYSDATETIMEOFFSET();
 DECLARE /* culprit */ @selected xml=(SELECT TOP({limit}) i.runtime_stats_interval_id AS id,
  CONVERT(varchar(40),i.start_time,127) AS starts,CONVERT(varchar(40),i.end_time,127) AS ends
  FROM sys.query_store_runtime_stats_interval i WHERE {selection}
  FOR XML RAW('interval'),ROOT('intervals'));
-SELECT /* culprit */ CONVERT(varchar(40),@at,127) AS window_clock,
+SELECT /* culprit */ {identity_columns},CONVERT(varchar(40),@at,127) AS window_clock,
  CONVERT(nvarchar(max),{bounds}) AS native_intervals,
  CASE WHEN @selected.value('count(/intervals/interval)','int')={bounds}.value('count(/intervals/interval)','int') THEN 1 ELSE 0 END AS intervals_retained,
  {start} AS window_start,{end} AS window_end,

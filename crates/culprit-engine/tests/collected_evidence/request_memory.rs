@@ -41,6 +41,7 @@ fn scan(source: &CollectionDescription, rows: &[TelemetryRecord]) -> Snapshot {
         reason_message: None,
     });
     scan.pressure.get_or_insert_default().request_memory = Some(RequestMemorySnapshot {
+        context: NativeReadContext::from_snapshot(source).unwrap(),
         source: coverage.source.clone(),
         observed_at: native.observed_from.clone(),
         observations: observations(rows).into_iter().cloned().collect(),

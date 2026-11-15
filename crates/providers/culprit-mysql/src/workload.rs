@@ -231,6 +231,8 @@ fn digest(r: &Rec, has_cpu: bool, columns: &BTreeSet<String>) -> Result<Digest> 
     let lock_ms = crate::native::statements::lock_time_ms(r)?;
     Ok(Digest {
         stat: QueryStat {
+            native_identity: None,
+            native_plan_identity: None,
             plan_history: None,
             variant_family: None,
             resolved_write_target: None,
@@ -819,6 +821,8 @@ mod tests {
     fn digest(id: &str, time: f64, calls: f64, examined: f64) -> Digest {
         Digest {
             stat: QueryStat {
+                native_identity: None,
+                native_plan_identity: None,
                 plan_history: None,
                 variant_family: None,
                 resolved_write_target: None,

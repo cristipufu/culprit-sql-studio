@@ -5,6 +5,7 @@ pub(super) struct CachedRuntime;
 #[async_trait::async_trait]
 impl SnapshotRecipe for CachedRuntime {
     type Layout = cached_runtime::Layout;
+    const INSTANCE_LOCAL: bool = true;
     const DATASET: SnapshotDataset = SnapshotDataset::CachedRuntime;
     const NAME: &'static str = "statement-runtime-cache";
     const SOURCE: &'static Source = &crate::sources::PLAN_CACHE;

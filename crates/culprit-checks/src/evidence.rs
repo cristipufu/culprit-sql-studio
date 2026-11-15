@@ -33,7 +33,6 @@ pub enum QueryMeasure {
     Rows,
     Histograms,
     TemporaryWork,
-    Grants,
     Waits(WaitClass),
 }
 
@@ -376,9 +375,6 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
     use CheckEvidence::*;
     let insufficient = |why: String| Insufficient(why);
     let Some(w) = &s.workload else {
-        if matches!(measure, QueryMeasure::Grants) && s.pressure.as_ref().is_some_and(|p| !p.grants.is_empty()) {
-            return insufficient(t!("evidence.grants_without_history"));
-        }
         return Unavailable(s.no_workload_reason().unwrap_or_else(|| t!("evidence.no_history")));
     };
     if w.queries.is_empty() {
@@ -406,7 +402,6 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
         QueryMeasure::Waits(_) => &[source_id::QUERY_WAITS],
         QueryMeasure::Failures => &[source_id::QUERY_COSTS, source_id::QUERY_ERRORS],
         QueryMeasure::Planning | QueryMeasure::Jit | QueryMeasure::LogBytes => &[source_id::QUERY_COSTS],
-        QueryMeasure::Grants => &[source_id::GRANTS],
         QueryMeasure::Histograms => &[source_id::HISTOGRAMS],
         _ => &[],
     };
@@ -447,11 +442,6 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
                 QueryMeasure::Rows => q.rows_per_execution().is_some(),
                 QueryMeasure::Histograms => s.histograms.is_some(),
                 QueryMeasure::TemporaryWork => q.temporary_work.as_ref().is_some_and(|work| work.has_measurements()),
-                QueryMeasure::Grants => s.pressure.as_ref().is_some_and(|p| {
-                    p.grants
-                        .iter()
-                        .any(|g| q.query_hash.as_deref() == Some(g.query_hash.as_str()) && g.executions >= 5.0)
-                }),
                 QueryMeasure::Waits(class) => q.measured_wait_ms(class).is_some(),
                 QueryMeasure::Plans => q.plan.is_some(),
                 _ => true,

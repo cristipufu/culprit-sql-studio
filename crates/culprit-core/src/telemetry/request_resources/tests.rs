@@ -1,5 +1,23 @@
 use super::*;
 
+fn context(at: &str) -> NativeReadContext {
+    NativeReadContext {
+        target: DatabaseIdentity::server(crate::Engine::Mssql, "sample", "fixture.invalid", 1433, None).into(),
+        partition: SourcePartition::InstanceLocal {
+            member: Some(SharedResourceIdentity {
+                engine: crate::Engine::Mssql,
+                kind: SharedResourceKind::Node,
+                namespace: NativeIdentity::new("fixture-logical-database"),
+                native: NativeIdentity::new("fixture-native-member"),
+            }),
+            epoch: Some("fixture-native-process-epoch".into()),
+        },
+        observed_from: at.into(),
+        observed_until: at.into(),
+        database_writable: Some(true),
+    }
+}
+
 pub(crate) fn grant() -> ExecutionGrantObservation {
     ExecutionGrantObservation {
         source: crate::source_id::CURRENT_REQUEST_MEMORY.into(),
@@ -92,6 +110,7 @@ fn grant_context_validation_rejects_invalid_scope_counts_time_and_column_presenc
 fn request_memory_capture_keeps_empty_source_identity_and_rejects_mixed_or_duplicate_rows() {
     let row = grant();
     let mut captured = RequestMemorySnapshot {
+        context: context(&row.observed_at),
         source: row.source.clone(),
         observed_at: row.observed_at.clone(),
         observations: Vec::new(),
@@ -110,6 +129,35 @@ fn request_memory_capture_keeps_empty_source_identity_and_rejects_mixed_or_dupli
     captured.observations.clear();
     captured.observed_at = "2020-01-01T08:01:00".into();
     assert!(!captured.is_valid(), "an empty capture still requires an established UTC clock");
+}
+
+#[test]
+fn request_memory_capture_binds_associated_database_context_without_assigning_unresolved_rows() {
+    let row = grant();
+    let mut captured = RequestMemorySnapshot {
+        context: context(&row.observed_at),
+        source: row.source.clone(),
+        observed_at: row.observed_at.clone(),
+        observations: vec![row],
+    };
+    assert!(captured.is_valid());
+    captured.context.target =
+        DatabaseIdentity::server(crate::Engine::Mssql, "other-database", "fixture.invalid", 1433, None).into();
+    assert!(captured.context.is_valid());
+    assert!(!captured.is_valid(), "a valid native read cannot relabel a request from another database");
+
+    let unresolved = &mut captured.observations[0];
+    unresolved.request = None;
+    unresolved.scope = None;
+    unresolved.request_association = RequestGrantAssociation::MissingRequest;
+    unresolved.statement_relationship = GrantStatementRelationship::Unresolved;
+    assert!(captured.is_valid(), "an unresolved reservation remains a native positive, without database ownership");
+    assert_eq!(captured.observations[0].requested_kibibytes.as_deref(), Some("9007199254740993"));
+
+    let SourcePartition::InstanceLocal { member: Some(member), .. } = &captured.context.partition else { panic!() };
+    captured.context.target = CollectionTarget::Shared(member.clone());
+    assert!(captured.context.is_valid());
+    assert!(!captured.is_valid(), "a database request-memory capture cannot become a shared-resource capture");
 }
 
 #[test]
@@ -165,6 +213,7 @@ fn sharing_request_memory_removes_client_identity_and_literals_without_changing_
         host: Some("private-host-canary".into()),
     });
     snapshot.pressure.get_or_insert_default().request_memory = Some(RequestMemorySnapshot {
+        context: context(&value.observed_at),
         source: value.source.clone(),
         observed_at: value.observed_at.clone(),
         observations: vec![value.clone()],

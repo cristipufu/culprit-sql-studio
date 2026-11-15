@@ -5,7 +5,7 @@ pub(crate) mod page_targets;
 mod participants;
 mod resources;
 mod rows;
-mod sql;
+pub(crate) mod sql;
 mod statement_identity;
 pub(crate) mod tempdb;
 
@@ -67,7 +67,7 @@ impl ActivityContext {
         )
         .with_detail(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceUnavailable)))
     }
-    fn observed(row: &Rec, host: &str, port: u16, identity: IdentityDetail) -> Result<(Self, bool)> {
+    pub(crate) fn observed(row: &Rec, host: &str, port: u16, identity: IdentityDetail) -> Result<(Self, bool)> {
         let edition = integer(row, "edition")?;
         let major = u32::try_from(integer(row, "major")?).map_err(|_| invalid_data())?;
         if identity == IdentityDetail::AzureDatabase && edition != 5 {

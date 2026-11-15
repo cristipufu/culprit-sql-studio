@@ -1045,6 +1045,14 @@ fn days_when(from: &str, to: Option<&str>) -> String {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct QueryStat {
+    /// Exact source-owned statement identity. Missing when a runtime row combines several native statements.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub native_identity: Option<crate::telemetry::NativeQueryIdentity>,
+    /// Exact identity of the selected captured plan, independent of this workload's runtime population.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub native_plan_identity: Option<crate::telemetry::NativePlanIdentity>,
     pub requests: Option<crate::operations::RequestEvidence>,
     /// A CTE write's unambiguous base table, resolved by shared SQL analysis. Absent when unknown or unnecessary.
     pub resolved_write_target: Option<String>,
@@ -1259,6 +1267,9 @@ impl QueryStat {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct PlanVariant {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub native_identity: Option<crate::telemetry::NativePlanIdentity>,
     pub id: String,
     pub executions: f64,
     pub total_time_ms: f64,

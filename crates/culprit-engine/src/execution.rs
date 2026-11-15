@@ -182,6 +182,11 @@ impl Execution<'_> {
         plan_id: Option<&str>,
         report_id: Option<&str>,
     ) -> Result<Plan> {
+        let engine = self.connections.connection(name)?.engine;
+        if !engine.abilities().has(culprit_core::Ability::LastActualPlan) {
+            return Err(engine.refused(culprit_core::Ability::LastActualPlan));
+        }
+        let report_owned = report_id.is_some();
         let report_name = name.to_owned();
         let report_id = report_id.map(str::to_owned);
         let report =
@@ -195,20 +200,72 @@ impl Execution<'_> {
                 })
                 || snapshot.runtime_populations.as_ref().is_some_and(|catalog| catalog.partitioned)
         }) {
-            // The current provider API returns connected-cache XML without execution-group provenance. Native
+            // The current native API returns connected-cache XML without execution-group provenance. Native
             // query/plan IDs cannot attach that execution or its table/workload context to another population.
             return Err(Error::new(ErrorCode::Unsupported, t!("engine.execution.actual_population_unverified"))
                 .with_hint(t!("engine.execution.actual_population_unverified_hint"))
                 .with_detail(culprit_core::ErrorDetail::ActualPlanExecutionPopulationUnverified));
         }
+        if report_owned
+            && !report.as_ref().is_some_and(|report| report.snapshot.queries().iter().any(|query| query.id == query_id))
+        {
+            return Err(Error::not_found(t!("engine.execution.no_query", query = query_id, name = name)));
+        }
+        let request = Self::retained_request(report.as_ref(), query_id, plan_id)?;
+        request.validate()?;
         let observed = self.connections.observed_provider(name).await?;
         let provider = observed.provider();
         let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
-            let plan = self.connections.forget_rejected(name, provider.last_actual_plan(query_id, plan_id).await)?;
-            Ok(Self::contextual_plan(plan, report.as_ref().map(|r| &r.snapshot), query_id, plan_id))
+            let retained = self.connections.forget_rejected(name, provider.last_actual_plan(&request).await)?;
+            if !retained.matches_request(&request) {
+                return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+            }
+            let mut plan = retained.plan;
+            plan.facts_mut().retained = Some(Box::new(retained.provenance));
+            // Exact current statement identity is not a proof of the earlier execution's population or schema.
+            culprit_checks::present_retained_plan(&mut plan, &t!("engine.execution.retained.actual_independent"));
+            Ok(plan)
         })
         .await;
         observed.finish(result).await
+    }
+
+    fn retained_request(
+        report: Option<&Report>,
+        query_id: &str,
+        plan_id: Option<&str>,
+    ) -> Result<culprit_core::telemetry::RetainedActualPlanRequest> {
+        let query = report.and_then(|report| report.snapshot.queries().iter().find(|query| query.id == query_id));
+        let mut request = culprit_core::telemetry::RetainedActualPlanRequest {
+            query_id: query_id.into(),
+            plan_id: plan_id.map(str::to_owned),
+            expected_target: None,
+            expected_query: None,
+            expected_plan: None,
+        };
+        let Some(query) = query else { return Ok(request) };
+        let unverified = || {
+            Error::new(ErrorCode::Unsupported, t!("engine.execution.actual_identity_unverified"))
+                .with_hint(t!("engine.execution.actual_identity_unverified_hint"))
+                .with_detail(culprit_core::ErrorDetail::ActualPlanIdentityUnverified)
+        };
+        let native = query.native_identity.as_ref().ok_or_else(unverified)?;
+        let target = report.and_then(|report| report.snapshot.identity.clone()).ok_or_else(unverified)?;
+        request.query_id.clone_from(&native.query_id);
+        request.expected_query = Some(native.clone());
+        request.expected_target = Some(target.into());
+        if let Some(plan_id) = plan_id {
+            let native_plan = query
+                .plans
+                .iter()
+                .find(|plan| plan.id == plan_id)
+                .and_then(|plan| plan.native_identity.as_ref())
+                .or_else(|| query.native_plan_identity.as_ref().filter(|_| query.plan_id.as_deref() == Some(plan_id)))
+                .ok_or_else(unverified)?;
+            request.plan_id = Some(native_plan.plan_id.clone());
+            request.expected_plan = Some(native_plan.clone());
+        }
+        Ok(request)
     }
 
     /// How far along a session's running statement is: per-operator progress on SQL Server, the estimated plan with

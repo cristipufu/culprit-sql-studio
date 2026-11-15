@@ -22,6 +22,8 @@ mod page_waits;
 pub use page_waits::page_waits;
 mod statement_work;
 pub use statement_work::statement_work;
+mod statement_grants;
+pub use statement_grants::statement_grants;
 mod task_space;
 pub use task_space::task_space;
 mod runtime_distributions;

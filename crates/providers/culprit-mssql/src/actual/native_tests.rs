@@ -87,7 +87,19 @@ async fn retained_actual_plan_never_comes_from_another_database_with_matching_ha
         foreign_database,
         "old lookup must select the wrong database in this fixture"
     );
-    let read = retained::read(&mut native_a, query_id, None, 2 * 1024 * 1024).await.unwrap();
+    let read = retained::read(
+        &mut native_a,
+        &culprit_core::telemetry::RetainedActualPlanRequest {
+            query_id: query_id.to_string(),
+            plan_id: None,
+            expected_target: None,
+            expected_query: None,
+            expected_plan: None,
+        },
+        2 * 1024 * 1024,
+    )
+    .await
+    .unwrap();
     let plan = read.plan.expect("current database retains the exact linked statement");
     assert_eq!(i64::from(plan.context.database_id), expected_database);
     assert_eq!(plan.executions, "1");

@@ -1,4 +1,4 @@
-//! Pressure signals and the "right now" wait sample: performance counters, wait totals, memory grants and the oldest open
+//! Pressure signals and the "right now" wait sample: performance counters, wait totals, request queues and the oldest open
 //! transaction. Read-only and tagged; a read that fails leaves its signal out.
 
 use std::collections::HashMap;
@@ -128,7 +128,7 @@ pub(crate) fn resource_signals(summary: &crate::resources::Summary) -> Vec<Signa
     signals
 }
 
-/// Signals, grants and the oldest open transaction. Each read is independent, through `sources::read`: a failure is a
+/// Signals, waits and the oldest open transaction. Each read is independent, through `sources::read`: a failure is a
 /// note in the coverage returned.
 pub(crate) struct CollectedPressure {
     pub pressure: Pressure,
@@ -177,16 +177,6 @@ pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Pro
     p.signals.extend(crate::compiler_gateways::collect(pool.clone(), probe, &mut coverage).await);
     if let Some(topology) = crate::processors::collect(pool.clone(), probe, &mut coverage).await {
         (p.cpus, p.numa_nodes) = topology.application();
-    }
-    if let Some(grants) = crate::grants::collect_application(
-        pool.clone(),
-        probe,
-        &mut coverage,
-        crate::grants::ApplicationSelection::Largest,
-    )
-    .await
-    {
-        p.grants = grants;
     }
     let version_store = crate::version_store::application(pool.clone(), probe, &mut coverage).await;
     if let Some(bytes) = version_store.tempdb_bytes {

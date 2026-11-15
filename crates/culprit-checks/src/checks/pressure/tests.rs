@@ -1,6 +1,6 @@
 use super::*;
 use crate::waits::snapshot_with;
-use culprit_core::{GrantStat, OpenTransaction, ResourceSample, Signal, SignalScope, SignalUnit, WaitStat};
+use culprit_core::{Actionability, OpenTransaction, ResourceSample, Signal, SignalScope, SignalUnit, WaitStat};
 
 fn with_signals(engine: Engine, signals: Vec<Signal>) -> Snapshot {
     let mut s = snapshot_with(engine);
@@ -36,68 +36,51 @@ fn fixture(name: &str) -> Snapshot {
 }
 
 #[test]
-fn over_sized_grants_are_named_with_their_query() {
-    let mut s = with_signals(Engine::Mssql, vec![sig("memory-grants-pending", 6.0)]);
-    let hash = s.workload.as_mut().unwrap().queries[0].query_hash.clone().unwrap_or_else(|| "0xABC".into());
-    s.workload.as_mut().unwrap().queries[0].query_hash = Some(hash.clone());
-    s.pressure.as_mut().unwrap().grants = vec![GrantStat {
-        query_hash: hash.to_lowercase(),
-        executions: 40.0,
-        avg_granted_kb: 2.0 * 1024.0 * 1024.0,
-        avg_used_kb: 40.0 * 1024.0,
-        max_granted_kb: 3.0 * 1024.0 * 1024.0,
-        last_granted_kb: None,
-        last_used_kb: None,
-    }];
-    let f = memory_grant(&s);
-    assert_eq!(f.len(), 1);
-    assert!(f[0].title.contains("reserves 2.0 GB of memory per run and uses 40.0 MB"), "{}", f[0].title);
-    assert_eq!(f[0].severity, Severity::High);
-    // The query never waited for memory itself: the grant claims none of its time.
-    assert_eq!(f[0].impact.db_time_share, None);
-    let q = memory_queue(&s);
-    assert_eq!(q[0].title, "6 queries in this database were waiting for a memory grant when the scan ran");
-    // A few queries seen queueing once is no record of queueing: the waste alone grades it.
-    s.pressure.as_mut().unwrap().signals.retain(|x| x.key != "memory-grants-pending");
-    s.pressure.as_mut().unwrap().signals.push(sig("memory-grants-pending", 3.0));
-    assert_eq!(memory_grant(&s)[0].severity, Severity::Medium);
-    // Recent runs that use their grant (memory grant feedback shrank it) are fixed already.
-    s.pressure.as_mut().unwrap().grants[0].last_granted_kb = Some(100.0 * 1024.0);
-    s.pressure.as_mut().unwrap().grants[0].last_used_kb = Some(60.0 * 1024.0);
-    assert!(memory_grant(&s).is_empty());
+fn cached_entry_imbalance_is_named_without_claiming_the_cause_of_a_queue() {
+    let mut snapshot = with_signals(Engine::Mssql, vec![sig("memory-grants-pending", 6.0)]);
+    crate::statement_grant_fixture::install(&mut snapshot);
+    let findings = memory_grant(&snapshot);
+    assert_eq!(findings.len(), 1);
+    let finding = &findings[0];
+    assert!(finding.title.contains("SELECT value FROM dbo.grant_input"));
+    assert!(finding.summary.contains("2.0 GB") && finding.summary.contains("40.0 MB"));
+    assert_eq!(finding.actionability, Actionability::Information);
+    assert_eq!(finding.severity, Severity::Low);
+    assert!(finding.queries.is_empty());
+    assert_eq!(finding.impact.db_time_share, None);
+    assert_eq!(finding.impact.time_ms_per_day, None);
+    assert!(finding.fix.as_ref().unwrap().sql.is_none());
+    assert_eq!(
+        memory_queue(&snapshot)[0].title,
+        "6 queries in this database were waiting for a memory grant when the scan ran"
+    );
+    snapshot.pressure.as_mut().unwrap().signals.clear();
+    let independent = memory_grant(&snapshot).remove(0);
+    assert_eq!(independent.severity, finding.severity);
+    assert_eq!(independent.actionability, finding.actionability);
 }
 
-// Grant impact and accumulated network waits keep their distinct accounting.
 #[test]
-fn network_wait_totals_are_reported_independently_of_grant_impact() {
-    let mut s = with_signals(Engine::Mssql, vec![]);
-    let total = s.workload.as_ref().unwrap().total_time_ms;
-    let q = &mut s.workload.as_mut().unwrap().queries[0];
-    q.query_hash = Some("0xABC".into());
-    let query_ms = q.total_time_ms;
-    q.waits = vec![WaitStat { category: "Memory".into(), wait_type: None, wait_ms: query_ms * 0.1, tasks: None }];
-    s.pressure.as_mut().unwrap().grants = vec![GrantStat {
-        query_hash: "0xabc".into(),
-        executions: 40.0,
-        avg_granted_kb: 2.0 * 1024.0 * 1024.0,
-        avg_used_kb: 40.0 * 1024.0,
-        max_granted_kb: 3.0 * 1024.0 * 1024.0,
-        last_granted_kb: None,
-        last_used_kb: None,
-    }];
-    let f = memory_grant(&s);
-    let share = f[0].impact.db_time_share.unwrap();
-    assert!((share - query_ms * 0.1 / total).abs() < 1e-9, "{share}");
+fn network_and_memory_wait_totals_are_independent_of_retained_grant_counters() {
+    let mut snapshot = with_signals(Engine::Mssql, vec![]);
+    crate::statement_grant_fixture::install(&mut snapshot);
+    let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+    query.query_hash = Some("0x0123456789ABCDEF".into());
+    query.waits =
+        vec![WaitStat { category: "Memory".into(), wait_type: None, wait_ms: query.total_time_ms * 0.1, tasks: None }];
+    let grant = memory_grant(&snapshot).remove(0);
+    assert!(grant.queries.is_empty());
+    assert_eq!(grant.impact.db_time_share, None);
+    assert_eq!(grant.impact.time_ms_per_day, None);
 
-    let mut s = snapshot_with(Engine::Mssql);
-    let q = &mut s.workload.as_mut().unwrap().queries[0];
-    let network = q.total_time_ms * 0.3;
-    q.waits = vec![WaitStat { category: "Network".into(), wait_type: None, wait_ms: network, tasks: None }];
-    let f = network_wait(&s);
-    assert_eq!(f[0].impact.db_time_share, None);
-    assert_eq!(f[0].impact.time_ms_per_day, None);
+    let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+    let network = query.total_time_ms * 0.3;
+    query.waits = vec![WaitStat { category: "Network".into(), wait_type: None, wait_ms: network, tasks: None }];
+    let findings = network_wait(&snapshot);
+    assert_eq!(findings[0].impact.db_time_share, None);
+    assert_eq!(findings[0].impact.time_ms_per_day, None);
     assert_eq!(
-        f[0].metrics.iter().find(|metric| metric.is("check.network_wait.metric.recorded")).unwrap().value,
+        findings[0].metrics.iter().find(|metric| metric.is("check.network_wait.metric.recorded")).unwrap().value,
         network
     );
 }

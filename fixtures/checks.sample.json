@@ -378,13 +378,13 @@
   },
   {
     "category": "queries",
-    "description": "Statements whose memory grant (reserved before they run, for sorts and hashes) is many times what they use, so other queries queue for memory.",
+    "description": "Native cache entries whose recorded mean grant is large relative to mean use. These lifetime counters do not identify a current pressure cause.",
     "engines": [
       "mssql"
     ],
     "id": "memory-grant",
     "requires": [],
-    "title": "Queries that reserve far more memory than they use"
+    "title": "Recorded memory grant/use imbalance"
   },
   {
     "category": "configuration",

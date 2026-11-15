@@ -11,6 +11,10 @@ pub use relational_input::{RelationalInput, RelationalInputKind, RelationalInput
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct PlanFacts {
+    /// Retained native cache evidence. Read ownership is separate from the earlier execution's unknown population.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub retained: Option<Box<crate::telemetry::RetainedPlanProvenance>>,
     /// Protection confirmed by the native provider for this measured execution. An imported or retained plan cannot
     /// establish how Culprit executed it, and therefore leaves this unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]

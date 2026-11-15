@@ -395,23 +395,9 @@ fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryS
             }
         }
         "lock" => top.map(|q| t!("view.waits.detail.lock", query = query(q), time = time(q))),
-        "memory" => {
-            let grant = top.and_then(|q| {
-                let hash = contributors.iter().find(|(s, _)| s.id == q.id).and_then(|(s, _)| s.query_hash.clone())?;
-                snapshot.pressure.as_ref()?.grants.iter().find(|g| g.query_hash.eq_ignore_ascii_case(&hash)).cloned()
-            });
-            match (top, grant) {
-                (Some(q), Some(g)) => Some(t!(
-                    "view.waits.detail.grant",
-                    query = query(q),
-                    time = time(q),
-                    granted = format::bytes(g.avg_granted_kb * 1024.0),
-                    used = format::bytes(g.avg_used_kb * 1024.0)
-                )),
-                (Some(q), None) => Some(t!("view.waits.detail.recorded_time", query = query(q), time = time(q))),
-                _ => pending_grants(snapshot),
-            }
-        }
+        "memory" => top
+            .map(|q| t!("view.waits.detail.recorded_time", query = query(q), time = time(q)))
+            .or_else(|| pending_grants(snapshot)),
         "io" => top.map(|q| {
             let reads = contributors
                 .iter()

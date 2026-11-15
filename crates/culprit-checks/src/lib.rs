@@ -16,6 +16,9 @@ mod refine;
 #[cfg(test)]
 #[path = "../tests/retention_fixture.rs"]
 mod retention_fixture;
+#[cfg(test)]
+#[path = "../tests/statement_grant_fixture.rs"]
+mod statement_grant_fixture;
 mod summary;
 pub(crate) mod support;
 mod views;
@@ -26,7 +29,7 @@ pub(crate) use checks::{config, deadlocks, index_health, indexes, pressure, quer
 pub(crate) use views::{advisor, brief, digest};
 pub use views::{
     cleanup, compilation, dashboard, drift, memory_failures, native_failures, page_waits, request_memory,
-    runtime_distributions, session_memory, statement_work, task_space, temporary_work, waits,
+    runtime_distributions, session_memory, statement_grants, statement_work, task_space, temporary_work, waits,
 };
 
 use std::sync::Arc;

@@ -110,8 +110,7 @@ async fn boxed_baseline_native_recovery_epoch_is_accepted_by_the_same_focused_re
     let mut authority_reader =
         reader(vec![Ok(vec![platform.clone()]), Ok(vec![ticks.clone()]), Ok(vec![authority_row.clone()])]);
     authority_reader.options.identity = crate::activity::IdentityDetail::Endpoint;
-    let native_authority =
-        crate::activity::database_context::DatabaseContext::initial(&mut authority_reader).await.unwrap();
+    let native_authority = crate::activity::database_context::initial(&mut authority_reader).await.unwrap();
     let authority = native_authority.capture_context().unwrap();
     let mut focus = focus(&original);
     focus.target = authority.database.into();

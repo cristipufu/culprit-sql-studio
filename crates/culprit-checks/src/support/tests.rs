@@ -293,6 +293,8 @@ fn query_handles() {
 
 pub(crate) fn sample() -> QueryStat {
     QueryStat {
+        native_identity: None,
+        native_plan_identity: None,
         plan_history: None,
         variant_family: None,
         resolved_write_target: None,

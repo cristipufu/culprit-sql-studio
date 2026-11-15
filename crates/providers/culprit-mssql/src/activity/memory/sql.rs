@@ -28,11 +28,3 @@ pub(super) fn observation(layout: &fields::Layout, identity: IdentityDetail) -> 
     // diagnostic itself. The row cap still does not bound all work of native DMV/session/request joins.
     super::super::sql::frame_query(&rows, identity, super::super::sql::QueryPolicy::MemoryDiagnostic)
 }
-
-pub(super) fn context(identity: IdentityDetail) -> String {
-    super::super::sql::frame_query(
-        "SELECT CAST(NULL AS int) AS session_id WHERE 1=0",
-        identity,
-        super::super::sql::QueryPolicy::MemoryDiagnostic,
-    )
-}

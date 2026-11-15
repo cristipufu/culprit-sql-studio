@@ -8,6 +8,7 @@ impl SnapshotRecipe for Partitions {
     const DATASET: SnapshotDataset = SnapshotDataset::Partitions;
     const NAME: &'static str = "partition-boundary-state";
     const SOURCE: &'static Source = &crate::sources::PARTITIONS;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _: &mut R, budget: &CollectionBudget) -> Result<Option<usize>> {
         Ok(Some(MAX_CATALOG_EXPRESSION_BYTES.min(budget.max_sql_bytes as usize)))

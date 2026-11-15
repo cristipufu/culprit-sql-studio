@@ -58,6 +58,7 @@ pub mod runtime_population;
 pub mod serialization;
 pub mod signals;
 pub mod sql;
+pub mod statement_grant_report;
 pub mod statement_work_report;
 pub mod task_space_report;
 pub mod telemetry;
@@ -151,6 +152,7 @@ pub use signals::{
     Replica, ReplicaCondition, ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
+pub use statement_grant_report::{StatementGrantExplanation, StatementGrantRead, StatementGrantReport};
 pub use statement_work_report::{StatementWorkEntry, StatementWorkReport};
 pub use task_space_report::*;
 pub use tuning_report::{TuningExplanation, TuningReport};
@@ -158,7 +160,7 @@ pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_repo
 pub use wait_resources::{ObservedWaitResource, WaitResourceKind};
 pub use waits::{
     ActivityCategory, ActivityEvent, ActivityHistory, ActivityPeriod, ActivityQuery, ActivityReport, CleanupHolder,
-    GrantStat, OpenTransaction, Pressure, QueryWaitCoverage, Signal, SignalScope, SignalStatus, SignalUnit,
-    TransactionActivity, WaitCategory, WaitQuery, WaitSample, WaitScope, WaitsReport, signal_id,
+    OpenTransaction, Pressure, QueryWaitCoverage, Signal, SignalScope, SignalStatus, SignalUnit, TransactionActivity,
+    WaitCategory, WaitQuery, WaitSample, WaitScope, WaitsReport, signal_id,
 };
 pub use window::{MAX_WINDOW_MINUTES, MINUTES_PER_DAY, parse_window, window_label};

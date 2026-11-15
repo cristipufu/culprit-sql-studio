@@ -230,6 +230,7 @@ fn query(
         let Some(part) = aggregate(capture, &definition.id, &group.rows, limitations)? else { continue };
         let parsed = plan(Some(definition), capture.source().target.engine(), limitations)?;
         variants.push(PlanVariant {
+            native_identity: Some(definition.identity.clone()),
             id: definition.id.clone(),
             executions: part.stats.executions,
             total_time_ms: part.stats.total_ms,
@@ -270,7 +271,15 @@ fn query(
     {
         limitations.push(limit(Some(id.into()), CollectedAnalysisLimit::MetricNotProjected));
     }
+    let native_plan_identity = plan
+        .as_ref()
+        .and_then(|_| {
+            groups.iter().filter_map(|group| group.plan).find(|definition| Some(&definition.id) == plan_id.as_ref())
+        })
+        .map(|definition| definition.identity.clone());
     Ok(Some(QueryStat {
+        native_identity: Some(first.query.identity.clone()),
+        native_plan_identity,
         id: id.into(),
         text: text.clone(),
         query_hash: None,

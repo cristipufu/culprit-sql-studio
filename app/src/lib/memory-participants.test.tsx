@@ -69,7 +69,18 @@ function report(identities = [identity()]): MemoryParticipantsReport {
 }
 
 function requestEvidence(observations = [grant()]): RequestMemorySnapshot {
-  return { source: "current request memory", observed_at: "2026-11-13T10:00:00.500000Z", observations };
+  const observed_at = "2026-11-13T10:00:00.500000Z";
+  return {
+    context: {
+      target: { scope: "database", identity: {
+        engine: "mssql", database: "app", incarnation: null,
+        location: { kind: "server", host: "fixture.invalid", port: 1433, instance: null },
+      } },
+      partition: { kind: "instance-local", member: null, epoch: null },
+      observed_from: observed_at, observed_until: observed_at, database_writable: null,
+    },
+    source: "current request memory", observed_at, observations,
+  };
 }
 
 function sessionEvidence(observations = [session()]): SessionMemorySnapshot {

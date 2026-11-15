@@ -252,6 +252,15 @@ block traffic and recorded I/O timing from internal-table and sort-pass counts. 
 readback; missing metrics remain unknown. A point does not establish an interval or safe delta, and matching a
 query ID does not attach SQL from a separately captured definition. No mode reconnects to the monitored database.
 
+`statement-grants` reads database-target `statement-grants` captures from `operational-samples` through the same
+pure explanation used by scans. Each original cache entry retains its handles, offsets, generation, exact integer
+counters and available statement text, separately from the native member, process generation and observation bounds
+of its read. A matching query hash supplies no current request, execution-group, wait or pressure attribution.
+Last/minimum/maximum values are not combined into a synthetic execution, and a balanced last execution or missing
+cache row does not prove recovery. Native partial/unavailable coverage and warehouse decoding gaps stay distinct;
+readable positive entries survive a gap without rewriting the original source header. Complete statement text that
+exceeds the UTF-8 warehouse preview uses the same explicit bounded recovery option; no source query is executed.
+
 `runtime-distributions` inspects a database-target `runtime-distributions` capture. Every distribution retains its
 own native statement identity, observation clock, source, reset qualification and population. Native histogram
 bounds and counts remain exact; an approximate percentile is not an individual execution time. Separate source

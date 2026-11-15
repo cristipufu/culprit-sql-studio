@@ -141,6 +141,15 @@ pub fn request_memory_evidence(
         fact: OperationalFact::ExecutionGrant(Box::new(grant)),
     })];
     manifest.source.source = source.into();
+    manifest.source.partition = SourcePartition::InstanceLocal {
+        member: Some(SharedResourceIdentity {
+            engine: manifest.source.target.engine(),
+            kind: SharedResourceKind::Node,
+            namespace: NativeIdentity::new("fixture-logical-database"),
+            native: NativeIdentity::new("fixture-native-compute-member"),
+        }),
+        epoch: Some("fixture-native-process-epoch".into()),
+    };
     manifest.source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
         dataset: SnapshotDataset::CurrentRequestMemory,
         observed_from: "2020-01-01T12:00:00Z".into(),

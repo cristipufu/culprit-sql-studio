@@ -5,7 +5,7 @@ use culprit_core::{
     format, t,
 };
 
-const CLEANUP_DETAIL_CHARS: usize = 1024;
+const OBSERVATION_DETAIL_CHARS: usize = 1024;
 
 struct Summary<'a> {
     title: &'a str,
@@ -80,7 +80,7 @@ pub(crate) fn cleanup(report: &culprit_core::CleanupReport) -> String {
             source: SourceQualification::Multiple(&report.sources),
             limitations: &report.limitations,
         },
-        |text| super::append_brief_details(text, entries.iter().map(String::as_str), CLEANUP_DETAIL_CHARS),
+        |text| super::append_brief_details(text, entries.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS),
     )
 }
 
@@ -98,6 +98,33 @@ pub(crate) fn tuning(report: &culprit_core::TuningReport) -> String {
             limitations: &limitations,
         },
         titles.iter().map(String::as_str),
+    )
+}
+
+pub(crate) fn statement_grants(report: &culprit_core::StatementGrantReport) -> String {
+    let title = report.title.render();
+    let summary = report.summary.render();
+    let limitations = report.limitations.iter().map(|message| message.render()).collect::<Vec<_>>();
+    let entries = report
+        .entries
+        .iter()
+        .take(super::BRIEF_FINDING_LIMIT)
+        .map(|entry| {
+            t!(
+                "evidence.cli.statement_grant_entry",
+                title = entry.title.render(),
+                explanation = entry.explanation.render()
+            )
+        })
+        .collect::<Vec<_>>();
+    render_summary(
+        Summary {
+            title: &title,
+            summary: &summary,
+            source: SourceQualification::Multiple(&report.sources),
+            limitations: &limitations,
+        },
+        |text| super::append_brief_details(text, entries.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS),
     )
 }
 
@@ -390,11 +417,11 @@ mod tests {
         report.entries[0].explanation = format!("{} Recorded pages: 9007199254740993.", "qualification ".repeat(20));
         let detailed = cleanup(&report);
         assert!(detailed.contains("Recorded pages: 9007199254740993."));
-        report.entries[0].explanation = "é".repeat(CLEANUP_DETAIL_CHARS * 2);
+        report.entries[0].explanation = "é".repeat(OBSERVATION_DETAIL_CHARS * 2);
         let bounded = cleanup(&report);
         let first = bounded.lines().find(|line| line.starts_with('•')).unwrap();
         assert!(first.ends_with('…'));
-        assert!(first.chars().count() <= CLEANUP_DETAIL_CHARS + 3);
+        assert!(first.chars().count() <= OBSERVATION_DETAIL_CHARS + 3);
     }
 
     #[test]

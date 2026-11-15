@@ -16,6 +16,7 @@ mod observations;
 mod populations;
 mod queries;
 mod source_partitions;
+mod statement_grants;
 mod tuning;
 mod waits;
 

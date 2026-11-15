@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub(crate) fn context() -> Rec {
-    metadata(0)
+    crate::activity::database_context::tests::row(5)
 }
 pub(crate) fn columns() -> Vec<Rec> {
     fields::columns()
@@ -57,15 +57,17 @@ pub(crate) fn reader_with_identity(
     replies: Vec<ReadResult<Vec<Rec>>>,
     identity: IdentityDetail,
 ) -> ActivityReader<FakeRead> {
-    ActivityReader::new(
+    reader_with_options(
         FakeRead::new(replies),
         ReadOptions { budget: CollectionBudget::default(), scope: ActivityScope::CurrentDatabase, identity },
-        "fixture.invalid".into(),
-        1433,
     )
+}
+pub(crate) fn reader_with_options(io: FakeRead, options: ReadOptions) -> ActivityReader<FakeRead> {
+    ActivityReader::new(io, options, "fixture.invalid".into(), 1433)
 }
 pub(crate) fn successful() -> ActivityReader<FakeRead> {
     reader(vec![
+        Ok(vec![crate::grants::tests::platform()]),
         Ok(vec![context()]),
         Ok(columns()),
         Ok(vec![row()]),
@@ -97,10 +99,15 @@ async fn native_grant_probe_reuses_request_generations_exact_counters_and_guarde
     assert!(
         matches!(&grant.request.as_ref().unwrap().statement,DefinitionPayload::Available{text,..} if !text.contains("42"))
     );
-    assert!(reader.verify_memory_context(&captured.context).await.unwrap());
-    assert_eq!(reader.query_count(), 5);
-    assert!(reader.io.calls.iter().all(|call| call.sql.contains("OPTION(MAXDOP 1, LOOP JOIN)")));
-    let probe = &reader.io.calls[2].sql;
+    assert!(reader.verify_memory_context(&captured.owner).await.unwrap().has_qualified_local_owner());
+    assert_eq!(reader.query_count(), 6);
+    for index in [2, 3, 4] {
+        assert!(
+            reader.io.calls[index].sql.contains("OPTION(MAXDOP 1, LOOP JOIN)"),
+            "columns, grant rows and guarded SQL retain the diagnostic policy"
+        );
+    }
+    let probe = &reader.io.calls[3].sql;
     for disallowed in
         ["ORDER BY", "COUNT(", "COUNT_BIG(", "SUM(", "GROUP BY", "sys.dm_exec_query_plan", "sys.dm_os_memory_objects"]
     {
@@ -108,7 +115,7 @@ async fn native_grant_probe_reuses_request_generations_exact_counters_and_guarde
     }
     assert!(probe.contains("r.request_id=mg.request_id"));
     assert!(probe.contains("r.database_id=DB_ID() OR NULLIF(r.database_id,0) IS NULL"));
-    assert_eq!(reader.io.calls[2].limit, 501);
+    assert_eq!(reader.io.calls[3].limit, 501);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
 
@@ -127,7 +134,8 @@ async fn native_nulls_and_version_unavailable_fields_preserve_unknowns_without_i
         ],
     );
     let columns = columns().into_iter().filter(|row| !row.string("name").contains("worker_count")).collect();
-    let mut reader = reader(vec![Ok(vec![context()]), Ok(columns), Ok(vec![native])]);
+    let mut reader =
+        reader(vec![Ok(vec![crate::grants::tests::platform()]), Ok(vec![context()]), Ok(columns), Ok(vec![native])]);
     let frame = reader.observe_memory().await.unwrap();
     assert!(frame.complete_scope, "unavailable optional columns do not imply missing request rows");
     let rows = frame.into_observations().unwrap();
@@ -141,7 +149,7 @@ async fn native_nulls_and_version_unavailable_fields_preserve_unknowns_without_i
     assert_eq!(grant.native_properties["resource_semaphore_id"], "0");
     assert!(!grant.native_properties.contains_key("pool_id"));
     assert!(!grant.available_columns.contains(&"used_worker_count".into()));
-    assert_eq!(reader.query_count(), 3);
+    assert_eq!(reader.query_count(), 4);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
 
@@ -161,7 +169,12 @@ async fn reused_ids_old_handles_and_missing_requests_preserve_unassigned_native_
         (vec![("grant_plan_handle", Val::Null)], RequestGrantAssociation::InsufficientEvidence),
         (vec![("scope_basis", Val::Int(5))], RequestGrantAssociation::InsufficientEvidence),
     ] {
-        let mut reader = reader(vec![Ok(vec![context()]), Ok(columns()), Ok(vec![replace(&row(), &changes)])]);
+        let mut reader = reader(vec![
+            Ok(vec![crate::grants::tests::platform()]),
+            Ok(vec![context()]),
+            Ok(columns()),
+            Ok(vec![replace(&row(), &changes)]),
+        ]);
         let frame = reader.observe_memory().await.unwrap();
         assert!(!frame.complete_scope);
         let rows = frame.into_observations().unwrap();
@@ -169,7 +182,7 @@ async fn reused_ids_old_handles_and_missing_requests_preserve_unassigned_native_
         assert!(rows[0].request.is_none() && rows[0].scope.is_none());
         assert_eq!(rows[0].state, ExecutionGrantState::Granted);
         assert_eq!(rows[0].granted_kibibytes.as_deref(), Some("65536"));
-        assert_eq!(reader.query_count(), 3, "unknown ownership never probes a previous batch or broadens the source");
+        assert_eq!(reader.query_count(), 4, "unknown ownership never probes a previous batch or broadens the source");
         assert_eq!(reader.close().await, SourceShutdown::Quiescent);
     }
 }
@@ -187,7 +200,12 @@ async fn different_native_resources_and_waiting_requests_do_not_establish_a_hold
             ("grant_wait_time_ms", Val::Int(30_000)),
         ],
     );
-    let mut reader = reader(vec![Ok(vec![context()]), Ok(columns()), Ok(vec![row(), other])]);
+    let mut reader = reader(vec![
+        Ok(vec![crate::grants::tests::platform()]),
+        Ok(vec![context()]),
+        Ok(columns()),
+        Ok(vec![row(), other]),
+    ]);
     let frame = reader.observe_memory().await.unwrap();
     let rows = frame.into_observations().unwrap();
     assert_eq!(rows[0].state, ExecutionGrantState::Granted);
@@ -200,15 +218,15 @@ async fn different_native_resources_and_waiting_requests_do_not_establish_a_hold
 #[tokio::test]
 async fn hidden_visibility_or_required_metadata_never_reads_grants_or_reports_empty_success() {
     let denied = replace(&context(), &[("database_wide", Val::Int(0))]);
-    let mut denied = reader(vec![Ok(vec![denied])]);
+    let mut denied = reader(vec![Ok(vec![crate::grants::tests::platform()]), Ok(vec![denied])]);
     assert_eq!(denied.observe_memory().await.err().unwrap().code, culprit_core::ErrorCode::PermissionDenied);
-    assert_eq!(denied.query_count(), 1);
-    let mut hidden = reader(vec![Ok(vec![context()]), Ok(vec![])]);
+    assert_eq!(denied.query_count(), 2);
+    let mut hidden = reader(vec![Ok(vec![crate::grants::tests::platform()]), Ok(vec![context()]), Ok(vec![])]);
     assert_eq!(
         CollectionStop::from_error(&hidden.observe_memory().await.err().unwrap()),
         CollectionStop::SourceUnavailable
     );
-    assert_eq!(hidden.query_count(), 2);
+    assert_eq!(hidden.query_count(), 3);
 }
 
 #[tokio::test]
@@ -216,11 +234,13 @@ async fn empty_visible_native_grants_and_unavailable_optional_sql_keep_different
     let mut values = context().columns().map(|(key, value)| (key.to_owned(), value.clone())).collect::<Vec<_>>();
     values.push(("grant_session_id".into(), Val::Null));
     let empty = Rec::of(&values.iter().map(|(key, value)| (key.as_str(), value.clone())).collect::<Vec<_>>());
-    let mut empty = reader(vec![Ok(vec![context()]), Ok(columns()), Ok(vec![empty])]);
+    let mut empty =
+        reader(vec![Ok(vec![crate::grants::tests::platform()]), Ok(vec![context()]), Ok(columns()), Ok(vec![empty])]);
     let captured = empty.capture_memory().await.unwrap();
     assert!(captured.complete_scope && captured.observations.is_empty());
-    assert_eq!(empty.query_count(), 3, "no SQL enrichment is requested for native absence");
+    assert_eq!(empty.query_count(), 4, "no SQL enrichment is requested for native absence");
     let mut denied = reader(vec![
+        Ok(vec![crate::grants::tests::platform()]),
         Ok(vec![context()]),
         Ok(columns()),
         Ok(vec![row()]),
@@ -241,16 +261,22 @@ async fn empty_visible_native_grants_and_unavailable_optional_sql_keep_different
 
 #[tokio::test]
 async fn overflow_terminal_enrichment_and_retired_calls_never_reopen_or_verify_native_work() {
-    let mut overflow = reader(vec![Ok(vec![context()]), Ok(columns()), Ok(vec![row(), row()])]);
+    let mut overflow = reader(vec![
+        Ok(vec![crate::grants::tests::platform()]),
+        Ok(vec![context()]),
+        Ok(columns()),
+        Ok(vec![row(), row()]),
+    ]);
     overflow.options.budget.max_snapshot_rows = 1;
     assert_eq!(CollectionStop::from_error(&overflow.observe_memory().await.err().unwrap()), CollectionStop::RowLimit);
-    assert_eq!(overflow.query_count(), 3);
+    assert_eq!(overflow.query_count(), 4);
     for code in [
         culprit_core::ErrorCode::Timeout,
         culprit_core::ErrorCode::ConnectionFailed,
         culprit_core::ErrorCode::AuthFailed,
     ] {
         let mut reader = reader(vec![
+            Ok(vec![crate::grants::tests::platform()]),
             Ok(vec![context()]),
             Ok(columns()),
             Ok(vec![row()]),
@@ -258,7 +284,7 @@ async fn overflow_terminal_enrichment_and_retired_calls_never_reopen_or_verify_n
         ]);
         assert_eq!(reader.capture_memory().await.err().unwrap().code, code);
         assert!(reader.capture_memory().await.is_err());
-        assert_eq!(reader.query_count(), 4);
+        assert_eq!(reader.query_count(), 5);
         assert_eq!(reader.close().await, SourceShutdown::Quiescent);
     }
     let mut retired = ActivityReader::new(

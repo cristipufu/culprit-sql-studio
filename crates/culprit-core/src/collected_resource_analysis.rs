@@ -43,6 +43,13 @@ pub struct CollectedStatementWorkAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedStatementGrantAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::StatementGrantReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedTaskSpaceAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: TaskSpaceReport,

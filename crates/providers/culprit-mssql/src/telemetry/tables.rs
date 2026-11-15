@@ -8,6 +8,7 @@ impl SnapshotRecipe for Tables {
     const DATASET: SnapshotDataset = SnapshotDataset::Tables;
     const NAME: &'static str = "table-state";
     const SOURCE: &'static Source = &crate::sources::TABLES;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<Self::Layout>> {
         Ok(Some(tables::Layout::new(true)))

@@ -9,13 +9,17 @@ use crate::{
 };
 use culprit_core::{
     Result,
-    telemetry::{CachedStatementContext, PayloadUnavailable},
+    telemetry::{
+        CachedStatementContext, NativePlanIdentity, NativeQueryIdentity, PayloadUnavailable, RetainedActualPlanRequest,
+    },
 };
 
 pub(crate) struct RetainedPlan {
     /// Native statement-counter context observed alongside the lookup. The XML and these counters are separate
     /// point observations; a checked module token does not prove one execution or counter generation.
     pub context: CachedStatementContext,
+    pub query: Option<NativeQueryIdentity>,
+    pub native_plan: Option<NativePlanIdentity>,
     pub payload: Payload,
     pub source_utf16_bytes: Option<usize>,
     pub executions: String,
@@ -25,12 +29,25 @@ pub(crate) struct Read {
     pub setting_on: Option<bool>,
     pub plan: Option<RetainedPlan>,
 }
+pub(super) fn validate_request(request: &RetainedActualPlanRequest) -> Result<()> {
+    requested_ids(request).map(|_| ())
+}
+fn requested_ids(request: &RetainedActualPlanRequest) -> Result<(i64, Option<i64>)> {
+    request.validate()?;
+    let query_id = super::numeric(&request.query_id)?.parse::<i64>().map_err(|_| super::ids_are_numbers())?;
+    let plan_id = request
+        .plan_id
+        .as_deref()
+        .map(|id| super::numeric(id)?.parse::<i64>().map_err(|_| super::ids_are_numbers()))
+        .transpose()?;
+    Ok((query_id, plan_id))
+}
 pub(crate) async fn read<R: NativeRead>(
     reader: &mut R,
-    query_id: i64,
-    plan_id: Option<i64>,
+    request: &RetainedActualPlanRequest,
     maximum_bytes: usize,
 ) -> Result<Read> {
+    let (query_id, plan_id) = requested_ids(request)?;
     let layout = Layout::read(reader).await?;
     match layout.last_actual {
         Availability::Absent => return Err(super::needs_2019()),
@@ -53,7 +70,22 @@ pub(crate) async fn read<R: NativeRead>(
         .map_err(cache_error)?;
     let mut plan = match rows.as_slice() {
         [] => None,
-        [row] => Some(decode(row, maximum_bytes)?),
+        [row] => {
+            let mut plan = decode(row, maximum_bytes)?;
+            let query = crate::query_store::decode::prefixed_query_identity(row, "query_store_")?;
+            let native_plan = crate::query_store::decode::plan_identity_for_query(row, "query_store_", query.clone())?
+                .ok_or_else(invalid_data)?;
+            if request.expected_query.as_ref().is_some_and(|expected| expected != &query)
+                || request.expected_plan.as_ref().is_some_and(|expected| expected != &native_plan)
+                || query.query_id != query_id.to_string()
+                || plan_id.is_some_and(|selected| native_plan.plan_id != selected.to_string())
+            {
+                return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+            }
+            plan.query = Some(query);
+            plan.native_plan = Some(native_plan);
+            Some(plan)
+        }
         _ => return Err(invalid_data()),
     };
     if let Some(plan) = &mut plan
@@ -96,6 +128,8 @@ pub(crate) fn decode(row: &crate::value::Rec, maximum_bytes: usize) -> Result<Re
         optional_integer(row, "plan_bytes")?.map(|value| value.try_into().map_err(|_| invalid_data())).transpose()?;
     let plan = RetainedPlan {
         context: cached_statements::context(row)?,
+        query: None,
+        native_plan: None,
         payload: Payload::read_column(row, "query_plan", bytes, maximum_bytes)?,
         source_utf16_bytes: bytes,
         executions: integer(row, "execution_count")?.to_string(),
@@ -108,7 +142,7 @@ pub(crate) fn decode(row: &crate::value::Rec, maximum_bytes: usize) -> Result<Re
 fn sql() -> String {
     let projection = projection(cached_statements::context_columns(), "st.encrypted", "@P3");
     format!(
-        r#"SELECT TOP(1) {projection}
+        r#"SELECT TOP(1) {projection},{query_identity},{plan_identity}
 {relation}
 JOIN sys.query_store_query q ON q.query_hash=qs.query_hash AND q.context_settings_id=qs.statement_context_id
 JOIN sys.query_store_query_text qt ON qt.query_text_id=q.query_text_id AND qt.statement_sql_handle=qs.statement_sql_handle
@@ -116,6 +150,8 @@ JOIN sys.query_store_plan p ON p.query_id=q.query_id AND p.query_plan_hash=qs.qu
 OUTER APPLY sys.dm_exec_query_plan_stats(qs.plan_handle) ps
 WHERE {database} AND q.object_id=COALESCE(st.objectid,0) AND q.query_id=@P1 AND (@P2=-1 OR p.plan_id=@P2)
 ORDER BY qs.last_execution_time DESC,qs.creation_time DESC,qs.statement_start_offset OPTION(MAXDOP 1)"#,
+        query_identity = crate::query_store::catalog_sql::query_identity_columns!("q.query_id", "q", "query_store_"),
+        plan_identity = crate::query_store::catalog_sql::plan_identity_columns!("p", "query_store_"),
         relation = cached_statements::relation(),
         database = cached_statements::DATABASE_PREDICATE,
     )

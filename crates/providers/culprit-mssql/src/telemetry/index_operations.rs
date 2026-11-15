@@ -12,6 +12,7 @@ impl SnapshotRecipe for IndexOperations {
     const DATASET: SnapshotDataset = SnapshotDataset::IndexOperations;
     const NAME: &'static str = "index-operational-state";
     const SOURCE: &'static Source = &crate::sources::INDEX_OPERATIONS;
+    const INSTANCE_LOCAL: bool = false;
     async fn layout<R: NativeRead>(&self, reader: &mut R, _budget: &CollectionBudget) -> Result<Option<Layout>> {
         Layout::read(reader).await.map(Some)
     }

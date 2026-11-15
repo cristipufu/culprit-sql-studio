@@ -37,6 +37,7 @@ mod signal_false_flags;
 mod signal_words;
 mod sql_lint_words;
 mod sqlite;
+mod statement_grant_fixture;
 mod tuning_words;
 mod view_words;
 mod waits_words;

@@ -82,6 +82,25 @@ fn fixture_with_options(
     pause_batches: bool,
     shutdown: SourceShutdown,
 ) -> StreamedSnapshot<Grants, StreamingRead> {
+    let updates = final_identity.columns().map(|(key, value)| (key, value.clone())).collect::<Vec<_>>();
+    let after = replace(&crate::grants::tests::authority("2020-01-01T06:02:01Z"), &updates);
+    fixture_with_authority(
+        available,
+        batches,
+        crate::grants::tests::authority("2020-01-01T06:02:00Z"),
+        after,
+        pause_batches,
+        shutdown,
+    )
+}
+fn fixture_with_authority(
+    available: bool,
+    batches: Vec<ReadResult<ReadBatch>>,
+    before: Rec,
+    after: Rec,
+    pause_batches: bool,
+    shutdown: SourceShutdown,
+) -> StreamedSnapshot<Grants, StreamingRead> {
     let columns = if available {
         vec![
             "total_grant_kb",
@@ -97,16 +116,15 @@ fn fixture_with_options(
         vec![]
     };
     let mut replies = vec![
-        Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
-        Ok(vec![identity()]),
-        Ok(vec![clock("2020-01-01T06:02:00Z")]),
+        Ok(vec![crate::grants::tests::platform()]),
+        Ok(vec![before]),
         Ok(vec![pressure()]),
         Ok(vec![crate::grants::tests::layout_row(true, &columns)]),
     ];
     if available {
         replies.push(Ok(vec![pressure()]));
     }
-    replies.extend([Ok(vec![final_identity]), Ok(vec![clock("2020-01-01T06:02:01Z")])]);
+    replies.push(Ok(vec![after]));
     let mut native = FakeRead::new(replies);
     native.shutdown = shutdown;
     let io = StreamingRead { native, batches: batches.into(), starts: 0, pause_batches };
@@ -151,22 +169,35 @@ fn catalog_source_with_native<D: SnapshotRecipe>(
     native_reads: CatalogReplies,
 ) -> StreamedSnapshot<D, StreamingRead> {
     let CatalogReplies { layout, final_proof } = native_reads;
-    let mut replies = vec![
-        Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
-        Ok(vec![identity()]),
-        Ok(vec![replace(&clock("2020-01-01T06:02:00Z"), &[("metadata_visibility", Val::Int(i64::from(visible)))])]),
-        Ok(vec![pressure()]),
-    ];
+    let mut replies = if D::INSTANCE_LOCAL {
+        vec![
+            Ok(vec![crate::grants::tests::platform()]),
+            Ok(vec![crate::grants::tests::authority("2020-01-01T06:02:00Z")]),
+        ]
+    } else {
+        vec![Ok(vec![Rec::of(&[("edition", Val::Int(5))])]), Ok(vec![identity()])]
+    };
+    if !D::INSTANCE_LOCAL || D::REQUIRES_FULL_METADATA {
+        replies.push(Ok(vec![replace(
+            &clock("2020-01-01T06:02:00Z"),
+            &[("metadata_visibility", Val::Int(i64::from(visible)))],
+        )]));
+    }
+    replies.push(Ok(vec![pressure()]));
     replies.extend(layout);
     replies.push(Ok(vec![pressure()]));
     replies.extend(final_proof);
-    replies.extend([
-        Ok(vec![identity()]),
-        Ok(vec![replace(
+    if D::INSTANCE_LOCAL {
+        replies.push(Ok(vec![crate::grants::tests::authority("2020-01-01T06:02:01Z")]));
+    } else {
+        replies.push(Ok(vec![identity()]));
+    }
+    if !D::INSTANCE_LOCAL || D::REQUIRES_FULL_METADATA {
+        replies.push(Ok(vec![replace(
             &clock("2020-01-01T06:02:01Z"),
             &[("metadata_visibility", Val::Int(i64::from(final_visible)))],
-        )]),
-    ]);
+        )]));
+    }
     let io = StreamingRead {
         native: FakeRead::new(replies),
         batches: vec![batch(row, true)].into(),
@@ -286,6 +317,63 @@ async fn a_different_physical_database_cannot_certify_even_a_drained_stream() {
     source.describe().await.unwrap();
     source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap();
     assert!(matches!(source.finish().await.unwrap(), SourceCompletion::Changed));
+}
+
+#[tokio::test]
+async fn unknown_local_grant_owner_keeps_raw_entries_and_partial_coverage_without_a_target_namespace() {
+    let before = replace(&crate::grants::tests::authority("2020-01-01T06:02:00Z"), &[("replica_id", Val::Null)]);
+    let after = replace(&crate::grants::tests::authority("2020-01-01T06:02:01Z"), &[("replica_id", Val::Null)]);
+    let native = crate::grants::tests::row();
+    let expected = crate::grants::decode(&native, &crate::grants::tests::layout()).unwrap();
+    let mut source =
+        fixture_with_authority(true, vec![batch(native, true)], before, after, false, SourceShutdown::Quiescent);
+    let initial = source.describe().await.unwrap();
+    assert_eq!(initial.source, crate::sources::GRANTS.name);
+    assert!(matches!(initial.partition, SourcePartition::InstanceLocal { member: None, epoch: None }));
+    let CollectionRead::Page { records, next_cursor } =
+        source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+    else {
+        panic!("native grant page")
+    };
+    assert!(next_cursor.is_none());
+    let TelemetryRecord::Operational(row) = &records[0] else { panic!("operational grant") };
+    let OperationalFact::MssqlStatementGrants(grant) = &row.fact else { panic!("cached grant") };
+    assert_eq!(grant.as_ref(), &expected, "unknown ownership does not erase or synthesize native measurements");
+    let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
+    let coverage = &completed.observation.snapshot().unwrap().sources[0];
+    assert_eq!(coverage.state, culprit_core::SourceState::Partial);
+    assert!(!coverage.complete_scope);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn local_grant_ownership_does_not_expand_the_existing_platform_or_primary_admission_policy() {
+    let readonly = replace(
+        &crate::grants::tests::authority("2020-01-01T06:02:00Z"),
+        &[("updateability", Val::Text("READ_ONLY".into()))],
+    );
+    let mut source = fixture_with_authority(true, vec![], readonly.clone(), readonly, false, SourceShutdown::Quiescent);
+    assert!(source.describe().await.is_err());
+    assert_eq!(source.inner.reader().io.native.calls.len(), 2);
+    assert_eq!(source.inner.reader().io.starts, 0);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+
+    let io = StreamingRead {
+        native: FakeRead::new(vec![
+            Ok(vec![crate::instance::test_support::metadata()]),
+            Ok(vec![crate::instance::test_support::epoch(100)]),
+            Ok(vec![crate::activity::database_context::tests::row(3)]),
+        ]),
+        batches: VecDeque::new(),
+        starts: 0,
+        pause_batches: false,
+    };
+    let mut source = StreamedSnapshot::with_io(io, &request(), "fixture.invalid".into(), 1433, Grants).unwrap();
+    let error = source.describe().await.unwrap_err();
+    assert_eq!(error.code, culprit_core::ErrorCode::Unsupported);
+    assert_eq!(source.inner.reader().io.native.calls.len(), 3);
+    assert_eq!(source.inner.reader().io.starts, 0);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
 
 #[tokio::test]
@@ -770,13 +858,32 @@ async fn cached_definitions_export_two_bounded_payloads_without_duplicating_the_
     let TelemetryRecord::ObjectDefinition(record) = &exported.record else { panic!("definition") };
     assert_eq!(record.fact.definition_payloads().count(), 2);
     let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
-    assert!(completed.observation.snapshot().unwrap().sources[0].complete_scope);
+    let native = completed.observation.snapshot().unwrap();
+    assert!(native.sources[0].complete_scope);
+    assert_eq!(canonical_time(&native.observed_from).unwrap(), canonical_time("2020-01-01T06:02:00Z").unwrap());
+    assert_eq!(canonical_time(&native.observed_until).unwrap(), canonical_time("2020-01-01T06:02:01Z").unwrap());
     assert_eq!(
         source.query_count(),
-        9,
-        "one payload stream plus one independent binding check and the common owner checks"
+        7,
+        "local authority reads include both native clocks; no separate state-clock reads are needed"
     );
     let calls = &source.inner.reader().io.native.calls;
+    let [platform, before, describe_pressure, stream_pressure, payload, binding, after] = calls.as_slice() else {
+        panic!("platform, initial authority, two pressure checks, one payload, binding and final authority")
+    };
+    assert!(platform.sql.contains("SERVERPROPERTY('EngineEdition')"));
+    for column in ["AS observed_at", "AS physical_incarnation", "AS replica_id", "AS local_started_ticks"] {
+        assert!(before.sql.contains(column), "the authority read must retain {column}");
+    }
+    assert_eq!(before.sql, after.sql, "an independent final read repeats the complete native owner projection");
+    assert!(matches!(before.parameters.as_slice(), [Parameter::Integer(1)]));
+    assert!(matches!(after.parameters.as_slice(), [Parameter::Integer(1)]));
+    assert!(describe_pressure.sql.contains("FROM sys.dm_db_resource_stats"));
+    assert_eq!(describe_pressure.sql, stream_pressure.sql, "pressure is checked again before native payload work");
+    assert!(payload.sql.contains("sys.dm_exec_query_stats"));
+    assert!(payload.sql.contains("AS statement_bytes") && payload.sql.contains("AS plan_bytes"));
+    assert!(binding.sql.contains("sys.dm_exec_plan_attributes(selected.plan_handle)"));
+    assert!(!binding.sql.contains("sys.dm_exec_query_stats"), "binding proof cannot walk the cache again");
     assert_eq!(calls.iter().filter(|call| call.sql.contains("sys.dm_exec_query_stats")).count(), 1);
     assert_eq!(
         calls.iter().filter(|call| call.sql.contains("sys.dm_exec_plan_attributes(selected.plan_handle)")).count(),
@@ -912,11 +1019,11 @@ async fn retained_plan_payloads_require_the_same_independent_post_stream_module_
         if unchanged {
             let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
             assert!(completed.observation.snapshot().unwrap().sources[0].complete_scope);
-            assert_eq!(source.query_count(), 11);
+            assert_eq!(source.query_count(), 9, "local authority replaces duplicate legacy target/clock phases");
         } else {
             let error = source.finish().await.err().unwrap();
             assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
-            assert_eq!(source.query_count(), 9, "failed module proof must stop before target/clock rechecks");
+            assert_eq!(source.query_count(), 8, "failed module proof must stop before the native owner recheck");
         }
         assert_eq!(source.inner.reader().io.starts, 1);
         assert_eq!(source.close().await, SourceShutdown::Quiescent);

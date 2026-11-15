@@ -84,6 +84,8 @@ async fn collect_with_base(
         .iter()
         .map(|r| {
             Ok(QueryStat {
+                native_identity: None,
+                native_plan_identity: None,
                 plan_history: None,
                 variant_family: None,
                 resolved_write_target: None,

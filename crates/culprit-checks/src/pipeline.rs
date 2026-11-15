@@ -772,6 +772,20 @@ mod tests {
         crate::views::request_memory::tests::associated(&mut grant);
         grant.request.as_mut().unwrap().database = Some(snapshot.server.database.clone());
         snapshot.pressure.get_or_insert_default().request_memory = Some(RequestMemorySnapshot {
+            context: NativeReadContext {
+                target: culprit_core::DatabaseIdentity::server(
+                    snapshot.server.engine,
+                    &snapshot.server.database,
+                    "fixture.invalid",
+                    1433,
+                    None,
+                )
+                .into(),
+                partition: SourcePartition::InstanceLocal { member: None, epoch: None },
+                observed_from: grant.observed_at.clone(),
+                observed_until: grant.observed_at.clone(),
+                database_writable: None,
+            },
             source: grant.source.clone(),
             observed_at: grant.observed_at.clone(),
             observations: vec![grant.clone()],

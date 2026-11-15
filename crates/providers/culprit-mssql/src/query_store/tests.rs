@@ -67,6 +67,7 @@ pub(crate) fn runtime_row(duration: i64) -> Rec {
 async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_counts() {
     let mut reader = Reader::new(FakeRead::new(vec![
         Ok(vec![Rec::of(&[
+            ("engine_edition", Val::Int(3)),
             ("tempdb", Val::Int(0)),
             ("replicas", Val::Int(1)),
             ("actual_state_desc", Val::Text("READ_CAPTURE_SECONDARY".into())),
@@ -182,6 +183,7 @@ async fn missing_or_changed_definition_identity_cannot_supply_text_for_a_differe
 async fn source_budget_and_cancellation_errors_are_not_retried_as_schema_fallbacks() {
     let mut reader = Reader::new(FakeRead::new(vec![
         Ok(vec![Rec::of(&[
+            ("engine_edition", Val::Int(3)),
             ("tempdb", Val::Int(1)),
             ("replicas", Val::Int(0)),
             ("actual_state_desc", Val::Text("READ_WRITE".into())),

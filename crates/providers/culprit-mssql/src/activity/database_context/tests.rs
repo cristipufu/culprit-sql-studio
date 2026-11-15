@@ -1,9 +1,14 @@
 use super::*;
 use crate::{
-    activity::{ActivityScope, ReadOptions},
+    activity::{ActivityScope, IdentityDetail, ReadOptions},
     instance::test_support::{epoch, metadata},
+    read::ReadError,
     resources::test_support::{FakeRead, replace},
     value::Val,
+};
+use culprit_core::{
+    Error, ErrorCode,
+    telemetry::{CollectionBudget, CollectionStop},
 };
 
 pub(crate) fn row(edition: i64) -> Rec {
@@ -43,7 +48,7 @@ fn reader(replies: Vec<crate::read::ReadResult<Vec<Rec>>>, identity: IdentityDet
 async fn boxed_authority_reuses_single_native_platform_and_process_projection_without_azure_views() {
     let mut reader =
         reader(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)]), Ok(vec![row(3)])], IdentityDetail::Endpoint);
-    let authority = DatabaseContext::initial(&mut reader).await.unwrap();
+    let authority = initial(&mut reader).await.unwrap();
     assert!(authority.is_qualified());
     let context = authority.capture_context().unwrap();
     assert!(context.database.incarnation.is_none(), "local native GUID is not a global database namespace");
@@ -66,10 +71,10 @@ async fn azure_context_reads_its_bounded_guarded_process_epoch_without_the_boxed
     let platform =
         replace(&metadata(), &[("edition", Val::Int(5)), ("machine_name", Val::Null), ("process_id", Val::Null)]);
     let mut reader = reader(vec![Ok(vec![platform]), Ok(vec![row(5)]), Ok(vec![row(5)])], IdentityDetail::Endpoint);
-    let initial = DatabaseContext::initial(&mut reader).await.unwrap();
+    let initial = initial(&mut reader).await.unwrap();
     assert!(initial.is_qualified());
     assert!(initial.instance.is_none());
-    let final_context = DatabaseContext::recheck(&mut reader, &initial).await.unwrap();
+    let final_context = recheck(&mut reader, &initial).await.unwrap();
     assert!(initial.same_source(&final_context));
     assert_eq!(reader.query_count(), 3, "two initial phases and one known-Azure recheck");
     assert!(reader.io.calls.iter().all(|call| !call.sql.contains("sys.database_recovery_status")));
@@ -91,8 +96,8 @@ async fn missing_or_masked_azure_member_process_and_role_facts_do_not_gain_autho
         let unqualified = replace(&row(5), &changes);
         let mut owner =
             reader(vec![Ok(vec![unqualified.clone()]), Ok(vec![unqualified])], IdentityDetail::AzureDatabase);
-        let before = DatabaseContext::initial(&mut owner).await.unwrap();
-        let after = DatabaseContext::recheck(&mut owner, &before).await.unwrap();
+        let before = initial(&mut owner).await.unwrap();
+        let after = recheck(&mut owner, &before).await.unwrap();
         assert!(!before.is_qualified());
         assert!(!before.same_source(&after));
         assert!(before.capture_context().unwrap().epoch.is_none());
@@ -106,13 +111,13 @@ async fn current_tick_progress_does_not_change_the_native_process_epoch_but_regr
     let before_row = row(5);
     let after_row = replace(&before_row, &[("local_now_ticks", Val::Int(2_000))]);
     let mut owner = reader(vec![Ok(vec![before_row]), Ok(vec![after_row])], IdentityDetail::AzureDatabase);
-    let before = DatabaseContext::initial(&mut owner).await.unwrap();
-    let after = DatabaseContext::recheck(&mut owner, &before).await.unwrap();
+    let before = initial(&mut owner).await.unwrap();
+    let after = recheck(&mut owner, &before).await.unwrap();
     assert!(before.same_source(&after));
     assert_eq!(before.capture_context().unwrap().epoch, after.capture_context().unwrap().epoch);
     let invalid = replace(&row(5), &[("local_now_ticks", Val::Int(99))]);
     let mut owner = reader(vec![Ok(vec![invalid])], IdentityDetail::AzureDatabase);
-    let error = DatabaseContext::initial(&mut owner).await.err().unwrap();
+    let error = initial(&mut owner).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
 }
 
@@ -123,7 +128,7 @@ async fn absent_native_recovery_or_file_facts_do_not_fabricate_an_epoch() {
             vec![Ok(vec![metadata()]), Ok(vec![epoch(100)]), Ok(vec![replace(&row(3), &[(field, Val::Null)])])],
             IdentityDetail::Endpoint,
         );
-        let context = DatabaseContext::initial(&mut reader).await.unwrap();
+        let context = initial(&mut reader).await.unwrap();
         assert!(!context.is_qualified(), "{field}");
         assert!(context.capture_context().unwrap().epoch.is_none());
         assert!(!context.same_source(&context), "None/None is never a qualified source epoch");
@@ -150,8 +155,8 @@ async fn recovery_or_process_changes_invalidate_the_same_file_and_database_numbe
             ],
             IdentityDetail::Endpoint,
         );
-        let first = DatabaseContext::initial(&mut reader).await.unwrap();
-        let after = DatabaseContext::recheck(&mut reader, &first).await.unwrap();
+        let first = initial(&mut reader).await.unwrap();
+        let after = recheck(&mut reader, &first).await.unwrap();
         assert_eq!(first.database_id, after.database_id);
         assert_eq!(first.database_file_guid, after.database_file_guid);
         assert!(!first.same_source(&after), "{change}");
@@ -165,13 +170,13 @@ async fn permission_gaps_stay_unqualified_but_terminal_native_failures_stop_befo
     let denied = Error::new(ErrorCode::PermissionDenied, "fixture denied");
     let mut partial =
         reader(vec![Ok(vec![metadata()]), Err(denied.into()), Ok(vec![row(3)])], IdentityDetail::Endpoint);
-    let authority = DatabaseContext::initial(&mut partial).await.unwrap();
+    let authority = initial(&mut partial).await.unwrap();
     assert!(!authority.is_qualified());
     assert_eq!(authority.qualification_error, Some(ErrorCode::PermissionDenied));
     assert!(authority.capture_context().unwrap().epoch.is_none());
     assert_eq!(partial.query_count(), 3);
     let mut terminal =
         reader(vec![Ok(vec![metadata()]), Err(ReadError::Stopped(CollectionStop::TimedOut))], IdentityDetail::Endpoint);
-    assert!(DatabaseContext::initial(&mut terminal).await.is_err());
+    assert!(initial(&mut terminal).await.is_err());
     assert_eq!(terminal.query_count(), 2);
 }

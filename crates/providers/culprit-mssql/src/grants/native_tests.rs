@@ -12,7 +12,7 @@ use std::{
 
 #[tokio::test]
 #[ignore = "requires disposable loopback SQL Server and CULPRIT_MSSQL_SOURCE_TEST_PORT / CULPRIT_MSSQL_SOURCE_TEST_PASSWORD"]
-async fn native_cache_grants_share_exact_rows_with_app_summaries_and_preserve_own_queries() {
+async fn native_cache_grants_share_exact_rows_with_app_observations_and_preserve_own_queries() {
     let port = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PORT").unwrap().parse::<u16>().unwrap();
     let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").unwrap();
     let master = Arc::new(Pool::new(config(port, "master", &password, "culprit"), None));
@@ -38,7 +38,7 @@ async fn native_cache_grants_share_exact_rows_with_app_summaries_and_preserve_ow
     let budget = CollectionBudget { page_bytes: 8 * 1024 * 1024, ..Default::default() };
     let mut native = ReadSession::new(pool.clone(), budget);
     let layout = Layout::read(&mut native).await.unwrap().expect("native grant columns");
-    assert!(layout.can_summarize());
+    assert!(layout.has("total_grant_kb") && layout.has("total_used_grant_kb"));
     let rows = native
         .query(&select_sql(&layout, false), vec![Parameter::Integer(10_001)], 10_001)
         .await
@@ -58,14 +58,20 @@ async fn native_cache_grants_share_exact_rows_with_app_summaries_and_preserve_ow
         .expect("the completed zero-grant query is cached");
     assert_eq!(decoded[zero_index].total_grant_kibibytes.as_deref(), Some("0"));
     let hashes = vec![decoded[zero_index].context.query_hash.clone().unwrap()];
-    let selected = application(&mut native, ApplicationSelection::Hashes(&hashes)).await.unwrap().unwrap();
-    assert!(selected.complete);
-    assert_eq!(selected.grants.len(), 1);
-    assert_eq!(selected.grants[0].avg_granted_kb, 0.0);
-    assert_eq!(selected.grants[0].avg_used_kb, 0.0);
-    let largest = application(&mut native, ApplicationSelection::Largest).await.unwrap().unwrap();
-    assert!(!largest.grants.is_empty(), "the owned sort establishes a real grant");
-    assert!(largest.grants.iter().any(|grant| grant.avg_granted_kb > 0.0));
+    let selected = application(&mut native, &hashes).await.unwrap().unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].total_grant_kibibytes.as_deref(), Some("0"));
+    assert_eq!(selected[0].total_used_kibibytes.as_deref(), Some("0"));
+    let sort_index = rows
+        .iter()
+        .position(|row| row.string("text_prefix").contains("FROM dbo.grant_fixture ORDER BY payload DESC"))
+        .expect("the owned completed sort is cached");
+    let sort = &decoded[sort_index];
+    assert!(sort.total_grant_kibibytes.as_deref().unwrap().parse::<u64>().unwrap() > 0);
+    let hashes = vec![sort.context.query_hash.clone().unwrap()];
+    let selected = application(&mut native, &hashes).await.unwrap().unwrap();
+    assert!(selected.iter().any(|grant| grant.context.identity == sort.context.identity
+        && grant.total_grant_kibibytes == sort.total_grant_kibibytes));
     let runtime_layout = crate::cached_runtime::Layout::read(&mut native).await.unwrap();
     let runtime_rows = native
         .query(&crate::cached_runtime::select_sql(&runtime_layout), vec![Parameter::Integer(10_001)], 10_001)

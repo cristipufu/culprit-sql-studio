@@ -3,9 +3,7 @@
 //! tests hold the English to what it said when it wrote it in code.
 
 use culprit_checks::waits::explain;
-use culprit_core::{
-    Capability, Engine, GrantStat, Platform, Signal, SignalScope, SignalUnit, Snapshot, WaitStat, WaitsReport,
-};
+use culprit_core::{Capability, Engine, Platform, Signal, SignalScope, SignalUnit, Snapshot, WaitStat, WaitsReport};
 
 fn snapshot(name: &str) -> Snapshot {
     let text =
@@ -51,16 +49,9 @@ fn sql_server_categories_say_what_their_queries_did() {
         .enumerate()
         .map(|(i, c)| wait(c, 1000.0 - i as f64 * 100.0))
         .collect();
-    let hash = s.workload.as_ref().unwrap().queries[2].query_hash.clone().unwrap();
-    s.pressure.get_or_insert_with(Default::default).grants.push(GrantStat {
-        query_hash: hash,
-        executions: 10.0,
-        avg_granted_kb: 204_800.0,
-        avg_used_kb: 1024.0,
-        max_granted_kb: 204_800.0,
-        last_granted_kb: None,
-        last_used_kb: None,
-    });
+    crate::statement_grant_fixture::install(&mut s);
+    let hash = s.pressure.as_ref().unwrap().grants[0].observations[0].context.query_hash.clone();
+    s.workload.as_mut().unwrap().queries[2].query_hash = hash;
     let w = s.workload.as_mut().unwrap();
     w.queries[0].rows = Some(w.queries[0].executions * 80_000.0);
     w.queries[0].waits = vec![wait("Network", 900.0), wait("Lock", 50.0)];
@@ -75,7 +66,7 @@ note: Category totals and per-query totals may cover different populations; they
 note: Query attribution includes observed totals; missing categories are not measured zeroes.
 network: 1 query returns 80K+ rows per call. If result handling is slow, test paging, filtering or streaming while preserving required results.
 lock: A read from order_items recorded 750 ms of lock waiting. Use Live to capture the blocked request, native resource and holder before choosing a change.
-memory: A read from support_tickets recorded 800 ms in this category. A captured grant with the same query hash averaged 200 MB reserved and 1.0 MB used; confirm the request and native wait before linking them.
+memory: A read from support_tickets recorded 800 ms in this category.
 io: A read from order_items recorded 700 ms in this category, with 13.1 native page reads per execution. Compare file-read latency under comparable work before choosing a change.
 parallelism: A read from order_items recorded 500 ms in this category. Inspect measured worker activity and the actual plan before attributing the delay or changing indexes.
 compilation: A read from support_tickets recorded 400 ms in this category.

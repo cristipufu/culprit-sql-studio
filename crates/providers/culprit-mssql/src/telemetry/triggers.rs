@@ -8,6 +8,7 @@ impl SnapshotRecipe for Triggers {
     const DATASET: SnapshotDataset = SnapshotDataset::Triggers;
     const NAME: &'static str = "trigger-state";
     const SOURCE: &'static Source = &crate::sources::TRIGGERS;
+    const INSTANCE_LOCAL: bool = false;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _: &mut R, _: &CollectionBudget) -> Result<Option<()>> {
         Ok(Some(()))

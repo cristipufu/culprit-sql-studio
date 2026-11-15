@@ -5,7 +5,7 @@ use crate::query_store::{
 };
 use crate::read::{NativeRead, ReadError};
 use culprit_core::{
-    DatabaseIdentity, Engine, Error, ErrorCode, Result, t,
+    DatabaseIdentity, Error, ErrorCode, Result, t,
     telemetry::{
         CollectionDescription, CollectionRequest, QueryHistoryPopulationBinding, QueryHistoryPopulationBindingEntry,
         SourceContinuity, WaitCaptureState,
@@ -141,17 +141,11 @@ struct DatabaseContext {
 }
 
 async fn database_context<R: NativeRead>(session: &mut R, host: &str, port: u16) -> Result<DatabaseContext> {
-    let rows = session.query(sql::IDENTITY, vec![], 2).await.map_err(ReadError::into_error)?;
-    if rows.len() != 1 {
-        return Err(malformed());
-    }
-    let row = &rows[0];
-    let mut database = DatabaseIdentity::server(Engine::Mssql, &text(row, "database_name")?, host, port, None);
-    database.incarnation = Some(text(row, "incarnation")?);
+    let context = crate::database_identity::read_azure(session).await?;
     Ok(DatabaseContext {
-        database,
-        physical_incarnation: text(row, "physical_incarnation")?,
-        writable: crate::read::database_writable(row)?,
+        database: context.identity(host, port),
+        physical_incarnation: context.physical_incarnation().ok_or_else(malformed)?.to_owned(),
+        writable: context.writable,
     })
 }
 

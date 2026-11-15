@@ -1,20 +1,13 @@
-//! One native cache relation and decoder serve application summaries and streamed grant telemetry.
+//! One native cache relation and decoder retain original statement-grant observations for scans and telemetry.
 mod projection;
 use crate::{
-    read::{NativeRead, Parameter, ReadError, integer, invalid_data, optional_integer, optional_text, text},
+    read::{NativeRead, Parameter, ReadError, integer, invalid_data, optional_integer, optional_text},
     value::Rec,
 };
 use culprit_core::{Result, telemetry::*};
 
 const MAX_APPLICATION_ENTRIES: usize = 10_000;
 use crate::cached_statements::{MAX_HASH_SELECTORS, hashes_parameter, valid_hash};
-const LARGEST_HASHES: &str = r#"SELECT TOP(30) CONVERT(varchar(18),qs.query_hash,1) AS query_hash
- FROM sys.dm_exec_query_stats qs CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) pa
- WHERE pa.attribute='dbid' AND CAST(pa.value AS int)=DB_ID()
- AND qs.total_grant_kb>0 AND qs.query_hash IS NOT NULL
- GROUP BY qs.query_hash
- ORDER BY SUM(CAST(qs.total_grant_kb AS decimal(38,0)))-SUM(CAST(qs.total_used_grant_kb AS decimal(38,0))) DESC
- OPTION(MAXDOP 1)"#;
 const COLUMNS: [&str; 8] = [
     "total_grant_kb",
     "total_used_grant_kb",
@@ -61,9 +54,6 @@ impl Layout {
     fn has(&self, name: &str) -> bool {
         self.columns.iter().any(|column| column == name)
     }
-    fn can_summarize(&self) -> bool {
-        self.has("total_grant_kb") && self.has("total_used_grant_kb") && self.has("max_grant_kb")
-    }
 }
 
 pub(crate) fn select_sql(layout: &Layout, selected: bool) -> String {
@@ -102,6 +92,7 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<StatementGrantStatist
         if measured { Ok(optional_integer(row, name)?.map(|value| value.to_string())) } else { Ok(None) }
     };
     let value = StatementGrantStatistics {
+        statement: projection::statement(&context, optional_text(row, "text_prefix")?.as_deref()),
         context,
         available_columns: layout.columns.clone(),
         executions: measured.then(|| integer(row, "execution_count").map(|value| value.to_string())).transpose()?,
@@ -124,30 +115,25 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<StatementGrantStatist
     Ok(value)
 }
 
-pub(crate) enum ApplicationSelection<'a> {
-    Largest,
-    Hashes(&'a [String]),
+fn validate_hashes(hashes: &[String]) -> Result<()> {
+    if hashes.is_empty() {
+        return Err(CollectionStop::SourceUnavailable.error());
+    }
+    if hashes.len() > MAX_APPLICATION_ENTRIES {
+        return Err(CollectionStop::RowLimit.error());
+    }
+    if !hashes.iter().all(|hash| valid_hash(hash)) {
+        return Err(invalid_data());
+    }
+    Ok(())
 }
 async fn application<R: NativeRead>(
     reader: &mut R,
-    selection: ApplicationSelection<'_>,
-) -> Result<Option<projection::Summary>> {
+    hashes: &[String],
+) -> Result<Option<Vec<StatementGrantStatistics>>> {
+    validate_hashes(hashes)?;
     let Some(layout) = Layout::read(reader).await? else { return Ok(None) };
-    if !layout.can_summarize() {
-        return Ok(None);
-    }
-    let hashes = match selection {
-        ApplicationSelection::Hashes(hashes) => hashes.to_vec(),
-        ApplicationSelection::Largest => reader
-            .query(LARGEST_HASHES, vec![], 31)
-            .await
-            .map_err(ReadError::into_error)?
-            .iter()
-            .map(|row| text(row, "query_hash"))
-            .collect::<Result<Vec<_>>>()?,
-    };
-    let rows = selected_entries(reader, &layout, &hashes).await?;
-    Ok(Some(projection::summarize(&rows)?))
+    Ok(Some(selected_entries(reader, &layout, hashes).await?))
 }
 
 async fn selected_entries<R: NativeRead>(
@@ -155,12 +141,6 @@ async fn selected_entries<R: NativeRead>(
     layout: &Layout,
     hashes: &[String],
 ) -> Result<Vec<StatementGrantStatistics>> {
-    if hashes.len() > MAX_APPLICATION_ENTRIES {
-        return Err(CollectionStop::RowLimit.error());
-    }
-    if !hashes.iter().all(|hash| valid_hash(hash)) {
-        return Err(invalid_data());
-    }
     let hashes = hashes
         .iter()
         .map(|hash| format!("0x{}", hash[2..].to_ascii_uppercase()))
@@ -170,6 +150,7 @@ async fn selected_entries<R: NativeRead>(
     let parameters = hashes.chunks(MAX_HASH_SELECTORS).map(hashes_parameter).collect::<Result<Vec<_>>>()?;
     let sql = select_sql(layout, true);
     let mut entries = Vec::new();
+    let mut identities = std::collections::BTreeSet::new();
     for parameter in parameters {
         let limit = MAX_APPLICATION_ENTRIES - entries.len() + 1;
         let rows = reader
@@ -179,25 +160,104 @@ async fn selected_entries<R: NativeRead>(
         if entries.len() + rows.len() > MAX_APPLICATION_ENTRIES {
             return Err(CollectionStop::RowLimit.error());
         }
-        entries.extend(rows.iter().map(|row| decode(row, layout)).collect::<Result<Vec<_>>>()?);
+        for row in rows {
+            let entry = decode(&row, layout)?;
+            if !identities.insert(entry.context.identity.key()?) {
+                return Err(invalid_data());
+            }
+            entries.push(entry);
+        }
     }
     Ok(entries)
 }
 
+async fn capture_application<R: NativeRead>(
+    reader: &mut R,
+    hashes: &[String],
+    host: &str,
+    port: u16,
+) -> Result<StatementGrantSnapshot> {
+    validate_hashes(hashes)?;
+    let capture = culprit_read::admission::observation_identity()?;
+    let before = crate::local_source::Context::read(reader, host, port).await?;
+    let rows = application(reader, hashes).await?;
+    let after = before.recheck(reader, host, port).await?;
+    let context = before.completed(&after)?;
+    let supported = rows.is_some();
+    let observations = rows.unwrap_or_default();
+    let source = crate::sources::GRANTS.name.to_string();
+    let coverage = if supported {
+        StateSourceCoverage::observed(
+            source.clone(),
+            observations.len() as u32,
+            // Workload hash selectors preserve useful positives but never exhaust the whole cache.
+            false,
+        )
+    } else {
+        StateSourceCoverage::not_applicable(source.clone())
+    };
+    let snapshot = StatementGrantSnapshot {
+        capture,
+        description: CollectionDescription {
+            target: context.target,
+            partition: context.partition,
+            source,
+            continuity: SourceContinuity::Unverified,
+            observation: SourceObservation::Snapshot(StateSnapshotDescription {
+                dataset: SnapshotDataset::StatementGrants,
+                observed_from: context.observed_from,
+                observed_until: context.observed_until,
+                records: observations.len() as u32,
+                sources: vec![coverage],
+            }),
+        },
+        observations,
+    };
+    if !snapshot.is_valid() {
+        return Err(invalid_data());
+    }
+    Ok(snapshot)
+}
+
+async fn collect_from<R: NativeRead>(
+    reader: &mut R,
+    hashes: &[String],
+    host: &str,
+    port: u16,
+) -> Result<StatementGrantSnapshot> {
+    let result = capture_application(reader, hashes, host, port).await;
+    if reader.close().await == SourceShutdown::Unconfirmed {
+        return Err(CollectionStop::CancellationUnconfirmed.error());
+    }
+    result
+}
+
 pub(crate) async fn collect_application(
-    pool: std::sync::Arc<crate::conn::Pool>,
+    provider: &crate::MssqlProvider,
     probe: &crate::probe::Probe,
     coverage: &mut culprit_core::Coverage,
-    selection: ApplicationSelection<'_>,
-) -> Option<Vec<culprit_core::GrantStat>> {
-    let mut reader =
-        crate::read::ReadSession::new(pool, CollectionBudget { page_bytes: 8 * 1024 * 1024, ..Default::default() });
-    let result = application(&mut reader, selection).await;
-    let result = if reader.close().await == SourceShutdown::Unconfirmed {
-        Err(CollectionStop::CancellationUnconfirmed.error())
-    } else {
-        result
-    };
+    hashes: &[String],
+) -> Option<StatementGrantSnapshot> {
+    if hashes.is_empty() {
+        coverage.source_failed(
+            &crate::sources::GRANTS,
+            &culprit_core::Error::new(
+                culprit_core::ErrorCode::QueryFailed,
+                culprit_core::message!("provider.mssql.grants.no_selectors"),
+            )
+            .with_detail(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceUnavailable)),
+        );
+        return None;
+    }
+    let mut reader = crate::read::ReadSession::new(
+        provider.pool.clone(),
+        CollectionBudget {
+            max_snapshot_rows: MAX_APPLICATION_ENTRIES as u32,
+            page_bytes: 8 * 1024 * 1024,
+            ..Default::default()
+        },
+    );
+    let result = collect_from(&mut reader, hashes, &provider.endpoint_host, provider.endpoint_port).await;
     let result = result.map_err(|error| {
         if error.code == culprit_core::ErrorCode::PermissionDenied && error.hint.is_none() {
             error.with_hint(probe.grant_hint())
@@ -206,19 +266,28 @@ pub(crate) async fn collect_application(
         }
     });
     match result {
-        Ok(None) => {
-            coverage.not_applicable(
-                &crate::sources::GRANTS,
-                culprit_core::message!("provider.mssql.grants.not_applicable"),
-            );
-            None
-        }
-        Ok(Some(summary)) => {
-            let rows = coverage.read_rows(&crate::sources::GRANTS, Ok(summary.grants));
-            if !summary.complete {
+        Ok(snapshot) => {
+            let Some(state) = snapshot
+                .description
+                .observation
+                .snapshot()
+                .and_then(|native| if let [state] = native.sources.as_slice() { Some(state) } else { None })
+            else {
+                coverage.source_failed(&crate::sources::GRANTS, &invalid_data());
+                return None;
+            };
+            if state.state == culprit_core::SourceState::NotApplicable {
+                coverage.not_applicable(
+                    &crate::sources::GRANTS,
+                    culprit_core::message!("provider.mssql.grants.not_applicable"),
+                );
+            } else {
+                coverage.completed(&crate::sources::GRANTS, snapshot.observations.len());
+            }
+            if state.state == culprit_core::SourceState::Partial {
                 coverage.partial(&crate::sources::GRANTS, culprit_core::message!("provider.mssql.grants.partial"));
             }
-            rows
+            Some(snapshot)
         }
         Err(error) => {
             coverage.source_failed(&crate::sources::GRANTS, &error);

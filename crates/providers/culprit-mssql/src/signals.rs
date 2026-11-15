@@ -33,12 +33,13 @@ pub(crate) struct QueryParticipant<'a> {
 /// so a failure is a note.
 pub(crate) async fn collect(
     client: &mut impl NativeRead,
-    pool: std::sync::Arc<crate::conn::Pool>,
+    provider: &crate::MssqlProvider,
     probe: &Probe,
     options: &SnapshotOptions,
     participants: &mut [QueryParticipant<'_>],
     snapshot: &mut Snapshot,
 ) {
+    let pool = provider.pool.clone();
     let mut coverage = Coverage::default();
     snapshot.operations.query_compilation = None;
     if participants.iter().any(|participant| participant.kind == Some(WorkloadKind::QueryStore)) {
@@ -66,19 +67,8 @@ pub(crate) async fn collect(
         // These native hash selectors collect shared cache candidates once. They do not assign grants or requests
         // to a Query Store population, even when that population contains the same statement hash.
         let hashes = participant_hashes(participants);
-        if !hashes.is_empty()
-            && let Some(grants) = crate::grants::collect_application(
-                pool.clone(),
-                probe,
-                &mut coverage,
-                crate::grants::ApplicationSelection::Hashes(&hashes),
-            )
-            .await
-        {
-            for grant in grants {
-                pressure.grants.retain(|g| g.query_hash != grant.query_hash);
-                pressure.grants.push(grant);
-            }
+        if let Some(grants) = crate::grants::collect_application(provider, probe, &mut coverage, &hashes).await {
+            pressure.grants.push(grants);
         }
         let azure = probe.is_azure_sql_database();
         let files = files(pool.clone(), azure).await.map_err(|error| {

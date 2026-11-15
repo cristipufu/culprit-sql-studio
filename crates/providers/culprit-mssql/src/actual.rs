@@ -4,6 +4,7 @@
 
 use culprit_core::{
     Engine, Error, ErrorCode, NodeProgress, NodeState, Plan, PlanKind, QueryProgress, Result, session_number, t,
+    telemetry::{CollectionStop, RetainedActualPlan, RetainedActualPlanRequest, RetainedPlanProvenance},
 };
 
 mod layout;
@@ -59,15 +60,51 @@ pub(crate) fn no_matching_plan() -> Error {
         .with_hint(t!("provider.mssql.actual.no_matching_plan.hint"))
 }
 
-/// The cached plan of a Query Store query, with the runtime counters of its last execution.
-pub(crate) async fn last_actual_plan(pool: &Arc<Pool>, query_id: &str, plan_id: Option<&str>) -> Result<Plan> {
-    let query_id = numeric(query_id)?.parse::<i64>().map_err(|_| ids_are_numbers())?;
-    let plan_id = plan_id.map(|id| numeric(id)?.parse::<i64>().map_err(|_| ids_are_numbers())).transpose()?;
+/// Read the retained actual plan independently of Query Store's runtime population or observation window.
+pub(crate) async fn last_actual_plan(
+    pool: &Arc<Pool>,
+    host: &str,
+    port: u16,
+    request: &RetainedActualPlanRequest,
+) -> Result<RetainedActualPlan> {
+    retained::validate_request(request)?;
     let maximum = crate::read::ReadSession::application_budget().max_plan_bytes as usize;
-    let read = pool
-        .observe(|reader| Box::pin(async move { retained::read(reader, query_id, plan_id, maximum).await }))
-        .await?;
-    plan_from_retained(read)
+    let host = host.to_owned();
+    let request = request.clone();
+    pool.observe(|reader| Box::pin(async move { read_retained_plan(reader, &host, port, &request, maximum).await }))
+        .await
+}
+
+async fn read_retained_plan<R: NativeRead>(
+    reader: &mut R,
+    host: &str,
+    port: u16,
+    request: &RetainedActualPlanRequest,
+    maximum: usize,
+) -> Result<RetainedActualPlan> {
+    let before = crate::local_source::Context::read(reader, host, port).await?;
+    if let Some(expected) = &request.expected_target {
+        let target = culprit_core::telemetry::CollectionTarget::from(before.activity.database.clone());
+        if expected.telemetry_id()? != target.telemetry_id()? {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+    }
+    let read = retained::read(reader, request, maximum).await?;
+    let after = before.recheck(reader, host, port).await?;
+    let context = before.completed(&after)?;
+    let Some(row) = read.plan.as_ref() else {
+        return Err(if read.setting_on == Some(false) { not_kept() } else { no_matching_plan() });
+    };
+    if row.context.database_id != before.database_id {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    let provenance = RetainedPlanProvenance {
+        read: context,
+        statement: row.context.clone(),
+        query: row.query.clone(),
+        native_plan: row.native_plan.clone(),
+    };
+    Ok(RetainedActualPlan { plan: plan_from_retained(read)?, provenance })
 }
 
 fn plan_from_retained(read: retained::Read) -> Result<Plan> {
@@ -324,10 +361,12 @@ fn node_progress(profiles: &[Rec], plan: Option<&Plan>) -> Vec<NodeProgress> {
 mod tests {
     use super::*;
 
-    fn retained_row() -> retained::RetainedPlan {
+    pub(in crate::actual) fn retained_row() -> retained::RetainedPlan {
         let xml = r#"<ShowPlanXML><BatchSequence><Batch><Statements><StmtSimple StatementText="SELECT id FROM @Rows" QueryHash="0x0123456789ABCDEF" StatementSubTreeCost="1"><QueryPlan><RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="100" EstimatedTotalSubtreeCost="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="10000" ActualExecutions="1" /></RunTimeInformation><TableScan><Object Table="[@Rows]" /></TableScan></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#;
         retained::RetainedPlan {
             context: crate::cached_statements::context(&crate::grants::tests::row()).unwrap(),
+            query: None,
+            native_plan: None,
             source_utf16_bytes: Some(xml.encode_utf16().count() * 2),
             payload: crate::query_store::payload::Payload::Text(xml.into()),
             executions: "9007199254740993".into(),

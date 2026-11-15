@@ -140,9 +140,9 @@
     },
     {
       "check": "memory-grant",
-      "reason": "Query Store is OFF on this database.",
-      "status": "unavailable",
-      "title": "Queries that reserve far more memory than they use"
+      "reason": "This scan did not record the required source's collection outcome.",
+      "status": "insufficient-evidence",
+      "title": "Recorded memory grant/use imbalance"
     },
     {
       "check": "memory-queue",
@@ -1477,7 +1477,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 6,
+    "format": 7,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {

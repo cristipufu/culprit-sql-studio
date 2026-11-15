@@ -21,6 +21,7 @@ type Outcome = Coverage;
 
 #[derive(Clone, Default)]
 struct WorkloadPart {
+    database: Option<crate::database_identity::Context>,
     workload: Option<Workload>,
     query_identities: std::collections::HashMap<String, culprit_core::telemetry::NativeQueryIdentity>,
     waits: Vec<WaitStat>,
@@ -42,6 +43,7 @@ impl WorkloadPart {
         if !result.waits.is_empty() {
             self.outcome.delivered(Capability::WaitStats);
         }
+        self.database = result.database;
         self.waits = result.waits;
         self.query_identities = result.query_identities;
         self.workload = Some(result.workload);
@@ -537,7 +539,7 @@ async fn acquire(
     });
     let mut client = ReadSession::application(provider.pool.clone());
     let mut participants = workloads.participants();
-    signals::collect(&mut client, provider.pool.clone(), &probe, options, &mut participants, &mut snapshot).await;
+    signals::collect(&mut client, provider, &probe, options, &mut participants, &mut snapshot).await;
     drop(participants);
     if client.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
@@ -567,13 +569,9 @@ async fn acquire(
     snapshot.operations.task_space = task_space;
     task_space_coverage.append_to(&mut snapshot);
     provider.pool.ensure_available()?;
-    snapshot.bind_identity(culprit_core::DatabaseIdentity::server(
-        Engine::Mssql,
-        &snapshot.server.database,
-        &provider.endpoint_host,
-        provider.endpoint_port,
-        None,
-    ));
+    let identity =
+        workloads.database_identity(&snapshot.server.database, &provider.endpoint_host, provider.endpoint_port)?;
+    snapshot.bind_identity(identity);
     snapshot.duration_ms = started.elapsed().as_secs_f64() * 1_000.0;
     Ok((snapshot, workloads))
 }
@@ -589,6 +587,7 @@ mod tests {
         workload.kind = Some(culprit_core::WorkloadKind::PlanCache);
         assert!(!workload.queries.is_empty(), "the regression must preserve a real populated workload");
         crate::workload::WorkloadResult {
+            database: None,
             workload,
             query_identities: Default::default(),
             waits: vec![],
