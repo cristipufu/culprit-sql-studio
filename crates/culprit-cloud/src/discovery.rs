@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn export_discovery_policy() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../app/src/gen");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/src/gen");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("discovery.json"),

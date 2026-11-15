@@ -395,7 +395,7 @@ The package layout distinguishes independent extension roles:
 | `crates/providers/` | Databases being analyzed | `culprit-postgres`, `culprit-mssql` |
 | `crates/telemetry/` | Analytical destinations | `culprit-store-adx`, `culprit-store-clickhouse` |
 | `crates/recovery/` | Private object recovery transports | `culprit-blob-azure`, `culprit-blob-s3` |
-| `crates/cloud/` | Cloud discovery and metrics adapters | `culprit-cloud` |
+| `crates/culprit-cloud/` | Cloud discovery and metrics adapters | `culprit-cloud` |
 | `crates/authentication/` | Credential interfaces and native authentication | `culprit-auth`, `culprit-auth-azure`, `culprit-auth-aws` |
 
 A future ClickHouse database provider can be `crates/providers/culprit-clickhouse` independently of the telemetry

@@ -579,7 +579,7 @@ crates/culprit-querylog            framework query log parser (Rails, Django, EF
 crates/authentication/             credential contracts, Azure/Entra and AWS authentication providers
 crates/telemetry/                  ADX and ClickHouse analytical stores
 crates/recovery/                   Azure Blob and S3 conditional object recovery
-crates/cloud/                      pluggable cloud discovery and metrics
+crates/culprit-cloud               pluggable cloud discovery and metrics
 crates/culprit-collector           capture, outbox, fleet scheduling and verified analytical delivery
 crates/culprit-read                bounded native reads and shared source admission
 crates/culprit-engine              connection store, credential composition, scans, reports, agent approvals and audit log
