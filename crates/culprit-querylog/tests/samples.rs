@@ -109,13 +109,13 @@ fn request_counts_need_explicit_nonempty_ids_and_never_export_them() {
 }
 
 #[test]
-fn sql_spans_in_one_trace_do_not_establish_request_repetition_or_change_observed_work() {
+fn unrelated_trace_fields_do_not_establish_request_repetition_or_change_observed_work() {
     let records: Vec<_> = (0..12)
-        .map(|span| {
+        .map(|call| {
             serde_json::json!({
-                "sql": format!("SELECT * FROM items WHERE id = {span}"),
-                "ms": span + 1,
-                "at": format!("2026-10-15T12:00:{span:02}Z"),
+                "sql": format!("SELECT * FROM items WHERE id = {call}"),
+                "ms": call + 1,
+                "at": format!("2026-10-15T12:00:{call:02}Z"),
             })
         })
         .collect();
@@ -126,23 +126,39 @@ fn sql_spans_in_one_trace_do_not_establish_request_repetition_or_change_observed
     assert!(baseline.queries[0].requests.is_none());
 
     for trace_key in ["trace_id", "traceId"] {
-        let spans: Vec<_> = records
+        let decorated: Vec<_> = records
             .iter()
-            .enumerate()
-            .map(|(index, record)| {
-                let mut span = record.clone();
-                span[trace_key] = serde_json::json!("private-trace-shared-by-several-requests");
-                span["spanId"] = serde_json::json!(format!("sql-span-{index}"));
-                span.to_string()
+            .map(|record| {
+                let mut record = record.clone();
+                record[trace_key] = serde_json::json!("private-trace-shared-by-several-requests");
+                record.to_string()
             })
             .collect();
-        let (format, aggregator) = culprit_querylog::read(spans.iter().map(String::as_str), Engine::Sqlite).unwrap();
+        let (format, aggregator) =
+            culprit_querylog::read(decorated.iter().map(String::as_str), Engine::Sqlite).unwrap();
         assert_eq!(aggregator.entries(), 12);
         assert!(!aggregator.limited());
         let observed = aggregator.workload(format, 50);
         assert!(observed.queries.iter().all(|query| query.requests.is_none()), "{trace_key}");
         assert_eq!(serde_json::to_value(&observed).unwrap(), serde_json::to_value(&baseline).unwrap(), "{trace_key}");
     }
+}
+
+#[test]
+fn span_only_json_is_unrecognized_and_cannot_add_work_to_an_ordinary_log() {
+    let spans = [
+        r#"{"startTimeUnixNano":"1760529600000000000","endTimeUnixNano":"1760529600012500000","attributes":{"db.statement":"SELECT * FROM orders"}}"#,
+        r#"{"duration_ms":12.5,"spanAttributes":[{"key":"db.query.text","value":{"stringValue":"SELECT * FROM orders"}}]}"#,
+    ];
+    assert!(culprit_querylog::read(spans, Engine::Sqlite).is_none());
+    let ordinary = r#"{"fields":{"sql":"SELECT * FROM orders WHERE id = 1","duration_ms":2,"request_id":"explicit-request"},"timestamp":"2026-10-15T12:00:00Z"}"#;
+    let (format, aggregator) = culprit_querylog::read([spans[0], ordinary, spans[1]], Engine::Sqlite).unwrap();
+    assert_eq!(format, "JSON lines");
+    assert_eq!(aggregator.entries(), 1);
+    assert!(aggregator.failures().is_empty());
+    let workload = aggregator.workload(format, 50);
+    assert_eq!((workload.total_executions, workload.total_time_ms), (1.0, 2.0));
+    assert_eq!(workload.queries.len(), 1);
 }
 
 #[test]

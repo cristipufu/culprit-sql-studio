@@ -1,7 +1,5 @@
 //! JSON lines (`.jsonl`, `.ndjson`, `.log`), one statement each, for anything that already logs that way:
-//! `{"sql": …, "ms": …, "at": …}`, structured logger envelopes (`fields` in Rust `tracing-subscriber`), or
-//! OpenTelemetry JSON spans (`attributes` / `spanAttributes` with `db.statement` or `db.query.text` and
-//! `startTimeUnixNano` / `endTimeUnixNano`).
+//! `{"sql": …, "ms": …, "at": …}` or structured logger envelopes (`fields` in Rust `tracing-subscriber`).
 
 use super::{duration_ms, starts_like_sql};
 use crate::{Entry, Format, Moment};
@@ -25,46 +23,11 @@ impl Format for JsonLines {
     }
 }
 
-/// Unwrap an OTLP JSON attribute value object (`{"stringValue": "…"}`, `{"intValue": "…"}`, `{"doubleValue": …}`).
-fn otlp_value(v: &Value) -> &Value {
-    if let Some(obj) = v.as_object() {
-        for key in ["stringValue", "intValue", "doubleValue", "boolValue"] {
-            if let Some(inner) = obj.get(key) {
-                return inner;
-            }
-        }
-    }
-    v
-}
-
-/// Look up a key at the top level, under `fields` (`tracing-subscriber`), or under `attributes` / `spanAttributes`
-/// (OpenTelemetry JSON spans, both flat maps and OTLP key-value arrays).
+/// Look up an explicit log field at the top level or under `fields` (`tracing-subscriber`).
 fn lookup<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
-    if let Some(found) = v.get(key).filter(|f| !f.is_null()) {
-        return Some(found);
-    }
-    if let Some(found) = v.get("fields").and_then(|f| f.get(key)).filter(|f| !f.is_null()) {
-        return Some(found);
-    }
-    for container in ["attributes", "spanAttributes"] {
-        let Some(attrs) = v.get(container) else { continue };
-        if let Some(found) = attrs.get(key) {
-            let unwrapped = otlp_value(found);
-            if !unwrapped.is_null() {
-                return Some(unwrapped);
-            }
-        }
-        if let Some(arr) = attrs.as_array()
-            && let Some(item) = arr.iter().find(|item| item.get("key").and_then(Value::as_str) == Some(key))
-            && let Some(val) = item.get("value")
-        {
-            let unwrapped = otlp_value(val);
-            if !unwrapped.is_null() {
-                return Some(unwrapped);
-            }
-        }
-    }
-    None
+    v.get(key)
+        .filter(|field| !field.is_null())
+        .or_else(|| v.get("fields").and_then(|fields| fields.get(key)).filter(|field| !field.is_null()))
 }
 
 fn number_value(v: &Value) -> Option<f64> {
@@ -72,28 +35,6 @@ fn number_value(v: &Value) -> Option<f64> {
         let s = v.as_str()?;
         duration_ms(s).or_else(|| s.trim().parse::<f64>().ok())
     })
-}
-
-fn unix_nanos(v: &Value) -> Option<u128> {
-    v.as_u64().map(u128::from).or_else(|| v.as_str()?.trim().parse::<u128>().ok())
-}
-
-fn span_duration_ms(v: &Value) -> Option<f64> {
-    if let (Some(start), Some(end)) =
-        (lookup(v, "startTimeUnixNano").and_then(unix_nanos), lookup(v, "endTimeUnixNano").and_then(unix_nanos))
-        && end >= start
-    {
-        return Some((end - start) as f64 / 1_000_000.0);
-    }
-    let start = ["start_time", "startTime"]
-        .iter()
-        .find_map(|k| lookup(v, k)?.as_str())
-        .and_then(culprit_core::format::epoch_seconds)?;
-    let end = ["end_time", "endTime"]
-        .iter()
-        .find_map(|k| lookup(v, k)?.as_str())
-        .and_then(culprit_core::format::epoch_seconds)?;
-    (end >= start).then_some((end - start) * 1_000.0)
 }
 
 fn moment_from_value(v: &Value) -> Option<Moment> {
@@ -150,27 +91,14 @@ fn entry(line: &str) -> Option<Entry> {
         return None;
     }
     let v: Value = serde_json::from_str(t).ok()?;
-    let sql = ["sql", "query", "statement", "db.statement", "db.query.text"]
-        .iter()
-        .find_map(|k| lookup(&v, k)?.as_str())?
-        .to_string();
+    let sql = ["sql", "query", "statement"].iter().find_map(|k| lookup(&v, k)?.as_str())?.to_string();
     if !starts_like_sql(&sql) {
         return None;
     }
-    let otel_error = v.get("status").and_then(|s| {
-        let code = s.get("code")?;
-        let is_err = code.as_u64() == Some(2)
-            || code
-                .as_str()
-                .is_some_and(|c| c.eq_ignore_ascii_case("ERROR") || c.eq_ignore_ascii_case("STATUS_CODE_ERROR"));
-        is_err.then(|| s.get("message").or_else(|| s.get("description")).unwrap_or(code))
-    });
     let raw_error = lookup(&v, "error_code")
         .filter(is_non_ok_error)
         .or_else(|| v.pointer("/error/code").filter(is_non_ok_error))
-        .or_else(|| lookup(&v, "db.response.status_code").filter(is_non_ok_error))
-        .or_else(|| lookup(&v, "error").filter(is_non_ok_error))
-        .or_else(|| otel_error.filter(is_non_ok_error));
+        .or_else(|| lookup(&v, "error").filter(is_non_ok_error));
     let error_code = raw_error.map(|value| {
         let code = value
             .as_str()
@@ -225,17 +153,9 @@ fn entry(line: &str) -> Option<Entry> {
                 .find_map(|k| number_value(lookup(&v, k)?).map(|ns| ns / 1_000_000.0))
         })
         .or_else(|| ["duration", "elapsed"].iter().find_map(|k| duration_ms(lookup(&v, k)?.as_str()?)))
-        .or_else(|| span_duration_ms(&v))
         .filter(|ms| ms.is_finite() && *ms >= 0.0);
     let ms = timed_ms.or_else(|| error_code.map(|_| f64::NAN))?;
-    let at = ["at", "ts", "timestamp", "time", "start_time", "startTime"]
-        .iter()
-        .find_map(|k| moment_from_value(lookup(&v, k)?))
-        .or_else(|| {
-            let nanos =
-                lookup(&v, "startTimeUnixNano").and_then(unix_nanos).filter(|&n| n >= 1_000_000_000_000_000_000)?;
-            Some(Moment { epoch: nanos as f64 / 1_000_000_000.0, zoned: true })
-        });
+    let at = ["at", "ts", "timestamp", "time"].iter().find_map(|k| moment_from_value(lookup(&v, k)?));
     // A distributed trace can contain several requests; only an explicit request identifier groups calls by request.
     let request_id = ["request_id", "requestId", "http.request_id"]
         .iter()
@@ -319,8 +239,6 @@ mod tests {
         for line in [
             r#"{"sql":"SELECT value FROM items","ms":2,"trace_id":"shared-trace"}"#,
             r#"{"sql":"SELECT value FROM items","ms":2,"fields":{"traceId":"shared-trace"}}"#,
-            r#"{"sql":"SELECT value FROM items","ms":2,"attributes":{"trace_id":"shared-trace"}}"#,
-            r#"{"sql":"SELECT value FROM items","ms":2,"spanAttributes":[{"key":"traceId","value":{"stringValue":"shared-trace"}}]}"#,
         ] {
             let observed = entry(line).unwrap();
             assert_eq!(observed.request_id, None, "{line}");
@@ -333,34 +251,16 @@ mod tests {
         for line in [
             r#"{"sql":"SELECT value FROM items","ms":2,"request_id":" req-17 ","traceId":"shared-trace"}"#,
             r#"{"sql":"SELECT value FROM items","ms":2,"trace_id":"shared-trace","fields":{"requestId":"req-17"}}"#,
-            r#"{"sql":"SELECT value FROM items","ms":2,"traceId":"shared-trace","attributes":{"http.request_id":"req-17"}}"#,
-            r#"{"sql":"SELECT value FROM items","ms":2,"trace_id":"shared-trace","spanAttributes":[{"key":"request_id","value":{"stringValue":"req-17"}}]}"#,
+            r#"{"sql":"SELECT value FROM items","ms":2,"traceId":"shared-trace","http.request_id":"req-17"}"#,
         ] {
             assert_eq!(entry(line).unwrap().request_id.as_deref(), Some("req-17"), "{line}");
         }
     }
 
     #[test]
-    fn opentelemetry_spans_and_tracing_fields_are_parsed() {
-        // OpenTelemetry flat attributes + startTimeUnixNano/endTimeUnixNano + traceId
-        let otel_flat = r#"{"traceId":"4bf92f3577b34da6a3ce929d0e0e4736","startTimeUnixNano":"1760529600000000000","endTimeUnixNano":"1760529600012500000","attributes":{"db.system":"sqlite","db.statement":"SELECT * FROM orders WHERE customer_id = ?"}}"#;
-        assert!(JsonLines.recognizes(otel_flat));
-        let e = entry(otel_flat).unwrap();
-        assert_eq!(e.sql, "SELECT * FROM orders WHERE customer_id = ?");
-        assert!((e.ms - 12.5).abs() < 1e-6);
-        assert_eq!(e.request_id, None, "a trace identifies no request boundary");
-        assert!(e.at.is_some_and(|m| m.zoned && (m.epoch - 1_760_529_600.0).abs() < 1e-3));
-
-        // OTLP JSON key-value array format with `db.query.text` and error status
-        let otlp_array = r#"{"traceId":"00000000000000000000000000000000","startTimeUnixNano":1760529600000000000,"endTimeUnixNano":1760529600003200000,"attributes":[{"key":"db.query.text","value":{"stringValue":"INSERT INTO orders (id) VALUES (?)"}}],"status":{"code":"STATUS_CODE_ERROR","message":"database is locked"}}"#;
-        let e = entry(otlp_array).unwrap();
-        assert_eq!(e.sql, "INSERT INTO orders (id) VALUES (?)");
-        assert!((e.ms - 3.2).abs() < 1e-6);
-        assert_eq!(e.error_code, Some("SQLITE_BUSY"));
-        assert_eq!(e.request_id, None, "a trace identifies no request boundary");
-
+    fn ordinary_structured_logger_fields_are_parsed() {
         // Rust tracing-subscriber JSON format (`fields` envelope + microseconds)
-        let tracing_line = r#"{"timestamp":"2026-10-15T12:00:05Z","level":"INFO","fields":{"db.statement":"UPDATE orders SET status = 'shipped' WHERE id = $1","duration_us":1500,"request_id":"req-99"}}"#;
+        let tracing_line = r#"{"timestamp":"2026-10-15T12:00:05Z","level":"INFO","fields":{"sql":"UPDATE orders SET status = 'shipped' WHERE id = $1","duration_us":1500,"request_id":"req-99"}}"#;
         let e = entry(tracing_line).unwrap();
         assert_eq!(e.sql, "UPDATE orders SET status = 'shipped' WHERE id = $1");
         assert!((e.ms - 1.5).abs() < 1e-6);
@@ -377,7 +277,32 @@ mod tests {
         let fallback_err =
             r#"{"sql":"INSERT INTO orders (id) VALUES (?)","ms":1.1,"error_code":null,"error":"SQLITE_BUSY"}"#;
         assert_eq!(entry(fallback_err).unwrap().error_code, Some("SQLITE_BUSY"));
-        let sqlstate_ok = r#"{"sql":"SELECT 1","ms":0.4,"attributes":{"db.response.status_code":"00000"}}"#;
+        let sqlstate_ok = r#"{"sql":"SELECT 1","ms":0.4,"error_code":"00000"}"#;
         assert_eq!(entry(sqlstate_ok).unwrap().error_code, None);
+    }
+
+    #[test]
+    fn span_only_records_are_not_recognized_or_converted_to_sql_timings() {
+        for line in [
+            r#"{"startTimeUnixNano":"1760529600000000000","endTimeUnixNano":"1760529600012500000","attributes":{"db.statement":"SELECT * FROM orders"}}"#,
+            r#"{"duration_ms":12.5,"spanAttributes":[{"key":"db.query.text","value":{"stringValue":"SELECT * FROM orders"}}]}"#,
+            r#"{"db.statement":"SELECT * FROM orders","duration_ms":12.5}"#,
+            r#"{"sql":"SELECT * FROM orders","startTimeUnixNano":"1760529600000000000","endTimeUnixNano":"1760529600012500000"}"#,
+            r#"{"sql":"SELECT * FROM orders","start_time":"2026-10-15T12:00:00Z","end_time":"2026-10-15T12:00:01Z"}"#,
+            r#"{"sql":"SELECT * FROM orders","status":{"code":"STATUS_CODE_ERROR","message":"database is locked"}}"#,
+        ] {
+            assert!(!JsonLines.recognizes(line), "{line}");
+            let mut observed = Vec::new();
+            JsonLines.line(line, &mut observed);
+            assert!(observed.is_empty(), "a recognized ordinary log must not admit a later span: {line}");
+        }
+    }
+
+    #[test]
+    fn span_attributes_do_not_supply_errors_requests_or_clocks_to_an_ordinary_timed_statement() {
+        let line = r#"{"sql":"SELECT * FROM orders","ms":2,"startTimeUnixNano":"1760529600000000000","attributes":{"error":"SQLITE_BUSY","request_id":"span-request"},"status":{"code":"STATUS_CODE_ERROR","message":"database is locked"}}"#;
+        let observed = entry(line).unwrap();
+        assert_eq!((observed.sql.as_str(), observed.ms), ("SELECT * FROM orders", 2.0));
+        assert!(observed.at.is_none() && observed.error_code.is_none() && observed.request_id.is_none());
     }
 }
