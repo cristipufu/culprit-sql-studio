@@ -56,7 +56,7 @@ fn request(focus: ActivityWaitFocus) -> CollectionRequest {
         budget: Default::default(),
     }
 }
-fn pin(files: &Files, owner: &str) -> bool {
+pub(super) fn pin(files: &Files, owner: &str) -> bool {
     files
         .journal
         .conn
@@ -71,7 +71,7 @@ pub(super) fn admitted_intent(input: &DiagnosticInput) -> DiagnosticInvestigatio
     intent.focus = question;
     intent.episode_id = episode.id;
     intent.episode_revision = episode.revision;
-    intent.qualification.scope = episode.scope;
+    intent.qualification.scope = RecipeCostScope::Activity(episode.scope);
     assert!(intent.is_valid(), "the cost approval is synthetic; this test grants no native authority");
     intent
 }
@@ -218,27 +218,44 @@ fn queued_investigation_parent_is_authenticated_idempotent_and_preserved_across_
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
     let first = files.next_diagnostic_input(1).unwrap().unwrap();
-    let question = focus(&first);
-    let key = digest(b"immutable-investigation-intent");
-    let mut substituted = question.clone();
-    substituted.original.elapsed_ms = Some("90001".into());
-    assert!(files.pin_investigation_parent(&key, &substituted).is_err());
+    let intent = admitted_intent(&first);
+    let key = intent.key().unwrap();
+    let mut substituted = intent.clone();
+    substituted.focus.original.elapsed_ms = Some("90001".into());
+    assert!(files.pin_investigation_parent(&substituted).is_err());
     assert!(files.investigation_parent_keys().unwrap().is_empty());
-    files.pin_investigation_parent(&key, &question).unwrap();
-    files.pin_investigation_parent(&key, &question).unwrap();
+    files.pin_investigation_parent(&intent).unwrap();
+    files.pin_investigation_parent(&intent).unwrap();
     assert_eq!(files.investigation_parent_keys().unwrap().as_slice(), std::slice::from_ref(&key));
 
     let newer = baseline(&mut files, vec![page_activity()], true, 10);
     let newer = files.diagnostic_input(&newer.observation_id, 1).unwrap();
+    assert_ne!(admitted_intent(&newer).key().unwrap(), key, "the API derives the exact original intent key");
+    files
+        .journal
+        .conn
+        .execute(
+            "UPDATE diagnostic_pins SET observation_id=?1 WHERE owner=?2",
+            params![newer.parent.capture.observation_id, format!("investigation:{key}")],
+        )
+        .unwrap();
     assert!(
-        files.pin_investigation_parent(&key, &focus(&newer)).is_err(),
+        files.pin_investigation_parent(&intent).is_err(),
         "an immutable queued key cannot silently change its original parent"
     );
+    files
+        .journal
+        .conn
+        .execute(
+            "UPDATE diagnostic_pins SET observation_id=?1 WHERE owner=?2",
+            params![first.parent.capture.observation_id, format!("investigation:{key}")],
+        )
+        .unwrap();
     drop(files);
     let mut files = Files::open(&path).unwrap();
     files.recover().unwrap();
     assert_eq!(files.investigation_parent_keys().unwrap().as_slice(), std::slice::from_ref(&key));
-    files.pin_investigation_parent(&key, &question).unwrap();
+    files.pin_investigation_parent(&intent).unwrap();
     files.release_investigation_parent(&key).unwrap();
     files.release_investigation_parent(&key).unwrap();
     assert!(files.investigation_parent_keys().unwrap().is_empty());
@@ -256,8 +273,9 @@ fn releasing_a_queued_parent_never_clears_unconfirmed_native_focus_pins_or_sourc
     baseline(&mut files, vec![page_activity()], true, 0);
     let input = files.next_diagnostic_input(1).unwrap().unwrap();
     let question = focus(&input);
-    let key = digest(b"queued-stage");
-    files.pin_investigation_parent(&key, &question).unwrap();
+    let intent = admitted_intent(&input);
+    let key = intent.key().unwrap();
+    files.pin_investigation_parent(&intent).unwrap();
     let reservation = files.reserve("fixture", &request(question.clone())).unwrap();
     let id = reservation.entry.identity.observation_id.clone();
     let native_owner = format!("focus:{id}");
@@ -293,11 +311,12 @@ fn queued_parent_inventory_is_complete_and_capacity_never_drops_an_existing_owne
     transaction.commit().unwrap();
     let retained = files.investigation_parent_keys().unwrap();
     assert_eq!(retained.len(), MAX_DIAGNOSTIC_EPISODES);
-    let overflow = digest(b"one-extra-intent");
-    assert!(files.pin_investigation_parent(&overflow, &focus(&input)).is_err());
+    let intent = admitted_intent(&input);
+    let overflow = intent.key().unwrap();
+    assert!(files.pin_investigation_parent(&intent).is_err());
     assert_eq!(files.investigation_parent_keys().unwrap(), retained);
     files.release_investigation_parent(&retained[0]).unwrap();
-    files.pin_investigation_parent(&overflow, &focus(&input)).unwrap();
+    files.pin_investigation_parent(&intent).unwrap();
     let owners = files.investigation_parent_keys().unwrap();
     assert_eq!(owners.len(), MAX_DIAGNOSTIC_EPISODES);
     assert!(owners.contains(&overflow));
@@ -510,8 +529,9 @@ async fn parent_pin_survives_checkpoint_eviction_race_and_transfers_until_result
     let initial_commit =
         stage_and_commit(&store, owner.fence(), Some(&native_commit.manifest().range_id), &prepared).await.unwrap();
     let requested = request(question.clone());
-    let queued_key = digest(b"queued-parent-handoff");
-    files.pin_investigation_parent(&queued_key, &question).unwrap();
+    let intent = admitted_intent(&input);
+    let queued_key = intent.key().unwrap();
+    files.pin_investigation_parent(&intent).unwrap();
     let reservation = files.reserve("fixture", &requested).unwrap();
     let focus_owner = format!("focus:{}", reservation.entry.identity.observation_id);
     files.release_investigation_parent(&queued_key).unwrap();

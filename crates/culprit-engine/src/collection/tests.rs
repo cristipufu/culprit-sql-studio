@@ -7,6 +7,7 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 mod admission;
+mod shared;
 
 #[derive(Clone)]
 struct Baseline {
@@ -51,6 +52,13 @@ impl ObservationReader for Reader {
 }
 
 async fn retained_parent(path: &Path) -> (Outbox, ActivityWaitFocus, Arc<AtomicU32>) {
+    retained_parent_on_member(path, None).await
+}
+
+async fn retained_parent_on_member(
+    path: &Path,
+    member: Option<SharedResourceIdentity>,
+) -> (Outbox, ActivityWaitFocus, Arc<AtomicU32>) {
     let mut outbox = Outbox::create(path, OutboxLimits::default()).unwrap();
     outbox.recover().await.unwrap();
     let (mut source, _) = activity_evidence_cases().remove(0);
@@ -58,6 +66,9 @@ async fn retained_parent(path: &Path) -> (Outbox, ActivityWaitFocus, Arc<AtomicU
     snapshot.native_rows = 1;
     snapshot.observations = 1;
     snapshot.coverage = StateSourceCoverage::collected(source.source.clone(), 1);
+    if let Some(member) = member {
+        source.partition = SourcePartition::InstanceLocal { member: Some(member), epoch: snapshot.epoch.clone() };
+    }
     let mut observation = activity_observation(DefinitionPayload::sql(
         "SELECT payload FROM dbo.orders WHERE tenant_id=9264",
         Engine::Mssql,

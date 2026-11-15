@@ -81,7 +81,13 @@ fn a_shared_followup_keeps_the_database_parent_and_verifies_a_distinct_native_re
         SourcePartition::InstanceLocal { member: Some(resource.clone()), epoch: Some(original.epoch.clone()) };
     let request = CollectionRequest {
         subject: CollectionSubject::Shared { resource: resource.clone() },
-        selection: CollectionSelection::FocusedPageWait { focus: Box::new(original.clone()) },
+        selection: CollectionSelection::SharedPageWaitFocus {
+            focus: Box::new(original.clone()),
+            partition: SourcePartition::InstanceLocal {
+                member: Some(resource.clone()),
+                epoch: Some("native-shared-process-epoch".into()),
+            },
+        },
         budget: CollectionBudget::default(),
     };
     request.validate().unwrap();

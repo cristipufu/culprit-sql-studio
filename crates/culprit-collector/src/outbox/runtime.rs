@@ -70,6 +70,7 @@ impl Outbox {
             store_id: range.store_id().into(),
             parent,
             source: range.manifest().source.clone(),
+            investigation: range.manifest().investigation.clone(),
             connection: connection.into(),
             rows,
         };
@@ -87,6 +88,7 @@ impl Outbox {
             store_id: range.store_id().into(),
             parent,
             source: range.manifest().source.clone(),
+            investigation: range.manifest().investigation.clone(),
             connection: connection.into(),
             rows,
         };
@@ -122,6 +124,18 @@ impl Outbox {
             })
             .await
     }
+    /// Select an authenticated positive native row; an empty shared baseline cannot establish owner evidence.
+    pub async fn diagnostic_owner(
+        &self,
+        capture: &CaptureIdentity,
+    ) -> Result<Option<(DiagnosticEvidenceRef, CollectionDescription, ExportedRecord)>> {
+        self.files
+            .run(|| {
+                let capture = capture.clone();
+                move |files| files.diagnostic_owner(&capture)
+            })
+            .await
+    }
     /// Authenticate local queue knowledge without interpreting absent metadata or cached evidence as consumption.
     pub async fn diagnostic_input_state(
         &self,
@@ -136,12 +150,11 @@ impl Outbox {
             .await
     }
     /// Authenticate and retain the exact original before storing a queued investigation. This grants no native rights.
-    pub async fn pin_investigation_parent(&mut self, key: &str, focus: &ActivityWaitFocus) -> Result<()> {
+    pub async fn pin_investigation_parent(&mut self, intent: &DiagnosticInvestigationIntent) -> Result<()> {
         self.files
             .run(|| {
-                let key = key.to_owned();
-                let focus = focus.clone();
-                move |files| files.pin_investigation_parent(&key, &focus)
+                let intent = intent.clone();
+                move |files| files.pin_investigation_parent(&intent)
             })
             .await
     }

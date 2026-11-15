@@ -64,10 +64,11 @@ impl Files {
                 .map_err(storage)?;
         }
         self.validate_diagnostic_update(&input, &update)?;
+        let controller_target = input.controller_target()?.clone();
         let budget = local_budget();
         let parts = checkpoint_parts(&update.checkpoint, &budget)?;
         let request = CollectionRequest {
-            subject: match &input.source.target {
+            subject: match &controller_target {
                 CollectionTarget::Database(_) => CollectionSubject::Database,
                 CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
             },
@@ -82,7 +83,7 @@ impl Files {
         let identity = reservation.entry.identity.clone();
         let source = CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: input.source.target.clone(),
+            target: controller_target,
             source: DIAGNOSTICS_SOURCE.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Diagnostics(DiagnosticCaptureDescription {
@@ -148,6 +149,8 @@ impl Files {
             || current.source != input.source
             || current.expected_head != input.expected_head
             || current.checkpoint != input.checkpoint
+            || encode_investigation(current.investigation.as_ref())?
+                != encode_investigation(input.investigation.as_ref())?
         {
             return Err(DeliveryProblem::Conflict.error());
         }
@@ -171,7 +174,7 @@ impl Files {
             || canonical_time(&update.analyzed_at).is_err()
             || !update.checkpoint.is_valid()
             || update.checkpoint.input != input.parent
-            || update.checkpoint.target != input.source.target
+            || update.checkpoint.target != *current.controller_target()?
             || update.checkpoint.controller_version != input.controller_version
             || update.revisions.len() > MAX_DIAGNOSTIC_EPISODES
             || encode(update)?.len() > 2 * MAX_CHECKPOINT_BYTES
@@ -179,6 +182,10 @@ impl Files {
             return Err(integrity());
         }
         super::journal::validate_transition(&self.journal.conn, &update.checkpoint.key()?, update)?;
+        let intent = current.investigation_intent()?;
+        if let Some(intent) = &intent {
+            self.verify_investigation_intent(intent)?;
+        }
         let mut known: BTreeSet<String> = current.rows.iter().map(|row| row.reference.key()).collect::<Result<_>>()?;
         if let Some(previous) = &current.checkpoint {
             for reference in super::journal::checkpoint_references(previous) {
@@ -198,14 +205,28 @@ impl Files {
             if !revision.is_valid()
                 || revision.controller_version != input.controller_version
                 || revision.analyzed_at != update.analyzed_at
-                || revision.episode.scope.target.telemetry_id()? != input.source.target.telemetry_id()?
+                || revision.episode.scope.target.telemetry_id()? != current.controller_target()?.telemetry_id()?
+                || intent.as_ref().is_some_and(|intent| !intent.matches_episode(&revision.episode))
+            {
+                return Err(integrity());
+            }
+            if let Some(intent) = &intent
+                && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
+                && (!revision.inputs.contains(&intent.focus.parent) || !revision.inputs.contains(owner))
             {
                 return Err(integrity());
             }
             for reference in &revision.inputs {
                 if !known.contains(&reference.key()?) {
-                    let (source, _) = self.diagnostic_reference(reference)?;
-                    if source.target.telemetry_id()? != revision.episode.scope.target.telemetry_id()? {
+                    let (source, row) = self.diagnostic_reference(reference)?;
+                    let shared_intent =
+                        revision.investigation.as_ref().map(|event| event.intent.as_ref()).or(intent.as_ref());
+                    let shared_owner = shared_intent.is_some_and(|intent| {
+                        intent.matches_episode(&revision.episode)
+                            && matches!(&intent.execution, DiagnosticExecutionBinding::Shared { owner } if owner.as_ref() == reference)
+                            && intent.matches_shared_owner(&source, &row)
+                    });
+                    if source.target.telemetry_id()? != revision.episode.scope.target.telemetry_id()? && !shared_owner {
                         return Err(integrity());
                     }
                     known.insert(reference.key()?);
@@ -240,11 +261,26 @@ impl Files {
                         return Err(integrity());
                     }
                     self.verify_focus_parent(&result.focus)?;
-                    if source.target.telemetry_id()? != revision.episode.scope.target.telemetry_id()?
+                    let report_input =
+                        self.diagnostic_input(&report.evidence().capture.observation_id, input.controller_version)?;
+                    let report_intent = report_input.investigation_intent()?;
+                    if report_input.parent != report.evidence().capture_ref()
+                        || report_input.source != source
+                        || report_input.controller_target()?.telemetry_id()?
+                            != revision.episode.scope.target.telemetry_id()?
+                        || report_intent.as_ref().is_some_and(|intent| !intent.matches_episode(&revision.episode))
                         || !revision.inputs.contains(&result.focus.parent)
                         || !result.accepts_observation(page)
                     {
                         return Err(integrity());
+                    }
+                    if let Some(intent) = &report_intent {
+                        self.verify_investigation_intent(intent)?;
+                        if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
+                            && !revision.inputs.contains(owner)
+                        {
+                            return Err(integrity());
+                        }
                     }
                 }
             }
@@ -256,7 +292,13 @@ impl Files {
                 && prior.is_none_or(|episode| episode.lifecycle != DiagnosticLifecycle::Resolved)
             {
                 let proof = revision.episode.recovery.as_ref().ok_or_else(integrity)?;
-                if !proof.matches_source(&revision.episode, &current.source, &current.parent) {
+                let matches_source = match &intent {
+                    Some(intent) => {
+                        proof.matches_source_with_intent(&revision.episode, &current.source, &current.parent, intent)
+                    }
+                    None => proof.matches_source(&revision.episode, &current.source, &current.parent),
+                };
+                if !matches_source {
                     return Err(integrity());
                 }
                 if matches!(proof, DiagnosticRecoveryProof::CompleteScope { .. })
@@ -282,7 +324,7 @@ impl Files {
     }
 
     fn validate_investigation_event(&mut self, event: &DiagnosticInvestigationEvent) -> Result<()> {
-        self.verify_focus_parent(&event.intent.focus)?;
+        self.verify_investigation_intent(&event.intent)?;
         if let Some(attempt) = &event.attempt {
             let owner = DiagnosticInvestigationLineage::from_intent(&event.intent)?;
             if attempt.manifest_sha256.is_some() {
@@ -300,6 +342,11 @@ impl Files {
         if let DiagnosticInvestigationOutcome::Captured { capture } = &event.outcome {
             let input = self.diagnostic_input(&capture.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
             if input.parent != *capture
+                || !event.intent.matches_result_source(&input.source)
+                || input
+                    .investigation
+                    .as_ref()
+                    .is_none_or(|owner| !owner.matches_intent(&event.intent.focus, &event.intent))
                 || !matches!(&input.source.observation, SourceObservation::FocusedPageWait { result, .. }
                     if result.focus == event.intent.focus)
             {

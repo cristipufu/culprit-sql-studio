@@ -245,6 +245,9 @@ pub struct CollectionRequest {
 }
 
 impl CollectionRequest {
+    pub fn focus(&self) -> Option<&ActivityWaitFocus> {
+        self.selection.focus()
+    }
     pub fn collection(&self) -> TelemetryCollection {
         self.selection.collection()
     }
@@ -272,7 +275,19 @@ impl CollectionRequest {
                 }
             }
             CollectionSelection::FocusedPageWait { focus } => {
-                if !focus.is_valid_for(&self.subject) {
+                if self.subject != CollectionSubject::Database || !focus.is_valid_for(&self.subject) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::SharedPageWaitFocus { focus, partition } => {
+                let CollectionSubject::Shared { resource } = &self.subject else {
+                    return Err(CollectionStop::InvalidPage.error());
+                };
+                if !focus.is_valid_for(&self.subject)
+                    || !partition.is_valid_for(&CollectionTarget::Shared(resource.clone()))
+                    || !matches!(partition, SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) }
+                        if member == resource)
+                {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }

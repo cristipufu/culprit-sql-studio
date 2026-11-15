@@ -1,6 +1,10 @@
 //! Immutable targeted questions and source-issued cost approvals. Structural validity is never native admission.
 use super::*;
 use crate::ComponentVersion;
+mod execution;
+mod scope;
+pub use execution::{DiagnosticExecutionBinding, DiagnosticSharedOwner};
+pub use scope::RecipeCostScope;
 
 /// Approval issued by the selected source registration for one measured native context and exact tested budget.
 /// Before native admission, the caller must authenticate `evidence` and run that registration's pure verifier
@@ -11,7 +15,7 @@ use crate::ComponentVersion;
 pub struct RecipeCostReceipt {
     pub recipe_id: String,
     pub recipe_version: u32,
-    pub scope: DiagnosticScope,
+    pub scope: RecipeCostScope,
     /// Exact native-reader/qualification authority identity supplied by the selected registration.
     pub component: ComponentVersion,
     pub tested_budget: CollectionBudget,
@@ -27,8 +31,8 @@ impl RecipeCostReceipt {
         valid_key(&self.recipe_id)
             && self.recipe_version > 0
             && self.scope.is_valid()
-            && self.scope.native_epoch.is_some()
-            && self.scope.partition.is_qualified()
+            && self.scope.native_epoch().is_some()
+            && self.scope.partition().is_qualified()
             && qualification_component_is_valid(&self.component)
             && self.tested_budget.validate().is_ok()
             && self.evidence.is_valid()
@@ -49,7 +53,7 @@ impl RecipeCostReceipt {
             && self.recipe_version == recipe.version
             && recipe.purpose == RecipePurpose::Investigation
             && recipe.selector == RecipeSelector::FocusedPageWait
-            && recipe.subjects.contains(&RecipeSubject::Database)
+            && recipe.subjects.iter().any(|subject| subject.accepts(&self.scope.subject()))
             && within(&self.tested_budget, &recipe.budget)
     }
 }
@@ -65,6 +69,7 @@ pub struct DiagnosticInvestigationIntent {
     pub recipe_id: String,
     pub recipe_version: u32,
     pub focus: ActivityWaitFocus,
+    pub execution: DiagnosticExecutionBinding,
     pub budget: CollectionBudget,
     pub qualification: RecipeCostReceipt,
 }
@@ -83,6 +88,7 @@ pub struct DiagnosticInvestigationLineage {
     pub recipe_version: u32,
     pub budget: CollectionBudget,
     pub qualification: RecipeCostReceipt,
+    pub execution: DiagnosticExecutionBinding,
 }
 
 impl DiagnosticInvestigationLineage {
@@ -95,6 +101,7 @@ impl DiagnosticInvestigationLineage {
             recipe_version: intent.recipe_version,
             budget: intent.budget.clone(),
             qualification: intent.qualification.clone(),
+            execution: intent.execution.clone(),
         })
     }
 
@@ -112,6 +119,7 @@ impl DiagnosticInvestigationLineage {
             focus: focus.clone(),
             budget: self.budget.clone(),
             qualification: self.qualification.clone(),
+            execution: self.execution.clone(),
         };
         if intent.key()? != self.intent_key {
             return Err(invalid());
@@ -131,11 +139,12 @@ impl DiagnosticInvestigationLineage {
 
     pub(super) fn intent_for_request(&self, request: &CollectionRequest) -> Result<DiagnosticInvestigationIntent> {
         request.validate()?;
-        let CollectionSelection::FocusedPageWait { focus } = &request.selection else {
-            return Err(invalid());
-        };
+        let focus = request.focus().ok_or_else(invalid)?;
         let intent = self.reconstruct(focus)?;
-        if intent.budget != request.budget || !request.subject.accepts(&intent.focus.target) {
+        if intent.budget != request.budget
+            || intent.subject() != request.subject
+            || intent.selection() != request.selection
+        {
             return Err(invalid());
         }
         Ok(intent)
@@ -161,10 +170,41 @@ impl DiagnosticInvestigationIntent {
             recipe_id: recipe.id.clone(),
             recipe_version: recipe.version,
             focus,
+            execution: DiagnosticExecutionBinding::Database,
             budget: receipt.tested_budget.clone(),
             qualification: receipt.as_ref().clone(),
         };
         if !value.matches_admission(episode, recipe, component, caller_budget) {
+            return Err(invalid());
+        }
+        Ok(value)
+    }
+
+    /// The caller authenticates the positive shared owner through the same outbox/recovery proof path as the parent.
+    pub fn new_shared(
+        episode: &DiagnosticEpisode,
+        recipe: &RecipeDescriptor,
+        focus: ActivityWaitFocus,
+        component: &ComponentVersion,
+        caller_budget: &CollectionBudget,
+        owner: DiagnosticSharedOwner<'_>,
+    ) -> Result<Self> {
+        let RecipeCostQualification::Measured(receipt) = &recipe.cost else {
+            return Err(invalid());
+        };
+        let value = Self {
+            episode_id: episode.id.clone(),
+            episode_revision: episode.revision.clone(),
+            recipe_id: recipe.id.clone(),
+            recipe_version: recipe.version,
+            focus,
+            execution: DiagnosticExecutionBinding::Shared { owner: Box::new(owner.reference.clone()) },
+            budget: receipt.tested_budget.clone(),
+            qualification: receipt.as_ref().clone(),
+        };
+        if !value.matches_admission(episode, recipe, component, caller_budget)
+            || !value.matches_shared_owner(owner.source, owner.row)
+        {
             return Err(invalid());
         }
         Ok(value)
@@ -181,10 +221,7 @@ impl DiagnosticInvestigationIntent {
             && self.recipe_id == self.qualification.recipe_id
             && self.recipe_version == self.qualification.recipe_version
             && self.budget == self.qualification.tested_budget
-            && self.qualification.scope.source == self.focus.source
-            && self.qualification.scope.native_epoch.as_deref() == Some(self.focus.epoch.as_str())
-            && self.qualification.scope.partition == self.focus.partition
-            && self.qualification.scope.target.telemetry_id().ok() == self.focus.target.telemetry_id().ok()
+            && self.execution.matches_focus(&self.qualification.scope, &self.focus)
     }
 
     pub fn key(&self) -> Result<String> {
@@ -199,7 +236,7 @@ impl DiagnosticInvestigationIntent {
         if !self.is_valid() {
             return Err(invalid());
         }
-        hash(&("diagnostic-page-wait-stage-v1", &self.episode_id))
+        hash(&("diagnostic-page-wait-stage-v2", &self.episode_id, self.qualification.scope.target().telemetry_id()?))
     }
 
     /// Revalidate the immutable question against current, authenticated context. A newer same-episode revision
@@ -214,12 +251,8 @@ impl DiagnosticInvestigationIntent {
     ) -> bool {
         let RecipeCostQualification::Measured(receipt) = &recipe.cost else { return false };
         self.is_valid()
-            && episode.is_valid()
+            && self.matches_episode(episode)
             && episode.analysis.needs_work()
-            && episode.id == self.episode_id
-            && super::diagnostics::positive(&episode.revision) >= super::diagnostics::positive(&self.episode_revision)
-            && episode.matches_focus(&self.focus)
-            && episode.scope.key().ok() == self.qualification.scope.key().ok()
             && recipe.is_valid()
             && self.qualification.matches_recipe(recipe)
             && self.qualification.key().ok() == receipt.key().ok()

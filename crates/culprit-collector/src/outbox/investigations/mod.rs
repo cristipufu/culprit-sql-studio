@@ -17,6 +17,7 @@ use std::{
 
 const MAX_CHECKPOINT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RESTORED_INPUT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_INVESTIGATION_BYTES: usize = crate::collection_files::MAX_MANIFEST_BYTES;
 
 #[derive(Clone, Debug)]
 pub struct DiagnosticInputRow {
@@ -38,11 +39,23 @@ pub enum DiagnosticInputState {
 pub struct DiagnosticInput {
     pub parent: DiagnosticCaptureRef,
     pub source: CollectionDescription,
+    pub investigation: Option<DiagnosticInvestigationLineage>,
     pub connection: String,
     pub rows: Vec<DiagnosticInputRow>,
     pub controller_version: u32,
     pub checkpoint: Option<DiagnosticCheckpoint>,
     expected_head: Option<String>,
+}
+
+impl DiagnosticInput {
+    /// The original database owns the controller. Shared native evidence retains its separate source target.
+    pub fn controller_target(&self) -> Result<&CollectionTarget> {
+        controller_target(&self.source, self.investigation.as_ref())
+    }
+
+    pub fn investigation_intent(&self) -> Result<Option<DiagnosticInvestigationIntent>> {
+        investigation_intent(&self.source, self.investigation.as_ref())
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -78,16 +91,57 @@ pub(crate) struct RestoredInput {
     pub store_id: String,
     pub parent: DiagnosticCaptureRef,
     pub source: CollectionDescription,
+    pub investigation: Option<DiagnosticInvestigationLineage>,
     pub connection: String,
     pub rows: Vec<ExportedRecord>,
 }
 
-pub(super) fn eligible(request: &CollectionRequest) -> bool {
-    // This controller keeps database-scoped episodes. Explicit shared captures still retain and deliver their facts,
-    // but need a separately authenticated cross-resource intent before they can revise an original database episode.
+pub(crate) fn eligible_source(
+    source: &CollectionDescription,
+    investigation: Option<&DiagnosticInvestigationLineage>,
+) -> Result<bool> {
+    let intent = investigation_intent(source, investigation)?;
+    Ok(match (&source.observation, &source.target) {
+        (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
+        (SourceObservation::FocusedPageWait { .. }, CollectionTarget::Database(_)) => true,
+        (SourceObservation::FocusedPageWait { .. }, CollectionTarget::Shared(_)) => intent.is_some(),
+        _ => false,
+    })
+}
+
+fn investigation_intent(
+    source: &CollectionDescription,
+    investigation: Option<&DiagnosticInvestigationLineage>,
+) -> Result<Option<DiagnosticInvestigationIntent>> {
+    let Some(investigation) = investigation else { return Ok(None) };
+    let SourceObservation::FocusedPageWait { result, .. } = &source.observation else {
+        return Err(integrity());
+    };
+    let intent = investigation.reconstruct(&result.focus).map_err(|_| integrity())?;
+    if !intent.matches_result_source(source) {
+        return Err(integrity());
+    }
+    Ok(Some(intent))
+}
+
+fn controller_target<'a>(
+    source: &'a CollectionDescription,
+    investigation: Option<&DiagnosticInvestigationLineage>,
+) -> Result<&'a CollectionTarget> {
+    if !eligible_source(source, investigation)? {
+        return Err(integrity());
+    }
+    Ok(match &source.observation {
+        SourceObservation::FocusedPageWait { result, .. } => &result.focus.target,
+        _ => &source.target,
+    })
+}
+
+pub(crate) fn shared_owner_source(source: &CollectionDescription) -> bool {
     matches!(
-        (&request.selection, &request.subject),
-        (CollectionSelection::Activity | CollectionSelection::FocusedPageWait { .. }, CollectionSubject::Database)
+        (&source.target, &source.partition, &source.observation),
+        (CollectionTarget::Shared(resource), SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) }, SourceObservation::Snapshot(StateSnapshotDescription { dataset: SnapshotDataset::Operational, .. }))
+            if member == resource && source.partition.is_qualified()
     )
 }
 
@@ -96,6 +150,35 @@ fn encode(value: &impl serde::Serialize) -> Result<String> {
 }
 fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
     serde_json::from_str(text).map_err(|_| integrity())
+}
+fn encode_investigation(investigation: Option<&DiagnosticInvestigationLineage>) -> Result<Option<String>> {
+    investigation
+        .map(|investigation| {
+            let encoded = encode(investigation)?;
+            if encoded.len() > MAX_INVESTIGATION_BYTES {
+                return Err(integrity());
+            }
+            Ok(encoded)
+        })
+        .transpose()
+}
+fn decode_investigation(encoded: Option<&str>) -> Result<Option<DiagnosticInvestigationLineage>> {
+    encoded
+        .map(|encoded| {
+            if encoded.len() > MAX_INVESTIGATION_BYTES {
+                return Err(integrity());
+            }
+            decode(encoded)
+        })
+        .transpose()
+}
+fn restored_checksum(
+    parent: &DiagnosticCaptureRef,
+    source: &CollectionDescription,
+    investigation: Option<&DiagnosticInvestigationLineage>,
+    rows: &str,
+) -> Result<String> {
+    Ok(digest(encode(&(parent, source, investigation, rows))?.as_bytes()))
 }
 fn integrity() -> culprit_core::Error {
     problem(OutboxProblem::Integrity)

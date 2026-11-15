@@ -8,6 +8,7 @@ mod journal;
 pub use investigations::{
     DiagnosticCheckpointPage, DiagnosticInput, DiagnosticInputRow, DiagnosticInputState, DiagnosticUpdate,
 };
+pub(crate) use investigations::{eligible_source as diagnostic_source_eligible, shared_owner_source};
 mod runtime;
 pub use runtime::{CaptureLease, Outbox, OutboxDelivery};
 #[cfg(test)]
@@ -237,7 +238,7 @@ impl Files {
         if !self.recovered || !self.journal.unfinished()?.is_empty() {
             self.recover()?;
         }
-        if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
+        if let Some(focus) = request.focus() {
             self.verify_focus_parent(focus)?;
         }
         let capture = self.journal.reserve(connection, request, &mut self.epoch)?;

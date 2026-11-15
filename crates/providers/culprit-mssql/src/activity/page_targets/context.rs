@@ -6,7 +6,7 @@ use super::super::{
 use crate::read::{NativeRead, boolean};
 use culprit_core::{
     Result,
-    telemetry::{NativeIdentity, PageTargetIdentityBasis, PageWaitResolution},
+    telemetry::{CollectionStop, NativeIdentity, PageTargetIdentityBasis, PageWaitResolution, SourcePartition},
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -92,6 +92,30 @@ pub(super) async fn initial_shared<R: NativeRead>(
     resource: &culprit_core::telemetry::SharedResourceIdentity,
 ) -> Result<LookupContext> {
     let (authority, row) = database_context::read_initial(reader, Detail::PageLookup).await?;
+    shared_context(reader, resource, authority, row).await
+}
+pub(super) async fn initial_shared_focus<R: NativeRead>(
+    reader: &mut ActivityReader<R>,
+    resource: &culprit_core::telemetry::SharedResourceIdentity,
+    expected: &SourcePartition,
+) -> Result<LookupContext> {
+    let (authority, row) = database_context::read_initial(reader, Detail::PageLookup).await?;
+    let instance = authority.instance.as_ref().ok_or_else(|| CollectionStop::SourceChanged.error())?;
+    let current = SourcePartition::InstanceLocal {
+        member: Some(instance.identity.clone()),
+        epoch: Some(instance.capture_epoch()?),
+    };
+    if current != *expected {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    shared_context(reader, resource, authority, row).await
+}
+async fn shared_context<R: NativeRead>(
+    reader: &mut ActivityReader<R>,
+    resource: &culprit_core::telemetry::SharedResourceIdentity,
+    authority: Context,
+    row: crate::value::Rec,
+) -> Result<LookupContext> {
     let shared = super::shared_tempdb::Context::initial(
         &mut reader.io,
         &authority,

@@ -159,9 +159,10 @@ fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sq
     let SourceObservation::FocusedPageWait { result, .. } = &mut source.observation else { panic!() };
     let mut intent = test_support::investigation_fixture().intent;
     intent.focus = result.focus.clone();
-    intent.qualification.scope.target = intent.focus.target.clone();
-    intent.qualification.scope.source = intent.focus.source.clone();
-    intent.qualification.scope.native_epoch = Some(intent.focus.epoch.clone());
+    let RecipeCostScope::Activity(scope) = &mut intent.qualification.scope else { panic!() };
+    scope.target = intent.focus.target.clone();
+    scope.source = intent.focus.source.clone();
+    scope.native_epoch = Some(intent.focus.epoch.clone());
     intent.qualification.read_metrics.templates[0].statement = DefinitionPayload::sql(
         "SELECT private_qualification_query FROM private_cost_observer WHERE label='private-client'",
         Engine::Mssql,

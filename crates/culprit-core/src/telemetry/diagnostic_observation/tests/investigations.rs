@@ -85,7 +85,7 @@ fn scenario() -> Scenario {
     let receipt = RecipeCostReceipt {
         recipe_id: "fixture.page-wait-focus".into(),
         recipe_version: 1,
-        scope: episode.scope.clone(),
+        scope: episode.scope.clone().into(),
         component: component.clone(),
         tested_budget: CollectionBudget {
             page_rows: 1,
@@ -252,9 +252,9 @@ fn scope_epoch_component_recipe_and_receipt_changes_cannot_borrow_an_existing_in
             _ => {
                 let RecipeCostQualification::Measured(receipt) = &mut recipe.cost else { panic!() };
                 match changed {
-                    "epoch" => receipt.scope.native_epoch = Some("another-native-epoch".into()),
-                    "population" => receipt.scope.population = ActivityPopulation::DefaultDatabaseConnections,
-                    "scope" => receipt.scope.measurement_scope = MeasurementScope::Server,
+                    "epoch" => activity_scope(receipt).native_epoch = Some("another-native-epoch".into()),
+                    "population" => activity_scope(receipt).population = ActivityPopulation::DefaultDatabaseConnections,
+                    "scope" => activity_scope(receipt).measurement_scope = MeasurementScope::Server,
                     "native-cost-proof" => receipt.evidence.payload_sha256 = digest(b"different-native-proof"),
                     _ => receipt.read_metrics.templates[0].client_elapsed_ms = 2.0,
                 }
@@ -376,7 +376,7 @@ fn raw_intent_changes_and_unknown_components_fail_storage_validation_without_rep
             "revision" => encoded["episode_revision"] = serde_json::json!("01"),
             "recipe" => encoded["recipe_version"] = serde_json::json!(2),
             "budget" => encoded["budget"]["max_queries"] = serde_json::json!(2),
-            "epoch" => encoded["qualification"]["scope"]["native_epoch"] = serde_json::json!(null),
+            "epoch" => encoded["qualification"]["scope"]["data"]["native_epoch"] = serde_json::json!(null),
             "component" => encoded["qualification"]["component"]["version"] = serde_json::json!(null),
             _ => encoded["unrelated_policy"] = serde_json::json!(true),
         }
@@ -605,3 +605,9 @@ fn initial_owner_metadata_rejects_wrong_selection_subject_or_a_contradictory_nat
 }
 
 mod provenance;
+mod shared;
+
+fn activity_scope(receipt: &mut RecipeCostReceipt) -> &mut DiagnosticScope {
+    let RecipeCostScope::Activity(scope) = &mut receipt.scope else { panic!() };
+    scope
+}

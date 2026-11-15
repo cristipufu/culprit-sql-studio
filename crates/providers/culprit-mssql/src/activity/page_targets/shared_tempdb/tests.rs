@@ -244,8 +244,12 @@ async fn an_explicit_shared_focus_keeps_its_original_request_and_never_discovers
     focus.epoch = original_context.epoch.unwrap();
     focus.partition = native.source_partition().unwrap();
     let resource = resource().await;
+    let partition = SourcePartition::InstanceLocal {
+        member: Some(resource.clone()),
+        epoch: Some(native.instance.as_ref().unwrap().capture_epoch().unwrap()),
+    };
     let mut reader = native_reader(replies());
-    let captured = reader.capture_shared_tempdb_page_wait_focus(&focus, &resource).await.unwrap();
+    let captured = reader.capture_shared_tempdb_page_wait_focus(&focus, &resource, &partition).await.unwrap();
     assert_eq!(captured.result.focus, focus);
     assert!(captured.result.permits_page_lookup());
     assert_eq!(captured.capture.snapshot.observations.len(), 1);
@@ -256,6 +260,37 @@ async fn an_explicit_shared_focus_keeps_its_original_request_and_never_discovers
     assert!(reader.io.calls[4].sql.contains("r.session_id=@P2 AND r.request_id=@P3"));
     assert!(!reader.io.calls[4].sql.contains("sys.dm_os_waiting_tasks"));
     assert_eq!(reader.query_count(), 14);
+}
+
+#[tokio::test]
+async fn stale_shared_execution_generation_refuses_before_tempdb_metadata_activity_or_headers() {
+    let original = crate::activity::page_targets::tests::page_wait(42, "PAGELATCH_EX", "2:1:4144");
+    let mut focus = crate::activity::page_targets::focus::tests::focus(&original);
+    let mut authority = native_reader(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)]), Ok(vec![boxed_context()])]);
+    let native = crate::activity::database_context::initial(&mut authority).await.unwrap();
+    let current = native.capture_context().unwrap();
+    focus.target = current.database.into();
+    focus.epoch = current.epoch.unwrap();
+    focus.partition = native.source_partition().unwrap();
+    let resource = resource().await;
+    for stale_member in [false, true] {
+        let mut member = resource.clone();
+        if stale_member {
+            member.native.id = "other-native-instance".into();
+        }
+        let expected = SourcePartition::InstanceLocal {
+            member: Some(member),
+            epoch: Some("stale-measured-native-generation".into()),
+        };
+        let mut reader = native_reader(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)]), Ok(vec![boxed_context()])]);
+        let error = reader.capture_shared_tempdb_page_wait_focus(&focus, &resource, &expected).await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
+        assert_eq!(reader.query_count(), 3);
+        assert!(!reader.io.calls.iter().any(|call| call.sql.contains("tempdb.")
+            || call.sql.contains("FROM sys.dm_exec_requests r")
+            || call.sql.contains("sys.dm_db_page_info(")));
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
 }
 
 #[tokio::test]

@@ -1,9 +1,8 @@
 //! Prepare bounded questions from retained native evidence. This module never opens a source or grants admission.
-use super::RouteBindings;
+use super::{RouteBindings, evidence::resolve_optional_evidence, routes::RouteBinding};
 use crate::{
     capture::CollectionCancellation,
     delivery::recovery::RecoveryStore,
-    diagnostics::resolve_evidence,
     fleet::{FleetBackend, FleetJournal, journal::FocusedStage, scheduler::FocusedJob},
     outbox::Outbox,
 };
@@ -108,38 +107,35 @@ async fn bounded(
             let episode = &checkpoint.episodes[offset];
             scanned += 1;
             if episode.analysis.needs_work() && matches!(episode.signal, DiagnosticSignal::PageWait { .. }) {
+                let mut selected_resources = BTreeSet::new();
                 for target in targets {
                     if cancellation.is_cancelled() || questions == MAX_QUESTIONS_PER_PASS {
                         return Ok(prepared);
                     }
                     let Some(binding) = bindings.get(&target.id).filter(|binding| {
-                        binding.matches_scope(&episode.scope)
-                            && binding.source.observation.activity().is_some_and(|source| {
-                                ObservationBounds::new(&episode.last_seen_at, &source.at).is_some()
-                            })
+                        binding.matches_episode(&episode.scope) && binding.observed_after(&episode.last_seen_at)
                     }) else {
                         continue;
                     };
-                    let Some(schedule) = target
-                        .schedules
-                        .iter()
-                        .find(|schedule| matches!(schedule.collection, ScheduledCollection::Activity { .. }))
-                    else {
+                    let Some(budget) = binding.budget(target) else {
                         continue;
                     };
+                    if !selected_resources.insert(binding.source.target.telemetry_id()?) {
+                        continue;
+                    }
                     if !routes.contains_key(&target.id) {
                         routes.insert(target.id.clone(), select_route(backend, target, &binding.revision)?);
                     }
                     let Some(route) = routes.get(&target.id).and_then(Option::as_ref) else { continue };
                     questions += 1;
-                    if let Some(candidate) = evidence.question(outbox, target, &schedule.budget, route, episode).await?
+                    if let Some(candidate) = evidence.question(outbox, target, budget, route, episode, binding).await?
                         && seen.insert(candidate.intent.episode_stage_key()?)
                     {
                         prepared.push(candidate);
+                        break;
                     }
-                    // One explicit selected route owns this question in this pass; a refusal is not permission to
-                    // probe alternative aliases. The episode cursor advances even when its proof is withheld.
-                    break;
+                    // One saved route owns each physical resource question. A completed database stage may still
+                    // need a distinct, explicitly assigned shared owner; refusal never probes that owner's aliases.
                 }
             }
             if cancellation.is_cancelled() {
@@ -192,9 +188,11 @@ impl EvidencePlanner<'_> {
         budget: &CollectionBudget,
         route: &SelectedRoute,
         episode: &DiagnosticEpisode,
+        binding: &RouteBinding,
     ) -> Result<Option<PreparedInvestigation>> {
         let Some((source, row)) =
-            resolve_evidence(outbox, &target.connection, &episode.latest, self.recovery, self.cancellation).await?
+            resolve_optional_evidence(outbox, &target.connection, &episode.latest, self.recovery, self.cancellation)
+                .await?
         else {
             return Ok(None);
         };
@@ -202,10 +200,32 @@ impl EvidencePlanner<'_> {
         let PageWaitFocusPlan::Ready(focus) = episode.plan_page_wait_focus(&source, original, &episode.latest)? else {
             return Ok(None);
         };
-        let Ok(intent) = DiagnosticInvestigationIntent::new(episode, &route.recipe, *focus, &route.component, budget)
-        else {
+        let proposed = if let Some(owner) = &binding.shared_owner {
+            let Some((owner_source, owner_row)) =
+                resolve_optional_evidence(outbox, &target.connection, owner, self.recovery, self.cancellation).await?
+            else {
+                return Ok(None);
+            };
+            if owner_source != binding.source {
+                return Err(DeliveryProblem::Integrity.error());
+            }
+            DiagnosticInvestigationIntent::new_shared(
+                episode,
+                &route.recipe,
+                *focus,
+                &route.component,
+                budget,
+                DiagnosticSharedOwner { source: &owner_source, row: &owner_row, reference: owner },
+            )
+        } else {
+            DiagnosticInvestigationIntent::new(episode, &route.recipe, *focus, &route.component, budget)
+        };
+        let Ok(intent) = proposed else {
             return Ok(None);
         };
+        if !binding.matches_scope(&intent.qualification.scope) {
+            return Ok(None);
+        }
         match self.journal.focused_stage(&intent.episode_stage_key()?).await? {
             Some(FocusedStage::Outstanding | FocusedStage::Completed) => return Ok(None),
             Some(FocusedStage::Cancelled { key }) if key == intent.key()? => return Ok(None),
@@ -214,7 +234,7 @@ impl EvidencePlanner<'_> {
         if self.cancellation.is_cancelled() {
             return Ok(None);
         }
-        let Some((cost_source, cost_row)) = resolve_evidence(
+        let Some((cost_source, cost_row)) = resolve_optional_evidence(
             outbox,
             &target.connection,
             &intent.qualification.evidence,

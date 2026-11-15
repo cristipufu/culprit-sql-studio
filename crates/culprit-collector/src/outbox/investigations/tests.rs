@@ -1,6 +1,7 @@
 mod events;
 mod focus;
 mod retirement;
+mod shared;
 use super::*;
 use crate::{
     collection_files::ObservationFiles,
@@ -331,6 +332,7 @@ async fn publication_before_analysis_survives_volume_loss_and_preserves_the_full
         store_id: store.id().into(),
         parent: crate::delivery::diagnostic_recovery::capture_reference(range.manifest()).unwrap(),
         source: range.manifest().source.clone(),
+        investigation: range.manifest().investigation.clone(),
         connection: "fixture".into(),
         rows,
     })
@@ -550,6 +552,7 @@ async fn caching_unknown_authenticated_history_after_epoch_binding_does_not_enqu
         store_id: store.id().into(),
         parent: crate::delivery::diagnostic_recovery::capture_reference(range.manifest()).unwrap(),
         source: range.manifest().source.clone(),
+        investigation: range.manifest().investigation.clone(),
         connection: "pending".into(),
         rows,
     })
@@ -564,6 +567,7 @@ async fn caching_unknown_authenticated_history_after_epoch_binding_does_not_enqu
         store_id: store.id().into(),
         parent: crate::delivery::diagnostic_recovery::capture_reference(range.manifest()).unwrap(),
         source: range.manifest().source.clone(),
+        investigation: range.manifest().investigation.clone(),
         connection: "historical".into(),
         rows,
     })

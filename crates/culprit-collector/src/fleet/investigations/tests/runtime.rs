@@ -18,11 +18,11 @@ use tokio::time::Instant;
 
 mod provenance;
 
-struct Runtime {
-    fixture: Harness,
-    investigations: Investigations,
-    scheduler: Scheduler,
-    started: Instant,
+pub(super) struct Runtime {
+    pub(super) fixture: Harness,
+    pub(super) investigations: Investigations,
+    pub(super) scheduler: Scheduler,
+    pub(super) started: Instant,
 }
 impl Runtime {
     async fn new() -> Self {
@@ -30,7 +30,7 @@ impl Runtime {
         Self::from_fixture(fixture).await
     }
 
-    async fn from_fixture(fixture: Harness) -> Self {
+    pub(super) async fn from_fixture(fixture: Harness) -> Self {
         let mut scheduler = Scheduler::new(&fixture.inventory, "one").unwrap();
         let started = Instant::now();
         let state = scheduler.initial_state(started.elapsed(), chrono::Utc::now()).unwrap();
@@ -41,7 +41,7 @@ impl Runtime {
         runtime
     }
 
-    async fn baseline(&mut self) {
+    pub(super) async fn baseline(&mut self) {
         let Work::Scheduled(job) = self.scheduler.take_allowed(self.started.elapsed(), |_| false).unwrap().unwrap()
         else {
             panic!("the initial periodic baseline runs before any targeted work")
@@ -60,17 +60,26 @@ impl Runtime {
         .await
         .unwrap();
         assert_eq!(result.event.status, CollectionStatus::Complete);
-        self.investigations.completed_baseline(&job, &result, admitted.used_route_revision()).unwrap();
+        self.investigations
+            .completed_baseline(&job, &result, admitted.used_route_revision(), &mut self.fixture.outbox)
+            .await
+            .unwrap();
         self.finish(result.outcome).await;
         let policies = self.policies();
         drain_pending(&mut self.fixture.outbox, &policies, &CollectionCancellation::default(), None).await.unwrap();
     }
 
-    fn policies(&self) -> DiagnosticPolicies {
-        DiagnosticPolicies::from_inventory(&self.fixture.inventory, "one")
-            .unwrap()
-            .with_recipes("saved-source", vec![self.fixture.backend.recipe.clone()])
-            .unwrap()
+    pub(super) fn policies(&self) -> DiagnosticPolicies {
+        let policies = if self.fixture.backend.shared.is_some() {
+            // The database point was sealed before selecting this independent shared-resource route.
+            DiagnosticPolicies::for_activity("saved-source", CollectionSubject::Database, ActivityPolicy::default())
+        } else {
+            DiagnosticPolicies::from_inventory(&self.fixture.inventory, "one")
+        };
+        let recipes = std::iter::once(self.fixture.backend.recipe.clone())
+            .chain(self.fixture.backend.additional_recipes.iter().cloned())
+            .collect();
+        policies.unwrap().with_recipes("saved-source", recipes).unwrap()
     }
 
     async fn complete_empty_baseline(&mut self) {
@@ -88,7 +97,7 @@ impl Runtime {
         self.baseline().await;
     }
 
-    async fn enroll(&mut self) -> bool {
+    pub(super) async fn enroll(&mut self) -> bool {
         self.investigations
             .prepare(
                 &self.fixture.backend,
@@ -102,7 +111,7 @@ impl Runtime {
             .unwrap()
     }
 
-    async fn take_focus(&mut self) -> FocusedJob {
+    pub(super) async fn take_focus(&mut self) -> FocusedJob {
         // Only advance scheduler control time. Native capture uses its real admission instant and deadlines.
         self.started -=
             self.scheduler.wait_allowed(self.started.elapsed(), |job| self.investigations.route_available(job));
@@ -125,7 +134,7 @@ impl Runtime {
         self.scheduler.persisted(self.fixture.journal.update_scheduler(update).await.unwrap()).unwrap();
     }
 
-    async fn execute(&mut self, job: &FocusedJob) -> WorkResult {
+    pub(super) async fn execute(&mut self, job: &FocusedJob) -> WorkResult {
         let admitted = AdmittedBackend::new(&self.fixture.backend, Instant::now());
         self.investigations
             .execute(
@@ -140,13 +149,13 @@ impl Runtime {
             .unwrap()
     }
 
-    async fn finish(&mut self, outcome: Outcome) {
+    pub(super) async fn finish(&mut self, outcome: Outcome) {
         self.scheduler.finish(self.started.elapsed(), outcome).unwrap();
         let update = self.scheduler.completion_checkpoint(self.started.elapsed(), chrono::Utc::now()).unwrap();
         self.scheduler.persisted(self.fixture.journal.update_scheduler(update).await.unwrap()).unwrap();
     }
 
-    async fn reconcile(&mut self) {
+    pub(super) async fn reconcile(&mut self) {
         self.investigations
             .reconcile(
                 &self.fixture.backend,
@@ -160,13 +169,17 @@ impl Runtime {
             .unwrap();
     }
 
-    async fn revisions(&self, parent: &CaptureIdentity) -> Vec<DiagnosticRevision> {
+    pub(super) async fn revisions(&self, parent: &CaptureIdentity) -> Vec<DiagnosticRevision> {
         let status = self.fixture.outbox.status(100, None).await.unwrap();
         let captures: Vec<_> = status.entries.iter().filter(|entry| {
             matches!(&entry.request.selection, CollectionSelection::Diagnostics { parent: input, .. } if input.capture == *parent)
         }).collect();
         assert_eq!(captures.len(), 1, "one input owns one offline transition");
-        let directory = self.fixture._directory.path().join("offline-revision");
+        let directory = self
+            .fixture
+            ._directory
+            .path()
+            .join(format!("offline-revision-{}", digest(&serde_json::to_vec(parent).unwrap())));
         replay(&self.fixture._directory.path().join("outbox"), &captures[0].capture, &directory)
             .await
             .into_iter()
@@ -181,7 +194,7 @@ impl Runtime {
             .collect()
     }
 
-    fn native_calls(&self) -> [usize; 5] {
+    pub(super) fn native_calls(&self) -> [usize; 5] {
         let calls = &self.fixture.backend.calls;
         [&calls.captured, &calls.opened, &calls.observed, &calls.verified, &calls.closed]
             .map(|count| count.load(Ordering::SeqCst))

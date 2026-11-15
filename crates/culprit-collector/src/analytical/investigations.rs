@@ -42,6 +42,14 @@ struct PublicLineage<'a> {
     component: &'a culprit_core::ComponentVersion,
     qualification_key: String,
     cost_evidence: &'a DiagnosticEvidenceRef,
+    execution: PublicExecution<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum PublicExecution<'a> {
+    Database,
+    Shared { owner: &'a DiagnosticEvidenceRef },
 }
 
 pub(super) fn lineage(value: &DiagnosticInvestigationLineage) -> Result<Value> {
@@ -55,6 +63,10 @@ pub(super) fn lineage(value: &DiagnosticInvestigationLineage) -> Result<Value> {
         component: &value.qualification.component,
         qualification_key: value.qualification.key()?,
         cost_evidence: &value.qualification.evidence,
+        execution: match &value.execution {
+            DiagnosticExecutionBinding::Database => PublicExecution::Database,
+            DiagnosticExecutionBinding::Shared { owner } => PublicExecution::Shared { owner },
+        },
     })
     .map_err(|_| DeliveryProblem::Integrity.error())
 }

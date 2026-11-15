@@ -29,7 +29,7 @@ impl PageWaitSource {
 fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
     request.validate()?;
     let mut bounded = request.clone();
-    bounded.budget = if matches!(request.selection, CollectionSelection::FocusedPageWait { .. }) {
+    bounded.budget = if request.focus().is_some() {
         focused_budget(&request.budget)
     } else {
         crate::page_waits::bounded_budget(&request.budget)
@@ -62,6 +62,7 @@ impl<R: NativeRead> PageWaitSource<R> {
             request.selection,
             CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }
                 | CollectionSelection::FocusedPageWait { .. }
+                | CollectionSelection::SharedPageWaitFocus { .. }
         ) {
             return Err(invalid_data());
         }
@@ -76,8 +77,8 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
                 let focused = self.reader.capture_focused_page_wait_targets(focus).await?;
                 (focused.capture, Some(focused.result))
             }
-            (CollectionSelection::FocusedPageWait { focus }, CollectionSubject::Shared { resource }) => {
-                let focused = self.reader.capture_shared_tempdb_page_wait_focus(focus, resource).await?;
+            (CollectionSelection::SharedPageWaitFocus { focus, partition }, CollectionSubject::Shared { resource }) => {
+                let focused = self.reader.capture_shared_tempdb_page_wait_focus(focus, resource, partition).await?;
                 (focused.capture, Some(focused.result))
             }
             (

@@ -61,6 +61,12 @@ impl DiagnosticRevision {
         {
             inputs.push(event.intent.focus.parent.clone());
         }
+        if let Some(event) = &investigation
+            && let DiagnosticExecutionBinding::Shared { owner } = &event.intent.execution
+            && !inputs.contains(owner)
+        {
+            inputs.push(owner.as_ref().clone());
+        }
         let mut revision = Self {
             id: String::new(),
             controller_version: DIAGNOSTIC_CONTROLLER_VERSION,

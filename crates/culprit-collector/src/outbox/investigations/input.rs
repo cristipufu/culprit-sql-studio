@@ -12,6 +12,8 @@ struct StoredDiagnosticInput {
     restored: Option<String>,
     checksum: Option<String>,
     evidence_only: bool,
+    investigation: Option<String>,
+    charged_bytes: i64,
 }
 
 struct StoredDiagnosticAcknowledgement {
@@ -20,6 +22,17 @@ struct StoredDiagnosticAcknowledgement {
     controller_version: u32,
     acknowledged: bool,
     evidence_only: bool,
+    investigation: Option<String>,
+}
+
+struct DiagnosticInputContents {
+    parent: String,
+    source: String,
+    connection: String,
+    version: u32,
+    restored: Option<String>,
+    checksum: Option<String>,
+    investigation: Option<String>,
 }
 
 impl Files {
@@ -32,21 +45,23 @@ impl Files {
             return Err(integrity());
         }
         let stored = self.journal.conn.query_row(
-            "SELECT parent_json,source_json,controller_version,acknowledged,evidence_only FROM diagnostic_inputs WHERE observation_id=?1",
+            "SELECT parent_json,source_json,controller_version,acknowledged,evidence_only,lineage_json FROM diagnostic_inputs WHERE observation_id=?1",
             [&reference.capture.observation_id],
             |row| Ok(StoredDiagnosticAcknowledgement {
                 parent: row.get(0)?, source: row.get(1)?, controller_version: row.get(2)?,
                 acknowledged: row.get(3)?, evidence_only: row.get(4)?,
+                investigation: row.get(5)?,
             }),
         ).optional().map_err(storage)?;
         let Some(stored) = stored else { return Ok(DiagnosticInputState::Missing) };
         let parent: DiagnosticCaptureRef = decode(&stored.parent)?;
         let source: CollectionDescription = decode(&stored.source)?;
+        let investigation = decode_investigation(stored.investigation.as_deref())?;
         if parent != *reference
             || stored.controller_version != controller_version
             || stored.evidence_only && !stored.acknowledged
             || source.captured_range().map_err(|_| integrity())?.scope_id != parent.source_scope_id
-            || !matches!(source.observation, SourceObservation::Activity(_) | SourceObservation::FocusedPageWait { .. })
+            || !eligible_source(&source, investigation.as_ref())? && !stored.evidence_only
         {
             return Err(integrity());
         }
@@ -69,22 +84,27 @@ impl Files {
         id.map(|id| self.diagnostic_input(&id, controller_version)).transpose()
     }
     pub(in crate::outbox) fn diagnostic_input(&mut self, id: &str, controller_version: u32) -> Result<DiagnosticInput> {
-        let (parent, source, connection, version, restored, restored_sha): (String,String,String,u32,Option<String>,Option<String>) = self.journal.conn.query_row(
-            "SELECT parent_json,source_json,connection,controller_version,restored_json,restored_sha FROM diagnostic_inputs WHERE observation_id=?1",
-            [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional().map_err(storage)?
+        let stored = self.journal.conn.query_row(
+            "SELECT parent_json,source_json,connection,controller_version,restored_json,restored_sha,lineage_json FROM diagnostic_inputs WHERE observation_id=?1",
+            [id], |row| Ok(DiagnosticInputContents {
+                parent: row.get(0)?, source: row.get(1)?, connection: row.get(2)?, version: row.get(3)?,
+                restored: row.get(4)?, checksum: row.get(5)?, investigation: row.get(6)?,
+            })).optional().map_err(storage)?
             .ok_or_else(|| DeliveryProblem::Conflict.error())?;
-        let parent: DiagnosticCaptureRef = decode(&parent)?;
-        let source: CollectionDescription = decode(&source)?;
+        let parent: DiagnosticCaptureRef = decode(&stored.parent)?;
+        let source: CollectionDescription = decode(&stored.source)?;
+        let investigation = decode_investigation(stored.investigation.as_deref())?;
         if !parent.is_valid()
             || parent.capture.observation_id != id
-            || version != controller_version
+            || stored.version != controller_version
             || source.captured_range()?.scope_id != parent.source_scope_id
         {
             return Err(integrity());
         }
-        let rows = if let Some(restored) = restored {
+        let rows = if let Some(restored) = stored.restored {
             if restored.len() > MAX_RESTORED_INPUT_BYTES
-                || restored_sha.as_deref() != Some(digest(restored.as_bytes()).as_str())
+                || stored.checksum.as_deref()
+                    != Some(restored_checksum(&parent, &source, investigation.as_ref(), &restored)?.as_str())
             {
                 return Err(integrity());
             }
@@ -93,12 +113,14 @@ impl Files {
             let validated = self.validated(id)?;
             if validated.manifest_sha != parent.manifest_sha256
                 || validated.manifest.description.as_ref() != Some(&source)
+                || encode_investigation(validated.manifest.investigation.as_ref())?
+                    != encode_investigation(investigation.as_ref())?
             {
                 return Err(integrity());
             }
             self.exported_rows(&validated)?
         };
-        let key = controller_key(&parent, &source.target, controller_version)?;
+        let key = controller_key(&parent, controller_target(&source, investigation.as_ref())?, controller_version)?;
         let head: Option<(String, String)> = self
             .journal
             .conn
@@ -122,7 +144,8 @@ impl Files {
         Ok(DiagnosticInput {
             parent: parent.clone(),
             source: source.clone(),
-            connection,
+            investigation,
+            connection: stored.connection,
             rows: row_references(&parent, &source, rows)?,
             controller_version,
             checkpoint,
@@ -169,36 +192,31 @@ impl Files {
             return Err(integrity());
         }
         let id = &reference.capture.observation_id;
-        let restored: Option<(Option<String>, Option<String>)> = self
+        let restored: Option<DiagnosticInputContents> = self
             .journal
             .conn
             .query_row(
-                "SELECT restored_json,restored_sha FROM diagnostic_inputs WHERE observation_id=?1",
+                "SELECT parent_json,source_json,connection,controller_version,restored_json,restored_sha,lineage_json FROM diagnostic_inputs WHERE observation_id=?1",
                 [id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok(DiagnosticInputContents {
+                    parent: row.get(0)?, source: row.get(1)?, connection: row.get(2)?, version: row.get(3)?,
+                    restored: row.get(4)?, checksum: row.get(5)?, investigation: row.get(6)?,
+                }),
             )
             .optional()
             .map_err(storage)?;
-        let (parent, source, rows) = if let Some((Some(restored), restored_sha)) = restored {
+        let (parent, source, rows) = if let Some(stored) = restored.filter(|stored| stored.restored.is_some()) {
+            let restored = stored.restored.as_deref().ok_or_else(integrity)?;
+            let parent = decode::<DiagnosticCaptureRef>(&stored.parent)?;
+            let source = decode::<CollectionDescription>(&stored.source)?;
+            let investigation = decode_investigation(stored.investigation.as_deref())?;
             if restored.len() > MAX_RESTORED_INPUT_BYTES
-                || restored_sha.as_deref() != Some(digest(restored.as_bytes()).as_str())
+                || stored.checksum.as_deref()
+                    != Some(restored_checksum(&parent, &source, investigation.as_ref(), restored)?.as_str())
             {
                 return Err(integrity());
             }
-            let (parent, source): (String, String) = self
-                .journal
-                .conn
-                .query_row(
-                    "SELECT parent_json,source_json FROM diagnostic_inputs WHERE observation_id=?1",
-                    [id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .map_err(storage)?;
-            (
-                decode::<DiagnosticCaptureRef>(&parent)?,
-                decode::<CollectionDescription>(&source)?,
-                decode::<Vec<ExportedRecord>>(&restored)?,
-            )
+            (parent, source, decode::<Vec<ExportedRecord>>(restored)?)
         } else {
             let validated = self.validated(id)?;
             (
@@ -231,6 +249,57 @@ impl Files {
         }
         Ok(())
     }
+    pub(in crate::outbox) fn verify_investigation_intent(
+        &mut self,
+        intent: &DiagnosticInvestigationIntent,
+    ) -> Result<()> {
+        if !intent.is_valid() {
+            return Err(integrity());
+        }
+        self.verify_focus_parent(&intent.focus)?;
+        if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
+            let (source, row) = self.diagnostic_reference(owner)?;
+            if !intent.matches_shared_owner(&source, &row) {
+                return Err(integrity());
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::outbox) fn diagnostic_owner(
+        &mut self,
+        identity: &CaptureIdentity,
+    ) -> Result<Option<(DiagnosticEvidenceRef, CollectionDescription, ExportedRecord)>> {
+        let validated = self.validated(&identity.observation_id)?;
+        if validated.manifest.capture != *identity {
+            return Err(integrity());
+        }
+        let source = validated.manifest.description.clone().ok_or_else(integrity)?;
+        if !matches!(source.target, CollectionTarget::Shared(_)) {
+            return Ok(None);
+        }
+        if !shared_owner_source(&source) {
+            return Ok(None);
+        }
+        let parent = DiagnosticCaptureRef {
+            capture: identity.clone(),
+            manifest_sha256: validated.manifest_sha.clone(),
+            source_scope_id: source.captured_range()?.scope_id,
+        };
+        let rows = row_references(&parent, &source, self.exported_rows(&validated)?)?;
+        Ok(rows.into_iter().find_map(|row| {
+            let TelemetryRecord::Operational(observation) = &row.row.record else { return None };
+            let positive = source.observation.snapshot()?.sources.iter().any(|coverage| {
+                coverage.source == observation.source
+                    && coverage.records > 0
+                    && matches!(
+                        coverage.state,
+                        culprit_core::SourceState::Collected | culprit_core::SourceState::Partial
+                    )
+            });
+            positive.then(|| (row.reference, source.clone(), row.row))
+        }))
+    }
     pub(in crate::outbox) fn restore_diagnostic_input(&mut self, input: RestoredInput) -> Result<()> {
         self.install_diagnostic_input(input, InputInstallation::Pending)
     }
@@ -259,11 +328,17 @@ impl Files {
         {
             return Err(DeliveryProblem::Conflict.error());
         }
+        let investigation = encode_investigation(input.investigation.as_ref())?;
+        if installation == InputInstallation::Pending && !eligible_source(&input.source, input.investigation.as_ref())?
+        {
+            return Err(integrity());
+        }
         let rows = row_references(&input.parent, &input.source, input.rows.clone())?;
         if rows.iter().any(|row| !row.row.record.is_valid()) {
             return Err(integrity());
         }
         let encoded = encode(&input.rows)?;
+        let checksum = restored_checksum(&input.parent, &input.source, input.investigation.as_ref(), &encoded)?;
         if encoded.len() > MAX_RESTORED_INPUT_BYTES {
             return Err(problem(OutboxProblem::Capacity));
         }
@@ -271,7 +346,7 @@ impl Files {
             .journal
             .conn
             .query_row(
-                "SELECT parent_json,source_json,restored_json,restored_sha,evidence_only FROM diagnostic_inputs WHERE observation_id=?1",
+                "SELECT parent_json,source_json,restored_json,restored_sha,evidence_only,lineage_json,charged_bytes FROM diagnostic_inputs WHERE observation_id=?1",
                 [&input.parent.capture.observation_id],
                 |row| Ok(StoredDiagnosticInput {
                     parent: row.get(0)?,
@@ -279,6 +354,8 @@ impl Files {
                     restored: row.get(2)?,
                     checksum: row.get(3)?,
                     evidence_only: row.get(4)?,
+                    investigation: row.get(5)?,
+                    charged_bytes: row.get(6)?,
                 }),
             )
             .optional()
@@ -286,13 +363,12 @@ impl Files {
         if let Some(stored) = &existing {
             if decode::<DiagnosticCaptureRef>(&stored.parent)? != input.parent
                 || decode::<CollectionDescription>(&stored.source)? != input.source
+                || stored.investigation != investigation
             {
                 return Err(integrity());
             }
             if let Some(existing_rows) = &stored.restored {
-                if existing_rows != &encoded
-                    || stored.checksum.as_deref() != Some(digest(existing_rows.as_bytes()).as_str())
-                {
+                if existing_rows != &encoded || stored.checksum.as_deref() != Some(checksum.as_str()) {
                     return Err(integrity());
                 }
                 if installation == InputInstallation::Pending && stored.evidence_only {
@@ -318,21 +394,30 @@ impl Files {
         } else if self.epoch.is_some() && installation == InputInstallation::Pending {
             return Err(DeliveryProblem::Conflict.error());
         }
-        let charge = encoded.len() as u64 + super::super::CAPTURE_ACCOUNTING;
+        let charge = encoded.len() as u64
+            + investigation.as_ref().map_or(0, String::len) as u64
+            + super::super::CAPTURE_ACCOUNTING;
+        let previous_charge = existing
+            .as_ref()
+            .map(|stored| super::super::journal::bytes_from_sql(stored.charged_bytes))
+            .transpose()?
+            .unwrap_or(0);
+        let additional_charge = charge.checked_sub(previous_charge).ok_or_else(integrity)?;
         let status = self.journal.status(1, None)?;
-        if status.charged_bytes.checked_add(charge).is_none_or(|total| total > self.journal.limits.max_bytes) {
+        if status.charged_bytes.checked_add(additional_charge).is_none_or(|total| total > self.journal.limits.max_bytes)
+        {
             return Err(problem(OutboxProblem::Capacity));
         }
         let tx = self.journal.conn.transaction().map_err(storage)?;
         if existing.is_some() {
             tx.execute(
                 "UPDATE diagnostic_inputs SET restored_json=?1,charged_bytes=?2,restored_sha=?4 WHERE observation_id=?3",
-                params![encoded, super::super::journal::bytes_to_sql(charge)?, input.parent.capture.observation_id,digest(encoded.as_bytes())],
+                params![encoded, super::super::journal::bytes_to_sql(charge)?, input.parent.capture.observation_id,checksum],
             )
             .map_err(storage)?;
         } else {
             tx.execute(
-                "INSERT INTO diagnostic_inputs VALUES(?1,?2,?3,?4,?5,?9,?6,?7,?8,?9)",
+                "INSERT INTO diagnostic_inputs VALUES(?1,?2,?3,?4,?5,?9,?6,?7,?8,?9,?10)",
                 params![
                     input.parent.capture.observation_id,
                     DIAGNOSTIC_CONTROLLER_VERSION,
@@ -341,8 +426,9 @@ impl Files {
                     input.connection,
                     encoded,
                     super::super::journal::bytes_to_sql(charge)?,
-                    digest(encoded.as_bytes()),
-                    installation == InputInstallation::EvidenceOnly
+                    checksum,
+                    installation == InputInstallation::EvidenceOnly,
+                    investigation
                 ],
             )
             .map_err(storage)?;
@@ -368,6 +454,14 @@ fn pin_restored_focus(tx: &Transaction<'_>, input: &RestoredInput) -> Result<()>
             "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM diagnostic_inputs WHERE observation_id=?3 AND acknowledged=0)",
             params![format!("focus:{}",input.parent.capture.observation_id),result.focus.parent.capture.observation_id,input.parent.capture.observation_id],
         ).map_err(storage)?;
+        if let Some(intent) = investigation_intent(&input.source, input.investigation.as_ref())?
+            && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
+        {
+            tx.execute(
+                "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM diagnostic_inputs WHERE observation_id=?3 AND acknowledged=0)",
+                params![format!("focus:{}",input.parent.capture.observation_id),owner.capture.observation_id,input.parent.capture.observation_id],
+            ).map_err(storage)?;
+        }
     }
     Ok(())
 }

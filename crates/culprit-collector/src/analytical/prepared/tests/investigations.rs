@@ -56,7 +56,7 @@ fn private_investigation() -> (DiagnosticInvestigationIntent, DiagnosticEpisode)
     fixture.intent.focus = update.focuses[0].1.clone();
     fixture.intent.episode_id = episode.id.clone();
     fixture.intent.episode_revision = episode.revision.clone();
-    fixture.intent.qualification.scope = episode.scope.clone();
+    fixture.intent.qualification.scope = RecipeCostScope::Activity(episode.scope.clone());
     fixture.intent.qualification.read_metrics.templates[0].statement = DefinitionPayload::sql(
         "SELECT private_observer_cost_sql FROM sys.dm_exec_requests WHERE session_id=9264",
         Engine::Mssql,
@@ -76,8 +76,8 @@ fn focused_capture(intent: &DiagnosticInvestigationIntent) -> test_support::Reco
         wait: PageWaitRelation::Unqualified,
     };
     let source = CollectionDescription {
-        partition: culprit_core::telemetry::SourcePartition::Target,
-        target: intent.focus.target.clone(),
+        partition: intent.qualification.scope.partition().clone(),
+        target: intent.qualification.scope.target(),
         source: culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::FocusedPageWait {
@@ -112,6 +112,7 @@ fn expected_lineage(intent: &DiagnosticInvestigationIntent) -> Value {
         "component": intent.qualification.component,
         "qualification_key": intent.qualification.key().unwrap(),
         "cost_evidence": intent.qualification.evidence,
+        "execution": {"kind": "database"},
     })
 }
 
@@ -120,6 +121,27 @@ fn assert_private_values_absent(value: &Value) {
     for canary in PRIVATE_VALUES {
         assert!(!encoded.contains(canary), "private value leaked into public projection: {canary}");
     }
+}
+
+#[test]
+fn shared_execution_publishes_exact_owner_receipt_without_native_resource_or_question_details() {
+    let fixture = test_support::shared_investigation_fixture();
+    let intent = fixture.investigation.intent;
+    let recovery = focused_capture(&intent);
+    let public = envelope::capture_context(&recovery.manifest, &digest(b"shared-recovery-manifest")).unwrap();
+    let lineage = &public["investigation"];
+    let DiagnosticExecutionBinding::Shared { owner } = &intent.execution else { panic!() };
+    assert_eq!(lineage["execution"]["kind"], "shared");
+    assert_eq!(lineage["execution"]["owner"], serde_json::to_value(owner).unwrap());
+    assert_eq!(lineage["intent_key"], intent.key().unwrap());
+    let encoded = serde_json::to_string(&public).unwrap();
+    assert!(!encoded.contains("private-diagnostic"));
+    for private in ["target", "partition", "focus", "read_metrics", "scope"] {
+        assert!(lineage.get(private).is_none(), "{private}");
+    }
+    let stored = recovery.manifest.investigation.as_ref().unwrap().reconstruct(&intent.focus).unwrap();
+    assert_eq!(stored, intent);
+    assert!(stored.matches_shared_owner(&fixture.owner_source, &fixture.owner_record));
 }
 
 #[test]

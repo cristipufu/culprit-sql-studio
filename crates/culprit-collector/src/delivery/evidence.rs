@@ -242,10 +242,13 @@ impl RangeManifest {
                 CollectionTarget::Database(_) => CollectionSubject::Database,
                 CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
             },
-            selection: CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.clone()) },
-            budget: intent.budget,
+            selection: intent.selection(),
+            budget: intent.budget.clone(),
         };
-        if !owner.matches_request(&request) || !self.source.matches_request(&request) {
+        if !owner.matches_request(&request)
+            || !self.source.matches_request(&request)
+            || !intent.matches_result_source(&self.source)
+        {
             return Err(DeliveryProblem::Integrity.error());
         }
         Ok(())

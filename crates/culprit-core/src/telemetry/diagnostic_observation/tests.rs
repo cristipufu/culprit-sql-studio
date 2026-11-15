@@ -394,6 +394,54 @@ fn a_focused_missing_actor_preserves_the_original_incident_and_records_an_unreso
 }
 
 #[test]
+fn complete_scope_recovery_proof_cannot_clear_a_newer_positive_observation_or_a_malformed_clock() {
+    let first = observe(&frame(1, vec![actor()], true), None);
+    let newer = observe(&frame(3, vec![actor()], true), Some(&first.checkpoint));
+    let episode = &newer.checkpoint.episodes[0];
+    let late = frame(2, vec![], true);
+    let fresh = frame(4, vec![], true);
+    for (capture, accepted) in [(&late, false), (&fresh, true)] {
+        let proof = DiagnosticRecoveryProof::CompleteScope { capture: capture.1.clone() };
+        assert_eq!(proof.matches_source(episode, &capture.0, &capture.1), accepted);
+    }
+    let proof = DiagnosticRecoveryProof::CompleteScope { capture: fresh.1.clone() };
+    let mut malformed = episode.clone();
+    malformed.last_seen_at = "unrecorded-native-clock".into();
+    assert!(!proof.matches_source(&malformed, &fresh.0, &fresh.1));
+    let mut source = fresh.0;
+    let SourceObservation::Activity(snapshot) = &mut source.observation else { panic!() };
+    snapshot.at = "unrecorded-native-clock".into();
+    assert!(!proof.matches_source(episode, &source, &fresh.1));
+}
+
+#[test]
+fn focused_database_recovery_proof_checks_native_upper_bound_against_the_last_positive_point() {
+    let first = observe(&frame(1, vec![actor()], true), None);
+    let newer = observe(&frame(3, vec![actor()], true), Some(&first.checkpoint));
+    let episode = &newer.checkpoint.episodes[0];
+    let focused =
+        focus_frame(first.focuses[0].1.clone(), PageWaitRequestState::Missing, PageWaitRelation::Unqualified, vec![]);
+    let proof = DiagnosticRecoveryProof::FocusedParticipantGone {
+        capture: focused.1.clone(),
+        parent: Box::new(first.focuses[0].1.parent.clone()),
+    };
+    assert!(!proof.matches_source(episode, &focused.0, &focused.1));
+    let mut source = focused.0;
+    for upper_bound in [episode.last_seen_at.as_str(), "2020-01-01T00:04:02Z"] {
+        let SourceObservation::FocusedPageWait { result, snapshot } = &mut source.observation else { panic!() };
+        result.observed_until = upper_bound.into();
+        snapshot.observed_until = result.observed_until.clone();
+        assert!(proof.matches_source(episode, &source, &focused.1));
+    }
+    let mut malformed = episode.clone();
+    malformed.last_seen_at = "unrecorded-native-clock".into();
+    assert!(!proof.matches_source(&malformed, &source, &focused.1));
+    let SourceObservation::FocusedPageWait { result, .. } = &mut source.observation else { panic!() };
+    result.observed_until = "unrecorded-native-clock".into();
+    assert!(!proof.matches_source(episode, &source, &focused.1));
+}
+
+#[test]
 fn a_later_focused_frame_keeps_its_own_counters_and_never_manufactures_an_owner() {
     let first = observe(&frame(1, vec![actor()], true), None);
     let focus = first.focuses[0].1.clone();

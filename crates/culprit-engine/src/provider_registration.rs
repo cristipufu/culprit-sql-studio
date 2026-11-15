@@ -81,7 +81,7 @@ impl ProviderRegistration {
         if !receipt.matches_recipe(recipe)
             || receipt.key()? != selected.key()?
             || !source.target.is_valid()
-            || source.target.telemetry_id()? != receipt.scope.target.telemetry_id()?
+            || source.target.telemetry_id()? != receipt.scope.target().telemetry_id()?
         {
             return Ok(false);
         }

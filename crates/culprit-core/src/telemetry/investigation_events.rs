@@ -1,5 +1,5 @@
 //! Immutable owner events describe admission and attempt history; they never approve native source work.
-use super::diagnostics::{digest_value, positive, valid_capture};
+use super::diagnostics::{digest_value, valid_capture};
 use super::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -73,11 +73,6 @@ impl DiagnosticInvestigationEvent {
     /// A newer revision can still owe an earlier question, including after native symptom recovery.
     /// The caller independently authenticates the original row and the selected source's cost artifact.
     pub fn matches_episode(&self, episode: &DiagnosticEpisode) -> bool {
-        self.is_valid()
-            && episode.is_valid()
-            && episode.id == self.intent.episode_id
-            && positive(&episode.revision) >= positive(&self.intent.episode_revision)
-            && episode.matches_focus(&self.intent.focus)
-            && episode.scope.key().ok() == self.intent.qualification.scope.key().ok()
+        self.is_valid() && self.intent.matches_episode(episode)
     }
 }

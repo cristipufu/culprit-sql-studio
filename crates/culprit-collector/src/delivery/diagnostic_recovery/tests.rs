@@ -292,3 +292,33 @@ async fn captured_event_requires_native_payload_authentication_even_after_native
     assert!(fixture.commit(&prepared).await.is_err(), "a native manifest alone cannot attest truncated payload bytes");
     assert_eq!(fixture.store.checkpoint_head().await.unwrap(), Some(fixture.native.range_id.clone()));
 }
+
+#[tokio::test]
+async fn owned_report_rejects_replaced_lineage_even_when_native_payload_and_receipts_are_identical() {
+    let fixture = CapturedInvestigation::new(true).await;
+    let native = load_diagnostic_input(&fixture.store, &fixture.native.range_id).await.unwrap();
+    let reference = DiagnosticEvidenceRef::from_export(
+        &fixture.native.source,
+        &fixture.native.capture_manifest_sha256,
+        &native.rows[0],
+        0,
+    )
+    .unwrap();
+    let mut episode = fixture.episode.clone();
+    episode.report = Some(DiagnosticReport::PageWait { observation: reference });
+    let authenticated =
+        authenticate_owned_report(&fixture.store, &fixture.native, &episode, &mut BTreeSet::new()).await.unwrap();
+    assert_eq!(authenticated.key().unwrap(), fixture.intent.key().unwrap());
+
+    let mut other_intent = fixture.intent.clone();
+    other_intent.qualification.read_metrics.templates[0].client_elapsed_ms = -0.0;
+    assert_eq!(other_intent, fixture.intent, "numeric equality cannot replace exact admission lineage");
+    let mut replaced = fixture.native.clone();
+    replaced.investigation = Some(DiagnosticInvestigationLineage::from_intent(&other_intent).unwrap());
+    replaced.validate().unwrap();
+    assert_eq!(replaced.batches, fixture.native.batches);
+    assert_eq!(replaced.capture_manifest_sha256, fixture.native.capture_manifest_sha256);
+    assert_eq!(capture_reference(&replaced).unwrap(), capture_reference(&fixture.native).unwrap());
+    let error = authenticate_owned_report(&fixture.store, &replaced, &episode, &mut BTreeSet::new()).await.unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+}

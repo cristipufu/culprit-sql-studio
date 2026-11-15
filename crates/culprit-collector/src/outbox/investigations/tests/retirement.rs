@@ -83,6 +83,7 @@ impl Fixture {
                 store_id: self.store.id().into(),
                 parent: capture_reference(range.manifest()).unwrap(),
                 source: range.manifest().source.clone(),
+                investigation: range.manifest().investigation.clone(),
                 connection: "fixture".into(),
                 rows,
             })
@@ -201,6 +202,7 @@ async fn a_stale_pending_proof_cannot_install_work_after_metadata_retirement() {
         store_id: fixture.store.id().into(),
         parent: capture_reference(range.manifest()).unwrap(),
         source: range.manifest().source.clone(),
+        investigation: range.manifest().investigation.clone(),
         connection: "fixture".into(),
         rows,
     };
@@ -239,6 +241,7 @@ async fn acknowledged_evidence_cache_reclaims_its_charge_once_without_becoming_p
         store_id: fixture.store.id().into(),
         parent: capture_reference(range.manifest()).unwrap(),
         source: range.manifest().source.clone(),
+        investigation: range.manifest().investigation.clone(),
         connection: "fixture".into(),
         rows,
     })
@@ -341,6 +344,7 @@ async fn interruption_of_archive_retirement_rolls_back_acknowledgement_and_retri
             store_id: fixture.store.id().into(),
             parent: capture_reference(range.manifest()).unwrap(),
             source: range.manifest().source.clone(),
+            investigation: range.manifest().investigation.clone(),
             connection: "fixture".into(),
             rows,
         })

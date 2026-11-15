@@ -7,7 +7,7 @@ use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 9;
+const JOURNAL_VERSION: i64 = 10;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
 const REQUEST_LIMIT: usize = 4096;
@@ -50,7 +50,8 @@ impl Journal {
         durable_fs::create_file(path).map_err(storage)?.sync_all().map_err(storage)?;
         let conn = open(path, true)?;
         configure_owner(&conn)?;
-        conn.execute_batch("PRAGMA application_id=1129663572; PRAGMA user_version=9;
+        conn.pragma_update(None, "user_version", JOURNAL_VERSION).map_err(storage)?;
+        conn.execute_batch("PRAGMA application_id=1129663572;
           CREATE TABLE metadata(id TEXT PRIMARY KEY, limits_json TEXT NOT NULL, owner_epoch INTEGER NOT NULL, sequence INTEGER NOT NULL,diagnostic_gc_generation INTEGER NOT NULL CHECK(diagnostic_gc_generation>=0));
           CREATE TABLE captures(observation_id TEXT PRIMARY KEY,epoch INTEGER NOT NULL,sequence INTEGER NOT NULL,
             connection TEXT NOT NULL,collection TEXT NOT NULL,request_json TEXT NOT NULL CHECK(length(request_json)<=4096),state TEXT NOT NULL,
@@ -59,7 +60,7 @@ impl Journal {
           CREATE TABLE batches(batch_id TEXT PRIMARY KEY,observation_id TEXT NOT NULL REFERENCES captures(observation_id),
             stream TEXT NOT NULL,file TEXT NOT NULL,sha TEXT NOT NULL,rows INTEGER NOT NULL,bytes INTEGER NOT NULL);
           CREATE TABLE range_heads(range_key TEXT PRIMARY KEY,observation_id TEXT NOT NULL REFERENCES captures(observation_id));
-          CREATE TABLE diagnostic_inputs(observation_id TEXT PRIMARY KEY,controller_version INTEGER NOT NULL,parent_json TEXT NOT NULL,source_json TEXT NOT NULL,connection TEXT NOT NULL,acknowledged INTEGER NOT NULL CHECK(acknowledged IN(0,1)),restored_json TEXT,charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0),restored_sha TEXT,evidence_only INTEGER NOT NULL DEFAULT 0 CHECK(evidence_only IN(0,1)));
+          CREATE TABLE diagnostic_inputs(observation_id TEXT PRIMARY KEY,controller_version INTEGER NOT NULL,parent_json TEXT NOT NULL,source_json TEXT NOT NULL,connection TEXT NOT NULL,acknowledged INTEGER NOT NULL CHECK(acknowledged IN(0,1)),restored_json TEXT,charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0),restored_sha TEXT,evidence_only INTEGER NOT NULL DEFAULT 0 CHECK(evidence_only IN(0,1)),lineage_json TEXT);
           CREATE TABLE diagnostic_heads(controller_key TEXT PRIMARY KEY,controller_version INTEGER NOT NULL,observation_id TEXT NOT NULL,checkpoint_json TEXT NOT NULL,capture_json TEXT NOT NULL);
           CREATE TABLE diagnostic_episodes(controller_key TEXT NOT NULL,episode_id TEXT NOT NULL,revision TEXT NOT NULL,episode_json TEXT NOT NULL,PRIMARY KEY(controller_key,episode_id));
           CREATE TABLE diagnostic_pins(owner TEXT NOT NULL,observation_id TEXT NOT NULL,PRIMARY KEY(owner,observation_id));
@@ -174,7 +175,7 @@ impl Journal {
         tx.execute("INSERT INTO captures(observation_id,epoch,sequence,connection,request_json,state,source_work,charged_bytes,collection)
           VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![identity.observation_id,epoch,sequence,connection,request_json,
             encode(&OutboxCaptureState::Capturing)?,encode(&source_work)?,bytes_to_sql(charge)?,encode(&request.collection())?]).map_err(storage)?;
-        if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
+        if let Some(focus) = request.focus() {
             tx.execute(
                 "INSERT INTO diagnostic_pins VALUES(?1,?2)",
                 params![format!("focus:{}", identity.observation_id), focus.parent.capture.observation_id],
@@ -258,6 +259,7 @@ impl Journal {
             return Err(problem(OutboxProblem::Integrity));
         }
         let range = validated.range()?;
+        let max_bytes = self.limits.max_bytes;
         let tx = self.conn.transaction().map_err(storage)?;
         for file in &validated.manifest.files {
             tx.execute(
@@ -290,6 +292,15 @@ impl Journal {
                 params![range_key(&range)?,capture.identity.observation_id]).map_err(storage)?;
         }
         super::investigations::journal::prepare_commit(&tx, capture, validated)?;
+        let capture_bytes: i64 = tx
+            .query_row("SELECT coalesce(sum(charged_bytes),0) FROM captures", [], |row| row.get(0))
+            .map_err(storage)?;
+        if bytes_from_sql(capture_bytes)?
+            .checked_add(super::investigations::journal::charged_bytes(&tx)?)
+            .is_none_or(|bytes| bytes > max_bytes)
+        {
+            return Err(problem(OutboxProblem::Capacity));
+        }
         Ok(tx)
     }
     pub(super) fn check_receipt(&self, capture: &Capture, validated: &ValidatedCapture) -> Result<()> {

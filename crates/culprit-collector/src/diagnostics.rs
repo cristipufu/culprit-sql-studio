@@ -76,13 +76,15 @@ impl DiagnosticPolicies {
     pub(crate) fn connections(&self) -> std::collections::BTreeSet<&str> {
         self.assignments.iter().map(|assignment| assignment.connection.as_str()).collect()
     }
-    fn assignment(&self, input: &DiagnosticInput) -> Option<&DiagnosticAssignment> {
-        self.assignments.iter().find(|assignment| {
-            assignment.connection == input.connection && assignment.subject.accepts(&input.source.target)
-        })
+    fn assignment(&self, input: &DiagnosticInput) -> Result<Option<&DiagnosticAssignment>> {
+        let target = input.controller_target()?;
+        Ok(self
+            .assignments
+            .iter()
+            .find(|assignment| assignment.connection == input.connection && assignment.subject.accepts(target)))
     }
-    fn for_input(&self, input: &DiagnosticInput) -> ActivityPolicy {
-        self.assignment(input).map(|assignment| assignment.policy.clone()).unwrap_or_default()
+    fn for_input(&self, input: &DiagnosticInput) -> Result<ActivityPolicy> {
+        Ok(self.assignment(input)?.map(|assignment| assignment.policy.clone()).unwrap_or_default())
         // Recovered evidence can have no current saved route. Its analysis explicitly stores this policy;
         // a policy match never supplies native identity or authorizes a new connection.
     }
@@ -109,9 +111,21 @@ pub async fn analyze_pending(
         {
             break;
         }
+        if let Some(intent) = input.investigation_intent()?
+            && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
+        {
+            let Some((source, row)) =
+                resolve_evidence(outbox, &input.connection, owner, recovery, cancellation).await?
+            else {
+                break;
+            };
+            if !intent.matches_shared_owner(&source, &row) {
+                return Err(DeliveryProblem::Integrity.error());
+            }
+        }
         let analyzed_at = chrono::Utc::now().to_rfc3339();
-        let mut update = analyze(&input, &policies.for_input(&input), &analyzed_at)?;
-        planning::qualify_questions(&input, policies.assignment(&input), &mut update)?;
+        let mut update = analyze(&input, &policies.for_input(&input)?, &analyzed_at)?;
+        planning::qualify_questions(&input, policies.assignment(&input)?, &mut update)?;
         outbox.commit_diagnostics(input, update).await?;
         processed += 1;
     }
@@ -193,7 +207,14 @@ pub(crate) async fn resolve_evidence(
                 else {
                     return Ok(None);
                 };
-                recovered.into_parts()
+                if recovered.can_cache() {
+                    // Shared owner evidence uses the same bounded cache and pin inventory as original activity.
+                    // It remains acknowledged evidence only, never a native input or an admission authority.
+                    outbox.cache_diagnostic_evidence(connection, recovered.into_cached_input()?).await?;
+                    outbox.diagnostic_evidence(reference).await?
+                } else {
+                    recovered.into_parts()
+                }
             }
         }
         Err(error) => return Err(error),
@@ -265,7 +286,17 @@ fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) 
                 })
                 .collect::<Result<Vec<_>>>()?;
             let previous = input.checkpoint.as_ref().ok_or_else(|| DeliveryProblem::Conflict.error())?;
-            let update = analyze_diagnostic_focus(&input.source, &input.parent, &rows, previous, analyzed_at)?;
+            let update = match input.investigation_intent()? {
+                Some(intent) => analyze_diagnostic_focus_with_intent(
+                    &input.source,
+                    &input.parent,
+                    &rows,
+                    previous,
+                    analyzed_at,
+                    &intent,
+                )?,
+                None => analyze_diagnostic_focus(&input.source, &input.parent, &rows, previous, analyzed_at)?,
+            };
             (update.revisions, update.checkpoint)
         }
         _ => return Err(CollectionStop::InvalidPage.error()),

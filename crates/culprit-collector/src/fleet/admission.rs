@@ -106,7 +106,8 @@ impl<'a> AdmittedBackend<'a> {
         let mut admission = self.context(connection, &request.budget, Some(expected_route))?;
         if !intent.is_valid()
             || request.budget != intent.budget
-            || !matches!(&request.selection, CollectionSelection::FocusedPageWait { focus } if focus.as_ref() == &intent.focus)
+            || request.selection != intent.selection()
+            || request.subject != intent.subject()
         {
             return Err(CollectionStop::InvalidPage.error());
         }

@@ -34,8 +34,7 @@ fn investigations(harness: &mut Harness) -> Investigations {
 }
 async fn enqueue(harness: &mut Harness, scheduler: &mut Scheduler) -> DiagnosticInvestigationIntent {
     let candidate = harness.prepare(&CollectionCancellation::default()).await.unwrap().pop().unwrap();
-    let key = candidate.intent.key().unwrap();
-    harness.outbox.pin_investigation_parent(&key, &candidate.intent.focus).await.unwrap();
+    harness.outbox.pin_investigation_parent(&candidate.intent).await.unwrap();
     let FocusEnrollment::Enqueued(update) =
         scheduler.enqueue_focus(candidate.job, Duration::ZERO, chrono::Utc::now()).unwrap()
     else {
@@ -66,8 +65,9 @@ async fn startup_reconciles_orphan_owners_without_removing_or_reopening_canonica
     let mut scheduler = scheduler(&harness).await;
     let intent = enqueue(&mut harness, &mut scheduler).await;
     let key = intent.key().unwrap();
-    let orphan = digest(b"crash-before-canonical-enrollment");
-    harness.outbox.pin_investigation_parent(&orphan, &intent.focus).await.unwrap();
+    let mut orphan_intent = intent.clone();
+    orphan_intent.episode_revision = "2".into();
+    harness.outbox.pin_investigation_parent(&orphan_intent).await.unwrap();
     let mut manager = Investigations::new(&harness.inventory, "one");
     let source_calls = harness.backend.calls.opened.load(std::sync::atomic::Ordering::SeqCst);
     manager

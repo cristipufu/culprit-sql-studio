@@ -169,7 +169,13 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             }
         }
         let description = CollectionDescription {
-            partition: culprit_core::telemetry::SourcePartition::Target,
+            partition: match self.identity.as_ref().ok_or_else(invalid_data)? {
+                subject::Identity::Instance(context) => SourcePartition::InstanceLocal {
+                    member: Some(context.identity.clone()),
+                    epoch: Some(context.capture_epoch()?),
+                },
+                _ => SourcePartition::Target,
+            },
             target,
             source: if shared {
                 if dataset == SnapshotDataset::MemoryFailures {

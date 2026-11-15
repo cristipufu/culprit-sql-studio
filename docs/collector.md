@@ -226,7 +226,7 @@ The affected request keeps its application database; the mapped page keeps its s
 that reader when both page-target and shared-resource collection are selected. One population supplies at most eight
 targeted page addresses, within the existing read envelope. Shared source names remain private to authenticated
 recovery metadata; warehouse facts retain opaque owner references. Automatic escalation from a database episode
-to a shared-resource investigation still requires cross-resource intent and production-cost qualification.
+requires its authenticated original participant, a separately captured shared owner and production-cost qualification.
 The captured waiter population remains partial; an empty result cannot establish that the whole instance had no
 tempdb contention.
 
@@ -774,6 +774,19 @@ Qualified page-wait investigations share the existing fleet scheduler. A durable
 evidence pin; repeated baselines cannot enqueue competing work for that episode/stage. Periodic collection takes
 precedence. Focused work must fit its native timeout, shutdown and resource gap before another periodic deadline.
 After restart, a fresh baseline must establish the source behind the saved route before a focused job can run.
+
+A shared-resource follow-up preserves the original database question and binds a separate positive operational
+capture of its exact native member and process generation. Discovery labels, empty captures and unknown generations
+cannot supply this authority. Its recipe and measured cost belong to that execution resource; the database's
+activity population and generation are not substituted for shared ownership. The expected shared generation reaches
+the native reader and is checked before page-header work. Native ownership comes from the existing read path, with
+no additional periodic query.
+
+The database and its explicit shared owner are separate page-wait stages, with one outstanding stage per episode.
+An unresolved database lookup can progress to the shared stage; another alias for the same physical resource cannot
+create duplicate work. Both stages retain their own finite completion receipts. The shared result updates the original
+database incident, including after recovery, and never replaces its scope with a shared-resource head. A delayed
+lookup older than a newer positive observation may add historical analysis but cannot clear that current incident.
 
 Qualification requires an exact measured budget, reader version/revision and independently authenticated native-cost
 artifact, interpreted by the selected provider's pure verifier. Client timing alone is insufficient. The reader

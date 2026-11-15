@@ -472,13 +472,16 @@ async fn a_recovered_activity_parent_can_be_pinned_without_becoming_consumed_or_
         pending.parent
     );
     assert_eq!(cold.harness.outbox.status(10, None).await.unwrap().captures, 0);
-    let intent = digest(b"newly-validated-question-for-recovered-original");
-    cold.harness.outbox.pin_investigation_parent(&intent, &cold.focus).await.unwrap();
-    assert_eq!(
-        cold.harness.outbox.investigation_parent_keys().await.unwrap().as_slice(),
-        std::slice::from_ref(&intent)
-    );
-    cold.harness.outbox.release_investigation_parent(&intent).await.unwrap();
+    let episode = &cold.checkpoint.episodes[0];
+    let mut intent = crate::analytical::test_support::investigation_fixture().intent;
+    intent.focus = cold.focus.clone();
+    intent.episode_id = episode.id.clone();
+    intent.episode_revision = episode.revision.clone();
+    intent.qualification.scope = RecipeCostScope::Activity(episode.scope.clone());
+    let key = intent.key().unwrap();
+    cold.harness.outbox.pin_investigation_parent(&intent).await.unwrap();
+    assert_eq!(cold.harness.outbox.investigation_parent_keys().await.unwrap().as_slice(), std::slice::from_ref(&key));
+    cold.harness.outbox.release_investigation_parent(&key).await.unwrap();
     assert_eq!(cold.harness.calls.counts(), [2, 2, 2, 2]);
 }
 

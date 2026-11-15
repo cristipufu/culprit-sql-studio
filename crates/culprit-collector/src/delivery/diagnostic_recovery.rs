@@ -5,7 +5,7 @@ use super::{
 };
 use culprit_core::{Result, telemetry::*};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_DIAGNOSTIC_RECOVERY_BYTES: u64 = 16 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -151,6 +151,7 @@ pub struct RecoveredDiagnosticInput {
 pub struct RecoveredDiagnosticEvidence {
     range: CommittedRange,
     record: ExportedRecord,
+    cached_rows: Option<Vec<ExportedRecord>>,
 }
 impl RecoveredDiagnosticEvidence {
     pub fn source(&self) -> &CollectionDescription {
@@ -159,8 +160,17 @@ impl RecoveredDiagnosticEvidence {
     pub fn record(&self) -> &ExportedRecord {
         &self.record
     }
+    pub(crate) fn manifest_digest(&self) -> &str {
+        self.range.manifest_digest()
+    }
     pub fn into_parts(self) -> (CollectionDescription, ExportedRecord) {
         (self.range.manifest().source.clone(), self.record)
+    }
+    pub(crate) fn can_cache(&self) -> bool {
+        self.cached_rows.is_some()
+    }
+    pub(crate) fn into_cached_input(self) -> Result<RecoveredDiagnosticInput> {
+        Ok(RecoveredDiagnosticInput { range: self.range, rows: self.cached_rows.ok_or_else(invalid)? })
     }
 }
 
@@ -179,10 +189,16 @@ pub async fn load_diagnostic_evidence(
     if range.manifest_digest() != advertised_digest || capture_reference(range.manifest())? != reference.capture_ref() {
         return Err(invalid());
     }
-    let rows = read_rows(store, range.manifest(), Some(reference.stream)).await?;
+    let cacheable = crate::outbox::shared_owner_source(&range.manifest().source);
+    let rows = read_rows(store, range.manifest(), (!cacheable).then_some(reference.stream)).await?;
     // A validated range has one batch per stream. EOF authenticates the entire selected batch before its
     // exact receipt position is returned, including when the requested row occurs near the start.
-    let record = rows.into_iter().nth(reference.row_ordinal as usize).ok_or_else(invalid)?;
+    let record = rows
+        .iter()
+        .filter(|row| row.batch_id == reference.batch_id)
+        .nth(reference.row_ordinal as usize)
+        .cloned()
+        .ok_or_else(invalid)?;
     let candidate = DiagnosticEvidenceRef::from_export(
         &range.manifest().source,
         &reference.manifest_sha256,
@@ -192,7 +208,7 @@ pub async fn load_diagnostic_evidence(
     if candidate != *reference {
         return Err(invalid());
     }
-    Ok(RecoveredDiagnosticEvidence { range, record })
+    Ok(RecoveredDiagnosticEvidence { range, record, cached_rows: cacheable.then_some(rows) })
 }
 impl RecoveredDiagnosticInput {
     pub fn range(&self) -> &CommittedRange {
@@ -237,10 +253,7 @@ pub(super) fn validate_pending_input(
         return Err(DeliveryProblem::UnsupportedSchema.error());
     }
     if capture_reference(manifest)? != *input
-        || !matches!(
-            manifest.source.observation,
-            SourceObservation::Activity(_) | SourceObservation::FocusedPageWait { .. }
-        )
+        || !crate::outbox::diagnostic_source_eligible(&manifest.source, manifest.investigation.as_ref())?
     {
         return Err(invalid());
     }
@@ -248,10 +261,7 @@ pub(super) fn validate_pending_input(
 }
 pub async fn load_diagnostic_input(store: &dyn RecoveryStore, range_id: &str) -> Result<RecoveredDiagnosticInput> {
     let range = recovery::reopen(store, range_id).await?;
-    if !matches!(
-        range.manifest().source.observation,
-        SourceObservation::Activity(_) | SourceObservation::FocusedPageWait { .. }
-    ) {
+    if !crate::outbox::diagnostic_source_eligible(&range.manifest().source, range.manifest().investigation.as_ref())? {
         return Err(invalid());
     }
     let rows = read_rows(store, range.manifest(), None).await?;
@@ -294,8 +304,12 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         return Err(invalid());
     }
     let mut manifests = BTreeMap::new();
+    let mut authenticated = BTreeSet::new();
+    let mut shared_references = BTreeMap::<String, BTreeSet<String>>::new();
     for revision in &references.diagnostic_revisions {
         let Some(event) = &revision.investigation else { continue };
+        authenticate_shared_intent(store, &event.intent, &mut authenticated).await?;
+        authorize_shared_owner(&mut shared_references, &event.intent)?;
         let DiagnosticInvestigationOutcome::Captured { capture } = &event.outcome else { continue };
         let range_id = range_id_for(&manifest.contract, &capture.capture)?;
         if !manifests.contains_key(&range_id) {
@@ -309,7 +323,8 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         }
         let native = manifests.get(&range_id).ok_or_else(invalid)?;
         if capture_reference(native)? != *capture
-            || native.source.target.telemetry_id()? != manifest.source.target.telemetry_id()?
+            || event.intent.focus.target.telemetry_id()? != manifest.source.target.telemetry_id()?
+            || !event.intent.matches_result_source(&native.source)
         {
             return Err(invalid());
         }
@@ -323,40 +338,22 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             return Err(invalid());
         }
     }
-    let mut exact_refs = BTreeMap::new();
-    for revision in &references.diagnostic_revisions {
-        for reference in revision
-            .inputs
-            .iter()
-            .chain([&revision.episode.first, &revision.episode.latest])
-            .chain(revision.episode.peak.iter())
-            .chain(revision.episode.report.as_ref().map(DiagnosticReport::evidence))
-        {
-            exact_refs.insert(reference.key()?, reference.clone());
-        }
-    }
-    for episode in &checkpoint.episodes {
-        for reference in [&episode.first, &episode.latest]
-            .into_iter()
-            .chain(episode.peak.iter())
-            .chain(episode.report.as_ref().map(DiagnosticReport::evidence))
-        {
-            exact_refs.insert(reference.key()?, reference.clone());
-        }
-    }
-    for reference in exact_refs.into_values() {
-        let range_id = range_id_for(&manifest.contract, &reference.capture)?;
+    for episode in references.diagnostic_revisions.iter().map(|revision| &revision.episode).chain(&checkpoint.episodes)
+    {
+        let Some(report) = &episode.report else { continue };
+        let range_id = range_id_for(&manifest.contract, &report.evidence().capture)?;
         if !manifests.contains_key(&range_id) {
             if manifests.len() >= MAX_DIAGNOSTIC_EPISODES {
                 return Err(DeliveryProblem::Capacity.error());
             }
             manifests.insert(range_id.clone(), store.load(&range_id).await?);
         }
-        let referenced = manifests.get(&range_id).ok_or_else(invalid)?;
-        if referenced.source.target.telemetry_id()? != manifest.source.target.telemetry_id()? {
-            return Err(invalid());
+        let native = manifests.get(&range_id).ok_or_else(invalid)?;
+        if matches!(native.source.target, CollectionTarget::Shared(_)) {
+            let intent = authenticate_owned_report(store, native, episode, &mut authenticated).await?;
+            authorize_shared_owner(&mut shared_references, &intent)?;
+            shared_references.entry(episode.id.clone()).or_default().insert(report.evidence().key()?);
         }
-        verify_reference(referenced, &reference)?;
     }
     let episodes = references
         .diagnostic_revisions
@@ -376,9 +373,27 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             manifests.insert(key.clone(), store.load(&key).await?);
         }
         let capture = manifests.get(&key).ok_or_else(invalid)?;
-        if capture_reference(capture)? != *proof.capture()
-            || !proof.matches_source(&episode, &capture.source, proof.capture())
-        {
+        if capture_reference(capture)? != *proof.capture() {
+            return Err(invalid());
+        }
+        let intent = native_intent(capture)?;
+        if matches!(capture.source.target, CollectionTarget::Shared(_)) {
+            let recovered = load_diagnostic_input(store, &capture.range_id).await?;
+            if recovered.range().manifest_digest() != capture.digest()? {
+                return Err(invalid());
+            }
+            let intent = intent.as_ref().ok_or_else(invalid)?;
+            if !intent.matches_episode(&episode) {
+                return Err(invalid());
+            }
+            authenticate_shared_intent(store, intent, &mut authenticated).await?;
+            authorize_shared_owner(&mut shared_references, intent)?;
+        }
+        let matches_source = match &intent {
+            Some(intent) => proof.matches_source_with_intent(&episode, &capture.source, proof.capture(), intent),
+            None => proof.matches_source(&episode, &capture.source, proof.capture()),
+        };
+        if !matches_source {
             return Err(invalid());
         }
         if let DiagnosticRecoveryProof::FocusedParticipantGone { parent, .. } = proof {
@@ -392,11 +407,143 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             verify_reference(manifests.get(&parent_key).ok_or_else(invalid)?, parent)?;
         }
     }
+    let mut exact_refs = BTreeMap::new();
+    for revision in &references.diagnostic_revisions {
+        for reference in revision
+            .inputs
+            .iter()
+            .chain([&revision.episode.first, &revision.episode.latest])
+            .chain(revision.episode.peak.iter())
+            .chain(revision.episode.report.as_ref().map(DiagnosticReport::evidence))
+        {
+            let entry = exact_refs.entry(reference.key()?).or_insert_with(|| (reference.clone(), BTreeSet::new()));
+            entry.1.insert(revision.episode.id.clone());
+        }
+    }
+    for episode in &checkpoint.episodes {
+        for reference in [&episode.first, &episode.latest]
+            .into_iter()
+            .chain(episode.peak.iter())
+            .chain(episode.report.as_ref().map(DiagnosticReport::evidence))
+        {
+            let entry = exact_refs.entry(reference.key()?).or_insert_with(|| (reference.clone(), BTreeSet::new()));
+            entry.1.insert(episode.id.clone());
+        }
+    }
+    for (reference, episodes) in exact_refs.into_values() {
+        let reference_key = reference.key()?;
+        let range_id = range_id_for(&manifest.contract, &reference.capture)?;
+        if !manifests.contains_key(&range_id) {
+            if manifests.len() >= MAX_DIAGNOSTIC_EPISODES {
+                return Err(DeliveryProblem::Capacity.error());
+            }
+            manifests.insert(range_id.clone(), store.load(&range_id).await?);
+        }
+        let referenced = manifests.get(&range_id).ok_or_else(invalid)?;
+        if referenced.source.target.telemetry_id()? != manifest.source.target.telemetry_id()?
+            && !episodes
+                .iter()
+                .all(|episode| shared_references.get(episode).is_some_and(|allowed| allowed.contains(&reference_key)))
+        {
+            return Err(invalid());
+        }
+        verify_reference(referenced, &reference)?;
+    }
     // The capture digest is an attestation from preparation, not independently recovered raw manifest.json bytes.
     let parent = store.load(&range_id_for(&manifest.contract, &description.parent.capture)?).await?;
-    if capture_reference(&parent)? != description.parent || parent.source.target != manifest.source.target {
+    if capture_reference(&parent)? != description.parent {
         return Err(invalid());
     }
+    if parent.source.target != manifest.source.target {
+        let recovered = load_diagnostic_input(store, &parent.range_id).await?;
+        if recovered.range().manifest_digest() != parent.digest()? {
+            return Err(invalid());
+        }
+        let intent = native_intent(&parent)?.ok_or_else(invalid)?;
+        if intent.focus.target != manifest.source.target
+            || !matches!(intent.execution, DiagnosticExecutionBinding::Shared { .. })
+        {
+            return Err(invalid());
+        }
+        authenticate_shared_intent(store, &intent, &mut authenticated).await?;
+    }
+    Ok(())
+}
+
+fn native_intent(manifest: &RangeManifest) -> Result<Option<DiagnosticInvestigationIntent>> {
+    let Some(owner) = &manifest.investigation else { return Ok(None) };
+    let SourceObservation::FocusedPageWait { result, .. } = &manifest.source.observation else {
+        return Err(invalid());
+    };
+    let intent = owner.reconstruct(&result.focus)?;
+    if !intent.matches_result_source(&manifest.source) {
+        return Err(invalid());
+    }
+    Ok(Some(intent))
+}
+
+async fn authenticate_owned_report(
+    store: &dyn RecoveryStore,
+    manifest: &RangeManifest,
+    episode: &DiagnosticEpisode,
+    authenticated: &mut BTreeSet<String>,
+) -> Result<DiagnosticInvestigationIntent> {
+    let report = episode.report.as_ref().ok_or_else(invalid)?;
+    let recovered = load_diagnostic_evidence(store, report.evidence()).await?;
+    if recovered.manifest_digest() != manifest.digest()? {
+        return Err(invalid());
+    }
+    let SourceObservation::FocusedPageWait { result, .. } = &recovered.source().observation else {
+        return Err(invalid());
+    };
+    let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =
+        &recovered.record().record
+    else {
+        return Err(invalid());
+    };
+    let intent = native_intent(manifest)?.ok_or_else(invalid)?;
+    if !intent.matches_episode(episode) || !result.accepts_observation(page) {
+        return Err(invalid());
+    }
+    authenticate_shared_intent(store, &intent, authenticated).await?;
+    Ok(intent)
+}
+
+fn authorize_shared_owner(
+    authorized: &mut BTreeMap<String, BTreeSet<String>>,
+    intent: &DiagnosticInvestigationIntent,
+) -> Result<()> {
+    if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
+        authorized.entry(intent.episode_id.clone()).or_default().insert(owner.key()?);
+    }
+    Ok(())
+}
+
+async fn authenticate_shared_intent(
+    store: &dyn RecoveryStore,
+    intent: &DiagnosticInvestigationIntent,
+    authenticated: &mut BTreeSet<String>,
+) -> Result<()> {
+    let DiagnosticExecutionBinding::Shared { owner } = &intent.execution else { return Ok(()) };
+    let key = intent.key()?;
+    if authenticated.contains(&key) {
+        return Ok(());
+    }
+    if authenticated.len() >= MAX_DIAGNOSTIC_EPISODES {
+        return Err(DeliveryProblem::Capacity.error());
+    }
+    let parent = load_diagnostic_evidence(store, &intent.focus.parent).await?;
+    let TelemetryRecord::Activity(original) = &parent.record().record else {
+        return Err(invalid());
+    };
+    if !intent.focus.matches_parent(parent.source(), original, &intent.focus.parent) {
+        return Err(invalid());
+    }
+    let recovered_owner = load_diagnostic_evidence(store, owner).await?;
+    if !intent.matches_shared_owner(recovered_owner.source(), recovered_owner.record()) {
+        return Err(invalid());
+    }
+    authenticated.insert(key);
     Ok(())
 }
 /// Checks the original committed manifest attestation and exact row position without opening raw payloads.

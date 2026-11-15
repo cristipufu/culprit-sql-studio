@@ -19,14 +19,15 @@ impl<R: NativeRead> ActivityReader<R> {
         &mut self,
         focus: &ActivityWaitFocus,
         resource: &SharedResourceIdentity,
+        partition: &SourcePartition,
     ) -> Result<FocusedPageWaitCapture> {
-        self.capture_page_wait_focus(focus, Some(resource)).await
+        self.capture_page_wait_focus(focus, Some((resource, partition))).await
     }
 
     async fn capture_page_wait_focus(
         &mut self,
         focus: &ActivityWaitFocus,
-        resource: Option<&SharedResourceIdentity>,
+        resource: Option<(&SharedResourceIdentity, &SourcePartition)>,
     ) -> Result<FocusedPageWaitCapture> {
         if !focus.is_valid()
             || focus.source != culprit_core::source_id::SESSIONS
@@ -39,7 +40,7 @@ impl<R: NativeRead> ActivityReader<R> {
             return Err(CollectionStop::SourceUnavailable.error());
         }
         let initial = match resource {
-            Some(resource) => context::initial_shared(self, resource).await?,
+            Some((resource, partition)) => context::initial_shared_focus(self, resource, partition).await?,
             None => context::initial(self).await?,
         };
         let current = initial.capture_context()?;

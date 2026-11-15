@@ -18,6 +18,32 @@ pub fn analyze_diagnostic_focus(
     previous: &DiagnosticCheckpoint,
     analyzed_at: &str,
 ) -> Result<DiagnosticFocusUpdate> {
+    analyze_focus(source, input, rows, previous, analyzed_at, None)
+}
+
+/// The caller authenticates the sealed intent, original parent and shared owner before this pure transition.
+pub fn analyze_diagnostic_focus_with_intent(
+    source: &CollectionDescription,
+    input: &DiagnosticCaptureRef,
+    rows: &[DiagnosticFocusRow<'_>],
+    previous: &DiagnosticCheckpoint,
+    analyzed_at: &str,
+    intent: &DiagnosticInvestigationIntent,
+) -> Result<DiagnosticFocusUpdate> {
+    if !intent.matches_result_source(source) || previous.target.telemetry_id()? != intent.focus.target.telemetry_id()? {
+        return Err(invalid());
+    }
+    analyze_focus(source, input, rows, previous, analyzed_at, Some(intent))
+}
+
+fn analyze_focus(
+    source: &CollectionDescription,
+    input: &DiagnosticCaptureRef,
+    rows: &[DiagnosticFocusRow<'_>],
+    previous: &DiagnosticCheckpoint,
+    analyzed_at: &str,
+    intent: Option<&DiagnosticInvestigationIntent>,
+) -> Result<DiagnosticFocusUpdate> {
     let SourceObservation::FocusedPageWait { snapshot, result } = &source.observation else {
         return Err(invalid());
     };
@@ -26,7 +52,7 @@ pub fn analyze_diagnostic_focus(
         || !previous.is_valid()
         || previous.controller_version != DIAGNOSTIC_CONTROLLER_VERSION
         || input.source_scope_id != source.captured_range()?.scope_id
-        || source.target.telemetry_id()? != previous.target.telemetry_id()?
+        || intent.is_none() && source.target.telemetry_id()? != previous.target.telemetry_id()?
         || rows.len() > 1
         || rows.len() != snapshot.records as usize
     {
@@ -55,11 +81,22 @@ pub fn analyze_diagnostic_focus(
     let mut episodes = Vec::new();
     for before in &previous.episodes {
         let mut next = before.clone();
-        if before.matches_focus(&result.focus) {
+        if before.analysis.needs_work()
+            && before.matches_focus(&result.focus)
+            && intent.is_none_or(|intent| intent.matches_episode(before))
+        {
             apply_result(&mut next, result, input, rows.first())?;
             if let Some(mut revision) = DiagnosticRevision::between(Some(before), next.clone(), analyzed_at)? {
                 if !revision.inputs.contains(&result.focus.parent) {
                     revision.inputs.push(result.focus.parent.clone());
+                }
+                if let Some(DiagnosticInvestigationIntent {
+                    execution: DiagnosticExecutionBinding::Shared { owner },
+                    ..
+                }) = intent
+                    && !revision.inputs.contains(owner)
+                {
+                    revision.inputs.push(owner.as_ref().clone());
                 }
                 revision.id = revision.expected_id()?;
                 if !revision.is_valid() {
@@ -75,7 +112,7 @@ pub fn analyze_diagnostic_focus(
     }
     let checkpoint = DiagnosticCheckpoint {
         controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
-        target: source.target.clone(),
+        target: previous.target.clone(),
         input: input.clone(),
         episodes,
     };
@@ -115,6 +152,10 @@ fn apply_result(
             }
             _ => DiagnosticAnalysisIssue::EvidenceUnavailable,
         });
+    }
+    // A delayed lookup remains historical evidence; it cannot clear or weaken a newer native observation.
+    if ObservationBounds::new(&episode.last_seen_at, &result.observed_until).is_none() {
+        return Ok(());
     }
     if episode.lifecycle != DiagnosticLifecycle::Resolved
         && result.source == FocusSourceState::Matched

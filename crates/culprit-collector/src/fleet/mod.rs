@@ -217,7 +217,7 @@ impl<'a> FleetRunner<'a> {
             }
             let maintain_investigations = matches!(&job, scheduler::Work::Focused(_))
                 || matches!(&job, scheduler::Work::Scheduled(job)
-                    if matches!(job.schedule.collection, ScheduledCollection::Activity { .. }));
+                    if investigations::is_baseline(job));
             let result = self.execute_work(&job, admitted_at, cancellation).await?;
             self.scheduler.finish(self.started.elapsed(), result.outcome)?;
             self.save_completion().await?;
@@ -282,7 +282,9 @@ impl<'a> FleetRunner<'a> {
                 let result =
                     work::execute(&backend, self.journal, &mut self.storage, job, cancellation, chrono::Utc::now())
                         .await?;
-                self.investigations.completed_baseline(job, &result, backend.used_route_revision())?;
+                self.investigations
+                    .completed_baseline(job, &result, backend.used_route_revision(), self.storage.outbox)
+                    .await?;
                 Ok(result)
             }
             scheduler::Work::Focused(job) => {

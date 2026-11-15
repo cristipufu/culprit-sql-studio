@@ -11,10 +11,33 @@ pub(in crate::outbox) fn prepare_commit(
         manifest_sha256: validated.manifest_sha.clone(),
         source_scope_id: source.captured_range()?.scope_id,
     };
-    if eligible(&capture.request) {
-        tx.execute("INSERT INTO diagnostic_inputs(observation_id,controller_version,parent_json,source_json,connection,acknowledged,restored_json,charged_bytes) VALUES(?1,?2,?3,?4,?5,0,NULL,0)",
-            params![capture.identity.observation_id, DIAGNOSTIC_CONTROLLER_VERSION, encode(&parent)?, encode(source)?, capture.connection]).map_err(storage)?;
+    if eligible_source(source, validated.manifest.investigation.as_ref())? {
+        let investigation = encode_investigation(validated.manifest.investigation.as_ref())?;
+        let charge = investigation.as_ref().map_or(0, String::len) as u64;
+        tx.execute("INSERT INTO diagnostic_inputs(observation_id,controller_version,parent_json,source_json,connection,acknowledged,restored_json,charged_bytes,lineage_json) VALUES(?1,?2,?3,?4,?5,0,NULL,?6,?7)",
+            params![capture.identity.observation_id, DIAGNOSTIC_CONTROLLER_VERSION, encode(&parent)?, encode(source)?, capture.connection, super::super::journal::bytes_to_sql(charge)?, investigation]).map_err(storage)?;
         pin(tx, &format!("input:{}", capture.identity.observation_id), &capture.identity.observation_id)?;
+        if let Some(intent) = investigation_intent(source, validated.manifest.investigation.as_ref())?
+            && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
+        {
+            pin(tx, &format!("focus:{}", capture.identity.observation_id), &owner.capture.observation_id)?;
+        }
+    } else if capture.request.focus().is_some() {
+        // A manual shared result has no controller step to consume it. Keep its original parent until this
+        // immutable native result is archived, using the existing archive-owned pin release.
+        tx.execute(
+            "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,observation_id FROM diagnostic_pins WHERE owner=?2",
+            params![
+                format!("derived:{}", capture.identity.observation_id),
+                format!("focus:{}", capture.identity.observation_id)
+            ],
+        )
+        .map_err(storage)?;
+        tx.execute(
+            "DELETE FROM diagnostic_pins WHERE owner=?1",
+            [format!("focus:{}", capture.identity.observation_id)],
+        )
+        .map_err(storage)?;
     }
     if capture.request.collection() == TelemetryCollection::Diagnostics {
         complete_step(tx, capture, validated)?;

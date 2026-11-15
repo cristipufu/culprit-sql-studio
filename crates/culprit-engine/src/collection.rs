@@ -10,7 +10,7 @@ use culprit_collector::{
 use culprit_core::{
     Result,
     telemetry::{
-        CollectionManifest, CollectionRequest, CollectionSelection, CollectionStop, DiagnosticAttemptReceipt,
+        CollectionManifest, CollectionRequest, CollectionStop, DiagnosticAttemptReceipt,
         DiagnosticInvestigationLineage, TelemetryRecord, TelemetrySource,
     },
 };
@@ -142,7 +142,7 @@ impl Workspace {
         cancellation: &CollectionCancellation,
     ) -> Result<CollectionManifest> {
         request.validate()?;
-        if matches!(request.selection, CollectionSelection::FocusedPageWait { .. }) {
+        if request.selection.focus().is_some() {
             // Focus requires the immutable original receipt, which only the outbox/recovery path can resolve.
             return Err(CollectionStop::InvalidPage.error());
         }
@@ -207,12 +207,20 @@ impl Workspace {
             if investigation.as_ref().is_some_and(|owner| !owner.matches_request(&request)) {
                 return Err(CollectionStop::InvalidPage.error());
             }
-            if let CollectionSelection::FocusedPageWait { focus } = &request.selection {
+            if let Some(focus) = request.selection.focus() {
                 let (source, row) = outbox.diagnostic_evidence(&focus.parent).await?;
                 let TelemetryRecord::Activity(original) = &row.record else {
                     return Err(CollectionStop::InvalidPage.error());
                 };
                 if !focus.matches_parent(&source, original, &focus.parent) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            if let Some(intent) = admitted.and_then(|admitted| admitted.investigation.as_ref())
+                && let culprit_core::telemetry::DiagnosticExecutionBinding::Shared { owner } = &intent.execution
+            {
+                let (source, row) = outbox.diagnostic_evidence(owner).await?;
+                if !intent.matches_shared_owner(&source, &row) {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }

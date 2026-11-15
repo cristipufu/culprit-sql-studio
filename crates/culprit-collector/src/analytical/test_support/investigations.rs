@@ -1,6 +1,8 @@
 //! Structural admission fixture only. Its synthetic cost artifact does not qualify any production recipe.
 use super::*;
 use culprit_core::{ComponentVersion, MeasurementScope, ObservedWaitResource, WaitResourceKind};
+mod shared;
+pub use shared::{SharedInvestigationFixture, shared_investigation_evidence, shared_investigation_fixture};
 
 #[derive(Clone)]
 pub struct InvestigationFixture {
@@ -102,7 +104,7 @@ pub fn investigation_fixture() -> InvestigationFixture {
     let receipt = RecipeCostReceipt {
         recipe_id: "fixture.page-wait-focus".into(),
         recipe_version: 1,
-        scope: episode.scope.clone(),
+        scope: RecipeCostScope::Activity(episode.scope.clone()),
         component: component.clone(),
         tested_budget: CollectionBudget {
             page_rows: 1,

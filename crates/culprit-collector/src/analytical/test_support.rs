@@ -14,7 +14,10 @@ pub use source_partitions::{
     assert_replica_activity_capture, replica_activity_evidence_cases, replicated_history_evidence_cases,
 };
 mod investigations;
-pub use investigations::{InvestigationFixture, investigation_fixture};
+pub use investigations::{
+    InvestigationFixture, SharedInvestigationFixture, investigation_fixture, shared_investigation_evidence,
+    shared_investigation_fixture,
+};
 
 mod queries;
 pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};

@@ -1,8 +1,9 @@
 //! Revalidate one admitted question before delegating to the shared native capture lifecycle.
+use super::evidence::resolve_optional_evidence;
 use super::*;
 use crate::{
     capture::CollectionCancellation,
-    diagnostics::{record_investigation, resolve_evidence},
+    diagnostics::record_investigation,
     fleet::{
         FleetBackend, FleetJournal,
         admission::AdmittedBackend,
@@ -40,7 +41,7 @@ impl Investigations {
         let ready = match self.revalidate(backend, storage, job, &intent, cancellation).await? {
             Revalidation::Ready(ready) => ready,
             Revalidation::Withheld(issue) => {
-                match resolve_evidence(
+                match resolve_optional_evidence(
                     storage.outbox,
                     &job.connection,
                     &intent.focus.parent,
@@ -59,10 +60,10 @@ impl Investigations {
                         )
                         .await?
                     }
-                    Ok(None) => {
+                    Ok(None) if cancellation.is_cancelled() => {
                         return failed(job, CollectionStop::Cancelled.error(), None, SourceWorkState::NotStarted);
                     }
-                    Err(error) if evidence_unavailable(&error) => {}
+                    Ok(None) => {}
                     Err(error) => return Err(error),
                 }
                 return withheld(job, &issue);
@@ -81,7 +82,7 @@ impl Investigations {
         .await?;
         let request = CollectionRequest {
             subject: job.subject.clone(),
-            selection: CollectionSelection::FocusedPageWait { focus: Box::new(ready.intent.focus.clone()) },
+            selection: ready.intent.selection(),
             budget: ready.intent.budget.clone(),
         };
         let manifest = match admitted
@@ -218,11 +219,16 @@ impl Investigations {
         let Some(component) = component else {
             return Ok(Revalidation::Withheld(DiagnosticAnalysisIssue::CostUnqualified));
         };
-        let Some((source, original)) =
-            resolve_evidence(storage.outbox, &job.connection, &intent.focus.parent, storage.recovery, cancellation)
-                .await?
+        let Some((source, original)) = resolve_optional_evidence(
+            storage.outbox,
+            &job.connection,
+            &intent.focus.parent,
+            storage.recovery,
+            cancellation,
+        )
+        .await?
         else {
-            return Ok(Revalidation::Cancelled);
+            return Ok(missing_evidence(cancellation));
         };
         let TelemetryRecord::Activity(original) = &original.record else {
             return Err(CollectionStop::InvalidPage.error());
@@ -230,7 +236,18 @@ impl Investigations {
         if !intent.focus.matches_parent(&source, original, &intent.focus.parent) {
             return Err(CollectionStop::InvalidPage.error());
         }
-        storage.outbox.pin_investigation_parent(&job.key, &intent.focus).await?;
+        if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
+            let Some((owner_source, owner_row)) =
+                resolve_optional_evidence(storage.outbox, &job.connection, owner, storage.recovery, cancellation)
+                    .await?
+            else {
+                return Ok(missing_evidence(cancellation));
+            };
+            if !intent.matches_shared_owner(&owner_source, &owner_row) {
+                return Err(DeliveryProblem::Integrity.error());
+            }
+        }
+        storage.outbox.pin_investigation_parent(intent).await?;
         let current = storage
             .outbox
             .diagnostic_input(&intent.focus.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
@@ -242,36 +259,22 @@ impl Investigations {
         let Some(episode) = episode else {
             return Ok(Revalidation::Withheld(DiagnosticAnalysisIssue::NativeContextGone));
         };
-        if binding
-            .source
-            .observation
-            .activity()
-            .is_none_or(|frame| ObservationBounds::new(&episode.last_seen_at, &frame.at).is_none())
-        {
+        if !binding.observed_after(&episode.last_seen_at) {
             return Ok(Revalidation::Withheld(DiagnosticAnalysisIssue::SourceChanged));
         }
-        let caller_budget = target.schedules.iter().find_map(|schedule| {
-            matches!(schedule.collection, ScheduledCollection::Activity { .. }).then_some(&schedule.budget)
-        });
+        let caller_budget = binding.budget(target);
         if caller_budget.is_none_or(|budget| !intent.matches_admission(episode, recipe, &component, budget)) {
             return Ok(Revalidation::Withheld(DiagnosticAnalysisIssue::PolicyChanged));
         }
-        let cost = match resolve_evidence(
+        let cost = resolve_optional_evidence(
             storage.outbox,
             &job.connection,
             &intent.qualification.evidence,
             storage.recovery,
             cancellation,
         )
-        .await
-        {
-            Ok(cost) => cost,
-            Err(error) if evidence_unavailable(&error) => {
-                return Ok(Revalidation::Withheld(DiagnosticAnalysisIssue::EvidenceUnavailable));
-            }
-            Err(error) => return Err(error),
-        };
-        let Some((cost_source, artifact)) = cost else { return Ok(Revalidation::Cancelled) };
+        .await?;
+        let Some((cost_source, artifact)) = cost else { return Ok(missing_evidence(cancellation)) };
         if !backend.verify_cost(&job.connection, &intent.qualification, &cost_source, &artifact)? {
             return Ok(Revalidation::Withheld(DiagnosticAnalysisIssue::CostUnqualified));
         }
@@ -279,6 +282,14 @@ impl Investigations {
             intent: intent.clone(),
             route_revision: binding.revision.clone(),
         })))
+    }
+}
+
+fn missing_evidence(cancellation: &CollectionCancellation) -> Revalidation {
+    if cancellation.is_cancelled() {
+        Revalidation::Cancelled
+    } else {
+        Revalidation::Withheld(DiagnosticAnalysisIssue::EvidenceUnavailable)
     }
 }
 
@@ -314,14 +325,6 @@ fn stopped_issue(
         | CollectionStop::RowLimit => DiagnosticAnalysisIssue::BudgetExhausted,
         _ => DiagnosticAnalysisIssue::SourceUnavailable { code, stopped: Some(stopped) },
     }
-}
-
-pub(super) fn evidence_unavailable(error: &culprit_core::Error) -> bool {
-    matches!(
-        error.detail,
-        Some(culprit_core::ErrorDetail::Outbox(OutboxProblem::MissingCapture))
-            | Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::NotReady))
-    )
 }
 
 fn withheld(job: &FocusedJob, issue: &DiagnosticAnalysisIssue) -> Result<WorkResult> {

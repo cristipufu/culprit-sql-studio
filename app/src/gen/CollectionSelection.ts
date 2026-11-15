@@ -3,5 +3,6 @@ import type { ActivityWaitFocus } from "./ActivityWaitFocus";
 import type { CacheEntryMemoryFocus } from "./CacheEntryMemoryFocus";
 import type { DiagnosticCaptureRef } from "./DiagnosticCaptureRef";
 import type { SnapshotDataset } from "./SnapshotDataset";
+import type { SourcePartition } from "./SourcePartition";
 
-export type CollectionSelection = { "kind": "query-history", from: string, until: string, } | { "kind": "resource-history", from: string, until: string, } | { "kind": "deadlock-history", from: string, until: string, } | { "kind": "activity" } | { "kind": "cache-entry-memory", focus: CacheEntryMemoryFocus, } | { "kind": "focused-page-wait", focus: ActivityWaitFocus, } | { "kind": "diagnostics", parent: DiagnosticCaptureRef, controller_version: number, step_id: string, } | { "kind": "snapshot", dataset: SnapshotDataset, };
+export type CollectionSelection = { "kind": "query-history", from: string, until: string, } | { "kind": "resource-history", from: string, until: string, } | { "kind": "deadlock-history", from: string, until: string, } | { "kind": "activity" } | { "kind": "cache-entry-memory", focus: CacheEntryMemoryFocus, } | { "kind": "focused-page-wait", focus: ActivityWaitFocus, } | { "kind": "shared-page-wait-focus", focus: ActivityWaitFocus, partition: SourcePartition, } | { "kind": "diagnostics", parent: DiagnosticCaptureRef, controller_version: number, step_id: string, } | { "kind": "snapshot", dataset: SnapshotDataset, };

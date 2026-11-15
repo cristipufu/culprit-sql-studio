@@ -62,7 +62,7 @@ impl Investigations {
             {
                 continue;
             }
-            storage.outbox.pin_investigation_parent(&key, &candidate.intent.focus).await?;
+            storage.outbox.pin_investigation_parent(&candidate.intent).await?;
             match scheduler.enqueue_focus(candidate.job, started.elapsed(), chrono::Utc::now())? {
                 FocusEnrollment::Enqueued(update) => {
                     let clock = journal.enqueue_focused(candidate.intent, *update).await?;
@@ -206,7 +206,7 @@ impl Investigations {
         .await
         {
             Ok(evidence) => evidence,
-            Err(error) if super::execution::evidence_unavailable(&error) => return Ok(()),
+            Err(error) if super::evidence::evidence_unavailable(&error) => return Ok(()),
             Err(error) => return Err(error),
         };
         let Some((source, row)) = evidence else { return Ok(()) };
@@ -279,9 +279,7 @@ impl Investigations {
         let Some(component) = component else {
             return Ok(Some(DiagnosticAnalysisIssue::CostUnqualified));
         };
-        let budget = target.schedules.iter().find_map(|schedule| {
-            matches!(schedule.collection, ScheduledCollection::Activity { .. }).then_some(&schedule.budget)
-        });
+        let budget = binding.budget(target);
         Ok(budget
             .is_none_or(|budget| !intent.matches_admission(episode, recipe, &component, budget))
             .then_some(DiagnosticAnalysisIssue::PolicyChanged))
@@ -395,7 +393,7 @@ impl Investigations {
             }) => result.map_err(|_| DeliveryProblem::Storage.error())?,
         };
         match recovered {
-            Err(error) if super::execution::evidence_unavailable(&error) => Ok(false),
+            Err(error) if super::evidence::evidence_unavailable(&error) => Ok(false),
             recovered => recovered,
         }
     }
@@ -413,6 +411,7 @@ pub(super) fn result_matches_intent(
         return Err(DeliveryProblem::Integrity.error());
     };
     Ok(result.is_valid()
+        && intent.matches_result_source(source)
         && result.focus == intent.focus
         && lineage.is_some_and(|lineage| lineage.matches_intent(&result.focus, intent)))
 }

@@ -11,7 +11,7 @@ use crate::{
     fleet::{FleetBackend, FleetCaptureOutcome, FleetJournal, FleetSourceAdmission},
     outbox::Outbox,
 };
-use culprit_core::{ComponentVersion, Result, telemetry::*};
+use culprit_core::{ComponentVersion, Engine, MeasurementScope, Result, telemetry::*};
 use culprit_read::{FrozenObservation, FrozenSource, ObservationReader, admission::SourceGate};
 use std::sync::{
     Arc,
@@ -105,6 +105,7 @@ impl ObservationReader for Reader {
 
 pub(in crate::fleet::investigations) struct Backend {
     pub(in crate::fleet::investigations) recipe: RecipeDescriptor,
+    pub(in crate::fleet::investigations) additional_recipes: Vec<RecipeDescriptor>,
     pub(in crate::fleet::investigations) component: ComponentVersion,
     pub(in crate::fleet::investigations) revision: String,
     pub(in crate::fleet::investigations) verified: AtomicUsize,
@@ -115,7 +116,9 @@ pub(in crate::fleet::investigations) struct Backend {
     pub(in crate::fleet::investigations) changed: AtomicBool,
     pub(in crate::fleet::investigations) route_error: Option<culprit_core::Error>,
     pub(in crate::fleet::investigations) activity: Frame,
+    pub(in crate::fleet::investigations) shared: Option<Frame>,
     pub(in crate::fleet::investigations) focus_request: PageWaitRequestState,
+    pub(in crate::fleet::investigations) focus_resolution: Option<PageWaitResolution>,
     pub(in crate::fleet::investigations) focus_failure: Option<CollectionStop>,
     pub(in crate::fleet::investigations) focus_auth_failure: bool,
     pub(in crate::fleet::investigations) calls: Arc<NativeCalls>,
@@ -126,7 +129,7 @@ impl FleetBackend for Backend {
         Ok(())
     }
     fn telemetry_recipes(&self, _: &str) -> Result<Vec<RecipeDescriptor>> {
-        Ok(vec![self.recipe.clone()])
+        Ok(std::iter::once(self.recipe.clone()).chain(self.additional_recipes.iter().cloned()).collect())
     }
     fn route_revision(&self, _: &str) -> Result<Option<String>> {
         if let Some(error) = &self.route_error {
@@ -146,6 +149,7 @@ impl FleetBackend for Backend {
         row: &ExportedRecord,
     ) -> Result<bool> {
         self.verified.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(source.target, receipt.scope.target(), "cost proof belongs to the selected execution resource");
         assert_eq!(
             DiagnosticEvidenceRef::from_export(
                 source,
@@ -196,7 +200,22 @@ impl FleetBackend for Backend {
                         admission.investigation.as_ref().expect("automatic focus must retain its admitted intent");
                     assert_eq!(&intent.focus, focus.as_ref());
                     assert_eq!(intent.budget, request.budget);
-                    focused_frame(focus.as_ref().clone(), self.focus_request)
+                    focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution)
+                }
+                CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational } => {
+                    assert!(admission.investigation.is_none());
+                    self.shared.clone().expect("the shared route must have an independently observed frame")
+                }
+                CollectionSelection::SharedPageWaitFocus { focus, partition } => {
+                    let intent = admission.investigation.as_ref().expect("shared work retains its admitted intent");
+                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.subject(), request.subject);
+                    assert_eq!(intent.budget, request.budget);
+                    let mut frame = focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution);
+                    let CollectionSubject::Shared { resource } = &request.subject else { panic!() };
+                    frame.source.target = CollectionTarget::Shared(resource.clone());
+                    frame.source.partition = partition.clone();
+                    frame
                 }
                 _ => panic!("runtime fixture only implements its declared activity and focused routes"),
             };
@@ -206,11 +225,8 @@ impl FleetBackend for Backend {
                 admission: Some(admission.window),
                 intent: admission.investigation,
                 calls: self.calls.clone(),
-                failure: matches!(request.selection, CollectionSelection::FocusedPageWait { .. })
-                    .then_some(self.focus_failure)
-                    .flatten(),
-                auth_failure: matches!(request.selection, CollectionSelection::FocusedPageWait { .. })
-                    && self.focus_auth_failure,
+                failure: request.focus().is_some().then_some(self.focus_failure).flatten(),
+                auth_failure: request.focus().is_some() && self.focus_auth_failure,
             };
             let mut lease = outbox.reserve(connection, &request).await?;
             let capture = lease.identity().clone();
@@ -238,15 +254,32 @@ pub(in crate::fleet::investigations) struct Harness {
     pub(in crate::fleet::investigations) bindings: RouteBindings,
     pub(in crate::fleet::investigations) backend: Backend,
 }
+enum FixtureRoutes {
+    Database,
+    Shared,
+    Progressive,
+}
 impl Harness {
     pub(in crate::fleet::investigations) async fn new(rows: usize) -> Self {
         Self::with_recovery_store(rows, None).await
     }
 
     pub(in crate::fleet::investigations) async fn with_recovery_store(rows: usize, fence: Option<&Fence>) -> Self {
+        Self::build(rows, fence, FixtureRoutes::Database).await
+    }
+
+    pub(in crate::fleet::investigations) async fn shared() -> Self {
+        Self::build(1, None, FixtureRoutes::Shared).await
+    }
+
+    pub(in crate::fleet::investigations) async fn progressive() -> Self {
+        Self::build(1, None, FixtureRoutes::Progressive).await
+    }
+
+    async fn build(rows: usize, fence: Option<&Fence>, routes: FixtureRoutes) -> Self {
         let fixture = investigation_fixture();
         let directory = tempfile::tempdir().unwrap();
-        let inventory = FleetInventory {
+        let mut inventory = FleetInventory {
             targets: vec![FleetTarget {
                 id: "target".into(),
                 connection: "saved-source".into(),
@@ -273,11 +306,34 @@ impl Harness {
             outbox.begin_remote_epoch(fence, 0).await.unwrap();
         }
         let mut source = fixture.baseline_source.clone();
+        let shared = (!matches!(routes, FixtureRoutes::Database)).then(shared_frame);
+        if let Some(shared) = &shared {
+            let CollectionTarget::Shared(member) = &shared.source.target else { panic!() };
+            source.partition = SourcePartition::InstanceLocal {
+                member: Some(member.clone()),
+                epoch: Some("native-database-generation".into()),
+            };
+            let SourceObservation::Activity(frame) = &mut source.observation else { panic!() };
+            frame.epoch = Some("native-database-generation".into());
+            let target = &mut inventory.targets[0];
+            target.subject = CollectionSubject::Shared { resource: member.clone() };
+            target.schedules[0].collection = ScheduledCollection::Snapshot { dataset: SnapshotDataset::Operational };
+            if matches!(routes, FixtureRoutes::Progressive) {
+                let mut database = target.clone();
+                database.id = "database-target".into();
+                database.subject = CollectionSubject::Database;
+                database.schedules[0].collection = ScheduledCollection::Activity { policy: ActivityPolicy::default() };
+                inventory.targets.insert(0, database);
+            }
+        }
         let mut records = Vec::new();
         for index in 0..rows {
             let mut row = fixture.baseline_record.record.clone();
             let TelemetryRecord::Activity(original) = &mut row else { panic!() };
             original.key.session.id = (100 + index).to_string();
+            if shared.is_some() {
+                original.wait.as_mut().unwrap().identified_resources[0].native.id = "2:1:4144".into();
+            }
             records.push(row);
         }
         let SourceObservation::Activity(frame) = &mut source.observation else { panic!() };
@@ -286,17 +342,53 @@ impl Harness {
         frame.coverage.records = rows as u32;
         let activity = Frame { source: source.clone(), records };
         seal(&mut outbox, activity.clone()).await;
-        let cost =
-            seal(&mut outbox, Frame { source: fixture.source.clone(), records: vec![fixture.record.record.clone()] })
-                .await;
+        let mut cost_frame = Frame { source: fixture.source.clone(), records: vec![fixture.record.record.clone()] };
+        if let Some(shared) = &shared {
+            cost_frame.source.target = shared.source.target.clone();
+            let TelemetryRecord::Operational(row) = &mut cost_frame.records[0] else { panic!() };
+            let OperationalFact::CounterSet(counters) = &mut row.fact else { panic!() };
+            counters.scope = MeasurementScope::Server;
+            for sample in &mut counters.counters {
+                sample.scope = MeasurementScope::Server;
+            }
+            row.key = counters.key().unwrap();
+        }
+        let cost = seal(&mut outbox, cost_frame).await;
         let policies = DiagnosticPolicies::from_inventory(&inventory, "one").unwrap();
         drain_pending(&mut outbox, &policies, &CollectionCancellation::default(), None).await.unwrap();
         let mut recipe = fixture.recipe;
         let RecipeCostQualification::Measured(receipt) = &mut recipe.cost else { panic!() };
         receipt.evidence = cost;
+        if let Some(shared) = &shared {
+            let CollectionTarget::Shared(resource) = &shared.source.target else { panic!() };
+            receipt.scope = RecipeCostScope::SharedResource {
+                target: resource.clone(),
+                partition: shared.source.partition.clone(),
+                source: shared.source.source.clone(),
+            };
+            recipe.subjects = vec![RecipeSubject::Shared(resource.kind)];
+        }
+        let mut additional_recipes = Vec::new();
+        if matches!(routes, FixtureRoutes::Progressive) {
+            let database_cost = seal(
+                &mut outbox,
+                Frame { source: fixture.source.clone(), records: vec![fixture.record.record.clone()] },
+            )
+            .await;
+            let mut database_recipe = recipe.clone();
+            database_recipe.id = "fixture.database-page-wait-focus".into();
+            database_recipe.subjects = vec![RecipeSubject::Database];
+            let RecipeCostQualification::Measured(receipt) = &mut database_recipe.cost else { panic!() };
+            receipt.recipe_id = database_recipe.id.clone();
+            receipt.scope = RecipeCostScope::Activity(DiagnosticScope::from_source(&source).unwrap());
+            receipt.evidence = database_cost;
+            additional_recipes.push(database_recipe);
+        }
         let revision = digest(b"saved-route-revision");
         let mut bindings = RouteBindings::default();
-        bindings.observe("target", &source, &revision).unwrap();
+        if shared.is_none() {
+            bindings.observe("target", &source, &revision).unwrap();
+        }
         let journal = FleetJournal::open(&directory.path().join("fleet"), &inventory, "one").await.unwrap();
         Self {
             _directory: directory,
@@ -306,6 +398,7 @@ impl Harness {
             bindings,
             backend: Backend {
                 recipe,
+                additional_recipes,
                 component: fixture.intent.qualification.component,
                 revision,
                 verified: AtomicUsize::new(0),
@@ -316,7 +409,9 @@ impl Harness {
                 changed: AtomicBool::new(false),
                 route_error: None,
                 activity,
+                shared,
                 focus_request: PageWaitRequestState::Missing,
+                focus_resolution: None,
                 focus_failure: None,
                 focus_auth_failure: false,
                 calls: Arc::default(),
@@ -340,23 +435,108 @@ impl Harness {
     }
 }
 
-fn focused_frame(focus: ActivityWaitFocus, request: PageWaitRequestState) -> Frame {
+fn shared_frame() -> Frame {
+    let member = SharedResourceIdentity {
+        engine: Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("fixture-native-instance-namespace"),
+        native: NativeIdentity::new("fixture-native-instance"),
+    };
+    let source = "fixture-shared-native-owner".to_owned();
+    let counters = NativeCounterSet {
+        identity: NativeIdentity::new("shared-native-counter-point"),
+        scope: MeasurementScope::Server,
+        counters: vec![NativeCounterSample::gauge(
+            "latch_waiters",
+            1,
+            CounterUnit::Count,
+            MeasurementScope::Server,
+            "fixture-native-counters",
+            "latch_waiters",
+        )],
+        properties: Default::default(),
+    };
+    Frame {
+        source: CollectionDescription {
+            target: CollectionTarget::Shared(member.clone()),
+            partition: SourcePartition::InstanceLocal {
+                member: Some(member),
+                epoch: Some("native-instance-generation".into()),
+            },
+            source: source.clone(),
+            continuity: SourceContinuity::Unverified,
+            observation: SourceObservation::Snapshot(StateSnapshotDescription {
+                dataset: SnapshotDataset::Operational,
+                observed_from: "2020-01-01T12:00:00.500Z".into(),
+                observed_until: "2020-01-01T12:00:01Z".into(),
+                records: 1,
+                sources: vec![StateSourceCoverage::collected(source.clone(), 1)],
+            }),
+        },
+        records: vec![TelemetryRecord::Operational(OperationalObservation {
+            source,
+            key: counters.key().unwrap(),
+            fact: OperationalFact::CounterSet(Box::new(counters)),
+        })],
+    }
+}
+
+fn focused_frame(
+    focus: ActivityWaitFocus,
+    request: PageWaitRequestState,
+    resolution: Option<PageWaitResolution>,
+) -> Frame {
     let at = chrono::DateTime::parse_from_rfc3339(&focus.original_observed_at).unwrap();
     let from = (at + chrono::Duration::seconds(1)).to_rfc3339();
     let until = (at + chrono::Duration::seconds(2)).to_rfc3339();
     let source = "fixture-focused-pages".to_owned();
+    let records = resolution
+        .map(|resolution| {
+            let page = PageWaitObservation {
+                source: source.clone(),
+                observed_from: from.clone(),
+                observed_until: until.clone(),
+                request: focus.original.clone(),
+                task_wait: None,
+                before_check: Some(PageWaitRecheck {
+                    observed_at: from.clone(),
+                    request,
+                    wait: PageWaitRelation::OriginalObserved,
+                }),
+                after_check: Some(PageWaitRecheck {
+                    observed_at: until.clone(),
+                    request,
+                    wait: PageWaitRelation::OriginalObserved,
+                }),
+                statement_identity: None,
+                plan_identity: None,
+                resource: focus.resource.clone(),
+                observed_address: Some(PageWaitAddress { database_id: 2, file_id: 1, page_id: 4144 }),
+                resolution,
+                target: None,
+                index_operations: None,
+            };
+            assert!(page.is_valid());
+            TelemetryRecord::Operational(OperationalObservation {
+                source: source.clone(),
+                key: page.key().unwrap(),
+                fact: OperationalFact::PageWait(Box::new(page)),
+            })
+        })
+        .into_iter()
+        .collect::<Vec<_>>();
     let result = ActivityWaitFocusResult {
         focus,
         observed_from: from.clone(),
         observed_until: until.clone(),
         source: FocusSourceState::Matched,
         request,
-        wait: PageWaitRelation::Unqualified,
+        wait: if records.is_empty() { PageWaitRelation::Unqualified } else { PageWaitRelation::OriginalObserved },
     };
     assert!(result.is_valid());
     Frame {
         source: CollectionDescription {
-            partition: culprit_core::telemetry::SourcePartition::Target,
+            partition: result.focus.partition.clone(),
             target: result.focus.target.clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,
@@ -365,13 +545,13 @@ fn focused_frame(focus: ActivityWaitFocus, request: PageWaitRequestState) -> Fra
                     dataset: SnapshotDataset::PageWaitTargets,
                     observed_from: from,
                     observed_until: until,
-                    records: 0,
-                    sources: vec![StateSourceCoverage::observed(source, 0, false)],
+                    records: records.len() as u32,
+                    sources: vec![StateSourceCoverage::observed(source, records.len() as u32, false)],
                 },
                 result: Box::new(result),
             },
         },
-        records: Vec::new(),
+        records,
     }
 }
 
@@ -395,7 +575,10 @@ pub(in crate::fleet::investigations) async fn capture_frame(outbox: &mut Outbox,
 
 async fn capture_artifact(outbox: &mut Outbox, frame: Frame) -> (CollectionManifest, std::path::PathBuf) {
     let request = CollectionRequest {
-        subject: CollectionSubject::Database,
+        subject: match &frame.source.target {
+            CollectionTarget::Database(_) => CollectionSubject::Database,
+            CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
+        },
         selection: match &frame.source.observation {
             SourceObservation::Activity(_) => CollectionSelection::Activity,
             SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },

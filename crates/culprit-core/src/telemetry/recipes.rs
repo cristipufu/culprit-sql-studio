@@ -54,8 +54,14 @@ impl RecipeSelector {
         match (self, &request.selection) {
             (Self::CacheEntryMemory, CollectionSelection::CacheEntryMemory { .. }) => true,
             (Self::Collection(_), CollectionSelection::CacheEntryMemory { .. }) => false,
-            (Self::FocusedPageWait, CollectionSelection::FocusedPageWait { .. }) => true,
-            (Self::Collection(_), CollectionSelection::FocusedPageWait { .. }) => false,
+            (
+                Self::FocusedPageWait,
+                CollectionSelection::FocusedPageWait { .. } | CollectionSelection::SharedPageWaitFocus { .. },
+            ) => true,
+            (
+                Self::Collection(_),
+                CollectionSelection::FocusedPageWait { .. } | CollectionSelection::SharedPageWaitFocus { .. },
+            ) => false,
             (Self::Collection(collection), _) => *collection == request.collection(),
             _ => false,
         }

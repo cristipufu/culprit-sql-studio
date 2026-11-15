@@ -64,6 +64,13 @@ async fn every_declared_recipe_uses_exactly_one_actual_constructor_without_nativ
                     panic!("a shared follow-up requires the original native member")
                 };
                 *member = Some(resource.clone());
+                selection = CollectionSelection::SharedPageWaitFocus {
+                    focus: focus.clone(),
+                    partition: SourcePartition::InstanceLocal {
+                        member: Some(resource.clone()),
+                        epoch: Some("native-shared-generation".into()),
+                    },
+                };
             }
             let request = CollectionRequest { subject, selection, budget: descriptor.budget.clone() };
             assert!(descriptor.accepts(&request));

@@ -6,6 +6,8 @@ use crate::{
 use chrono::{DateTime, TimeDelta, Utc};
 use std::time::Duration;
 
+mod stages;
+
 struct Fixture {
     directory: tempfile::TempDir,
     inventory: FleetInventory,

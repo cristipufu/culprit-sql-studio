@@ -45,6 +45,13 @@ async fn instance_capture_reuses_native_readers_and_never_charges_the_shared_fac
     let mut source = source(metadata(), SourceShutdown::Quiescent);
     let description = source.describe().await.unwrap();
     assert!(matches!(description.target, CollectionTarget::Shared(_)));
+    let CollectionTarget::Shared(member) = &description.target else { panic!() };
+    let SourcePartition::InstanceLocal { member: Some(owner), epoch: Some(epoch) } = &description.partition else {
+        panic!("the already-read native process authority must survive export");
+    };
+    assert_eq!(owner, member);
+    assert!(valid_digest(epoch));
+    assert!(description.is_partition_qualified());
     let snapshot = description.observation.snapshot().unwrap();
     assert_eq!(snapshot.sources.len(), 6);
     assert_eq!(snapshot.records, 8);
@@ -122,4 +129,21 @@ async fn shared_source_preserves_unconfirmed_shutdown_for_the_capture_owner() {
     source.describe().await.unwrap();
     assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
     assert!(source.read_page(TelemetryStream::OperationalSamples, None).await.is_err());
+}
+
+#[tokio::test]
+async fn the_emitted_shared_partition_is_the_existing_native_process_generation_without_additional_queries() {
+    let mut reader = FakeRead::new(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)])]);
+    let native = crate::instance::read(&mut reader).await.unwrap().0;
+    let mut source = source(metadata(), SourceShutdown::Quiescent);
+    let description = source.describe().await.unwrap();
+    assert_eq!(
+        description.partition,
+        SourcePartition::InstanceLocal {
+            member: Some(native.identity.clone()),
+            epoch: Some(native.capture_epoch().unwrap()),
+        }
+    );
+    assert_eq!(source.query_count(), 11, "the partition reuses the initial authority already owned by this read");
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }

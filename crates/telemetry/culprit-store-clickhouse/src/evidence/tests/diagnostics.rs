@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::atomic::Ordering;
 
 #[tokio::test]
 async fn diagnostic_revisions_keep_private_targets_out_of_warehouse_rows_and_restore_exact_originals() {
@@ -48,4 +49,47 @@ async fn diagnostic_revisions_keep_private_targets_out_of_warehouse_rows_and_res
             assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
         }
     }
+}
+
+#[tokio::test]
+async fn shared_investigation_provenance_stays_private_and_requires_explicit_native_recovery() {
+    let (source, records) = test_support::shared_investigation_evidence();
+    let fixture = Fixture::new(source.clone(), records.clone()).await;
+    assert!(!serde_json::to_string(&fixture.rows).unwrap().contains("private-diagnostic"));
+    let before = fixture.recovery.object_reads.load(Ordering::SeqCst);
+    fixture.replies(vec![fixture.rows.clone()]);
+    let preview = fixture
+        .reader
+        .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default(), None)
+        .await
+        .unwrap();
+    assert!(!preview.is_read_complete());
+    assert!(preview.records().is_empty());
+    assert!(preview.gaps().iter().any(|gap| gap.reason == EvidenceGapReason::NativeRepresentationRequired));
+    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), before);
+    *fixture.recovery.fault.lock().unwrap() = Fault::None;
+    fixture.replies(vec![fixture.rows.clone()]);
+    let restored = fixture
+        .reader
+        .read_capture(
+            &fixture.range,
+            &[EvidenceFamily::OperationalSamples],
+            EvidenceReadBudget {
+                recovery_payloads: Some(RecoveryPayloadBudget::default()),
+                ..EvidenceReadBudget::default()
+            },
+            Some(fixture.recovery.as_ref()),
+        )
+        .await
+        .unwrap();
+    test_support::assert_diagnostic_capture(&restored, &source, &records);
+    assert_eq!(restored.metrics().recovery_objects, 1);
+    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), before + 1);
+    let TelemetryRecord::Operational(row) = &restored.records()[0].row().record else { panic!() };
+    let OperationalFact::DiagnosticRevision(revision) = &row.fact else { panic!() };
+    let event = revision.investigation.as_ref().unwrap();
+    let DiagnosticExecutionBinding::Shared { owner } = &event.intent.execution else { panic!() };
+    assert!(revision.inputs.contains(owner));
+    assert!(revision.episode.scope.target.database().is_some());
+    assert!(matches!(event.intent.subject(), CollectionSubject::Shared { .. }));
 }

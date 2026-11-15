@@ -25,7 +25,7 @@ pub(in crate::fleet) struct FocusedJob {
 }
 impl FocusedJob {
     pub fn new(intent: &DiagnosticInvestigationIntent, target: &FleetTarget, cooldown_seconds: u32) -> Result<Self> {
-        if !intent.is_valid() || !target.subject.accepts(&intent.focus.target) {
+        if !intent.is_valid() || target.subject != intent.subject() {
             return Err(state_failed());
         }
         let job = Self {
@@ -70,7 +70,7 @@ impl FocusedJob {
             && self.recipe_id == intent.recipe_id
             && self.recipe_version == intent.recipe_version
             && self.budget == intent.budget
-            && self.subject.accepts(&intent.focus.target)
+            && self.subject == intent.subject()
     }
 }
 

@@ -3,6 +3,7 @@ use super::*;
 use crate::fleet::scheduler::{FocusEnrollment, Scheduler};
 use culprit_core::ErrorDetail;
 use std::sync::atomic::Ordering;
+mod optional_evidence;
 
 #[tokio::test]
 async fn sealed_original_and_cost_evidence_prepare_one_verified_candidate_without_native_work() {

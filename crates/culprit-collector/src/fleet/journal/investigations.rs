@@ -1,4 +1,4 @@
-//! One immutable intent per episode shares admission transactions and bounded current replay receipts.
+//! One outstanding intent per episode; completed execution-target stages retain bounded replay receipts.
 use super::*;
 use crate::fleet::scheduler::{
     FocusMutation, FocusState, FocusStatus, MAX_FOCUSED_JOBS, ScheduleClock, ScheduleUpdate,
@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_INTENT_BYTES: usize = 256 * 1024;
 const MAX_INTENTS_BYTES: usize = 16 * 1024 * 1024;
-const MAX_RECEIPTS: usize = MAX_DIAGNOSTIC_EPISODES;
+// The implemented page-wait progression has one original database target and its one exact native member.
+const MAX_FOCUSED_STAGES_PER_EPISODE: usize = 2;
+const MAX_RECEIPTS: usize = MAX_DIAGNOSTIC_EPISODES * MAX_FOCUSED_STAGES_PER_EPISODE;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -66,7 +68,7 @@ impl FleetJournal {
         self.files
             .run(|| {
                 let stage = stage.to_owned();
-                move |files| receipt(&files.connection, None, &stage)
+                move |files| receipt(&files.connection, &stage)
             })
             .await
     }
@@ -95,9 +97,7 @@ impl FleetJournal {
                 |files| {
                     let mut episodes = BTreeSet::new();
                     for receipt in receipts(&files.connection)? {
-                        if !episodes.insert(receipt.episode_id) {
-                            return Err(state_failed());
-                        }
+                        episodes.insert(receipt.episode_id);
                     }
                     Ok(episodes)
                 }
@@ -125,7 +125,7 @@ impl FleetJournal {
     }
     /// This is a complete current working-set reconciliation, never a native latest-N or partial-source inventory.
     pub(in crate::fleet) async fn prune_focused_receipts(&self, retained: &BTreeSet<String>) -> Result<()> {
-        if retained.len() > MAX_RECEIPTS || retained.iter().any(|id| !valid_digest(id)) {
+        if retained.len() > MAX_DIAGNOSTIC_EPISODES || retained.iter().any(|id| !valid_digest(id)) {
             return Err(capacity());
         }
         self.files
@@ -150,7 +150,7 @@ impl Files {
             .query_row("SELECT id FROM investigation_intents WHERE stage_key=?1", [stage], |row| row.get(0))
             .optional()
             .map_err(|_| state_failed())?;
-        let completed = receipt(&self.connection, None, stage)?;
+        let completed = receipt(&self.connection, stage)?;
         match (active, completed) {
             (Some(key), None) => {
                 intent(&self.connection, &key)?.ok_or_else(state_failed)?;
@@ -217,7 +217,7 @@ impl Files {
         if conflict {
             return Err(DeliveryProblem::Conflict.error());
         }
-        if let Some(receipt) = receipt(&transaction, Some(&candidate.episode_id), &candidate.episode_stage_key()?)? {
+        if let Some(receipt) = receipt(&transaction, &candidate.episode_stage_key()?)? {
             if !matches!(receipt.settlement, FocusedSettlement::Cancelled { .. })
                 || receipt.key == *key
                 || receipt.episode_id != candidate.episode_id
@@ -232,6 +232,7 @@ impl Files {
                 return Err(state_failed());
             }
         }
+        require_receipt_capacity(&transaction, &candidate.episode_id)?;
         transaction
             .execute(
                 "INSERT INTO investigation_intents VALUES(?1,?2,?3,?4,?5)",
@@ -272,12 +273,7 @@ impl Files {
         if clock.pending_job.is_some() {
             return Err(state_failed());
         }
-        let count: u32 = transaction
-            .query_row("SELECT count(*) FROM investigation_receipts", [], |row| row.get(0))
-            .map_err(|_| state_failed())?;
-        if count as usize >= MAX_RECEIPTS {
-            return Err(capacity());
-        }
+        require_receipt_capacity(&transaction, &candidate.episode_id)?;
         let receipt = FocusedReceipt {
             key: key.clone(),
             episode_id: candidate.episode_id.clone(),
@@ -327,20 +323,46 @@ fn receipts(connection: &Connection) -> Result<Vec<FocusedReceipt>> {
     if rows.len() > MAX_RECEIPTS {
         return Err(state_failed());
     }
-    rows.into_iter().map(StoredReceipt::decode).collect()
+    let mut episodes = BTreeMap::<String, usize>::new();
+    let mut decoded = Vec::with_capacity(rows.len());
+    for row in rows {
+        let receipt = row.decode()?;
+        let count = episodes.entry(receipt.episode_id.clone()).or_default();
+        *count += 1;
+        if *count > MAX_FOCUSED_STAGES_PER_EPISODE || episodes.len() > MAX_DIAGNOSTIC_EPISODES {
+            return Err(state_failed());
+        }
+        decoded.push(receipt);
+    }
+    Ok(decoded)
 }
 
-fn receipt(connection: &Connection, episode: Option<&str>, stage: &str) -> Result<Option<FocusedReceipt>> {
-    let mut query = connection
-        .prepare("SELECT id,episode_id,stage_key,receipt_json FROM investigation_receipts WHERE stage_key=?1 OR episode_id=?2 LIMIT 2")
-        .map_err(|_| state_failed())?;
-    let mut rows = query.query(params![stage, episode]).map_err(|_| state_failed())?;
-    let result =
-        rows.next().map_err(|_| state_failed())?.map(StoredReceipt::read).transpose().map_err(|_| state_failed())?;
-    if rows.next().map_err(|_| state_failed())?.is_some() {
-        return Err(state_failed());
+fn receipt(connection: &Connection, stage: &str) -> Result<Option<FocusedReceipt>> {
+    connection
+        .query_row(
+            "SELECT id,episode_id,stage_key,receipt_json FROM investigation_receipts WHERE stage_key=?1",
+            [stage],
+            StoredReceipt::read,
+        )
+        .optional()
+        .map_err(|_| state_failed())?
+        .map(StoredReceipt::decode)
+        .transpose()
+}
+
+fn require_receipt_capacity(connection: &Connection, episode: &str) -> Result<()> {
+    let (total, episodes, stages): (u32, u32, u32) = connection.query_row(
+        "SELECT count(*),count(DISTINCT episode_id),coalesce(sum(CASE WHEN episode_id=?1 THEN 1 ELSE 0 END),0) FROM investigation_receipts",
+        [episode], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|_| state_failed())?;
+    if total as usize >= MAX_RECEIPTS
+        || stages as usize >= MAX_FOCUSED_STAGES_PER_EPISODE
+        || episodes as usize > MAX_DIAGNOSTIC_EPISODES
+        || episodes as usize == MAX_DIAGNOSTIC_EPISODES && stages == 0
+    {
+        return Err(capacity());
     }
-    result.map(StoredReceipt::decode).transpose()
+    Ok(())
 }
 
 pub(super) fn intents(connection: &Connection) -> Result<BTreeMap<String, DiagnosticInvestigationIntent>> {

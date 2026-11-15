@@ -43,6 +43,7 @@ pub enum CollectionSelection {
     Activity,
     CacheEntryMemory { focus: Box<CacheEntryMemoryFocus> },
     FocusedPageWait { focus: Box<ActivityWaitFocus> },
+    SharedPageWaitFocus { focus: Box<ActivityWaitFocus>, partition: SourcePartition },
     Diagnostics { parent: DiagnosticCaptureRef, controller_version: u32, step_id: String },
     Snapshot { dataset: SnapshotDataset },
 }
@@ -54,9 +55,25 @@ impl CollectionSelection {
             Self::DeadlockHistory { .. } => TelemetryCollection::DeadlockHistory,
             Self::Activity => TelemetryCollection::Activity,
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
-            Self::FocusedPageWait { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
+            Self::FocusedPageWait { .. } | Self::SharedPageWaitFocus { .. } => {
+                TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)
+            }
             Self::Diagnostics { .. } => TelemetryCollection::Diagnostics,
             Self::Snapshot { dataset } => TelemetryCollection::Snapshot(*dataset),
+        }
+    }
+
+    pub fn focus(&self) -> Option<&ActivityWaitFocus> {
+        match self {
+            Self::FocusedPageWait { focus } | Self::SharedPageWaitFocus { focus, .. } => Some(focus),
+            _ => None,
+        }
+    }
+
+    pub fn shared_partition(&self) -> Option<&SourcePartition> {
+        match self {
+            Self::SharedPageWaitFocus { partition, .. } => Some(partition),
+            _ => None,
         }
     }
 }
@@ -477,16 +494,15 @@ impl CollectionDescription {
                         && snapshot.coverage.state == crate::SourceState::Partial
                         && snapshot.coverage.stopped == Some(CollectionStop::RowLimit));
         }
-        if let (
-            SourceObservation::FocusedPageWait { snapshot, result },
-            CollectionSelection::FocusedPageWait { focus },
-        ) = (&self.observation, &request.selection)
+        if let (SourceObservation::FocusedPageWait { snapshot, result }, Some(focus)) =
+            (&self.observation, request.focus())
         {
             return snapshot.is_valid()
                 && result.is_valid()
-                && &result.focus == focus.as_ref()
+                && &result.focus == focus
                 && focus.is_valid_for(&request.subject)
                 && focus.matches_capture_scope(self)
+                && request.selection.shared_partition().is_none_or(|partition| self.partition == *partition)
                 && snapshot.dataset == SnapshotDataset::PageWaitTargets
                 && snapshot.records <= request.budget.max_snapshot_rows
                 && snapshot.observed_from == result.observed_from

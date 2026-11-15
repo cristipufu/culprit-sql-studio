@@ -103,16 +103,19 @@ async fn recipe_policy_is_part_of_the_durable_step_identity() {
     let at = clock(1);
     let mut unqualified = analyze(&input, &ActivityPolicy::default(), &at).unwrap();
     let available = policies(vec![recipe()]);
-    crate::diagnostics::planning::qualify_questions(&input, available.assignment(&input), &mut unqualified).unwrap();
+    crate::diagnostics::planning::qualify_questions(&input, available.assignment(&input).unwrap(), &mut unqualified)
+        .unwrap();
     let mut unsupported = analyze(&input, &ActivityPolicy::default(), &at).unwrap();
     let absent = policies(vec![]);
-    crate::diagnostics::planning::qualify_questions(&input, absent.assignment(&input), &mut unsupported).unwrap();
+    crate::diagnostics::planning::qualify_questions(&input, absent.assignment(&input).unwrap(), &mut unsupported)
+        .unwrap();
     assert_ne!(unqualified.step_id, unsupported.step_id);
     assert_ne!(unqualified.checkpoint, unsupported.checkpoint);
     assert_eq!(unqualified.revisions[0].episode.revision, "1");
     assert_eq!(unsupported.revisions[0].episode.revision, "1");
     let mut replay = analyze(&input, &ActivityPolicy::default(), &clock(2)).unwrap();
-    crate::diagnostics::planning::qualify_questions(&input, available.assignment(&input), &mut replay).unwrap();
+    crate::diagnostics::planning::qualify_questions(&input, available.assignment(&input).unwrap(), &mut replay)
+        .unwrap();
     assert_eq!(replay.step_id, unqualified.step_id);
     assert_eq!(replay.revisions[0].id, unqualified.revisions[0].id);
     harness.outbox.commit_diagnostics(input, unqualified).await.unwrap();
@@ -136,7 +139,8 @@ async fn equivalent_catalog_permutations_replay_the_same_step_but_changed_envelo
     let qualified = |catalog| {
         let policy = policies(catalog);
         let mut update = analyze(&input, &ActivityPolicy::default(), &clock(1)).unwrap();
-        crate::diagnostics::planning::qualify_questions(&input, policy.assignment(&input), &mut update).unwrap();
+        crate::diagnostics::planning::qualify_questions(&input, policy.assignment(&input).unwrap(), &mut update)
+            .unwrap();
         update
     };
     let expected = qualified(original.clone());

@@ -153,14 +153,16 @@ fn event_relation_requires_the_original_native_focus_scope_and_monotonic_episode
             "future-revision" => other.intent.episode_revision = "4".into(),
             "epoch" => {
                 other.intent.focus.epoch = "another-generation".into();
-                other.intent.qualification.scope.native_epoch = Some(other.intent.focus.epoch.clone());
+                activity_scope(&mut other.intent.qualification).native_epoch = Some(other.intent.focus.epoch.clone());
             }
             "source" => {
                 other.intent.focus.source = "other-native-source".into();
-                other.intent.qualification.scope.source = other.intent.focus.source.clone();
+                activity_scope(&mut other.intent.qualification).source = other.intent.focus.source.clone();
             }
-            "population" => other.intent.qualification.scope.population = ActivityPopulation::ClientBackends,
-            "scope" => other.intent.qualification.scope.measurement_scope = MeasurementScope::Server,
+            "population" => {
+                activity_scope(&mut other.intent.qualification).population = ActivityPopulation::ClientBackends
+            }
+            "scope" => activity_scope(&mut other.intent.qualification).measurement_scope = MeasurementScope::Server,
             "statement" => {
                 other.intent.focus.statement_identity = NativeIdentity::new("different-statement");
                 other.intent.focus.original.statement_identity = Some(other.intent.focus.statement_identity.clone());

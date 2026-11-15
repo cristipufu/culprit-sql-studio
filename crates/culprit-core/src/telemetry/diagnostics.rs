@@ -232,6 +232,7 @@ impl DiagnosticRecoveryProof {
         match self {
             Self::CompleteScope { .. } => source.observation.activity().is_some_and(|snapshot| {
                 snapshot.is_valid()
+                    && ObservationBounds::new(&episode.last_seen_at, &snapshot.at).is_some()
                     && DiagnosticScope::from_source(source)
                         .is_ok_and(|scope| scope.key().ok() == episode.scope.key().ok())
                     && diagnostic_baseline_can_resolve(
@@ -243,6 +244,7 @@ impl DiagnosticRecoveryProof {
             Self::FocusedParticipantGone { parent, .. } => match &source.observation {
                 SourceObservation::FocusedPageWait { result, .. } => {
                     result.is_valid()
+                        && ObservationBounds::new(&episode.last_seen_at, &result.observed_until).is_some()
                         && result.source == FocusSourceState::Matched
                         && result.request == PageWaitRequestState::Missing
                         && result.wait == PageWaitRelation::Unqualified
@@ -252,6 +254,34 @@ impl DiagnosticRecoveryProof {
                 _ => false,
             },
         }
+    }
+    /// A shared result can establish the original participant's disappearance only through its admitted intent.
+    /// The caller authenticates that intent and both original/owner receipts; a manual shared capture is insufficient.
+    pub fn matches_source_with_intent(
+        &self,
+        episode: &DiagnosticEpisode,
+        source: &CollectionDescription,
+        capture: &DiagnosticCaptureRef,
+        intent: &DiagnosticInvestigationIntent,
+    ) -> bool {
+        if !matches!(intent.execution, DiagnosticExecutionBinding::Shared { .. }) {
+            return self.matches_source(episode, source, capture);
+        }
+        let Self::FocusedParticipantGone { parent, .. } = self else {
+            return false;
+        };
+        self.capture() == capture
+            && self.qualifies(&episode.first)
+            && intent.matches_episode(episode)
+            && intent.matches_result_source(source)
+            && source.captured_range().ok().map(|range| range.scope_id).as_deref()
+                == Some(capture.source_scope_id.as_str())
+            && matches!(&source.observation, SourceObservation::FocusedPageWait { result, .. }
+                if result.source == FocusSourceState::Matched
+                    && result.request == PageWaitRequestState::Missing
+                    && result.wait == PageWaitRelation::Unqualified
+                    && ObservationBounds::new(&episode.last_seen_at, &result.observed_until).is_some()
+                    && result.focus.parent == **parent)
     }
     fn qualifies(&self, original: &DiagnosticEvidenceRef) -> bool {
         self.capture().is_valid()
@@ -486,6 +516,10 @@ impl DiagnosticRevision {
                 event.matches_episode(&self.episode)
                     && event.key().ok().as_deref() == self.episode.investigation_event.as_deref()
                     && self.inputs.contains(&event.intent.focus.parent)
+                    && match &event.intent.execution {
+                        DiagnosticExecutionBinding::Database => true,
+                        DiagnosticExecutionBinding::Shared { owner } => self.inputs.contains(owner),
+                    }
             })
             && (self.previous_revision.is_some()
                 || self.investigation.is_some()
