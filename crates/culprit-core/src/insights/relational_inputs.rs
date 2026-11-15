@@ -12,6 +12,8 @@ enum AccessDifference {
 pub(super) struct AccessComparison {
     estimated: f64,
     actual: f64,
+    estimated_output: f64,
+    actual_output: f64,
     difference: AccessDifference,
 }
 
@@ -44,7 +46,7 @@ impl AccessComparison {
             (true, true) => AccessDifference::Both,
             (false, false) => AccessDifference::Undetermined,
         };
-        Some(Self { estimated, actual, difference })
+        Some(Self { estimated, actual, estimated_output: expected_output, actual_output: output, difference })
     }
 
     pub(super) fn detail(&self) -> String {
@@ -69,6 +71,69 @@ impl AccessComparison {
             AccessDifference::Both | AccessDifference::Undetermined => t!("insight.relational_input.investigate_both"),
         }
     }
+
+    fn underestimated(&self) -> bool {
+        self.actual > self.estimated
+            && self.actual >= crate::plan::MISESTIMATE_MIN_ROWS
+            && differs_materially(self.estimated, self.actual)
+    }
+
+    fn output_detail(&self) -> String {
+        t!(
+            "insight.relational_input_access.output_counts",
+            estimated = rows_text(self.estimated_output),
+            actual = rows_text(self.actual_output)
+        )
+    }
+}
+
+const MAX_ACCESS_CONCERNS: usize = 2;
+
+/// Output can match its estimate while unexpectedly high access is offset by a lower kept fraction. Only actual
+/// underestimation is evidence here: fewer accessed rows can follow early termination of a correctly estimated run.
+pub(super) fn access_misestimates(cx: &Cx, output_concerns: &[Draft]) -> Vec<Draft> {
+    if cx.plan.kind != PlanKind::Actual {
+        return Vec::new();
+    }
+    let mut candidates: Vec<_> = cx
+        .nodes
+        .iter()
+        .copied()
+        .filter(|node| !output_concerns.iter().any(|concern| concern.nodes.contains(&node.id)))
+        .filter_map(|node| {
+            let kind = relational_input_kind(node)?;
+            let access = AccessComparison::from_node(node)?;
+            access.underestimated().then_some((node, kind, access))
+        })
+        .collect();
+    candidates.sort_by(|left, right| right.2.actual.total_cmp(&left.2.actual));
+    candidates
+        .into_iter()
+        .take(MAX_ACCESS_CONCERNS)
+        .map(|(node, kind, access)| access_concern(cx, node, kind, &access))
+        .collect()
+}
+
+fn access_concern(
+    cx: &Cx,
+    node: &PlanNode,
+    kind: crate::plan_facts::RelationalInputKind,
+    access: &AccessComparison,
+) -> Draft {
+    let input = what(node);
+    let mut concern = Draft::new("relational-input-access", InsightArea::Statistics, cx.share(node), vec![node.id]);
+    concern.cap = Severity::Medium;
+    concern.title = t!(
+        "insight.relational_input_access.title",
+        input = &input,
+        estimated = rows_text(access.estimated),
+        actual = rows_text(access.actual)
+    );
+    concern.detail = format!("{} {}", access.detail(), access.output_detail());
+    concern.fix =
+        format!("{} {}", access.investigation(), statistics::relational_input_advice(kind, &table_leaf(&input)));
+    concern.verify = t!("insight.relational_input.verify");
+    concern
 }
 
 fn differs_materially(left: f64, right: f64) -> bool {

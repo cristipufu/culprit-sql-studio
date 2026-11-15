@@ -277,4 +277,83 @@ mod tests {
             found.iter().filter(|f| !f.id.contains(":parallelism-blocked:")).all(|f| f.queries[0].plan_node.is_some())
         );
     }
+
+    #[test]
+    fn a_material_query_keeps_native_access_and_output_estimates_separate_in_its_finding() {
+        use culprit_core::plan_facts::{
+            PlanAccessRows, RelationalInput, RelationalInputKind, RelationalInputProvenance,
+        };
+        use culprit_core::{Check, NodeKind, PlanFacts, PlanNode, PlanNodeFacts, Properties};
+
+        let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
+        let mut query = crate::support::tests::sample();
+        query.text = "SELECT value FROM @input WHERE value > 0".into();
+        query.executions = 100_000.0;
+        query.mean_time_ms = 400.0;
+        query.total_time_ms = query.executions * query.mean_time_ms;
+        query.plan = Some(Plan {
+            facts: PlanFacts { elapsed_ms: Some(400.0), ..Default::default() },
+            view: None,
+            engine: Engine::Mssql,
+            kind: PlanKind::Actual,
+            statement: Some(query.text.clone()),
+            total_cost: 100.0,
+            root: PlanNode {
+                facts: PlanNodeFacts {
+                    access_rows: PlanAccessRows::new(Some(100.0), Some(10_000.0)),
+                    relational_input: Some(RelationalInput {
+                        kind: RelationalInputKind::TableValuedParameter,
+                        provenance: RelationalInputProvenance::NativeParameterMetadata,
+                    }),
+                    ..Default::default()
+                },
+                id: 7,
+                kind: NodeKind::Scan,
+                op: "Table Scan".into(),
+                detail: None,
+                object: Some("@input".into()),
+                index: None,
+                seek_predicate: None,
+                predicate: None,
+                est_rows: 100.0,
+                est_executions: 1.0,
+                act_rows: Some(100.0),
+                act_executions: Some(1.0),
+                rows_read: Some(10_000.0),
+                table_rows: None,
+                subtree_cost: 100.0,
+                self_cost: 100.0,
+                act_time_ms: None,
+                runtime: None,
+                warnings: vec![],
+                props: Properties::new(),
+                children: vec![],
+            },
+            warnings: vec![],
+            index_hints: vec![],
+            props: Properties::new(),
+            raw: None,
+            insights: None,
+        });
+        let workload = snapshot.workload.as_mut().unwrap();
+        workload.total_time_ms = query.total_time_ms;
+        workload.queries = vec![query];
+
+        let found = PlanInsightsCheck.run(&snapshot);
+        let finding = found
+            .iter()
+            .find(|finding| finding.id == "plan-insights:relational-input-access:@input")
+            .expect("the real plan-insights check retains underestimated accessed work");
+        assert_eq!(finding.queries.len(), 1);
+        assert_eq!(finding.queries[0].id, "1");
+        assert_eq!(finding.queries[0].plan_node, Some(7));
+        assert!(finding.fix.as_ref().unwrap().sql.is_none());
+        assert!(finding.summary.contains(&t!("insight.relational_input.access_and_selectivity")));
+        assert!(finding.summary.contains(&t!(
+            "insight.relational_input_access.output_counts",
+            estimated = "100",
+            actual = "100"
+        )));
+        assert!(!found.iter().any(|finding| finding.id.starts_with("plan-insights:misestimate:")));
+    }
 }

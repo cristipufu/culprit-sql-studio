@@ -5,6 +5,12 @@ use ts_rs::TS;
 
 mod access_rows;
 pub use access_rows::PlanAccessRows;
+mod parameters;
+pub use parameters::{
+    MAX_PARAMETER_NAME_UTF16, MAX_PARAMETER_TYPE_BYTES, MAX_PLAN_PARAMETERS, PlanParameter, PlanParameterComparison,
+    PlanParameterContext, PlanParameterIssue, PlanParameterValueState, parameter_name_is_valid,
+    parameter_type_is_valid,
+};
 mod relational_input;
 pub use relational_input::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
 
@@ -106,6 +112,11 @@ pub struct PlanFacts {
     pub statistics_maintenance: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compiled_parameters: Option<String>,
+    /// Native parameter metadata from this selected plan, with value availability and a pre-redaction comparison.
+    /// The plan's retained/execution provenance remains separate; this does not describe a workload population.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "parameters::deserialize")]
+    #[ts(optional)]
+    pub parameter_context: Option<PlanParameterContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_grant_warning: Option<String>,
     pub conversions: Vec<PlanConversion>,

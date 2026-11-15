@@ -6,6 +6,7 @@ use culprit_core::{
 use roxmltree::{Document, Node};
 
 mod cached_definitions;
+mod parameters;
 mod relational_inputs;
 pub use cached_definitions::{parse_cached_definition, parse_retained_definition};
 
@@ -299,6 +300,7 @@ fn statement_facts(statement: Node, plan: Node) -> culprit_core::PlanFacts {
                 .collect();
             (!list.is_empty()).then(|| list.join(", "))
         }),
+        parameter_context: parameters::read(plan),
         conversions: child(plan, "Warnings")
             .map(|w| {
                 children(w, "PlanAffectingConvert")

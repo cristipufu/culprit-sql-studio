@@ -25,6 +25,7 @@ mod growth;
 mod index;
 mod memory;
 mod parallelism;
+mod parameters;
 mod predicates;
 mod query;
 mod relational_inputs;
@@ -148,6 +149,8 @@ pub const RULES: &[(&str, &[Engine], RuleLine)] = &[
     ("spill", ALL, RuleLine(key!("insight.spill.rule"))),
     ("memory-grant", &[Engine::Mssql], RuleLine(key!("insight.memory_grant.rule"))),
     ("misestimate", ALL, RuleLine(key!("insight.misestimate.rule"))),
+    ("relational-input-access", ALL, RuleLine(key!("insight.relational_input_access.rule"))),
+    ("parameter-context", ALL, RuleLine(key!("insight.parameter_context.rule"))),
     ("nested-loops", ALL, RuleLine(key!("insight.nested_loops.rule"))),
     ("big-sort", ALL, RuleLine(key!("insight.big_sort.rule"))),
     ("no-join-predicate", ALL, RuleLine(key!("insight.no_join_predicate.rule"))),
@@ -290,6 +293,7 @@ pub fn insights(plan: &Plan) -> Vec<PlanInsight> {
         spill,
         memory_grant,
         misestimate,
+        parameters::context,
         nested_loops,
         big_sort,
         no_join_predicate,

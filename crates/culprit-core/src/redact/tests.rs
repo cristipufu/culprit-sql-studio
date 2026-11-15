@@ -2,6 +2,7 @@ use super::plan::is_measurement;
 use super::*;
 
 mod native_context;
+mod parameter_context;
 
 #[test]
 fn recorded_messages_and_capability_actions_do_not_retain_private_collector_details() {

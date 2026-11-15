@@ -4,6 +4,12 @@
 use super::*;
 
 pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
+    let mut concerns = output_misestimates(cx);
+    concerns.extend(relational_inputs::access_misestimates(cx, &concerns));
+    concerns
+}
+
+fn output_misestimates(cx: &Cx) -> Vec<Draft> {
     // The plan's misestimates by the one shared rule (`PlanNode::misestimates`), judged here again so a plan saved
     // before that rule reads the same as a fresh one.
     let found: HashMap<u32, f64> = cx.plan.root.misestimates().into_iter().collect();

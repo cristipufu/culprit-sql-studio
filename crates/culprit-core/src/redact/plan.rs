@@ -4,6 +4,7 @@ use crate::model::{Engine, Properties};
 use crate::plan::{Plan, PlanNode};
 
 use super::sql::{redact_prose, redact_sql, redact_strings, strip_database, strip_parts};
+mod parameter_types;
 
 /// Units a plan writes after a measured number: MySQL's `data_read_per_join` ("106M", "1G"), sizes ("8kB", "4MB"),
 /// times ("0.5ms") and shares ("10%").
@@ -152,6 +153,30 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         f.server_version = f.server_version.as_deref().map(|v| redact_strings(v, plan.engine));
         f.memory_grant_warning = f.memory_grant_warning.as_deref().map(|v| redact_strings(v, plan.engine));
         f.compiled_parameters = f.compiled_parameters.as_deref().map(|v| text(v, plan.engine));
+        if let Some(context) = &mut f.parameter_context {
+            for parameter in &mut context.parameters {
+                let name = parameter
+                    .name
+                    .as_deref()
+                    .map(|name| text(name, plan.engine))
+                    .filter(|name| crate::plan_facts::parameter_name_is_valid(name));
+                if name.is_none() || name != parameter.name {
+                    parameter.comparison = crate::plan_facts::PlanParameterComparison::Unavailable;
+                }
+                parameter.name = name;
+                parameter.data_type = parameter
+                    .data_type
+                    .as_deref()
+                    .and_then(|data_type| {
+                        if plan.engine.sql_syntax() == crate::SqlSyntax::Mssql {
+                            parameter_types::redact(data_type)
+                        } else {
+                            Some(text(data_type, plan.engine))
+                        }
+                    })
+                    .filter(|data_type| crate::plan_facts::parameter_type_is_valid(data_type));
+            }
+        }
         for c in &mut f.conversions {
             c.expression = text(&c.expression, plan.engine);
             if let crate::PlanConversionIssue::Other(v) = &mut c.issue {
@@ -269,6 +294,7 @@ fn redact_showplan(xml: &str) -> String {
                 let replacement = match attr.name() {
                     "Database" => Some("[database]".to_string()),
                     "Server" => Some("[server]".to_string()),
+                    "ParameterDataType" => Some(xml_escape(&parameter_types::redact(attr.value()).unwrap_or_default())),
                     name if SHOWPLAN_TEXT.contains(&name) => {
                         Some(xml_escape(&strip_database(&redact_sql(attr.value(), Engine::Mssql))))
                     }

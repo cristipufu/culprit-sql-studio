@@ -244,3 +244,162 @@ fn relational_input_filter_and_spool_evidence_never_produce_direct_table_ddl() {
         assert_eq!(concern.fix, statistics::relational_input_advice(input.kind, "@input"));
     }
 }
+
+fn access_concern(plan: &Plan) -> PlanInsight {
+    insights(plan)
+        .into_iter()
+        .find(|insight| insight.rule == "relational-input-access")
+        .expect("recorded underestimated access")
+}
+
+#[test]
+fn accurate_output_does_not_hide_offsetting_access_and_selectivity_errors() {
+    let plan = access_plan(100.0, 100.0, 100.0, 10_000.0);
+    assert!(plan.root.misestimates().is_empty(), "output matches its estimate");
+    let concern = access_concern(&plan);
+    assert_eq!(concern.nodes, vec![1]);
+    assert_eq!(
+        concern.title,
+        t!("insight.relational_input_access.title", input = "@input", estimated = "100", actual = "10K")
+    );
+    assert!(concern.detail.contains(&t!("insight.relational_input.access_and_selectivity")));
+    assert!(concern.detail.contains(&t!(
+        "insight.relational_input_access.output_counts",
+        estimated = "100",
+        actual = "100"
+    )));
+    assert!(concern.fix.contains(&t!("insight.misestimate.fix.tvp", table = "@input")));
+    assert!(concern.fix_sql.is_none());
+    assert_eq!(concern.verify, t!("insight.relational_input.verify"));
+    assert!(!insights(&plan).iter().any(|insight| insight.rule == "misestimate"));
+}
+
+#[test]
+fn inner_loop_access_is_compared_across_its_actual_executions_not_its_outer_row_count() {
+    let mut input = access_plan(1.0, 100.0, 100.0, 1_000_000.0).root;
+    input.act_executions = Some(100.0);
+    let mut join = measured(0, "Nested Loops", NodeKind::Join, 100.0, 100.0, 1.0);
+    let mut outer = measured(2, "Table Scan", NodeKind::Scan, 100.0, 100.0, 1.0);
+    outer.object = Some("dbo.drivers".into());
+    join.children = vec![outer, input];
+    let mut plan = actual(Engine::Mssql, join, 400.0);
+    let concern = access_concern(&plan);
+    assert_eq!(concern.nodes, vec![1]);
+    assert!(concern.detail.contains(&t!(
+        "insight.relational_input.access_counts",
+        estimated = "10K",
+        actual = format::count(1_000_000.0)
+    )));
+    assert!(concern.detail.contains(&t!(
+        "insight.relational_input_access.output_counts",
+        estimated = "100",
+        actual = "100"
+    )));
+    plan.root.children[1].facts_mut().access_rows.as_mut().unwrap().actual_total = Some(10_000.0);
+    assert!(!insights(&plan).iter().any(|insight| insight.rule == "relational-input-access"));
+}
+
+#[test]
+fn unknown_or_other_native_input_kinds_never_borrow_tvp_advice() {
+    for kind in [
+        Some(RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration }),
+        Some(RelationalInput { kind: Kind::TemporaryTable, provenance: Provenance::NativePlan }),
+        Some(RelationalInput { kind: Kind::TableValuedFunction, provenance: Provenance::NativePlan }),
+        Some(RelationalInput { kind: Kind::Unknown, provenance: Provenance::Unresolved }),
+        None,
+    ] {
+        let mut plan = access_plan(100.0, 100.0, 100.0, 10_000.0);
+        plan.root.facts_mut().relational_input = kind;
+        let concern = access_concern(&plan);
+        let expected_kind = kind.map_or(Kind::Unknown, |input| input.kind);
+        assert!(concern.fix.ends_with(&statistics::relational_input_advice(expected_kind, "@input")));
+        assert!(!concern.fix.contains(&t!("insight.misestimate.fix.tvp", table = "@input")));
+        assert!(concern.fix_sql.is_none());
+    }
+    let mut ordinary_table = access_plan(100.0, 100.0, 100.0, 10_000.0);
+    ordinary_table.root.object = Some("dbo.orders".into());
+    ordinary_table.root.facts_mut().relational_input = None;
+    assert!(!insights(&ordinary_table).iter().any(|insight| insight.rule == "relational-input-access"));
+}
+
+#[test]
+fn estimated_missing_partial_worker_or_non_access_evidence_cannot_authorize_the_new_comparison() {
+    for missing in [
+        "estimated-plan",
+        "no-native-access",
+        "estimated-only",
+        "actual-only",
+        "no-executions",
+        "fractional-executions",
+        "parallel",
+        "wrong-operator",
+        "inconsistent-output",
+    ] {
+        let mut plan = access_plan(100.0, 100.0, 100.0, 10_000.0);
+        match missing {
+            "estimated-plan" => plan.kind = PlanKind::Estimated,
+            "no-native-access" => {
+                plan.root.facts_mut().access_rows = None;
+                plan.root.rows_read = Some(10_000.0);
+            }
+            "estimated-only" => plan.root.facts_mut().access_rows.as_mut().unwrap().actual_total = None,
+            "actual-only" => plan.root.facts_mut().access_rows.as_mut().unwrap().estimated_per_execution = None,
+            "no-executions" => plan.root.act_executions = None,
+            "fractional-executions" => plan.root.act_executions = Some(0.5),
+            "parallel" => plan.root.facts_mut().parallel_threads = Some(2),
+            "wrong-operator" => plan.root.kind = NodeKind::Join,
+            "inconsistent-output" => plan.root.act_rows = Some(20_000.0),
+            _ => unreachable!(),
+        }
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "relational-input-access"), "{missing}");
+    }
+}
+
+#[test]
+fn healthy_access_and_fewer_accesses_under_top_do_not_become_underestimation_findings() {
+    for (estimated, actual) in [(10_000.0, 10_000.0), (10_000.0, 50_000.0), (10.0, 99.0)] {
+        let plan = access_plan(1.0, 1.0, estimated, actual);
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "relational-input-access"));
+    }
+    let mut top = measured(0, "Top", NodeKind::Other, 1.0, 1.0, 1.0);
+    top.children = vec![access_plan(100.0, 1.0, 10_000.0, 1.0).root];
+    let plan = actual(Engine::Mssql, top, 400.0);
+    assert!(!insights(&plan).iter().any(|insight| insight.rule == "relational-input-access"));
+}
+
+#[test]
+fn only_the_output_insight_that_already_covers_this_native_access_suppresses_it() {
+    let plan = access_plan(100.0, 10_000.0, 100.0, 10_000.0);
+    let output = estimate_concern(&plan);
+    assert!(output.detail.contains(&t!("insight.relational_input.access_volume")));
+    assert!(!insights(&plan).iter().any(|insight| insight.rule == "relational-input-access"));
+
+    let mut independent = measured(2, "Table Scan", NodeKind::Scan, 1.0, 10_000.0, 1.0);
+    independent.object = Some("dbo.orders".into());
+    let mut root = measured(0, "Concatenation", NodeKind::Other, 1.0, 1.0, 1.0);
+    root.children = vec![access_plan(100.0, 100.0, 100.0, 10_000.0).root, independent];
+    let plan = actual(Engine::Mssql, root, 400.0);
+    assert_eq!(estimate_concern(&plan).nodes, vec![2]);
+    assert_eq!(access_concern(&plan).nodes, vec![1]);
+}
+
+#[test]
+fn an_output_concern_omitted_by_its_bound_does_not_hide_an_unexplained_access_mismatch() {
+    let mut root = measured(0, "Concatenation", NodeKind::Other, 1.0, 1.0, 1.0);
+    root.children = [1_000_000.0, 100_000.0, 10_000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(index, actual)| {
+            let mut input = access_plan(1.0, actual, 1.0, actual).root;
+            input.id = u32::try_from(index + 1).unwrap();
+            input.object = Some(format!("@input_{index}"));
+            input
+        })
+        .collect();
+    let plan = actual(Engine::Mssql, root, 400.0);
+    let concerns = insights(&plan);
+    let output: Vec<_> = concerns.iter().filter(|concern| concern.rule == "misestimate").collect();
+    assert_eq!(output.len(), 2);
+    assert!(output.iter().all(|concern| concern.nodes != vec![3]));
+    assert_eq!(access_concern(&plan).nodes, vec![3]);
+}

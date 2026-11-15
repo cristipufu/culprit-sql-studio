@@ -1,3 +1,4 @@
+mod parameters;
 mod relational_inputs;
 mod spills;
 
@@ -2881,6 +2882,8 @@ rule automatic-index [Sqlite]: SQLite builds a throwaway index on every run beca
 rule spill [Mssql, Postgres, Yugabyte, Mysql]: A sort or hash that ran out of memory and wrote to disk, or an exchange that spilled
 rule memory-grant [Mssql]: A memory grant far larger than what the query uses, or a wait for one
 rule misestimate [Mssql, Postgres, Yugabyte, Mysql]: Actual rows far from the estimate
+rule relational-input-access [Mssql, Postgres, Yugabyte, Mysql]: Recorded access exceeds the estimate for a relational input
+rule parameter-context [Mssql, Postgres, Yugabyte, Mysql]: Recorded runtime parameter representations differ from compilation
 rule nested-loops [Mssql, Postgres, Yugabyte, Mysql]: A nested loop rereading its inner side thousands of times
 rule big-sort [Mssql, Postgres, Yugabyte, Mysql]: A large sort that dominates the plan
 rule no-join-predicate [Mssql, Postgres, Yugabyte, Mysql]: Two inputs joined without a condition

@@ -7,7 +7,7 @@ use crate::model::Engine;
 const HINTS_WITH_A_NUMBER: &[&str] = &["MAXDOP", "FAST", "MAXRECURSION", "QUERYTRACEON"];
 
 /// Numbers inside these types' parentheses are sizes (`nvarchar(200)`, `decimal(12,2)`), not data.
-const SIZED_TYPES: &[&str] = &[
+pub(super) const SIZED_TYPES: &[&str] = &[
     "char",
     "varchar",
     "nchar",
