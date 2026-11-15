@@ -12,9 +12,9 @@ enum AccessDifference {
 pub(super) struct AccessComparison {
     estimated: f64,
     actual: f64,
-    estimated_output: f64,
-    actual_output: f64,
-    difference: AccessDifference,
+    estimated_output: Option<f64>,
+    actual_output: Option<f64>,
+    difference: Option<AccessDifference>,
 }
 
 impl AccessComparison {
@@ -29,24 +29,29 @@ impl AccessComparison {
         }
         let estimated = access.estimated_per_execution? * executions;
         let actual = access.actual_total?;
-        let expected_output = node.est_rows * executions;
-        let output = node.act_rows?;
-        if ![estimated, actual, expected_output, output].into_iter().all(|value| value.is_finite() && value >= 0.0)
-            || expected_output > estimated
-            || output > actual
+        let estimated_output = (!node.facts().estimated_rows_unavailable).then_some(node.est_rows * executions);
+        let actual_output = node.act_rows;
+        let invalid_output = |output: Option<f64>, accessed: f64| {
+            output.is_some_and(|value| !value.is_finite() || value < 0.0 || value > accessed)
+        };
+        if ![estimated, actual].into_iter().all(|value| value.is_finite() && value >= 0.0)
+            || invalid_output(estimated_output, estimated)
+            || invalid_output(actual_output, actual)
         {
             return None;
         }
-        let volume = differs_materially(estimated, actual);
-        let selectivity =
-            estimated > 0.0 && actual > 0.0 && differs_materially(expected_output / estimated, output / actual);
-        let difference = match (volume, selectivity) {
-            (true, false) => AccessDifference::Volume,
-            (false, true) => AccessDifference::Selectivity,
-            (true, true) => AccessDifference::Both,
-            (false, false) => AccessDifference::Undetermined,
-        };
-        Some(Self { estimated, actual, estimated_output: expected_output, actual_output: output, difference })
+        let difference = estimated_output.zip(actual_output).map(|(expected, output)| {
+            let volume = differs_materially(estimated, actual);
+            let selectivity =
+                estimated > 0.0 && actual > 0.0 && differs_materially(expected / estimated, output / actual);
+            match (volume, selectivity) {
+                (true, false) => AccessDifference::Volume,
+                (false, true) => AccessDifference::Selectivity,
+                (true, true) => AccessDifference::Both,
+                (false, false) => AccessDifference::Undetermined,
+            }
+        });
+        Some(Self { estimated, actual, estimated_output, actual_output, difference })
     }
 
     pub(super) fn detail(&self) -> String {
@@ -56,19 +61,22 @@ impl AccessComparison {
             actual = rows_text(self.actual)
         );
         let distinction = match self.difference {
-            AccessDifference::Volume => t!("insight.relational_input.access_volume"),
-            AccessDifference::Selectivity => t!("insight.relational_input.selectivity"),
-            AccessDifference::Both => t!("insight.relational_input.access_and_selectivity"),
-            AccessDifference::Undetermined => t!("insight.relational_input.access_undetermined"),
+            Some(AccessDifference::Volume) => t!("insight.relational_input.access_volume"),
+            Some(AccessDifference::Selectivity) => t!("insight.relational_input.selectivity"),
+            Some(AccessDifference::Both) => t!("insight.relational_input.access_and_selectivity"),
+            Some(AccessDifference::Undetermined) => t!("insight.relational_input.access_undetermined"),
+            None => self.unavailable_output_detail(),
         };
         format!("{counts} {distinction}")
     }
 
     pub(super) fn investigation(&self) -> String {
         match self.difference {
-            AccessDifference::Volume => t!("insight.relational_input.investigate_volume"),
-            AccessDifference::Selectivity => t!("insight.relational_input.investigate_selectivity"),
-            AccessDifference::Both | AccessDifference::Undetermined => t!("insight.relational_input.investigate_both"),
+            Some(AccessDifference::Volume) => t!("insight.relational_input.investigate_volume"),
+            Some(AccessDifference::Selectivity) => t!("insight.relational_input.investigate_selectivity"),
+            Some(AccessDifference::Both | AccessDifference::Undetermined) | None => {
+                t!("insight.relational_input.investigate_both")
+            }
         }
     }
 
@@ -78,12 +86,25 @@ impl AccessComparison {
             && differs_materially(self.estimated, self.actual)
     }
 
-    fn output_detail(&self) -> String {
-        t!(
+    fn output_detail(&self) -> Option<String> {
+        let (estimated, actual) = self.estimated_output.zip(self.actual_output)?;
+        Some(t!(
             "insight.relational_input_access.output_counts",
-            estimated = rows_text(self.estimated_output),
-            actual = rows_text(self.actual_output)
-        )
+            estimated = rows_text(estimated),
+            actual = rows_text(actual)
+        ))
+    }
+
+    fn unavailable_output_detail(&self) -> String {
+        match (self.estimated_output, self.actual_output) {
+            (Some(estimated), None) => {
+                t!("insight.relational_input_access.actual_output_unavailable", estimated = rows_text(estimated))
+            }
+            (None, Some(actual)) => {
+                t!("insight.relational_input_access.estimated_output_unavailable", actual = rows_text(actual))
+            }
+            _ => t!("insight.relational_input_access.output_unavailable"),
+        }
     }
 }
 
@@ -129,7 +150,9 @@ fn access_concern(
         estimated = rows_text(access.estimated),
         actual = rows_text(access.actual)
     );
-    concern.detail = format!("{} {}", access.detail(), access.output_detail());
+    let mut detail = vec![access.detail()];
+    detail.extend(access.output_detail());
+    concern.detail = detail.join(" ");
     concern.fix =
         format!("{} {}", access.investigation(), statistics::relational_input_advice(kind, &table_leaf(&input)));
     concern.verify = t!("insight.relational_input.verify");

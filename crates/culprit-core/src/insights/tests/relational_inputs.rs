@@ -403,3 +403,185 @@ fn an_output_concern_omitted_by_its_bound_does_not_hide_an_unexplained_access_mi
     assert!(output.iter().all(|concern| concern.nodes != vec![3]));
     assert_eq!(access_concern(&plan).nodes, vec![3]);
 }
+
+#[test]
+fn native_access_underestimation_survives_missing_operator_output_measurement() {
+    let mut plan = access_plan(100.0, 100.0, 100.0, 10_000.0);
+    plan.root.act_rows = None;
+
+    let concern = access_concern(&plan);
+    assert_eq!(concern.nodes, vec![1]);
+    assert_eq!(
+        concern.detail,
+        format!(
+            "{} {}",
+            t!("insight.relational_input.access_counts", estimated = "100", actual = "10K"),
+            t!("insight.relational_input_access.actual_output_unavailable", estimated = "100")
+        )
+    );
+    assert!(concern.fix.starts_with(&t!("insight.relational_input.investigate_both")));
+    assert!(concern.fix.ends_with(&t!("insight.misestimate.fix.tvp", table = "@input")));
+    assert!(concern.fix_sql.is_none());
+    assert!(plan.root.act_rows.is_none());
+    assert_eq!(plan.root.facts().access_rows.unwrap().actual_total, Some(10_000.0));
+}
+
+#[test]
+fn unavailable_output_estimates_never_supply_placeholder_selectivity() {
+    let mut expected_detail = None;
+    for placeholder in [0.0, 1.0, 1_000_000.0] {
+        let mut plan = access_plan(placeholder, 100.0, 100.0, 10_000.0);
+        plan.root.facts_mut().estimated_rows_unavailable = true;
+
+        let concern = access_concern(&plan);
+        assert!(
+            concern
+                .detail
+                .contains(&t!("insight.relational_input_access.estimated_output_unavailable", actual = "100"))
+        );
+        assert!(concern.fix.starts_with(&t!("insight.relational_input.investigate_both")));
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "misestimate"));
+        if let Some(expected) = &expected_detail {
+            assert_eq!(&concern.detail, expected, "an unavailable estimate must not alter the comparison");
+        } else {
+            expected_detail = Some(concern.detail);
+        }
+        assert_eq!(plan.root.est_rows, placeholder, "the raw native plan is retained");
+    }
+}
+
+#[test]
+fn access_evidence_can_stand_when_both_output_counts_are_unavailable() {
+    let mut plan = access_plan(0.0, 0.0, 100.0, 10_000.0);
+    plan.root.facts_mut().estimated_rows_unavailable = true;
+    plan.root.act_rows = None;
+
+    let concern = access_concern(&plan);
+    assert_eq!(
+        concern.detail,
+        format!(
+            "{} {}",
+            t!("insight.relational_input.access_counts", estimated = "100", actual = "10K"),
+            t!("insight.relational_input_access.output_unavailable")
+        )
+    );
+    assert!(concern.fix_sql.is_none());
+    assert_eq!(concern.verify, t!("insight.relational_input.verify"));
+}
+
+#[test]
+fn measured_zero_output_is_distinct_from_unavailable_output() {
+    let mut plan = access_plan(0.0, 0.0, 100.0, 10_000.0);
+    let measured = access_concern(&plan);
+    assert!(measured.detail.contains(&t!("insight.relational_input.access_volume")));
+    assert!(measured.detail.contains(&t!(
+        "insight.relational_input_access.output_counts",
+        estimated = "0",
+        actual = "0"
+    )));
+
+    plan.root.act_rows = None;
+    let unavailable = access_concern(&plan);
+    assert!(
+        unavailable.detail.contains(&t!("insight.relational_input_access.actual_output_unavailable", estimated = "0"))
+    );
+    assert!(!unavailable.detail.contains(&t!("insight.relational_input.access_volume")));
+    assert_ne!(unavailable.detail, measured.detail);
+}
+
+#[test]
+fn missing_output_does_not_erase_serial_execution_scaling() {
+    let mut plan = access_plan(1.0, 100.0, 100.0, 1_000_000.0);
+    plan.root.act_executions = Some(100.0);
+    plan.root.act_rows = None;
+
+    let concern = access_concern(&plan);
+    assert!(concern.detail.contains(&t!(
+        "insight.relational_input.access_counts",
+        estimated = "10K",
+        actual = format::count(1_000_000.0)
+    )));
+    assert!(
+        concern.detail.contains(&t!("insight.relational_input_access.actual_output_unavailable", estimated = "100"))
+    );
+    assert_eq!(plan.root.act_executions, Some(100.0));
+}
+
+#[test]
+fn incomplete_output_cannot_relax_native_access_authority_or_contradiction_guards() {
+    for issue in [
+        "estimated-plan",
+        "no-native-access",
+        "estimated-access-only",
+        "actual-access-only",
+        "invalid-access",
+        "missing-executions",
+        "fractional-executions",
+        "parallel",
+        "wrong-operator",
+        "invalid-output-estimate",
+        "output-estimate-exceeds-access",
+        "invalid-output-measurement",
+        "output-measurement-exceeds-access",
+    ] {
+        let mut plan = access_plan(100.0, 100.0, 100.0, 10_000.0);
+        plan.root.act_rows = None;
+        match issue {
+            "estimated-plan" => plan.kind = PlanKind::Estimated,
+            "no-native-access" => {
+                plan.root.facts_mut().access_rows = None;
+                plan.root.rows_read = Some(10_000.0);
+            }
+            "estimated-access-only" => plan.root.facts_mut().access_rows.as_mut().unwrap().actual_total = None,
+            "actual-access-only" => plan.root.facts_mut().access_rows.as_mut().unwrap().estimated_per_execution = None,
+            "invalid-access" => {
+                plan.root.facts_mut().access_rows.as_mut().unwrap().actual_total = Some(f64::INFINITY);
+            }
+            "missing-executions" => plan.root.act_executions = None,
+            "fractional-executions" => plan.root.act_executions = Some(0.5),
+            "parallel" => plan.root.facts_mut().parallel_threads = Some(2),
+            "wrong-operator" => plan.root.kind = NodeKind::Join,
+            "invalid-output-estimate" => plan.root.est_rows = f64::NAN,
+            "output-estimate-exceeds-access" => plan.root.est_rows = 101.0,
+            "invalid-output-measurement" => plan.root.act_rows = Some(f64::NAN),
+            "output-measurement-exceeds-access" => plan.root.act_rows = Some(10_001.0),
+            _ => unreachable!(),
+        }
+        assert!(!insights(&plan).iter().any(|insight| insight.rule == "relational-input-access"), "{issue}");
+    }
+
+    let mut healthy = access_plan(100.0, 100.0, 10_000.0, 10_000.0);
+    healthy.root.act_rows = None;
+    assert!(!insights(&healthy).iter().any(|insight| insight.rule == "relational-input-access"));
+}
+
+#[test]
+fn unavailable_output_does_not_promote_an_unqualified_input_to_a_tvp() {
+    for input in [
+        None,
+        Some(RelationalInput { kind: Kind::Unknown, provenance: Provenance::Unresolved }),
+        Some(RelationalInput { kind: Kind::TableValuedParameter, provenance: Provenance::NativePlan }),
+    ] {
+        let mut plan = access_plan(100.0, 100.0, 100.0, 10_000.0);
+        plan.root.act_rows = None;
+        plan.root.facts_mut().relational_input = input;
+        let concern = access_concern(&plan);
+        assert!(concern.fix.ends_with(&statistics::relational_input_advice(Kind::Unknown, "@input")));
+        assert!(!concern.fix.contains(&t!("insight.misestimate.fix.tvp", table = "@input")));
+        assert!(concern.fix_sql.is_none());
+    }
+}
+
+#[test]
+fn complete_access_and_output_comparisons_preserve_their_existing_wording() {
+    let concern = access_concern(&access_plan(100.0, 100.0, 100.0, 10_000.0));
+    assert_eq!(
+        concern.detail,
+        format!(
+            "{} {} {}",
+            t!("insight.relational_input.access_counts", estimated = "100", actual = "10K"),
+            t!("insight.relational_input.access_and_selectivity"),
+            t!("insight.relational_input_access.output_counts", estimated = "100", actual = "100")
+        )
+    );
+}
