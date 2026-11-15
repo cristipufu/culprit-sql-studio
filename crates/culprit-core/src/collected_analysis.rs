@@ -100,6 +100,7 @@ pub enum CollectedAnalysisLimit {
     UnknownWaitCategory,
     WaitWithoutRuntime,
     ExecutableFixPrerequisitesUnknown,
+    ExecutionPopulationUnknown,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -109,12 +110,13 @@ pub struct CollectedAnalysisLimitation {
     pub reason: CollectedAnalysisLimit,
 }
 
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 #[ts(export)]
-pub struct CollectedAnalysisContext {
-    #[serde(flatten)]
-    pub evidence: CollectedEvidenceContext,
-    pub query_inputs: Vec<CollectedQueryInput>,
+pub enum CollectedQueryPopulation {
+    Unknown,
+    Unpartitioned,
+    Population { identity: crate::telemetry::NativeIdentity },
 }
 
 /// A partial analysis of the captured application's query observations. It deliberately has no current-server
@@ -122,7 +124,17 @@ pub struct CollectedAnalysisContext {
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
 pub struct CollectedQueryAnalysis {
-    pub context: CollectedAnalysisContext,
+    pub context: CollectedEvidenceContext,
+    pub requested_population: Option<crate::telemetry::NativeIdentity>,
+    /// Independent results from the same authenticated capture. Their runtime populations are never pooled.
+    pub analyses: Vec<CollectedQueryAnalysisResult>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedQueryAnalysisResult {
+    pub population: CollectedQueryPopulation,
+    pub query_inputs: Vec<CollectedQueryInput>,
     pub workload: Option<Workload>,
     pub findings: Vec<Finding>,
     pub assessments: Vec<CheckAssessment>,

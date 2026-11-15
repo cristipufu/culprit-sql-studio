@@ -76,13 +76,13 @@ async fn committed_query_capture_reaches_the_existing_offline_analysis_with_exac
     let before = fixture.objects.snapshot();
     let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = crate::collected_evidence::analyze(&capture).unwrap();
-    assert_eq!(analysis.context.evidence.source, source);
-    assert_eq!(analysis.context.evidence.records.len(), expected_records);
-    assert!(!analysis.context.query_inputs.is_empty());
-    assert!(analysis.workload.is_some());
+    let analysis = crate::collected_evidence::analyze(&capture, None).unwrap();
+    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.context.records.len(), expected_records);
+    assert!(!analysis.analyses[0].query_inputs.is_empty());
+    assert!(analysis.analyses[0].workload.is_some());
     assert!(
-        analysis
+        analysis.analyses[0]
             .limitations
             .iter()
             .any(|limitation| limitation.reason

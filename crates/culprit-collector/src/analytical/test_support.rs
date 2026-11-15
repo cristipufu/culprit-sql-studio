@@ -18,6 +18,10 @@ pub use investigations::{InvestigationFixture, investigation_fixture};
 
 mod queries;
 pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};
+mod query_populations;
+pub use query_populations::{
+    assert_query_population_capture, query_population_evidence, query_population_evidence_cases,
+};
 mod query_cohorts;
 pub use query_cohorts::{
     QueryCohortCase, assert_query_cohort_capture, query_cohort_evidence, query_cohort_evidence_cases,

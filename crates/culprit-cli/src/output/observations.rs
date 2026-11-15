@@ -1,6 +1,7 @@
 use culprit_core::{
     CachedPlanEntry, CachedPlanReport, CompilationReport, MemoryParticipantsReport, PageWaitReport,
     RetainedFailureReport, RuntimeDistributionReport, SourceOutcome, SourceState, StatementWorkReport, TaskSpaceReport,
+    collected_analysis::{CollectedQueryAnalysis, CollectedQueryAnalysisResult, CollectedQueryPopulation},
     format, t,
 };
 
@@ -16,6 +17,53 @@ struct Summary<'a> {
 enum SourceQualification<'a> {
     Single { state: Option<SourceState>, reason: Option<&'a str> },
     Multiple(&'a [SourceOutcome]),
+}
+
+pub(crate) fn queries(analysis: &CollectedQueryAnalysis) -> String {
+    let mut text = t!(
+        "evidence.cli.query_summary",
+        range = &analysis.context.range_id,
+        findings = format::count(analysis.analyses.iter().map(|result| result.findings.len()).sum::<usize>() as f64),
+        limitations =
+            format::count(analysis.analyses.iter().map(|result| result.limitations.len()).sum::<usize>() as f64),
+        gaps = format::count(analysis.context.read_gaps.len() as f64)
+    );
+    text.push('\n');
+    text.push_str(&t!("evidence.cli.query_source", source = &analysis.context.source.source));
+    for result in &analysis.analyses {
+        text.push_str("\n\n");
+        text.push_str(&query_result(result));
+    }
+    text
+}
+
+fn query_result(result: &CollectedQueryAnalysisResult) -> String {
+    let mut text = match &result.population {
+        CollectedQueryPopulation::Unknown => t!("evidence.cli.query_population_unknown"),
+        CollectedQueryPopulation::Unpartitioned => t!("evidence.cli.query_population_unpartitioned"),
+        CollectedQueryPopulation::Population { identity } => {
+            let mut title = t!("evidence.cli.query_population", id = &identity.id);
+            if !identity.qualifiers.is_empty() {
+                let qualifiers =
+                    identity.qualifiers.iter().map(|(name, value)| format!("{name}={value:?}")).collect::<Vec<_>>();
+                title.push('\n');
+                title.push_str(&t!("evidence.cli.query_population_qualifiers", qualifiers = format::list(&qualifiers)));
+            }
+            title
+        }
+    };
+    text.push('\n');
+    text.push_str(&t!(
+        "evidence.cli.query_population_summary",
+        findings = format::count(result.findings.len() as f64),
+        limitations = format::count(result.limitations.len() as f64)
+    ));
+    if result.workload.is_none() {
+        text.push('\n');
+        text.push_str(&t!("evidence.cli.query_population_unavailable"));
+    }
+    super::append_brief_titles(&mut text, result.findings.iter().map(|finding| finding.title.as_str()));
+    text
 }
 
 pub(crate) fn cleanup(report: &culprit_core::CleanupReport) -> String {
@@ -264,6 +312,43 @@ fn append_native_sources(text: &mut String, sources: &[SourceOutcome]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn query_sections_keep_exact_native_context_and_distinguish_unknown_from_unpartitioned_history() {
+        let mut result = CollectedQueryAnalysisResult {
+            population: CollectedQueryPopulation::Population {
+                identity: culprit_core::telemetry::NativeIdentity::new("17")
+                    .qualified("native-context", "readonly, original generation"),
+            },
+            query_inputs: vec![],
+            workload: None,
+            findings: vec![],
+            assessments: vec![],
+            locked: vec![],
+            limitations: vec![culprit_core::collected_analysis::CollectedAnalysisLimitation {
+                record_id: None,
+                reason: culprit_core::collected_analysis::CollectedAnalysisLimit::RuntimeDenominatorUnavailable,
+            }],
+            provenance: None,
+        };
+        let text = query_result(&result);
+        assert!(text.starts_with(&t!("evidence.cli.query_population", id = "17")));
+        assert!(text.contains("native-context=\"readonly, original generation\""));
+        assert!(text.contains(&t!("evidence.cli.query_population_unavailable")));
+        assert!(text.contains(&t!("evidence.cli.query_population_summary", findings = "0", limitations = "1")));
+        assert!(!text.contains(&t!("evidence.cli.query_population_unknown")));
+        assert!(!text.contains(&t!("evidence.cli.query_population_unpartitioned")));
+
+        result.population = CollectedQueryPopulation::Unknown;
+        let unknown = query_result(&result);
+        assert!(unknown.starts_with(&t!("evidence.cli.query_population_unknown")));
+        assert!(
+            !unknown.contains("native-context")
+                && !unknown.contains(&t!("evidence.cli.query_population_unpartitioned"))
+        );
+        result.population = CollectedQueryPopulation::Unpartitioned;
+        assert!(query_result(&result).starts_with(&t!("evidence.cli.query_population_unpartitioned")));
+    }
 
     #[test]
     fn cleanup_text_keeps_native_mechanisms_and_source_failures_with_a_bounded_entry_list() {

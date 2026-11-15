@@ -62,10 +62,22 @@ are returned. Recovery objects and bytes are reported alongside warehouse querie
 The existing caller deadline and cancellation own these read-only bodies; no source connection or archive writer
 is opened.
 
-With the engine's `collector` feature, `culprit_engine::collected_evidence::analyze` feeds one verified query-history
-capture through the existing pure checks. It returns `CollectedQueryAnalysis`, with authenticated native inputs,
-findings, unavailable assessments and explicit limitations. It does not open a database or manufacture a current
-server snapshot. Sources can declare a plan-independent native cohort for comparable runtime fragments. Analysis
+With the engine's `collector` feature, `culprit_engine::collected_evidence::analyze(&capture, population)` feeds one
+verified query-history capture through the existing pure checks. `None` returns independent analyses for every
+source-declared execution group; `Some(&NativeIdentity)` selects one exact captured group. It returns
+`CollectedQueryAnalysis`: one original authenticated evidence `context`, the `requested_population`, and separate
+`analyses` containing their own population, query inputs, workload, findings, assessments and limitations. Their
+runtime totals are never pooled. Unknown execution-group coverage stays unknown, with no comparable workload or
+denominator; it does not become an unpartitioned history. The captured source catalog distinguishes positively
+unpartitioned history from known groups. Analysis does not open a database or manufacture a current server snapshot.
+
+The SDK's retained-analysis limit is 256 MiB of compact JSON for the complete output, including the single original
+evidence context and every independent result. It measures serialized size without allocating that JSON output and
+rejects an oversized analysis with a capacity error, returning no partial analysis. Select one execution group or
+read a smaller capture to stay within the limit. This ceiling is separate from the caller's archive read budget and
+the CLI's `--max-output-bytes` output limit; increasing the CLI limit does not raise the SDK ceiling.
+
+Sources can declare a plan-independent native cohort for comparable runtime fragments. Analysis
 groups only the same exact query reference and declared cohort within one source interval; native execution
 outcomes, replica identities, contexts and generations remain separate. Without that declaration, exact plan
 references and all native qualifiers remain part of the grouping. Shared code never removes provider qualifiers
@@ -77,7 +89,7 @@ Recorded variation can justify investigating inputs, estimates, waits and resour
 parameter sniffing, current plan use, overlapping plan lifetimes or a safe plan to force. Unobserved forcing status
 is unknown rather than false. Waits join only the exact plan population with positive runtime in that cohort.
 Missing runtime rows withhold the workload denominator. Available statements can still be analyzed when unrelated
-definitions are missing, using the complete captured runtime totals. Unsupported metrics remain in the native context.
+definitions are missing, using the complete captured runtime totals for their selected group. Unsupported metrics remain in the native context.
 Known monitoring and engine-internal statements are excluded from application totals as well as application
 recommendations. Unresolved definitions keep their known runtime in the conservative denominator.
 
@@ -143,6 +155,8 @@ culprit collect evidence read --config archive.json --range "$CULPRIT_CAPTURE_RA
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis queries --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis queries --workload-population "$CULPRIT_EXECUTION_GROUP" --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis native-failures
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis request-memory --json
@@ -172,6 +186,14 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
 diagnostics. Both call the scan's existing pure explanation functions, reference original native rows once, and
 retain source qualifications separately from warehouse read gaps. Query analysis requests its four definition,
 runtime and wait families. No mode invents current server metadata or query ownership.
+
+Query analysis shows separate execution-group sections by default. Its JSON retains the native choices at
+`context.source.observation.data.population_catalog`, with all original rows and proof context once. Set
+`CULPRIT_EXECUTION_GROUP` to an exact ID from that captured catalog to select one group with
+`--workload-population`. The option applies only to query analysis. An absent ID is rejected; if several captured
+identities share that ID with different qualifiers, use the SDK with the full native identity. Neither native labels,
+role history nor the connected compute member selects a group. Selection happens after the same verified
+whole-capture archive read, without another source read or a change to recovery-payload opt-in and proof checks.
 
 `request-memory` explains native execution reservations from a database-target `current-request-memory` capture.
 Waiting requests are affected participants; granted and used amounts are separate measurements. A matching current

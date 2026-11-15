@@ -1,7 +1,7 @@
 //! Native response limits and retained report limits are independent: shared payloads can recur in many reports.
 use super::*;
+use culprit_core::serialization::{JsonSizeError, json_size};
 use serde::Serialize;
-use std::io::Write;
 
 const MAX_RETAINED_WORKLOAD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_POPULATION_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
@@ -150,29 +150,11 @@ fn limited_snapshot(shared: &Snapshot, options: &SnapshotOptions) -> Snapshot {
     snapshot
 }
 
-struct CountedBytes {
-    count: usize,
-    limit: usize,
-    exceeded: bool,
-}
-impl Write for CountedBytes {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if bytes.len() > self.limit.saturating_sub(self.count) {
-            self.exceeded = true;
-            return Err(std::io::Error::other("bounded serialization"));
-        }
-        self.count += bytes.len();
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
 fn serialized_size(value: &impl Serialize, limit: usize) -> Result<usize> {
-    let mut writer = CountedBytes { count: 0, limit, exceeded: false };
-    serde_json::to_writer(&mut writer, value)
-        .map_err(|_| if writer.exceeded { CollectionStop::ByteLimit.error() } else { crate::read::invalid_data() })?;
-    Ok(writer.count)
+    json_size(value, limit).map_err(|error| match error {
+        JsonSizeError::LimitExceeded => CollectionStop::ByteLimit.error(),
+        JsonSizeError::Serialization => crate::read::invalid_data(),
+    })
 }
 
 #[cfg(test)]

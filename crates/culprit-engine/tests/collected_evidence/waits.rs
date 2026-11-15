@@ -68,13 +68,13 @@ fn integer_wait(records: &[TelemetryRecord], category: &str, total: &str, id: &s
 }
 
 fn query(analysis: &CollectedQueryAnalysis) -> &QueryStat {
-    let queries = &analysis
+    let queries = &analysis.analyses[0]
         .workload
         .as_ref()
         .unwrap_or_else(|| {
             panic!(
                 "query workload unavailable: limits={:?}; read gaps={:?}",
-                analysis.limitations, analysis.context.evidence.read_gaps
+                analysis.analyses[0].limitations, analysis.context.read_gaps
             )
         })
         .queries;
@@ -83,7 +83,7 @@ fn query(analysis: &CollectedQueryAnalysis) -> &QueryStat {
 }
 
 fn has_limit(analysis: &CollectedQueryAnalysis, reason: CollectedAnalysisLimit) -> bool {
-    analysis.limitations.iter().any(|limit| limit.reason == reason)
+    analysis.analyses[0].limitations.iter().any(|limit| limit.reason == reason)
 }
 
 #[tokio::test]
@@ -101,7 +101,7 @@ async fn authenticated_dictionary_projects_every_class_and_keeps_native_names_an
     let fixture = Fixture::new(source.clone(), records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let projected = query(&analysis);
     for (index, class) in WaitClass::ALL.iter().enumerate() {
         let expected = Some((100 + index) as f64);
@@ -110,9 +110,9 @@ async fn authenticated_dictionary_projects_every_class_and_keeps_native_names_an
     }
     assert!(projected.waits.iter().all(|row| row.wait_type.is_none() && row.tasks.is_none()));
     assert_eq!(projected.waits_coverage.as_ref().unwrap().classes.len(), WaitClass::ALL.len());
-    assert_eq!(analysis.context.evidence.source, source);
+    assert_eq!(analysis.context.source, source);
     for wait in waits {
-        assert!(analysis.context.evidence.records.iter().any(|record| record.row.record == wait));
+        assert!(analysis.context.records.iter().any(|record| record.row.record == wait));
     }
     assert!(!has_limit(&analysis, CollectedAnalysisLimit::MetricNotProjected));
     assert!(!has_limit(&analysis, CollectedAnalysisLimit::UnknownWaitCategory));
@@ -143,7 +143,7 @@ async fn dictionary_disposition_is_authoritative_over_engine_source_native_id_an
         "arbitrary-native-id",
     )));
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let projected = query(&analysis);
     assert_eq!(projected.measured_wait_ms(WaitClass::Memory), Some(1250.0));
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
@@ -162,14 +162,14 @@ async fn a_published_present_empty_wait_batch_can_measure_zero_for_qualified_cla
     assert!(empty.delivery_required && empty.rows.is_empty());
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let projected = query(&analysis);
     assert!(projected.waits.is_empty());
     assert_eq!(projected.observed_wait_ms(WaitClass::Lock), None);
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), Some(0.0));
     assert_eq!(projected.measured_wait_ms(WaitClass::Memory), None);
     assert!(!has_limit(&analysis, CollectedAnalysisLimit::UnknownWaitCategory));
-    let lock = analysis.assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap();
+    let lock = analysis.analyses[0].assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap();
     assert_eq!(lock.status, CheckStatus::Assessed);
 }
 
@@ -185,13 +185,13 @@ async fn unselected_wait_family_is_unknown_even_when_the_requested_read_has_no_g
         ])
         .await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let projected = query(&analysis);
     assert!(projected.waits.is_empty());
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
     assert!(has_limit(&analysis, CollectedAnalysisLimit::WaitFamilyIncomplete));
     assert_ne!(
-        analysis.assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap().status,
+        analysis.analyses[0].assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap().status,
         CheckStatus::Assessed
     );
 }
@@ -205,23 +205,18 @@ async fn currently_enabled_capture_preserves_positive_waits_without_proving_the_
     let fixture = Fixture::new(source.clone(), records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let projected = query(&analysis);
     assert_eq!(projected.observed_wait_ms(WaitClass::Io), Some(15000.0));
     assert_eq!(projected.measured_wait_ms(WaitClass::Io), None);
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
     assert!(has_limit(&analysis, CollectedAnalysisLimit::WaitIntervalCoverageUnverified));
-    assert_eq!(analysis.context.evidence.source, source);
+    assert_eq!(analysis.context.source, source);
     assert!(
-        analysis
-            .context
-            .evidence
-            .records
-            .iter()
-            .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
+        analysis.context.records.iter().any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
     );
     assert_ne!(
-        analysis.assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap().status,
+        analysis.analyses[0].assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap().status,
         CheckStatus::Assessed
     );
 }
@@ -238,7 +233,7 @@ async fn turning_capture_off_or_losing_current_config_does_not_erase_historical_
         let wait = integer_wait(&records, "native-lock", "60000", "retained-positive");
         records.push(TelemetryRecord::QueryWaits(wait.clone()));
         let fixture = Fixture::new(source, records).await;
-        let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+        let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
         let projected = query(&analysis);
         assert_eq!(projected.observed_wait_ms(WaitClass::Lock), Some(60000.0));
         assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
@@ -247,12 +242,11 @@ async fn turning_capture_off_or_losing_current_config_does_not_erase_historical_
         assert!(
             analysis
                 .context
-                .evidence
                 .records
                 .iter()
                 .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
         );
-        assert!(analysis.findings.iter().any(|finding| finding.check == "lock-time"));
+        assert!(analysis.analyses[0].findings.iter().any(|finding| finding.check == "lock-time"));
     }
 }
 
@@ -262,7 +256,7 @@ async fn current_mode_does_not_override_independent_qualification_of_a_historica
         let (mut source, records) = history();
         dictionary(&mut source).capture = capture;
         let fixture = Fixture::new(source, records).await;
-        let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+        let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
         assert_eq!(query(&analysis).measured_wait_ms(WaitClass::Lock), Some(0.0));
         assert!(!has_limit(&analysis, CollectedAnalysisLimit::WaitIntervalCoverageUnverified));
     }
@@ -277,15 +271,15 @@ async fn a_missing_wait_row_preserves_known_positive_subtotals_without_inventing
     fixture.remove_first_row(TelemetryStream::QueryWaits);
     let capture = fixture.read().await;
     assert!(!capture.is_read_complete());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let projected = query(&analysis);
     assert_eq!(projected.observed_wait_ms(WaitClass::Io), Some(15000.0));
     assert_eq!(projected.measured_wait_ms(WaitClass::Io), None);
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
     assert!(has_limit(&analysis, CollectedAnalysisLimit::WaitFamilyIncomplete));
-    assert!(analysis.findings.iter().all(|finding| finding.check != "lock-time"));
+    assert!(analysis.analyses[0].findings.iter().all(|finding| finding.check != "lock-time"));
     assert_ne!(
-        analysis.assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap().status,
+        analysis.analyses[0].assessments.iter().find(|assessment| assessment.check == "lock-time").unwrap().status,
         CheckStatus::Assessed
     );
 }
@@ -297,18 +291,17 @@ async fn observed_unknown_categories_preserve_positive_locks_but_never_become_ot
         records.push(TelemetryRecord::QueryWaits(integer_wait(&records, "native-lock", "60000", "known-lock")));
         records.push(TelemetryRecord::QueryWaits(integer_wait(&records, category, "9000", "unknown-wait")));
         let fixture = Fixture::new(source, records).await;
-        let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+        let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
         let projected = query(&analysis);
         assert_eq!(projected.observed_wait_ms(WaitClass::Lock), Some(60000.0));
         assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
         assert_eq!(projected.observed_wait_ms(WaitClass::Other), None);
         assert_eq!(projected.measured_wait_ms(WaitClass::Other), None);
         assert!(has_limit(&analysis, CollectedAnalysisLimit::UnknownWaitCategory));
-        assert!(analysis.findings.iter().any(|finding| finding.check == "lock-time"));
+        assert!(analysis.analyses[0].findings.iter().any(|finding| finding.check == "lock-time"));
         assert_eq!(
             analysis
                 .context
-                .evidence
                 .records
                 .iter()
                 .filter(|record| matches!(record.row.record, TelemetryRecord::QueryWaits(_)))
@@ -323,7 +316,7 @@ async fn ignored_native_categories_do_not_poison_measurement_or_become_other() {
     let (source, mut records) = history();
     records.push(TelemetryRecord::QueryWaits(integer_wait(&records, "native-idle", "99999", "ignored")));
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let projected = query(&analysis);
     assert!(projected.waits.is_empty());
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), Some(0.0));
@@ -341,7 +334,7 @@ async fn exact_qualifier_joins_do_not_attach_another_outcome_replica_or_plan() {
         wait.key.native.qualifiers.insert(dimension.into(), "1".into());
         records.push(TelemetryRecord::QueryWaits(wait.clone()));
         let fixture = Fixture::new(source, records).await;
-        let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+        let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
         let projected = query(&analysis);
         assert!(projected.waits.is_empty());
         assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
@@ -349,7 +342,6 @@ async fn exact_qualifier_joins_do_not_attach_another_outcome_replica_or_plan() {
         assert!(
             analysis
                 .context
-                .evidence
                 .records
                 .iter()
                 .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
@@ -391,8 +383,8 @@ async fn exact_plan_definition_references_isolate_waits_even_with_identical_sql_
     let wait = integer_wait(&records, "native-lock", "60000", "first-plan-lock");
     records.extend([TelemetryRecord::QueryRuntime(second), TelemetryRecord::QueryWaits(wait)]);
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
-    let queries = &analysis.workload.as_ref().unwrap().queries;
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
+    let queries = &analysis.analyses[0].workload.as_ref().unwrap().queries;
     assert_eq!(queries.len(), 2);
     let by_plan = |id: &str| queries.iter().find(|query| query.plan_id.as_deref() == Some(id)).unwrap();
     assert_eq!(
@@ -433,7 +425,7 @@ async fn native_time_units_and_multiple_category_fragments_fold_once_without_exe
         )));
     }
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let projected = query(&analysis);
     assert_eq!(projected.waits.len(), 1);
     assert_eq!(projected.measured_wait_ms(WaitClass::Lock), Some(5010.0));
@@ -455,7 +447,7 @@ async fn integer_precision_and_conversion_overflow_keep_raw_values_and_only_supp
             )));
         }
         let fixture = Fixture::new(source, records).await;
-        let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+        let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
         let projected = query(&analysis);
         assert_eq!(projected.observed_wait_ms(WaitClass::Lock), expected);
         assert_eq!(projected.measured_wait_ms(WaitClass::Lock), None);
@@ -463,7 +455,6 @@ async fn integer_precision_and_conversion_overflow_keep_raw_values_and_only_supp
         assert_eq!(
             analysis
                 .context
-                .evidence
                 .records
                 .iter()
                 .filter(|record| matches!(record.row.record, TelemetryRecord::QueryWaits(_)))
@@ -480,7 +471,7 @@ async fn integer_precision_and_conversion_overflow_keep_raw_values_and_only_supp
         "overflow",
     )));
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     assert_eq!(query(&analysis).observed_wait_ms(WaitClass::Lock), None);
     assert_eq!(query(&analysis).measured_wait_ms(WaitClass::Lock), None);
     assert!(has_limit(&analysis, CollectedAnalysisLimit::CounterPrecision));
@@ -493,11 +484,11 @@ async fn missing_publication_does_not_turn_an_empty_read_into_a_measured_workloa
     fixture.unpublish();
     let capture = fixture.read().await;
     assert!(!capture.is_read_complete());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
-    assert!(analysis.workload.is_none());
-    assert!(analysis.context.query_inputs.is_empty());
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    assert!(analysis.analyses[0].workload.is_none());
+    assert!(analysis.analyses[0].query_inputs.is_empty());
     assert!(
-        analysis
+        analysis.analyses[0]
             .assessments
             .iter()
             .filter(|assessment| assessment.check == "lock-time")

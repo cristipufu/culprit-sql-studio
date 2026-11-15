@@ -2,32 +2,96 @@
 use culprit_collector::analytical::evidence::EvidenceCapture;
 use culprit_core::{
     CollectorNote, Environment, MissingCapability, Result, SNAPSHOT_FORMAT, ServerInfo, Snapshot, SourceOutcome,
-    SourceState, Workload, collected_analysis::*, source_id, telemetry::DeliveryProblem,
+    SourceState, Workload,
+    collected_analysis::*,
+    serialization::{JsonSizeError, json_size},
+    source_id,
+    telemetry::DeliveryProblem,
 };
 
 mod groups;
+mod populations;
 mod validation;
 mod waits;
 
+const MAX_RETAINED_ANALYSIS_BYTES: usize = 256 * 1024 * 1024;
+
 /// Analyze one explicitly selected capture. This cannot merge overlapping captures, source epochs or databases.
-pub fn analyze(capture: &EvidenceCapture) -> Result<CollectedQueryAnalysis> {
+pub fn analyze(
+    capture: &EvidenceCapture,
+    population: Option<&culprit_core::telemetry::NativeIdentity>,
+) -> Result<CollectedQueryAnalysis> {
+    analyze_with_limit(capture, population, MAX_RETAINED_ANALYSIS_BYTES)
+}
+
+fn analyze_with_limit(
+    capture: &EvidenceCapture,
+    population: Option<&culprit_core::telemetry::NativeIdentity>,
+    limit: usize,
+) -> Result<CollectedQueryAnalysis> {
     let database = validation::capture(capture)?;
+    let selected = populations::PopulationIndex::new(capture, population)?;
     let definitions = validation::Definitions::new(capture)?;
+    let mut analysis = CollectedQueryAnalysis {
+        context: crate::collected_context::from_capture(capture),
+        requested_population: population.cloned(),
+        analyses: Vec::new(),
+    };
+    // The empty array already accounts for both brackets. Only each item and separators are added below; the
+    // original context, including every retained native payload, is charged exactly once before derivation.
+    let mut retained = json_size(&analysis, limit).map_err(output_size_error)?;
+    for population in selected.selected() {
+        let result =
+            analyze_population(capture, &definitions, &database, population.clone(), selected.rows(population)?)?;
+        let comma = usize::from(!analysis.analyses.is_empty());
+        let remaining = limit
+            .checked_sub(retained)
+            .and_then(|remaining| remaining.checked_sub(comma))
+            .ok_or_else(|| output_size_error(JsonSizeError::LimitExceeded))?;
+        let bytes = json_size(&result, remaining).map_err(output_size_error)?;
+        retained += comma + bytes;
+        analysis.analyses.push(result);
+    }
+    Ok(analysis)
+}
+
+fn output_size_error(error: JsonSizeError) -> culprit_core::Error {
+    match error {
+        JsonSizeError::LimitExceeded => {
+            DeliveryProblem::Capacity.error().with_hint(culprit_core::t!("engine.collected_analysis.output_limit_hint"))
+        }
+        JsonSizeError::Serialization => DeliveryProblem::Integrity.error(),
+    }
+}
+
+fn analyze_population(
+    capture: &EvidenceCapture,
+    definitions: &validation::Definitions<'_>,
+    database: &culprit_core::DatabaseIdentity,
+    population: CollectedQueryPopulation,
+    rows: &populations::NativeRows<'_>,
+) -> Result<CollectedQueryAnalysisResult> {
     let mut limitations = vec![
         limit(None, CollectedAnalysisLimit::MissingCurrentServerMetadata),
         limit(None, CollectedAnalysisLimit::MissingSchema),
         limit(None, CollectedAnalysisLimit::MissingSettings),
         limit(None, CollectedAnalysisLimit::MissingResourceMeasurements),
     ];
-    let (queries, query_inputs, partial) = groups::project(capture, &definitions, &mut limitations)?;
-    let workload = workload(capture, &definitions, queries, &mut limitations)?;
-    let mut report = culprit_checks::analyze(snapshot(capture, database, workload, partial));
+    let (workload, query_inputs, partial) = if population == CollectedQueryPopulation::Unknown {
+        limitations.push(limit(None, CollectedAnalysisLimit::ExecutionPopulationUnknown));
+        (None, vec![], true)
+    } else {
+        let (queries, inputs, partial) = groups::project(capture, definitions, &population, rows, &mut limitations)?;
+        (workload(capture, definitions, &population, rows, queries, &mut limitations)?, inputs, partial)
+    };
+    let mut report = culprit_checks::analyze(snapshot(capture, database.clone(), workload, partial));
     if let Some(provenance) = &mut report.provenance {
         provenance.origin = culprit_core::AnalysisOrigin::ArchivedTelemetry;
     }
     apply_executable_fix_policy(&mut report.findings, report.snapshot.workload.as_mut(), &mut limitations);
-    Ok(CollectedQueryAnalysis {
-        context: CollectedAnalysisContext { evidence: crate::collected_context::from_capture(capture), query_inputs },
+    Ok(CollectedQueryAnalysisResult {
+        population,
+        query_inputs,
         workload: report.snapshot.workload,
         findings: report.findings,
         assessments: report.assessments,
@@ -40,6 +104,8 @@ pub fn analyze(capture: &EvidenceCapture) -> Result<CollectedQueryAnalysis> {
 fn workload(
     capture: &EvidenceCapture,
     definitions: &validation::Definitions<'_>,
+    population: &CollectedQueryPopulation,
+    rows: &populations::NativeRows<'_>,
     queries: Vec<culprit_core::QueryStat>,
     limitations: &mut Vec<CollectedAnalysisLimitation>,
 ) -> Result<Option<Workload>> {
@@ -47,13 +113,16 @@ fn workload(
         return Ok(None);
     }
     let history = capture.source().query_history().ok_or_else(invalid)?;
-    let Some(totals) = groups::captured_totals(capture, definitions)? else {
+    let Some(totals) = groups::captured_totals(capture, definitions, rows)? else {
         limitations.push(limit(None, CollectedAnalysisLimit::RuntimeDenominatorUnavailable));
         return Ok(None);
     };
     let hours = validation::hours(&history.interval.from, &history.interval.until)?;
     Ok(Some(Workload {
-        population: None,
+        population: match population {
+            CollectedQueryPopulation::Population { identity } => Some(identity.clone()),
+            _ => None,
+        },
         population_catalog: None,
         source: capture.source().source.clone(),
         kind: None,
@@ -227,6 +296,10 @@ fn apply_executable_fix_policy(
 #[cfg(test)]
 #[path = "collected_evidence/advice_tests.rs"]
 mod advice_tests;
+
+#[cfg(test)]
+#[path = "collected_evidence/retention_tests.rs"]
+mod retention_tests;
 
 pub(super) fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()

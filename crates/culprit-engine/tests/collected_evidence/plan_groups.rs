@@ -8,7 +8,8 @@ use culprit_core::{
 use culprit_engine::collected_evidence;
 
 fn one(analysis: &CollectedQueryAnalysis) -> &QueryStat {
-    let workload = analysis.workload.as_ref().unwrap_or_else(|| panic!("{:?}", analysis.limitations));
+    let workload =
+        analysis.analyses[0].workload.as_ref().unwrap_or_else(|| panic!("{:?}", analysis.analyses[0].limitations));
     let [query] = workload.queries.as_slice() else { panic!("one native query population") };
     query
 }
@@ -45,7 +46,7 @@ async fn per_plan_extrema_and_optional_costs_require_every_original_fragment() {
     fragment.last_execution_at = None;
     fragment.metrics.retain(|metric| metric.key != RuntimeMetricKey::CpuTime);
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let query = one(&analysis);
     assert_eq!(query.executions, 50.0);
     assert_eq!(query.total_time_ms, 9500.0);
@@ -77,17 +78,17 @@ async fn unknown_native_qualifiers_remain_distinct_without_a_declared_cohort() {
     let (source, mut records) = query_cohort_evidence(QueryCohortCase::UnknownCohort);
     runtime(&mut records, "fragment-2").key.native.qualifiers.insert("unrecognized-reset-token".into(), "later".into());
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
-    let workload = analysis.workload.as_ref().unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
+    let workload = analysis.analyses[0].workload.as_ref().unwrap();
     assert_eq!(workload.queries.len(), 3);
     assert_eq!(workload.total_time_ms, 9500.0);
     assert_eq!(workload.total_executions, 50.0);
     assert_eq!(workload.query_count, 1.0);
     assert!(workload.queries.iter().all(|query| query.plans.len() == 1));
     assert!(
-        analysis.context.query_inputs.iter().all(|input| input.measurements.iter().all(|key| key.cohort.is_none()))
+        analysis.analyses[0].query_inputs.iter().all(|input| input.measurements.iter().all(|key| key.cohort.is_none()))
     );
-    assert!(!analysis.findings.iter().any(|finding| finding.check == "parameter-sensitive"));
+    assert!(!analysis.analyses[0].findings.iter().any(|finding| finding.check == "parameter-sensitive"));
 }
 
 #[tokio::test]
@@ -97,9 +98,9 @@ async fn authenticated_cohort_equality_authorizes_fragments_without_removing_raw
         runtime(&mut records, id).key.native.qualifiers.insert("source-row-token".into(), id.into());
     }
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     assert_eq!(one(&analysis).plans.len(), 2);
-    let [input] = analysis.context.query_inputs.as_slice() else { panic!() };
+    let [input] = analysis.analyses[0].query_inputs.as_slice() else { panic!() };
     assert!(input.references.plan.is_none(), "a multi-plan group has no single original plan reference");
     assert_eq!(input.measurements.len(), 3);
     for key in &input.measurements {
@@ -136,13 +137,15 @@ async fn a_wait_for_a_third_plan_cannot_join_through_the_query_cohort_alone() {
     wait.total = MeasurementValue::Integer("4000".into());
     records.extend([TelemetryRecord::PlanDefinition(third), TelemetryRecord::QueryWaits(wait)]);
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let query = one(&analysis);
     assert_eq!(query.plans.len(), 2);
     assert_eq!(query.observed_wait_ms(WaitClass::Lock), Some(30.0));
     assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitWithoutRuntime));
-    assert!(analysis.context.evidence.records.iter().any(|record| matches!(&record.row.record,
+    assert!(
+        analysis.analyses[0].limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitWithoutRuntime)
+    );
+    assert!(analysis.context.records.iter().any(|record| matches!(&record.row.record,
         TelemetryRecord::QueryWaits(wait) if wait.key.native.id == "unmatched-native-wait")));
 }
 
@@ -157,11 +160,13 @@ async fn mismatched_wait_cohort_keeps_only_the_original_plan_positive() {
         }
     }
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let query = one(&analysis);
     assert_eq!(query.observed_wait_ms(WaitClass::Lock), Some(25.0));
     assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitWithoutRuntime));
+    assert!(
+        analysis.analyses[0].limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitWithoutRuntime)
+    );
 }
 
 #[tokio::test]
@@ -171,28 +176,35 @@ async fn zero_execution_rows_do_not_authorize_a_plans_independent_waits() {
         runtime(&mut records, id).executions = "0".into();
     }
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let query = one(&analysis);
     assert_eq!(query.executions, 40.0);
     assert_eq!(query.total_time_ms, 400.0);
     assert_eq!(query.plans.len(), 1);
     assert_eq!(query.observed_wait_ms(WaitClass::Lock), Some(5.0));
     assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitWithoutRuntime));
+    assert!(
+        analysis.analyses[0].limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitWithoutRuntime)
+    );
 }
 
 #[tokio::test]
 async fn a_missing_plan_definition_keeps_its_runtime_without_inventing_a_variant_or_reference() {
     let (source, records) = query_cohort_evidence(QueryCohortCase::MissingPlan);
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let query = one(&analysis);
     assert_eq!(query.executions, 50.0);
     assert_eq!(query.total_time_ms, 9500.0);
     assert_eq!(query.plans.len(), 1);
     assert_eq!(query.plans[0].executions, 10.0);
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MissingPlanDefinition));
-    let [input] = analysis.context.query_inputs.as_slice() else { panic!() };
+    assert!(
+        analysis.analyses[0]
+            .limitations
+            .iter()
+            .any(|limit| limit.reason == CollectedAnalysisLimit::MissingPlanDefinition)
+    );
+    let [input] = analysis.analyses[0].query_inputs.as_slice() else { panic!() };
     assert!(input.references.plan.is_none());
     assert_eq!(input.measurements.len(), 3);
     assert!(
@@ -206,19 +218,17 @@ async fn a_missing_runtime_fragment_withholds_the_denominator_even_after_cohort_
     let fixture = Fixture::new(source, records).await;
     fixture.remove_first_runtime();
     let capture = fixture.read().await;
-    let analysis = collected_evidence::analyze(&capture).unwrap();
-    assert!(analysis.workload.is_none());
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    assert!(analysis.analyses[0].workload.is_none());
     assert!(
-        analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::RuntimeDenominatorUnavailable)
-    );
-    assert_eq!(analysis.context.query_inputs[0].measurements.len(), 2);
-    assert!(
-        analysis
-            .context
-            .evidence
-            .records
+        analysis.analyses[0]
+            .limitations
             .iter()
-            .any(|record| matches!(&record.row.record, TelemetryRecord::QueryRuntime(_)))
+            .any(|limit| limit.reason == CollectedAnalysisLimit::RuntimeDenominatorUnavailable)
+    );
+    assert_eq!(analysis.analyses[0].query_inputs[0].measurements.len(), 2);
+    assert!(
+        analysis.context.records.iter().any(|record| matches!(&record.row.record, TelemetryRecord::QueryRuntime(_)))
     );
 }
 
@@ -263,7 +273,7 @@ async fn query_history_uses_its_authenticated_yugabyte_parser_for_unmarked_nativ
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let query = one(&analysis);
     let plan = query.plan.as_ref().unwrap();
     assert_eq!(plan.engine, culprit_core::Engine::Yugabyte);
@@ -273,7 +283,9 @@ async fn query_history_uses_its_authenticated_yugabyte_parser_for_unmarked_nativ
     assert_eq!(query.plans.len(), 2);
     assert_eq!(query.executions, 50.0);
     assert_eq!(query.total_time_ms, 9500.0);
-    assert!(!analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::PlanUnavailable));
+    assert!(
+        !analysis.analyses[0].limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::PlanUnavailable)
+    );
 }
 
 #[cfg(feature = "postgres")]
@@ -308,7 +320,7 @@ async fn real_native_heap_fetch_advice_keeps_its_evidence_but_no_executable_sql_
         )
         .await;
     assert!(capture.is_read_complete());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let archived = one(&analysis);
     assert_eq!(archived.executions, 50.0);
     let insight = archived
@@ -324,9 +336,11 @@ async fn real_native_heap_fetch_advice_keeps_its_evidence_but_no_executable_sql_
         .unwrap();
     assert!(insight.fix_sql.is_none());
     assert!(!insight.fix.is_empty() && !insight.verify.is_empty());
-    assert!(analysis.limitations.iter().any(|limit| limit.record_id.as_deref() == Some(archived.id.as_str())
-        && limit.reason == CollectedAnalysisLimit::ExecutableFixPrerequisitesUnknown));
-    assert!(analysis.context.evidence.records.iter().any(|row| matches!(&row.row.record,
+    assert!(
+        analysis.analyses[0].limitations.iter().any(|limit| limit.record_id.as_deref() == Some(archived.id.as_str())
+            && limit.reason == CollectedAnalysisLimit::ExecutableFixPrerequisitesUnknown)
+    );
+    assert!(analysis.context.records.iter().any(|row| matches!(&row.row.record,
         TelemetryRecord::PlanDefinition(plan) if matches!(&plan.plan,
             DefinitionPayload::Available {text,..} if text.contains("Heap Fetches")))));
 

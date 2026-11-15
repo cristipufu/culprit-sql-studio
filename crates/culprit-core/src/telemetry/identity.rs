@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 23;
+pub const EXPORT_FORMAT_VERSION: u32 = 24;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -383,6 +383,7 @@ mod tests {
             target: database.into(),
             source: "query_store".into(),
             observation: crate::telemetry::SourceObservation::QueryHistory(crate::telemetry::QueryHistoryDescription {
+                population_binding: crate::telemetry::QueryHistoryPopulationBinding::Unknown,
                 population_catalog: None,
                 waits: None,
                 interval: TelemetryInterval {

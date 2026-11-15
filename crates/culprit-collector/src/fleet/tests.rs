@@ -75,6 +75,7 @@ impl FleetBackend for Backend {
             let observation = match &request.selection {
                 CollectionSelection::QueryHistory { from, .. } => {
                     SourceObservation::QueryHistory(QueryHistoryDescription {
+                        population_binding: culprit_core::telemetry::QueryHistoryPopulationBinding::Unknown,
                         population_catalog: None,
                         waits: None,
                         interval: if work::parse_time(from).unwrap().hour() == 10 {

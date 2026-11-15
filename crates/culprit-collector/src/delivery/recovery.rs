@@ -5,6 +5,8 @@ use super::{contract::*, evidence::*};
 use async_trait::async_trait;
 use culprit_core::{Result, telemetry::DeliveryProblem};
 use std::{path::Path, pin::Pin, sync::Arc};
+#[cfg(test)]
+mod tests;
 /// The recovery provider owns transport; common consumers bound and verify the stream at EOF.
 pub type RecoveryReader = Pin<Box<dyn tokio::io::AsyncRead + Send>>;
 

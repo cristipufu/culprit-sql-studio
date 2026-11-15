@@ -37,7 +37,8 @@ fn history(with_family: bool) -> (CollectionDescription, Vec<TelemetryRecord>) {
 }
 
 fn projected(analysis: &CollectedQueryAnalysis) -> &QueryStat {
-    let workload = analysis.workload.as_ref().unwrap_or_else(|| panic!("{:?}", analysis.limitations));
+    let workload =
+        analysis.analyses[0].workload.as_ref().unwrap_or_else(|| panic!("{:?}", analysis.analyses[0].limitations));
     assert_eq!(workload.queries.len(), 1);
     &workload.queries[0]
 }
@@ -56,10 +57,10 @@ async fn authenticated_native_family_survives_analysis_with_scoped_ids_without_a
     let fixture = Fixture::new(source.clone(), records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let query = projected(&analysis);
-    assert_eq!(analysis.context.query_inputs.len(), 1);
-    let input = &analysis.context.query_inputs[0];
+    assert_eq!(analysis.analyses[0].query_inputs.len(), 1);
+    let input = &analysis.analyses[0].query_inputs[0];
     assert_eq!(input.query_id, query.id);
     assert_eq!(input.references, references);
     assert_eq!(input.references.query.as_ref().unwrap().definition_id.as_deref(), Some(definition_id.as_str()));
@@ -69,13 +70,13 @@ async fn authenticated_native_family_survives_analysis_with_scoped_ids_without_a
     assert_eq!(query.variant_family.as_ref(), Some(&expected_family));
     assert_eq!(query.executions, executions);
     assert!((query.total_time_ms - total).abs() < 1e-8);
-    let workload = analysis.workload.as_ref().unwrap();
+    let workload = analysis.analyses[0].workload.as_ref().unwrap();
     assert_eq!(workload.total_executions, executions);
     assert!((workload.total_time_ms - total).abs() < 1e-8);
     assert_eq!(workload.query_count, 1.0);
     assert!(query.plans.is_empty(), "a dispatcher identity cannot manufacture measured plan variants");
-    assert_eq!(analysis.context.evidence.source, source);
-    assert!(analysis.context.evidence.records.iter().any(|record|matches!(&record.row.record,TelemetryRecord::QueryDefinition(value) if value.variant_family.as_ref()==Some(&expected_family))));
+    assert_eq!(analysis.context.source, source);
+    assert!(analysis.context.records.iter().any(|record|matches!(&record.row.record,TelemetryRecord::QueryDefinition(value) if value.variant_family.as_ref()==Some(&expected_family))));
 }
 
 #[tokio::test]
@@ -83,11 +84,11 @@ async fn unverified_visibility_keeps_raw_capability_and_positive_runtime_without
     let (source, records) = history(false);
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read().await;
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     assert!(projected(&analysis).variant_family.is_none());
     assert!(projected(&analysis).executions > 0.0);
     assert_eq!(
-        analysis.context.evidence.source.query_history().unwrap().native_properties["variant_families"],
+        analysis.context.source.query_history().unwrap().native_properties["variant_families"],
         "visibility_unverified"
     );
 }
@@ -106,15 +107,15 @@ async fn a_parent_definition_with_identical_sql_cannot_replace_the_missing_child
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "all provided native rows were retrieved");
-    let analysis = collected_evidence::analyze(&capture).unwrap();
-    assert!(analysis.workload.is_none());
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MissingQueryDefinition));
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    assert!(analysis.analyses[0].workload.is_none());
     assert!(
-        analysis
-            .context
-            .evidence
-            .records
+        analysis.analyses[0]
+            .limitations
             .iter()
-            .any(|record| matches!(&record.row.record, TelemetryRecord::QueryRuntime(_)))
+            .any(|limit| limit.reason == CollectedAnalysisLimit::MissingQueryDefinition)
+    );
+    assert!(
+        analysis.context.records.iter().any(|record| matches!(&record.row.record, TelemetryRecord::QueryRuntime(_)))
     );
 }

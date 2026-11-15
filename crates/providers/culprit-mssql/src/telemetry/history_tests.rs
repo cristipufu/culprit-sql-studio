@@ -107,6 +107,15 @@ async fn readable_secondary_exports_exact_native_history_without_claiming_local_
         assert_eq!(history.native_properties["actual_state"], mode);
         assert_eq!(history.native_properties["local_capture_permitted"], permitted);
         assert_eq!(history.dimensions["replica_group_id"], ["7"]);
+        assert_eq!(
+            history.population_binding,
+            QueryHistoryPopulationBinding::Dimensions {
+                bindings: vec![QueryHistoryPopulationBindingEntry {
+                    population: NativeIdentity::new("7"),
+                    qualifiers: [("replica_group_id".into(), "7".into())].into(),
+                }],
+            }
+        );
         let catalog = history.population_catalog.as_ref().unwrap();
         let groups: serde_json::Value =
             serde_json::from_str(&catalog.populations[0].native_properties["role_history"]).unwrap();
@@ -126,6 +135,111 @@ async fn readable_secondary_exports_exact_native_history_without_claiming_local_
         assert!(source.finish().await.is_err(), "unread waits/definitions cannot produce complete history");
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }
+}
+
+fn identified_runtime(group: i64, duration: i64) -> Rec {
+    let runtime = crate::query_store::tests::runtime_row(duration);
+    let metadata = crate::query_store::tests::summary_row();
+    let mut fields = runtime.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    for (name, value) in metadata.columns() {
+        if !fields.iter().any(|(key, _)| *key == name) {
+            fields.push((name, value.clone()));
+        }
+    }
+    replace(&Rec::of(&fields), &[("replica_group_id", Val::Int(group))])
+}
+
+fn identified_wait(group: i64, total: i64) -> Rec {
+    let runtime = identified_runtime(group, 1_000);
+    let mut fields = runtime.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    fields.extend([
+        ("wait_category", Val::Int(3)),
+        ("total_query_wait_time_ms", Val::Int(total)),
+        ("avg_query_wait_time_ms", Val::Float(total as f64)),
+        ("min_query_wait_time_ms", Val::Int(total)),
+        ("max_query_wait_time_ms", Val::Int(total)),
+    ]);
+    replace(&Rec::of(&fields), &[("row_id", Val::Int(100 + group))])
+}
+
+#[tokio::test]
+async fn native_group_binding_reuses_the_catalog_read_and_keeps_query_runtime_and_wait_populations_exact() {
+    let mut replies = description_rows();
+    replies[5] = Ok(vec![
+        crate::query_store::replicas::tests::row(7, 1, Some("same-role-member")),
+        crate::query_store::replicas::tests::row(1, 1, Some("same-role-member")),
+    ]);
+    replies[6] = Ok(vec![Rec::of(&[("plan_id", Val::Int(4))])]);
+    replies.extend([
+        Ok(vec![pressure()]),
+        Ok(vec![identified_runtime(1, 1_000), identified_runtime(7, 3_000)]),
+        Ok(vec![pressure()]),
+        Ok(vec![identified_wait(1, 7), identified_wait(7, 90)]),
+    ]);
+    let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+    let description = source.describe().await.unwrap();
+    assert_eq!(source.query_count(), 7, "binding is computed from the existing native catalog observation");
+    let history = description.query_history().unwrap();
+    let QueryHistoryPopulationBinding::Dimensions { bindings } = &history.population_binding else {
+        panic!("source-owned native bindings")
+    };
+    assert_eq!(bindings.len(), 2, "equal role/name metadata cannot merge native execution groups");
+    assert_eq!(bindings[0].population, NativeIdentity::new("1"));
+    assert_eq!(bindings[1].population, NativeIdentity::new("7"));
+    let CollectionRead::Page { records: runtime, next_cursor: None } =
+        source.read_page(TelemetryStream::QueryRuntime, None).await.unwrap()
+    else {
+        panic!("native runtime page")
+    };
+    let CollectionRead::Page { records: waits, next_cursor: None } =
+        source.read_page(TelemetryStream::QueryWaits, None).await.unwrap()
+    else {
+        panic!("native wait page")
+    };
+    for (index, (runtime, wait)) in runtime.iter().zip(&waits).enumerate() {
+        let TelemetryRecord::QueryRuntime(runtime) = runtime else { panic!("runtime") };
+        let TelemetryRecord::QueryWaits(wait) = wait else { panic!("wait") };
+        assert_eq!(runtime.key.references, wait.key.references);
+        assert!(runtime.key.references.is_resolved());
+        assert_eq!(runtime.key.cohort, wait.key.cohort);
+        assert_eq!(
+            history.execution_population(&runtime.key.native.qualifiers).unwrap(),
+            QueryExecutionPopulation::Population(&bindings[index].population)
+        );
+        assert_eq!(
+            history.execution_population(&wait.key.native.qualifiers).unwrap(),
+            QueryExecutionPopulation::Population(&bindings[index].population)
+        );
+        assert_eq!(runtime.metric(&RuntimeMetricKey::Duration).unwrap().average, [1_000.0, 3_000.0][index]);
+        assert_eq!(wait.total.integer(), Some([7, 90][index]));
+    }
+    assert_eq!(runtime[0].measurement_key().unwrap().references, runtime[1].measurement_key().unwrap().references);
+    assert_eq!(source.query_count(), 11, "description plus the existing two bounded pressure/page pairs");
+    assert_eq!(
+        source.session.calls.iter().filter(|call| call.sql == crate::query_store::catalog_sql::REPLICAS).count(),
+        1
+    );
+    assert_eq!(source.session.calls[8].sql, crate::query_store::catalog_sql::runtime(false));
+    assert_eq!(source.session.calls[10].sql, crate::query_store::catalog_sql::waits(false));
+    assert!(source.finish().await.is_err(), "unread definitions still cannot establish a complete capture");
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn an_undeclared_native_group_stops_before_other_pages_instead_of_becoming_unknown_or_unpartitioned() {
+    let mut replies = description_rows();
+    replies[6] = Ok(vec![Rec::of(&[("plan_id", Val::Int(4))])]);
+    replies.extend([Ok(vec![pressure()]), Ok(vec![identified_runtime(8, 1_000)])]);
+    let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
+    let description = source.describe().await.unwrap();
+    assert!(description.query_history().unwrap().is_valid());
+    assert!(matches!(
+        source.read_page(TelemetryStream::QueryRuntime, None).await.unwrap(),
+        CollectionRead::Stopped(CollectionStop::SourceChanged)
+    ));
+    assert!(source.read_page(TelemetryStream::QueryWaits, None).await.is_err());
+    assert_eq!(source.query_count(), 9);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
 
 #[tokio::test]

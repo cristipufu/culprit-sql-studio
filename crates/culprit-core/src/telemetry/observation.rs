@@ -141,6 +141,8 @@ pub struct QueryHistoryDescription {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub population_catalog: Option<crate::NativeRuntimePopulationCatalog>,
+    /// Explicit source-owned membership, independent of opaque native qualifier names and comparison cohorts.
+    pub population_binding: QueryHistoryPopulationBinding,
     /// Source-owned native wait meaning frozen with this capture. None establishes neither a vocabulary nor zero waits.
     pub waits: Option<QueryWaitSemantics>,
     /// Dimensions required on every native measurement, with the admissible values observed by the source.
@@ -154,7 +156,7 @@ const MAX_DIMENSION_VALUES: usize = 100;
 impl QueryHistoryDescription {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.interval.native_id)
-            && self.population_catalog.as_ref().is_none_or(crate::NativeRuntimePopulationCatalog::is_valid)
+            && self.population_binding.is_valid(self.population_catalog.as_ref(), &self.dimensions)
             && self.waits.as_ref().is_none_or(QueryWaitSemantics::is_valid)
             && self.dimensions.len() <= MAX_NATIVE_QUALIFIERS
             && super::native_identity::native_properties_valid(&self.native_properties)
@@ -326,7 +328,7 @@ impl SourceObservation {
     }
     pub fn covers_request(&self) -> bool {
         match self {
-            Self::QueryHistory(_) => true,
+            Self::QueryHistory(history) => history.is_valid(),
             Self::RetainedSamples(history) => history.covers_request(),
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
@@ -397,12 +399,15 @@ pub struct CollectionDescription {
     pub continuity: SourceContinuity,
 }
 impl CollectionDescription {
+    /// Validate one row against an already qualified source description. Collection admission, manifest reopening
+    /// and archived analysis validate the complete immutable metadata before iterating rows.
     pub fn accepts_measurement(&self, key: &NativeMeasurementKey) -> bool {
         self.is_partition_qualified()
             && self.query_history().is_some_and(|history| {
-                history.dimensions.iter().all(|(dimension, allowed)| {
-                    key.native.qualifiers.get(dimension).is_some_and(|value| allowed.contains(value))
-                })
+                history.population_binding.resolve(&key.native.qualifiers).is_ok()
+                    && history.dimensions.iter().all(|(dimension, allowed)| {
+                        key.native.qualifiers.get(dimension).is_some_and(|value| allowed.contains(value))
+                    })
             })
     }
 

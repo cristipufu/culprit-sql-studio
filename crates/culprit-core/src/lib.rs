@@ -55,6 +55,7 @@ pub mod retained_failure_report;
 pub mod runtime_distribution;
 pub mod runtime_distribution_report;
 pub mod runtime_population;
+pub mod serialization;
 pub mod signals;
 pub mod sql;
 pub mod statement_work_report;

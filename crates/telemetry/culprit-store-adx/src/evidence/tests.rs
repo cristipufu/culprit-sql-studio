@@ -13,6 +13,7 @@ mod cleanup;
 mod diagnostics;
 mod object_definitions;
 mod observations;
+mod populations;
 mod queries;
 mod source_partitions;
 mod tuning;

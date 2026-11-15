@@ -19,6 +19,7 @@ pub(super) struct CapturedTotals {
 pub(super) fn captured_totals(
     capture: &EvidenceCapture,
     definitions: &validation::Definitions<'_>,
+    rows: &super::populations::NativeRows<'_>,
 ) -> Result<Option<CapturedTotals>> {
     if capture.gaps().iter().any(|gap| gap.stream.is_none_or(|stream| stream == TelemetryStream::QueryRuntime)) {
         return Ok(None);
@@ -26,8 +27,7 @@ pub(super) fn captured_totals(
     let interval = &capture.source().query_history().ok_or_else(invalid)?.interval;
     let mut totals = CapturedTotals { executions: 0, time_ms: 0.0, cpu_ms: Some(0.0), queries: 0 };
     let mut queries = std::collections::BTreeSet::new();
-    for record in capture.records() {
-        let TelemetryRecord::QueryRuntime(row) = &record.row().record else { continue };
+    for &(_, row) in &rows.runtime {
         if inclusion(definitions.join(&row.key.references)?.query) == QueryInclusion::Excluded {
             continue;
         }
@@ -87,33 +87,34 @@ fn inclusion(query: Option<&QueryDefinition>) -> QueryInclusion {
 pub(super) fn project(
     capture: &EvidenceCapture,
     definitions: &validation::Definitions<'_>,
+    population: &CollectedQueryPopulation,
+    rows: &super::populations::NativeRows<'_>,
     limitations: &mut Vec<CollectedAnalysisLimitation>,
 ) -> Result<(Vec<QueryStat>, Vec<CollectedQueryInput>, bool)> {
     let mut groups = BTreeMap::<String, BTreeMap<String, NativeGroup<'_>>>::new();
     let mut partial = !capture.is_read_complete();
-    for record in capture.records() {
-        let TelemetryRecord::QueryRuntime(runtime) = &record.row().record else { continue };
+    for &(record, runtime) in &rows.runtime {
         let joined = definitions.join(&runtime.key.references)?;
         let Some(query) = joined.query else {
-            omit(record.row(), CollectedAnalysisLimit::MissingQueryDefinition, limitations, &mut partial);
+            omit(record, CollectedAnalysisLimit::MissingQueryDefinition, limitations, &mut partial);
             continue;
         };
         match inclusion(Some(query)) {
             QueryInclusion::Application => (),
             QueryInclusion::Unresolved => {
-                omit(record.row(), CollectedAnalysisLimit::UnknownStatementOrigin, limitations, &mut partial);
+                omit(record, CollectedAnalysisLimit::UnknownStatementOrigin, limitations, &mut partial);
                 continue;
             }
             QueryInclusion::Excluded => continue,
         }
         if !query.sql.is_available() {
-            omit(record.row(), CollectedAnalysisLimit::QueryTextUnavailable, limitations, &mut partial);
+            omit(record, CollectedAnalysisLimit::QueryTextUnavailable, limitations, &mut partial);
             continue;
         }
         if runtime.key.references.plan.is_some() && joined.plan.is_none() {
-            limitations.push(limit(record.row().record_id.clone(), CollectedAnalysisLimit::MissingPlanDefinition));
+            limitations.push(limit(record.record_id.clone(), CollectedAnalysisLimit::MissingPlanDefinition));
         }
-        let key = group_key(capture, &runtime.key)?;
+        let key = group_key(capture, &runtime.key, population)?;
         groups
             .entry(key)
             .or_default()
@@ -125,7 +126,7 @@ pub(super) fn project(
                 references: runtime.key.references.clone(),
             })
             .rows
-            .push((record.row(), runtime));
+            .push((record, runtime));
     }
     let mut queries = BTreeMap::new();
     let mut inputs = vec![];
@@ -151,19 +152,18 @@ pub(super) fn project(
     }
     let mut native_waits = BTreeMap::<String, Vec<super::waits::NativeWait<'_>>>::new();
     let mut wait_joins_complete = true;
-    for record in capture.records() {
-        let TelemetryRecord::QueryWaits(wait) = &record.row().record else { continue };
+    for &(record, wait) in &rows.waits {
         if inclusion(definitions.join(&wait.key.references)?.query) == QueryInclusion::Excluded {
             continue;
         }
-        let key = group_key(capture, &wait.key)?;
+        let key = group_key(capture, &wait.key, population)?;
         if !runtime_plans.contains(&(key.clone(), plan_key(capture, &wait.key.references)?)) {
-            limitations.push(limit(record.row().record_id.clone(), CollectedAnalysisLimit::WaitWithoutRuntime));
+            limitations.push(limit(record.record_id.clone(), CollectedAnalysisLimit::WaitWithoutRuntime));
             wait_joins_complete = false;
             partial = true;
             continue;
         }
-        native_waits.entry(key).or_default().push((record.row(), wait));
+        native_waits.entry(key).or_default().push((record, wait));
     }
     let waits = super::waits::Projection::new(capture, wait_joins_complete, limitations);
     for (id, query) in &mut queries {
@@ -172,15 +172,19 @@ pub(super) fn project(
     Ok((queries.into_values().collect(), inputs, partial))
 }
 
-fn group_key(capture: &EvidenceCapture, key: &NativeMeasurementKey) -> Result<String> {
+fn group_key(
+    capture: &EvidenceCapture,
+    key: &NativeMeasurementKey,
+    population: &CollectedQueryPopulation,
+) -> Result<String> {
     let interval = &capture.source().query_history().ok_or_else(invalid)?.interval;
     match &key.cohort {
-        Some(cohort) => {
-            capture.source().scoped_id("collected-query-cohort-v1", &(interval, &key.references.query, cohort))
-        }
-        None => {
-            capture.source().scoped_id("collected-query-group-v2", &(interval, &key.references, &key.native.qualifiers))
-        }
+        Some(cohort) => capture
+            .source()
+            .scoped_id("collected-query-cohort-v2", &(interval, population, &key.references.query, cohort)),
+        None => capture
+            .source()
+            .scoped_id("collected-query-group-v3", &(interval, population, &key.references, &key.native.qualifiers)),
     }
 }
 

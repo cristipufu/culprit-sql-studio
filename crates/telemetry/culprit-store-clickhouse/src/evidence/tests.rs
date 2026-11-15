@@ -3,6 +3,7 @@ mod activity;
 mod cleanup;
 mod diagnostics;
 mod object_definitions;
+mod populations;
 mod queries;
 mod source_partitions;
 mod tuning;
@@ -82,21 +83,32 @@ impl Fixture {
         records: Vec<TelemetryRecord>,
         stream: TelemetryStream,
     ) -> Self {
+        Self::new_for_streams(source, records, &[stream]).await
+    }
+    async fn new_for_streams(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        streams: &[TelemetryStream],
+    ) -> Self {
         let catalog = Arc::new(SchemaCatalog::new().unwrap());
-        let schema = catalog.get(stream).unwrap();
         let recovery = Arc::new(Recovery::capture("clickhouse:test", catalog.digest(), source, records, 140_000));
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
         let scratch = tempfile::tempdir().unwrap();
         let encoder = BatchEncoder::new(catalog.clone(), recovery.clone(), scratch.path()).unwrap();
-        let batch = range.manifest().batches.iter().find(|batch| batch.stream == stream).unwrap();
-        let encoded = encoder.encode(&range, &batch.batch_id).await.unwrap();
-        indexes.put(&encoded.index_key, &encoded.digests).await.unwrap();
-        let rows: Vec<_> = std::fs::read_to_string(encoded.path())
-            .unwrap()
-            .lines()
-            .map(|line| returned(schema, &serde_json::from_str(line).unwrap()))
-            .collect();
+        let mut rows = Vec::new();
+        for stream in streams {
+            let schema = catalog.get(*stream).unwrap();
+            let batch = range.manifest().batches.iter().find(|batch| batch.stream == *stream).unwrap();
+            let encoded = encoder.encode(&range, &batch.batch_id).await.unwrap();
+            indexes.put(&encoded.index_key, &encoded.digests).await.unwrap();
+            rows.extend(
+                std::fs::read_to_string(encoded.path())
+                    .unwrap()
+                    .lines()
+                    .map(|line| returned(schema, &serde_json::from_str(line).unwrap())),
+            );
+        }
         let publication_schema = catalog.publication();
         let values = publication_schema.project(&publication::input(catalog.as_ref(), &range).unwrap()).unwrap();
         let publication = returned(
@@ -113,6 +125,12 @@ impl Fixture {
         replies.push_back(vec![self.publication.clone()]);
         replies.push_back(vec![vec![json!(0)]]);
         replies.extend(pages);
+    }
+    fn rows_for(&self, stream: TelemetryStream) -> Vec<Vec<Value>> {
+        let batch = self.range.manifest().batches.iter().find(|batch| batch.stream == stream).unwrap();
+        let schema = self.catalog.get(stream).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "BatchId").unwrap();
+        self.rows.iter().filter(|row| row[column].as_str() == Some(batch.batch_id.as_str())).cloned().collect()
     }
 }
 

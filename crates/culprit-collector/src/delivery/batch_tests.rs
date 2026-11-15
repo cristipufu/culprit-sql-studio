@@ -177,6 +177,7 @@ fn empty_query_history(root: &Path) -> PreparedRange {
         source: "query-store".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            population_binding: culprit_core::telemetry::QueryHistoryPopulationBinding::Unknown,
             population_catalog: None,
             interval: TelemetryInterval {
                 native_id: "1".into(),

@@ -48,11 +48,11 @@ fn runtime(records: &mut [TelemetryRecord], index: usize) -> &mut RuntimeMeasure
 }
 
 fn queries(analysis: &CollectedQueryAnalysis) -> &[QueryStat] {
-    &analysis.workload.as_ref().unwrap_or_else(|| panic!("{:?}", analysis.limitations)).queries
+    &analysis.analyses[0].workload.as_ref().unwrap_or_else(|| panic!("{:?}", analysis.analyses[0].limitations)).queries
 }
 
 fn has_limit(analysis: &CollectedQueryAnalysis, reason: CollectedAnalysisLimit) -> bool {
-    analysis.limitations.iter().any(|limit| limit.reason == reason)
+    analysis.analyses[0].limitations.iter().any(|limit| limit.reason == reason)
 }
 
 #[tokio::test]
@@ -62,7 +62,7 @@ async fn authenticated_runtime_space_averages_reach_the_same_pure_information_vi
     let fixture = Fixture::new(source.clone(), records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
     let projected = &queries(&analysis)[0];
     assert_eq!(projected.executions, 12.0);
     assert_eq!(projected.total_time_ms, 42_000.0);
@@ -76,19 +76,19 @@ async fn authenticated_runtime_space_averages_reach_the_same_pure_information_vi
     );
     let work = projected.temporary_work.as_ref().unwrap();
     let explanation = culprit_checks::temporary_work::explain(culprit_checks::temporary_work::evidence(work).unwrap());
-    let finding = analysis.findings.iter().find(|finding| finding.check == "temp-spill").unwrap();
+    let finding = analysis.analyses[0].findings.iter().find(|finding| finding.check == "temp-spill").unwrap();
     assert_eq!(finding.actionability, Actionability::Information);
     assert_eq!(finding.summary, explanation.summary);
     assert_eq!(serde_json::to_value(&finding.metrics).unwrap(), serde_json::to_value(explanation.metrics).unwrap());
     assert!(finding.impact.db_time_share.is_none());
     assert!(finding.fix.as_ref().unwrap().sql.is_none());
     assert!(finding.queries.iter().all(|query| query.plan_node.is_none()));
-    assert_eq!(analysis.context.evidence.source, source);
-    assert_eq!(analysis.context.evidence.source.continuity, SourceContinuity::Unverified);
+    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.context.source.continuity, SourceContinuity::Unverified);
     assert!(!has_limit(&analysis, CollectedAnalysisLimit::MetricNotProjected));
     for row in expected_rows {
         let expected = ExportedRecord::new(capture.source(), capture.capture(), row).unwrap();
-        assert!(analysis.context.evidence.records.iter().any(|record| record.row == expected));
+        assert!(analysis.context.records.iter().any(|record| record.row == expected));
     }
 }
 
@@ -105,16 +105,16 @@ async fn native_zero_is_retained_while_missing_or_partially_measured_fragments_r
             }
         }
         let fixture = Fixture::new(source, records).await;
-        let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+        let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
         let work = &queries(&analysis)[0].temporary_work;
         if kind == "zero" {
             assert!(matches!(work, Some(StatementTemporaryWork::SpaceUsage { usage_pages_total: 0.0, .. })));
         } else {
             assert!(work.is_none());
         }
-        assert!(analysis.findings.iter().all(|finding| finding.check != "temp-spill"));
+        assert!(analysis.analyses[0].findings.iter().all(|finding| finding.check != "temp-spill"));
         assert_eq!(has_limit(&analysis, CollectedAnalysisLimit::MetricNotProjected), kind == "partial");
-        assert_eq!(analysis.context.evidence.records.len(), 3);
+        assert_eq!(analysis.context.records.len(), 3);
     }
 }
 
@@ -134,11 +134,11 @@ async fn byte_units_page_conflicts_peak_metrics_and_opaque_native_lookalikes_do_
         let fixture = Fixture::new(source, records).await;
         let capture = fixture.read().await;
         assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-        let analysis = collected_evidence::analyze(&capture).unwrap();
+        let analysis = collected_evidence::analyze(&capture, None).unwrap();
         assert!(queries(&analysis)[0].temporary_work.is_none(), "{kind}");
         assert!(has_limit(&analysis, CollectedAnalysisLimit::MetricNotProjected), "{kind}");
-        assert!(analysis.findings.iter().all(|finding| finding.check != "temp-spill"));
-        assert_eq!(analysis.context.evidence.records.len(), 3);
+        assert!(analysis.analyses[0].findings.iter().all(|finding| finding.check != "temp-spill"));
+        assert_eq!(analysis.context.records.len(), 3);
     }
 }
 
@@ -148,7 +148,7 @@ async fn native_epochs_and_outcomes_are_separate_populations_without_reset_or_ra
         let (source, mut records) = history();
         runtime(&mut records, 2).key.native.qualifiers.insert(dimension.into(), "different-native-population".into());
         let fixture = Fixture::new(source.clone(), records).await;
-        let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
+        let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
         let mut amounts = queries(&analysis)
             .iter()
             .map(|query| match query.temporary_work.as_ref().unwrap() {
@@ -158,10 +158,10 @@ async fn native_epochs_and_outcomes_are_separate_populations_without_reset_or_ra
             .collect::<Vec<_>>();
         amounts.sort_by(f64::total_cmp);
         assert_eq!(amounts, vec![2.5, 5.0]);
-        assert!(analysis.context.query_inputs.iter().all(|input| input.measurements.len() == 1));
-        assert_eq!(analysis.context.evidence.source, source);
-        assert!(analysis.workload.as_ref().unwrap().counter_set.is_none());
-        assert!(analysis.workload.as_ref().unwrap().history_inputs.is_empty());
+        assert!(analysis.analyses[0].query_inputs.iter().all(|input| input.measurements.len() == 1));
+        assert_eq!(analysis.context.source, source);
+        assert!(analysis.analyses[0].workload.as_ref().unwrap().counter_set.is_none());
+        assert!(analysis.analyses[0].workload.as_ref().unwrap().history_inputs.is_empty());
     }
 }
 
@@ -179,9 +179,9 @@ async fn missing_rows_unpublished_captures_and_out_of_bounds_runtime_cannot_esta
             fixture.unpublish();
         }
         let capture = fixture.read().await;
-        let analysis = collected_evidence::analyze(&capture).unwrap();
-        assert!(analysis.workload.is_none(), "{kind}");
-        assert!(analysis.findings.iter().all(|finding| finding.check != "temp-spill"));
+        let analysis = collected_evidence::analyze(&capture, None).unwrap();
+        assert!(analysis.analyses[0].workload.is_none(), "{kind}");
+        assert!(analysis.analyses[0].findings.iter().all(|finding| finding.check != "temp-spill"));
         if kind == "outside-window" {
             assert!(capture.is_read_complete());
             assert!(has_limit(&analysis, CollectedAnalysisLimit::RuntimeBounds));
@@ -197,10 +197,10 @@ async fn execution_precision_limits_preserve_the_native_row_without_a_rounded_sp
     runtime(&mut records, 1).executions = "9007199254740993".into();
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read().await;
-    let analysis = collected_evidence::analyze(&capture).unwrap();
-    assert!(analysis.workload.is_none());
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    assert!(analysis.analyses[0].workload.is_none());
     assert!(has_limit(&analysis, CollectedAnalysisLimit::CounterPrecision));
-    assert!(analysis.context.evidence.records.iter().any(|record| {
+    assert!(analysis.context.records.iter().any(|record| {
         matches!(&record.row.record, TelemetryRecord::QueryRuntime(row) if row.executions == "9007199254740993")
     }));
 }

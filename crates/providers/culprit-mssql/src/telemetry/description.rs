@@ -6,7 +6,10 @@ use crate::query_store::{
 use crate::read::{NativeRead, ReadError};
 use culprit_core::{
     DatabaseIdentity, Engine, Error, ErrorCode, Result, t,
-    telemetry::{CollectionDescription, CollectionRequest, SourceContinuity, WaitCaptureState},
+    telemetry::{
+        CollectionDescription, CollectionRequest, QueryHistoryPopulationBinding, QueryHistoryPopulationBindingEntry,
+        SourceContinuity, WaitCaptureState,
+    },
 };
 
 pub(super) struct Description {
@@ -44,6 +47,17 @@ pub(super) async fn read<R: NativeRead>(
     let interval = crate::query_store::intervals::exact(session, request).await?;
     let replicas = crate::query_store::replicas::read(session).await?;
     let replica_group_ids = replicas.ids();
+    let population_catalog = replicas.population_catalog()?.native_facts();
+    let population_binding = QueryHistoryPopulationBinding::Dimensions {
+        bindings: population_catalog
+            .populations
+            .iter()
+            .map(|population| QueryHistoryPopulationBindingEntry {
+                population: population.identity.clone(),
+                qualifiers: [("replica_group_id".into(), population.identity.id.clone())].into(),
+            })
+            .collect(),
+    };
     let plan_upper_bound = plan_upper_bound(session).await?;
     Ok(Description {
         value: CollectionDescription {
@@ -53,7 +67,8 @@ pub(super) async fn read<R: NativeRead>(
             observation: culprit_core::telemetry::SourceObservation::QueryHistory(
                 culprit_core::telemetry::QueryHistoryDescription {
                     interval,
-                    population_catalog: Some(replicas.population_catalog()?.native_facts()),
+                    population_catalog: Some(population_catalog),
+                    population_binding,
                     dimensions: [("replica_group_id".into(), replica_group_ids.clone())].into(),
                     native_properties: [
                         ("capture_mode".into(), settings.capture_mode),

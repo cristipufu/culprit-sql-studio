@@ -28,6 +28,7 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
         source: "query_store".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            population_binding: culprit_core::telemetry::QueryHistoryPopulationBinding::Unknown,
             population_catalog: None,
             waits: None,
             interval: interval(10),

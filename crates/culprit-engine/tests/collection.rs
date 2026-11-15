@@ -163,6 +163,7 @@ fn description() -> CollectionDescription {
         source: "fixture-statistics".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {
+                population_binding: culprit_core::telemetry::QueryHistoryPopulationBinding::Unknown,
                 population_catalog: None,
                 waits: None,
                 interval: TelemetryInterval {

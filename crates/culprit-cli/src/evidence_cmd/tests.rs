@@ -318,3 +318,167 @@ fn tuning_text_uses_existing_source_qualification_and_bounded_titles_without_pay
     assert!(output.contains("native-source") && output.contains("Unknown scope remains unknown"));
     assert!(!output.contains("native-context-only"));
 }
+
+fn analyze_args(analysis: &str, options: &[&str]) -> AnalyzeArgs {
+    let range = culprit_core::telemetry::digest(b"archive-population-capture");
+    let parsed = crate::Cli::try_parse_from(
+        [
+            "culprit",
+            "collect",
+            "evidence",
+            "analyze",
+            "--config",
+            "missing.json",
+            "--range",
+            &range,
+            "--analysis",
+            analysis,
+        ]
+        .into_iter()
+        .chain(options.iter().copied()),
+    )
+    .unwrap();
+    let crate::Command::Collect(crate::collect_cmd::CollectCommand::Evidence(EvidenceCommand::Analyze(args))) =
+        parsed.command
+    else {
+        panic!("archive query analysis")
+    };
+    args
+}
+
+fn population_catalog(identities: Vec<NativeIdentity>) -> NativeRuntimePopulationCatalog {
+    NativeRuntimePopulationCatalog {
+        source: "native-query-history".into(),
+        partitioned: true,
+        requires_selection: identities.len() > 1,
+        populations: identities
+            .into_iter()
+            .map(|identity| culprit_core::NativeRuntimePopulation { identity, native_properties: Default::default() })
+            .collect(),
+    }
+}
+
+#[test]
+fn query_analysis_defaults_to_all_independent_sections_and_accepts_an_exact_native_id() {
+    let args = analyze_args("queries", &[]);
+    assert!(args.workload_population.is_none());
+    assert_eq!(resolve_population(None, args.workload_population.as_ref()).unwrap(), None);
+    let request = args.common.request(args.analysis.families(), Format::Json).unwrap();
+    assert_eq!(request.families.len(), 4);
+
+    let args = analyze_args("queries", &["--workload-population", "native-reader-17"]);
+    assert_eq!(args.workload_population, Some(NativeIdentity::new("native-reader-17")));
+    let identity = NativeIdentity::new("native-reader-17").qualified("native-generation", "original-context");
+    let catalog = population_catalog(vec![identity.clone(), NativeIdentity::new("native-reader-18")]);
+    assert_eq!(resolve_population(Some(&catalog), args.workload_population.as_ref()).unwrap(), Some(identity));
+}
+
+#[test]
+fn invalid_archive_group_ids_are_rejected_by_argument_parsing_without_configuration_access() {
+    let range = culprit_core::telemetry::digest(b"archive-population-capture");
+    let base = [
+        "culprit",
+        "collect",
+        "evidence",
+        "analyze",
+        "--config",
+        "missing.json",
+        "--range",
+        &range,
+        "--analysis",
+        "queries",
+    ];
+    for id in ["".to_owned(), "bad\nidentity".to_owned(), "x".repeat(513)] {
+        assert!(crate::Cli::try_parse_from(base.into_iter().chain(["--workload-population", id.as_str()])).is_err());
+    }
+    assert!(crate::Cli::try_parse_from(base.into_iter().chain(["--workload-population"])).is_err());
+    assert!(
+        crate::Cli::try_parse_from(base.into_iter().chain([
+            "--workload-population",
+            "17",
+            "--workload-population",
+            "18"
+        ]))
+        .is_err()
+    );
+    assert_eq!(
+        analyze_args("queries", &["--workload-population", &"x".repeat(512)]).workload_population.unwrap().id.len(),
+        512
+    );
+    assert!(
+        crate::Cli::try_parse_from([
+            "culprit",
+            "collect",
+            "evidence",
+            "read",
+            "--config",
+            "missing.json",
+            "--range",
+            &range,
+            "--family",
+            "query-runtime",
+            "--workload-population",
+            "17",
+        ])
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn group_selection_on_non_query_analysis_stops_before_opening_configuration() {
+    for mode in [
+        "memory-failures",
+        "native-failures",
+        "request-memory",
+        "session-memory",
+        "page-waits",
+        "task-space",
+        "statement-work",
+        "runtime-distributions",
+        "cached-plans",
+        "compilation",
+        "cleanup",
+        "tuning",
+    ] {
+        let mut args = analyze_args(mode, &["--workload-population", "17"]);
+        args.common.config =
+            std::env::temp_dir().join(format!("culprit-invalid-archive-population-{}.json", std::process::id()));
+        let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+        assert_eq!(error.code, culprit_core::ErrorCode::InvalidInput);
+        assert_eq!(error.message, t!("evidence.cli.population_queries_only"));
+    }
+    let mut args = analyze_args("queries", &[]);
+    args.workload_population = Some(NativeIdentity::new(""));
+    let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+    assert_eq!(error.message, t!("cli.scan.workload_population_invalid"));
+}
+
+#[test]
+fn archive_group_resolution_rejects_missing_unknown_and_ambiguous_identities_without_guessing_properties() {
+    let requested = NativeIdentity::new("17");
+    let mut catalog = population_catalog(vec![NativeIdentity::new("18")]);
+    catalog.populations[0].native_properties.insert("replica_group_id".into(), "17".into());
+    for catalog in [None, Some(&catalog)] {
+        let error = resolve_population(catalog, Some(&requested)).unwrap_err();
+        assert_eq!(error.message, t!("evidence.cli.population_missing", id = "17"));
+    }
+    let catalog = NativeRuntimePopulationCatalog {
+        source: "native-query-history".into(),
+        partitioned: false,
+        requires_selection: false,
+        populations: vec![],
+    };
+    assert!(resolve_population(Some(&catalog), Some(&requested)).is_err());
+    let catalog = population_catalog(vec![
+        requested.clone().qualified("context", "first"),
+        requested.clone().qualified("context", "second"),
+    ]);
+    assert!(catalog.is_valid());
+    let error = resolve_population(Some(&catalog), Some(&requested)).unwrap_err();
+    assert_eq!(error.message, t!("evidence.cli.population_ambiguous", id = "17"));
+    assert_eq!(
+        resolve_population(Some(&catalog), None).unwrap(),
+        None,
+        "the default delegates every independent group to the pure API"
+    );
+}

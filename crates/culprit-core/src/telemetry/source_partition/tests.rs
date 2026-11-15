@@ -97,6 +97,7 @@ fn role_is_observed_state_and_native_restart_changes_scope_without_creating_anot
 fn target_history_has_one_database_namespace_independent_of_native_replica_cohorts() {
     let mut target = source(SourcePartition::Target);
     target.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
+        population_binding: crate::telemetry::QueryHistoryPopulationBinding::Unknown,
         population_catalog: None,
         waits: None,
         interval: TelemetryInterval {

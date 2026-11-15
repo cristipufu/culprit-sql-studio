@@ -12,6 +12,7 @@ mod memory_failures;
 mod native_failures;
 mod page_waits;
 mod plan_groups;
+mod populations;
 mod request_memory;
 mod runtime_distributions;
 mod session_memory;
@@ -32,7 +33,13 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
         source: culprit_core::source_id::QUERY_STORE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
-            population_catalog: None,
+            population_binding: QueryHistoryPopulationBinding::Unpartitioned,
+            population_catalog: Some(culprit_core::NativeRuntimePopulationCatalog {
+                source: culprit_core::source_id::QUERY_STORE.into(),
+                partitioned: false,
+                requires_selection: false,
+                populations: vec![],
+            }),
             waits: None,
             interval: TelemetryInterval {
                 native_id: "recorded-interval".into(),
@@ -112,28 +119,31 @@ async fn authenticated_archived_scan_measurements_reach_the_existing_pure_checks
     let fixture = Fixture::new(source.clone(), records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_evidence::analyze(&capture).unwrap();
-    let workload = analysis.workload.as_ref().unwrap();
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    let workload = analysis.analyses[0].workload.as_ref().unwrap();
     assert_eq!(workload.kind, None);
     assert!(workload.windowed && workload.counter_set.is_none() && workload.history_inputs.is_empty());
-    assert_eq!(analysis.context.evidence.source, source);
-    assert_eq!(analysis.context.evidence.recovery_manifest_sha256, fixture.range.manifest_digest());
-    assert_eq!(analysis.provenance.as_ref().unwrap().origin, culprit_core::AnalysisOrigin::ArchivedTelemetry);
+    assert_eq!(analysis.context.source, source);
+    assert_eq!(analysis.context.recovery_manifest_sha256, fixture.range.manifest_digest());
+    assert_eq!(
+        analysis.analyses[0].provenance.as_ref().unwrap().origin,
+        culprit_core::AnalysisOrigin::ArchivedTelemetry
+    );
     let original = scan.workload.as_ref().unwrap();
-    for input in &analysis.context.query_inputs {
+    for input in &analysis.analyses[0].query_inputs {
         let native = &input.references.query.as_ref().unwrap().native.id;
         let recorded = original.queries.iter().find(|query| &query.id == native).unwrap();
         let projected = workload.queries.iter().find(|query| query.id == input.query_id).unwrap();
         asserted_metrics(projected, recorded);
         assert!(projected.logical_reads.is_none());
     }
-    let finding = analysis.findings.iter().find(|finding| finding.check == "heavy-query").unwrap();
+    let finding = analysis.analyses[0].findings.iter().find(|finding| finding.check == "heavy-query").unwrap();
     assert!(!finding.summary.is_empty());
     assert!(!finding.verify.is_empty());
     assert!(finding.fix.as_ref().is_some_and(|fix| !fix.summary.is_empty()));
-    assert!(analysis.locked.iter().any(|locked| locked.missing.contains(&Capability::TableStats)));
+    assert!(analysis.analyses[0].locked.iter().any(|locked| locked.missing.contains(&Capability::TableStats)));
     assert!(
-        analysis
+        analysis.analyses[0]
             .assessments
             .iter()
             .any(|assessment| assessment.check == "heavy-query" && assessment.status == CheckStatus::Findings)
@@ -159,36 +169,38 @@ async fn missing_or_native_restricted_definitions_keep_positive_evidence_partial
         }
         let capture = fixture.read().await;
         assert_eq!(capture.is_read_complete(), restricted);
-        let analysis = collected_evidence::analyze(&capture).unwrap();
+        let analysis = collected_evidence::analyze(&capture, None).unwrap();
         if restricted {
-            let workload = analysis.workload.as_ref().unwrap();
+            let workload = analysis.analyses[0].workload.as_ref().unwrap();
             assert_eq!(workload.queries.len(), 1);
             assert!(workload.total_time_ms > workload.queries.iter().map(|query| query.total_time_ms).sum::<f64>());
-            let assessed = analysis.assessments.iter().find(|assessment| assessment.check == "heavy-query").unwrap();
+            let assessed =
+                analysis.analyses[0].assessments.iter().find(|assessment| assessment.check == "heavy-query").unwrap();
             assert!(assessed.reason.is_some());
             assert!(
-                analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::QueryTextUnavailable)
+                analysis.analyses[0]
+                    .limitations
+                    .iter()
+                    .any(|limit| limit.reason == CollectedAnalysisLimit::QueryTextUnavailable)
             );
         } else {
-            assert!(analysis.workload.is_none());
+            assert!(analysis.analyses[0].workload.is_none());
             assert!(
-                analysis
+                analysis.analyses[0]
                     .assessments
                     .iter()
                     .filter(|assessment| assessment.check == "heavy-query")
                     .all(|assessment| assessment.status == CheckStatus::Unavailable)
             );
             assert!(
-                analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MissingQueryDefinition)
+                analysis.analyses[0]
+                    .limitations
+                    .iter()
+                    .any(|limit| limit.reason == CollectedAnalysisLimit::MissingQueryDefinition)
             );
         }
         assert!(
-            analysis
-                .context
-                .evidence
-                .records
-                .iter()
-                .any(|record| matches!(record.row.record, TelemetryRecord::QueryRuntime(_)))
+            analysis.context.records.iter().any(|record| matches!(record.row.record, TelemetryRecord::QueryRuntime(_)))
         );
     }
 }
@@ -200,11 +212,14 @@ async fn a_missing_runtime_fragment_cannot_inflate_the_remaining_querys_share() 
     fixture.remove_first_runtime();
     let capture = fixture.read().await;
     assert!(capture.records().iter().any(|record| matches!(record.row().record, TelemetryRecord::QueryRuntime(_))));
-    let analysis = collected_evidence::analyze(&capture).unwrap();
-    assert!(analysis.workload.is_none());
-    assert!(analysis.findings.iter().all(|finding| finding.check != "heavy-query"));
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    assert!(analysis.analyses[0].workload.is_none());
+    assert!(analysis.analyses[0].findings.iter().all(|finding| finding.check != "heavy-query"));
     assert!(
-        analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::RuntimeDenominatorUnavailable)
+        analysis.analyses[0]
+            .limitations
+            .iter()
+            .any(|limit| limit.reason == CollectedAnalysisLimit::RuntimeDenominatorUnavailable)
     );
 }
 
@@ -246,20 +261,29 @@ async fn application_totals_exclude_proven_monitoring_but_keep_unknown_and_missi
         records.push(TelemetryRecord::QueryRuntime(runtime));
     }
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
-    let workload = analysis.workload.as_ref().unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
+    let workload = analysis.analyses[0].workload.as_ref().unwrap();
     assert_eq!(workload.queries.len(), 1);
     assert_eq!(workload.query_count, 3.0);
     assert_eq!(workload.total_executions, 14.0);
     assert_eq!(workload.total_time_ms, 330.0);
     assert_eq!(workload.total_cpu_ms, Some(68.0));
     assert_eq!(workload.queries[0].total_time_ms, 20.0);
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::UnknownStatementOrigin));
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MissingQueryDefinition));
+    assert!(
+        analysis.analyses[0]
+            .limitations
+            .iter()
+            .any(|limit| limit.reason == CollectedAnalysisLimit::UnknownStatementOrigin)
+    );
+    assert!(
+        analysis.analyses[0]
+            .limitations
+            .iter()
+            .any(|limit| limit.reason == CollectedAnalysisLimit::MissingQueryDefinition)
+    );
     assert_eq!(
         analysis
             .context
-            .evidence
             .records
             .iter()
             .filter(|record| matches!(record.row.record, TelemetryRecord::QueryRuntime(_)))
@@ -286,18 +310,26 @@ async fn opaque_native_wait_codes_remain_exact_without_becoming_semantic_other_w
     };
     records.push(TelemetryRecord::QueryWaits(wait.clone()));
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
-    assert!(analysis.workload.as_ref().unwrap().queries[0].waits.is_empty());
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
+    assert!(analysis.analyses[0].workload.as_ref().unwrap().queries[0].waits.is_empty());
     assert!(
-        analysis
-            .context
-            .evidence
-            .records
-            .iter()
-            .any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
+        analysis.context.records.iter().any(|record| record.row.record == TelemetryRecord::QueryWaits(wait.clone()))
     );
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::WaitSemanticsUnavailable));
-    assert!(analysis.assessments.iter().find(|assessment| assessment.check == "heavy-query").unwrap().reason.is_some());
+    assert!(
+        analysis.analyses[0]
+            .limitations
+            .iter()
+            .any(|limit| limit.reason == CollectedAnalysisLimit::WaitSemanticsUnavailable)
+    );
+    assert!(
+        analysis.analyses[0]
+            .assessments
+            .iter()
+            .find(|assessment| assessment.check == "heavy-query")
+            .unwrap()
+            .reason
+            .is_some()
+    );
 }
 
 #[tokio::test]
@@ -316,7 +348,7 @@ async fn a_competing_native_generation_cannot_be_joined_by_query_number_or_displ
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read().await;
     assert!(capture.is_read_complete());
-    let error = collected_evidence::analyze(&capture).unwrap_err();
+    let error = collected_evidence::analyze(&capture, None).unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
 }
 
@@ -340,7 +372,7 @@ async fn a_plan_from_another_query_generation_cannot_be_attached_through_matchin
     let capture = fixture.read().await;
     assert!(capture.is_read_complete());
     assert_eq!(
-        collected_evidence::analyze(&capture).unwrap_err().detail,
+        collected_evidence::analyze(&capture, None).unwrap_err().detail,
         Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity))
     );
 }
@@ -354,22 +386,26 @@ async fn interval_shape_and_a_recorded_plan_version_do_not_invent_source_or_curr
         }
     }
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
-    assert_eq!(analysis.workload.as_ref().unwrap().kind, None);
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
+    assert_eq!(analysis.analyses[0].workload.as_ref().unwrap().kind, None);
     assert!(
-        analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MissingCurrentServerMetadata)
+        analysis.analyses[0]
+            .limitations
+            .iter()
+            .any(|limit| limit.reason == CollectedAnalysisLimit::MissingCurrentServerMetadata)
     );
-    assert!(analysis.context.evidence.records.iter().any(|record| matches!(&record.row.record,
+    assert!(analysis.context.records.iter().any(|record| matches!(&record.row.record,
         TelemetryRecord::PlanDefinition(plan) if plan.engine_version.as_deref() == Some("18.1"))));
     assert!(
-        analysis
-            .context
+        analysis.analyses[0]
             .query_inputs
             .iter()
             .any(|input| input.measurements[0].native.qualifiers["execution_type"] == "3")
     );
-    assert!(analysis.workload.as_ref().unwrap().queries.iter().all(|query| query.logical_reads.is_none()));
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MetricNotProjected));
+    assert!(analysis.analyses[0].workload.as_ref().unwrap().queries.iter().all(|query| query.logical_reads.is_none()));
+    assert!(
+        analysis.analyses[0].limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::MetricNotProjected)
+    );
 }
 
 #[tokio::test]
@@ -388,18 +424,17 @@ async fn fragments_are_execution_weighted_and_different_outcomes_stay_separate()
     aborted.key.native.qualifiers.insert("execution_type".into(), "3".into());
     records.extend([TelemetryRecord::QueryRuntime(second), TelemetryRecord::QueryRuntime(aborted)]);
     let fixture = Fixture::new(source, records).await;
-    let analysis = collected_evidence::analyze(&fixture.read().await).unwrap();
-    let workload = analysis.workload.as_ref().unwrap();
+    let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
+    let workload = analysis.analyses[0].workload.as_ref().unwrap();
     assert_eq!(workload.queries.len(), 2);
     assert_eq!(workload.query_count, 1.0);
-    let input = analysis.context.query_inputs.iter().find(|input| input.measurements.len() == 2).unwrap();
+    let input = analysis.analyses[0].query_inputs.iter().find(|input| input.measurements.len() == 2).unwrap();
     let query = workload.queries.iter().find(|query| query.id == input.query_id).unwrap();
     assert_eq!(query.executions, 10.0);
     assert_eq!(query.total_time_ms, 9100.0);
     assert_eq!(query.mean_time_ms, 910.0);
     assert!(
-        analysis
-            .context
+        analysis.analyses[0]
             .query_inputs
             .iter()
             .any(|input| input.measurements[0].native.qualifiers["execution_type"] == "3")
@@ -419,12 +454,13 @@ async fn native_large_counts_and_unknown_units_are_retained_without_rounded_anal
     ));
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read().await;
-    let analysis = collected_evidence::analyze(&capture).unwrap();
-    assert!(analysis.workload.is_none());
-    assert!(analysis.limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::CounterPrecision));
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    assert!(analysis.analyses[0].workload.is_none());
+    assert!(
+        analysis.analyses[0].limitations.iter().any(|limit| limit.reason == CollectedAnalysisLimit::CounterPrecision)
+    );
     let native = analysis
         .context
-        .evidence
         .records
         .iter()
         .find_map(|record| match &record.row.record {

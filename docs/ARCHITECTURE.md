@@ -217,6 +217,16 @@ references, cohorts and capture intervals bound plan comparison, and every origi
 available. Without a cohort, grouping retains exact plan references and all native qualifiers. A wait needs a
 matching positive-runtime plan population. Unknown forcing remains distinct from an observed unforced plan.
 
+Archived query history declares `QueryHistoryDescription.population_binding`: unknown membership, positively
+unpartitioned statistics, or disjoint native qualifier tuples bound to exact catalog identities. Admission and
+manifest reopening validate this frozen metadata; partitioned runtime and wait rows must match a declared tuple. The
+source owns the dimension names and their meaning. `collected_evidence::analyze` verifies the complete capture
+before selecting a population and returns independent analysis sections with one original evidence context.
+Definitions and borrowed measurement rows are indexed once. Grouping retains the resolved execution population
+even when a native cohort is shared. Unlocalized runtime read gaps withhold each group's denominator; unknown
+membership cannot establish an unpartitioned workload. Warehouse receipt and recovery verification always cover
+the original capture rather than a filtered proof.
+
 The shared export boundary canonicalizes runtime UTC instants without changing their nanosecond value. Equivalent
 offset or fractional spellings produce the same authenticated payload; oversized or subnanosecond values are
 rejected rather than truncated. Opaque native generation timestamps remain unchanged.

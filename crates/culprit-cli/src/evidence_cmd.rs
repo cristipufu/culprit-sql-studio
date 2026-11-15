@@ -8,7 +8,7 @@ use culprit_collector::{
     analytical::evidence::{EvidenceFamily, EvidenceReadBudget, RecoveryPayloadBudget},
     capture::CollectionCancellation,
 };
-use culprit_core::{Result, format, t};
+use culprit_core::{NativeRuntimePopulationCatalog, Result, format, t, telemetry::NativeIdentity};
 use culprit_engine::collector_service::{
     CollectorRuntime,
     evidence::{EvidenceConfig, EvidenceRequest},
@@ -37,6 +37,8 @@ pub(crate) struct AnalyzeArgs {
     common: CommonArgs,
     #[arg(long,value_enum,help=culprit_core::t!("evidence.cli.analysis"))]
     analysis: Analysis,
+    #[arg(long, value_name="ID", value_parser=crate::parse_workload_population, help=culprit_core::t!("evidence.cli.workload_population"))]
+    workload_population: Option<NativeIdentity>,
 }
 
 #[derive(Args)]
@@ -122,7 +124,7 @@ impl From<Family> for EvidenceFamily {
     }
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Analysis {
     Queries,
     MemoryFailures,
@@ -178,9 +180,19 @@ impl CommonArgs {
 }
 
 pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
-    let (common, families, analysis) = match command {
-        EvidenceCommand::Read(args) => (args.common, args.families.into_iter().map(Into::into).collect(), None),
-        EvidenceCommand::Analyze(args) => (args.common, args.analysis.families(), Some(args.analysis)),
+    let (common, families, analysis, requested_population) = match command {
+        EvidenceCommand::Read(args) => (args.common, args.families.into_iter().map(Into::into).collect(), None, None),
+        EvidenceCommand::Analyze(args) => {
+            if let Some(population) = &args.workload_population {
+                if !population.is_valid() {
+                    return Err(culprit_core::Error::invalid(t!("cli.scan.workload_population_invalid")));
+                }
+                if args.analysis != Analysis::Queries {
+                    return Err(culprit_core::Error::invalid(t!("evidence.cli.population_queries_only")));
+                }
+            }
+            (args.common, args.analysis.families(), Some(args.analysis), args.workload_population)
+        }
     };
     let request = common.request(families, out.format())?;
     let config = EvidenceConfig::from_file(&common.config)?;
@@ -193,21 +205,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             read_summary(capture.range_id(), capture.records().len(), capture.gaps().len())
         })?,
         Some(Analysis::Queries) => {
-            let analysis = culprit_engine::collected_evidence::analyze(&capture)?;
-            emit(out, &analysis, common.max_output_bytes, || {
-                let mut text = t!(
-                    "evidence.cli.query_summary",
-                    range = capture.range_id(),
-                    findings = format::count(analysis.findings.len() as f64),
-                    limitations = format::count(analysis.limitations.len() as f64),
-                    gaps = format::count(capture.gaps().len() as f64)
-                );
-                crate::output::append_brief_titles(
-                    &mut text,
-                    analysis.findings.iter().map(|finding| finding.title.as_str()),
-                );
-                text
-            })?;
+            let catalog = capture.source().query_history().and_then(|history| history.population_catalog.as_ref());
+            let population = resolve_population(catalog, requested_population.as_ref())?;
+            let analysis = culprit_engine::collected_evidence::analyze(&capture, population.as_ref())?;
+            emit(out, &analysis, common.max_output_bytes, || observations::queries(&analysis))?;
         }
         Some(Analysis::MemoryFailures) => {
             let analysis = culprit_engine::collected_resources::memory_failures(&capture)?;
@@ -262,6 +263,23 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         println!("{}", t!("evidence.cli.read_incomplete"));
     }
     Ok(if complete { 0 } else { 2 })
+}
+
+/// CLI IDs select an exact captured identity only when its native ID is unambiguous; labels and native properties
+/// never supply missing qualifiers. The immutable archive read, including all row proofs, remains unchanged.
+fn resolve_population(
+    catalog: Option<&NativeRuntimePopulationCatalog>,
+    requested: Option<&NativeIdentity>,
+) -> Result<Option<NativeIdentity>> {
+    let Some(requested) = requested else { return Ok(None) };
+    let missing = || culprit_core::Error::invalid(t!("evidence.cli.population_missing", id = &requested.id));
+    let catalog = catalog.filter(|catalog| catalog.is_valid()).ok_or_else(missing)?;
+    let mut matches = catalog.populations.iter().filter(|population| population.identity.id == requested.id);
+    let selected = matches.next().ok_or_else(missing)?;
+    if matches.next().is_some() {
+        return Err(culprit_core::Error::invalid(t!("evidence.cli.population_ambiguous", id = &requested.id)));
+    }
+    Ok(Some(selected.identity.clone()))
 }
 
 fn read_summary(range: &str, rows: usize, gaps: usize) -> String {
