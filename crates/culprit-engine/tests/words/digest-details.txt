@@ -340,18 +340,18 @@
 === pg-demo.report.json planning-time:-967240904657798800
 {
   "confidence": "high",
-  "summary": "The associated statements used 16 ms of database time over the 5 hours since statistics were reset (<1%). Each plan takes 90 ms and the statement then runs for 0.05 ms: almost all of its time goes to planning, 27.0 s since its statistics began 5 hours ago (a new plan for every run). Planning gets expensive with many joins, partitions or large statistics targets, and it repeats when the plan isn't reused.",
+  "summary": "The associated statements used 16 ms of database time over the 5 hours since statistics were reset (<1%). Planning accounts for almost all of this statement's measured planning and execution time: 27.0 s since its statistics began 5 hours ago. Executions average 0.05 ms. The recorded planning events average 90 ms each.",
   "metrics": [
     {
       "label": "Planning share",
       "value": "100%"
     },
     {
-      "label": "Per plan",
+      "label": "Per planning event",
       "value": "90 ms"
     },
     {
-      "label": "Plans",
+      "label": "Planning events",
       "value": "300"
     },
     {
@@ -368,14 +368,17 @@
     }
   ],
   "fix": {
-    "summary": "Prepare it once and reuse it: most drivers do when you bind parameters (pgjdbc prepareThreshold, Npgsql Max Auto Prepare, psycopg prepare=True). Behind PgBouncer in transaction mode, prepared statements need 1.21+ with max_prepared_statements set. If planning stays slow when reused, look at the number of joins and partitions it touches.",
+    "summary": "Compare planning and execution costs for the same statement and inputs in a test environment. Check whether the driver uses prepared statements and whether generic or custom plans suit those inputs. If planning remains expensive with reuse, inspect join and partition expansion before changing preparation settings.",
     "sql": null,
     "cost": null
   },
   "verify": [
-    "Between two scans, its planning time per run should drop: pg_stat_statements keeps running totals, so compare its planning time and runs in a scan taken once the change is live and one a day or more later (27.0 s over 300 runs in this scan)."
+    "This source retains running totals: compare planning work and executions between scans taken after the tested change, rather than treating all retained history as new work (pg_stat_statements; 27.0 s over 300 runs).",
+    "Compare the same statement, execution group, time window and representative inputs before and after the test. Check compilation or planning cost together with execution time and CPU; retain the change only if the combined cost improves."
   ],
-  "caveats": []
+  "caveats": [
+    "Planning and execution counts are aggregate observations. They do not establish plan reuse or the reason for a compilation."
+  ]
 }
 === pg-demo.report.json replica-lag:analytics_slot
 {

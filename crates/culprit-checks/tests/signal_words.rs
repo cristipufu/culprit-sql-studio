@@ -110,7 +110,7 @@ Read-only WAL sidecar metadata and changes between scans; retained allocation is
 failing-query: Queries that fail or time out
 Statements whose runs end in an error or are cancelled by the client (usually a command timeout): Query Store's aborted and exception runs, performance_schema's errors per digest. PostgreSQL keeps no per-statement error count.
 planning-time: Queries that spend their time being planned
-Statements where planning (PostgreSQL, with pg_stat_statements.track_planning on) or compiling (SQL Server Query Store) takes a large part of their time, usually because the plan isn't reused.
+Statements whose measured planning or compilation work accounts for a large share of their planning and execution time.
 jit-overhead: JIT compilation that takes much of a statement's time
 Statements where PostgreSQL's JIT compilation (pg_stat_statements jit_* columns, 15+) takes a large part of their run time.
 log-volume: Writes that produce most of the log
@@ -592,7 +592,7 @@ fn planning(fixture_name: &str, text: &str, runs: f64, total_ms: f64, plan_ms: f
 }
 
 #[test]
-fn planning_on_postgres_for_every_run() {
+fn planning_on_postgres_records_measured_work() {
     let s = planning(
         "postgres-demo",
         "SELECT * FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = $1",
@@ -605,14 +605,16 @@ fn planning_on_postgres_for_every_run() {
         &run("planning-time", &s),
         r#"id: planning-time:9065391607317686058
 title: Planning takes 60% of the time of a read from orders
-summary: Each plan takes 3 ms and the statement then runs for 2 ms: 60% of its time goes to planning, 30.0 s since its statistics began 5 hours ago (a new plan for every run). Planning gets expensive with many joins, partitions or large statistics targets, and it repeats when the plan isn't reused.
+summary: Planning accounts for 60% of this statement's measured planning and execution time: 30.0 s since its statistics began 5 hours ago. Executions average 2 ms. The recorded planning events average 3 ms each.
 impact: 60% planning
 metric: Planning share
-metric: Per plan
-metric: Plans
+metric: Per planning event
+metric: Planning events
 metric: Runs
-fix: Prepare it once and reuse it: most drivers do when you bind parameters (pgjdbc prepareThreshold, Npgsql Max Auto Prepare, psycopg prepare=True). Behind PgBouncer in transaction mode, prepared statements need 1.21+ with max_prepared_statements set. If planning stays slow when reused, look at the number of joins and partitions it touches.
-verify: Between two scans, its planning time per run should drop: pg_stat_statements keeps running totals, so compare its planning time and runs in a scan taken once the change is live and one a day or more later (30.0 s over 10K runs in this scan)."#,
+fix: Compare planning and execution costs for the same statement and inputs in a test environment. Check whether the driver uses prepared statements and whether generic or custom plans suit those inputs. If planning remains expensive with reuse, inspect join and partition expansion before changing preparation settings.
+verify: This source retains running totals: compare planning work and executions between scans taken after the tested change, rather than treating all retained history as new work (pg_stat_statements; 30.0 s over 10K runs).
+verify: Compare the same statement, execution group, time window and representative inputs before and after the test. Check compilation or planning cost together with execution time and CPU; retain the change only if the combined cost improves.
+caveat: Planning and execution counts are aggregate observations. They do not establish plan reuse or the reason for a compilation."#,
     );
 }
 
@@ -624,42 +626,42 @@ fn compiling_on_sql_server_asked_for_by_a_recompile_hint() {
         &run("planning-time", &s),
         r#"id: planning-time:7
 title: Compiling takes 67% of the time of a read from orders
-summary: Each compile takes 20 ms and the statement then runs for 10 ms: 67% of its time goes to compiling, 20.0 s in the last 5 hours (a new plan for every run). Planning gets expensive with many joins, partitions or large statistics targets, and it repeats when the plan isn't reused. Its OPTION (RECOMPILE) hint explicitly asks SQL Server for a new plan on every run.
+summary: Compiling accounts for 67% of this statement's measured planning and execution time: 20.0 s in the last 5 hours. Executions average 10 ms. The recorded compilations average 20 ms each. Its OPTION (RECOMPILE) hint explicitly asks SQL Server for a new plan on every run.
 impact: 67% planning
 metric: Planning share
-metric: Per plan
-metric: Plans
+metric: Per compilation
+metric: Compilations
 metric: Runs
 fix: Test removing OPTION (RECOMPILE) from this statement so SQL Server can reuse a plan. Compare representative parameter values, including those that need different plans: keep the hint if the extra runtime from reuse costs more than the compiles it saves. Forced parameterization does not override this hint.
-verify: Re-scan: planning should be a small part of its time.
+verify: Compare the same statement, execution group, time window and representative inputs before and after the test. Check compilation or planning cost together with execution time and CPU; retain the change only if the combined cost improves.
 verify: Compare compiles per run and planning time per run before and after, and check that time per run stays acceptable across representative parameter values. The rewritten statement has a new entry.
+caveat: Planning and execution counts are aggregate observations. They do not establish plan reuse or the reason for a compilation.
 caveat: This Query Store entry's first compile falls within the selected period, so its compile totals can be compared with its runs in that period. Older entries' compile totals are shown separately as retained query history."#,
     );
 }
 
 #[test]
-fn compiling_on_sql_server_for_every_run() {
+fn compiling_on_sql_server_keeps_the_cause_unknown() {
     let s = planning("mssql-demo", "SELECT id FROM dbo.orders WHERE status = 3", 1_000.0, 10_000.0, 20_000.0, 1_000.0);
     says(
         &run("planning-time", &s),
         r#"id: planning-time:7
 title: Compiling takes 67% of the time of a read from orders
-summary: Each compile takes 20 ms and the statement then runs for 10 ms: 67% of its time goes to compiling, 20.0 s in the last 5 hours (a new plan for every run). Planning gets expensive with many joins, partitions or large statistics targets, and it repeats when the plan isn't reused.
+summary: Compiling accounts for 67% of this statement's measured planning and execution time: 20.0 s in the last 5 hours. Executions average 10 ms. The recorded compilations average 20 ms each.
 impact: 67% planning
 metric: Planning share
-metric: Per plan
-metric: Plans
+metric: Per compilation
+metric: Compilations
 metric: Runs
-fix: It compiles on every run: look for OPTION (RECOMPILE), a procedure created WITH RECOMPILE, or literal values in the text instead of parameters (sp_executesql with parameters reuses one plan). Forced parameterization reuses plans for statements that differ only in literals, for the whole database: test it first.
-sql: -- Database-wide: statements that differ only in literals share a plan
-ALTER DATABASE CURRENT SET PARAMETERIZATION FORCED;
-verify: Re-scan: planning should be a small part of its time.
+fix: Inspect this statement's parameterization and SET options, deliberate recompilation, and available evidence of schema or statistics changes. Compare representative inputs and parameter-sensitive variants to separate expected plan choices from expensive repeated compilation. Test a statement-level change before changing plan reuse policy.
+verify: Compare the same statement, execution group, time window and representative inputs before and after the test. Check compilation or planning cost together with execution time and CPU; retain the change only if the combined cost improves.
+caveat: Planning and execution counts are aggregate observations. They do not establish plan reuse or the reason for a compilation.
 caveat: This Query Store entry's first compile falls within the selected period, so its compile totals can be compared with its runs in that period. Older entries' compile totals are shown separately as retained query history."#,
     );
 }
 
 #[test]
-fn compiling_on_sql_server_reused_but_slow_and_stopped() {
+fn compiling_on_sql_server_keeps_historical_work_without_inventing_reuse() {
     let mut s =
         planning("mssql-demo", "SELECT id FROM dbo.orders WHERE status = @P1", 10_000.0, 10_000.0, 600_000.0, 100.0);
     stopped(&mut s);
@@ -667,14 +669,15 @@ fn compiling_on_sql_server_reused_but_slow_and_stopped() {
         &run("planning-time", &s),
         r#"id: planning-time:7
 title: Compiling took almost all of the time of a read from orders
-summary: Each compile takes 6.0 s and the statement then runs for 1 ms: almost all of its time goes to compiling, 10 min in the last 3 days (a plan reused about 100 times). Planning gets expensive with many joins, partitions or large statistics targets, and it repeats when the plan isn't reused.
+summary: Compiling accounts for almost all of this statement's measured planning and execution time: 10 min in the last 3 days. Executions average 1 ms. The recorded compilations average 6.0 s each.
 impact: 98% planning
 metric: Planning share
-metric: Per plan
-metric: Plans
+metric: Per compilation
+metric: Compilations
 metric: Runs
-fix: Plans are reused but each compile is slow: simplify the statement (fewer joins and views), or keep its plan with a Query Store hint or plan forcing so it isn't recompiled after statistics change.
-verify: Re-scan: planning should be a small part of its time.
+fix: Inspect this statement's parameterization and SET options, deliberate recompilation, and available evidence of schema or statistics changes. Compare representative inputs and parameter-sensitive variants to separate expected plan choices from expensive repeated compilation. Test a statement-level change before changing plan reuse policy.
+verify: Compare the same statement, execution group, time window and representative inputs before and after the test. Check compilation or planning cost together with execution time and CPU; retain the change only if the combined cost improves.
+caveat: Planning and execution counts are aggregate observations. They do not establish plan reuse or the reason for a compilation.
 caveat: This Query Store entry's first compile falls within the selected period, so its compile totals can be compared with its runs in that period. Older entries' compile totals are shown separately as retained query history."#,
     );
 }

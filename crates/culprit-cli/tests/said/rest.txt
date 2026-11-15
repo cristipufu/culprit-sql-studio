@@ -88,7 +88,7 @@ sqlite-wal        SQLite WAL file size and growth
 failing-query     Queries that fail or time out
                   SQL Server, MySQL/MariaDB · Statements whose runs end in an error or are cancelled by the client (usually a command timeout): Query Store's aborted and exception runs, performance_schema's errors per digest. PostgreSQL keeps no per-statement error count.
 planning-time     Queries that spend their time being planned
-                  SQL Server, PostgreSQL · Statements where planning (PostgreSQL, with pg_stat_statements.track_planning on) or compiling (SQL Server Query Store) takes a large part of their time, usually because the plan isn't reused.
+                  SQL Server, PostgreSQL · Statements whose measured planning or compilation work accounts for a large share of their planning and execution time.
 jit-overhead      JIT compilation that takes much of a statement's time
                   PostgreSQL · Statements where PostgreSQL's JIT compilation (pg_stat_statements jit_* columns, 15+) takes a large part of their run time.
 log-volume        Writes that produce most of the log

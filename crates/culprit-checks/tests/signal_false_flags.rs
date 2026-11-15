@@ -615,12 +615,15 @@ fn an_explicit_recompile_hint_is_the_planning_time_fix() {
     assert!(fix.summary.contains("Test removing OPTION (RECOMPILE)"), "{}", fix.summary);
     assert!(fix.sql.is_none(), "forced parameterization cannot override RECOMPILE");
     assert!(f.verify.iter().any(|v| v.contains("representative parameter values")), "{:?}", f.verify);
-    // Hint text in a comment/literal is not evidence of a compile request. Keep the generic path there.
+    // Hint text in a comment/literal is not evidence of a compile request. Aggregate counts authorize no policy SQL.
     let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == "249").unwrap();
     q.text = q.text.replace("OPTION (RECOMPILE)", "/* OPTION (RECOMPILE) */ AND N'OPTION (RECOMPILE)' <> N''");
     let r = analyze(s);
     let f = r.findings.iter().find(|f| f.id == id).unwrap();
-    assert!(f.fix.as_ref().unwrap().sql.as_ref().unwrap().contains("SET PARAMETERIZATION FORCED"));
+    let fix = f.fix.as_ref().unwrap();
+    assert!(fix.sql.is_none());
+    assert!(fix.summary.contains("schema or statistics changes"), "{}", fix.summary);
+    assert!(!f.summary.contains("hint explicitly asks"), "{}", f.summary);
 }
 
 // ── 13. results that never reach the client ────────────────────────────────────────────────────────

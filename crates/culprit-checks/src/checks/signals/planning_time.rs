@@ -1,4 +1,4 @@
-//! The `planning-time` check: Statements where planning (PostgreSQL, with pg_stat_statements.track_planning on) or compiling (SQL Server Query Store) takes a large part of their time, usually because the plan isn't reused.
+//! Measured statement planning work. Aggregate event counts establish neither plan reuse nor a recompile cause.
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
@@ -26,29 +26,35 @@ check!(
 pub struct PlanningTime<'s> {
     q: &'s QueryStat,
     plan_ms: f64,
-    plans: f64,
+    events: Option<f64>,
+    average_ms: Option<f64>,
     /// Planning time against planning and running together.
     share: f64,
-    /// PostgreSQL plans; SQL Server compiles.
-    pg: bool,
-    /// A new plan for (nearly) every run.
-    every_run: bool,
-    /// SQL Server's OPTION (RECOMPILE) asks for a new plan on every run.
-    recompile_hint: bool,
+    step: culprit_core::PlanningStep,
+    investigation: PlanningInvestigation,
     severity: Severity,
     memory: Option<culprit_core::CompilationMemory>,
 }
 
+#[derive(Clone, Copy)]
+enum PlanningInvestigation {
+    PreparationAndPlanChoice,
+    StatementRecompileDirective,
+    CompilationCauseUnknown,
+}
+
 fn planning_times(snapshot: &Snapshot) -> Vec<PlanningTime<'_>> {
-    let pg = snapshot.server.engine == Engine::Postgres;
+    let step = snapshot.server.engine.spec().statement_metrics().planning;
     let mut cases: Vec<(PlanningTime<'_>, f64)> = app_queries(snapshot)
         .filter_map(|q| {
             let costs = q.costs.as_ref()?;
             let plan_ms = costs.plan_ms.filter(|ms| *ms >= 5_000.0)?;
             let share = plan_ms / (plan_ms + q.total_time_ms);
-            (share >= 0.25 && q.executions >= 50.0).then_some((q, plan_ms, costs.plans.unwrap_or(0.0), share))
+            // Compilation/planning and execution aggregates are not a history of individual cache lookups.
+            let events = costs.plans.filter(|events| events.is_finite() && *events >= 0.0);
+            (share >= 0.25 && q.executions >= 50.0).then_some((q, plan_ms, events, share))
         })
-        .map(|(q, plan_ms, plans, share)| {
+        .map(|(q, plan_ms, events, share)| {
             let severity = if share >= 0.5 && window_at_least(snapshot, q, plan_ms, 60_000.0) {
                 Severity::Medium
             } else {
@@ -57,11 +63,22 @@ fn planning_times(snapshot: &Snapshot) -> Vec<PlanningTime<'_>> {
             let case = PlanningTime {
                 q,
                 plan_ms,
-                plans,
+                events,
+                average_ms: events
+                    .filter(|events| *events > 0.0)
+                    .map(|events| plan_ms / events)
+                    .filter(|average| average.is_finite()),
                 share,
-                pg,
-                every_run: plans >= q.executions * 0.9,
-                recompile_hint: !pg && culprit_core::sql::has_mssql_recompile_hint(&q.text),
+                step,
+                investigation: if step == culprit_core::PlanningStep::Planning {
+                    PlanningInvestigation::PreparationAndPlanChoice
+                } else if snapshot.server.engine.sql_syntax() == culprit_core::SqlSyntax::Mssql
+                    && culprit_core::sql::has_mssql_recompile_hint(&q.text)
+                {
+                    PlanningInvestigation::StatementRecompileDirective
+                } else {
+                    PlanningInvestigation::CompilationCauseUnknown
+                },
                 severity,
                 memory: q.costs.as_ref().and_then(|costs| costs.compile_history.as_ref()?.memory),
             };
@@ -74,11 +91,15 @@ fn planning_times(snapshot: &Snapshot) -> Vec<PlanningTime<'_>> {
 }
 
 fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding {
-    let PlanningTime { q, plan_ms, plans, share, pg, .. } = case;
+    let PlanningTime { q, plan_ms, share, step, .. } = case;
     let mut f = finding("planning-time", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
     let handle = query_handle(q);
     // PostgreSQL plans a statement, SQL Server compiles it: the messages' `select` words each.
-    let work = if pg { "plan" } else { "compile" };
+    let is_planning = step == culprit_core::PlanningStep::Planning;
+    let work = match step {
+        culprit_core::PlanningStep::Planning => "plan",
+        culprit_core::PlanningStep::Compiling => "compile",
+    };
     f.title = t!(
         "check.planning_time.title",
         work = work,
@@ -86,36 +107,18 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
         share = share_words(share),
         handle = &handle
     );
-    let per_plan = per_run(plan_ms, plans.max(1.0));
-    let (each, runs, all, ran) = (
-        format::duration(per_plan),
-        format::duration(q.mean_time_ms),
-        format::duration(plan_ms),
-        ran_phrase(snapshot, q),
-    );
-    let mut summary = vec![if case.every_run {
-        t!(
-            "check.planning_time.summary.every_run",
-            work = work,
-            per_plan = each,
-            run = runs,
-            share = share_words(share),
-            plan_ms = all,
-            ran = ran
-        )
-    } else {
-        t!(
-            "check.planning_time.summary.reused",
-            work = work,
-            per_plan = each,
-            run = runs,
-            share = share_words(share),
-            plan_ms = all,
-            ran = ran,
-            reuses = format::count(per_run(q.executions, plans.max(1.0)))
-        )
-    }];
-    if case.recompile_hint {
+    let mut summary = vec![t!(
+        "check.planning_time.summary.measured",
+        work = work,
+        run = format::duration(q.mean_time_ms),
+        share = share_words(share),
+        plan_ms = format::duration(plan_ms),
+        ran = ran_phrase(snapshot, q)
+    )];
+    if let Some(average) = case.average_ms {
+        summary.push(t!("check.planning_time.summary.average", work = work, average = format::duration(average)));
+    }
+    if matches!(case.investigation, PlanningInvestigation::StatementRecompileDirective) {
         summary.push(t!("check.planning_time.summary.recompile_hint"));
     }
     f.summary = summary.join(" ");
@@ -123,13 +126,25 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
     with_query(snapshot, &mut f, q);
     severity_score(&mut f);
     f.impact.set_label(t!("check.planning_time.impact", share = format::percent(share)));
-    f.confidence = if pg { Confidence::High } else { Confidence::Medium };
-    f.metrics = vec![
-        Metric::said(culprit_core::key!("check.planning_time.metric.share"), share, Unit::Ratio),
-        Metric::said(culprit_core::key!("check.planning_time.metric.per_plan"), per_plan, Unit::Ms),
-        Metric::said(culprit_core::key!("check.planning_time.metric.plans"), plans, Unit::Count),
-        Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
-    ];
+    f.confidence = if is_planning { Confidence::High } else { Confidence::Medium };
+    f.metrics = vec![Metric::said(culprit_core::key!("check.planning_time.metric.share"), share, Unit::Ratio)];
+    if let Some(average) = case.average_ms {
+        let key = if is_planning {
+            key!("check.planning_time.metric.per_plan")
+        } else {
+            key!("check.planning_time.metric.per_compile")
+        };
+        f.metrics.push(Metric::said(key, average, Unit::Ms));
+    }
+    if let Some(events) = case.events {
+        let key = if is_planning {
+            key!("check.planning_time.metric.plans")
+        } else {
+            key!("check.planning_time.metric.compiles")
+        };
+        f.metrics.push(Metric::said(key, events, Unit::Count));
+    }
+    f.metrics.push(Metric::said(key!("common.metric.runs"), q.executions, Unit::Count));
     if let Some(memory) = case.memory.filter(|memory| memory.is_valid() && memory.is_measured()) {
         for (key, kb) in [
             (key!("common.metric.compile_memory_average"), memory.average_kb),
@@ -142,20 +157,13 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
         }
         f.caveats.push(t!("check.planning_time.caveat.compile_memory"));
     }
-    f.fix = Some(if pg {
-        Fix { summary: t!("check.planning_time.fix.prepare"), sql: None, cost: None }
-    } else if case.recompile_hint {
-        Fix { summary: t!("check.planning_time.fix.recompile_hint"), sql: None, cost: None }
-    } else if case.every_run {
-        Fix {
-            summary: t!("check.planning_time.fix.every_run"),
-            sql: Some("-- Database-wide: statements that differ only in literals share a plan\nALTER DATABASE CURRENT SET PARAMETERIZATION FORCED;".into()),
-            cost: None,
-        }
-    } else {
-        Fix { summary: t!("check.planning_time.fix.slow_compiles"), sql: None, cost: None }
-    });
-    // On running totals the planning time holds every plan from before the change: two scans show it.
+    let advice = match case.investigation {
+        PlanningInvestigation::PreparationAndPlanChoice => t!("check.planning_time.fix.planning"),
+        PlanningInvestigation::StatementRecompileDirective => t!("check.planning_time.fix.recompile_hint"),
+        PlanningInvestigation::CompilationCauseUnknown => t!("check.planning_time.fix.compilation_unknown"),
+    };
+    f.fix = Some(Fix { summary: advice, sql: None, cost: None });
+    // Retained planning and execution totals must be compared over equivalent source intervals after a test.
     let now = t!(
         "check.planning_time.verify.now",
         plan_ms = format::duration(plan_ms),
@@ -163,15 +171,19 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
         runs = format::count(q.executions)
     );
     f.facts.advice.running_totals_explained = crate::queries::running_totals(snapshot).is_some();
-    f.verify = vec![match crate::queries::running_totals(snapshot) {
-        Some(source) => t!("check.planning_time.verify.between_scans", source = source, now = now),
-        None => t!("check.planning_time.verify.rescan"),
-    }];
-    if case.recompile_hint {
+    f.verify = vec![t!("check.planning_time.verify.comparison")];
+    if let Some(source) = crate::queries::running_totals(snapshot) {
+        f.verify.insert(0, t!("check.planning_time.verify.between_scans", source = source, now = now));
+    }
+    f.caveats.push(t!("check.planning_time.caveat.event_counts"));
+    if matches!(case.investigation, PlanningInvestigation::StatementRecompileDirective) {
         f.verify.push(t!("check.planning_time.verify.recompile_hint"));
     }
-    if !pg {
+    if step == culprit_core::PlanningStep::Compiling {
         f.caveats.push(t!("check.planning_time.caveat.query_store"));
     }
     f
 }
+
+#[cfg(test)]
+mod tests;

@@ -551,7 +551,7 @@
   },
   {
     "category": "queries",
-    "description": "Statements where planning (PostgreSQL, with pg_stat_statements.track_planning on) or compiling (SQL Server Query Store) takes a large part of their time, usually because the plan isn't reused.",
+    "description": "Statements whose measured planning or compilation work accounts for a large share of their planning and execution time.",
     "engines": [
       "mssql",
       "postgres"

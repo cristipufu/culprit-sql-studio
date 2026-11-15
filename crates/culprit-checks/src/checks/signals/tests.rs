@@ -50,7 +50,7 @@ fn mysql_errors_carry_the_code_not_the_message() {
 }
 
 #[test]
-fn planning_share_needs_reuse_and_volume() {
+fn planning_share_preserves_measured_work_without_inventing_plan_reuse() {
     let mut s = snapshot_with(Engine::Postgres);
     let q = first_query(&mut s);
     q.text = "SELECT * FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = $1".into();
@@ -61,7 +61,8 @@ fn planning_share_needs_reuse_and_volume() {
     let f = PlanningTimeCheck.run(&s);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].title, "Planning takes 60% of the time of a read from orders");
-    assert!(f[0].summary.contains("a new plan for every run"));
+    assert!(f[0].summary.contains("recorded planning events average 3 ms"));
+    assert!(!f[0].summary.contains("a new plan for every run"));
 }
 
 #[test]
