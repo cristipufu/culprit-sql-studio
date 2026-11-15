@@ -7,6 +7,6 @@ export type Blocking = {
  */
 chains: Array<BlockingChain>, 
 /**
- * Sessions waiting on another session, across all chains.
+ * Distinct session identities waiting on another session, across all chains.
  */
 waiting: number, };

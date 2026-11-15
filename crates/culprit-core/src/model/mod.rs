@@ -838,7 +838,7 @@ impl Snapshot {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct Session {
     pub id: String,

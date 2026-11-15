@@ -18,8 +18,8 @@ fn round(v: f64) -> f64 {
     v.round()
 }
 
-fn node(live: &LiveState, n: &BlockNode) -> Value {
-    let s = live.sessions.iter().find(|s| s.id == n.session);
+fn node(n: &BlockNode) -> Value {
+    let s = n.context.as_ref();
     json!({
         "session": n.session,
         "state": s.map(|s| s.state.clone()),
@@ -32,7 +32,7 @@ fn node(live: &LiveState, n: &BlockNode) -> Value {
         "elapsed_ms": s.and_then(|s| s.elapsed_ms).map(round),
         "transaction_ms": s.and_then(|s| s.transaction_ms).map(round),
         "sql": s.and_then(|s| s.sql.as_deref()).map(clip),
-        "blocks": n.children.iter().map(|c| node(live, c)).collect::<Vec<_>>(),
+        "blocks": n.children.iter().map(node).collect::<Vec<_>>(),
     })
 }
 
@@ -51,7 +51,7 @@ pub fn blocking(live: &LiveState) -> Value {
                 "advice": c.advice,
                 "waiters": c.waiters,
                 "longest_wait_ms": c.longest_wait_ms.map(round),
-                "tree": node(live, &c.tree),
+                "tree": node(&c.tree),
             })
         })
         .collect();
@@ -160,5 +160,52 @@ mod tests {
         assert_eq!(response["chains"].as_array().unwrap().len(), 1);
         assert_eq!(response["incomplete"], true);
         assert_eq!(response["notes"], json!(live.notes));
+    }
+
+    #[test]
+    fn blocking_nodes_use_only_projected_context_after_an_independent_session_changes() {
+        let mut live = live();
+        let mut owner = session("20", None);
+        owner.sql = Some("SELECT original_owner".into());
+        owner.application = Some("original-program".into());
+        live.sessions = vec![owner, session("10", Some("20"))];
+        live.blocking = culprit_core::blocking::analyze(culprit_core::Engine::Postgres, &live.sessions, &[], &[]);
+        live.sessions[0].sql = Some("DELETE FROM replacement_request".into());
+        live.sessions[0].application = Some("replacement-program".into());
+        let response = blocking(&live);
+        let tree = &response["chains"][0]["tree"];
+        assert_eq!(tree["sql"], "SELECT original_owner");
+        assert_eq!(tree["application"], "original-program");
+        assert!(!response.to_string().contains("replacement"));
+    }
+
+    #[test]
+    fn an_unqualified_intermediate_owner_cannot_recover_client_sql_or_timing_by_id() {
+        let mut live = live();
+        let mut middle = session("20", Some("30"));
+        middle.sql = Some("DELETE FROM stale_owner_request".into());
+        middle.application = Some("stale-program".into());
+        middle.user = Some("stale-login".into());
+        middle.host = Some("stale-host".into());
+        middle.transaction_ms = Some(900_000.0);
+        let mut waiter = session("10", Some("20"));
+        waiter.sql = Some("SELECT qualified_waiter".into());
+        live.sessions = vec![session("30", None), middle, waiter];
+        live.blocking =
+            culprit_core::blocking::analyze(culprit_core::Engine::Postgres, &live.sessions, &[], &["20".into()]);
+        let response = blocking(&live);
+        let middle = &response["chains"][0]["tree"]["blocks"][0];
+        assert_eq!(response["waiting"], 2);
+        assert_eq!(middle["session"], "20");
+        for field in
+            ["state", "user", "host", "application", "wait_type", "wait_ms", "elapsed_ms", "transaction_ms", "sql"]
+        {
+            assert!(middle[field].is_null(), "unqualified {field} must not attach to the blocking relation");
+        }
+        assert_eq!(middle["blocks"][0]["session"], "10");
+        assert_eq!(middle["blocks"][0]["sql"], "SELECT qualified_waiter");
+        assert!(!response.to_string().contains("stale-"));
+        assert!(!response.to_string().contains("stale_owner_request"));
+        assert_eq!(live.sessions[1].sql.as_deref(), Some("DELETE FROM stale_owner_request"));
     }
 }

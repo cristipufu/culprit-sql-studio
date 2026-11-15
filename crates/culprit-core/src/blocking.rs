@@ -34,7 +34,7 @@ pub enum HeadKind {
     Running,
     /// Connected, not running anything, no transaction age known.
     Idle,
-    /// Not visible to this login (another database, or not permitted).
+    /// Session context is hidden, repeated or lacks native owner continuity.
     Unknown,
 }
 
@@ -43,6 +43,9 @@ pub enum HeadKind {
 #[ts(export)]
 pub struct BlockNode {
     pub session: String,
+    /// The captured session context qualified for this node. Hidden, repeated or known-unqualified identities
+    /// retain their topology without borrowing SQL, client details or action eligibility from an independent row.
+    pub context: Option<Session>,
     /// The lock this session waits for; `None` for the head.
     pub lock: Option<LockWait>,
     /// That lock in words: "an update lock on shop.orders".
@@ -60,7 +63,7 @@ pub struct BlockingChain {
     pub head_ms: Option<f64>,
     /// Age of the head's open transaction.
     pub transaction_ms: Option<f64>,
-    /// Sessions waiting behind the head, directly or through others.
+    /// Distinct session identities waiting behind the head, directly or through others.
     pub waiters: u32,
     pub longest_wait_ms: Option<f64>,
     /// The wait most of the head's direct waiters report, e.g. `LCK_M_X` or `Lock: transactionid`.
@@ -79,27 +82,27 @@ pub struct BlockingChain {
 pub struct Blocking {
     /// Biggest chain first.
     pub chains: Vec<BlockingChain>,
-    /// Sessions waiting on another session, across all chains.
+    /// Distinct session identities waiting on another session, across all chains.
     pub waiting: u32,
 }
 
 /// The blocking chains in `sessions`, with lock details from `locks` where the engine provided them. `None` when
 /// nobody waits on anybody. Known-unqualified owner IDs retain their topology and waiter facts, but their captured
-/// session context cannot explain the head of a chain (for example, a PID whose native generation changed).
+/// session context cannot explain that node (for example, a PID whose native generation changed).
 pub fn analyze(
     engine: Engine,
     sessions: &[Session],
     locks: &[LockWait],
     unqualified_owner_ids: &[String],
 ) -> Option<Blocking> {
-    let by_id: HashMap<&str, &Session> = sessions.iter().map(|s| (s.id.as_str(), s)).collect();
+    let contexts = qualified_contexts(sessions, unqualified_owner_ids);
     let lock_of: HashMap<&str, &LockWait> = locks.iter().map(|l| (l.session.as_str(), l)).collect();
-    let wait_of: HashMap<&str, &str> =
-        sessions.iter().filter_map(|s| Some((s.id.as_str(), s.wait.as_deref()?))).collect();
-    let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut children: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut has_parent = BTreeSet::new();
     for s in sessions {
         if let Some(blocker) = s.blocked_by.as_deref().filter(|b| *b != s.id) {
-            children.entry(blocker).or_default().push(&s.id);
+            children.entry(blocker).or_default().insert(&s.id);
+            has_parent.insert(s.id.as_str());
         }
     }
     if children.is_empty() {
@@ -108,11 +111,7 @@ pub fn analyze(
 
     // Heads hold locks and wait on nobody. A cycle (a deadlock being resolved right now) has no such session, so the
     // smallest id in it stands in as the head.
-    let mut heads: Vec<&str> = children
-        .keys()
-        .copied()
-        .filter(|id| by_id.get(id).and_then(|s| s.blocked_by.as_deref()).is_none_or(|b| b == *id))
-        .collect();
+    let mut heads: Vec<&str> = children.keys().copied().filter(|id| !has_parent.contains(id)).collect();
     let mut placed: BTreeSet<&str> = BTreeSet::new();
     for head in &heads {
         collect(head, &children, &mut placed);
@@ -128,18 +127,35 @@ pub fn analyze(
         .into_iter()
         .map(|head| {
             let mut seen = BTreeSet::new();
-            let tree = node(head, &children, &lock_of, &wait_of, &mut seen, true);
-            let context = by_id.get(head).copied().filter(|_| !unqualified_owner_ids.iter().any(|id| id == head));
-            chain(engine, head, context, tree, &by_id, &lock_of)
+            let mut ancestors = BTreeSet::new();
+            let tree = node(head, &children, &lock_of, &contexts, &mut seen, &mut ancestors, true);
+            chain(engine, head, tree)
         })
         .filter(|c| c.waiters > 0)
         .collect();
     chains.sort_by(|a, b| b.waiters.cmp(&a.waiters).then_with(|| a.head.cmp(&b.head)));
-    let waiting = chains.iter().map(|c| c.waiters).sum();
+    let waiting = chains
+        .iter()
+        .flat_map(|chain| descendants(&chain.tree))
+        .map(|node| node.session.as_str())
+        .collect::<BTreeSet<_>>()
+        .len() as u32;
     Some(Blocking { chains, waiting })
 }
 
-fn collect<'a>(id: &'a str, children: &BTreeMap<&'a str, Vec<&'a str>>, placed: &mut BTreeSet<&'a str>) {
+fn qualified_contexts<'a>(sessions: &'a [Session], unqualified_owner_ids: &[String]) -> HashMap<&'a str, &'a Session> {
+    let mut unique = HashMap::new();
+    for session in sessions {
+        unique.entry(session.id.as_str()).and_modify(|context| *context = None).or_insert(Some(session));
+    }
+    unique
+        .into_iter()
+        .filter(|(id, _)| !unqualified_owner_ids.iter().any(|unqualified| unqualified.as_str() == *id))
+        .filter_map(|(id, context)| context.map(|session| (id, session)))
+        .collect()
+}
+
+fn collect<'a>(id: &'a str, children: &BTreeMap<&'a str, BTreeSet<&'a str>>, placed: &mut BTreeSet<&'a str>) {
     if !placed.insert(id) {
         return;
     }
@@ -150,18 +166,28 @@ fn collect<'a>(id: &'a str, children: &BTreeMap<&'a str, Vec<&'a str>>, placed: 
 
 fn node<'a>(
     id: &'a str,
-    children: &BTreeMap<&'a str, Vec<&'a str>>,
+    children: &BTreeMap<&'a str, BTreeSet<&'a str>>,
     lock_of: &HashMap<&str, &LockWait>,
-    wait_of: &HashMap<&str, &str>,
+    contexts: &HashMap<&str, &Session>,
     seen: &mut BTreeSet<&'a str>,
+    ancestors: &mut BTreeSet<&'a str>,
     head: bool,
 ) -> BlockNode {
-    seen.insert(id);
-    let kids = children.get(id).into_iter().flatten().filter(|c| !seen.contains(**c)).copied().collect::<Vec<_>>();
-    let children_nodes = kids.into_iter().map(|c| node(c, children, lock_of, wait_of, seen, false)).collect();
+    let children_nodes = if seen.insert(id) {
+        ancestors.insert(id);
+        let kids =
+            children.get(id).into_iter().flatten().filter(|c| !ancestors.contains(**c)).copied().collect::<Vec<_>>();
+        let nodes = kids.into_iter().map(|c| node(c, children, lock_of, contexts, seen, ancestors, false)).collect();
+        ancestors.remove(id);
+        nodes
+    } else {
+        Vec::new()
+    };
+    let context = contexts.get(id).map(|session| (*session).clone());
     let lock = if head { None } else { lock_of.get(id).map(|l| (*l).clone()) };
-    let waits_for = if head { None } else { lock_phrase(wait_of.get(id).copied(), lock.as_ref()) };
-    BlockNode { session: id.to_string(), lock, waits_for, children: children_nodes }
+    let waits_for =
+        if head { None } else { lock_phrase(context.as_ref().and_then(|s| s.wait.as_deref()), lock.as_ref()) };
+    BlockNode { session: id.to_string(), context, lock, waits_for, children: children_nodes }
 }
 
 fn descendants(node: &BlockNode) -> Vec<&BlockNode> {
@@ -287,37 +313,33 @@ pub fn lock_phrase(wait_type: Option<&str>, lock: Option<&LockWait>) -> Option<S
     }
 }
 
-fn chain(
-    engine: Engine,
-    head: &str,
-    session: Option<&Session>,
-    tree: BlockNode,
-    by_id: &HashMap<&str, &Session>,
-    lock_of: &HashMap<&str, &LockWait>,
-) -> BlockingChain {
+fn chain(engine: Engine, head: &str, tree: BlockNode) -> BlockingChain {
+    let session = tree.context.as_ref();
     let kind = head_kind(session);
     let all = descendants(&tree);
-    let waiters = all.len() as u32;
+    let waiters = all.iter().map(|node| node.session.as_str()).collect::<BTreeSet<_>>().len() as u32;
     let longest_wait_ms = all
         .iter()
-        .filter_map(|n| by_id.get(n.session.as_str()).and_then(|s| s.wait_ms.or(s.elapsed_ms)))
+        .filter_map(|n| n.context.as_ref().and_then(|s| s.wait_ms.or(s.elapsed_ms)))
         .fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.max(v))));
-    let direct: Vec<&str> = tree.children.iter().map(|c| c.session.as_str()).collect();
     // MySQL's "wait" is the processlist state (updating, statistics), not a wait type; the lock says it better.
     let wait_type = if engine == Engine::Mysql {
         None
     } else {
-        most_common(direct.iter().filter_map(|id| by_id.get(id).and_then(|s| s.wait.clone())))
+        most_common(tree.children.iter().filter_map(|n| n.context.as_ref().and_then(|s| s.wait.clone())))
     };
     let lock = most_common(
-        direct.iter().filter_map(|id| lock_of.get(id)).map(|l| (l.object.clone(), l.mode.clone(), l.resource.clone())),
+        tree.children
+            .iter()
+            .filter_map(|n| n.lock.as_ref())
+            .map(|l| (l.object.clone(), l.mode.clone(), l.resource.clone())),
     )
     .and_then(|(object, mode, resource)| {
-        direct
+        tree.children
             .iter()
-            .filter_map(|id| lock_of.get(id))
+            .filter_map(|n| n.lock.as_ref())
             .find(|l| (&l.object, &l.mode, &l.resource) == (&object, &mode, &resource))
-            .map(|l| (*l).clone())
+            .cloned()
     });
     let head_ms = session.and_then(|s| s.elapsed_ms);
     let transaction_ms = session.and_then(|s| s.transaction_ms);
@@ -480,7 +502,8 @@ mod tests {
     fn a_blocker_this_login_cannot_see() {
         let b = analyze(Engine::Postgres, &[session("61", "active", Some("99"))], &[], &[]).unwrap();
         assert_eq!(b.chains[0].head_kind, HeadKind::Unknown);
-        assert!(b.chains[0].headline.contains("can't see"));
+        assert!(b.chains[0].tree.context.is_none());
+        assert_eq!(b.chains[0].tree.children[0].context.as_ref().unwrap().id, "61");
     }
 
     #[test]
@@ -501,15 +524,34 @@ mod tests {
         let mut intermediate = session("20", "active", Some("30"));
         intermediate.command = Some("DELETE".into());
         intermediate.sql = Some("DELETE FROM private_old_request".into());
+        intermediate.application = Some("old-owner-program".into());
+        intermediate.wait_ms = Some(900_000.0);
         let sessions = [session("10", "active", Some("20")), intermediate, session("30", "idle", None)];
         let locks = [lock("10"), lock("20")];
         let known = analyze(Engine::Postgres, &sessions, &locks, &[]).unwrap();
         let qualified = analyze(Engine::Postgres, &sessions, &locks, &["20".into()]).unwrap();
-        assert_eq!(qualified, known, "an intermediate context cannot erase its positive waiter edge");
         assert_eq!(qualified.waiting, 2);
         assert_eq!(qualified.chains.len(), 1);
-        assert_eq!(qualified.chains[0].tree.children[0].session, "20");
-        assert_eq!(qualified.chains[0].tree.children[0].children[0].session, "10");
+        let chain = &qualified.chains[0];
+        let middle = &chain.tree.children[0];
+        assert_eq!(chain.tree.context.as_ref(), Some(&sessions[2]));
+        assert_eq!(middle.session, "20");
+        assert!(middle.context.is_none());
+        assert_eq!(middle.lock, known.chains[0].tree.children[0].lock, "keep the independently observed lock");
+        assert_eq!(middle.children[0].session, "10");
+        assert_eq!(middle.children[0].context.as_ref(), Some(&sessions[0]));
+        assert_eq!(known.chains[0].longest_wait_ms, Some(900_000.0));
+        assert_eq!(
+            chain.longest_wait_ms,
+            Some(30_000.0),
+            "an unqualified owner's old duration cannot explain this chain"
+        );
+        assert!(chain.wait_type.is_none());
+        assert_eq!(
+            sessions[1].sql.as_deref(),
+            Some("DELETE FROM private_old_request"),
+            "retain the independent original row"
+        );
     }
 
     #[test]
@@ -524,12 +566,90 @@ mod tests {
         assert_eq!(qualified.waiting, known.waiting);
         assert_eq!(qualified.chains.len(), known.chains.len());
         let chain = &qualified.chains[0];
-        assert_eq!(chain.tree, known.chains[0].tree);
+        assert_eq!(chain.tree.session, known.chains[0].tree.session);
+        assert_eq!(chain.tree.children[0], known.chains[0].tree.children[0]);
+        assert!(chain.tree.context.is_none());
         assert_eq!(chain.longest_wait_ms, known.chains[0].longest_wait_ms, "waiter observations survive");
         assert_eq!(chain.head_kind, HeadKind::Unknown);
         assert!(chain.head_ms.is_none() && chain.transaction_ms.is_none());
         assert!(!chain.headline.contains("DELETE") && !chain.headline.contains("private_old_request"));
         assert_ne!(chain.headline, known.chains[0].headline);
+    }
+
+    #[test]
+    fn qualified_nodes_carry_the_exact_original_session_without_a_later_lookup() {
+        let mut head = session("20", "active", None);
+        head.sql = Some("SELECT qualified_original".into());
+        head.application = Some("qualified-program".into());
+        head.host = Some("qualified-host".into());
+        let waiter = session("10", "active", Some("20"));
+        let mut sessions = [head.clone(), waiter.clone()];
+        let blocking = analyze(Engine::Postgres, &sessions, &[lock("10")], &[]).unwrap();
+        sessions[0].sql = Some("DELETE FROM replacement_request".into());
+        let tree = &blocking.chains[0].tree;
+        assert_eq!(tree.context.as_ref(), Some(&head));
+        assert_eq!(tree.children[0].context.as_ref(), Some(&waiter));
+        assert_eq!(tree.context.as_ref().unwrap().id, tree.session);
+        assert_eq!(tree.children[0].context.as_ref().unwrap().id, tree.children[0].session);
+    }
+
+    #[test]
+    fn repeated_session_ids_never_choose_a_context_or_double_count_a_waiter() {
+        let mut head = session("20", "active", None);
+        head.sql = Some("SELECT first_request".into());
+        let mut replacement = head.clone();
+        replacement.sql = Some("DELETE FROM replacement_request".into());
+        let waiter = session("10", "active", Some("20"));
+        for repeated in [head.clone(), replacement] {
+            let sessions = [head.clone(), repeated, waiter.clone(), waiter.clone()];
+            let blocking = analyze(Engine::Postgres, &sessions, &[], &[]).unwrap();
+            let chain = &blocking.chains[0];
+            assert_eq!(blocking.waiting, 1);
+            assert_eq!(chain.head_kind, HeadKind::Unknown);
+            assert!(chain.tree.context.is_none());
+            assert_eq!(chain.tree.children.len(), 1);
+            assert!(chain.tree.children[0].context.is_none());
+            assert!(chain.longest_wait_ms.is_none());
+        }
+    }
+
+    #[test]
+    fn conflicting_parent_rows_preserve_each_edge_without_counting_one_waiter_twice() {
+        let sessions = [
+            session("30", "active", None),
+            session("10", "active", Some("30")),
+            session("20", "active", Some("10")),
+            session("20", "active", Some("30")),
+        ];
+        let blocking = analyze(Engine::Postgres, &sessions, &[], &[]).unwrap();
+        let chain = &blocking.chains[0];
+        assert_eq!(blocking.waiting, 2);
+        assert_eq!(chain.waiters, 2);
+        let children = &chain.tree.children;
+        assert_eq!(children[0].session, "10");
+        assert_eq!(children[0].children[0].session, "20");
+        assert!(children[0].children[0].context.is_none());
+        assert_eq!(children[1].session, "20");
+        assert!(children[1].context.is_none());
+        assert!(children[1].children.is_empty(), "a repeated identity cannot expand the graph again");
+    }
+
+    #[test]
+    fn a_repeated_waiter_under_separate_heads_is_counted_once_across_chains() {
+        let sessions = [
+            session("30", "active", None),
+            session("40", "active", None),
+            session("20", "active", Some("30")),
+            session("20", "active", Some("40")),
+        ];
+        let blocking = analyze(Engine::Postgres, &sessions, &[], &[]).unwrap();
+        assert_eq!(blocking.chains.len(), 2);
+        assert_eq!(blocking.waiting, 1);
+        for chain in &blocking.chains {
+            assert_eq!(chain.waiters, 1);
+            assert_eq!(chain.tree.children[0].session, "20");
+            assert!(chain.tree.children[0].context.is_none());
+        }
     }
 
     #[test]
@@ -770,8 +890,8 @@ Session 57 holds locks without running anything; 1 session waits behind it (PAGE
 Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
 
 Mssql unseen
-Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
-The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+Session 99 is reported as a blocker; 1 session waits behind it (an update lock).
+Culprit could not safely match this blocker to its session details. Refresh the observation and verify its identity and visibility before attributing SQL or taking action.
 
 Postgres sleeping Some(48000.0) 1 LCK_M_S
 Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
@@ -822,8 +942,8 @@ Session 57 holds locks without running anything; 1 session waits behind it (PAGE
 Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
 
 Postgres unseen
-Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
-The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+Session 99 is reported as a blocker; 1 session waits behind it (an update lock).
+Culprit could not safely match this blocker to its session details. Refresh the observation and verify its identity and visibility before attributing SQL or taking action.
 
 Yugabyte sleeping Some(48000.0) 1 LCK_M_S
 Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
@@ -874,8 +994,8 @@ Session 57 holds locks without running anything; 1 session waits behind it (PAGE
 Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
 
 Yugabyte unseen
-Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
-The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+Session 99 is reported as a blocker; 1 session waits behind it (an update lock).
+Culprit could not safely match this blocker to its session details. Refresh the observation and verify its identity and visibility before attributing SQL or taking action.
 
 Mysql sleeping Some(48000.0) 1 LCK_M_S
 Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (an update lock on shop.orders).
@@ -926,8 +1046,8 @@ Session 57 holds locks without running anything; 1 session waits behind it.
 Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
 
 Mysql unseen
-Session 99, which this login can't see, holds the locks; 1 session waits behind it.
-The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+Session 99 is reported as a blocker; 1 session waits behind it.
+Culprit could not safely match this blocker to its session details. Refresh the observation and verify its identity and visibility before attributing SQL or taking action.
 
 Sqlite sleeping Some(48000.0) 1 LCK_M_S
 Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
@@ -978,8 +1098,8 @@ Session 57 holds locks without running anything; 1 session waits behind it (PAGE
 Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
 
 Sqlite unseen
-Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
-The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look."#
+Session 99 is reported as a blocker; 1 session waits behind it (an update lock).
+Culprit could not safely match this blocker to its session details. Refresh the observation and verify its identity and visibility before attributing SQL or taking action."#
         );
     }
 

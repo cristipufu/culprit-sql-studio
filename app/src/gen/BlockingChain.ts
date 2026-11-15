@@ -16,7 +16,7 @@ head_ms: number | null,
  */
 transaction_ms: number | null, 
 /**
- * Sessions waiting behind the head, directly or through others.
+ * Distinct session identities waiting behind the head, directly or through others.
  */
 waiters: number, longest_wait_ms: number | null, 
 /**

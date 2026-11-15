@@ -112,11 +112,62 @@
            "index": "pk_orders"
           },
           "waits_for": "a shared lock on shop.orders",
-          "children": []
+          "children": [],
+          "context": {
+           "id": "75",
+           "user": "sa",
+           "application": "SQLCMD",
+           "host": "web-1",
+           "database": "culprit_demo",
+           "state": "suspended",
+           "command": "SELECT",
+           "wait": "LCK_M_S",
+           "wait_ms": 20908.0,
+           "blocked_by": "76",
+           "elapsed_ms": 20909.0,
+           "transaction_ms": null,
+           "cpu_ms": 0.0,
+           "reads": 3.0,
+           "sql": "SELECT [status] FROM [shop].[orders] WHERE [id]=@1"
+          }
          }
-        ]
+        ],
+        "context": {
+         "id": "76",
+         "user": "sa",
+         "application": "SQLCMD",
+         "host": "web-1",
+         "database": "culprit_demo",
+         "state": "suspended",
+         "command": "UPDATE",
+         "wait": "LCK_M_U",
+         "wait_ms": 20909.0,
+         "blocked_by": "71",
+         "elapsed_ms": 20909.0,
+         "transaction_ms": 20907.0,
+         "cpu_ms": 0.0,
+         "reads": 3.0,
+         "sql": "UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1"
+        }
        }
-      ]
+      ],
+      "context": {
+       "id": "71",
+       "user": "sa",
+       "application": "SQLCMD",
+       "host": "web-1",
+       "database": "culprit_demo",
+       "state": "sleeping",
+       "command": null,
+       "wait": null,
+       "wait_ms": null,
+       "blocked_by": null,
+       "elapsed_ms": 22410.0,
+       "transaction_ms": 22410.0,
+       "cpu_ms": 1.0,
+       "reads": 3.0,
+       "sql": "BEGIN TRAN;\nUPDATE shop.orders SET total = total + 1 WHERE id = 1;"
+      }
      }
     }
    ],
@@ -237,11 +288,62 @@
            "index": "PRIMARY"
           },
           "waits_for": "an exclusive row lock on shop.orders",
-          "children": []
+          "children": [],
+          "context": {
+           "id": "657",
+           "user": "root",
+           "application": null,
+           "host": "localhost",
+           "database": "shop",
+           "state": "active",
+           "command": "QUERY",
+           "wait": "updating",
+           "wait_ms": null,
+           "blocked_by": "658",
+           "elapsed_ms": 21000.0,
+           "transaction_ms": 21541.73,
+           "cpu_ms": null,
+           "reads": null,
+           "sql": "UPDATE orders SET id = id WHERE id = 1"
+          }
          }
-        ]
+        ],
+        "context": {
+         "id": "658",
+         "user": "root",
+         "application": null,
+         "host": "localhost",
+         "database": "shop",
+         "state": "active",
+         "command": "QUERY",
+         "wait": "statistics",
+         "wait_ms": null,
+         "blocked_by": "656",
+         "elapsed_ms": 21000.0,
+         "transaction_ms": 21541.73,
+         "cpu_ms": null,
+         "reads": null,
+         "sql": "SELECT id FROM orders WHERE id = 1 FOR UPDATE"
+        }
        }
-      ]
+      ],
+      "context": {
+       "id": "656",
+       "user": "root",
+       "application": null,
+       "host": "localhost",
+       "database": "shop",
+       "state": "idle in transaction",
+       "command": null,
+       "wait": null,
+       "wait_ms": null,
+       "blocked_by": null,
+       "elapsed_ms": 23000.0,
+       "transaction_ms": 23541.73,
+       "cpu_ms": null,
+       "reads": null,
+       "sql": "UPDATE orders SET id = id WHERE id = 1"
+      }
      }
     }
    ],
@@ -368,11 +470,62 @@
            "index": null
           },
           "waits_for": "a row lock on public.orders",
-          "children": []
+          "children": [],
+          "context": {
+           "id": "3440",
+           "user": "postgres",
+           "application": "psql",
+           "host": null,
+           "database": "demo",
+           "state": "active",
+           "command": "SET",
+           "wait": "Lock: tuple",
+           "wait_ms": null,
+           "blocked_by": "3439",
+           "elapsed_ms": 21053.791,
+           "transaction_ms": 21053.791,
+           "cpu_ms": null,
+           "reads": null,
+           "sql": "SET lock_timeout = '30s'; UPDATE orders SET id = id WHERE id = 1"
+          }
          }
-        ]
+        ],
+        "context": {
+         "id": "3439",
+         "user": "postgres",
+         "application": "psql",
+         "host": null,
+         "database": "demo",
+         "state": "active",
+         "command": "SET",
+         "wait": "Lock: transactionid",
+         "wait_ms": null,
+         "blocked_by": "3427",
+         "elapsed_ms": 21053.995,
+         "transaction_ms": 21053.995,
+         "cpu_ms": null,
+         "reads": null,
+         "sql": "SET lock_timeout = '30s'; SELECT id FROM orders WHERE id = 1 FOR UPDATE"
+        }
        }
-      ]
+      ],
+      "context": {
+       "id": "3427",
+       "user": "postgres",
+       "application": "psql",
+       "host": null,
+       "database": "demo",
+       "state": "idle in transaction",
+       "command": null,
+       "wait": null,
+       "wait_ms": null,
+       "blocked_by": null,
+       "elapsed_ms": 22547.744,
+       "transaction_ms": 22550.222,
+       "cpu_ms": null,
+       "reads": null,
+       "sql": "UPDATE orders SET id = id WHERE id = 1;"
+      }
      }
     }
    ],

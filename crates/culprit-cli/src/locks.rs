@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use clap::Args;
-use culprit_core::{BlockNode, Deadlock, DeadlockReport, Error, LiveState, Result, Session, format, t};
+use culprit_core::{BlockNode, Deadlock, DeadlockReport, Error, LiveState, Result, format, t};
 use culprit_engine::{Workspace, deadlocks};
 use serde_json::{Value, json};
 
@@ -62,19 +62,15 @@ pub async fn blocking(ws: &Workspace, connection: &str, out: &Out) -> Result<u8>
     };
     for chain in &blocking.chains {
         println!("{}", out.bold(&chain.headline));
-        print_node(&live, &chain.tree, out, 0);
+        print_node(&chain.tree, out, 0);
         println!("  {}", out.dim(&chain.advice));
         println!();
     }
     Ok(0)
 }
 
-fn session<'a>(live: &'a LiveState, id: &str) -> Option<&'a Session> {
-    live.sessions.iter().find(|s| s.id == id)
-}
-
-fn print_node(live: &LiveState, node: &BlockNode, out: &Out, depth: usize) {
-    let s = session(live, &node.session);
+fn node_line(node: &BlockNode, out: &Out, depth: usize) -> String {
+    let s = node.context.as_ref();
     let prefix = if depth == 0 { "  ".to_string() } else { format!("{}└─ ", "   ".repeat(depth)) };
     let state = match (depth, s) {
         (0, Some(s)) => s.state.clone(),
@@ -99,9 +95,13 @@ fn print_node(live: &LiveState, node: &BlockNode, out: &Out, depth: usize) {
         .unwrap_or_default();
     let sql = if sql.chars().count() > 90 { format!("{}…", sql.chars().take(89).collect::<String>()) } else { sql };
     let detail = [state, lock, who].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
-    println!("{prefix}{}  {}  {}", out.bold(&node.session), detail, out.dim(&sql));
+    format!("{prefix}{}  {}  {}", out.bold(&node.session), detail, out.dim(&sql))
+}
+
+fn print_node(node: &BlockNode, out: &Out, depth: usize) {
+    println!("{}", node_line(node, out, depth));
     for child in &node.children {
-        print_node(live, child, out, depth + 1);
+        print_node(child, out, depth + 1);
     }
 }
 
@@ -109,18 +109,7 @@ fn blocking_json(live: &LiveState) -> Value {
     let Some(b) = live.blocking.as_ref() else {
         return json!({ "taken_at": live.taken_at, "waiting": 0, "chains": [], "incomplete": live.blocking_incomplete(), "notes": live.notes });
     };
-    let mut ids = Vec::new();
-    fn walk(node: &BlockNode, ids: &mut Vec<String>) {
-        ids.push(node.session.clone());
-        for c in &node.children {
-            walk(c, ids);
-        }
-    }
-    for c in &b.chains {
-        walk(&c.tree, &mut ids);
-    }
-    let sessions: Vec<&Session> = live.sessions.iter().filter(|s| ids.contains(&s.id)).collect();
-    json!({ "taken_at": live.taken_at, "waiting": b.waiting, "chains": b.chains, "sessions": sessions, "incomplete": live.blocking_incomplete(), "notes": live.notes })
+    json!({ "taken_at": live.taken_at, "waiting": b.waiting, "chains": b.chains, "incomplete": live.blocking_incomplete(), "notes": live.notes })
 }
 
 pub async fn deadlocks(ws: &Workspace, args: DeadlocksArgs, out: &Out) -> Result<u8> {
@@ -221,6 +210,60 @@ fn print_deadlock(d: &Deadlock, out: &Out) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn blocking_live(unqualified: &[String]) -> LiveState {
+        let sessions: Vec<culprit_core::Session> = serde_json::from_value(json!([
+            {"id":"20","state":"active","sql":"SELECT original_head","application":"original-owner-program","user":"original-owner-login","host":"original-owner-host"},
+            {"id":"10","state":"active","blocked_by":"20","waiting_on_lock":true,"sql":"SELECT waiting_request","wait_ms":5000.0}
+        ])).unwrap();
+        let blocking = culprit_core::blocking::analyze(culprit_core::Engine::Postgres, &sessions, &[], unqualified);
+        LiveState {
+            taken_at: "2026-11-15T10:00:00Z".into(),
+            sessions,
+            blocking,
+            notes: vec![],
+            waits: vec![],
+            session_actions: vec![],
+            session_actions_note: None,
+        }
+    }
+
+    #[test]
+    fn blocking_output_uses_the_qualified_context_without_rejoining_independent_sessions() {
+        let mut live = blocking_live(&[]);
+        live.sessions[0].sql = Some("DELETE FROM later_request".into());
+        live.sessions[0].application = Some("later-program".into());
+        let response = blocking_json(&live);
+        assert!(response.get("sessions").is_none(), "qualified contexts live only under their tree nodes");
+        assert_eq!(response["chains"][0]["tree"]["context"]["sql"], "SELECT original_head");
+        let output = response.to_string();
+        assert!(!output.contains("later_request") && !output.contains("later-program"));
+        let text = node_line(&live.blocking.as_ref().unwrap().chains[0].tree, &Out::new(Format::Json), 0);
+        assert!(text.contains("original_head") && text.contains("original-owner-program"));
+        assert!(!text.contains("later_request") && !text.contains("later-program"));
+    }
+
+    #[test]
+    fn an_unqualified_blocker_keeps_topology_without_its_independent_client_or_sql() {
+        let live = blocking_live(&["20".into()]);
+        let response = blocking_json(&live);
+        assert_eq!(response["waiting"], 1);
+        assert_eq!(response["chains"][0]["tree"]["session"], "20");
+        assert!(response["chains"][0]["tree"]["context"].is_null());
+        assert_eq!(response["chains"][0]["tree"]["children"][0]["context"]["sql"], "SELECT waiting_request");
+        let output = response.to_string();
+        for private in ["original_head", "original-owner-program", "original-owner-login", "original-owner-host"] {
+            assert!(!output.contains(private));
+        }
+        let text = node_line(&live.blocking.as_ref().unwrap().chains[0].tree, &Out::new(Format::Json), 0);
+        assert!(text.contains(&t!("cli.blocking.not_visible")));
+        assert!(!text.contains("original_head") && !text.contains("original-owner-program"));
+        assert_eq!(
+            live.sessions[0].sql.as_deref(),
+            Some("SELECT original_head"),
+            "keep the independent original observation"
+        );
+    }
 
     #[test]
     fn spans_read_like_people_write_them() {

@@ -200,7 +200,6 @@ function LiveSessions({ connection }: { connection: string }) {
       ) : chains.length > 0 && state?.blocking ? (
         <BlockingChains
           blocking={state.blocking}
-          sessions={sessions}
           actions={actions}
           actionsNote={state.session_actions_note}
           onInterrupt={interrupt}

@@ -11,7 +11,6 @@ import { t } from "../lib/i18n";
 
 type Props = {
   blocking: Blocking;
-  sessions: Session[];
   actions: SessionAction[];
   actionsNote: string | null;
   onInterrupt: (session: Session, action: SessionAction) => Promise<void>;
@@ -32,17 +31,17 @@ function headLabel(kind: BlockingChain["head_kind"]): string {
 }
 
 /** Every chain, biggest first: a calm card with the head blocker, the story, and the tree of who waits behind whom. */
-export function BlockingChains({ blocking, sessions, actions, actionsNote, onInterrupt, onLocate }: Props) {
+export function BlockingChains({ blocking, actions, actionsNote, onInterrupt, onLocate }: Props) {
   return (
     <div className="block-chains" role="group" aria-label={t("ui.blocking_chains.label", { count: blocking.waiting })}>
       {blocking.chains.map((chain, i) => (
-        <ChainCard key={chain.head} chain={chain} sessions={sessions} actions={actions} actionsNote={actionsNote} onInterrupt={onInterrupt} onLocate={onLocate} defaultOpen={i < 2} />
+        <ChainCard key={chain.head} chain={chain} actions={actions} actionsNote={actionsNote} onInterrupt={onInterrupt} onLocate={onLocate} defaultOpen={i < 2} />
       ))}
     </div>
   );
 }
 
-function ChainCard({ chain, sessions, actions, actionsNote, onInterrupt, onLocate, defaultOpen }: Omit<Props, "blocking"> & { chain: BlockingChain; defaultOpen: boolean }) {
+function ChainCard({ chain, actions, actionsNote, onInterrupt, onLocate, defaultOpen }: Omit<Props, "blocking"> & { chain: BlockingChain; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [adviceOpen, setAdviceOpen] = useState(false);
   const [clamped, setClamped] = useState(false);
@@ -51,7 +50,7 @@ function ChainCard({ chain, sessions, actions, actionsNote, onInterrupt, onLocat
     const el = adviceRef.current;
     if (el && !adviceOpen) setClamped(el.scrollHeight > el.clientHeight + 1);
   }, [chain.advice, adviceOpen]);
-  const head = sessions.find((s) => s.id === chain.head) ?? null;
+  const head = chain.tree.context;
   const severity = chain.waiters >= 5 || (chain.longest_wait_ms ?? 0) > 60_000 ? "high" : "medium";
   const treeRef = useRef<HTMLDivElement>(null);
 
@@ -111,15 +110,15 @@ function ChainCard({ chain, sessions, actions, actionsNote, onInterrupt, onLocat
       </div>
       {open && (
         <div className="block-tree" role="tree" ref={treeRef} onKeyDown={moveFocus}>
-          <TreeRow node={chain.tree} depth={0} sessions={sessions} onLocate={onLocate} isHead />
+          <TreeRow node={chain.tree} depth={0} onLocate={onLocate} isHead />
         </div>
       )}
     </section>
   );
 }
 
-function TreeRow({ node, depth, sessions, onLocate, isHead = false }: { node: BlockNode; depth: number; sessions: Session[]; onLocate: (id: string) => void; isHead?: boolean }) {
-  const s = sessions.find((x) => x.id === node.session);
+function TreeRow({ node, depth, onLocate, isHead = false }: { node: BlockNode; depth: number; onLocate: (id: string) => void; isHead?: boolean }) {
+  const s = node.context;
   const who = s ? [s.user && s.host ? `${s.user}@${s.host}` : (s.user ?? s.host), s.application].filter(Boolean).join(" · ") : t("ui.blocking_chains.not_visible");
   const waited = s?.wait_ms ?? s?.elapsed_ms ?? null;
   return (
@@ -131,18 +130,18 @@ function TreeRow({ node, depth, sessions, onLocate, isHead = false }: { node: Bl
         aria-expanded={node.children.length ? true : undefined}
         tabIndex={0}
         style={{ ["--depth" as string]: depth }}
-        onClick={() => onLocate(node.session)}
-        onKeyDown={(e) => e.key === "Enter" && onLocate(node.session)}
-        title={t("ui.blocking_chains.locate")}
+        onClick={s ? () => onLocate(s.id) : undefined}
+        onKeyDown={s ? (e) => e.key === "Enter" && onLocate(s.id) : undefined}
+        title={s ? t("ui.blocking_chains.locate") : undefined}
       >
         <span className="block-indent" aria-hidden />
         <span className="block-session">{node.session}</span>
         <span className="block-state">
-          {isHead ? (
-            <span className="pill head">{s?.state === "sleeping" ? t("ui.blocking_chains.state.idle_in_transaction") : (s?.state ?? t("ui.blocking_chains.state.holding_locks"))}</span>
+          {s && (isHead ? (
+            <span className="pill head">{s.state}</span>
           ) : (
             <span className="pill waiting">{t("ui.blocking_chains.waits", { duration: waited != null ? duration(waited) : "" })}</span>
-          )}
+          ))}
         </span>
         <span className="block-what">
           <span className="block-who">{who}</span>
@@ -151,7 +150,7 @@ function TreeRow({ node, depth, sessions, onLocate, isHead = false }: { node: Bl
         </span>
       </div>
       {node.children.map((c) => (
-        <TreeRow key={c.session} node={c} depth={depth + 1} sessions={sessions} onLocate={onLocate} />
+        <TreeRow key={c.session} node={c} depth={depth + 1} onLocate={onLocate} />
       ))}
     </>
   );
