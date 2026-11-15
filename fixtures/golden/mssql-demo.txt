@@ -172,7 +172,7 @@ brief:
 === finding missing-index:shop.order_items(order_id)
 Optional improvement · low severity · high confidence · indexes
 title: order_items is searched by order_id without a supporting index
-summary: 6.7 s of database time over the last 5 hours (17%). SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the minute since the server last restarted. Without it, each of those lookups reads more of shop.order_items (1.5M rows) than it needs to. It estimates the index would make them about 99% cheaper. The query that asked for it accounts for 17% of database time.
+summary: 6.7 s of database time over the last 5 hours (17%). SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the recorded counters. Without it, each of those lookups reads more of shop.order_items (1.5M rows) than it needs to. It estimates the index would make them about 99% cheaper. The query that asked for it accounts for 17% of database time.
 impact: 6.7 s of database time over the last 5 hours (17%) · 16.5% of database time
 metrics:
   - Share of DB time: 17%
@@ -198,7 +198,7 @@ brief:
 
     ## What's happening
 
-    6.7 s of database time over the last 5 hours (17%). SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the minute since the server last restarted. Without it, each of those lookups reads more of shop.order_items (1.5M rows) than it needs to. It estimates the index would make them about 99% cheaper. The query that asked for it accounts for 17% of database time.
+    6.7 s of database time over the last 5 hours (17%). SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the recorded counters. Without it, each of those lookups reads more of shop.order_items (1.5M rows) than it needs to. It estimates the index would make them about 99% cheaper. The query that asked for it accounts for 17% of database time.
 
     ## Evidence
 
@@ -298,7 +298,7 @@ brief:
 === finding missing-index:shop.orders(shipped_at)
 Optional improvement · low severity · high confidence · indexes
 title: orders is searched by shipped_at without a supporting index
-summary: 5.0 s of database time over the last 5 hours (12%). SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the minute since the server last restarted. Without it, each of those lookups reads more of shop.orders (1.0M rows) than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 12% of database time.
+summary: 5.0 s of database time over the last 5 hours (12%). SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the recorded counters. Without it, each of those lookups reads more of shop.orders (1.0M rows) than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 12% of database time.
 impact: 5.0 s of database time over the last 5 hours (12%) · 12.2% of database time
 metrics:
   - Share of DB time: 12%
@@ -325,7 +325,7 @@ brief:
 
     ## What's happening
 
-    5.0 s of database time over the last 5 hours (12%). SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the minute since the server last restarted. Without it, each of those lookups reads more of shop.orders (1.0M rows) than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 12% of database time.
+    5.0 s of database time over the last 5 hours (12%). SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the recorded counters. Without it, each of those lookups reads more of shop.orders (1.0M rows) than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 12% of database time.
 
     ## Evidence
 

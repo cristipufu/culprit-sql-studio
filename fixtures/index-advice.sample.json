@@ -104,7 +104,7 @@
             "text": "SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id = o1.customer_id JOIN shop.order_items i1 ON i1.order_id = o1.id JOIN shop.products p1 ON p1.id = i1.product_id JOIN shop.orders o2 ON o2.customer_id = c1.id JOIN shop.orde"
           }
         ],
-        "reason": "SQL Server's optimizer asked for it 300 times in the hour since the server last restarted and estimates those lookups would be about 99% cheaper. The 2 queries behind it account for 6% of database time.",
+        "reason": "SQL Server's optimizer asked for it 300 times in the recorded counters and estimates those lookups would be about 99% cheaper. The 2 queries behind it account for 6% of database time.",
         "requests": [
           {
             "equality": [
@@ -126,7 +126,7 @@
           "Check whether the queries listed use the new index and compare reads and time per run under equivalent parameters and load."
         ],
         "widens": null,
-        "write_cost": "shop.order_items had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
+        "write_cost": null,
         "writes_per_day": null
       },
       {
@@ -148,7 +148,7 @@
             "text": "SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEADD(day, @P1, '2026-01-01') AND [shipped_at] < DATEADD(day, @P2, '2026-01-01')"
           }
         ],
-        "reason": "SQL Server's optimizer asked for it 150 times in the hour since the server last restarted and estimates those lookups would be about 81% cheaper. The query behind it accounts for 1% of database time.",
+        "reason": "SQL Server's optimizer asked for it 150 times in the recorded counters and estimates those lookups would be about 81% cheaper. The query behind it accounts for 1% of database time.",
         "requests": [
           {
             "equality": [],
@@ -172,7 +172,7 @@
           "Check whether the queries listed use the new index and compare reads and time per run under equivalent parameters and load."
         ],
         "widens": null,
-        "write_cost": "shop.orders had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
+        "write_cost": null,
         "writes_per_day": null
       },
       {
@@ -196,7 +196,7 @@
           "Deletes from support_tickets no longer scan ticket_events."
         ],
         "widens": null,
-        "write_cost": "shop.ticket_events had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
+        "write_cost": null,
         "writes_per_day": null
       }
     ],
@@ -246,10 +246,10 @@
       }
     ],
     "connection": "mssql-demo",
-    "counters": "in the hour since the server last restarted",
+    "counters": "in the recorded counters",
     "engine": "mssql",
     "notes": [
-      "Index usage counters have counted for 1 h 7 min; an index has to go unread for a week before it's listed to clean up."
+      "Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up."
     ],
     "tables": [],
     "taken_at": "2026-10-11T12:13:47Z"
@@ -327,10 +327,10 @@
       }
     ],
     "connection": "mssql-demo-staging",
-    "counters": "in the 2 minutes since the server last restarted",
+    "counters": "in the recorded counters",
     "engine": "mssql",
     "notes": [
-      "Index usage counters have counted for 2 min; an index has to go unread for a week before it's listed to clean up.",
+      "Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.",
       "No plans were captured, so plan-based candidates are missing."
     ],
     "tables": [],

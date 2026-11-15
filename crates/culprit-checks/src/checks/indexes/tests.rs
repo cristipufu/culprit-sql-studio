@@ -367,9 +367,12 @@ fn widening_bringing_back_and_write_costs_say_what_they_said() {
     // performance_schema's counters, reset since the server started: no length is said.
     let mut m: Snapshot = serde_json::from_str(include_str!("../../../../../fixtures/mysql-demo.json")).unwrap();
     m.server.started_at = Some("2026-10-11T10:00:00Z".into());
+    m.pressure.get_or_insert_with(Default::default).uptime_hours = Some(2.0);
     let t = m.tables.iter_mut().find(|t| t.name == "orders").unwrap();
     (t.inserts, t.updates, t.deletes) = (Some(0.0), Some(0.0), Some(0.0));
     m.indexes.retain(|i| i.table != "orders");
+    assert!(counters_may_be_reset(&m));
+    assert!(!watched_long_enough(&m), "the shorter native reset window still controls absence");
     out.push(format!("reset none: {:?}", write_cost(&m, "shop", "orders")));
     let actual = out.join("\n");
     assert!(actual == WIDENING_WORDS, "said:\n{actual}");

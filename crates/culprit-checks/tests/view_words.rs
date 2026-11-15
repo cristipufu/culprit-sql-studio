@@ -11,13 +11,11 @@ fn snapshot(name: &str) -> Snapshot {
     serde_json::from_str(&text).expect("snapshot")
 }
 
-/// Counters ten days old: absence and rates a day are said.
+/// An explicit ten-day source counter period for the advisor's absence and rate wording.
 fn ten_days(mut s: Snapshot) -> Snapshot {
     s.server.started_at = Some("2026-10-01T12:00:00Z".into());
     s.taken_at = "2026-10-11T12:00:00Z".into();
-    if s.server.engine == culprit_core::Engine::Postgres {
-        s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
-    }
+    s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
     crate::counter_age::digests_counted_since_the_start(&mut s);
     s
 }

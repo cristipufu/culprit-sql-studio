@@ -328,52 +328,26 @@ async fn files(
 /// The login counters count every database on the instance. On Azure SQL Database that instance is the server
 /// process behind the database, shared by its elastic pool: shown for context, labelled as the whole server's and
 /// never graded, since another database's logins would turn this one red.
-pub(crate) fn login_signals(
-    logins: Option<f64>,
-    resets: Option<f64>,
-    uptime_s: Option<f64>,
-    shared: bool,
-) -> Vec<Signal> {
+pub(crate) fn connection_reuse_signals(logins: Option<f64>, resets: Option<f64>, shared: bool) -> Vec<Signal> {
     let whole = if shared { "server" } else { "other" };
-    let grade = |signal: Signal, healthy: String, watch: f64, bad: f64, higher_is_worse: bool| {
-        if shared {
-            Signal { healthy: Some(culprit_core::t!("provider.mssql.signal.shared")), ..signal }
-        } else {
-            signal.graded(&healthy, watch, bad, higher_is_worse)
-        }
-    };
     let mut out = Vec::new();
-    if let (Some(logins), Some(seconds)) = (logins, uptime_s) {
-        out.push(grade(
-            Signal::new(
-                culprit_core::signal_id::NEW_CONNECTIONS,
-                culprit_core::message!("provider.mssql.signal.new_connections", whole = whole),
-                logins / seconds,
-                SignalUnit::PerSecond,
-                SignalScope::SinceStartup,
-            ),
-            culprit_core::t!("provider.mssql.signal.new_connections.healthy"),
-            5.0,
-            25.0,
-            true,
-        ));
-        if let Some(resets) = resets
-            && logins + resets >= 1_000.0
-        {
-            out.push(grade(
-                Signal::new(
-                    culprit_core::signal_id::POOLED_REUSE,
-                    culprit_core::message!("provider.mssql.signal.pooled_reuse", whole = whole),
-                    resets / (logins + resets) * 100.0,
-                    SignalUnit::Percent,
-                    SignalScope::SinceStartup,
-                ),
-                culprit_core::t!("provider.mssql.signal.pooled_reuse.healthy"),
-                90.0,
-                50.0,
-                false,
-            ));
-        }
+    if let Some((logins, resets)) = logins.zip(resets)
+        && logins + resets >= 1_000.0
+    {
+        out.push(Signal {
+            healthy: Some(if shared {
+                culprit_core::t!("provider.mssql.signal.shared")
+            } else {
+                culprit_core::t!("provider.mssql.signal.pooled_reuse.healthy")
+            }),
+            ..Signal::new(
+                culprit_core::signal_id::POOLED_REUSE,
+                culprit_core::message!("provider.mssql.signal.pooled_reuse", whole = whole),
+                resets / (logins + resets) * 100.0,
+                SignalUnit::Percent,
+                SignalScope::Cumulative,
+            )
+        });
     }
     out
 }
@@ -486,12 +460,17 @@ mod tests {
 
     // On Azure SQL Database the login counters are the server process's, shared by the pool: never graded.
     #[test]
-    fn azure_logins_are_the_whole_servers_and_not_graded() {
-        let shared = login_signals(Some(3_600_000.0), Some(10.0), Some(3_600.0), true);
-        assert_eq!(shared[0].label, "New connections (whole server)");
+    fn same_read_pool_reuse_is_independent_of_unknown_lifetime_and_shared_counters_are_not_graded() {
+        let shared = connection_reuse_signals(Some(3_600_000.0), Some(10.0), true);
+        assert_eq!(shared[0].key, culprit_core::signal_id::POOLED_REUSE);
+        assert_eq!(shared[0].label, "Connections served from a pool (whole server)");
         assert_eq!(shared[0].status, culprit_core::SignalStatus::Info);
-        let own = login_signals(Some(3_600_000.0), Some(10.0), Some(3_600.0), false);
-        assert_eq!(own[0].status, culprit_core::SignalStatus::Bad);
+        let own = connection_reuse_signals(Some(3_600_000.0), Some(10.0), false);
+        assert_eq!(own[0].status, culprit_core::SignalStatus::Info);
+        assert!(shared.iter().chain(&own).all(|signal| signal.scope == SignalScope::Cumulative));
+        assert!(shared.iter().chain(&own).all(|signal| signal.key != culprit_core::signal_id::NEW_CONNECTIONS));
+        assert!(connection_reuse_signals(None, Some(10.0), false).is_empty());
+        assert!(connection_reuse_signals(Some(1000.0), None, false).is_empty());
     }
     #[tokio::test]
     async fn failed_table_detail_reads_preserve_tables_and_report_partial_coverage() {

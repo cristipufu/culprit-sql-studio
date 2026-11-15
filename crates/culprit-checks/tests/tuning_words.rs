@@ -954,7 +954,7 @@ verify: Re-scan a day later: the recommendation is gone, and the queries that re
 
 id: tuning-advice:drop-index:shop.orders.ix_orders_channel · Low · Medium · score 9 · share None
 title: Azure SQL recommends dropping ix_orders_channel on orders
-summary: Azure SQL Database's automatic tuning recommends dropping ix_orders_channel since Oct 6, judging from a longer history than the usage counters here, which count 1 reads of it in the minute since the server last restarted.
+summary: Azure SQL Database's automatic tuning recommends dropping ix_orders_channel since Oct 6, judging from a longer history than the usage counters here, which count 1 reads of it in the recorded counters.
 impact: Recommended by Azure SQL
 metric: Size: 22290432 Bytes
 metric: Reads: 1 Count

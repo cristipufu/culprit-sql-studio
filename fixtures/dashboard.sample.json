@@ -959,17 +959,6 @@
           {
             "at": null,
             "finding_id": null,
-            "id": "batch-requests",
-            "kind": "signal",
-            "label": "Batch requests (whole server)",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "0.2/s"
-          },
-          {
-            "at": null,
-            "finding_id": null,
             "id": "compiles-per-batch",
             "kind": "signal",
             "label": "Plans compiled (whole server)",
@@ -1005,22 +994,11 @@
             "finding_id": null,
             "id": "threadpool-wait-ms",
             "kind": "signal",
-            "label": "Waiting for workers since start (whole instance)",
+            "label": "Recorded worker wait time (whole instance)",
             "query_id": null,
             "share": null,
             "status": "info",
             "value": "1.1 s"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "threadpool-waits",
-            "kind": "signal",
-            "label": "Waiting for workers, per hour (whole server)",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "973 ms"
           },
           {
             "at": null,
@@ -1091,7 +1069,7 @@
         "title": "Deadlocks"
       },
       {
-        "detail": "Index usage counters have counted for 1 h 7 min; an index has to go unread for a week before it's listed to clean up.",
+        "detail": "Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.",
         "fix_sql": null,
         "items": [
           {
@@ -1312,17 +1290,10 @@
         "fix_sql": null,
         "items": [],
         "key": "connections",
-        "metrics": [
-          {
-            "key": "per-minute",
-            "label": "New per minute",
-            "text": "3",
-            "value": 3.0
-          }
-        ],
+        "metrics": [],
         "next": "culprit waits mssql-demo",
-        "status": "info",
-        "takeaway": "3 new connections a minute over the recorded counter history.",
+        "status": "unavailable",
+        "takeaway": "This scan has no connection counters.",
         "title": "Connections"
       },
       {
@@ -1748,7 +1719,7 @@
         "title": "Deadlocks"
       },
       {
-        "detail": "Index usage counters have counted for 2 min; an index has to go unread for a week before it's listed to clean up.",
+        "detail": "Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.",
         "fix_sql": null,
         "items": [
           {

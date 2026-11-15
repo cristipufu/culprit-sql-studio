@@ -53,8 +53,8 @@
     },
     {
       "check": "over-indexed",
-      "reason": null,
-      "status": "assessed",
+      "reason": "Some tables lack the measurements this check needs.",
+      "status": "insufficient-evidence",
       "title": "Many indexes on write-heavy tables"
     },
     {
@@ -1118,7 +1118,7 @@
         "workload_dependency": "current-statements"
       },
       "fix": {
-        "cost": "shop.order_items had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
+        "cost": null,
         "sql": "CREATE NONCLUSTERED INDEX [IX_order_items_order_id]\n    ON [shop].[order_items] ([order_id])\n    WITH (ONLINE = ON);",
         "summary": "Create an index on order_id."
       },
@@ -1179,7 +1179,7 @@
         "kind": "table",
         "name": "shop.order_items"
       },
-      "summary": "20.3 s of database time over the last 5 hours (6%). SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the hour since the server last restarted. Without it, each of those lookups reads more of shop.order_items (1.5M rows) than it needs to. It estimates the index would make them about 99% cheaper. The 2 queries that asked for it account for 6% of database time.",
+      "summary": "20.3 s of database time over the last 5 hours (6%). SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the recorded counters. Without it, each of those lookups reads more of shop.order_items (1.5M rows) than it needs to. It estimates the index would make them about 99% cheaper. The 2 queries that asked for it account for 6% of database time.",
       "title": "order_items is searched by order_id without a supporting index",
       "verification_basis": "rescan",
       "verify": [
@@ -1348,7 +1348,7 @@
         "recommended_plan": null
       },
       "fix": {
-        "cost": "shop.ticket_events had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
+        "cost": null,
         "sql": "CREATE NONCLUSTERED INDEX [IX_ticket_events_ticket_id]\n    ON [shop].[ticket_events] ([ticket_id])\n    WITH (ONLINE = ON);",
         "summary": "Index the foreign key column on shop.ticket_events."
       },
@@ -1412,7 +1412,7 @@
         "workload_dependency": "current-statements"
       },
       "fix": {
-        "cost": "shop.orders had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
+        "cost": null,
         "sql": "CREATE NONCLUSTERED INDEX [IX_orders_shipped_at]\n    ON [shop].[orders] ([shipped_at])\n    INCLUDE ([total])\n    WITH (ONLINE = ON);",
         "summary": "Create an index on shipped_at, including total."
       },
@@ -1468,7 +1468,7 @@
         "kind": "table",
         "name": "shop.orders"
       },
-      "summary": "5.0 s of database time over the last 5 hours (1%). SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the hour since the server last restarted. Without it, each of those lookups reads more of shop.orders (1.0M rows) than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 1% of database time.",
+      "summary": "5.0 s of database time over the last 5 hours (1%). SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the recorded counters. Without it, each of those lookups reads more of shop.orders (1.0M rows) than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 1% of database time.",
       "title": "orders is searched by shipped_at without a supporting index",
       "verification_basis": "rescan",
       "verify": [
@@ -4343,26 +4343,6 @@
       "replicas": [],
       "signals": [
         {
-          "healthy": null,
-          "key": "batch-requests",
-          "label": "Batch requests (whole server)",
-          "label_message": {
-            "arguments": {
-              "whole": {
-                "kind": "text",
-                "value": "server"
-              }
-            },
-            "key": "provider.mssql.signal.batch_requests",
-            "kind": "catalog"
-          },
-          "measurement_scope": "server",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "per-second",
-          "value": 0.1928606841844323
-        },
-        {
           "healthy": "New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.",
           "key": "compiles-per-batch",
           "label": "Plans compiled (whole server)",
@@ -4377,7 +4357,7 @@
             "kind": "catalog"
           },
           "measurement_scope": "server",
-          "scope": "since-startup",
+          "scope": "cumulative",
           "status": "info",
           "unit": "percent",
           "value": 45.88688946015424
@@ -4436,7 +4416,7 @@
             "kind": "catalog"
           },
           "measurement_scope": "server",
-          "scope": "since-startup",
+          "scope": "cumulative",
           "status": "info",
           "unit": "percent",
           "value": 1.7635830724973312
@@ -4444,7 +4424,7 @@
         {
           "healthy": null,
           "key": "threadpool-wait-ms",
-          "label": "Waiting for workers since start (whole instance)",
+          "label": "Recorded worker wait time (whole instance)",
           "label_message": {
             "arguments": {
               "whole": {
@@ -4456,39 +4436,10 @@
             "kind": "catalog"
           },
           "measurement_scope": "server",
-          "scope": "since-startup",
+          "scope": "cumulative",
           "status": "info",
           "unit": "milliseconds",
           "value": 1090.0
-        },
-        {
-          "healthy": "Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.",
-          "key": "threadpool-waits",
-          "label": "Waiting for workers, per hour (whole server)",
-          "label_message": {
-            "arguments": {
-              "label": {
-                "kind": "message",
-                "value": {
-                  "arguments": {
-                    "per": {
-                      "kind": "text",
-                      "value": "hour"
-                    }
-                  },
-                  "key": "provider.mssql.signal.threadpool_waits",
-                  "kind": "catalog"
-                }
-              }
-            },
-            "key": "health.label.whole_server",
-            "kind": "catalog"
-          },
-          "measurement_scope": "server",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "milliseconds",
-          "value": 972.7317798710956
         },
         {
           "healthy": "Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.",
@@ -4504,29 +4455,9 @@
           "status": "info",
           "unit": "bytes",
           "value": 0.0
-        },
-        {
-          "healthy": "The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.",
-          "key": "new-connections",
-          "label": "New connections (whole server)",
-          "label_message": {
-            "arguments": {
-              "whole": {
-                "kind": "text",
-                "value": "server"
-              }
-            },
-            "key": "provider.mssql.signal.new_connections",
-            "kind": "catalog"
-          },
-          "measurement_scope": "server",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "per-second",
-          "value": 0.04958528669311215
         }
       ],
-      "uptime_hours": 1.1205555555555555
+      "uptime_hours": null
     },
     "query_families": [],
     "resources": [],
@@ -12571,14 +12502,14 @@
       ],
       "separator": " "
     },
-    "index_counting": "in the hour since the server last restarted",
+    "index_counting": "in the recorded counters",
     "index_notes": [
       {
         "finding": null,
         "index": "uq_products_sku",
         "schema": "shop",
         "table": "products",
-        "text": "Never read in the hour since the server last restarted; it still enforces uniqueness",
+        "text": "Never read in the recorded counters; it still enforces uniqueness",
         "tone": "low"
       },
       {
@@ -12602,7 +12533,7 @@
         "index": "ix_orders_status_created",
         "schema": "shop",
         "table": "orders",
-        "text": "No reads in the hour since the server last restarted; a week of counting is needed before calling it unused",
+        "text": "No reads recorded over a period the counters don't establish; a week of known counting is needed before calling it unused",
         "tone": "low"
       },
       {
@@ -12610,7 +12541,7 @@
         "index": "ix_order_items_product_id",
         "schema": "shop",
         "table": "order_items",
-        "text": "Never read in the hour since the server last restarted, but it backs foreign key fk_order_items_product: without it, deleting or updating a products row scans order_items",
+        "text": "Never read in the recorded counters, but it backs foreign key fk_order_items_product: without it, deleting or updating a products row scans order_items",
         "tone": "low"
       },
       {
@@ -12618,7 +12549,7 @@
         "index": "ix_support_tickets_customer_id",
         "schema": "shop",
         "table": "support_tickets",
-        "text": "Never read in the hour since the server last restarted, but it backs foreign key fk_support_tickets_customer: without it, deleting or updating a customers row scans support_tickets",
+        "text": "Never read in the recorded counters, but it backs foreign key fk_support_tickets_customer: without it, deleting or updating a customers row scans support_tickets",
         "tone": "low"
       }
     ],

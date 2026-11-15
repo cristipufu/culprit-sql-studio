@@ -163,6 +163,9 @@ export const SIGNAL_SCOPE: Record<Signal["scope"], string> = {
   get "since-startup"() {
     return t("ui.waits.scope.since_startup");
   },
+  get cumulative() {
+    return t("common.signal_scope.cumulative");
+  },
   get sampled() {
     return t("ui.waits.scope.sampled");
   },
@@ -176,6 +179,21 @@ export const SIGNAL_SCOPE: Record<Signal["scope"], string> = {
     return t("ui.waits.scope.window");
   },
 };
+
+/** Historical facts stay separate from observations of the scan's current state. */
+export function isHistoricalSignalScope(scope: Signal["scope"]): boolean {
+  switch (scope) {
+    case "since-startup":
+    case "cumulative":
+    case "query-history":
+      return true;
+    case "now":
+    case "sampled":
+    case "last-hour":
+    case "window":
+      return false;
+  }
+}
 
 // ── the "right now" sample keeps running while the panel is closed ────────────────────────────────
 

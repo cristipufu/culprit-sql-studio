@@ -11,7 +11,7 @@ import { dateFormat, duration, percent, percentValue } from "../lib/format";
 import { findingStatus, transactionState, worstFinding } from "../lib/health";
 import { t } from "../lib/i18n";
 import { tx } from "../lib/message-parts";
-import { SIGNAL_SCOPE, signalValue } from "../lib/waits";
+import { SIGNAL_SCOPE, isHistoricalSignalScope, signalValue } from "../lib/waits";
 import { Replication, StorageLatency } from "./BeyondTime";
 import { OperationalHealth, hasOperationalHealth } from "./OperationalHealth";
 import { MemoryFailureSourceIssue, RetainedMemoryFailures, memoryFailureReadIssue } from "./RetainedMemoryFailures";
@@ -84,6 +84,8 @@ export function HealthTab({
   engine?: Engine;
 }) {
   const signals = [...(pressure?.signals ?? [])].sort((a, b) => RANK[a.status] - RANK[b.status]);
+  const currentSignals = signals.filter((s) => !isHistoricalSignalScope(s.scope));
+  const historicalSignals = signals.filter((s) => isHistoricalSignalScope(s.scope));
   const memoryFailures = report.snapshot.operations.memory_failures;
   const memoryReport = report.memory_failures;
   const memoryIssue = memoryFailureReadIssue(memoryFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_memory_failures === true);
@@ -125,22 +127,23 @@ export function HealthTab({
     );
   }
   const uptime = pressure?.uptime_hours;
+  const showUptime = uptime != null && signals.some((s) => s.scope === "since-startup") && !signals.some((s) => s.scope === "cumulative");
   return (
     <div className="health-tab">
       {signals.length > 0 && (
         <>
           <div className="health-intro">
-            {t("ui.health.intro")} {uptime != null ? `${t("ui.health.since_start", { duration: duration(uptime * 3_600_000), engine: engineLabel })} ` : ""}
+            {t("ui.health.intro")} {showUptime ? `${t("ui.health.since_start", { duration: duration(uptime * 3_600_000), engine: engineLabel })} ` : ""}
             {t("ui.health.coverage")}
           </div>
           <div className="signal-grid">
-            {signals.filter((s) => s.scope !== "since-startup" && s.scope !== "query-history").map((s) => <SignalTile key={s.key} signal={s} />)}
+            {currentSignals.map((s) => <SignalTile key={s.key} signal={s} />)}
           </div>
-          {signals.some((s) => s.scope === "since-startup" || s.scope === "query-history") && (
+          {historicalSignals.length > 0 && (
             <details className="historical-signals">
               <summary>{t("ui.health.historical")}</summary>
               <div className="signal-grid">
-                {signals.filter((s) => s.scope === "since-startup" || s.scope === "query-history").map((s) => <SignalTile key={s.key} signal={s} />)}
+                {historicalSignals.map((s) => <SignalTile key={s.key} signal={s} />)}
               </div>
             </details>
           )}

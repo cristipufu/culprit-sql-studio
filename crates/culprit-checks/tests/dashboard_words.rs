@@ -641,7 +641,7 @@ fn indexes_and_plans_say_what_they_said() {
 }
 
 const INDEXES_PLANS: &str = r#"Indexes Info Indexes: One new index is worth a look; 2 indexes can go (27.1 MB).
-  detail: Index usage counters have counted for 1 h 7 min; an index has to go unread for a week before it's listed to clean up.
+  detail: Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.
   metric To add: 1
   metric To clean up: 2
   metric Space back: 27.1 MB
@@ -650,7 +650,7 @@ const INDEXES_PLANS: &str = r#"Indexes Info Indexes: One new index is worth a lo
   item ix_orders_status on orders: 26.5 MB
   item ix_products_sku on products: 648 KB
 Indexes Info Indexes: One new index would help queries that take 6% of database time; 2 indexes can go (27.1 MB).
-  detail: Index usage counters have counted for 1 h 7 min; an index has to go unread for a week before it's listed to clean up.
+  detail: Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.
   metric To add: 1
   metric To clean up: 2
   metric Space back: 27.1 MB
@@ -659,7 +659,7 @@ Indexes Info Indexes: One new index would help queries that take 6% of database 
   item ix_orders_status on orders: 26.5 MB
   item ix_products_sku on products: 648 KB
 Indexes Info Indexes: One new index is worth a look; 1 index can go (26.5 MB).
-  detail: Index usage counters have counted for 1 h 7 min; an index has to go unread for a week before it's listed to clean up.
+  detail: Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.
   metric To add: 1
   metric To clean up: 1
   metric Space back: 26.5 MB

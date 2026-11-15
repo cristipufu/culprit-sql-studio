@@ -4992,14 +4992,14 @@
       ],
       "separator": " "
     },
-    "index_counting": "in the 2 minutes since the server last restarted",
+    "index_counting": "in the recorded counters",
     "index_notes": [
       {
         "finding": null,
         "index": "uq_products_sku",
         "schema": "shop",
         "table": "products",
-        "text": "Never read in the 2 minutes since the server last restarted; it still enforces uniqueness",
+        "text": "Never read in the recorded counters; it still enforces uniqueness",
         "tone": "low"
       },
       {
@@ -5023,7 +5023,7 @@
         "index": "ix_orders_status_created",
         "schema": "shop",
         "table": "orders",
-        "text": "No reads in the 2 minutes since the server last restarted; a week of counting is needed before calling it unused",
+        "text": "No reads recorded over a period the counters don't establish; a week of known counting is needed before calling it unused",
         "tone": "low"
       },
       {
@@ -5031,7 +5031,7 @@
         "index": "ix_order_items_product_id",
         "schema": "shop",
         "table": "order_items",
-        "text": "Never read in the 2 minutes since the server last restarted, but it backs foreign key fk_order_items_product: without it, deleting or updating a products row scans order_items",
+        "text": "Never read in the recorded counters, but it backs foreign key fk_order_items_product: without it, deleting or updating a products row scans order_items",
         "tone": "low"
       },
       {
@@ -5039,7 +5039,7 @@
         "index": "ix_support_tickets_customer_id",
         "schema": "shop",
         "table": "support_tickets",
-        "text": "Never read in the 2 minutes since the server last restarted, but it backs foreign key fk_support_tickets_customer: without it, deleting or updating a customers row scans support_tickets",
+        "text": "Never read in the recorded counters, but it backs foreign key fk_support_tickets_customer: without it, deleting or updating a customers row scans support_tickets",
         "tone": "low"
       }
     ],

@@ -17,16 +17,10 @@ async fn counters<R: NativeRead>(reader: &mut R) -> culprit_core::Result<HashMap
         .map(|rows| crate::performance::application(&rows))
 }
 
-fn uptime_hours(probe: &Probe) -> Option<f64> {
-    let started = chrono::DateTime::parse_from_rfc3339(probe.started_at.as_deref()?).ok()?;
-    let hours = (chrono::Utc::now() - started.with_timezone(&chrono::Utc)).num_seconds() as f64 / 3600.0;
-    (hours > 0.0).then_some(hours)
-}
-
 /// What the server's performance counters say. On Azure SQL Database they describe the server process behind the
 /// database, which an elastic pool shares among all its databases: shown for context, labelled as the whole server's,
 /// and never graded, since another database's scans would turn this one red.
-pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azure: bool) -> Vec<Signal> {
+pub(crate) fn counter_signals(c: &HashMap<String, f64>, azure: bool) -> Vec<Signal> {
     let shared = || Some(t!("provider.mssql.signal.shared"));
     let whole = if azure { "server" } else { "other" };
     let mut signals = Vec::new();
@@ -37,16 +31,6 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
     let recompiles =
         c.get("SQL Re-Compilations/sec").copied().map(|value| compilations.map_or(value, |total| value.min(total)));
     let compiles = compilations.zip(recompiles).map(|(total, repeated)| total - repeated);
-    if let Some(hours) = uptime.filter(|_| batches > 0.0) {
-        let rate = Signal::new(
-            culprit_core::signal_id::BATCH_REQUESTS,
-            culprit_core::message!("provider.mssql.signal.batch_requests", whole = whole),
-            batches / (hours * 3600.0),
-            SignalUnit::PerSecond,
-            SignalScope::SinceStartup,
-        );
-        signals.push(if azure { Signal { healthy: shared(), ..rate } } else { rate });
-    }
     if batches > 0.0 {
         if let Some(compiles) = compiles {
             let ratio = Signal::new(
@@ -54,16 +38,13 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
                 culprit_core::message!("provider.mssql.signal.plans_compiled", whole = whole),
                 compiles / batches * 100.0,
                 SignalUnit::Percent,
-                SignalScope::SinceStartup,
+                SignalScope::Cumulative,
             );
-            // A handful of batches compiling says nothing about plan reuse; grade the ratio only under real load.
-            let busy = uptime.is_none_or(|h| batches / (h * 3600.0) >= 1.0);
             signals.push(if azure {
                 Signal { healthy: shared(), ..ratio }
-            } else if busy {
-                ratio.graded(&t!("provider.mssql.signal.plans_compiled.healthy"), 10.0, 25.0, true)
             } else {
-                Signal { healthy: Some(t!("provider.mssql.signal.plans_compiled.too_few")), ..ratio }
+                // Counts from this read establish a ratio, but neither its counter lifetime nor sustained load.
+                Signal { healthy: Some(t!("provider.mssql.signal.counter_lifetime_unknown")), ..ratio }
             });
         }
         if let Some(recompiles) = recompiles {
@@ -72,7 +53,7 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
                 culprit_core::message!("provider.mssql.signal.plans_recompiled", whole = whole),
                 recompiles / batches * 100.0,
                 SignalUnit::Percent,
-                SignalScope::SinceStartup,
+                SignalScope::Cumulative,
             );
             signals.push(if azure { Signal { healthy: shared(), ..recompiled } } else { recompiled });
         }
@@ -139,10 +120,39 @@ pub(crate) struct CollectedPressure {
 
 pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Probe) -> CollectedPressure {
     let azure = probe.is_azure_sql_database();
-    let uptime = uptime_hours(probe);
-    let mut p = Pressure { uptime_hours: uptime, ..Pressure::default() };
-    let mut coverage = Coverage::default();
     let (native_waits, native_counters) = history(pool.clone(), azure).await;
+    let mut captured = project_history(probe, native_waits, native_counters);
+    let p = &mut captured.pressure;
+    let coverage = &mut captured.coverage;
+    p.signals.extend(crate::queues::application(pool.clone(), probe, coverage).await);
+    p.signals.extend(crate::compiler_gateways::collect(pool.clone(), probe, coverage).await);
+    if let Some(topology) = crate::processors::collect(pool.clone(), probe, coverage).await {
+        (p.cpus, p.numa_nodes) = topology.application();
+    }
+    let version_store = crate::version_store::application(pool.clone(), probe, coverage).await;
+    if let Some(bytes) = version_store.tempdb_bytes {
+        p.signals.push(version_store_signal(bytes));
+    }
+    p.signals.extend(version_store.persistent_signal());
+    let transactions =
+        crate::open_transactions::collect(pool, probe, coverage, version_store.tempdb_cleanup_context()).await;
+    p.oldest_transaction = transactions.oldest;
+    if let Some(transaction) = &p.oldest_transaction {
+        p.signals.push(oldest_transaction_signal(transaction.seconds));
+    }
+    captured.cleanup = version_store.persistent.into_iter().chain(transactions.cleanup).collect();
+    captured
+}
+
+fn project_history(
+    probe: &Probe,
+    native_waits: culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
+    native_counters: culprit_core::Result<HashMap<String, f64>>,
+) -> CollectedPressure {
+    let azure = probe.is_azure_sql_database();
+    // Probe uses another pooled owner. Neither it nor these native rows establishes the counter lifetime.
+    let mut p = Pressure::default();
+    let mut coverage = Coverage::default();
     let permission = |error: culprit_core::Error| {
         if error.code == culprit_core::ErrorCode::PermissionDenied {
             error.with_hint(probe.grant_hint())
@@ -153,16 +163,15 @@ pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Pro
     let native_waits = native_waits.map_err(permission);
     let native_counters = native_counters.map_err(permission);
     if let Some(counters) = coverage.read(&sources::LOGINS, native_counters.clone()) {
-        p.signals.extend(crate::signals::login_signals(
+        p.signals.extend(crate::signals::connection_reuse_signals(
             counters.get("Logins/sec").copied(),
             counters.get("Connection Reset/sec").copied(),
-            uptime.map(|hours| hours * 3600.0),
             azure,
         ));
     }
     if let Some(counters) = coverage.read(&sources::PERFORMANCE_COUNTERS, native_counters) {
         coverage.completed(&sources::PERFORMANCE_COUNTERS, counters.len());
-        p.signals.extend(counter_signals(&counters, uptime, azure));
+        p.signals.extend(counter_signals(&counters, azure));
     }
     let categories = if let Some(rows) = coverage.read_rows(&sources::WAITS, native_waits.clone()) {
         coverage.delivered(culprit_core::Capability::WaitStats);
@@ -171,26 +180,9 @@ pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Pro
         Vec::new()
     };
     if let Some(rows) = coverage.read_rows(&sources::WAIT_TOTALS, native_waits) {
-        p.signals.extend(wait_total_signals(&waits::totals(&rows), azure, uptime));
+        p.signals.extend(wait_total_signals(&waits::totals(&rows), azure));
     }
-    p.signals.extend(crate::queues::application(pool.clone(), probe, &mut coverage).await);
-    p.signals.extend(crate::compiler_gateways::collect(pool.clone(), probe, &mut coverage).await);
-    if let Some(topology) = crate::processors::collect(pool.clone(), probe, &mut coverage).await {
-        (p.cpus, p.numa_nodes) = topology.application();
-    }
-    let version_store = crate::version_store::application(pool.clone(), probe, &mut coverage).await;
-    if let Some(bytes) = version_store.tempdb_bytes {
-        p.signals.push(version_store_signal(bytes));
-    }
-    p.signals.extend(version_store.persistent_signal());
-    let transactions =
-        crate::open_transactions::collect(pool, probe, &mut coverage, version_store.tempdb_cleanup_context()).await;
-    p.oldest_transaction = transactions.oldest;
-    if let Some(transaction) = &p.oldest_transaction {
-        p.signals.push(oldest_transaction_signal(transaction.seconds));
-    }
-    let cleanup = version_store.persistent.into_iter().chain(transactions.cleanup).collect();
-    CollectedPressure { pressure: p, waits: categories, coverage, cleanup }
+    CollectedPressure { pressure: p, waits: categories, coverage, cleanup: Vec::new() }
 }
 
 /// Both consumers use one native wait snapshot; no second reading can silently describe a different instant.
@@ -202,8 +194,18 @@ async fn history(
     culprit_core::Result<HashMap<String, f64>>,
 ) {
     let mut reader = ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
-    let waits = waits::read(&mut reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
-    let counters = counters(&mut reader).await;
+    history_from(&mut reader, azure).await
+}
+
+async fn history_from<R: NativeRead>(
+    reader: &mut R,
+    azure: bool,
+) -> (
+    culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
+    culprit_core::Result<HashMap<String, f64>>,
+) {
+    let waits = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
+    let counters = counters(reader).await;
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
         return (Err(error.clone()), Err(error));
@@ -223,12 +225,13 @@ pub(crate) fn pending_grants_signal(pending: f64) -> Signal {
     .graded(&t!("provider.mssql.signal.grants_pending.healthy"), 1.0, 5.0, true)
 }
 
-/// What the wait totals since the start say: the scheduling share, and the waits for workers and memory grants.
-pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Option<f64>) -> Vec<Signal> {
+/// Recorded cumulative waits retain their totals and shares, without an unproved counter lifetime or rate.
+/// Waits can be cleared independently of startup: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-wait-stats-transact-sql
+pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool) -> Vec<Signal> {
     let mut out = Vec::new();
     let (wait, signal) = totals.values().fold((0.0, 0.0), |(w, s), (tw, ts, _)| (w + tw, s + ts));
     if wait > 0.0 {
-        out.push(scheduling_share(signal, wait, SignalScope::SinceStartup));
+        out.push(scheduling_share(signal, wait, SignalScope::Cumulative));
     }
     let threadpool = totals.get("THREADPOOL").map(|t| t.0).unwrap_or(0.0);
     // Totals since the start: one bad hour days ago and a steady trickle average to the same rate, so checks
@@ -241,7 +244,7 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
         ),
         threadpool,
         SignalUnit::Milliseconds,
-        SignalScope::SinceStartup,
+        SignalScope::Cumulative,
     ));
     // Memory grants alone; the Memory category also holds allocation waits (CMEMTHREAD) and compile memory.
     let grants = totals.get("RESOURCE_SEMAPHORE").map(|t| t.0).unwrap_or(0.0);
@@ -250,24 +253,8 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
         culprit_core::message!("provider.mssql.signal.grant_wait_ms", whole = if azure { "other" } else { "instance" }),
         grants,
         SignalUnit::Milliseconds,
-        SignalScope::SinceStartup,
+        SignalScope::Cumulative,
     ));
-    if let Some(hours) = uptime {
-        out.push(
-            Signal::new(
-                culprit_core::signal_id::THREADPOOL_WAITS,
-                culprit_core::message!(
-                    "provider.mssql.signal.threadpool_waits",
-                    per = if hours >= 1.0 { "hour" } else { "other" }
-                ),
-                // Under an hour of uptime, report the total rather than extrapolate an hourly rate.
-                threadpool / hours.max(1.0),
-                SignalUnit::Milliseconds,
-                SignalScope::SinceStartup,
-            )
-            .graded(&t!("provider.mssql.signal.threadpool_waits.healthy"), 1_000.0, 60_000.0, true),
-        );
-    }
     out
 }
 
@@ -452,6 +439,7 @@ mod tests {
     use culprit_core::SignalStatus;
 
     use super::*;
+    mod lifetimes;
 
     fn counters(ple: f64) -> HashMap<String, f64> {
         HashMap::from([
@@ -469,18 +457,21 @@ mod tests {
     // On a server of its own, a short page life is this server's, and graded.
     #[test]
     fn a_short_page_life_is_graded_on_a_server_of_its_own() {
-        let signals = counter_signals(&counters(44.0), Some(100.0), false);
+        let signals = counter_signals(&counters(44.0), false);
         let life = signal(&signals, "page-life");
         assert_eq!((life.label.as_str(), life.status), ("Page life expectancy", SignalStatus::Bad));
         assert!(life.healthy.as_deref().unwrap().starts_with("how long a page stays in memory once read"));
-        assert_eq!(signal(&signals, "compiles-per-batch").status, SignalStatus::Bad);
+        assert_eq!(signal(&signals, "compiles-per-batch").status, SignalStatus::Info);
+        assert!(
+            signal(&signals, "compiles-per-batch").healthy.as_ref().unwrap().contains("counter lifetime is unknown")
+        );
     }
 
     // On Azure SQL Database the counters are the server process's, shared by the elastic pool: context, never graded.
     #[test]
     fn azure_counters_are_the_whole_servers_and_never_graded() {
-        let signals = counter_signals(&counters(44.0), Some(100.0), true);
-        for key in ["page-life", "compiles-per-batch", "batch-requests"] {
+        let signals = counter_signals(&counters(44.0), true);
+        for key in ["page-life", "compiles-per-batch", "recompiles-per-batch"] {
             let s = signal(&signals, key);
             assert_eq!(s.status, SignalStatus::Info, "{key}");
             assert!(s.label.ends_with("(whole server)"), "{}", s.label);
@@ -493,7 +484,7 @@ mod tests {
     fn recompiles_are_not_counted_as_new_plans() {
         let mut c = counters(400.0);
         c.insert("SQL Re-Compilations/sec".into(), 1_800_000.0);
-        let signals = counter_signals(&c, Some(100.0), false);
+        let signals = counter_signals(&c, false);
         assert_eq!(signal(&signals, "compiles-per-batch").value, 25.0);
         assert_eq!(signal(&signals, "recompiles-per-batch").value, 25.0);
     }
@@ -501,7 +492,7 @@ mod tests {
     fn unknown_recompile_counts_cannot_be_substituted_with_zero_for_compile_ratios() {
         let mut counts = counters(400.0);
         counts.remove("SQL Re-Compilations/sec");
-        let signals = counter_signals(&counts, Some(100.0), false);
+        let signals = counter_signals(&counts, false);
         assert!(
             !signals.iter().any(|signal| matches!(signal.key.as_str(), "compiles-per-batch" | "recompiles-per-batch"))
         );

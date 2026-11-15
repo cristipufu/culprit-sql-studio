@@ -2358,7 +2358,7 @@ fn requests_made_before_the_window() {
         "missing-index:shop.order_items(order_id)",
         r#"missing-index:shop.order_items(order_id) · Low · High · History
 title: SQL Server previously requested an index on order_items (order_id)
-summary: SQL Server last requested this index on Aug 1 at 09:00 UTC, before the last 5 hours. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+summary: SQL Server last requested this index on Aug 1 at 09:00 UTC, before the last 5 hours. The 300 requests are cumulative in the recorded counters. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
 impact: Historical optimizer request
 metric: Lookups that wanted it: 300
 metric: Estimated improvement: 0.9947
@@ -2376,7 +2376,7 @@ caveat: SQL Server's optimizer last asked for this index on Aug 1, 71.1 days bef
         "missing-index:shop.order_items(order_id)",
         r#"missing-index:shop.order_items(order_id) · Low · High · Information
 title: SQL Server previously requested an index on order_items (order_id)
-summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the last 5 hours. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the last 5 hours. The 300 requests are cumulative in the recorded counters. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
 impact: Historical optimizer request
 metric: Lookups that wanted it: 300
 metric: Estimated improvement: 0.9947
@@ -2394,7 +2394,7 @@ caveat: None of the last 5 hours' statements asked for it: SQL Server's optimize
         "missing-index:shop.order_items(order_id)",
         r#"missing-index:shop.order_items(order_id) · Low · Low · Information
 title: SQL Server previously requested an index on order_items (order_id)
-summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the last 5 hours. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the last 5 hours. The 300 requests are cumulative in the recorded counters. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
 impact: Historical optimizer request
 metric: Lookups that wanted it: 300
 metric: Estimated improvement: 0.9947
@@ -2412,7 +2412,7 @@ verify: A later scan must show a new request inside its workload window and enou
         "missing-index:shop.order_items(order_id)",
         r#"missing-index:shop.order_items(order_id) · Low · High · History
 title: order_items was searched by order_id without a supporting index
-summary: SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the minute since the server last restarted. Without it, each of those lookups read more of shop.order_items (1.5M rows) than it needed to. It estimated the index would make them about 99% cheaper. The query that asked for it accounted for 14% of database time.
+summary: SQL Server's optimizer asked for an index on shop.order_items (order_id) 300 times in the recorded counters. Without it, each of those lookups read more of shop.order_items (1.5M rows) than it needed to. It estimated the index would make them about 99% cheaper. The query that asked for it accounted for 14% of database time.
 impact: 14% of DB time
 metric: Share of DB time: 0.14198168631293098
 metric: Lookups that wanted it: 300
@@ -2451,7 +2451,7 @@ caveat: SQL Server's optimizer last asked for this index on Aug 1, 71.1 days bef
         "missing-index:shop.order_items(order_id)",
         r#"missing-index:shop.order_items(order_id) · Low · Low · History
 title: SQL Server previously requested an index on order_items (order_id)
-summary: SQL Server last requested this index on Aug 1 at 09:00 UTC, before the last week. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+summary: SQL Server last requested this index on Aug 1 at 09:00 UTC, before the last week. The 300 requests are cumulative in the recorded counters. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
 impact: Historical optimizer request
 metric: Lookups that wanted it: 300
 metric: Estimated improvement: 0.9947
@@ -2619,7 +2619,7 @@ fn requests_beside_an_hour_of_queries_and_of_a_table_of_unknown_size() {
         "missing-index:shop.order_items(order_id)",
         r#"missing-index:shop.order_items(order_id) · Low · High · Information
 title: SQL Server previously requested an index on order_items (order_id)
-summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the last 60 minutes. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the last 60 minutes. The 300 requests are cumulative in the recorded counters. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
 impact: Historical optimizer request
 metric: Lookups that wanted it: 300
 metric: Estimated improvement: 0.9947
@@ -2637,7 +2637,7 @@ caveat: None of the last 60 minutes' statements asked for it: SQL Server's optim
         "missing-index:shop.orders(shipped_at)",
         r#"missing-index:shop.orders(shipped_at) · Low · Medium · OptionalImprovement
 title: orders is searched by shipped_at without a supporting index
-summary: SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the minute since the server last restarted. Without it, each of those lookups reads more of shop.orders than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 12% of database time.
+summary: SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the recorded counters. Without it, each of those lookups reads more of shop.orders than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 12% of database time.
 impact: 12% of DB time
 metric: Share of DB time: 0.12221322978535604
 metric: Lookups that wanted it: 150
@@ -2762,7 +2762,7 @@ fn a_request_beside_a_window_of_unknown_length() {
         "missing-index:shop.order_items(order_id)",
         r#"missing-index:shop.order_items(order_id) · Low · High · Information
 title: SQL Server previously requested an index on order_items (order_id)
-summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the recorded workload window. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the recorded workload window. The 300 requests are cumulative in the recorded counters. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
 impact: Historical optimizer request
 metric: Lookups that wanted it: 300
 metric: Estimated improvement: 0.9947

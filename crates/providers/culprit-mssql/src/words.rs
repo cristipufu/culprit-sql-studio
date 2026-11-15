@@ -434,22 +434,16 @@ fn server_signals() {
     .map(|(k, v)| (k.to_string(), v))
     .collect();
     assert_eq!(
-        signals(&counter_signals(&counters, Some(10.0), false)),
-        "Batch requests: -
-Plans compiled: under 10% of batches is healthy
+        signals(&counter_signals(&counters, false)),
+        "Plans compiled: The counter lifetime is unknown, so this ratio does not establish compilation pressure.
 Plans recompiled: -
 Page life expectancy: how long a page stays in memory once read: five minutes or more is healthy; under a minute means pages leave memory soon after they're read, often because of large scans"
     );
-    assert_eq!(
-        signals(&counter_signals(&counters, Some(10_000.0), false)).lines().nth(1),
-        Some("Plans compiled: too few batches to judge; under 10% is healthy under load")
-    );
     let shared = "covers every database on the server behind this one (its elastic pool's, if it has one), so it isn't graded here";
     assert_eq!(
-        signals(&counter_signals(&counters, Some(10.0), true)),
+        signals(&counter_signals(&counters, true)),
         format!(
-            "Batch requests (whole server): {shared}
-Plans compiled (whole server): {shared}
+            "Plans compiled (whole server): {shared}
 Plans recompiled (whole server): {shared}
 Page life expectancy (whole server): {shared}"
         )
@@ -465,21 +459,19 @@ Memory in use: of its memory limit; a full cache is normal, so it isn't graded"
             .collect();
     let scheduling = "Scheduling share of recorded waits: Share of recorded waiting spent ready to run before being scheduled. This is not CPU utilization; the ratio alone does not establish CPU pressure.";
     assert_eq!(
-        signals(&wait_total_signals(&totals, false, Some(2.0))),
+        signals(&wait_total_signals(&totals, false)),
         format!(
             "{scheduling}
-Waiting for workers since start (whole instance): -
-Waiting for memory grants since start (whole instance): -
-Waiting for workers, per hour: under a second an hour is healthy"
+Recorded worker wait time (whole instance): -
+Recorded memory-grant wait time (whole instance): -"
         )
     );
     assert_eq!(
-        signals(&wait_total_signals(&totals, true, Some(0.5))),
+        signals(&wait_total_signals(&totals, true)),
         format!(
             "{scheduling}
-Waiting for workers since start: -
-Waiting for memory grants since start: -
-Waiting for workers since start: under a second an hour is healthy"
+Recorded worker wait time: -
+Recorded memory-grant wait time: -"
         )
     );
     assert_eq!(
@@ -528,12 +520,11 @@ Recompiles: -
         format!("Compiles recorded: {context}\nCompilation time: {context}")
     );
     assert_eq!(
-        signals(&login_signals(Some(1000.0), Some(9000.0), Some(100.0), false)),
-        "New connections: under 5 a second: pooled connections log in once and are reused
-Connections served from a pool: above 90% when the application pools connections"
+        signals(&connection_reuse_signals(Some(1000.0), Some(9000.0), false)),
+        "Connections served from a pool: above 90% when the application pools connections"
     );
     assert_eq!(
-        signals(&login_signals(Some(1000.0), Some(9000.0), Some(100.0), true)),
-        format!("New connections (whole server): {shared}\nConnections served from a pool (whole server): {shared}")
+        signals(&connection_reuse_signals(Some(1000.0), Some(9000.0), true)),
+        format!("Connections served from a pool (whole server): {shared}")
     );
 }

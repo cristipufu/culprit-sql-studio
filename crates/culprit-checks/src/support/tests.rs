@@ -24,6 +24,67 @@ fn a_counter_rate_requires_its_own_valid_epoch_and_enough_observation_time() {
     }
 }
 
+#[test]
+fn metadata_startup_never_supplies_a_missing_counter_age_on_any_engine() {
+    let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
+    snapshot.taken_at = "2026-10-11T12:00:00Z".into();
+    snapshot.server.started_at = Some("2026-01-01T00:00:00Z".into());
+    for engine in Engine::ALL {
+        snapshot.server.engine = engine;
+        snapshot.pressure = None;
+        assert_eq!(counter_days(&snapshot), None, "{engine:?}: no counter source");
+        snapshot.pressure = Some(culprit_core::Pressure::default());
+        assert_eq!(counter_days(&snapshot), None, "{engine:?}: no source-owned age");
+        assert_eq!(counter_rate_per_day(&snapshot, 340.0), None, "{engine:?}");
+    }
+}
+
+#[test]
+fn only_explicit_finite_nonnegative_counter_ages_can_supply_a_lifetime() {
+    let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
+    snapshot.server.started_at = Some("2026-01-01T00:00:00Z".into());
+    for engine in Engine::ALL {
+        snapshot.server.engine = engine;
+        for hours in [0.0, 0.5, 1.0, 24.0, 240.0] {
+            snapshot.pressure.get_or_insert_with(Default::default).uptime_hours = Some(hours);
+            assert_eq!(counter_days(&snapshot), Some(hours / 24.0), "{engine:?}: {hours}");
+            assert_eq!(counter_days_for_rate(&snapshot).is_some(), hours >= 1.0, "{engine:?}: {hours}");
+        }
+        for hours in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            snapshot.pressure.as_mut().unwrap().uptime_hours = Some(hours);
+            assert_eq!(counter_days(&snapshot), None, "{engine:?}: {hours}");
+            assert_eq!(counter_rate_per_day(&snapshot, 340.0), None, "{engine:?}: {hours}");
+        }
+    }
+}
+
+#[test]
+fn old_server_metadata_cannot_authorize_a_counter_rate_or_a_week_of_absence() {
+    let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
+    snapshot.taken_at = "2026-10-11T12:00:00Z".into();
+    snapshot.server.started_at = Some("2026-01-01T00:00:00Z".into());
+    snapshot.operations.index_usage_scope = Some(culprit_core::operations::IndexUsageScope::AllReadMembers);
+    snapshot.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
+    assert_eq!(counter_rate_per_day(&snapshot, 340.0), Some(34.0));
+    assert!(crate::indexes::watched_long_enough(&snapshot));
+    assert!(matches!(
+        crate::evidence::assess(&[crate::evidence::Requirement::IndexHistory], &snapshot),
+        culprit_core::CheckEvidence::Available
+    ));
+
+    snapshot.pressure.as_mut().unwrap().uptime_hours = None;
+    assert_eq!(counter_rate_per_day(&snapshot, 340.0), None);
+    assert_eq!(watched_days(&snapshot), None);
+    assert_eq!(since_phrase(&snapshot), "in the recorded counters");
+    assert_ne!(since_phrase(&snapshot), t!("support.since.restart"));
+    assert_ne!(since_phrase(&snapshot), t!("support.since.reset"));
+    assert!(!crate::indexes::watched_long_enough(&snapshot));
+    assert!(matches!(
+        crate::evidence::assess(&[crate::evidence::Requirement::IndexHistory], &snapshot),
+        culprit_core::CheckEvidence::Insufficient(_)
+    ));
+}
+
 /// A name a database allows (a quoted identifier with a line break in it) can't end a comment of fix SQL and run the
 /// rest of itself as a statement.
 #[test]
@@ -169,9 +230,10 @@ fn no_writes_on_counters_that_may_be_reset_waits_a_week_of_their_own() {
 fn usage_windows_say_how_long_the_server_has_been_up() {
     let mut s = crate::waits::snapshot_with(Engine::Mssql);
     s.taken_at = "2026-10-11T17:05:00Z".into();
-    s.pressure = None;
     let mut at = |started: &str| {
         s.server.started_at = Some(started.into());
+        s.pressure.get_or_insert_with(Default::default).uptime_hours =
+            Some(days_between(started, &s.taken_at).expect("controlled counter lifetime") * 24.0);
         since_phrase(&s)
     };
     assert_eq!(at("2026-10-11T16:49:00Z"), "in the 16 minutes since the server last restarted");
@@ -203,7 +265,7 @@ fn postgres_counters_that_outlived_a_restart_say_so() {
 fn counts_are_per_day_only_over_a_day_of_counters() {
     let mut s = crate::waits::snapshot_with(Engine::Mssql);
     s.taken_at = "2026-10-11T17:05:00Z".into();
-    s.pressure = None;
+    s.pressure = Some(culprit_core::Pressure { uptime_hours: Some(5.0), ..Default::default() });
     s.server.started_at = Some("2026-10-11T12:05:00Z".into());
     let days = counter_days(&s).unwrap();
     // 5 hours: what was counted, not "~1.6K times a day".
@@ -212,6 +274,7 @@ fn counts_are_per_day_only_over_a_day_of_counters() {
         "340 times in the 5 hours since the server last restarted"
     );
     s.server.started_at = Some("2026-10-09T17:05:00Z".into());
+    s.pressure.as_mut().unwrap().uptime_hours = Some(48.0);
     let days = counter_days(&s).unwrap();
     assert_eq!(how_many(&s, 340.0, days, culprit_core::key!("common.noun.time")), "about 170 times a day");
 }

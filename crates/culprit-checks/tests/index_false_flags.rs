@@ -13,16 +13,11 @@ fn snapshot(name: &str) -> Snapshot {
     serde_json::from_str(&text).expect("snapshot")
 }
 
-/// The demo's counters are minutes old; claims of absence and rates a day need days of them.
+/// An explicit ten-day source counter period for absence and per-day advice.
 fn counted_for_ten_days(mut s: Snapshot) -> Snapshot {
     s.server.started_at = Some("2026-10-01T12:00:00Z".into());
     s.taken_at = "2026-10-11T12:00:00Z".into();
-    if let Some(p) = s.pressure.as_mut() {
-        p.uptime_hours = Some(240.0);
-    } else if s.server.engine == culprit_core::Engine::Postgres {
-        // PostgreSQL's counter age is the one its scan measured, never the time since the server started.
-        s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
-    }
+    s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
     // performance_schema's statements counted as long, or its counters may have been reset since.
     crate::counter_age::digests_counted_since_the_start(&mut s);
     s
@@ -488,19 +483,21 @@ fn a_scan_needs_time_a_day_as_well_as_a_share() {
     assert_eq!(big.severity, Severity::Medium);
 }
 
-// I11: an unread index's upkeep is judged as a rate: two million writes since a restart a year ago is a quiet table.
+// I11: an unread index's upkeep is judged over its source counter period, never inferred from server startup.
 #[test]
 fn unused_index_upkeep_is_a_rate() {
-    let unused = |started: &str| {
+    let unused = |started: &str, counter_days: Option<f64>| {
         let mut s = counted_for_ten_days(snapshot("mssql-demo.json"));
         s.server.started_at = Some(started.into());
+        s.pressure.as_mut().unwrap().uptime_hours = counter_days.map(|days| days * 24.0);
         for i in s.indexes.iter_mut().filter(|i| i.table == "order_items") {
             i.writes = Some(2_000_000.0);
         }
-        analyze(s).findings.into_iter().find(|f| f.id == "unused-index:shop.order_items").expect("unused")
+        analyze(s).findings.into_iter().find(|f| f.id == "unused-index:shop.order_items")
     };
-    assert_eq!(unused("2025-10-11T12:00:00Z").severity, Severity::Low);
-    assert_eq!(unused("2026-10-01T12:00:00Z").severity, Severity::Medium);
+    assert_eq!(unused("2025-10-11T12:00:00Z", Some(365.0)).expect("a year of counters").severity, Severity::Low);
+    assert_eq!(unused("2026-10-01T12:00:00Z", Some(10.0)).expect("ten days of counters").severity, Severity::Medium);
+    assert!(unused("2025-10-11T12:00:00Z", None).is_none(), "startup cannot establish counter age");
 }
 
 // A staging SQL Server reading "job_runs was written 5.2K times": SQL Server counts the writes that had to update each index

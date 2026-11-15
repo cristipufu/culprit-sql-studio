@@ -23,6 +23,10 @@ pub(super) struct ResourceUsage {
 pub(crate) fn grade_findings(snapshot: &mut Snapshot, findings: &[Finding]) {
     let Some(p) = snapshot.pressure.as_mut() else { return };
     for s in &mut p.signals {
+        if s.scope == SignalScope::Cumulative {
+            s.status = SignalStatus::Info;
+            continue;
+        }
         let check = match s.key.as_str() {
             "memory-grants-pending" => "memory-queue",
             "threadpool-waiting" => "worker-pressure",
@@ -161,10 +165,13 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
         }
         s.measurement_scope = Some(measured_in);
         s.label = s.label_message.render();
-        if s.scope == SignalScope::SinceStartup && !counted {
+        if s.scope == SignalScope::Cumulative || (s.scope == SignalScope::SinceStartup && !counted) {
             s.status = SignalStatus::Info;
         }
-        if matches!(s.key.as_str(), "threadpool-waiting" | "memory-grants-pending") && s.value > 0.0 {
+        if s.scope == SignalScope::Now
+            && matches!(s.key.as_str(), "threadpool-waiting" | "memory-grants-pending")
+            && s.value > 0.0
+        {
             // One observed queue is worth a look, not proof of sustained starvation.
             s.status = SignalStatus::Watch;
             s.healthy = Some(t!("health.queue_now"));
@@ -228,6 +235,37 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cumulative_counters_cannot_borrow_an_unrelated_age_or_a_current_queue_verdict() {
+        let mut snapshot = crate::waits::snapshot_with(Engine::Postgres);
+        let signal = |key, scope| Signal {
+            measurement_scope: Some(culprit_core::MeasurementScope::Database),
+            ..Signal::new(key, key, 5.0, SignalUnit::Count, scope).graded("test threshold", 1.0, 2.0, true)
+        };
+        snapshot.pressure = Some(Pressure {
+            uptime_hours: Some(240.0),
+            signals: vec![
+                signal("native-recorded-total", SignalScope::Cumulative),
+                signal("memory-grants-pending", SignalScope::Cumulative),
+                signal("native-current-gauge", SignalScope::Now),
+                signal("threadpool-waiting", SignalScope::Now),
+            ],
+            ..Pressure::default()
+        });
+        grade_on_evidence(&mut snapshot);
+        let signals = &snapshot.pressure.as_ref().unwrap().signals;
+        assert_eq!(signals[0].status, SignalStatus::Info);
+        assert_eq!(signals[1].status, SignalStatus::Info);
+        assert_eq!(signals[2].status, SignalStatus::Bad);
+        assert_eq!(signals[3].status, SignalStatus::Watch);
+
+        // Later finding refinement must not make even a recorded zero imply a currently empty grant queue.
+        snapshot.pressure.as_mut().unwrap().signals[1].value = 0.0;
+        grade_findings(&mut snapshot, &[]);
+        assert_eq!(snapshot.pressure.as_ref().unwrap().signals[1].status, SignalStatus::Info);
+        assert_eq!(snapshot.pressure.as_ref().unwrap().signals[2].status, SignalStatus::Bad);
+    }
 
     #[test]
     fn shared_scope_and_label_survive_language_changes_without_reading_prose() {
@@ -479,7 +517,12 @@ mod tests {
                             "connections" => "Connections (whole instance)".to_string(),
                             _ => format!("Label of {key}"),
                         };
-                        let mut signal = Signal::new(key, &label, 3.0, SignalUnit::Count, SignalScope::SinceStartup);
+                        let scope = if matches!(*key, "threadpool-waiting" | "memory-grants-pending") {
+                            SignalScope::Now
+                        } else {
+                            SignalScope::SinceStartup
+                        };
+                        let mut signal = Signal::new(key, &label, 3.0, SignalUnit::Count, scope);
                         if matches!(*key, "batch-requests" | "connections") {
                             signal.measurement_scope = Some(culprit_core::MeasurementScope::Server);
                         }

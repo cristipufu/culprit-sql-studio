@@ -15,12 +15,10 @@ fn snapshot() -> Snapshot {
     counted_for_ten_days(serde_json::from_str(&text).expect("snapshot"))
 }
 
-/// The demo's counters are minutes old; an index is only called unused after a week of them.
+/// An explicit ten-day source counter period for the unused-index scenarios.
 fn counted_for_ten_days(mut s: Snapshot) -> Snapshot {
     s.server.started_at = Some("2026-10-01T12:00:00Z".into());
-    if let Some(p) = s.pressure.as_mut() {
-        p.uptime_hours = Some(240.0);
-    }
+    s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
     s
 }
 
@@ -166,8 +164,9 @@ fn an_unread_filtered_index_is_unused_but_a_filtered_unique_one_is_a_constraint(
 #[test]
 fn an_index_added_this_week_is_not_unused_yet() {
     let mut s = snapshot();
-    // Six weeks of usage counters.
+    // An explicitly known 41-day usage counter period.
     s.server.started_at = Some("2026-08-31T12:00:00Z".into());
+    s.pressure.as_mut().unwrap().uptime_hours = Some(41.0 * 24.0);
     fn index(s: &mut Snapshot) -> &mut culprit_core::IndexStat {
         s.indexes.iter_mut().find(|i| i.name == "ix_support_tickets_customer_id").unwrap()
     }
@@ -183,7 +182,7 @@ fn an_index_added_this_week_is_not_unused_yet() {
     assert!(f.is_none(), "{:?}", f.map(|f| f.summary));
     assert!(!cleaned);
 
-    // Twelve days old, it is unused, over the days it has existed rather than the counters' six weeks.
+    // Twelve days old, it is unused, over the days it has existed rather than the counters' 41 days.
     index(&mut s).created_at_latest = Some("2026-09-29T12:00:00Z".into());
     let (f, cleaned) = unused(&s);
     let f = f.expect("unused after a week");
@@ -201,6 +200,12 @@ fn an_index_added_this_week_is_not_unused_yet() {
     index(&mut s).created_at_latest = None;
     let f = unused(&s).0.expect("unused");
     assert!(f.summary.contains("in the 41 days since the server last restarted"), "{}", f.summary);
+
+    // The old server timestamp cannot replace missing source counter age.
+    s.pressure.as_mut().unwrap().uptime_hours = None;
+    let (f, cleaned) = unused(&s);
+    assert!(f.is_none());
+    assert!(!cleaned);
 }
 
 #[test]

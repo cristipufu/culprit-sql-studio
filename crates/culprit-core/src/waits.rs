@@ -263,6 +263,8 @@ pub enum SignalScope {
     Now,
     /// Averaged since the server started or its statistics were reset (see `Pressure::uptime_hours`).
     SinceStartup,
+    /// Recorded cumulative counters or their ratios, without an established observation lifetime.
+    Cumulative,
     /// Over a short sample.
     Sampled,
     /// Over the last hour (Azure SQL Database keeps its own resource figures for about that long).

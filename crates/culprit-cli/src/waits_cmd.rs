@@ -402,7 +402,7 @@ fn print_signals(title: &str, p: &Pressure, signals: &[Signal]) {
         return;
     }
     println!();
-    match p.uptime_hours {
+    match p.uptime_hours.filter(|_| !signals.iter().any(|signal| signal.scope == SignalScope::Cumulative)) {
         Some(h) => {
             println!("{}", t!("cli.waits.signals_since", title = title, span = format::duration(h * 3_600_000.0)))
         }
@@ -418,6 +418,7 @@ fn print_signals(title: &str, p: &Pressure, signals: &[Signal]) {
         let scope = match s.scope {
             SignalScope::Now => t!("cli.waits.signal_scope.now"),
             SignalScope::SinceStartup => t!("cli.waits.signal_scope.since_start"),
+            SignalScope::Cumulative => t!("common.signal_scope.cumulative"),
             SignalScope::Sampled => t!("cli.waits.signal_scope.sampled"),
             SignalScope::LastHour => t!("cli.waits.signal_scope.last_hour"),
             SignalScope::QueryHistory => t!("cli.waits.signal_scope.query_history"),

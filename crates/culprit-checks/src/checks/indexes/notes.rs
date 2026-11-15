@@ -166,6 +166,7 @@ mod tests {
     fn snapshot(days: u32) -> Snapshot {
         let mut s: Snapshot = serde_json::from_str(include_str!("../../../../../fixtures/mssql-demo.json")).unwrap();
         s.server.started_at = Some(format!("2026-10-{:02}T12:13:47Z", 11 - days));
+        s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(f64::from(days) * 24.0);
         s.indexes.clear();
         s.foreign_keys.clear();
         s
@@ -223,6 +224,12 @@ mod tests {
         assert!(notes[0].1.starts_with("No reads in the 2 days since"), "{}", notes[0].1);
         assert!(notes[0].1.ends_with("a week of counting is needed before calling it unused"), "{}", notes[0].1);
         assert_eq!(notes[0].2, None);
+
+        s.pressure.as_mut().unwrap().uptime_hours = None;
+        let unknown = notes_for(&s);
+        assert_eq!(unknown[0].0, Severity::Low);
+        assert_eq!(unknown[0].1, t!("view.index_notes.unknown_period"));
+        assert_eq!(unknown[0].2, None, "old server metadata cannot supply the missing counter lifetime");
     }
 
     #[test]
@@ -398,6 +405,7 @@ mod tests {
         s.indexes = vec![index("ix_orders_status", &["status"])];
         say("short", &s);
         s.server.engine = Engine::Yugabyte;
+        s.pressure.as_mut().unwrap().uptime_hours = None;
         say("unknown", &s);
 
         let actual = out.join("\n");
@@ -429,6 +437,7 @@ unknown ix_orders_status Low: No reads recorded over a period the counters don't
     fn yugabyte_counters_without_a_known_period_and_a_catalog_without_sharding_say_unknown() {
         let mut s = snapshot(10);
         s.server.engine = Engine::Yugabyte;
+        s.pressure.as_mut().unwrap().uptime_hours = None;
         s.foreign_keys = vec![culprit_core::ForeignKey {
             name: "fk_orders_customer".into(),
             schema: "shop".into(),

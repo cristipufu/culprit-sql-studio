@@ -60,7 +60,7 @@ Information and history (5)
  28  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
 
-Check coverage: 5 assessed without a finding; 28 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 4 assessed without a finding; 29 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mssql-demo`.
 
@@ -83,28 +83,25 @@ Query Store · the last 5 hours · share of DB time · runs · avg
   <1%      4.0K    0.06 ms  5         SELECT TOP (20) [id], [status], [total], [created_at] FROM [shop].[orders] WHERE [customer
   <1%       200    0.05 ms  246       SELECT TOP (1) total / @d AS share FROM shop.orders WHERE id = 42
 $ culprit --format text indexes <repo>/fixtures/mssql-demo.report.json
-Index advisor · mssql-demo  usage counted in the hour since the server last restarted
+Index advisor · mssql-demo  usage counted in the recorded counters
 
 Add (3)
    1  shop.order_items (order_id)  6% of DB time · 2 queries
-      SQL Server's optimizer asked for it 300 times in the hour since the server last restarted and estimates those lookups would be about 99% cheaper. The 2 queries behind it account for 6% of database time.
+      SQL Server's optimizer asked for it 300 times in the recorded counters and estimates those lookups would be about 99% cheaper. The 2 queries behind it account for 6% of database time.
       CREATE NONCLUSTERED INDEX [IX_order_items_order_id]
           ON [shop].[order_items] ([order_id])
           WITH (ONLINE = ON);
-      shop.order_items had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.
    2  shop.orders (shipped_at) include (total)  1% of DB time · 1 query
-      SQL Server's optimizer asked for it 150 times in the hour since the server last restarted and estimates those lookups would be about 81% cheaper. The query behind it accounts for 1% of database time.
+      SQL Server's optimizer asked for it 150 times in the recorded counters and estimates those lookups would be about 81% cheaper. The query behind it accounts for 1% of database time.
       CREATE NONCLUSTERED INDEX [IX_orders_shipped_at]
           ON [shop].[orders] ([shipped_at])
           INCLUDE ([total])
           WITH (ONLINE = ON);
-      shop.orders had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.
    3  shop.ticket_events (ticket_id)  
       ticket_id is the foreign key to support_tickets. Without an index, deleting or re-keying a row in support_tickets reads all 800K rows of shop.ticket_events looking for matches, and joins from support_tickets can't seek.
       CREATE NONCLUSTERED INDEX [IX_ticket_events_ticket_id]
           ON [shop].[ticket_events] ([ticket_id])
           WITH (ONLINE = ON);
-      shop.ticket_events had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.
 
 Clean up (2)
   covered    shop.orders.ix_orders_status  26.5 MB
@@ -114,7 +111,7 @@ Clean up (2)
              Same keys as uq_products_sku: the same index twice, both maintained on every write.
              DROP INDEX [ix_products_sku] ON [shop].[products];
 
-Index usage counters have counted for 1 h 7 min; an index has to go unread for a week before it's listed to clean up.
+Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.
 $ culprit --format text dashboard <repo>/fixtures/mssql-demo.report.json
 mssql-demo · SQL Server 2022 · culprit_demo
 Query Store, the last 5 hours · local · scanned <age>
@@ -156,8 +153,8 @@ Needs a look: 23 opportunities; the top ones touch 3 min of database time over t
                     Each signal states the period it measures.
                     Bad 0 · Watch 0 · Healthy 1
                     ● Waiting for memory  0
-                    ○ Batch requests (whole server)  0.2/s
                     ○ Plans compiled (whole server)  45.89%
+                    ○ Page life expectancy (whole server)  1 h 7 min
                     → culprit waits mssql-demo
 
 ○ Deadlocks         One deadlock in the last 6 hours: key-lookup deadlock on shop.customers.
@@ -167,7 +164,7 @@ Needs a look: 23 opportunities; the top ones touch 3 min of database time over t
                     → culprit deadlocks mssql-demo
 
 ○ Indexes           3 new indexes would help queries that take 8% of database time; 2 indexes can go (27.1 MB).
-                    Index usage counters have counted for 1 h 7 min; an index has to go unread for a week before it's listed to clean up.
+                    Index usage counters have counted for an unknown time; an index has to go unread for a week before it's listed to clean up.
                     To add 3 · To clean up 2 · Space back 27.1 MB · Tables to look at 0
                     · order_items (order_id)  6%  id 9
                     · orders (shipped_at)  1%  id 8
@@ -189,8 +186,7 @@ Needs a look: 23 opportunities; the top ones touch 3 min of database time over t
                     ○ culprit_demo (this database)  40 µs per read
                     → culprit waits mssql-demo
 
-○ Connections       3 new connections a minute over the recorded counter history.
-                    New per minute 3
+○ Connections       This scan has no connection counters.
                     → culprit waits mssql-demo
 
 ● Replication       No availability group or geo-replica: nothing can fall behind.
@@ -243,16 +239,13 @@ Note: Category totals and per-query totals may cover different populations; they
 
 Note: Query attribution includes observed totals; missing categories are not measured zeroes.
 
-Health ("since start" covers 1 h 7 min)
-    Batch requests (whole server)             0.2/s  since start
-    Plans compiled (whole server)            45.89%  since start New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+Health
+    Plans compiled (whole server)            45.89%  recorded counters New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
     Page life expectancy (whole server)   1 h 7 min  when scanned A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
   ○ Waiting for memory                            0  when scanned No requests in this queue when the scan ran. Historical waits are reported separately.
-    Scheduling share of recorded waits (whole server)      1.76%  since start The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
-    Waiting for workers since start (whole instance)      1.1 s  since start
-    Waiting for workers, per hour (whole server)     973 ms  since start Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+    Scheduling share of recorded waits (whole server)      1.76%  recorded counters The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+    Recorded worker wait time (whole instance)      1.1 s  recorded counters
     Version store (tempdb)                      0 B  when scanned Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
-    New connections (whole server)          3.0/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
 
 Storage (average per operation, since start)
   culprit_demo_log                   reads     29 µs × 104     writes    632 µs × 26K   

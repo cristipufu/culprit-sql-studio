@@ -356,20 +356,15 @@ pub fn drop_index_for_snapshot(snapshot: &Snapshot, schema: &str, table: &str, i
     snapshot.server.engine.spec().table_dialect(kind).drop_index(schema, table, index)
 }
 
-/// Days the cumulative counters (index usage, table stats) have been accumulating. One source for every window that
-/// says so: the counters' own age as the scan measured it, else the server's start time where counters start with the
-/// server. Not on PostgreSQL: its counters outlive a clean restart and are discarded by a crash recovery that keeps the
-/// start time, so only the age its scan measured (from the last reset or discard) says how long they have counted.
+/// Days the cumulative counters (index usage, table stats) have been accumulating, from the age their source
+/// supplied. Server metadata can describe a different native owner and does not establish the counters' lifetime.
 pub fn counter_days(snapshot: &Snapshot) -> Option<f64> {
-    if let Some(hours) = snapshot.pressure.as_ref().and_then(|p| p.uptime_hours) {
-        return Some((hours / 24.0).max(0.0));
-    }
-    if matches!(snapshot.server.engine, Engine::Postgres | Engine::Yugabyte) {
-        return None;
-    }
-    let started = snapshot.server.started_at.as_deref()?;
-    let days = days_between(started, &snapshot.taken_at)?;
-    Some(days.max(0.0))
+    snapshot
+        .pressure
+        .as_ref()?
+        .uptime_hours
+        .filter(|hours| hours.is_finite() && *hours >= 0.0)
+        .map(|hours| hours / 24.0)
 }
 
 /// Whether the counters cover enough time (20 hours) for a per-day rate that isn't an extrapolation.
@@ -528,7 +523,7 @@ fn counted_since(snapshot: &Snapshot) -> Counted {
         Some(days) if days * 24.0 < 1.0 => Counted::Minutes { n: (days * 24.0 * 60.0).round().max(1.0), since },
         // An hour and a half or more rounds to 2 hours: "in the hour" is under that.
         Some(days) => Counted::Hours { n: (days * 24.0).round(), since },
-        None => Counted::Since(since),
+        None => Counted::Since(t!("support.since.unknown")),
     }
 }
 
