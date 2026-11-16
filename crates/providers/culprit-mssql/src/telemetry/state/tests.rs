@@ -392,59 +392,6 @@ async fn failed_wait_counter_reads_preserve_unknown_coverage_without_claiming_a_
 }
 
 #[tokio::test]
-async fn replication_snapshots_export_native_links_with_dataset_and_source_ownership() {
-    let mut source = point_source(SnapshotDataset::Replication, Ok(vec![crate::replication::tests::geo()]));
-    let description = source.describe().await.unwrap();
-    let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!((snapshot.dataset, snapshot.records), (SnapshotDataset::Replication, 1));
-    assert_eq!(snapshot.sources[0].source, culprit_core::source_id::REPLICATION);
-    assert!(snapshot.sources[0].complete_scope);
-    assert_eq!(TelemetryStream::ReplicationSamples.semantics(), TelemetrySemantics::Sample);
-    let CollectionRead::Page { records, next_cursor } =
-        source.read_page(TelemetryStream::ReplicationSamples, None).await.unwrap()
-    else {
-        panic!("replication page")
-    };
-    assert!(next_cursor.is_none());
-    assert_eq!(records.len(), 1);
-    let capture = CaptureIdentity { observation_id: "replication-fixture".into(), revision: None };
-    let exported = ExportedRecord::new(&description, &capture, records[0].clone()).unwrap();
-    assert!(exported.record_id.is_some());
-    let mut wrong_dataset = description.clone();
-    let SourceObservation::Snapshot(snapshot) = &mut wrong_dataset.observation else { panic!("snapshot") };
-    snapshot.dataset = SnapshotDataset::WaitCounters;
-    assert!(ExportedRecord::new(&wrong_dataset, &capture, records[0].clone()).is_err());
-    let mut wrong_source = records[0].clone();
-    let TelemetryRecord::Replication(row) = &mut wrong_source else { panic!("replication record") };
-    row.source = "another-source".into();
-    assert!(ExportedRecord::new(&description, &capture, wrong_source).is_err());
-    assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
-    assert_eq!(source.query_count(), 7);
-    assert_eq!(source.close().await, SourceShutdown::Quiescent);
-}
-
-#[tokio::test]
-async fn empty_replication_is_established_only_by_a_successful_native_read() {
-    for failed in [false, true] {
-        let reply = if failed {
-            Err(ReadError::Source(culprit_core::Error::new(ErrorCode::PermissionDenied, "fixture denied")))
-        } else {
-            Ok(vec![])
-        };
-        let mut source = point_source(SnapshotDataset::Replication, reply);
-        let description = source.describe().await.unwrap();
-        let snapshot = description.observation.snapshot().unwrap();
-        assert_eq!(snapshot.records, 0);
-        assert_eq!(snapshot.sources[0].complete_scope, !failed);
-        assert_eq!(snapshot.sources[0].state, if failed { SourceState::Unavailable } else { SourceState::Empty });
-        assert_eq!(snapshot.sources[0].error_code, if failed { Some(ErrorCode::PermissionDenied) } else { None });
-        assert!(matches!(source.read_page(TelemetryStream::ReplicationSamples, None).await.unwrap(),
-            CollectionRead::Page {records, next_cursor: None} if records.is_empty()));
-        assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
-    }
-}
-
-#[tokio::test]
 async fn unassigned_queue_scope_preserves_raw_work_without_publishing_complete_database_absence() {
     let queued = replace(&crate::queues::tests::row(), &[("unattributed_count", Val::Int(1))]);
     let mut source = StateSource::with_io(

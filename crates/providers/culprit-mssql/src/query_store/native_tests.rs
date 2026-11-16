@@ -287,13 +287,20 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     let store = crate::version_store::read(&mut operations).await.unwrap();
     assert!(crate::version_store::bytes(&store).is_some());
     assert!(crate::version_store::observation(store).is_valid());
-    let replicas =
-        crate::replication::read(&mut operations, crate::replication::Selection::AvailabilityGroup, 100).await.unwrap();
+    let (replicas, _) =
+        crate::replication::read_selected(&mut operations, 3, 100).await.unwrap().into_records(true, None);
     assert!(replicas.is_empty(), "the owned fixture does not enable an availability group");
     // Validate the native projection even when the disabled-AG probe correctly avoids the DMV during collection.
     assert!(
         operations
-            .query(&crate::replication::availability_sql(true), vec![], 100)
+            .query(
+                &crate::replication::availability_sql(crate::replication::AvailabilityColumns {
+                    lag: true,
+                    primary_role: true,
+                }),
+                vec![],
+                100,
+            )
             .await
             .map_err(crate::read::ReadError::into_error)
             .unwrap()

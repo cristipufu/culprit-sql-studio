@@ -207,7 +207,13 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.missing-indexes", MissingIndexes),
     state!("mssql.tuning", Tuning),
     state!("mssql.wait-counters", WaitCounters).baseline(),
-    state!("mssql.replication", Replication).baseline(),
+    Registration::database(
+        "mssql.replication",
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Replication)),
+        |pool, request, host, port| Ok(Box::new(replication::ReplicationSource::new(pool, request, host, port)?)),
+    )
+    .bounded(replication::bounded_budget)
+    .baseline(),
     state!("mssql.settings", Settings).baseline(),
     streamed!("mssql.statement-grants", StatementGrants, grants::Grants),
     streamed!("mssql.index-operations", IndexOperations, index_operations::IndexOperations),

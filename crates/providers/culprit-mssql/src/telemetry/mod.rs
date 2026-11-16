@@ -13,6 +13,7 @@ mod objects;
 mod page_waits;
 mod partitions;
 mod recipes;
+mod replication;
 mod request_memory;
 mod retained_definitions;
 mod streamed;

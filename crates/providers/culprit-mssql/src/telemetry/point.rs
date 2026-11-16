@@ -23,7 +23,6 @@ pub(super) enum Family {
     MissingIndexes,
     Tuning(crate::query_store::tuning::Kind),
     WaitCounters,
-    Replication,
     Settings(crate::settings::Kind),
 }
 pub(super) enum Availability {
@@ -59,7 +58,6 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         SnapshotDataset::MissingIndexes => vec![Family::MissingIndexes],
         SnapshotDataset::Tuning => crate::query_store::tuning::Kind::ALL.into_iter().map(Family::Tuning).collect(),
         SnapshotDataset::WaitCounters => vec![Family::WaitCounters],
-        SnapshotDataset::Replication => vec![Family::Replication],
         SnapshotDataset::Settings => crate::settings::Kind::ALL.into_iter().map(Family::Settings).collect(),
         SnapshotDataset::StatementCounters
         | SnapshotDataset::RuntimeDistributions
@@ -87,7 +85,8 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         | SnapshotDataset::CurrentRequestMemory => {
             return Err(crate::read::invalid_data());
         }
-        SnapshotDataset::MemoryFailures
+        SnapshotDataset::Replication
+        | SnapshotDataset::MemoryFailures
         | SnapshotDataset::NativeFailures
         | SnapshotDataset::SessionMemory
         | SnapshotDataset::PageWaitTargets
@@ -132,7 +131,6 @@ impl Family {
             Self::MissingIndexes => &sources::MISSING_INDEXES,
             Self::Tuning(kind) => kind.source(),
             Self::WaitCounters => &sources::WAITS,
-            Self::Replication => &sources::REPLICATION,
             Self::Settings(kind) => kind.source(),
         }
     }
@@ -288,13 +286,6 @@ impl Family {
                 .map_err(ReadError::into_error)?
                 .into_iter()
                 .map(TelemetryRecord::WaitCounter)
-                .collect(),
-            Self::Replication => crate::replication::read(reader, crate::replication::Selection::GeoLinks, limit)
-                .await?
-                .into_iter()
-                .map(|fact| {
-                    TelemetryRecord::Replication(ReplicationObservation { source: self.source().name.into(), fact })
-                })
                 .collect(),
         };
         Ok(ReadOutcome::Observed(Records::complete(records)))

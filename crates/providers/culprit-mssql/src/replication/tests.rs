@@ -5,10 +5,17 @@ use crate::{
 };
 
 const ID: &str = "11111111-2222-3333-4444-555555555555";
-fn layout(enabled: Val, lag: i64) -> Rec {
-    Rec::of(&[("hadr_enabled", enabled), ("lag_column", Val::Int(lag))])
+pub(crate) fn unavailable(number: i64) -> Rec {
+    Rec::of(&[(native::AVAILABILITY_ERROR, Val::Int(number))])
 }
-fn availability() -> Rec {
+fn observed(part: selection::Part) -> Vec<ReplicationFact> {
+    let selection::Part::Observed { facts, .. } = part else { panic!("readable native family") };
+    facts
+}
+pub(crate) fn layout(enabled: Val, lag: i64) -> Rec {
+    Rec::of(&[("hadr_enabled", enabled), ("lag_column", Val::Int(lag)), ("primary_column", Val::Int(1))])
+}
+pub(crate) fn availability() -> Rec {
     Rec::of(&[
         ("group_id", Val::Text(ID.into())),
         ("group_database_id", Val::Text(ID.into())),
@@ -30,6 +37,17 @@ fn availability() -> Rec {
         ("secondary_lag_seconds", Val::Int(31)),
     ])
 }
+pub(crate) fn primary() -> Rec {
+    replace(
+        &availability(),
+        &[
+            ("replica_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("native_name", Val::Text("primary".into())),
+            ("is_local", Val::Int(1)),
+            ("is_primary", Val::Int(1)),
+        ],
+    )
+}
 pub(crate) fn geo() -> Rec {
     Rec::of(&[
         ("link_id", Val::Text(ID.into())),
@@ -48,7 +66,7 @@ async fn native_ag_identity_direction_units_and_optional_layout_are_shared_with_
         let row =
             if lag == 0 { replace(&availability(), &[("secondary_lag_seconds", Val::Null)]) } else { availability() };
         let mut reader = FakeRead::new(vec![Ok(vec![layout(Val::Int(1), lag)]), Ok(vec![row])]);
-        let facts = read(&mut reader, Selection::AvailabilityGroup, 100).await.unwrap();
+        let facts = observed(read(&mut reader, 3, Selection::AvailabilityGroup, 100).await.unwrap());
         assert!(reader.calls[1].sql.contains("WHERE drs.database_id=DB_ID()"));
         assert!(reader.calls[1].sql.contains("LEFT JOIN sys.availability_replicas"));
         assert_eq!(reader.calls[1].sql.contains("drs.secondary_lag_seconds"), lag == 1);
@@ -85,7 +103,7 @@ async fn unknown_roles_and_missing_metadata_are_retained_without_inventing_repli
         ],
     );
     let mut reader = FakeRead::new(vec![Ok(vec![layout(Val::Int(1), 1)]), Ok(vec![unknown, local_primary])]);
-    let rows = read(&mut reader, Selection::AvailabilityGroup, 100).await.unwrap();
+    let rows = observed(read(&mut reader, 3, Selection::AvailabilityGroup, 100).await.unwrap());
     assert_eq!(rows.len(), 2);
     assert!(!direction_known(&rows[0]));
     assert!(direction_known(&rows[1]));
@@ -94,7 +112,7 @@ async fn unknown_roles_and_missing_metadata_are_retained_without_inventing_repli
 #[tokio::test]
 async fn disabled_ag_is_known_empty_but_failed_or_unknown_probes_are_never_empty_successes() {
     let mut disabled = FakeRead::new(vec![Ok(vec![layout(Val::Int(0), 0)])]);
-    assert!(read(&mut disabled, Selection::AvailabilityGroup, 100).await.unwrap().is_empty());
+    assert!(observed(read(&mut disabled, 3, Selection::AvailabilityGroup, 100).await.unwrap()).is_empty());
     assert_eq!(disabled.calls.len(), 1);
     for replies in [
         vec![Ok(vec![layout(Val::Null, 0)])],
@@ -103,7 +121,7 @@ async fn disabled_ag_is_known_empty_but_failed_or_unknown_probes_are_never_empty
     ] {
         let count = replies.len();
         let mut reader = FakeRead::new(replies);
-        assert!(read(&mut reader, Selection::AvailabilityGroup, 100).await.is_err());
+        assert!(read(&mut reader, 3, Selection::AvailabilityGroup, 100).await.is_err());
         assert_eq!(reader.calls.len(), count, "no schema/error fallback query");
     }
 }
@@ -116,7 +134,7 @@ async fn geo_direction_and_primary_only_lag_keep_their_native_meaning() {
             replace(&geo(), &[("role", Val::Int(role)), ("lag_seconds", Val::Null), ("last_replication_at", Val::Null)])
         };
         let mut reader = FakeRead::new(vec![Ok(vec![row])]);
-        let rows = read(&mut reader, Selection::GeoLinks, 100).await.unwrap();
+        let rows = observed(read(&mut reader, 5, Selection::GeoLinks, 100).await.unwrap());
         assert_eq!(reader.calls.len(), 1);
         assert!(reader.calls[0].sql.contains("CASE WHEN role=0 THEN replication_lag_sec END"));
         let ReplicationFact::GeoLink(raw) = &rows[0] else { panic!("geo") };
@@ -144,7 +162,7 @@ async fn malformed_rows_duplicates_and_overflow_fail_instead_of_producing_a_clea
         (10, vec![replace(&geo(), &[("last_replication_at", Val::Text("2020-01-01T00:00:00".into()))])]),
     ] {
         let mut reader = FakeRead::new(vec![Ok(rows)]);
-        assert!(read(&mut reader, Selection::GeoLinks, limit).await.is_err());
+        assert!(read(&mut reader, 5, Selection::GeoLinks, limit).await.is_err());
     }
     assert_eq!(bytes(&Some(i64::MAX.to_string())), None, "native KB overflow is not a display value");
 }
@@ -177,12 +195,12 @@ async fn local_secondary_scope_comes_from_shared_native_facts_without_another_se
         &[("is_local", Val::Null), ("replica_id", Val::Text("22222222-2222-3333-4444-555555555555".into()))],
     );
     let mut reader = FakeRead::new(vec![Ok(vec![layout(Val::Int(1), 1)]), Ok(vec![unknown, availability()])]);
-    let facts = read(&mut reader, Selection::AvailabilityGroup, 100).await.unwrap();
+    let facts = observed(read(&mut reader, 3, Selection::AvailabilityGroup, 100).await.unwrap());
     record_local_role(&mut settings, &facts);
     assert!(settings.is_empty(), "remote replicas and unknown local roles do not establish this connection's role");
     let secondary = replace(&availability(), &[("is_local", Val::Int(1))]);
     let mut reader = FakeRead::new(vec![Ok(vec![layout(Val::Int(1), 1)]), Ok(vec![secondary])]);
-    let facts = read(&mut reader, Selection::AvailabilityGroup, 100).await.unwrap();
+    let facts = observed(read(&mut reader, 3, Selection::AvailabilityGroup, 100).await.unwrap());
     record_local_role(&mut settings, &facts);
     record_local_role(&mut settings, &facts);
     assert_eq!(settings[0].value, "readable-secondary");

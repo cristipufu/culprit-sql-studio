@@ -8,30 +8,42 @@ use culprit_core::{
     telemetry::{AvailabilityReplicaSample, CollectionStop, GeoReplicationSample, ReplicationFact, canonical_time},
 };
 use std::collections::BTreeSet;
+mod native;
+mod selection;
+pub(crate) use selection::read_selected;
 
 pub(crate) const MAX_REPLICAS: usize = 1024;
 const LAYOUT: &str = r#"SELECT CAST(SERVERPROPERTY('IsHadrEnabled') AS int) AS hadr_enabled,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns
  WHERE object_id=OBJECT_ID(N'sys.dm_hadr_database_replica_states') AND name=N'secondary_lag_seconds')
- THEN 1 ELSE 0 END AS lag_column"#;
+ THEN 1 ELSE 0 END AS lag_column,
+ CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns
+ WHERE object_id=OBJECT_ID(N'sys.dm_hadr_database_replica_states') AND name=N'is_primary_replica')
+ THEN 1 ELSE 0 END AS primary_column"#;
 const GEO: &str = r#"SELECT link_guid AS link_id, partner_server, partner_database, role,
  replication_state AS state, replication_state_desc AS native_state,
  CASE WHEN role=0 THEN replication_lag_sec END AS lag_seconds,
  CASE WHEN role=0 THEN CONVERT(varchar(40),last_replication,127) END AS last_replication_at
  FROM sys.dm_geo_replication_link_status OPTION(MAXDOP 1)"#;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Selection {
     AvailabilityGroup,
     GeoLinks,
 }
 
-pub(crate) fn availability_sql(lag_column: bool) -> String {
-    let lag = if lag_column { "drs.secondary_lag_seconds" } else { "CAST(NULL AS bigint)" };
+pub(crate) struct AvailabilityColumns {
+    pub lag: bool,
+    pub primary_role: bool,
+}
+
+pub(crate) fn availability_sql(columns: AvailabilityColumns) -> String {
+    let lag = if columns.lag { "drs.secondary_lag_seconds" } else { "CAST(NULL AS bigint)" };
+    let primary = if columns.primary_role { "CAST(drs.is_primary_replica AS int)" } else { "CAST(NULL AS int)" };
     format!(
         r#"SELECT drs.group_id, drs.group_database_id, drs.replica_id,
  ar.replica_server_name AS native_name, CAST(drs.is_local AS int) AS is_local,
- CAST(drs.is_primary_replica AS int) AS is_primary,
+ {primary} AS is_primary,
  drs.synchronization_state AS state, drs.synchronization_state_desc AS native_state,
  ar.availability_mode AS mode, ar.availability_mode_desc AS native_mode,
  CAST(drs.is_suspended AS int) AS is_suspended, drs.suspend_reason, drs.synchronization_health,
@@ -44,36 +56,47 @@ pub(crate) fn availability_sql(lag_column: bool) -> String {
     )
 }
 
-pub(crate) async fn read<R: NativeRead>(
+async fn read<R: NativeRead>(
     reader: &mut R,
+    edition: i64,
     selection: Selection,
     limit: usize,
-) -> Result<Vec<ReplicationFact>> {
+) -> Result<selection::Part> {
     let limit = limit.min(MAX_REPLICAS);
     let (sql, decode): (String, fn(&Rec) -> Result<ReplicationFact>) = match selection {
         Selection::GeoLinks => (GEO.into(), geo_link),
         Selection::AvailabilityGroup => {
-            let layout = reader.query(LAYOUT, vec![], 1).await.map_err(ReadError::into_error)?;
-            let [layout] = layout.as_slice() else { return Err(invalid_data()) };
-            match optional_integer(layout, "hadr_enabled")? {
-                Some(0) => return Ok(vec![]),
-                Some(1) => {}
-                _ => return Err(CollectionStop::SourceUnavailable.error()),
-            }
-            let lag_column = match integer(layout, "lag_column")? {
-                0 => false,
-                1 => true,
-                _ => return Err(invalid_data()),
+            let layout = match native::read(reader, LAYOUT, 1).await? {
+                native::NativeRows::Available(rows) => rows,
+                native::NativeRows::Unavailable(error) => return Ok(selection::Part::Unavailable { selection, error }),
             };
-            (availability_sql(lag_column), availability_replica)
+            let [layout] = layout.as_slice() else { return Err(invalid_data()) };
+            // IsHadrEnabled is documented for boxed SQL Server, not Managed Instance. MI reads its
+            // supported AG interface even when this property is NULL or zero.
+            if matches!(edition, 2..=4) {
+                match optional_integer(layout, "hadr_enabled")? {
+                    Some(0) => return Ok(selection::Part::observed(selection, vec![])),
+                    Some(1) => {}
+                    _ => return Err(CollectionStop::SourceUnavailable.error()),
+                }
+            }
+            let columns = AvailabilityColumns {
+                lag: layout_flag(layout, "lag_column")?,
+                primary_role: layout_flag(layout, "primary_column")?,
+            };
+            (availability_sql(columns), availability_replica)
         }
     };
-    let rows = reader.query(&sql, vec![], limit + 1).await.map_err(ReadError::into_error)?;
+    let rows = match native::read(reader, &sql, limit + 1).await? {
+        native::NativeRows::Available(rows) => rows,
+        native::NativeRows::Unavailable(error) => return Ok(selection::Part::Unavailable { selection, error }),
+    };
     if rows.len() > limit {
         return Err(CollectionStop::RowLimit.error());
     }
     let mut keys = BTreeSet::new();
-    rows.iter()
+    let facts = rows
+        .iter()
         .map(|row| {
             let fact = decode(row)?;
             if !fact.is_valid() || !keys.insert(fact.key()) {
@@ -81,7 +104,16 @@ pub(crate) async fn read<R: NativeRead>(
             }
             Ok(fact)
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    Ok(selection::Part::observed(selection, facts))
+}
+
+fn layout_flag(row: &Rec, name: &str) -> Result<bool> {
+    match integer(row, name)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(invalid_data()),
+    }
 }
 
 fn native_code(row: &Rec, name: &str) -> Result<Option<u8>> {
@@ -224,27 +256,37 @@ pub(crate) async fn collect(
 ) {
     let mut reader = crate::read::ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
     let mut coverage = Coverage::default();
-    let selections: &[Selection] = match probe.platform() {
-        Some(culprit_core::Platform::AzureSqlDatabase) => &[Selection::GeoLinks],
-        Some(culprit_core::Platform::AzureSqlManagedInstance) => &[Selection::AvailabilityGroup, Selection::GeoLinks],
-        _ => &[Selection::AvailabilityGroup],
-    };
-    for selection in selections {
-        let rows = read(&mut reader, *selection, MAX_REPLICAS).await.map_err(|error| {
-            if error.code == culprit_core::ErrorCode::PermissionDenied {
-                error.with_hint(probe.grant_hint())
-            } else {
-                error
+    match read_selected(&mut reader, probe.engine_edition, MAX_REPLICAS).await {
+        Ok(read) => {
+            for part in read.parts {
+                let (rows, partial) = match part {
+                    selection::Part::Observed { facts, complete, .. } => (Ok(facts), !complete),
+                    selection::Part::Unavailable { error, .. } => (Err(error), false),
+                };
+                let rows = rows.map_err(|error| {
+                    if error.code == culprit_core::ErrorCode::PermissionDenied {
+                        error.with_hint(probe.grant_hint())
+                    } else {
+                        error
+                    }
+                });
+                if let Ok(facts) = &rows {
+                    record_local_role(&mut snapshot.settings, facts);
+                }
+                snapshot
+                    .pressure
+                    .get_or_insert_with(Pressure::default)
+                    .replicas
+                    .extend(record_application_result(&mut coverage, rows));
+                if partial {
+                    coverage.partial(
+                        &crate::sources::REPLICATION,
+                        culprit_core::message!("provider.mssql.replication.visibility_partial"),
+                    );
+                }
             }
-        });
-        if let Ok(facts) = &rows {
-            record_local_role(&mut snapshot.settings, facts);
         }
-        snapshot
-            .pressure
-            .get_or_insert_with(Pressure::default)
-            .replicas
-            .extend(record_application_result(&mut coverage, rows));
+        Err(error) => coverage.source_failed(&crate::sources::REPLICATION, &error),
     }
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         coverage.source_failed(&crate::sources::REPLICATION, &CollectionStop::CancellationUnconfirmed.error());

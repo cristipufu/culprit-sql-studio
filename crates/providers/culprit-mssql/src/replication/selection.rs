@@ -1,0 +1,110 @@
+//! Source families retain independent native availability on the same bounded owner.
+use super::*;
+use culprit_core::{Error, ErrorCode, telemetry::*};
+
+const AVAILABILITY_SOURCE: &str = "availability-group-state";
+const GEO_SOURCE: &str = "geo-replication-links";
+
+pub(crate) struct SelectedRead {
+    pub parts: Vec<Part>,
+}
+
+pub(crate) enum Part {
+    Observed { selection: Selection, facts: Vec<ReplicationFact>, complete: bool },
+    Unavailable { selection: Selection, error: Error },
+}
+
+impl Part {
+    pub(super) fn observed(selection: Selection, facts: Vec<ReplicationFact>) -> Self {
+        Self::Observed { selection, complete: scope_complete(selection, &facts), facts }
+    }
+}
+
+impl Selection {
+    pub(crate) fn source(self) -> &'static str {
+        match self {
+            Self::AvailabilityGroup => AVAILABILITY_SOURCE,
+            Self::GeoLinks => GEO_SOURCE,
+        }
+    }
+}
+
+impl SelectedRead {
+    pub(crate) fn into_records(
+        self,
+        qualified: bool,
+        qualification_error: Option<ErrorCode>,
+    ) -> (Vec<TelemetryRecord>, Vec<StateSourceCoverage>) {
+        let mut records = Vec::new();
+        let mut sources = Vec::new();
+        for part in self.parts {
+            match part {
+                Part::Observed { selection, facts, complete } => {
+                    let source = selection.source();
+                    let mut coverage =
+                        StateSourceCoverage::observed(source.into(), facts.len() as u32, complete && qualified);
+                    if !qualified {
+                        coverage.error_code = qualification_error;
+                    }
+                    sources.push(coverage);
+                    records.extend(facts.into_iter().map(|fact| {
+                        TelemetryRecord::Replication(ReplicationObservation { source: source.into(), fact })
+                    }));
+                }
+                Part::Unavailable { selection, error } => {
+                    sources.push(StateSourceCoverage::unavailable(selection.source().into(), error.code, None))
+                }
+            }
+        }
+        (records, sources)
+    }
+}
+
+pub(crate) async fn read_selected<R: NativeRead>(reader: &mut R, edition: i64, limit: usize) -> Result<SelectedRead> {
+    let mut parts = Vec::new();
+    let mut remaining = limit.min(MAX_REPLICAS);
+    for selection in selections(edition)? {
+        if remaining == 0 {
+            return Err(CollectionStop::RowLimit.error());
+        }
+        let part = read(reader, edition, *selection, remaining).await?;
+        if let Part::Observed { facts, .. } = &part {
+            remaining -= facts.len();
+        }
+        parts.push(part);
+    }
+    Ok(SelectedRead { parts })
+}
+
+fn selections(edition: i64) -> Result<&'static [Selection]> {
+    match edition {
+        crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE => Ok(&[Selection::GeoLinks]),
+        crate::probe::ENGINE_EDITION_MANAGED_INSTANCE => Ok(&[Selection::AvailabilityGroup, Selection::GeoLinks]),
+        2..=4 => Ok(&[Selection::AvailabilityGroup]),
+        _ => Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported"))),
+    }
+}
+
+fn scope_complete(selection: Selection, facts: &[ReplicationFact]) -> bool {
+    if facts.is_empty() {
+        return true;
+    }
+    match selection {
+        Selection::GeoLinks => facts.iter().all(direction_known),
+        Selection::AvailabilityGroup => {
+            // Secondary-side visibility is local, not a complete partner inventory. Even a primary cannot
+            // establish catalog completeness where replica names/modes or local role are unavailable.
+            facts.iter().any(|fact| {
+                matches!(fact, ReplicationFact::AvailabilityGroup(row)
+                    if row.is_local == Some(true) && row.is_primary == Some(true))
+            }) && facts.iter().all(|fact| {
+                matches!(fact, ReplicationFact::AvailabilityGroup(row)
+                    if row.is_local.is_some() && row.is_primary.is_some()
+                        && row.native_name.is_some() && row.mode.is_some() && row.state.is_some())
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
