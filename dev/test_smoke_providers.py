@@ -109,6 +109,32 @@ class DisposableOwnership(unittest.TestCase):
 
 
 class ReplicationOwnership(unittest.TestCase):
+    def test_cancelled_ag_failure_diagnostics_still_release_members_and_network(self):
+        fixture = next(fixture for fixture in smoke.FIXTURES if fixture.engine == "mssql")
+        primary = smoke.Database(smoke.replace(fixture, name="mssql-ag-primary"))
+        secondary = smoke.Database(smoke.replace(fixture, name="mssql-ag-secondary"))
+        events = []
+
+        def command(args, **_):
+            if args[:3] == ["docker", "network", "rm"]:
+                events.append("network")
+            return (0, primary.owner)
+
+        primary.commands = Mock()
+        primary.commands.run.side_effect = command
+        for name, database in (("primary", primary), ("secondary", secondary)):
+            database.start = Mock()
+            database.close = Mock(side_effect=lambda name=name: events.append(name))
+        topology = smoke.SqlServerReplication(primary, secondary, smoke.OWNER_LABEL)
+        topology.require_cached_images = Mock()
+        topology.verify_instance_name = Mock()
+        topology.prepare_database = Mock(side_effect=RuntimeError("setup failed"))
+        topology.report_failure = Mock(side_effect=KeyboardInterrupt)
+        with self.assertRaises(KeyboardInterrupt):
+            with topology:
+                self.fail("failed setup must not expose a ready topology")
+        self.assertEqual(events, ["secondary", "primary", "network"])
+
     def test_interrupted_network_creation_cleans_only_the_attested_network(self):
         commands = Mock()
         owner = "a" * 24

@@ -109,12 +109,30 @@ class SqlServerReplication:
             self.wait_until_ready()
             self.setup_elapsed_seconds = time.monotonic() - started
             return self
-        except BaseException:
-            self.stack.close()
+        except BaseException as error:
+            try:
+                if isinstance(error, Exception):
+                    self.report_failure()
+            finally:
+                self.stack.close()
             raise
 
     def __exit__(self, *exception):
         self.stack.close()
+
+    def report_failure(self):
+        for role, database, _ in self.members:
+            try:
+                if not database.owns_container():
+                    continue
+                print(f"Owned AG {role} state and final server messages:", flush=True)
+                database.commands.run(["docker", "inspect", "--format",
+                                       "{{.State.Status}} OOM={{.State.OOMKilled}} exit={{.State.ExitCode}}",
+                                       database.name], timeout=5, check=False, echo=True)
+                database.commands.run(["docker", "logs", "--tail", "60", database.name],
+                                      timeout=5, check=False, echo=True)
+            except (OSError, RuntimeError, TimeoutError) as error:
+                print(f"Owned AG {role} diagnostics unavailable: {type(error).__name__}", flush=True)
 
     def require_cached_images(self):
         for _, database, _ in self.members:
@@ -154,6 +172,7 @@ class SqlServerReplication:
         self.native_names[role] = actual_name
 
     def prepare_database(self):
+        print("Preparing owned AG database and seed backups", flush=True)
         if not self.primary.owns_container():
             raise RuntimeError("the owned primary disappeared before database preparation")
         self.primary.seed()
@@ -168,6 +187,7 @@ class SqlServerReplication:
                  "WITH INIT, COMPRESSION, CHECKSUM;", timeout=60)
 
     def create_endpoint(self, database):
+        print(f"Preparing owned AG endpoint on {database.name}", flush=True)
         password = f"Master!{secrets.token_hex(16)}Aa9"
         database.commands.passwords.append(password)
         self.sql(database, f"CREATE MASTER KEY ENCRYPTION BY PASSWORD={sql_string(password)}; "
@@ -202,6 +222,7 @@ FROM chunks WHERE n*{CERTIFICATE_CHUNK_HEX}<DATALENGTH(@encoded) ORDER BY n;
         return encoded
 
     def trust_peer(self, database, certificate):
+        print(f"Trusting owned AG peer on {database.name}", flush=True)
         password = f"Peer!{secrets.token_hex(16)}Aa9"
         database.commands.passwords.append(password)
         self.sql(database, f"CREATE LOGIN culprit_ag_peer WITH PASSWORD={sql_string(password)}; "
@@ -217,10 +238,13 @@ FROM chunks WHERE n*{CERTIFICATE_CHUNK_HEX}<DATALENGTH(@encoded) ORDER BY n;
             replicas.append(f"{sql_string(self.native_names[role])} WITH (ENDPOINT_URL={sql_string(endpoint)}, "
                             "AVAILABILITY_MODE=ASYNCHRONOUS_COMMIT, FAILOVER_MODE=MANUAL, "
                             "SEEDING_MODE=AUTOMATIC, SECONDARY_ROLE(ALLOW_CONNECTIONS=ALL))")
+        print("Creating owned AG on the primary", flush=True)
         self.sql(self.primary, f"CREATE AVAILABILITY GROUP [{self.name}] WITH (CLUSTER_TYPE=NONE) "
                  "FOR REPLICA ON " + ",".join(replicas) + ";")
+        print("Joining owned AG on the secondary", flush=True)
         self.sql(self.secondary, f"ALTER AVAILABILITY GROUP [{self.name}] JOIN WITH (CLUSTER_TYPE=NONE); "
                  f"ALTER AVAILABILITY GROUP [{self.name}] GRANT CREATE ANY DATABASE;")
+        print("Adding the owned database to the AG", flush=True)
         self.sql(self.primary, f"ALTER AVAILABILITY GROUP [{self.name}] ADD DATABASE [{self.database_name}];")
 
     def ready(self, role, database, visible_rows, timeout):
@@ -242,6 +266,7 @@ THEN N'ready' ELSE N'pending' END"""
         return self.value(database, expression, timeout=timeout) == "ready"
 
     def wait_until_ready(self):
+        print("Checking owned AG roles, native visibility and replicated marker", flush=True)
         deadline = time.monotonic() + SEEDING_BUDGET
         while time.monotonic() < deadline:
             ready = True
