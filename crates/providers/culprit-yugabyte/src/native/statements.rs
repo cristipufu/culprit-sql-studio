@@ -3,6 +3,10 @@ use super::metadata::Metadata;
 use super::*;
 use culprit_core::{Engine, Error, ErrorCode, MeasurementScope, ResetMarker};
 use std::collections::{BTreeMap, BTreeSet};
+mod temporary;
+pub(crate) use temporary::{Projection as TemporaryProjection, projection as temporary_projection, temporary_work};
+#[cfg(test)]
+mod tests;
 pub(crate) const SOURCE: &str = "ysql-node-pg-stat-statements";
 pub(crate) async fn columns(reader: &mut impl QueryRead, relation: &str) -> Result<BTreeSet<String>> {
     reader.query(&format!("SELECT attname FROM pg_catalog.pg_attribute WHERE attrelid='{}'::regclass AND attnum>0 AND NOT attisdropped",relation.replace('\'',"''")),128)
@@ -56,6 +60,7 @@ impl Layout {
             fields.push("pg_catalog.octet_length(s.query)::text AS source_text_bytes".into());
         } else {
             fields.extend(metrics(self, meta).iter().map(|metric| format!("s.{0}::text AS {0}", metric.column)));
+            fields.push(temporary_projection(&self.columns, TemporaryProjection::Point));
         }
         // Global FDW views can still materialize query bodies internally. Fast polling uses the native false/text
         // switch on one node. Node identity and scope are exported; this never claims a cluster-wide total.
@@ -128,10 +133,14 @@ fn identity(row: &Row, meta: &Metadata) -> Result<NativeQueryIdentity> {
     if let Some(value) = row.text("toplevel") {
         qualifiers.insert("toplevel".into(), value);
     }
-    Ok(NativeQueryIdentity { query_id, qualifiers })
+    let identity = NativeQueryIdentity { query_id, qualifiers };
+    if Engine::Yugabyte.spec().statement_counter_member(&identity).is_none() {
+        return Err(invalid());
+    }
+    Ok(identity)
 }
 pub(crate) fn counters(row: &Row, layout: &Layout, meta: &Metadata) -> Result<StatementCounterSample> {
-    let totals = metrics(layout, meta)
+    let mut totals = metrics(layout, meta)
         .into_iter()
         .map(|spec| {
             Ok(StatementCounter {
@@ -145,6 +154,7 @@ pub(crate) fn counters(row: &Row, layout: &Layout, meta: &Metadata) -> Result<St
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    totals.extend(temporary::counters(row)?);
     let sample = StatementCounterSample {
         identity: identity(row, meta)?,
         scope: MeasurementScope::Node,

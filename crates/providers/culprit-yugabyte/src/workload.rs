@@ -4,21 +4,26 @@ use crate::{
     sources,
 };
 use culprit_core::{
-    CounterScope, CounterSet, Coverage, QueryStat, Spread, Workload, WorkloadKind,
+    CounterScope, CounterSet, Coverage, ErrorDetail, QueryStat, Result, Spread, Workload, WorkloadKind,
     signals::{DocdbMetrics, QueryCosts},
     t,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
+#[cfg(test)]
+mod tests;
 
-async fn epochs(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Coverage) -> CounterSet {
+async fn epochs(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Coverage) -> Result<(CounterSet, bool)> {
     let mut result = CounterSet {
         scope: if probe.cluster { CounterScope::Cluster } else { CounterScope::Node },
         members: BTreeMap::new(),
         complete: false,
     };
     let relation = if probe.cluster {
-        let found = crate::global::configured(session, "pg_stat_statements_info").await.ok().flatten();
+        let found = match crate::global::configured(session, "pg_stat_statements_info").await {
+            Err(error) if terminal(&error) => return Err(error),
+            result => result.ok().flatten(),
+        };
         match found {
             Some(relation) => relation,
             None => {
@@ -26,7 +31,7 @@ async fn epochs(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Cov
                     &sources::EPOCHS,
                     culprit_core::message!("provider.yugabyte.coverage.epochs_not_configured"),
                 );
-                return result;
+                return Ok((result, false));
             }
         }
     } else {
@@ -35,13 +40,37 @@ async fn epochs(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Cov
             .qualified(&[probe.statement_schema.as_deref().unwrap_or("pg_catalog"), "pg_stat_statements_info"])
     };
     let before = session.notices();
+    let reset_available = probe.cluster || probe.statement_info;
     let sql = format!(
-        "SELECT {} AS reset{} FROM {relation}",
-        crate::probe::timestamp("stats_reset"),
-        if probe.cluster { ",server_uuid::text AS node" } else { "" }
+        "SELECT {} AS reset{}{}",
+        if reset_available { crate::probe::timestamp("stats_reset") } else { "NULL::text".into() },
+        if probe.cluster {
+            ",server_uuid::text AS node".into()
+        } else {
+            format!(
+                ",pg_catalog.replace(yb_get_local_tserver_uuid()::text,'-','') AS node,{} AS started",
+                crate::probe::timestamp("pg_catalog.pg_postmaster_start_time()")
+            )
+        },
+        if reset_available { format!(" FROM {relation}") } else { String::new() }
     );
-    if let Some(rows) = coverage.read_rows(&sources::EPOCHS, query(session, &sql).await) {
+    let mut local_owner = false;
+    let response = match query(session, &sql).await {
+        Err(error) if terminal(&error) => return Err(error),
+        response => response,
+    };
+    if let Some(rows) = coverage.read_rows(&sources::EPOCHS, response) {
         result.complete = session.notices() == before;
+        local_owner = !probe.cluster
+            && rows.len() == 1
+            && probe.node.as_deref().and_then(culprit_core::engines::ysql_node_member).is_some()
+            && rows[0].text("node") == probe.node
+            && rows[0]
+                .text("started")
+                .as_deref()
+                .and_then(|at| culprit_core::telemetry::canonical_time(at).ok())
+                .zip(probe.started.as_deref().and_then(|at| culprit_core::telemetry::canonical_time(at).ok()))
+                .is_some_and(|(current, original)| current == original);
         for row in rows {
             if let Some(node) = if probe.cluster { node_id(&row.string("node")) } else { probe.node.clone() } {
                 result.members.insert(node, row.text("reset"));
@@ -61,6 +90,7 @@ async fn epochs(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Cov
                         result.complete = false;
                     }
                 }
+                Err(error) if terminal(&error) => return Err(error),
                 Err(_) => result.complete = false,
             }
         }
@@ -68,7 +98,25 @@ async fn epochs(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Cov
     if !result.epochs_known() {
         coverage.partial(&sources::EPOCHS, culprit_core::message!("provider.yugabyte.coverage.epochs_incomplete"));
     }
-    result
+    Ok((result, local_owner))
+}
+
+fn terminal(error: &culprit_core::Error) -> bool {
+    matches!(error.detail, Some(ErrorDetail::CollectionStopped(_)))
+}
+
+async fn observed_epochs(
+    session: &mut impl NoticeRead,
+    probe: &Probe,
+    coverage: &mut Coverage,
+) -> Option<(CounterSet, bool)> {
+    match epochs(session, probe, coverage).await {
+        Ok(point) => Some(point),
+        Err(error) => {
+            let _ = coverage.read::<()>(&sources::EPOCHS, Err(error));
+            None
+        }
+    }
 }
 async fn statement_rows(
     session: &mut impl NoticeRead,
@@ -91,6 +139,23 @@ async fn statement_rows(
     let max = time_column("max_exec_time", "max_time")?;
     let mean = time_column("mean_exec_time", "mean_time")?;
     let stddev = time_column("stddev_exec_time", "stddev_time")?;
+    let unavailable_columns = std::collections::BTreeSet::new();
+    let temporary = crate::native::statements::temporary_projection(
+        if probe.cluster { &unavailable_columns } else { &columns },
+        crate::native::statements::TemporaryProjection::SingleIdentityGroup,
+    );
+    let native_identity = if probe.cluster {
+        "NULL::text AS native_userid,NULL::text AS native_toplevel,0::bigint AS native_rows".into()
+    } else {
+        format!(
+            "CASE WHEN count(*)=1 THEN min(userid)::text END AS native_userid,{} AS native_toplevel,count(*)::text AS native_rows",
+            if columns.contains("toplevel") {
+                "CASE WHEN count(*)=1 THEN min(toplevel::text) END"
+            } else {
+                "NULL::text"
+            }
+        )
+    };
     let role_filter = probe.statement_role.map(|role| format!(" AND userid={role}")).unwrap_or_default();
     let extras = [
         ("docdb_read_rpcs", "read_requests"),
@@ -129,7 +194,7 @@ async fn statement_rows(
          sum({total}::float8) AS ms,sum(rows::float8) AS rows,
          min({min}::float8) AS min_ms,max({max}::float8) AS max_ms,
          sum(calls::float8*(power({stddev}::float8,2)+power({mean}::float8,2))) AS moment,
-         {extras} FROM {relation} WHERE dbid={} AND calls>0{role_filter}
+         {extras},{temporary},{native_identity} FROM {relation} WHERE dbid={} AND calls>0{role_filter}
          AND rtrim(query) NOT LIKE '%/* culprit */' GROUP BY queryid)
          SELECT *,sum(ms) OVER() AS all_ms,sum(calls) OVER() AS all_calls,count(*) OVER() AS all_queries
          FROM grouped ORDER BY ms DESC,id LIMIT {}",
@@ -161,7 +226,7 @@ pub(crate) async fn read(
     if probe.cluster {
         coverage.read(&sources::WORKLOAD, crate::global::nodes_from(session).await)?;
     }
-    let mut counter_set = epochs(session, probe, coverage).await;
+    let (mut counter_set, before_owner) = observed_epochs(session, probe, coverage).await?;
     let relation = if probe.cluster {
         "pg_catalog.\"gv$pg_stat_statements\"".into()
     } else {
@@ -198,7 +263,8 @@ pub(crate) async fn read(
         return None;
     }
     let partial = session.notices() != before;
-    let after = epochs(session, probe, coverage).await;
+    let (after, after_owner) = observed_epochs(session, probe, coverage).await?;
+    let point_owner = before_owner && after_owner && counter_set == after && !partial;
     if counter_set != after || partial {
         counter_set.complete = false;
         coverage.partial(&sources::WORKLOAD, culprit_core::message!("provider.yugabyte.coverage.contributors_changed"));
@@ -253,7 +319,21 @@ pub(crate) async fn read(
             "stddev_time_ms":r.number("moment").map(|m|(m/calls-mean*mean).max(0.0).sqrt()),"rows":r.number("rows"),"plans":[],"waits":[],
             "costs":costs,"spread":Spread{min_ms:r.number("min_ms"),..Default::default()}});
         match serde_json::from_value::<QueryStat>(value) {
-            Ok(q) => queries.push(q),
+            Ok(mut q) => {
+                if point_owner && let Some(identity) = single_identity(r, probe) {
+                    match crate::native::statements::temporary_work(r) {
+                        Ok(work) => {
+                            q.native_identity = Some(identity);
+                            q.temporary_work = work;
+                        }
+                        Err(_) => coverage.partial(
+                            &sources::WORKLOAD,
+                            culprit_core::message!("provider.yugabyte.coverage.row_unreadable"),
+                        ),
+                    }
+                }
+                queries.push(q);
+            }
             Err(_) => {
                 coverage
                     .partial(&sources::WORKLOAD, culprit_core::message!("provider.yugabyte.coverage.row_unreadable"));
@@ -319,6 +399,22 @@ pub(crate) async fn read(
         )),
         counter_set: Some(counter_set),
     })
+}
+
+fn single_identity(row: &Row, probe: &Probe) -> Option<culprit_core::telemetry::NativeQueryIdentity> {
+    if probe.cluster || row.text("native_rows").as_deref() != Some("1") {
+        return None;
+    }
+    let mut qualifiers = BTreeMap::from([
+        ("database_oid".into(), probe.oid.to_string()),
+        ("node".into(), probe.node.clone()?),
+        ("userid".into(), row.text("native_userid")?),
+    ]);
+    if let Some(toplevel) = row.text("native_toplevel") {
+        qualifiers.insert("toplevel".into(), toplevel);
+    }
+    let identity = culprit_core::telemetry::NativeQueryIdentity { query_id: row.text("id")?, qualifiers };
+    culprit_core::Engine::Yugabyte.spec().statement_counter_member(&identity).map(|_| identity)
 }
 
 async fn metric_settings(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Coverage) -> (bool, bool) {

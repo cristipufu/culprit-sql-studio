@@ -4,6 +4,56 @@
 use super::*;
 
 #[test]
+fn statement_counter_members_are_source_facts_without_a_postgres_or_endpoint_fallback() {
+    use crate::telemetry::NativeQueryIdentity;
+    let identity = NativeQueryIdentity {
+        query_id: "-42".into(),
+        qualifiers: [
+            ("database_oid".into(), "16384".into()),
+            ("userid".into(), "10".into()),
+            ("node".into(), "0123456789abcdef0123456789abcdef".into()),
+            ("toplevel".into(), "true".into()),
+        ]
+        .into(),
+    };
+    for engine in Engine::ALL {
+        let expected =
+            (engine == Engine::Yugabyte).then(|| ysql_node_member("0123456789abcdef0123456789abcdef").unwrap());
+        assert_eq!(engine.spec().statement_counter_member(&identity), expected, "{engine:?}");
+    }
+    let mut legacy = identity.clone();
+    legacy.qualifiers.remove("toplevel");
+    assert!(Engine::Yugabyte.spec().statement_counter_member(&legacy).is_some());
+    legacy.qualifiers.insert("future_native_dimension".into(), "retained".into());
+    assert!(Engine::Yugabyte.spec().statement_counter_member(&legacy).is_some());
+    for key in ["node", "userid", "database_oid"] {
+        let mut missing = identity.clone();
+        missing.qualifiers.remove(key);
+        assert!(Engine::Yugabyte.spec().statement_counter_member(&missing).is_none(), "{key}");
+    }
+    for (key, value) in [
+        ("node", "00000000000000000000000000000000"),
+        ("node", "0123456789ABCDEF0123456789ABCDEF"),
+        ("node", "01234567-89ab-cdef-0123-456789abcdef"),
+        ("userid", "0"),
+        ("userid", "01"),
+        ("database_oid", "4294967296"),
+        ("database_oid", "+1"),
+        ("toplevel", "t"),
+        ("toplevel", "unknown"),
+    ] {
+        let mut changed = identity.clone();
+        changed.qualifiers.insert(key.into(), value.into());
+        assert!(Engine::Yugabyte.spec().statement_counter_member(&changed).is_none(), "{key}={value}");
+    }
+    for query in ["+42", "042", "9223372036854775808"] {
+        let mut changed = identity.clone();
+        changed.query_id = query.into();
+        assert!(Engine::Yugabyte.spec().statement_counter_member(&changed).is_none(), "{query}");
+    }
+}
+
+#[test]
 fn live_actor_labels_use_explicit_engine_facts_without_changing_native_activity_keys() {
     use SessionIdFormat::*;
     let cases = [

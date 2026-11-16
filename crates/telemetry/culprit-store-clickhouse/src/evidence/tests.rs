@@ -14,6 +14,7 @@ mod populations;
 mod queries;
 mod source_partitions;
 mod statement_grants;
+mod statement_work;
 mod tuning;
 use crate::{catalog::SchemaCatalog, client::QueryRequest, response::QueryTable, schema::Schema};
 use async_trait::async_trait;

@@ -102,7 +102,16 @@ async fn node_snapshots_preserve_native_scope_and_export_no_postgres_heap_counte
                 assert_eq!(sample.scope, MeasurementScope::Node);
                 assert!(sample.identity.qualifiers.contains_key("node"));
                 assert_eq!(sample.reset, culprit_core::ResetMarker::Unknown);
-                assert!(sample.totals.iter().all(|metric| !matches!(metric.unit, RuntimeMetricUnit::Pages { .. })));
+                assert!(
+                    sample.totals.iter().all(|metric| {
+                        !matches!(metric.unit, RuntimeMetricUnit::Pages { .. })
+                            || matches!(
+                                metric.key,
+                                RuntimeMetricKey::TemporaryBlocksRead | RuntimeMetricKey::TemporaryBlocksWritten
+                            )
+                    }),
+                    "temporary local blocks do not introduce PostgreSQL heap or shared-buffer metrics"
+                );
             }
         }
         assert_eq!(source.close().await, SourceShutdown::Quiescent);

@@ -5,6 +5,21 @@ use crate::dialect::{NewIndex, included, unique};
 
 pub(super) struct Yugabyte;
 
+/// Native TServer identity shared by YSQL read contexts and statement-counter qualification. This is a member
+/// identifier, not a process generation, database identity or proof of cluster-wide visibility.
+pub fn node_member(node: &str) -> Option<crate::telemetry::SharedResourceIdentity> {
+    use crate::telemetry::{NativeIdentity, SharedResourceIdentity, SharedResourceKind};
+    (node.len() == 32
+        && node.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && node.bytes().any(|byte| byte != b'0'))
+    .then(|| SharedResourceIdentity {
+        engine: Engine::Yugabyte,
+        kind: SharedResourceKind::Node,
+        namespace: NativeIdentity::new("yugabyte-tserver-uuid"),
+        native: NativeIdentity::new(node),
+    })
+}
+
 /// Parse the node, physical backend and start time that together identify a direct YSQL session. The same parser
 /// guards Workspace routing, provider operations and suggested SQL; a plain PID never identifies a cluster session.
 pub fn session_target(session: &str) -> crate::Result<(String, i32, String)> {
@@ -75,6 +90,23 @@ impl EngineSpec for Yugabyte {
             runtime_note: key!("core.engines.yugabyte.runtime_note").into(),
             ..StatementMetrics::pg_stat_statements(WriteLog::TransactionLog)
         }
+    }
+    fn statement_counter_member(
+        &self,
+        identity: &crate::telemetry::NativeQueryIdentity,
+    ) -> Option<crate::telemetry::SharedResourceIdentity> {
+        fn oid(value: &str) -> bool {
+            value.parse::<u32>().ok().is_some_and(|number| number > 0 && number.to_string() == value)
+        }
+        if !identity.is_valid()
+            || !identity.query_id.parse::<i64>().ok().is_some_and(|value| value.to_string() == identity.query_id)
+            || !identity.qualifiers.get("database_oid").is_some_and(|value| oid(value))
+            || !identity.qualifiers.get("userid").is_some_and(|value| oid(value))
+            || identity.qualifiers.get("toplevel").is_some_and(|value| !matches!(value.as_str(), "true" | "false"))
+        {
+            return None;
+        }
+        node_member(identity.qualifiers.get("node")?)
     }
     fn signal_scope(&self, _server: &ServerInfo, key: &str) -> crate::MeasurementScope {
         if key == "oldest-transaction" { crate::MeasurementScope::Database } else { crate::MeasurementScope::Server }

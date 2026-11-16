@@ -2,14 +2,22 @@
 use super::temporary_work;
 use culprit_core::{
     Error, MeasurementScope, Result, SourceOutcome, SourceState, StatementWorkEntry, StatementWorkReport, format, t,
-    telemetry::{OperationalFact, OperationalObservation, statement_temporary_work},
+    telemetry::{
+        NativeReadContext, OperationalFact, OperationalObservation, SourcePartition, statement_temporary_work,
+    },
 };
 use std::collections::BTreeSet;
 
 pub fn explain(
+    context: &NativeReadContext,
     observations: &[&OperationalObservation],
     source: Option<&SourceOutcome>,
 ) -> Result<StatementWorkReport> {
+    if !context.is_valid() || context.target.database().is_none() {
+        return Err(invalid());
+    }
+    let bounds = culprit_core::telemetry::ObservationBounds::new(&context.observed_from, &context.observed_until)
+        .ok_or_else(invalid)?;
     let expected =
         source.map(|source| source.source.as_str()).or_else(|| observations.first().map(|row| row.source.as_str()));
     if source.is_some_and(|source| match source.state {
@@ -26,7 +34,19 @@ pub fn explain(
             return Err(invalid());
         }
         let OperationalFact::StatementCounters(sample) = &observation.fact else { return Err(invalid()) };
-        if sample.scope != MeasurementScope::Database {
+        if !bounds.contains(&sample.observed_at)
+            || match sample.scope {
+                MeasurementScope::Database => false,
+                MeasurementScope::Node => !matches!(
+                    &context.partition,
+                    SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) }
+                        if context.has_qualified_local_owner()
+                            && context.target.engine().spec().statement_counter_member(&sample.identity).as_ref()
+                                == Some(member)
+                ),
+                _ => true,
+            }
+        {
             return Err(invalid());
         }
         let work = statement_temporary_work(sample, &observation.source).map_err(|_| invalid())?;
@@ -37,6 +57,7 @@ pub fn explain(
         entries.push(StatementWorkEntry {
             observation_key: observation.key.clone(),
             identity: sample.identity.clone(),
+            scope: sample.scope,
             observed_at: sample.observed_at.clone(),
             reset: sample.reset.clone(),
             work,
@@ -48,6 +69,11 @@ pub fn explain(
         t!("view.statement_work.limit.reset"),
         t!("view.statement_work.limit.identity"),
     ];
+    if observations.iter().any(|observation| {
+        matches!(&observation.fact, OperationalFact::StatementCounters(sample) if sample.scope == MeasurementScope::Node)
+    }) {
+        limitations.push(t!("view.statement_work.limit.node"));
+    }
     if entries.iter().any(|entry| entry.work.is_empty()) {
         limitations.push(t!("view.statement_work.limit.unmeasured"));
     }

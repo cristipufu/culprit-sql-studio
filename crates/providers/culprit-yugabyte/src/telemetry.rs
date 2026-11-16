@@ -21,6 +21,15 @@ enum Recipe {
     Schema(schema::Kind),
 }
 impl Recipe {
+    fn partition(self, meta: &Metadata) -> Result<SourcePartition> {
+        if matches!(self, Self::Statements | Self::Definitions) {
+            return meta
+                .completed_action_context(meta)
+                .map(|context| context.partition)
+                .ok_or_else(|| CollectionStop::SourceUnavailable.error());
+        }
+        Ok(SourcePartition::Target)
+    }
     fn dataset(self) -> SnapshotDataset {
         match self {
             Self::Statements => SnapshotDataset::StatementCounters,
@@ -127,9 +136,13 @@ impl SnapshotReader for Reader {
         }
         self.notices = self.io.notices();
         let description = CollectionDescription {
-            partition: culprit_core::telemetry::SourcePartition::Target,
+            partition: self.recipe.partition(&meta)?,
             target: meta.database.clone().into(),
-            source: format!("ysql-{}-{}", self.recipe.source(), meta.node),
+            source: if matches!(self.recipe, Recipe::Statements | Recipe::Definitions) {
+                self.recipe.source().into()
+            } else {
+                format!("ysql-{}-{}", self.recipe.source(), meta.node)
+            },
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
                 dataset: self.recipe.dataset(),

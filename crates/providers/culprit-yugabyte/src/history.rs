@@ -314,6 +314,7 @@ mod tests {
             global: false,
             statements: true,
             statement_schema: None,
+            statement_info: false,
             metrics: false,
             rpc_metrics: false,
             statement_role: Some(16385),

@@ -22,6 +22,7 @@ mod yugabyte;
 pub use mssql::QueryStoreReadMode;
 pub use presentation::{EvidencePresentation, StatisticsFreshness};
 pub use products::{DatabaseProduct, ProductFacts, ProductSpec};
+pub use yugabyte::node_member as ysql_node_member;
 pub use yugabyte::session_target as ysql_session_target;
 
 use std::borrow::Cow;
@@ -127,6 +128,14 @@ pub trait EngineSpec: Send + Sync {
     fn sql_syntax(&self) -> SqlSyntax;
     /// Meaning and presentation of statement counters, independently of SQL grammar or storage.
     fn statement_metrics(&self) -> StatementMetrics;
+    /// Source-owned native statement qualifiers may identify a compute member. A scope label, endpoint or query
+    /// identifier alone cannot supply that identity; the enclosing read must independently qualify its epoch.
+    fn statement_counter_member(
+        &self,
+        _identity: &crate::telemetry::NativeQueryIdentity,
+    ) -> Option<crate::telemetry::SharedResourceIdentity> {
+        None
+    }
     fn constraint_validation(&self) -> ConstraintValidation;
     fn cleanup_evidence(&self) -> CleanupEvidence;
     /// How a live wait sample is collected. Required so a new engine cannot inherit another engine's description.

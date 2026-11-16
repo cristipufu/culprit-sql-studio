@@ -1,7 +1,7 @@
 use super::fixture::Fixture;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason},
-    test_support::statement_work_evidence_cases,
+    test_support::{node_statement_work_evidence_cases, statement_work_evidence_cases},
 };
 use culprit_core::{ErrorDetail, MeasurementScope, ResetMarker, SourceOutcome, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
@@ -25,7 +25,8 @@ async fn authenticated_statement_work_reuses_pure_explanations_and_keeps_native_
             reason: None,
             reason_message: None,
         };
-        let expected = culprit_checks::statement_work::explain(&observations(&rows), Some(&outcome)).unwrap();
+        let context = NativeReadContext::from_snapshot(&source).unwrap();
+        let expected = culprit_checks::statement_work::explain(&context, &observations(&rows), Some(&outcome)).unwrap();
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete(), "{:?}", capture.gaps());
@@ -120,4 +121,99 @@ async fn conflicting_subject_scope_clock_family_or_dataset_is_rejected_before_ex
         };
         assert_eq!(error.detail, Some(ErrorDetail::Delivery(problem)), "{shape}");
     }
+}
+
+#[tokio::test]
+async fn authenticated_node_points_keep_native_members_users_top_level_contexts_and_partial_visibility_separate() {
+    for (source, rows) in node_statement_work_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let result = collected_resources::statement_work(&capture).unwrap();
+        assert_eq!(result.context.source, source);
+        assert_eq!(result.report.entries.len(), rows.len());
+        for row in observations(&rows) {
+            let OperationalFact::StatementCounters(sample) = &row.fact else { panic!() };
+            assert_eq!(sample.scope, MeasurementScope::Node);
+            let entry = result.report.entries.iter().find(|entry| entry.observation_key == row.key).unwrap();
+            assert_eq!(entry.identity, sample.identity);
+            assert_eq!(entry.scope, sample.scope, "read ownership cannot replace the native counter population");
+            assert_eq!(entry.reset, ResetMarker::Unknown);
+            assert_eq!(entry.observed_at, sample.observed_at);
+        }
+        assert_eq!(result.report.source_state, Some(source.observation.snapshot().unwrap().sources[0].state));
+        assert!(serde_json::to_value(result).unwrap().get("workload").is_none());
+    }
+}
+
+#[tokio::test]
+async fn node_scope_requires_the_original_qualified_member_epoch_and_canonical_native_statement_identity() {
+    for changed in
+        ["target-only", "unknown-member", "unknown-epoch", "other-member", "user", "database", "top", "clock"]
+    {
+        let (mut source, mut rows) = node_statement_work_evidence_cases().remove(0);
+        match changed {
+            "target-only" => source.partition = SourcePartition::Target,
+            "unknown-member" => {
+                source.partition =
+                    SourcePartition::InstanceLocal { member: None, epoch: Some("native-process-a".into()) }
+            }
+            "unknown-epoch" => {
+                source.partition = SourcePartition::InstanceLocal {
+                    member: culprit_core::engines::ysql_node_member("0123456789abcdef0123456789abcdef"),
+                    epoch: None,
+                }
+            }
+            "other-member" => {
+                source.partition = SourcePartition::InstanceLocal {
+                    member: culprit_core::engines::ysql_node_member("11111111111111111111111111111111"),
+                    epoch: Some("native-process-a".into()),
+                }
+            }
+            _ => {
+                let TelemetryRecord::Operational(observation) = &mut rows[0] else { panic!() };
+                let OperationalFact::StatementCounters(sample) = &mut observation.fact else { panic!() };
+                match changed {
+                    "user" => {
+                        sample.identity.qualifiers.insert("userid".into(), "01".into());
+                    }
+                    "database" => {
+                        sample.identity.qualifiers.insert("database_oid".into(), "0".into());
+                    }
+                    "top" => {
+                        sample.identity.qualifiers.insert("toplevel".into(), "unknown".into());
+                    }
+                    _ => sample.observed_at = "2020-01-01T12:00:02Z".into(),
+                }
+                observation.key = sample.key().unwrap();
+            }
+        }
+        // Unknown native ownership permits only raw partial points, never a complete native population.
+        if matches!(changed, "unknown-member" | "unknown-epoch") {
+            let SourceObservation::Snapshot(snapshot) = &mut source.observation else { panic!() };
+            snapshot.sources[0] =
+                StateSourceCoverage::observed(snapshot.sources[0].source.clone(), rows.len() as u32, false);
+        }
+        let fixture = Fixture::new(source, rows).await;
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let error = collected_resources::statement_work(&capture).unwrap_err();
+        assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{changed}");
+    }
+}
+
+#[tokio::test]
+async fn missing_archived_node_rows_preserve_original_counts_and_never_report_a_healthy_empty_population() {
+    let (source, rows) = node_statement_work_evidence_cases().remove(0);
+    let original = source.observation.snapshot().unwrap().sources[0].clone();
+    let fixture = Fixture::new(source, rows).await;
+    fixture.remove_first_row(TelemetryStream::OperationalSamples);
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let result = collected_resources::statement_work(&capture).unwrap();
+    assert_eq!(result.report.source_state, Some(SourceState::Partial));
+    assert_eq!(result.report.entries.len(), original.records as usize - 1);
+    assert_eq!(result.context.source.observation.snapshot().unwrap().sources[0], original);
+    fixture.unpublish();
+    let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+    let result = collected_resources::statement_work(&capture).unwrap();
+    assert!(result.report.entries.is_empty());
+    assert_eq!(result.report.source_state, Some(SourceState::Partial));
 }

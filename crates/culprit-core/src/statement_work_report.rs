@@ -1,5 +1,5 @@
 //! A native statement counter point retains its exact identity and reset qualification without copying raw rows.
-use crate::{ResetMarker, SourceState, TemporaryWorkExplanation, telemetry::NativeQueryIdentity};
+use crate::{MeasurementScope, ResetMarker, SourceState, TemporaryWorkExplanation, telemetry::NativeQueryIdentity};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -19,6 +19,8 @@ pub struct StatementWorkReport {
 pub struct StatementWorkEntry {
     pub observation_key: String,
     pub identity: NativeQueryIdentity,
+    /// The population declared by this native point, independent from the member that read it.
+    pub scope: MeasurementScope,
     pub observed_at: String,
     pub reset: ResetMarker,
     pub work: Vec<TemporaryWorkExplanation>,

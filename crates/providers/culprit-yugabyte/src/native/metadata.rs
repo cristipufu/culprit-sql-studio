@@ -32,6 +32,7 @@ impl Metadata {
             && self.probe.compatibility == other.probe.compatibility
             && self.probe.statement_role == other.probe.statement_role
             && self.probe.statement_schema == other.probe.statement_schema
+            && self.probe.statement_info == other.probe.statement_info
             && self.probe.metrics == other.probe.metrics
             && self.probe.rpc_metrics == other.probe.rpc_metrics
             && self.probe.global == other.probe.global
@@ -65,12 +66,7 @@ impl Metadata {
         let context = NativeReadContext {
             target: self.database.clone().into(),
             partition: SourcePartition::InstanceLocal {
-                member: Some(SharedResourceIdentity {
-                    engine: Engine::Yugabyte,
-                    kind: SharedResourceKind::Node,
-                    namespace: NativeIdentity::new("yugabyte-tserver-uuid"),
-                    native: NativeIdentity::new(&self.node),
-                }),
+                member: Some(culprit_core::engines::ysql_node_member(&self.node)?),
                 epoch: Some(self.activity_epoch()?),
             },
             observed_from: canonical_time(&self.probe.now).ok()?,

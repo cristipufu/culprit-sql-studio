@@ -759,6 +759,7 @@ mod tests {
                         query_id: format!("query-{index}"),
                         qualifiers: Default::default(),
                     },
+                    scope: culprit_core::MeasurementScope::Database,
                     observed_at: "2020-01-01T12:00:00.123456789Z".into(),
                     reset: culprit_core::ResetMarker::Unknown,
                     work: vec![],

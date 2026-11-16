@@ -6,6 +6,28 @@ mod tests;
 
 pub(crate) const ALL_STATS: &str = "(EXISTS(SELECT 1 FROM pg_roles WHERE rolname=current_user AND rolsuper) OR pg_has_role(current_user,'pg_read_all_stats','USAGE'))";
 
+// Capability, not a server-version heuristic: an older extension can retain temporary blocks without this view.
+// Only the extension-owned native C function/view with access for this login can supply reset evidence.
+const STATEMENT_INFO: &str = "EXISTS(
+    SELECT 1 FROM pg_catalog.pg_extension e
+    JOIN pg_catalog.pg_class c ON c.relnamespace=e.extnamespace AND c.relname='pg_stat_statements_info' AND c.relkind='v'
+    JOIN pg_catalog.pg_depend cd ON cd.classid='pg_catalog.pg_class'::regclass AND cd.objid=c.oid
+      AND cd.refclassid='pg_catalog.pg_extension'::regclass AND cd.refobjid=e.oid AND cd.deptype='e'
+    JOIN pg_catalog.pg_roles cr ON cr.oid=c.relowner AND cr.rolsuper
+    JOIN pg_catalog.pg_proc p ON p.pronamespace=e.extnamespace AND p.proname='pg_stat_statements_info'
+      AND p.pronargs=0 AND NOT p.prosecdef
+    JOIN pg_catalog.pg_language l ON l.oid=p.prolang AND l.lanname='c'
+    JOIN pg_catalog.pg_depend pd ON pd.classid='pg_catalog.pg_proc'::regclass AND pd.objid=p.oid
+      AND pd.refclassid='pg_catalog.pg_extension'::regclass AND pd.refobjid=e.oid AND pd.deptype='e'
+    JOIN pg_catalog.pg_roles pr ON pr.oid=p.proowner AND pr.rolsuper
+    JOIN pg_catalog.pg_rewrite r ON r.ev_class=c.oid
+    JOIN pg_catalog.pg_depend rd ON rd.classid='pg_catalog.pg_rewrite'::regclass AND rd.objid=r.oid
+      AND rd.refclassid='pg_catalog.pg_proc'::regclass AND rd.refobjid=p.oid
+    WHERE e.extname='pg_stat_statements'
+      AND pg_catalog.has_schema_privilege(e.extnamespace,'USAGE')
+      AND pg_catalog.has_table_privilege(c.oid,'SELECT')
+      AND pg_catalog.has_function_privilege(p.oid,'EXECUTE'))";
+
 pub(crate) async fn require_all_stats_from(reader: &mut impl culprit_postgres::wire::QueryRead) -> Result<()> {
     if crate::read::query_one(reader, &format!("SELECT {ALL_STATS} AS allowed"))
         .await?
@@ -33,6 +55,7 @@ pub(crate) struct Probe {
     pub global: bool,
     pub statements: bool,
     pub statement_schema: Option<String>,
+    pub statement_info: bool,
     pub metrics: bool,
     pub rpc_metrics: bool,
     pub statement_role: Option<u32>,
@@ -91,6 +114,7 @@ pub(crate) async fn read_from(reader: &mut impl culprit_postgres::wire::QueryRea
         {} AS now, {} AS started, current_setting('yb_enable_global_views',true) AS global_views,
         (SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
           WHERE e.extname='pg_stat_statements') AS statement_schema,
+        {STATEMENT_INFO} AS statement_info,
         to_regclass('pg_catalog.\"gv$pg_stat_statements\"') IS NOT NULL AS cluster_statements,
         current_setting('yb_enable_pg_stat_statements_docdb_metrics',true) AS metrics,
         current_setting('yb_enable_pg_stat_statements_rpc_stats',true) AS rpc_metrics,
@@ -110,6 +134,11 @@ pub(crate) async fn read_from(reader: &mut impl culprit_postgres::wire::QueryRea
                 .with_hint(t!("provider.yugabyte.error.not_yugabyte_hint"))
         })?
         .to_string();
+    let statement_info = match row.value("statement_info") {
+        Some(Some("t" | "true")) => true,
+        Some(Some("f" | "false")) => false,
+        _ => return Err(Error::invalid(t!("collection.invalid_source"))),
+    };
     let node = match one(reader, "SELECT yb_get_local_tserver_uuid()::text AS node").await {
         Ok(row) => node_id(&row.string("node")),
         Err(error)
@@ -138,6 +167,7 @@ pub(crate) async fn read_from(reader: &mut impl culprit_postgres::wire::QueryRea
         global: row.flag("global_views"),
         statements: row.text("statement_schema").is_some(),
         statement_schema: row.text("statement_schema"),
+        statement_info,
         metrics: row.flag("metrics"),
         rpc_metrics: row.flag("rpc_metrics"),
         statement_role: if row.flag("all_stats") {

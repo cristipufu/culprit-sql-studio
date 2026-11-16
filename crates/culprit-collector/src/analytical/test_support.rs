@@ -63,7 +63,7 @@ pub use page_writers::{
     PageWriterCase, PageWriterFixture, page_writer_evidence, page_writer_evidence_cases, page_writer_fixture,
 };
 mod statement_work;
-pub use statement_work::statement_work_evidence_cases;
+pub use statement_work::{node_statement_work_evidence_cases, statement_work_evidence_cases};
 mod statement_grants;
 pub use statement_grants::{
     StatementGrantCase, assert_statement_grant_capture, statement_grant_evidence, statement_grant_evidence_cases,

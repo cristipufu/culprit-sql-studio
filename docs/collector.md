@@ -308,6 +308,10 @@ clocks and reset qualification, and shares the scan's temporary-work explanation
 block traffic and recorded I/O timing from internal-table and sort-pass counts. Exact integer counters survive
 readback; missing metrics remain unknown. A point does not establish an interval or safe delta, and matching a
 query ID does not attach SQL from a separately captured definition. No mode reconnects to the monitored database.
+Yugabyte points retain the observed node and native user/top-level statement context. Readback requires the same
+qualified member, process generation and observation bounds. Scan summaries attach temporary work only when one
+local native row supplies those dimensions; global or mixed-context groups do not inherit a representative row's
+temporary counters. A process generation does not establish a counter-reset time.
 
 `statement-grants` reads database-target `statement-grants` captures from `operational-samples` through the same
 pure explanation used by scans. Each original cache entry retains its handles, offsets, generation, exact integer

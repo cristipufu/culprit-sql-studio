@@ -60,6 +60,7 @@ fn probe(global: bool) -> Probe {
         global,
         statements: false,
         statement_schema: None,
+        statement_info: false,
         metrics: false,
         rpc_metrics: false,
         statement_role: None,

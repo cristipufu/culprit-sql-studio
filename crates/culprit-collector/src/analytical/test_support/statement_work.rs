@@ -63,6 +63,100 @@ pub fn statement_work_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
             records,
         )
     })
+    .chain(node_statement_work_evidence_cases())
+    .collect()
+}
+
+/// Distributed statement points retain one observed node and every native query-population dimension.
+pub fn node_statement_work_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
+    let node_a = "0123456789abcdef0123456789abcdef";
+    let node_b = "fedcba9876543210fedcba9876543210";
+    [
+        (
+            node_a,
+            "native-process-a",
+            vec![("10", true, Some("9007199254740993")), ("11", true, Some("0")), ("10", false, None)],
+            true,
+        ),
+        (node_b, "native-process-b", vec![("10", true, Some("18446744073709551615"))], true),
+        (node_a, "native-process-a", vec![("10", true, Some("7"))], false),
+    ]
+    .into_iter()
+    .map(|(node, epoch, populations, complete)| {
+        let source_name = "ysql-node-pg-stat-statements";
+        let rows = populations
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, (user, toplevel, written))| {
+                let mut totals = vec![metric(RuntimeMetricKey::Executions, RuntimeMetricUnit::Count, "17")];
+                if let Some(written) = written {
+                    totals.push(metric(
+                        RuntimeMetricKey::TemporaryBlocksRead,
+                        RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                        "0",
+                    ));
+                    totals.push(metric(
+                        RuntimeMetricKey::TemporaryBlocksWritten,
+                        RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                        written,
+                    ));
+                    totals.push(StatementCounter {
+                        key: RuntimeMetricKey::TemporaryReadTime,
+                        unit: RuntimeMetricUnit::Milliseconds,
+                        total: MeasurementValue::Real(0.0),
+                    });
+                }
+                let sample = StatementCounterSample {
+                    identity: NativeQueryIdentity {
+                        query_id: "-42".into(),
+                        qualifiers: [
+                            ("database_oid".into(), "16384".into()),
+                            ("userid".into(), user.into()),
+                            ("node".into(), node.into()),
+                            ("toplevel".into(), toplevel.to_string()),
+                        ]
+                        .into(),
+                    },
+                    scope: culprit_core::MeasurementScope::Node,
+                    observed_at: format!("2020-01-01T12:00:00.{}00000000Z", ordinal + 1),
+                    reset: culprit_core::ResetMarker::Unknown,
+                    totals,
+                    distributions: vec![],
+                };
+                assert!(sample.is_valid());
+                TelemetryRecord::Operational(OperationalObservation {
+                    source: source_name.into(),
+                    key: sample.key().unwrap(),
+                    fact: OperationalFact::StatementCounters(Box::new(sample)),
+                })
+            })
+            .collect::<Vec<_>>();
+        let source = CollectionDescription {
+            target: culprit_core::DatabaseIdentity::server(
+                culprit_core::Engine::Yugabyte,
+                "db",
+                "fixture.invalid",
+                5433,
+                None,
+            )
+            .into(),
+            partition: SourcePartition::InstanceLocal {
+                member: Some(culprit_core::engines::ysql_node_member(node).unwrap()),
+                epoch: Some(epoch.into()),
+            },
+            source: source_name.into(),
+            continuity: SourceContinuity::Unverified,
+            observation: SourceObservation::Snapshot(StateSnapshotDescription {
+                dataset: SnapshotDataset::StatementCounters,
+                observed_from: "2020-01-01T12:00:00Z".into(),
+                observed_until: "2020-01-01T12:00:01Z".into(),
+                records: rows.len() as u32,
+                sources: vec![StateSourceCoverage::observed(source_name.into(), rows.len() as u32, complete)],
+            }),
+        };
+        assert!(source.partition_is_consistent());
+        (source, rows)
+    })
     .collect()
 }
 

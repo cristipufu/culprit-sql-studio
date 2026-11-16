@@ -20,6 +20,7 @@ pub(crate) fn metadata(started: &str) -> Row {
         ("global_views", Some("on")),
         ("cluster_statements", Some("t")),
         ("statement_schema", None),
+        ("statement_info", Some("f")),
         ("metrics", Some("off")),
         ("rpc_metrics", Some("off")),
         ("role_oid", Some("10")),

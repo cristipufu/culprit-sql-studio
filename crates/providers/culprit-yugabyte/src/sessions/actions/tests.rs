@@ -35,6 +35,7 @@ fn context(node: &str, started: &str) -> Vec<Result<Vec<Row>>> {
             ("started", Some(started)),
             ("global_views", Some("f")),
             ("statement_schema", None),
+            ("statement_info", Some("f")),
             ("cluster_statements", Some("f")),
             ("metrics", Some("f")),
             ("rpc_metrics", Some("f")),
