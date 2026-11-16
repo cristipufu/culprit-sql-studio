@@ -292,10 +292,9 @@ async fn resolved_but_deferred_work_keeps_original_metadata_until_its_terminal_r
         fixture.files.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 1).unwrap().checkpoints[0].episodes,
         [episode.clone()]
     );
-    assert_eq!(
-        fixture.metadata_charge(&input.parent.capture.observation_id),
-        Some(0),
-        "Deferred evidence metadata survives verified artifact eviction"
+    assert!(
+        fixture.metadata_charge(&input.parent.capture.observation_id).is_some_and(|bytes| bytes > 0),
+        "Deferred evidence metadata survives verified artifact eviction with its own quota charge"
     );
     fixture.cache(&native).await;
     assert_eq!(fixture.files.diagnostic_reference(&input.rows[0].reference).unwrap().1, input.rows[0].row);
@@ -359,6 +358,10 @@ async fn interruption_of_archive_retirement_rolls_back_acknowledgement_and_retri
         })
         .unwrap();
     let before = fixture.files.status(1, None).unwrap().charged_bytes;
+    let retired_charge = fixture.metadata_charge(&first.parent.capture.observation_id).unwrap();
+    let retained_charge = fixture.metadata_charge(&next.parent.capture.observation_id).unwrap();
+    let metadata_before = super::super::journal::charged_bytes(&fixture.files.journal.conn).unwrap();
+    assert_eq!(metadata_before, retired_charge + retained_charge);
     let generation = super::super::retirement::generation(&fixture.files.journal.conn).unwrap();
     fixture.files.journal.conn.execute_batch("CREATE TRIGGER stop_retirement BEFORE DELETE ON diagnostic_inputs BEGIN SELECT RAISE(ABORT,'test-stop'); END").unwrap();
     assert!(fixture.files.mark_archived(&derived).is_err());
@@ -370,5 +373,10 @@ async fn interruption_of_archive_retirement_rolls_back_acknowledgement_and_retri
     fixture.files.mark_archived(&derived).unwrap();
     fixture.files.mark_archived(&derived).unwrap();
     assert_eq!(fixture.files.journal.debts().unwrap(), 0);
-    assert_eq!(super::super::journal::charged_bytes(&fixture.files.journal.conn).unwrap(), 0);
+    assert_eq!(fixture.metadata_charge(&first.parent.capture.observation_id), None);
+    assert_eq!(fixture.metadata_charge(&next.parent.capture.observation_id), Some(retained_charge));
+    assert_eq!(
+        super::super::journal::charged_bytes(&fixture.files.journal.conn).unwrap(),
+        metadata_before - retired_charge
+    );
 }

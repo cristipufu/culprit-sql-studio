@@ -4,9 +4,13 @@ use culprit_core::{FileIo, Report, Signal, WaitSample, format};
 use serde_json::{Value, json};
 
 const COMPILATION_ENTRIES: usize = 5;
+const COMPILER_ADMISSION_ENTRIES: usize = 5;
 const CLEANUP_ENTRIES: usize = 5;
 const CLEANUP_BOUNDARY_REFERENCES: usize = 5;
 const PARTICIPANT_ENTRIES: usize = 5;
+
+#[cfg(test)]
+mod compiler_admission_tests;
 
 fn signal(s: &Signal) -> Value {
     json!({
@@ -104,6 +108,21 @@ pub fn report(report: &Report) -> Value {
     }
     if let Some(activity) = activity {
         response["activity"] = activity;
+    }
+    if let Some(admission) = &report.compiler_admission {
+        response["compiler_admission"] = json!({
+            "title": admission.title, "summary": admission.summary,
+            "source_state": admission.source_state, "source_reason": admission.source_reason,
+            "waiters_retained": admission.waiters.len(), "gateways_retained": admission.gateways.len(),
+            "waiters": admission.waiters.iter().take(COMPILER_ADMISSION_ENTRIES).map(|entry| json!({
+                "observation_key": entry.observation_key, "title": entry.title, "explanation": entry.explanation,
+                "investigation": entry.investigation, "verify": entry.verify,
+            })).collect::<Vec<_>>(),
+            "gateways": admission.gateways.iter().take(COMPILER_ADMISSION_ENTRIES).map(|entry| json!({
+                "observation_key": entry.observation_key, "title": entry.title, "explanation": entry.explanation,
+            })).collect::<Vec<_>>(),
+            "limitations": admission.limitations,
+        });
     }
     if let Some(pages) = &report.page_waits {
         response["page_waits"] = json!({

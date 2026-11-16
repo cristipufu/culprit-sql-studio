@@ -73,6 +73,81 @@ fn one_original_row_and_native_token_are_required_without_interpreting_provider_
 }
 
 #[test]
+fn source_declared_session_database_context_does_not_authorize_request_database_questions() {
+    let mut point = focus();
+    point.participant.original.scope = ActivityScopeBasis::SessionDatabase;
+    assert!(point.participant.is_valid());
+    assert!(!point.is_valid(), "page questions retain their native request-database requirement");
+    let mut original = point.participant;
+    original.partition = SourcePartition::InstanceLocal {
+        member: Some(SharedResourceIdentity {
+            engine: crate::Engine::Mssql,
+            kind: SharedResourceKind::Instance,
+            namespace: NativeIdentity::new("native-machine"),
+            native: NativeIdentity::new("native-member"),
+        }),
+        epoch: Some(original.epoch.clone()),
+    };
+    original.original.wait.as_mut().unwrap().class = Some(ActivityWaitClass::ExecutionGrant);
+    assert!(original.is_valid());
+    assert!(!original.is_request_memory_focus());
+    original.original.wait.as_mut().unwrap().class = Some(ActivityWaitClass::CompilationAdmission);
+    assert!(!original.is_compilation_admission_focus());
+}
+
+#[test]
+fn compiler_capture_namespaces_bind_the_exact_original_question_and_ignore_followup_read_clocks() {
+    let mut original = focus().participant;
+    original.partition = SourcePartition::InstanceLocal {
+        member: Some(SharedResourceIdentity {
+            engine: crate::Engine::Mssql,
+            kind: SharedResourceKind::Instance,
+            namespace: NativeIdentity::new("native-machine"),
+            native: NativeIdentity::new("native-member"),
+        }),
+        epoch: Some(original.epoch.clone()),
+    };
+    original.original.wait.as_mut().unwrap().class = Some(ActivityWaitClass::CompilationAdmission);
+    let mut source = CollectionDescription {
+        target: original.target.clone(),
+        partition: original.partition.clone(),
+        source: crate::source_id::COMPILATION_GATEWAYS.into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::FocusedCompilationAdmission {
+            snapshot: StateSnapshotDescription {
+                dataset: SnapshotDataset::CompilerAdmission,
+                observed_from: "2020-01-01T00:00:01Z".into(),
+                observed_until: "2020-01-01T00:00:02Z".into(),
+                records: 0,
+                sources: vec![StateSourceCoverage::collected(crate::source_id::COMPILATION_GATEWAYS.into(), 0)],
+            },
+            result: Box::new(ActivityCompilationAdmissionFocusResult {
+                focus: original,
+                observed_from: "2020-01-01T00:00:01Z".into(),
+                observed_until: "2020-01-01T00:00:02Z".into(),
+                source: FocusSourceState::Matched,
+                membership: CompilationAdmissionMembership::NotObserved,
+                gateways: vec![],
+            }),
+        },
+    };
+    let scope = source.captured_range().unwrap().scope_id;
+    let record = source.scoped_id("native-observation", &"native-row").unwrap();
+    let SourceObservation::FocusedCompilationAdmission { snapshot, result } = &mut source.observation else {
+        unreachable!()
+    };
+    snapshot.observed_until = "2020-01-01T00:00:03Z".into();
+    result.observed_until = snapshot.observed_until.clone();
+    assert_eq!(source.captured_range().unwrap().scope_id, scope);
+    assert_eq!(source.scoped_id("native-observation", &"native-row").unwrap(), record);
+    let SourceObservation::FocusedCompilationAdmission { result, .. } = &mut source.observation else { unreachable!() };
+    result.focus.parent.manifest_sha256 = digest(b"another original capture");
+    assert!(result.is_valid());
+    assert_ne!(source.captured_range().unwrap().scope_id, scope);
+    assert_ne!(source.scoped_id("native-observation", &"native-row").unwrap(), record);
+}
+
+#[test]
 fn a_shared_followup_keeps_the_database_parent_and_verifies_a_distinct_native_resource_epoch() {
     let resource = SharedResourceIdentity {
         engine: crate::Engine::Mssql,

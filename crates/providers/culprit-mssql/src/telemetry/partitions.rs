@@ -16,7 +16,7 @@ impl SnapshotRecipe for Partitions {
     fn query(&self, maximum_bytes: &usize) -> String {
         partitions::select_sql(partitions::Selection::AllIndexes, *maximum_bytes)
     }
-    fn decode(&self, row: &Rec, maximum_bytes: &usize) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, maximum_bytes: &usize, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),
             ObjectDefinitionFact::MssqlPartitionBoundary(Box::new(partitions::decode(row, *maximum_bytes)?.definition)),

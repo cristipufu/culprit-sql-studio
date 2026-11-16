@@ -233,6 +233,34 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             redact_native_identity(&mut row.identity);
         }
     }
+    if let Some(evidence) = &mut s.operations.compiler_admission {
+        if let Some(context) = &mut evidence.context {
+            redact_read_context(context);
+        }
+        for row in &mut evidence.observations {
+            if let crate::telemetry::OperationalFact::CompilerWaiter(waiter) = &mut row.fact {
+                waiter.request.redact(engine);
+                waiter.request.client = None;
+            }
+        }
+    }
+    if let Some(evidence) = &mut s.operations.maintenance_progress {
+        redact_read_context(&mut evidence.context);
+        if let Some(focus) = &mut evidence.result.focus {
+            redact_target(&mut focus.target);
+            redact_partition(&mut focus.partition);
+            focus.epoch = opaque(&focus.epoch);
+            focus.original.redact(engine);
+            focus.original.client = None;
+            redact_native_identity(&mut focus.statement_identity);
+            focus.original.statement_identity = Some(focus.statement_identity.clone());
+        }
+        for row in &mut evidence.observations {
+            if let Some(statement) = &mut row.statement {
+                redact_native_identity(statement);
+            }
+        }
+    }
     if let Some(evidence) = &mut s.operations.page_waits {
         for observation in &mut evidence.observations {
             observation.redact(engine);

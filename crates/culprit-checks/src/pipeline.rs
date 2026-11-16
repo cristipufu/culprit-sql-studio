@@ -21,6 +21,8 @@ use std::sync::Arc;
 use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot, t};
 
 mod cleanup;
+mod compiler_admission;
+mod maintenance_progress;
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
 /// contradicts itself or the database (a plan older than the table it describes), never to hide a problem.
@@ -259,6 +261,8 @@ impl Pipeline {
         let page_waits = explained_page_waits(&mut snapshot);
         let task_space = explained_task_space(&mut snapshot);
         let query_compilation = explained_compilation(&mut snapshot);
+        let compiler_admission = compiler_admission::explain(&mut snapshot);
+        let maintenance_progress = maintenance_progress::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
@@ -369,6 +373,8 @@ impl Pipeline {
             page_waits,
             task_space,
             query_compilation,
+            compiler_admission,
+            maintenance_progress,
             cleanup,
         }
     }

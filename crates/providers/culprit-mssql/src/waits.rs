@@ -258,5 +258,18 @@ pub(crate) fn is_execution_grant_wait(native: &str) -> bool {
     native == "RESOURCE_SEMAPHORE"
 }
 
+pub(crate) const COMPILATION_ADMISSION_WAIT: &str = "RESOURCE_SEMAPHORE_QUERY_COMPILE";
+
+pub(crate) fn activity_wait_class(native: &str) -> Option<culprit_core::telemetry::ActivityWaitClass> {
+    use culprit_core::telemetry::ActivityWaitClass;
+    if is_execution_grant_wait(native) {
+        Some(ActivityWaitClass::ExecutionGrant)
+    } else if native == COMPILATION_ADMISSION_WAIT {
+        Some(ActivityWaitClass::CompilationAdmission)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests;

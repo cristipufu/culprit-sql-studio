@@ -28,10 +28,15 @@ fn subject(kind: RecipeSubject) -> CollectionSubject {
 fn request(registration: &Registration, budget: CollectionBudget) -> CollectionRequest {
     CollectionRequest {
         subject: subject(registration.subject),
-        selection: match registration.route.collection() {
-            TelemetryCollection::Activity => CollectionSelection::Activity,
-            TelemetryCollection::Snapshot(dataset) => CollectionSelection::Snapshot { dataset },
-            _ => panic!("the catalog contains only implemented current sources"),
+        selection: match registration.route {
+            Route::MaintenanceProgress => CollectionSelection::MaintenanceProgress {
+                focus: Box::new(crate::progress::test_support::original_focus()),
+            },
+            _ => match registration.route.collection() {
+                TelemetryCollection::Activity => CollectionSelection::Activity,
+                TelemetryCollection::Snapshot(dataset) => CollectionSelection::Snapshot { dataset },
+                _ => panic!("the catalog contains only implemented current sources"),
+            },
         },
         budget,
     }
@@ -105,6 +110,13 @@ fn activity_uses_its_existing_native_profile_while_generic_recipes_keep_larger_v
             assert_eq!(bounded.budget.max_snapshot_rows, 500);
             assert_eq!(bounded.budget.statement_timeout_ms, 1_000);
             assert_eq!(bounded.budget.total_timeout_ms, 5_000);
+        } else if matches!(registration.route, Route::MaintenanceProgress) {
+            assert_eq!(bounded.budget, crate::progress::bounded_budget(&maximum));
+            assert_eq!(bounded.budget.max_queries, 8);
+            assert_eq!(bounded.budget.max_snapshot_rows, 1);
+            assert_eq!(bounded.budget.page_rows, 1);
+            assert_eq!(bounded.budget.statement_timeout_ms, 1_000);
+            assert_eq!(bounded.budget.total_timeout_ms, 5_000);
         } else {
             assert_eq!(bounded.budget, maximum, "{}", registration.id);
             assert!(bounded.budget.max_snapshot_rows > CollectionBudget::default().max_snapshot_rows);
@@ -154,4 +166,18 @@ fn shared_resource_discovery_uses_the_same_native_subject_registrations() {
     unsupported = resource;
     unsupported.engine = Engine::Yugabyte;
     assert!(collections_for(&unsupported).is_empty());
+}
+
+#[test]
+fn maintenance_progress_requires_an_original_focus_before_any_native_constructor() {
+    let connector = connector();
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::MaintenanceProgress },
+        budget: CollectionBudget::default(),
+    };
+    assert!(REGISTRATIONS.iter().all(|route| !route.accepts(&request)));
+    let error = open(connector.clone(), &request).err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
+    assert_eq!(connector.source_shutdown(), SourceShutdown::Quiescent);
 }

@@ -45,7 +45,7 @@ impl<R: NativeRead> ActivityReader<R> {
     }
 }
 
-pub(super) fn matches_owner(focus: &ActivityRequestFocus, owner: &crate::local_source::Context) -> Result<()> {
+pub(crate) fn matches_owner(focus: &ActivityRequestFocus, owner: &crate::local_source::Context) -> Result<()> {
     if focus.database_writable.is_none() || !owner.is_qualified() {
         return Err(CollectionStop::SourceUnavailable.error());
     }

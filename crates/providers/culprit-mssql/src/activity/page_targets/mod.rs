@@ -15,6 +15,7 @@ mod participants;
 mod rows;
 mod shared_tempdb;
 mod sql;
+pub(super) use sql::focused_observation;
 mod task_waits;
 #[cfg(test)]
 pub(crate) mod tests;

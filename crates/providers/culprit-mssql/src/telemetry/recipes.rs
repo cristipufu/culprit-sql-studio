@@ -146,6 +146,23 @@ const REGISTRATIONS: &[Registration] = &[
     .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
     .bounded(page_waits::focused_budget),
     Registration::database(
+        "mssql.focused-compiler-admission",
+        RecipeSelector::FocusedCompilationAdmission,
+        |pool, request, host, port| {
+            Ok(Box::new(compiler_admission::CompilerAdmissionSource::new(pool, request, host, port)?))
+        },
+    )
+    .bounded(compiler_admission::focused_budget),
+    Registration::database(
+        "mssql.focused-shared-compiler-admission",
+        RecipeSelector::FocusedCompilationAdmission,
+        |pool, request, host, port| {
+            Ok(Box::new(compiler_admission::CompilerAdmissionSource::new(pool, request, host, port)?))
+        },
+    )
+    .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
+    .bounded(compiler_admission::focused_budget),
+    Registration::database(
         "mssql.current-request-memory",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestMemory)),
         |pool, request, host, port| Ok(Box::new(request_memory::MemorySource::new(pool, request, host, port)?)),

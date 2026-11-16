@@ -31,7 +31,12 @@ impl RecipeCostReceipt {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.recipe_id)
             && self.recipe_version > 0
-            && matches!(self.selector, RecipeSelector::FocusedPageWait | RecipeSelector::FocusedRequestMemory)
+            && matches!(
+                self.selector,
+                RecipeSelector::FocusedPageWait
+                    | RecipeSelector::FocusedRequestMemory
+                    | RecipeSelector::FocusedCompilationAdmission
+            )
             && self.scope.is_valid()
             && self.scope.native_epoch().is_some()
             && self.scope.partition().is_qualified()

@@ -116,6 +116,7 @@ pub(crate) struct CollectedPressure {
     pub waits: Vec<WaitStat>,
     pub coverage: Coverage,
     pub cleanup: Vec<culprit_core::telemetry::CleanupSnapshot>,
+    pub compiler_admission: Option<culprit_core::telemetry::CompilerAdmissionSnapshot>,
 }
 
 pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Probe) -> CollectedPressure {
@@ -125,7 +126,10 @@ pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Pro
     let p = &mut captured.pressure;
     let coverage = &mut captured.coverage;
     p.signals.extend(crate::queues::application(pool.clone(), probe, coverage).await);
-    p.signals.extend(crate::compiler_gateways::collect(pool.clone(), probe, coverage).await);
+    if let Some(compilers) = crate::compiler_gateways::collect(pool.clone(), probe, coverage).await {
+        p.signals.extend(compilers.signals);
+        captured.compiler_admission = Some(compilers.snapshot);
+    }
     if let Some(topology) = crate::processors::collect(pool.clone(), probe, coverage).await {
         (p.cpus, p.numa_nodes) = topology.application();
     }
@@ -182,7 +186,7 @@ fn project_history(
     if let Some(rows) = coverage.read_rows(&sources::WAIT_TOTALS, native_waits) {
         p.signals.extend(wait_total_signals(&waits::totals(&rows), azure));
     }
-    CollectedPressure { pressure: p, waits: categories, coverage, cleanup: Vec::new() }
+    CollectedPressure { pressure: p, waits: categories, coverage, cleanup: Vec::new(), compiler_admission: None }
 }
 
 /// Both consumers use one native wait snapshot; no second reading can silently describe a different instant.

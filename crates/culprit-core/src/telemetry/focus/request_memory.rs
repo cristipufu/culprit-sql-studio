@@ -32,6 +32,7 @@ impl ActivityRequestFocus {
     /// A grant follow-up requires the original connected compute member and generation, not a target namespace.
     pub fn is_request_memory_focus(&self) -> bool {
         self.is_valid()
+            && self.original.scope == ActivityScopeBasis::RequestDatabase
             && self.partition.native_epoch().is_some()
             && self.original.wait.as_ref().is_some_and(|wait| wait.class == Some(ActivityWaitClass::ExecutionGrant))
     }

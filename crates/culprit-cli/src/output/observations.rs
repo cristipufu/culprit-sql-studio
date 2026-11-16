@@ -140,6 +140,22 @@ pub(crate) fn compilation(report: &CompilationReport) -> String {
     )
 }
 
+pub(crate) fn compiler_admission(report: &culprit_core::CompilerAdmissionReport) -> String {
+    render_explanations(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
+            limitations: &report.limitations,
+        },
+        report
+            .waiters
+            .iter()
+            .map(|entry| (entry.title.as_str(), entry.explanation.as_str()))
+            .chain(report.gateways.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str()))),
+    )
+}
+
 pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
     render_explanations(
         Summary {
@@ -152,6 +168,36 @@ pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
             limitations: &report.limitations,
         },
         report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
+    )
+}
+
+pub(crate) fn maintenance_progress(report: &culprit_core::MaintenanceProgressReport) -> String {
+    let entries = report
+        .entries
+        .iter()
+        .take(super::BRIEF_FINDING_LIMIT)
+        .map(|entry| {
+            let mut details = vec![entry.phase.clone()];
+            details.extend(
+                entry
+                    .metrics
+                    .iter()
+                    .filter_map(|metric| metric.text.as_ref().map(|value| format!("{}: {value}", metric.label))),
+            );
+            t!("evidence.cli.observation_entry", title = &entry.title, explanation = details.join("\n"))
+        })
+        .collect::<Vec<_>>();
+    render_summary(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Single {
+                state: Some(report.source_state),
+                reason: report.source_reason.as_deref(),
+            },
+            limitations: &report.limitations,
+        },
+        |text| super::append_brief_details(text, entries.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS),
     )
 }
 

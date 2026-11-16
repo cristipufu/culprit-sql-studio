@@ -30,7 +30,7 @@ impl DiagnosticExecutionBinding {
                 owner.is_valid()
                     && owner.stream == TelemetryStream::OperationalSamples
                     && matches!(owner.native_key, NativeRecordIdentity::Operational { .. })
-                    && matches!(focus, DiagnosticFocus::PageWait { .. })
+                    && matches!(focus, DiagnosticFocus::PageWait { .. } | DiagnosticFocus::CompilationAdmission { .. })
                     && participant.is_valid_for(&CollectionSubject::Shared { resource: target.clone() })
             }
             _ => false,
@@ -50,6 +50,15 @@ impl DiagnosticInvestigationIntent {
             }
             (DiagnosticFocus::PageWait { focus }, DiagnosticExecutionBinding::Shared { .. }) => {
                 CollectionSelection::SharedPageWaitFocus {
+                    focus: focus.clone(),
+                    partition: self.qualification.scope.partition().clone(),
+                }
+            }
+            (DiagnosticFocus::CompilationAdmission { focus }, DiagnosticExecutionBinding::Database) => {
+                CollectionSelection::FocusedCompilationAdmission { focus: focus.clone() }
+            }
+            (DiagnosticFocus::CompilationAdmission { focus }, DiagnosticExecutionBinding::Shared { .. }) => {
+                CollectionSelection::SharedCompilationAdmissionFocus {
                     focus: focus.clone(),
                     partition: self.qualification.scope.partition().clone(),
                 }

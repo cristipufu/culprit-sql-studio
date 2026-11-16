@@ -68,6 +68,7 @@ struct SchemaPart {
 struct MiscPart {
     pressure: Option<culprit_core::Pressure>,
     cleanup: Vec<culprit_core::telemetry::CleanupSnapshot>,
+    compiler_admission: Option<culprit_core::telemetry::CompilerAdmissionSnapshot>,
     query_families: Vec<culprit_core::QueryFamily>,
     plan_cache: Option<culprit_core::PlanCacheUse>,
     tuning: Option<culprit_core::TuningAdvice>,
@@ -390,6 +391,7 @@ async fn collect_misc(
         part.waits = collected.waits;
         part.pressure = Some(collected.pressure);
         part.cleanup = collected.cleanup;
+        part.compiler_admission = collected.compiler_admission;
     } else {
         server_state_unreadable(&mut part.outcome, probe);
     }
@@ -563,6 +565,7 @@ async fn acquire(
         operations: culprit_core::operations::OperationalStats {
             index_usage_scope: Some(culprit_core::operations::IndexUsageScope::ConnectedMember),
             cleanup: misc_part.cleanup,
+            compiler_admission: misc_part.compiler_admission,
             ..Default::default()
         },
     });

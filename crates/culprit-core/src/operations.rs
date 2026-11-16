@@ -67,6 +67,12 @@ pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub query_compilation: Option<crate::telemetry::CompilationSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub compiler_admission: Option<crate::telemetry::CompilerAdmissionSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub maintenance_progress: Option<crate::telemetry::MaintenanceProgressSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cleanup: Vec<crate::telemetry::CleanupSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +154,8 @@ impl OperationalStats {
             page_waits: _,
             task_space: _,
             query_compilation: _,
+            compiler_admission: _,
+            maintenance_progress: _,
             cleanup: _,
             node_resources: _,
         } = self;

@@ -14,6 +14,7 @@ fn payload(text: &str) -> MssqlCachedPayload {
 
 fn retained() -> MssqlRetainedPlanDefinition {
     MssqlRetainedPlanDefinition {
+        relational_input_proof: None,
         context: CachedStatementContext {
             identity: CachedStatementIdentity {
                 plan_handle: "0x0200".into(),

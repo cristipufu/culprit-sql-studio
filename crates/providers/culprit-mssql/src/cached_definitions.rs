@@ -5,7 +5,7 @@ use crate::{
     value::Rec,
 };
 use culprit_core::{Result, telemetry::*};
-const RECORD_METADATA_BYTES: usize = 16 * 1024;
+const RECORD_METADATA_BYTES: usize = 16 * 1024 + MAX_MSSQL_RELATIONAL_INPUT_PROOF_BYTES;
 const JSON_BYTES_PER_UTF16_BYTE: usize = 3;
 pub(crate) struct Limits {
     pub sql: usize,
@@ -42,22 +42,45 @@ FROM selected qs OUTER APPLY(SELECT {statement} AS statement_text) body
 OPTION(MAXDOP 1)"#
     )
 }
-pub(crate) fn decode(row: &Rec, limits: &Limits) -> Result<MssqlCachedDefinition> {
+pub(crate) fn decode(
+    row: &Rec,
+    limits: &Limits,
+    source: Option<&CollectionDescription>,
+) -> Result<MssqlCachedDefinition> {
     let context = cached_statements::context(row)?;
     let module_parameters = crate::relational_inputs::parameters(row, &context)?;
-    let value = MssqlCachedDefinition {
+    let (statement, statement_bytes) = cached_payload::read(row, "statement_bytes", "statement_text", limits.sql)?;
+    let (plan, plan_bytes) = cached_payload::read(row, "plan_bytes", "query_plan", limits.plan)?;
+    let bindings = source.filter(|source| MssqlRelationalInputProof::supports_source(source)).and_then(|source| {
+        plan.text().and_then(|xml| {
+            crate::plan_xml::original_input_bindings(
+                xml,
+                crate::plan_xml::CachedInputContext {
+                    statement: &context,
+                    module_parameters: module_parameters.as_ref(),
+                    text: statement.text(),
+                    origin: crate::plan_xml::PlanInputOrigin::OriginalCapture { source },
+                },
+            )
+        })
+    });
+    let mut value = MssqlCachedDefinition {
         context,
         query_plan_hash: optional_text(row, "query_plan_hash")?,
-        statement: cached_payload::decode(
-            row,
-            "statement_bytes",
-            "statement_text",
-            limits.sql,
-            DefinitionPayload::sql,
-        )?,
-        estimated_plan: cached_payload::decode(row, "plan_bytes", "query_plan", limits.plan, DefinitionPayload::plan)?,
+        statement: cached_payload::from_raw(statement, statement_bytes, limits.sql, DefinitionPayload::sql)?,
+        estimated_plan: cached_payload::from_raw(plan, plan_bytes, limits.plan, DefinitionPayload::plan)?,
         module_parameters,
+        relational_input_proof: None,
     };
+    if let Some((source, bindings)) = source.zip(bindings)
+        && value.estimated_plan.payload.is_available()
+        && (value.statement.payload.is_available()
+            || bindings.iter().all(|binding| {
+                binding.input.kind != culprit_core::plan_facts::RelationalInputKind::TableValuedParameter
+            }))
+    {
+        value.relational_input_proof = Some(MssqlRelationalInputProof::for_cached(source, &value, bindings)?);
+    }
     if !value.is_valid() {
         return Err(invalid_data());
     }

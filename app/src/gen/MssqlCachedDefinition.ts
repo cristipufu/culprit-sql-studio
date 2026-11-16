@@ -2,6 +2,7 @@
 import type { CachedStatementContext } from "./CachedStatementContext";
 import type { MssqlCachedPayload } from "./MssqlCachedPayload";
 import type { MssqlModuleParameters } from "./MssqlModuleParameters";
+import type { MssqlRelationalInputProof } from "./MssqlRelationalInputProof";
 
 export type MssqlCachedDefinition = { context: CachedStatementContext, query_plan_hash: string | null, statement: MssqlCachedPayload, 
 /**
@@ -12,4 +13,4 @@ estimated_plan: MssqlCachedPayload,
  * Declared parameter kinds from this SQL handle's original module header, with a separately checked native
  * plan-to-SQL-handle binding. This point evidence establishes neither input cardinality nor runtime ownership.
  */
-module_parameters?: MssqlModuleParameters, };
+module_parameters?: MssqlModuleParameters, relational_input_proof?: MssqlRelationalInputProof, };

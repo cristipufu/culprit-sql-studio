@@ -2,4 +2,4 @@
 import type { ActivityRequestFocus } from "./ActivityRequestFocus";
 import type { ActivityWaitFocus } from "./ActivityWaitFocus";
 
-export type DiagnosticFocus = { "kind": "page-wait", focus: ActivityWaitFocus, } | { "kind": "request-memory", focus: ActivityRequestFocus, };
+export type DiagnosticFocus = { "kind": "page-wait", focus: ActivityWaitFocus, } | { "kind": "request-memory", focus: ActivityRequestFocus, } | { "kind": "compilation-admission", focus: ActivityRequestFocus, };

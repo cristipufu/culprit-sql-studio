@@ -144,10 +144,14 @@ impl OperationalFact {
             Self::PageWait(value) => {
                 Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
             }
+            Self::CompilerWaiter(value) => {
+                Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
+            }
             Self::PostgresLog(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::MssqlStatementGrants(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::MssqlQueryCompilation(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::Space(_)
+            | Self::MaintenanceProgress(_)
             | Self::SessionMemory(_)
             | Self::Sequence(_)
             | Self::FileIo(_)

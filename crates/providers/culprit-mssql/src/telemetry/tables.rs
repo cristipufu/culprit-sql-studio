@@ -16,7 +16,7 @@ impl SnapshotRecipe for Tables {
     fn query(&self, layout: &Self::Layout) -> String {
         tables::select_sql(layout)
     }
-    fn decode(&self, row: &Rec, layout: &Self::Layout) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, layout: &Self::Layout, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         let table = tables::decode(row, layout)?;
         Ok(TelemetryRecord::Operational(OperationalObservation {
             source: Self::SOURCE.name.into(),

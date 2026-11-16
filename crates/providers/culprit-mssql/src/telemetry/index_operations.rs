@@ -19,7 +19,7 @@ impl SnapshotRecipe for IndexOperations {
     fn query(&self, layout: &Layout) -> String {
         select_sql(layout)
     }
-    fn decode(&self, row: &Rec, layout: &Layout) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, layout: &Layout, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         let index = decode(row, layout)?;
         Ok(TelemetryRecord::Operational(OperationalObservation {
             source: Self::SOURCE.name.into(),

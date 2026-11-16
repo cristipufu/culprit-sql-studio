@@ -404,6 +404,14 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub query_compilation: Option<crate::CompilationReport>,
+    /// Current compiler admission participants and independently scoped gateway context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub compiler_admission: Option<crate::CompilerAdmissionReport>,
+    /// Generation-bound native progress is a point observation, not completion or incident causality.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub maintenance_progress: Option<crate::MaintenanceProgressReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cleanup: Option<crate::CleanupReport>,

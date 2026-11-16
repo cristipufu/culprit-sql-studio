@@ -39,8 +39,12 @@ pub(super) fn qualify_questions(
         }
     }
     for episode in &mut update.checkpoint.episodes {
-        if !matches!(episode.signal, DiagnosticSignal::PageWait { .. } | DiagnosticSignal::RequestMemory { .. })
-            || !episode.analysis.needs_work()
+        if !matches!(
+            episode.signal,
+            DiagnosticSignal::PageWait { .. }
+                | DiagnosticSignal::RequestMemory { .. }
+                | DiagnosticSignal::CompilationAdmission { .. }
+        ) || !episode.analysis.needs_work()
             || episode.latest.capture_ref() != input.parent
         {
             continue;
@@ -81,6 +85,9 @@ fn qualification_issue(
         subject: subject.clone(),
         selection: match focus {
             DiagnosticFocus::PageWait { focus } => CollectionSelection::FocusedPageWait { focus: focus.clone() },
+            DiagnosticFocus::CompilationAdmission { focus } => {
+                CollectionSelection::FocusedCompilationAdmission { focus: focus.clone() }
+            }
             DiagnosticFocus::RequestMemory { focus } => {
                 CollectionSelection::FocusedRequestMemory { focus: focus.clone() }
             }

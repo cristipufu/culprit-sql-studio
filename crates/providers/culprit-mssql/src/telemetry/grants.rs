@@ -22,7 +22,7 @@ impl SnapshotRecipe for Grants {
     fn complete_record_scope(&self, record: &TelemetryRecord) -> bool {
         matches!(record,TelemetryRecord::Operational(OperationalObservation {fact:OperationalFact::MssqlStatementGrants(grants),..}) if grants.context.identity.has_plan_handle())
     }
-    fn decode(&self, row: &Rec, layout: &Layout) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, layout: &Layout, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         let grants = decode(row, layout)?;
         Ok(TelemetryRecord::Operational(OperationalObservation {
             source: Self::SOURCE.name.into(),

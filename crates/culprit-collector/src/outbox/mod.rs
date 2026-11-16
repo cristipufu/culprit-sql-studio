@@ -23,6 +23,8 @@ use std::{
 
 const IDENTITY_VERSION: u32 = 6;
 use crate::collection_files::MAX_MANIFEST_BYTES as MANIFEST_LIMIT;
+// A request is retained verbatim both in the journal and in its bounded capture manifest.
+const MAX_REQUEST_BYTES: usize = MANIFEST_LIMIT;
 const CAPTURE_ALLOWANCE: u64 = 256 * 1024;
 const CAPTURE_ACCOUNTING: u64 = 4096;
 
@@ -141,14 +143,19 @@ impl Files {
                             &capture,
                             OutboxCaptureState::Quarantined,
                             Some(OutboxProblem::Integrity),
-                            measure(&directory)?,
+                            capture.charge_artifacts(measure(&directory)?)?,
                         )?;
                         report.quarantined += 1;
                         continue;
                     }
                 }
             }
-            self.journal.fail(&capture, OutboxCaptureState::Interrupted, None, measure(&directory)?)?;
+            self.journal.fail(
+                &capture,
+                OutboxCaptureState::Interrupted,
+                None,
+                capture.charge_artifacts(measure(&directory)?)?,
+            )?;
             report.interrupted += 1;
         }
         report.source_debts = self.journal.debts()?;
@@ -314,7 +321,12 @@ impl Files {
         let Reservation { entry, directory, .. } = reservation;
         let capture = self.journal.capture(&entry.identity.observation_id)?;
         if !directory.exists() || is_incomplete(&directory, &capture) {
-            return self.journal.fail(&capture, OutboxCaptureState::Incomplete, None, measure(&directory)?);
+            return self.journal.fail(
+                &capture,
+                OutboxCaptureState::Incomplete,
+                None,
+                capture.charge_artifacts(measure(&directory)?)?,
+            );
         }
         match artifacts::validate(&directory, &capture, None) {
             Ok(validated) => self.journal.prepare_commit(&capture, &validated)?.commit().map_err(storage),
@@ -323,7 +335,7 @@ impl Files {
                     &capture,
                     OutboxCaptureState::Quarantined,
                     Some(OutboxProblem::Integrity),
-                    measure(&directory)?,
+                    capture.charge_artifacts(measure(&directory)?)?,
                 )?;
                 Err(error)
             }
@@ -340,9 +352,9 @@ fn is_incomplete(directory: &Path, capture: &journal::Capture) -> bool {
 }
 fn measure(directory: &Path) -> Result<u64> {
     if !directory.exists() {
-        return Ok(CAPTURE_ACCOUNTING);
+        return Ok(0);
     }
-    let mut bytes = CAPTURE_ACCOUNTING;
+    let mut bytes = 0_u64;
     let mut count = 0;
     let names: std::collections::BTreeSet<String> = TelemetryStream::ALL
         .into_iter()

@@ -21,6 +21,19 @@ enum PublicObservation<'a> {
         source: FocusSourceState,
         membership: RequestMemoryMembership,
     },
+    FocusedCompilationAdmissionContext {
+        snapshot: &'a StateSnapshotDescription,
+        focus_key: String,
+        source: FocusSourceState,
+        membership: CompilationAdmissionMembership,
+    },
+    MaintenanceProgressContext {
+        snapshot: &'a StateSnapshotDescription,
+        focus_key: Option<String>,
+        database_writable: Option<bool>,
+        binding: MaintenanceProgressBinding,
+        membership: MaintenanceProgressMembership,
+    },
     CacheEntryMemoryContext {
         snapshot: &'a StateSnapshotDescription,
         focus_key: String,
@@ -65,6 +78,21 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
                 membership: result.membership,
             }
         }
+        SourceObservation::FocusedCompilationAdmission { snapshot, result } => {
+            PublicObservation::FocusedCompilationAdmissionContext {
+                snapshot,
+                focus_key: result.focus.key()?,
+                source: result.source,
+                membership: result.membership,
+            }
+        }
+        SourceObservation::MaintenanceProgress { snapshot, result } => PublicObservation::MaintenanceProgressContext {
+            snapshot,
+            focus_key: result.focus.as_ref().map(|focus| focus.key()).transpose()?,
+            database_writable: result.database_writable,
+            binding: result.binding,
+            membership: result.membership,
+        },
         SourceObservation::FocusedPageWait { snapshot, result } => PublicObservation::FocusedPageWaitContext {
             snapshot,
             result: Box::new(FocusResult {

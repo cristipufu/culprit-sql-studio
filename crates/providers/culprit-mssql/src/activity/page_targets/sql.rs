@@ -66,8 +66,8 @@ pub(super) fn observation(identity: IdentityDetail) -> String {
     )
 }
 
-/// A durable focus admits only its original native request. It never selects another page-wait population.
-pub(super) fn focused_observation(identity: IdentityDetail) -> String {
+/// A durable focus admits only its original native request. It never selects a replacement population.
+pub(in crate::activity) fn focused_observation(identity: IdentityDetail) -> String {
     let rows = format!(
         r#"SELECT {request},
  CASE WHEN r.request_id IS NULL THEN 1 ELSE 0 END AS no_current_request,

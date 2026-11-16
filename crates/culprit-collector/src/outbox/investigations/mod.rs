@@ -104,10 +104,15 @@ pub(crate) fn eligible_source(
     Ok(match (&source.observation, &source.target) {
         (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
         (
-            SourceObservation::FocusedPageWait { .. } | SourceObservation::FocusedRequestMemory { .. },
+            SourceObservation::FocusedPageWait { .. }
+            | SourceObservation::FocusedRequestMemory { .. }
+            | SourceObservation::FocusedCompilationAdmission { .. },
             CollectionTarget::Database(_),
         ) => true,
-        (SourceObservation::FocusedPageWait { .. }, CollectionTarget::Shared(_)) => intent.is_some(),
+        (
+            SourceObservation::FocusedPageWait { .. } | SourceObservation::FocusedCompilationAdmission { .. },
+            CollectionTarget::Shared(_),
+        ) => intent.is_some(),
         _ => false,
     })
 }
@@ -135,6 +140,7 @@ fn controller_target<'a>(
     Ok(match &source.observation {
         SourceObservation::FocusedPageWait { result, .. } => &result.focus.participant.target,
         SourceObservation::FocusedRequestMemory { result, .. } => &result.focus.target,
+        SourceObservation::FocusedCompilationAdmission { result, .. } => &result.focus.target,
         _ => &source.target,
     })
 }

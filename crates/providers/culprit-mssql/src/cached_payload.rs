@@ -10,17 +10,11 @@ pub(crate) fn columns(expression: &str, bytes_alias: &str, value_alias: &str, li
         "CAST(DATALENGTH({expression}) AS bigint) AS {bytes_alias},CASE WHEN DATALENGTH({expression})<={limit} THEN {expression} END AS {value_alias}"
     )
 }
-pub(crate) fn decode(
-    row: &Rec,
-    bytes_name: &str,
-    value_name: &str,
-    maximum: usize,
-    redact: fn(&str, Engine) -> DefinitionPayload,
-) -> Result<MssqlCachedPayload> {
+pub(crate) fn read(row: &Rec, bytes_name: &str, value_name: &str, maximum: usize) -> Result<(Payload, Option<usize>)> {
     let bytes =
         optional_integer(row, bytes_name)?.map(|value| value.try_into().map_err(|_| invalid_data())).transpose()?;
     let body = Payload::read_column(row, value_name, bytes, maximum)?;
-    from_raw(body, bytes, maximum, redact)
+    Ok((body, bytes))
 }
 pub(crate) fn from_raw(
     body: Payload,

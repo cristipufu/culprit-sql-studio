@@ -6,7 +6,7 @@ use crate::{
     value::Rec,
 };
 use culprit_core::{Result, telemetry::*};
-const RECORD_METADATA_BYTES: usize = 16 * 1024;
+const RECORD_METADATA_BYTES: usize = 16 * 1024 + MAX_MSSQL_RELATIONAL_INPUT_PROOF_BYTES;
 const JSON_BYTES_PER_UTF16_BYTE: usize = 3;
 pub(crate) struct Layout {
     pub maximum_bytes: usize,
@@ -40,10 +40,27 @@ pub(crate) fn select_sql(layout: &Layout) -> String {
         "WITH selected AS ({selected}) SELECT {projection} FROM selected qs OUTER APPLY sys.dm_exec_query_plan_stats(qs.plan_handle) ps OPTION(MAXDOP 1)"
     )
 }
-pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlRetainedPlanDefinition> {
+pub(crate) fn decode(
+    row: &Rec,
+    layout: &Layout,
+    source: Option<&CollectionDescription>,
+) -> Result<MssqlRetainedPlanDefinition> {
     let native = retained::decode(row, layout.maximum_bytes, layout.maximum_statement_bytes)?;
+    let bindings = source.filter(|source| MssqlRelationalInputProof::supports_source(source)).and_then(|source| {
+        native.payload.text().and_then(|xml| {
+            crate::plan_xml::original_input_bindings(
+                xml,
+                crate::plan_xml::CachedInputContext {
+                    statement: &native.context,
+                    module_parameters: native.module_parameters.as_ref(),
+                    text: native.statement.text(),
+                    origin: crate::plan_xml::PlanInputOrigin::OriginalCapture { source },
+                },
+            )
+        })
+    });
     let measured = native.context.identity.has_plan_handle();
-    let value = MssqlRetainedPlanDefinition {
+    let mut value = MssqlRetainedPlanDefinition {
         context: native.context,
         statement_executions: measured.then_some(native.executions),
         last_start_without_offset: native.last_start_without_offset,
@@ -55,6 +72,7 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlRetainedPlanDefi
             DefinitionPayload::sql,
         )?,
         module_parameters: native.module_parameters,
+        relational_input_proof: None,
         batch_plan: cached_payload::from_raw(
             native.payload,
             native.source_utf16_bytes,
@@ -62,6 +80,15 @@ pub(crate) fn decode(row: &Rec, layout: &Layout) -> Result<MssqlRetainedPlanDefi
             DefinitionPayload::plan,
         )?,
     };
+    if let Some((source, bindings)) = source.zip(bindings)
+        && value.batch_plan.payload.is_available()
+        && (value.statement.payload.is_available()
+            || bindings.iter().all(|binding| {
+                binding.input.kind != culprit_core::plan_facts::RelationalInputKind::TableValuedParameter
+            }))
+    {
+        value.relational_input_proof = Some(MssqlRelationalInputProof::for_retained(source, &value, bindings)?);
+    }
     if !value.is_valid() {
         return Err(invalid_data());
     }

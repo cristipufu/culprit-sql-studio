@@ -21,11 +21,13 @@ impl SnapshotRecipe for RetainedPlans {
     fn query(&self, layout: &Self::Layout) -> String {
         retained_definitions::select_sql(&layout.native)
     }
-    fn decode(&self, row: &Rec, layout: &Self::Layout) -> Result<TelemetryRecord> {
-        let mut definition = retained_definitions::decode(row, &layout.native)?;
-        if !layout.bindings.contains(&definition.context) {
+    fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord> {
+        let admitted = layout.bindings.contains(&crate::cached_statements::context(row)?);
+        let mut definition = retained_definitions::decode(row, &layout.native, admitted.then_some(source))?;
+        if !admitted {
             definition.batch_plan.payload = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
             definition.module_parameters = None;
+            definition.relational_input_proof = None;
         }
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),

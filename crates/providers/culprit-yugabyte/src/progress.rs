@@ -2,10 +2,34 @@ use crate::{
     probe,
     sessions::{literal, target},
 };
-use culprit_core::{Engine, QueryProgress, Result, format, t};
+use culprit_core::{Engine, QueryProgress, Result, format, t, telemetry::*};
 #[cfg(test)]
 use culprit_postgres::wire::ObservedSession;
-use culprit_postgres::wire::{Connector, Row};
+use culprit_postgres::wire::{Connector, NativeRead, ReadSession, Row};
+
+mod index;
+mod reader;
+mod source;
+pub(crate) use source::source;
+#[cfg(test)]
+mod retained_tests;
+#[cfg(test)]
+pub(crate) mod test_support;
+
+const MAX_PROGRESS_QUERIES: u32 = 10; // Owned setup, two three-query identity bounds, two actor points and progress.
+const MAX_PROGRESS_ROWS: u32 = 1;
+const PROGRESS_STATEMENT_TIMEOUT_MS: u32 = 1_000;
+const PROGRESS_TOTAL_TIMEOUT_MS: u32 = 5_000;
+
+pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    let mut budget = requested.clone();
+    budget.max_queries = budget.max_queries.min(MAX_PROGRESS_QUERIES);
+    budget.max_snapshot_rows = budget.max_snapshot_rows.min(MAX_PROGRESS_ROWS);
+    budget.page_rows = budget.page_rows.min(MAX_PROGRESS_ROWS);
+    budget.statement_timeout_ms = budget.statement_timeout_ms.min(PROGRESS_STATEMENT_TIMEOUT_MS);
+    budget.total_timeout_ms = budget.total_timeout_ms.min(PROGRESS_TOTAL_TIMEOUT_MS);
+    budget
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
@@ -45,12 +69,18 @@ impl Command {
     fn describe(self, row: &Row) -> Option<(String, String)> {
         let count = |key| row.number(key).filter(|n| *n >= 0.0 && n.fract() == 0.0);
         match self {
-            Self::Index => Some(index_step(
-                row.text("command")?,
-                row.text("phase")?,
-                count("tuples_done"),
-                count("tuples_total").filter(|n| *n > 0.0),
-            )),
+            Self::Index => {
+                let work = index::work(row).ok()?;
+                Some(index_step(
+                    row.text("command")?,
+                    row.text("phase")?,
+                    work.tuples_done.as_deref().and_then(|value| value.parse().ok()),
+                    work.tuples_total_estimate
+                        .as_deref()
+                        .and_then(|value| value.parse().ok())
+                        .filter(|n: &f64| *n > 0.0),
+                ))
+            }
             Self::Analyze => Some(analyze_step(row.text("phase")?)),
             Self::Copy => {
                 // YugabyteDB retains the last COPY result on this backend after SUCCESS or ERROR.
@@ -119,7 +149,9 @@ pub(crate) async fn read(connector: &Connector, id: &str, with_plan: bool) -> Re
     use culprit_postgres::wire::NativeRead;
     let mut session = crate::read::application(connector.clone(), std::time::Duration::ZERO);
     let result = read_from(&mut session, id, with_plan).await;
-    session.close().await;
+    if session.close().await == SourceShutdown::Unconfirmed {
+        return Err(CollectionStop::CancellationUnconfirmed.error());
+    }
     result
 }
 
@@ -194,9 +226,20 @@ pub(crate) async fn read_from(
             if p.global { format!("pg_catalog.\"gv${view}\"") } else { format!("pg_catalog.{view}") };
         let guard = if p.global { format!(" AND server_uuid={}::uuid", literal(&node)) } else { String::new() };
         let before = session.notices();
-        let phase = crate::read::query_one(
-            session,
-            &format!(
+        let phase_sql = if command == Command::Index {
+            // This native view is documented as local. A global Activity row does not confer a remote local epoch.
+            if p.node.as_deref() != Some(node.as_str()) {
+                progress.note = Some(t!("provider.yugabyte.progress.view_unavailable"));
+                return Ok((progress, false));
+            }
+            let actor = ActivityKey {
+                session: NativeActivityIdentity { id: format!("{node}/{pid}"), generation: started.clone() },
+                request: Some(NativeActivityIdentity { id: "statement".into(), generation: query_start.clone() }),
+                transaction: None,
+            };
+            index::sql(p.oid, &node, &actor)?
+        } else {
+            format!(
                 "SELECT {} FROM {command_relation} WHERE pid={pid}{guard} AND datid={} AND EXISTS(
                     SELECT 1 FROM {relation} a WHERE a.datid={} AND a.pid={pid}
                     AND a.backend_start={}::timestamptz AND {node_guard}
@@ -206,9 +249,9 @@ pub(crate) async fn read_from(
                 p.oid,
                 literal(&started),
                 literal(&query_start)
-            ),
-        )
-        .await;
+            )
+        };
+        let phase = crate::read::query_one(session, &phase_sql).await;
         match phase {
             Ok(Some(row)) if session.notices() == before => {
                 if let Some((text, note)) = command.describe(&row) {
@@ -217,6 +260,15 @@ pub(crate) async fn read_from(
                 }
             }
             Ok(None) if session.notices() == before => {}
+            Err(error)
+                if error.detail.is_some()
+                    || !matches!(
+                        error.code,
+                        culprit_core::ErrorCode::PermissionDenied | culprit_core::ErrorCode::Unsupported
+                    ) =>
+            {
+                return Err(error);
+            }
             _ => {
                 progress.note = Some(t!("provider.yugabyte.progress.view_unavailable"));
             }

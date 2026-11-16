@@ -24,7 +24,10 @@ impl NativeReadContext {
             partition: source.partition.clone(),
             observed_from: snapshot.observed_from.clone(),
             observed_until: snapshot.observed_until.clone(),
-            database_writable: None,
+            database_writable: match &source.observation {
+                SourceObservation::MaintenanceProgress { result, .. } => result.database_writable,
+                _ => None,
+            },
         };
         if !context.is_valid() {
             return Err(CollectionStop::InvalidPage.error());

@@ -51,6 +51,9 @@ fn explain(
     dataset: SnapshotDataset,
     definition: &ObjectDefinitionRecord,
 ) -> Result<CachedPlanEntry> {
+    if !definition.fact.relational_input_proof_matches(capture.source()) {
+        return Err(invalid());
+    }
     let mut entry = CachedPlanEntry {
         source: definition.source.clone(),
         definition_key: definition.key.clone(),
@@ -65,7 +68,7 @@ fn explain(
             entry.identity = Some(CachedPlanIdentity::Mssql(native.context.identity.clone()));
             payload_available(&native.statement.payload, CachedPlanPayload::Statement, &mut entry);
             if payload_available(&native.estimated_plan.payload, CachedPlanPayload::EstimatedPlan, &mut entry) {
-                attach_mssql(&mut entry, || parse_cached(native));
+                attach_mssql(&mut entry, || parse_cached(native, capture.source()))?;
             }
         }
         (ObjectDefinitionFact::MssqlRetainedPlan(native), SnapshotDataset::RetainedPlans) => {
@@ -73,7 +76,7 @@ fn explain(
             entry.identity = Some(CachedPlanIdentity::Mssql(native.context.identity.clone()));
             payload_available(&native.statement.payload, CachedPlanPayload::Statement, &mut entry);
             if payload_available(&native.batch_plan.payload, CachedPlanPayload::RetainedPlan, &mut entry) {
-                attach_mssql(&mut entry, || parse_retained(native));
+                attach_mssql(&mut entry, || parse_retained(native, capture.source()))?;
             }
         }
         (
@@ -126,37 +129,41 @@ fn payload_available(payload: &DefinitionPayload, field: CachedPlanPayload, entr
     }
 }
 
-fn attach_mssql(entry: &mut CachedPlanEntry, parse: impl FnOnce() -> Result<Plan>) {
+fn attach_mssql(entry: &mut CachedPlanEntry, parse: impl FnOnce() -> Result<Plan>) -> Result<()> {
     if !crate::plans::PlanFormat::ShowplanXml.is_available() {
         add_limit(entry, CachedPlanLimit::NativeParserUnavailable);
     } else {
         match parse() {
             Ok(plan) => entry.plan = Some(plan),
+            Err(error) if error.detail == Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)) => {
+                return Err(error);
+            }
             Err(_) => add_limit(entry, CachedPlanLimit::UnusablePlan),
         }
     }
+    Ok(())
 }
 
-fn parse_cached(native: &MssqlCachedDefinition) -> Result<Plan> {
+fn parse_cached(native: &MssqlCachedDefinition, source: &CollectionDescription) -> Result<Plan> {
     #[cfg(feature = "mssql")]
     {
-        culprit_mssql::plan_xml::parse_cached_definition(native)
+        culprit_mssql::plan_xml::parse_cached_definition(native, source)
     }
     #[cfg(not(feature = "mssql"))]
     {
-        let _ = native;
+        let _ = (native, source);
         Err(DeliveryProblem::UnsupportedSchema.error())
     }
 }
 
-fn parse_retained(native: &MssqlRetainedPlanDefinition) -> Result<Plan> {
+fn parse_retained(native: &MssqlRetainedPlanDefinition, source: &CollectionDescription) -> Result<Plan> {
     #[cfg(feature = "mssql")]
     {
-        culprit_mssql::plan_xml::parse_retained_definition(native)
+        culprit_mssql::plan_xml::parse_retained_definition(native, source)
     }
     #[cfg(not(feature = "mssql"))]
     {
-        let _ = native;
+        let _ = (native, source);
         Err(DeliveryProblem::UnsupportedSchema.error())
     }
 }

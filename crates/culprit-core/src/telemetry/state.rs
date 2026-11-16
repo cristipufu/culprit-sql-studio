@@ -34,6 +34,8 @@ pub enum SnapshotDataset {
     CheckConstraints,
     MissingIndexes,
     QueryCompilation,
+    CompilerAdmission,
+    MaintenanceProgress,
     CachedRuntime,
     Objects,
     Triggers,
@@ -67,6 +69,8 @@ impl SnapshotDataset {
             | Self::Indexes
             | Self::MissingIndexes
             | Self::QueryCompilation
+            | Self::CompilerAdmission
+            | Self::MaintenanceProgress
             | Self::CachedRuntime => &[TelemetryStream::OperationalSamples],
             Self::WaitCounters => &[TelemetryStream::WaitCounterSamples],
             Self::Replication => &[TelemetryStream::ReplicationSamples],
@@ -430,6 +434,8 @@ pub enum OperationalFact {
     FileIo(FileIoCounters),
     Counter(NativeCounterSample),
     CounterSet(Box<NativeCounterSet>),
+    CompilerWaiter(Box<CompilerWaiterObservation>),
+    MaintenanceProgress(Box<MaintenanceProgressObservation>),
     CatalogCounters(Box<NativeCatalogCounters>),
     Retention(Box<RetentionObservation>),
     RetentionCoverage(RetentionCoverage),
@@ -466,6 +472,8 @@ impl OperationalFact {
     fn matches_key(&self, key: &str) -> bool {
         let expected = match self {
             Self::CounterSet(counters) => counters.key(),
+            Self::CompilerWaiter(waiter) => waiter.key(),
+            Self::MaintenanceProgress(point) => point.key(),
             Self::CatalogCounters(counters) => counters.catalog.key(),
             Self::Retention(retainer) => retainer.key(),
             Self::RetentionCoverage(coverage) => coverage.key(),
@@ -501,6 +509,7 @@ impl OperationalFact {
     }
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         match self {
+            Self::CompilerWaiter(waiter) => waiter.request.redact(engine),
             Self::MssqlIndex(index) => index.redact(engine),
             Self::CatalogCounters(counters) => counters.catalog.redact(engine),
             Self::ExecutionGrant(grant) => grant.redact(engine),
@@ -529,6 +538,7 @@ impl OperationalFact {
             | Self::Counter(_)
             | Self::StatementCounters(_)
             | Self::RuntimeDistribution(_)
+            | Self::MaintenanceProgress(_)
             | Self::DiagnosticRevision(_)
             | Self::CounterSet(_)
             | Self::Retention(_)
@@ -573,6 +583,8 @@ impl OperationalFact {
             Self::RuntimeDistribution(observation) => observation.is_valid(),
             Self::DiagnosticRevision(revision) => revision.is_valid(),
             Self::CounterSet(counters) => counters.is_valid(),
+            Self::CompilerWaiter(waiter) => waiter.is_valid(),
+            Self::MaintenanceProgress(point) => point.is_valid(),
             Self::CatalogCounters(counters) => counters.is_valid(),
             Self::Retention(retainer) => retainer.is_valid(),
             Self::RetentionCoverage(coverage) => coverage.is_valid(),
@@ -623,6 +635,7 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::CompilerWaiter(_) => self.source == crate::source_id::COMPILATION_GATEWAYS,
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,

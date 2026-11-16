@@ -1,4 +1,5 @@
 //! One native activity reader. Consumers choose scope, enrichment and presentation after reading the same facts.
+pub(crate) mod compiler_admission;
 pub(crate) mod database_context;
 pub(crate) mod memory;
 pub(crate) mod page_targets;

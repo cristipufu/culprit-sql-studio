@@ -53,6 +53,9 @@ pub struct MssqlCachedDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub module_parameters: Option<MssqlModuleParameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub relational_input_proof: Option<MssqlRelationalInputProof>,
 }
 impl MssqlCachedDefinition {
     pub fn is_valid(&self) -> bool {
@@ -61,6 +64,7 @@ impl MssqlCachedDefinition {
             && self.statement.is_valid()
             && self.estimated_plan.is_valid()
             && self.module_parameters.as_ref().is_none_or(|parameters| parameters.is_valid_for(&self.context))
+            && self.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_cached_contents(self))
     }
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         self.statement.redact(engine, DefinitionPayload::sql);
@@ -78,6 +82,9 @@ pub struct MssqlRetainedPlanDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub module_parameters: Option<MssqlModuleParameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub relational_input_proof: Option<MssqlRelationalInputProof>,
     /// Native statement-cache counter; it is not the number of measured executions in the XML batch.
     pub statement_executions: Option<String>,
     pub last_start_without_offset: Option<String>,
@@ -95,6 +102,7 @@ impl MssqlRetainedPlanDefinition {
             && self.statement_executions.is_some() == self.context.identity.has_plan_handle()
             && self.last_start_without_offset.as_deref().is_none_or(super::catalog::local_time)
             && self.batch_plan.is_valid()
+            && self.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_retained_contents(self))
     }
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         self.statement.redact(engine, DefinitionPayload::sql);

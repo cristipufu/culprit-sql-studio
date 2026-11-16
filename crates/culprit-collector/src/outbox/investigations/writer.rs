@@ -328,6 +328,19 @@ impl Files {
         input: &DiagnosticInput,
     ) -> Result<()> {
         match report {
+            DiagnosticReport::CompilationAdmission { .. } => {
+                let rows = input
+                    .rows
+                    .iter()
+                    .map(|row| match &row.row.record {
+                        TelemetryRecord::Operational(observation) => Ok((&row.reference, observation)),
+                        _ => Err(integrity()),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if !report.matches_compiler_admission_input(source, rows) {
+                    return Err(integrity());
+                }
+            }
             DiagnosticReport::RequestMemory { .. } => {
                 let rows = input
                     .rows

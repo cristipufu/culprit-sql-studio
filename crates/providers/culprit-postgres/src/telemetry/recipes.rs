@@ -4,27 +4,34 @@ use super::*;
 #[derive(Clone, Copy)]
 enum Route {
     Activity,
+    MaintenanceProgress,
     Snapshot(Recipe),
 }
 impl Route {
     fn collection(self) -> TelemetryCollection {
         match self {
             Self::Activity => TelemetryCollection::Activity,
+            Self::MaintenanceProgress => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
             Self::Snapshot(recipe) => TelemetryCollection::Snapshot(recipe.dataset()),
         }
     }
     fn selector(self) -> RecipeSelector {
-        RecipeSelector::Collection(self.collection())
+        match self {
+            Self::MaintenanceProgress => RecipeSelector::MaintenanceProgress,
+            _ => RecipeSelector::Collection(self.collection()),
+        }
     }
     fn bounded_budget(self, requested: &CollectionBudget) -> CollectionBudget {
         match self {
             Self::Activity => activity::bounded_budget(requested),
+            Self::MaintenanceProgress => crate::progress::bounded_budget(requested),
             Self::Snapshot(_) => requested.clone(),
         }
     }
     fn open(self, connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
         match self {
             Self::Activity => activity::source(connector, request),
+            Self::MaintenanceProgress => crate::progress::source(connector, request),
             Self::Snapshot(recipe) => snapshot_source(connector, request, recipe),
         }
     }
@@ -83,6 +90,12 @@ const REGISTRATIONS: &[Registration] = &[
         purpose: RecipePurpose::Baseline,
         subject: RecipeSubject::Database,
         route: Route::Activity,
+    },
+    Registration {
+        id: "postgres.maintenance-progress",
+        purpose: RecipePurpose::Investigation,
+        subject: RecipeSubject::Database,
+        route: Route::MaintenanceProgress,
     },
     Registration::snapshot("postgres.statement-counters", Recipe::Statements).baseline(),
     Registration::snapshot("postgres.statement-definitions", Recipe::Definitions),

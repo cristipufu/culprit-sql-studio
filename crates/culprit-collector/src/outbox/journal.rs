@@ -1,16 +1,16 @@
 //! SQLite owns revision allocation, artifact receipts and exact-range heads in one transaction.
 use super::{
-    CAPTURE_ACCOUNTING, CAPTURE_ALLOWANCE, artifacts::ValidatedCapture, problem, storage, valid_id, validate_limits,
+    CAPTURE_ACCOUNTING, CAPTURE_ALLOWANCE, MAX_REQUEST_BYTES, artifacts::ValidatedCapture, problem, storage, valid_id,
+    validate_limits,
 };
 use crate::durable_fs;
 use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 12;
+const JOURNAL_VERSION: i64 = 13;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
-const REQUEST_LIMIT: usize = 4096;
 
 pub(super) struct Journal {
     pub conn: Connection,
@@ -26,6 +26,15 @@ pub(super) struct Capture {
     pub source_work: SourceWorkState,
     pub charged_bytes: u64,
     pub problem: Option<OutboxProblem>,
+    request_bytes: u64,
+}
+impl Capture {
+    pub(super) fn charge_artifacts(&self, bytes: u64) -> Result<u64> {
+        bytes
+            .checked_add(CAPTURE_ACCOUNTING)
+            .and_then(|bytes| bytes.checked_add(self.request_bytes))
+            .ok_or_else(|| problem(OutboxProblem::Capacity))
+    }
 }
 
 impl Journal {
@@ -51,10 +60,10 @@ impl Journal {
         let conn = open(path, true)?;
         configure_owner(&conn)?;
         conn.pragma_update(None, "user_version", JOURNAL_VERSION).map_err(storage)?;
-        conn.execute_batch("PRAGMA application_id=1129663572;
+        conn.execute_batch(&format!("PRAGMA application_id=1129663572;
           CREATE TABLE metadata(id TEXT PRIMARY KEY, limits_json TEXT NOT NULL, owner_epoch INTEGER NOT NULL, sequence INTEGER NOT NULL,diagnostic_gc_generation INTEGER NOT NULL CHECK(diagnostic_gc_generation>=0));
           CREATE TABLE captures(observation_id TEXT PRIMARY KEY,epoch INTEGER NOT NULL,sequence INTEGER NOT NULL,
-            connection TEXT NOT NULL,collection TEXT NOT NULL,request_json TEXT NOT NULL CHECK(length(request_json)<=4096),state TEXT NOT NULL,
+            connection TEXT NOT NULL,collection TEXT NOT NULL,request_json TEXT NOT NULL CHECK(length(CAST(request_json AS BLOB))<={MAX_REQUEST_BYTES}),state TEXT NOT NULL,
             source_work TEXT NOT NULL,charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0),problem TEXT,
             manifest_sha TEXT,range_json TEXT,archive_range TEXT,archive_digest TEXT, UNIQUE(epoch,sequence));
           CREATE TABLE batches(batch_id TEXT PRIMARY KEY,observation_id TEXT NOT NULL REFERENCES captures(observation_id),
@@ -67,7 +76,7 @@ impl Journal {
           CREATE INDEX diagnostic_pin_capture ON diagnostic_pins(observation_id);
           CREATE TABLE diagnostic_steps(observation_id TEXT PRIMARY KEY,input_id TEXT NOT NULL,controller_key TEXT NOT NULL,expected_head TEXT,step_id TEXT NOT NULL,update_json TEXT,update_digest TEXT NOT NULL,result_json TEXT,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)),UNIQUE(input_id,step_id));
           CREATE INDEX capture_state ON captures(state);
-          CREATE INDEX capture_collection ON captures(connection,collection,state,epoch DESC,sequence DESC);") .map_err(storage)?;
+          CREATE INDEX capture_collection ON captures(connection,collection,state,epoch DESC,sequence DESC);")) .map_err(storage)?;
         conn.execute("INSERT INTO metadata VALUES(?1,?2,0,0,0)", params![id, encode(&limits)?]).map_err(storage)?;
         durable_fs::sync_directory(path.parent().ok_or_else(|| problem(OutboxProblem::Storage))?).map_err(storage)?;
         Ok(Self { conn, id: id.into(), limits })
@@ -106,11 +115,12 @@ impl Journal {
         request: &CollectionRequest,
         owner_epoch: &mut Option<i64>,
     ) -> Result<Capture> {
-        let charge = u64::from(request.budget.total_bytes) + CAPTURE_ALLOWANCE;
-        let request_json = encode(request)?;
-        if request_json.len() > REQUEST_LIMIT {
-            return Err(problem(OutboxProblem::Integrity));
-        }
+        let request_json = encode_request(request)?;
+        let request_bytes = request_json.len() as u64;
+        let charge = u64::from(request.budget.total_bytes)
+            .checked_add(CAPTURE_ALLOWANCE)
+            .and_then(|bytes| bytes.checked_add(request_bytes))
+            .ok_or_else(|| problem(OutboxProblem::Capacity))?;
         let tx = self.conn.transaction().map_err(storage)?;
         let (count, used): (u32, i64) = tx
             .query_row("SELECT count(*),coalesce(sum(charged_bytes),0) FROM captures", [], |row| {
@@ -192,6 +202,7 @@ impl Journal {
             source_work,
             charged_bytes: charge,
             problem: None,
+            request_bytes,
         })
     }
     pub(super) fn capture(&self, id: &str) -> Result<Capture> {
@@ -209,6 +220,10 @@ impl Journal {
         if epoch <= 0 || sequence <= 0 {
             return Err(problem(OutboxProblem::Integrity));
         }
+        let request_json: String = row.get(3).map_err(storage)?;
+        if request_json.len() > MAX_REQUEST_BYTES {
+            return Err(problem(OutboxProblem::Integrity));
+        }
         Ok(Capture {
             identity: CaptureIdentity {
                 observation_id: id.into(),
@@ -219,11 +234,12 @@ impl Journal {
                 }),
             },
             connection: row.get(2).map_err(storage)?,
-            request: decode(&row.get::<_, String>(3).map_err(storage)?)?,
+            request: decode(&request_json)?,
             state: decode(&row.get::<_, String>(4).map_err(storage)?)?,
             source_work: decode(&row.get::<_, String>(5).map_err(storage)?)?,
             charged_bytes: bytes_from_sql(row.get(6).map_err(storage)?)?,
             problem: row.get::<_, Option<String>>(7).map_err(storage)?.map(|text| decode(&text)).transpose()?,
+            request_bytes: request_json.len() as u64,
         })
     }
     pub(super) fn source_work(&mut self, capture: &Capture, state: SourceWorkState) -> Result<()> {
@@ -280,7 +296,7 @@ impl Journal {
             "UPDATE captures SET state=?1,charged_bytes=?2,manifest_sha=?3,range_json=?4 WHERE observation_id=?5",
             params![
                 encode(&OutboxCaptureState::Ready)?,
-                bytes_to_sql(validated.bytes + CAPTURE_ACCOUNTING)?,
+                bytes_to_sql(current.charge_artifacts(validated.bytes)?)?,
                 validated.manifest_sha,
                 encode(&range)?,
                 capture.identity.observation_id
@@ -535,6 +551,12 @@ fn configure_owner(conn: &Connection) -> Result<()> {
 
 pub(super) fn encode(value: &impl serde::Serialize) -> Result<String> {
     serde_json::to_string(value).map_err(|_| problem(OutboxProblem::Integrity))
+}
+fn encode_request(request: &CollectionRequest) -> Result<String> {
+    let mut buffer = durable_fs::LimitedBuffer::new(MAX_REQUEST_BYTES);
+    serde_json::to_writer(&mut buffer, request)
+        .map_err(|_| problem(if buffer.exceeded() { OutboxProblem::Capacity } else { OutboxProblem::Integrity }))?;
+    String::from_utf8(buffer.into_bytes()).map_err(|_| problem(OutboxProblem::Integrity))
 }
 fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
     serde_json::from_str(text).map_err(|_| problem(OutboxProblem::Integrity))

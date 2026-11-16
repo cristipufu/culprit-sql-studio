@@ -41,6 +41,10 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         query_compilation: &'a Option<culprit_core::CompilationReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        compiler_admission: &'a Option<culprit_core::CompilerAdmissionReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        maintenance_progress: &'a Option<culprit_core::MaintenanceProgressReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
@@ -58,6 +62,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         page_waits,
         task_space,
         query_compilation,
+        compiler_admission,
+        maintenance_progress,
         evidence: _,
         cleanup,
     } = report;
@@ -76,6 +82,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         page_waits,
         task_space,
         query_compilation,
+        compiler_admission,
+        maintenance_progress,
         cleanup,
     }
 }

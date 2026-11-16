@@ -202,6 +202,13 @@ impl FleetBackend for Backend {
                     assert_eq!(intent.budget, request.budget);
                     focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution)
                 }
+                CollectionSelection::FocusedCompilationAdmission { focus } => {
+                    let intent =
+                        admission.investigation.as_ref().expect("automatic compiler question retains its intent");
+                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.budget, request.budget);
+                    super::compiler_admission::focused_frame(focus)
+                }
                 CollectionSelection::FocusedRequestMemory { focus } => {
                     let intent = admission
                         .investigation

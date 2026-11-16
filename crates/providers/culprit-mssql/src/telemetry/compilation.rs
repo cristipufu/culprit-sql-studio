@@ -18,7 +18,7 @@ impl SnapshotRecipe for QueryCompilation {
     fn query(&self, _: &()) -> String {
         costs::compilation_snapshot_sql()
     }
-    fn decode(&self, row: &Rec, _: &()) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, _: &(), _source: &CollectionDescription) -> Result<TelemetryRecord> {
         Ok(TelemetryRecord::Operational(costs::Compilation::decode(row)?.record()?))
     }
 }

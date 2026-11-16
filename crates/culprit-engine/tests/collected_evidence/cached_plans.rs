@@ -2,8 +2,8 @@ use super::fixture::Fixture;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason, RecoveryPayloadBudget},
     test_support::{
-        memory_failure_evidence, object_definition_evidence_cases, object_definition_hydration_evidence,
-        object_definition_retained_input_evidence,
+        memory_failure_evidence, object_definition_bound_join_evidence, object_definition_evidence_cases,
+        object_definition_hydration_evidence, object_definition_retained_input_evidence,
     },
 };
 #[cfg(feature = "mssql")]
@@ -118,7 +118,7 @@ async fn explicit_hydration_restores_large_native_plans_and_original_tvp_context
 
         #[cfg(feature = "mssql")]
         {
-            let direct = culprit_mssql::plan_xml::parse_cached_definition(native).unwrap();
+            let direct = culprit_mssql::plan_xml::parse_cached_definition(native, capture.source()).unwrap();
             let direct_insights = culprit_core::insights::insights(&direct);
             let plan = entry.plan.as_ref().unwrap();
             assert_eq!(plan.kind, PlanKind::Estimated);
@@ -249,6 +249,125 @@ async fn redacted_join_namespaces_cannot_be_reconstructed_from_an_authenticated_
 
 #[cfg(feature = "mssql")]
 #[tokio::test]
+async fn retained_native_input_proofs_restore_exact_archived_join_kinds_and_independent_warnings() {
+    for (source, records) in object_definition_bound_join_evidence() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let reads_before = fixture.recovery_object_reads();
+        let preview = fixture.read_families(&[EvidenceFamily::ObjectDefinitions]).await;
+        assert!(preview.records().is_empty() && !preview.is_read_complete());
+        let batch = &fixture.range.manifest().batches[0];
+        let capture = fixture
+            .read_families_with_recovery(
+                &[EvidenceFamily::ObjectDefinitions],
+                RecoveryPayloadBudget { max_objects: 1, max_bytes: batch.bytes },
+            )
+            .await;
+        assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+        assert_eq!(capture.metrics().recovery_objects, 1);
+        assert_eq!(fixture.recovery_object_reads() - reads_before, 1);
+        let result = collected_resources::cached_plans(&capture).unwrap();
+        assert_eq!(result.context.source, source);
+        assert_eq!(result.context.records[0].row.record, records[0]);
+        let [entry] = result.report.entries.as_slice() else { panic!() };
+        let plan = entry.plan.as_ref().unwrap();
+        match &definition(&records[0]).fact {
+            ObjectDefinitionFact::MssqlRetainedPlan(native) => {
+                assert_eq!(native.statement_executions.as_deref(), Some("9007199254740993"));
+                assert_eq!(plan.kind, PlanKind::Actual);
+                assert_eq!(plan.root.children[0].facts().access_rows.unwrap().actual_total, Some(20000.0));
+                assert_eq!(plan.root.children[0].act_rows, Some(10000.0));
+                assert!(
+                    plan.root.children[0].facts().scan_completion.as_ref().unwrap().is_single_completed_serial_scan()
+                );
+                assert_eq!(plan.root.act_rows, None);
+                assert_eq!(plan.root.children[1].act_rows, None);
+                assert_eq!(plan.facts().last_run_at, None);
+                assert_eq!(plan.facts().elapsed_ms, None);
+            }
+            ObjectDefinitionFact::MssqlCachedDefinition(_) => {
+                assert_eq!(plan.kind, PlanKind::Estimated);
+                assert!(plan.nodes().iter().all(|node| node.act_rows.is_none()));
+            }
+            _ => panic!(),
+        }
+        assert_join_proof_explanation(plan, entry);
+    }
+}
+
+#[cfg(feature = "mssql")]
+fn assert_join_proof_explanation(plan: &culprit_core::Plan, entry: &culprit_core::CachedPlanEntry) {
+    assert_eq!(
+        plan.root.children[0].facts().relational_input.unwrap().qualified_kind(),
+        RelationalInputKind::TableValuedParameter
+    );
+    assert!(!entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput));
+    assert!(plan.root.warnings.contains(&culprit_core::PlanWarning::NoJoinPredicate));
+    let insights = &plan.insights.as_ref().unwrap().items;
+    assert!(insights.iter().any(|insight| insight.rule == "no-join-predicate"));
+    let completion =
+        culprit_core::t!("insight.relational_input.completed_input_counts", estimated = "100", actual = "20K");
+    assert!(insights.iter().all(|insight| !insight.detail.contains(&completion) && insight.fix_sql.is_none()));
+    assert!(plan.raw.is_none() && plan.statement.is_none());
+    assert!(!plan.props.contains_key("CachedExecutions"));
+    let report = serde_json::to_string(entry).unwrap();
+    assert!(!report.contains("private-cache-machine-canary") && !report.contains("private-cache-instance-canary"));
+}
+
+#[cfg(feature = "mssql")]
+#[tokio::test]
+async fn omitted_proof_stays_unknown_while_a_false_self_consistent_node_proof_is_an_integrity_error() {
+    for (source, original) in object_definition_bound_join_evidence() {
+        for wrong_node in [false, true] {
+            let mut records = original.clone();
+            replace_fact(&mut records[0], |fact| match fact {
+                ObjectDefinitionFact::MssqlCachedDefinition(native) => {
+                    let mut bindings = native.relational_input_proof.take().unwrap().bindings;
+                    if wrong_node {
+                        bindings[0].node_id = 999;
+                        native.relational_input_proof =
+                            Some(MssqlRelationalInputProof::for_cached(&source, native, bindings).unwrap());
+                    }
+                }
+                ObjectDefinitionFact::MssqlRetainedPlan(native) => {
+                    let mut bindings = native.relational_input_proof.take().unwrap().bindings;
+                    if wrong_node {
+                        bindings[0].node_id = 999;
+                        native.relational_input_proof =
+                            Some(MssqlRelationalInputProof::for_retained(&source, native, bindings).unwrap());
+                    }
+                }
+                _ => panic!(),
+            });
+            let fixture = Fixture::new(source.clone(), records).await;
+            let batch = &fixture.range.manifest().batches[0];
+            let capture = fixture
+                .read_families_with_recovery(
+                    &[EvidenceFamily::ObjectDefinitions],
+                    RecoveryPayloadBudget { max_objects: 1, max_bytes: batch.bytes },
+                )
+                .await;
+            if wrong_node {
+                let error = collected_resources::cached_plans(&capture).unwrap_err();
+                assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+            } else {
+                let analysis = collected_resources::cached_plans(&capture).unwrap();
+                let entry = &analysis.report.entries[0];
+                let plan = entry.plan.as_ref().unwrap();
+                assert_eq!(
+                    plan.root.children[0].facts().relational_input.unwrap().qualified_kind(),
+                    RelationalInputKind::Unknown
+                );
+                assert!(entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput));
+                assert!(
+                    plan.insights.as_ref().unwrap().items.iter().any(|insight| insight.rule == "no-join-predicate")
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "mssql")]
+#[tokio::test]
 async fn retained_actual_rows_never_borrow_the_cached_modules_kind_or_execution_population() {
     // Read the positive cached module first; a later retained capture must not consult it.
     let (source, rows) = case(0);
@@ -296,7 +415,7 @@ async fn retained_input_completion_survives_authenticated_hydration_and_requires
             }
         });
         let ObjectDefinitionFact::MssqlRetainedPlan(native) = &definition(&records[0]).fact else { panic!() };
-        let direct = culprit_mssql::plan_xml::parse_retained_definition(native).unwrap();
+        let direct = culprit_mssql::plan_xml::parse_retained_definition(native, &source).unwrap();
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let preview = fixture.read_families(&[EvidenceFamily::ObjectDefinitions]).await;
         assert!(!preview.is_read_complete());
@@ -602,7 +721,7 @@ async fn missing_current_metadata_withholds_optimizer_requested_index_sql_withou
     });
     let ObjectDefinitionFact::MssqlCachedDefinition(native) = &definition(&rows[0]).fact else { panic!() };
     let key = definition(&rows[0]).key.clone();
-    let direct = culprit_mssql::plan_xml::parse_cached_definition(native).unwrap();
+    let direct = culprit_mssql::plan_xml::parse_cached_definition(native, &source).unwrap();
     assert!(culprit_core::insights::insights(&direct).iter().any(|insight| insight.fix_sql.is_some()));
     let fixture = Fixture::new(source, rows).await;
     let capture = fixture.read_families(&[EvidenceFamily::ObjectDefinitions]).await;

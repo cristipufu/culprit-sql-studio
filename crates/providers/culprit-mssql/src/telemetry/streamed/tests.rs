@@ -893,6 +893,63 @@ async fn cached_definitions_export_two_bounded_payloads_without_duplicating_the_
 }
 
 #[tokio::test]
+async fn retained_input_binding_uses_the_original_stream_descriptor_and_still_requires_final_native_handle_proof() {
+    use crate::telemetry::cached_definitions::CachedDefinitions;
+    let sql = "SELECT r.id FROM @Rows r JOIN dbo.Items i ON r.id=i.id";
+    let xml = format!(
+        r#"<ShowPlanXML><BatchSequence><Batch><Statements><StmtSimple StatementText="{sql}" QueryHash="0x0123456789ABCDEF"><QueryPlan><RelOp NodeId="0" PhysicalOp="Nested Loops"><NestedLoops><RelOp NodeId="1" PhysicalOp="Table Scan"><TableScan><Object Table="[@Rows]" Alias="[r]" /></TableScan></RelOp><RelOp NodeId="2" PhysicalOp="Index Seek"><IndexScan><Object Database="[sample]" Schema="[dbo]" Table="[Items]" Alias="[i]" /></IndexScan></RelOp></NestedLoops></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#
+    );
+    let row = crate::cached_definitions::tests::module_row(sql, &xml);
+    let original = crate::cached_statements::context(&row).unwrap();
+    for changed in [false, true] {
+        let mut witness = crate::relational_inputs::tests::binding_row(&original);
+        if changed {
+            witness = replace(&witness, &[("sql_handle", Val::Text("0x9999".into()))]);
+        }
+        let mut source = catalog_source_with_native(
+            CachedDefinitions,
+            row.clone(),
+            true,
+            true,
+            Default::default(),
+            CatalogReplies { layout: vec![], final_proof: vec![Ok(vec![witness])] },
+        );
+        let initial = source.describe().await.unwrap();
+        let CollectionRead::Page { records, .. } =
+            source.read_page(TelemetryStream::ObjectDefinitions, None).await.unwrap()
+        else {
+            panic!()
+        };
+        let TelemetryRecord::ObjectDefinition(record) = &records[0] else { panic!() };
+        let ObjectDefinitionFact::MssqlCachedDefinition(definition) = &record.fact else { panic!() };
+        let proof = definition
+            .relational_input_proof
+            .as_ref()
+            .expect("the same native scope must reach the decoder before privacy removes namespace");
+        assert!(proof.matches_cached(&initial, definition));
+        if changed {
+            let error = source.finish().await.unwrap_err();
+            assert_eq!(error.detail, Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceChanged)));
+            assert_eq!(source.query_count(), 6, "native failure stops before any later authority reads");
+        } else {
+            let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
+            assert!(
+                proof.matches_cached(&completed, definition),
+                "final clocks and row counts do not replace the original native scope"
+            );
+            let plan = crate::plan_xml::parse_cached_definition(definition, &completed).unwrap();
+            assert_eq!(
+                plan.root.children[0].facts().relational_input.unwrap().qualified_kind(),
+                culprit_core::plan_facts::RelationalInputKind::TableValuedParameter
+            );
+            assert_eq!(source.query_count(), 7, "retained classification adds no source SQL");
+        }
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(source.inner.reader().io.native.closed, 1);
+    }
+}
+
+#[tokio::test]
 async fn a_drained_cache_definition_stream_cannot_complete_after_its_native_module_binding_changes() {
     use crate::telemetry::cached_definitions::CachedDefinitions;
     for native_sql in [Val::Text("0x9999".into()), Val::Null] {

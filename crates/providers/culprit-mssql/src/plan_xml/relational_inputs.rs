@@ -3,7 +3,7 @@
 //! Native schema: https://schemas.microsoft.com/sqlserver/2004/07/showplan/sql2019/showplanxml.xsd
 
 use culprit_core::{
-    PlanNode,
+    PlanNode, Result,
     plan_facts::{RelationalInput, RelationalInputKind as Kind, RelationalInputProvenance as Provenance},
 };
 use roxmltree::Node;
@@ -33,14 +33,31 @@ pub(super) fn from_operator(operator: Node<'_, '_>) -> Option<RelationalInput> {
 
 /// Bind the complete original relation inventory before assigning any variable kind. Native Object aliases and
 /// NodeIds select the operator; neither a token elsewhere in SQL nor a detached display name establishes ownership.
-pub(super) fn qualify(root: &mut PlanNode, statement: Node<'_, '_>, context: Option<&super::CachedInputContext<'_>>) {
-    if !direct_statement_scope(statement) {
-        return;
-    }
-    let Some(bound) = bindings::parameters(statement, context.and_then(|context| context.origin.native_read())) else {
-        return;
+pub(super) fn qualify(
+    root: &mut PlanNode,
+    statement: Node<'_, '_>,
+    context: Option<&super::CachedInputContext<'_>>,
+) -> Result<()> {
+    let inputs = classify(statement, context)?;
+    apply_inputs(root, &inputs);
+    Ok(())
+}
+
+pub(super) fn classify(
+    statement: Node<'_, '_>,
+    context: Option<&super::CachedInputContext<'_>>,
+) -> Result<BTreeMap<u32, RelationalInput>> {
+    let proof = context.and_then(|context| context.origin.retained_proof());
+    let namespace = if proof.is_some() {
+        bindings::Namespace::Retained
+    } else if let Some(target) = context.and_then(|context| context.origin.original_target()) {
+        bindings::Namespace::Original(target)
+    } else {
+        bindings::Namespace::Unknown
     };
-    let inputs = bound
+    let bound = direct_statement_scope(statement).then(|| bindings::parameters(statement, namespace)).flatten();
+    let inputs: BTreeMap<_, _> = bound
+        .unwrap_or_default()
         .into_iter()
         .filter_map(|(id, name)| {
             let local = local_declaration(statement, &name);
@@ -51,7 +68,19 @@ pub(super) fn qualify(root: &mut PlanNode, statement: Node<'_, '_>, context: Opt
             }
         })
         .collect();
-    apply_inputs(root, &inputs);
+    if let Some(proof) = proof {
+        let observed = inputs
+            .iter()
+            .map(|(node_id, input)| culprit_core::telemetry::MssqlRelationalInputBinding {
+                node_id: *node_id,
+                input: *input,
+            })
+            .collect::<Vec<_>>();
+        if !proof.is_valid() || proof.bindings != observed {
+            return Err(culprit_core::telemetry::DeliveryProblem::Integrity.error());
+        }
+    }
+    Ok(inputs)
 }
 
 /// Only preceding declarations in the very same native statement list can qualify a local input. Declarations in

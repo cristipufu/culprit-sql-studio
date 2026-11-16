@@ -15,7 +15,8 @@ pub use source_partitions::{
 };
 mod investigations;
 pub use investigations::{
-    InvestigationFixture, SharedInvestigationFixture, focused_request_memory_evidence,
+    InvestigationFixture, SharedInvestigationFixture, compiler_admission_evidence,
+    compiler_admission_investigation_fixture, focused_request_memory_evidence,
     focused_request_memory_evidence_with_peers, investigation_fixture, request_memory_investigation_fixture,
     request_memory_investigation_fixture_with_peers, shared_investigation_evidence, shared_investigation_fixture,
 };
@@ -69,13 +70,16 @@ mod task_space;
 pub use task_space::{assert_task_space_capture, task_space_evidence_cases};
 mod object_definitions;
 pub use object_definitions::{
-    assert_object_definition_capture, object_definition_evidence_cases, object_definition_hydration_evidence,
-    object_definition_recovery_only_evidence, object_definition_retained_input_evidence,
+    assert_object_definition_capture, object_definition_bound_join_evidence, object_definition_evidence_cases,
+    object_definition_hydration_evidence, object_definition_recovery_only_evidence,
+    object_definition_retained_input_evidence,
 };
 mod projection;
 pub use projection::JsonProjection;
 mod native_failures;
 pub use native_failures::native_failure_evidence_cases;
+mod maintenance_progress;
+pub use maintenance_progress::maintenance_progress_evidence_cases;
 
 pub fn assert_memory_participants_capture(
     capture: &crate::analytical::evidence::EvidenceCapture,

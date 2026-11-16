@@ -2,6 +2,9 @@
 use super::*;
 use culprit_core::{Engine, MeasurementScope, SourceState};
 
+mod bound_joins;
+pub use bound_joins::object_definition_bound_join_evidence;
+
 const OBSERVED_FROM: &str = "2020-01-01T12:00:00Z";
 const OBSERVED_UNTIL: &str = "2020-01-01T12:00:01Z";
 const SQL: &str = "SELECT value FROM @Rows WHERE value = 9264";
@@ -34,6 +37,7 @@ pub fn object_definition_evidence_cases() -> Vec<(CollectionDescription, Vec<Tel
         SourceState::Collected,
     )];
     let retained = MssqlRetainedPlanDefinition {
+        relational_input_proof: None,
         context: cached.context.clone(),
         statement: missing_payload(PayloadUnavailable::NotCollected),
         module_parameters: None,
@@ -88,9 +92,8 @@ pub fn object_definition_recovery_only_evidence() -> (CollectionDescription, Vec
     )
 }
 
-/// Full native-style estimated plans exceed warehouse previews. A direct TVP statement and a join with an
-/// unqualified parameter input share one batch, which recovery must verify once for both missing previews.
-pub fn object_definition_hydration_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+/// Original native-style input shared by positive and unavailable-provenance cases, before privacy runs.
+fn hydration_native_inputs() -> [(String, String); 2] {
     let direct_xml = format!(
         r#"<ShowPlanXML><BatchSequence><Batch><Statements>
         <StmtSimple StatementText="{SQL}" QueryHash="0x0123456789ABCDEF" StatementType="SELECT" StatementSubTreeCost="0.01">
@@ -126,6 +129,12 @@ pub fn object_definition_hydration_evidence() -> (CollectionDescription, Vec<Tel
         </NestedLoops></RelOp></QueryPlan></StmtSimple>
         </Statements></Batch></BatchSequence></ShowPlanXML>"#
     );
+    [(SQL.into(), direct_xml), (sql.into(), join_xml)]
+}
+
+/// A direct TVP and a join without retained namespace proof share one batch exceeding warehouse previews.
+pub fn object_definition_hydration_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let [(_, direct_xml), (sql, join_xml)] = hydration_native_inputs();
     let mut first = cached_definition();
     first.estimated_plan = cached_payload(&direct_xml, DefinitionPayload::plan);
     let mut second = cached_definition();
@@ -134,7 +143,7 @@ pub fn object_definition_hydration_evidence() -> (CollectionDescription, Vec<Tel
     second.context.query_hash = Some("0x1023456789ABCDEF".into());
     second.query_plan_hash = Some("0xEFDCBA9876543210".into());
     second.module_parameters.as_mut().unwrap().sql_handle = second.context.identity.sql_handle.clone();
-    second.statement = cached_payload(sql, DefinitionPayload::sql);
+    second.statement = cached_payload(&sql, DefinitionPayload::sql);
     second.context.source_text_bytes = second.statement.source_utf16_bytes.clone();
     second.estimated_plan = cached_payload(&join_xml, DefinitionPayload::plan);
     for definition in [&first, &second] {
@@ -195,6 +204,7 @@ pub fn object_definition_retained_input_evidence() -> (CollectionDescription, Ve
         </Statements></Batch></BatchSequence></ShowPlanXML>"#
     );
     let retained = MssqlRetainedPlanDefinition {
+        relational_input_proof: None,
         context,
         statement: cached_payload(SQL, DefinitionPayload::sql),
         module_parameters: Some(module_parameters),
@@ -236,6 +246,7 @@ fn cached_definition() -> MssqlCachedDefinition {
         table_parameters: [("@Rows".into(), vec!["dbo".into(), "RowsType".into()])].into(),
     };
     MssqlCachedDefinition {
+        relational_input_proof: None,
         context,
         query_plan_hash: Some("0xFEDCBA9876543210".into()),
         statement: cached_payload(SQL, DefinitionPayload::sql),

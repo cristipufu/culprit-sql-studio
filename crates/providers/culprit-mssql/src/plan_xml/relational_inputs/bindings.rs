@@ -3,15 +3,23 @@
 use super::{LocalName, Node};
 use culprit_core::{
     sql::{MssqlRelationName, MssqlRelationReference, identifier_parts, mssql_relational_references},
-    telemetry::NativeReadContext,
+    telemetry::CollectionTarget,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) fn parameters(statement: Node<'_, '_>, read: Option<&NativeReadContext>) -> Option<BTreeMap<u32, String>> {
+pub(super) enum Namespace<'a> {
+    Unknown,
+    Original(&'a CollectionTarget),
+    Retained,
+}
+
+pub(super) fn parameters(statement: Node<'_, '_>, namespace: Namespace<'_>) -> Option<BTreeMap<u32, String>> {
     let references = mssql_relational_references(statement.attribute("StatementText")?)?;
     // Stored XML removes native database names. An authenticated outer target cannot reconstruct those names;
     // positive archived named-relation binding needs typed proof retained before redaction.
-    if read.is_none() && references.iter().any(|reference| matches!(reference.name, MssqlRelationName::Named(_))) {
+    if matches!(namespace, Namespace::Unknown)
+        && references.iter().any(|reference| matches!(reference.name, MssqlRelationName::Named(_)))
+    {
         return None;
     }
     let mut ids = BTreeSet::new();
@@ -20,7 +28,6 @@ pub(super) fn parameters(statement: Node<'_, '_>, read: Option<&NativeReadContex
             return None;
         }
     }
-    let database = read.and_then(|read| read.target.database()).map(|database| database.database.as_str());
     let mut populations = vec![0usize; references.len()];
     let mut bound = BTreeMap::new();
     for object in statement.descendants().filter(|node| node.has_tag_name_local("Object")) {
@@ -31,11 +38,17 @@ pub(super) fn parameters(statement: Node<'_, '_>, read: Option<&NativeReadContex
             return None;
         }
         let relop = operator.parent().filter(|node| node.has_tag_name_local("RelOp"))?;
+        if !matches!(
+            super::super::node_kind(relop.attribute("PhysicalOp")?, relop.attribute("LogicalOp").unwrap_or_default()),
+            culprit_core::NodeKind::Scan | culprit_core::NodeKind::Seek
+        ) {
+            return None;
+        }
         if super::super::operator_element(relop) != Some(operator) || object.attribute("Server").is_some() {
             return None;
         }
         let native = NativeObject::read(object)?;
-        let mut matching = references.iter().enumerate().filter(|(_, reference)| native.matches(reference, database));
+        let mut matching = references.iter().enumerate().filter(|(_, reference)| native.matches(reference, &namespace));
         let (at, reference) = matching.next()?;
         if matching.next().is_some() {
             return None;
@@ -71,17 +84,17 @@ impl NativeObject {
         })
     }
 
-    fn matches(&self, reference: &MssqlRelationReference, database: Option<&str>) -> bool {
+    fn matches(&self, reference: &MssqlRelationReference, namespace: &Namespace<'_>) -> bool {
         let name_matches = match &reference.name {
             MssqlRelationName::Parameter(name) => self.table == *name,
             MssqlRelationName::Named(parts) => match parts.as_slice() {
                 [schema, table] => {
-                    database.is_some_and(|database| self.database.as_deref() == Some(database))
+                    self.matches_database(None, namespace)
                         && self.schema.as_ref() == Some(schema)
                         && self.table == *table
                 }
                 [database, schema, table] => {
-                    self.database.as_ref() == Some(database)
+                    self.matches_database(Some(database), namespace)
                         && self.schema.as_ref() == Some(schema)
                         && self.table == *table
                 }
@@ -93,6 +106,16 @@ impl NativeObject {
                 Some(alias) => self.alias.as_ref() == Some(alias),
                 None => self.alias.as_ref().is_none_or(|alias| alias == &self.table),
             }
+    }
+
+    fn matches_database(&self, explicit: Option<&str>, namespace: &Namespace<'_>) -> bool {
+        match namespace {
+            Namespace::Original(target) => explicit
+                .or_else(|| target.database().map(|database| database.database.as_str()))
+                .is_some_and(|database| self.database.as_deref() == Some(database)),
+            Namespace::Retained => self.database.is_some(),
+            Namespace::Unknown => false,
+        }
     }
 }
 

@@ -5,6 +5,7 @@ mod cached_runtime;
 mod check_constraints;
 mod columns;
 mod compilation;
+mod compiler_admission;
 mod grants;
 mod index_operations;
 mod indexes;

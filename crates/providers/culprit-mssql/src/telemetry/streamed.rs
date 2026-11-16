@@ -18,7 +18,7 @@ pub(super) trait SnapshotRecipe: Send + Sync {
     const INSTANCE_LOCAL: bool;
     async fn layout<R: NativeRead>(&self, reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>>;
     fn query(&self, layout: &Self::Layout) -> String;
-    fn decode(&self, row: &Rec, layout: &Self::Layout) -> Result<TelemetryRecord>;
+    fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord>;
     /// Retain bounded native witnesses while rows stream. The reader owns this state; decoders keep a read-only
     /// layout view. No additional SQL may run while the native stream is active.
     fn observe_batch(&self, _rows: &[Rec], _layout: &mut Self::Layout) -> Result<()> {
@@ -134,9 +134,9 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         self.recipe.observe_batch(&batch.rows, layout)?;
         Ok(batch)
     }
-    fn decode(&self, row: &Rec, _: &CollectionDescription) -> Result<culprit_read::SnapshotRecord> {
+    fn decode(&self, row: &Rec, source: &CollectionDescription) -> Result<culprit_read::SnapshotRecord> {
         let layout = self.layout.as_ref().ok_or_else(invalid_data)?;
-        let record = self.recipe.decode(row, layout)?;
+        let record = self.recipe.decode(row, layout, source)?;
         Ok(culprit_read::SnapshotRecord {
             source: D::SOURCE.name.into(),
             complete_scope: self.recipe.complete_record_scope(&record),

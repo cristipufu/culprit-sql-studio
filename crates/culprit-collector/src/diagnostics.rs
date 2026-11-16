@@ -356,6 +356,29 @@ fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) 
             };
             (update.revisions, update.checkpoint)
         }
+        SourceObservation::FocusedCompilationAdmission { .. } => {
+            let rows = input
+                .rows
+                .iter()
+                .map(|row| match &row.row.record {
+                    TelemetryRecord::Operational(observation) => {
+                        Ok(DiagnosticCompilerRow { reference: &row.reference, observation })
+                    }
+                    _ => Err(CollectionStop::InvalidPage.error()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let previous = input.checkpoint.as_ref().ok_or_else(|| DeliveryProblem::Conflict.error())?;
+            let intent = input.investigation_intent()?;
+            let update = analyze_diagnostic_compilation_admission(
+                &input.source,
+                &input.parent,
+                &rows,
+                previous,
+                analyzed_at,
+                intent.as_ref(),
+            )?;
+            (update.revisions, update.checkpoint)
+        }
         SourceObservation::FocusedRequestMemory { .. } => {
             let rows = input
                 .rows

@@ -1,4 +1,5 @@
 //! Definition closure belongs to an observation; native IDs and optional plans have no engine-specific meaning here.
+mod compiler_admission;
 mod memory;
 use culprit_core::telemetry::{
     CollectionDescription, DIAGNOSTICS_SOURCE, DefinitionCoverage, DiagnosticCheckpoint, DiagnosticCheckpointPart,
@@ -42,6 +43,7 @@ pub(crate) struct ObservationReferences {
     pub(crate) diagnostic_parts: Vec<DiagnosticCheckpointPart>,
     pub(crate) activity: crate::collection_activity::ActivityRecords,
     memory: memory::GrantReferences,
+    compiler_admission: compiler_admission::CompilerAdmissionReferences,
 }
 impl ObservationReferences {
     pub(crate) fn accepts_page(&self, records: &[TelemetryRecord]) -> bool {
@@ -91,6 +93,7 @@ impl ObservationReferences {
                 );
             }
             TelemetryRecord::Operational(row) => {
+                self.compiler_admission.record(row);
                 if let OperationalFact::ExecutionGrant(grant) = &row.fact {
                     self.memory.record(grant);
                 }
@@ -183,6 +186,7 @@ impl ObservationReferences {
             complete: source_rechecked
                 && self.diagnostics_complete(source)
                 && self.memory.complete(source)
+                && self.compiler_admission.complete(source)
                 && queries.complete()
                 && plans.complete()
                 && source.and_then(|source| source.observation.snapshot()).is_none_or(|snapshot| {

@@ -1,7 +1,11 @@
 //! Pure native-definition adapters share statement selection and kind qualification with interactive reads.
 use culprit_core::{Plan, Result, telemetry::*};
 
-pub fn parse_cached_definition(definition: &MssqlCachedDefinition) -> Result<Plan> {
+pub fn parse_cached_definition(definition: &MssqlCachedDefinition, source: &CollectionDescription) -> Result<Plan> {
+    if definition.relational_input_proof.as_ref().is_some_and(|proof| !proof.matches_cached(source, definition)) {
+        return Err(DeliveryProblem::Integrity.error());
+    }
+    require_source(source, SnapshotDataset::CachedDefinitions)?;
     if !definition.is_valid() {
         return Err(crate::read::invalid_data());
     }
@@ -18,12 +22,19 @@ pub fn parse_cached_definition(definition: &MssqlCachedDefinition) -> Result<Pla
             statement: &definition.context,
             module_parameters: definition.module_parameters.as_ref(),
             text: statement,
-            origin: super::PlanInputOrigin::StoredRedacted,
+            origin: super::PlanInputOrigin::StoredRedacted { proof: definition.relational_input_proof.as_ref() },
         },
     )
 }
 
-pub fn parse_retained_definition(definition: &MssqlRetainedPlanDefinition) -> Result<Plan> {
+pub fn parse_retained_definition(
+    definition: &MssqlRetainedPlanDefinition,
+    source: &CollectionDescription,
+) -> Result<Plan> {
+    if definition.relational_input_proof.as_ref().is_some_and(|proof| !proof.matches_retained(source, definition)) {
+        return Err(DeliveryProblem::Integrity.error());
+    }
+    require_source(source, SnapshotDataset::RetainedPlans)?;
     if !definition.is_valid() {
         return Err(crate::read::invalid_data());
     }
@@ -40,11 +51,27 @@ pub fn parse_retained_definition(definition: &MssqlRetainedPlanDefinition) -> Re
             statement: &definition.context,
             module_parameters: definition.module_parameters.as_ref(),
             text: statement,
-            origin: super::PlanInputOrigin::StoredRedacted,
+            origin: super::PlanInputOrigin::StoredRedacted { proof: definition.relational_input_proof.as_ref() },
         },
     )?;
     crate::actual::clear_unrecorded_times(&mut plan);
     Ok(plan)
+}
+
+fn require_source(source: &CollectionDescription, dataset: SnapshotDataset) -> Result<()> {
+    let matching = match &source.observation {
+        SourceObservation::Snapshot(snapshot) => snapshot.dataset == dataset,
+        SourceObservation::PagedSnapshot(snapshot) => snapshot.dataset == dataset,
+        _ => false,
+    };
+    if !matching
+        || source.target.engine() != culprit_core::Engine::Mssql
+        || source.target.database().is_none()
+        || !source.partition.is_valid_for(&source.target)
+    {
+        return Err(crate::read::invalid_data());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

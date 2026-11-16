@@ -1,6 +1,5 @@
 //! Actions retain observed backend/request generations. Native PID signalling still has a check-to-signal race.
-mod context;
-pub(crate) use context::Context;
+pub(crate) use crate::native::local_context::Context;
 #[cfg(test)]
 mod tests;
 

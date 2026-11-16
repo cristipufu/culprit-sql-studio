@@ -399,7 +399,7 @@ async fn verify_cached_definitions(pool: &Arc<Pool>) {
         .map_err(ReadError::into_error)
         .unwrap();
     let definitions =
-        rows.iter().map(|row| cached_definitions::decode(row, &limits)).collect::<Result<Vec<_>>>().unwrap();
+        rows.iter().map(|row| cached_definitions::decode(row, &limits, None)).collect::<Result<Vec<_>>>().unwrap();
     let canary=definitions.iter().find(|definition|matches!(&definition.statement.payload,DefinitionPayload::Available {text,..} if text.contains("scan_workload_canary"))).unwrap();
     assert!(canary.estimated_plan.payload.is_available());
     assert!(canary.estimated_plan.native_sha256.is_some());
@@ -411,7 +411,7 @@ async fn verify_cached_definitions(pool: &Arc<Pool>) {
         .map_err(ReadError::into_error)
         .unwrap();
     let retained =
-        rows.iter().map(|row| retained_definitions::decode(row, &layout)).collect::<Result<Vec<_>>>().unwrap();
+        rows.iter().map(|row| retained_definitions::decode(row, &layout, None)).collect::<Result<Vec<_>>>().unwrap();
     assert!(retained.iter().any(|definition| definition.context.identity == canary.context.identity
         && definition.batch_plan.payload.is_available()));
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);

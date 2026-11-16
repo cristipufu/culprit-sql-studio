@@ -1,6 +1,7 @@
 use super::*;
 use crate::{DatabaseIdentity, Engine, MeasurementScope, ObservedWaitResource};
 
+mod compiler_admission;
 mod investigations;
 mod partitions;
 mod planning;

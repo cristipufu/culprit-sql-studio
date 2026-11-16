@@ -3,8 +3,10 @@ import type { AnalysisProvenance } from "./AnalysisProvenance";
 import type { CheckAssessment } from "./CheckAssessment";
 import type { CleanupReport } from "./CleanupReport";
 import type { CompilationReport } from "./CompilationReport";
+import type { CompilerAdmissionReport } from "./CompilerAdmissionReport";
 import type { Finding } from "./Finding";
 import type { LockedCheck } from "./LockedCheck";
+import type { MaintenanceProgressReport } from "./MaintenanceProgressReport";
 import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
 import type { PageWaitReport } from "./PageWaitReport";
 import type { RefinementDecision } from "./RefinementDecision";
@@ -45,4 +47,12 @@ task_space?: TaskSpaceReport,
 /**
  * Native compilation lifetimes and working-memory observations, independent of execution and current ownership.
  */
-query_compilation?: CompilationReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+query_compilation?: CompilationReport, 
+/**
+ * Current compiler admission participants and independently scoped gateway context.
+ */
+compiler_admission?: CompilerAdmissionReport, 
+/**
+ * Generation-bound native progress is a point observation, not completion or incident causality.
+ */
+maintenance_progress?: MaintenanceProgressReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

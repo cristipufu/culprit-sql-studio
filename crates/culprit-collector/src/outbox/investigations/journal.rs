@@ -13,9 +13,11 @@ pub(in crate::outbox) fn prepare_commit(
     };
     if eligible_source(source, validated.manifest.investigation.as_ref())? {
         let investigation = encode_investigation(validated.manifest.investigation.as_ref())?;
-        let charge = investigation.as_ref().map_or(0, String::len) as u64;
+        let parent_json = encode(&parent)?;
+        let source_json = encode(source)?;
+        let charge = input_metadata_charge(&parent_json, &source_json, &capture.connection, investigation.as_deref())?;
         tx.execute("INSERT INTO diagnostic_inputs(observation_id,controller_version,parent_json,source_json,connection,acknowledged,restored_json,charged_bytes,lineage_json) VALUES(?1,?2,?3,?4,?5,0,NULL,?6,?7)",
-            params![capture.identity.observation_id, DIAGNOSTIC_CONTROLLER_VERSION, encode(&parent)?, encode(source)?, capture.connection, super::super::journal::bytes_to_sql(charge)?, investigation]).map_err(storage)?;
+            params![capture.identity.observation_id, DIAGNOSTIC_CONTROLLER_VERSION, parent_json, source_json, capture.connection, super::super::journal::bytes_to_sql(charge)?, investigation]).map_err(storage)?;
         pin(tx, &format!("input:{}", capture.identity.observation_id), &capture.identity.observation_id)?;
         if let Some(intent) = investigation_intent(source, validated.manifest.investigation.as_ref())?
             && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
@@ -231,6 +233,19 @@ pub(in crate::outbox) fn charged_bytes(conn: &rusqlite::Connection) -> Result<u6
         .query_row("SELECT coalesce(sum(charged_bytes),0) FROM diagnostic_inputs", [], |row| row.get(0))
         .map_err(storage)?;
     super::super::journal::bytes_from_sql(value)
+}
+
+pub(super) fn input_metadata_charge(
+    parent: &str,
+    source: &str,
+    connection: &str,
+    investigation: Option<&str>,
+) -> Result<u64> {
+    [parent.len(), source.len(), connection.len(), investigation.map_or(0, str::len)]
+        .into_iter()
+        .try_fold(super::super::CAPTURE_ACCOUNTING, |bytes, length| {
+            bytes.checked_add(length as u64).ok_or_else(|| problem(OutboxProblem::Capacity))
+        })
 }
 pub(in crate::outbox) fn is_pinned(conn: &rusqlite::Connection, observation_id: &str) -> Result<bool> {
     conn.query_row("SELECT EXISTS(SELECT 1 FROM diagnostic_pins WHERE observation_id=?1)", [observation_id], |row| {

@@ -44,7 +44,7 @@ async fn definition(reader: &mut ReadSession, object: i64) -> culprit_core::tele
                 && row.str("statement_text").is_some_and(|text| text.contains("tvp_original_header_probe"))
         })
         .expect("owned module statement must be in the bounded native cache projection");
-    let value = cached_definitions::decode(row, &limits).unwrap();
+    let value = cached_definitions::decode(row, &limits, None).unwrap();
     let mut bindings = Bindings::default();
     assert!(bindings.admit(&value.context).unwrap());
     let verified = bindings.verify(reader).await.unwrap();

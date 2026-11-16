@@ -7,19 +7,20 @@ use super::*;
 pub enum DiagnosticFocus {
     PageWait { focus: Box<ActivityWaitFocus> },
     RequestMemory { focus: Box<ActivityRequestFocus> },
+    CompilationAdmission { focus: Box<ActivityRequestFocus> },
 }
 
 impl DiagnosticFocus {
     pub fn participant(&self) -> &ActivityRequestFocus {
         match self {
             Self::PageWait { focus } => &focus.participant,
-            Self::RequestMemory { focus } => focus,
+            Self::RequestMemory { focus } | Self::CompilationAdmission { focus } => focus,
         }
     }
     pub fn participant_mut(&mut self) -> &mut ActivityRequestFocus {
         match self {
             Self::PageWait { focus } => &mut focus.participant,
-            Self::RequestMemory { focus } => focus,
+            Self::RequestMemory { focus } | Self::CompilationAdmission { focus } => focus,
         }
     }
     pub fn page_wait(&self) -> Option<&ActivityWaitFocus> {
@@ -38,12 +39,14 @@ impl DiagnosticFocus {
         match self {
             Self::PageWait { .. } => RecipeSelector::FocusedPageWait,
             Self::RequestMemory { .. } => RecipeSelector::FocusedRequestMemory,
+            Self::CompilationAdmission { .. } => RecipeSelector::FocusedCompilationAdmission,
         }
     }
     pub fn is_valid(&self) -> bool {
         match self {
             Self::PageWait { focus } => focus.is_valid(),
             Self::RequestMemory { focus } => focus.is_request_memory_focus(),
+            Self::CompilationAdmission { focus } => focus.is_compilation_admission_focus(),
         }
     }
     pub fn from_selection(selection: &CollectionSelection) -> Option<Self> {
@@ -52,6 +55,10 @@ impl DiagnosticFocus {
                 Some(Self::PageWait { focus: focus.clone() })
             }
             CollectionSelection::FocusedRequestMemory { focus } => Some(Self::RequestMemory { focus: focus.clone() }),
+            CollectionSelection::FocusedCompilationAdmission { focus }
+            | CollectionSelection::SharedCompilationAdmissionFocus { focus, .. } => {
+                Some(Self::CompilationAdmission { focus: focus.clone() })
+            }
             _ => None,
         }
     }

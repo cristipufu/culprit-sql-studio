@@ -16,7 +16,7 @@ impl SnapshotRecipe for CheckConstraints {
     fn query(&self, limit: &usize) -> String {
         check_constraints::select_sql(*limit)
     }
-    fn decode(&self, row: &Rec, limit: &usize) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, limit: &usize, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),
             ObjectDefinitionFact::MssqlCheckConstraint(Box::new(check_constraints::decode(row, *limit)?)),

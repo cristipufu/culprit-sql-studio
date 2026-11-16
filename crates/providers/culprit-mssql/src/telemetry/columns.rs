@@ -16,7 +16,7 @@ impl SnapshotRecipe for Columns {
     fn query(&self, limit: &usize) -> String {
         columns::select_sql(*limit)
     }
-    fn decode(&self, row: &Rec, limit: &usize) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, limit: &usize, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),
             ObjectDefinitionFact::MssqlColumn(Box::new(columns::decode(row, *limit)?.definition)),

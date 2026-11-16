@@ -20,12 +20,14 @@ impl SnapshotRecipe for CachedDefinitions {
     fn query(&self, layout: &Self::Layout) -> String {
         cached_definitions::select_sql(&layout.limits)
     }
-    fn decode(&self, row: &Rec, layout: &Self::Layout) -> Result<TelemetryRecord> {
-        let mut definition = cached_definitions::decode(row, &layout.limits)?;
-        if !layout.bindings.contains(&definition.context) {
+    fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord> {
+        let admitted = layout.bindings.contains(&crate::cached_statements::context(row)?);
+        let mut definition = cached_definitions::decode(row, &layout.limits, admitted.then_some(source))?;
+        if !admitted {
             definition.estimated_plan.payload =
                 DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
             definition.module_parameters = None;
+            definition.relational_input_proof = None;
         }
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),
@@ -65,9 +67,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
         recipe.observe_batch(&rows, &mut layout).unwrap();
-        let first = recipe.decode(&rows[0], &layout).unwrap();
+        let source = crate::plan_xml::test_source(SnapshotDataset::CachedDefinitions);
+        let first = recipe.decode(&rows[0], &layout, &source).unwrap();
         assert!(recipe.complete_record_scope(&first));
-        let overflow = recipe.decode(rows.last().unwrap(), &layout).unwrap();
+        let overflow = recipe.decode(rows.last().unwrap(), &layout, &source).unwrap();
         assert!(!recipe.complete_record_scope(&overflow));
         let TelemetryRecord::ObjectDefinition(record) = overflow else { panic!("definition") };
         let ObjectDefinitionFact::MssqlCachedDefinition(definition) = record.fact else { panic!("cache definition") };

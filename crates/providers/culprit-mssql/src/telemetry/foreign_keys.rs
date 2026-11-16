@@ -16,7 +16,7 @@ impl SnapshotRecipe for ForeignKeys {
     fn query(&self, _: &()) -> String {
         foreign_keys::select_sql()
     }
-    fn decode(&self, row: &Rec, _: &()) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, _: &(), _source: &CollectionDescription) -> Result<TelemetryRecord> {
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),
             ObjectDefinitionFact::MssqlForeignKey(Box::new(foreign_keys::decode(row)?)),

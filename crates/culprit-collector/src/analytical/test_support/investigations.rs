@@ -1,7 +1,9 @@
 //! Structural admission fixture only. Its synthetic cost artifact does not qualify any production recipe.
 use super::*;
 use culprit_core::{ComponentVersion, MeasurementScope, ObservedWaitResource, WaitResourceKind};
+mod compiler_admission;
 mod memory;
+pub use compiler_admission::{compiler_admission_evidence, compiler_admission_investigation_fixture};
 pub use memory::{
     focused_request_memory_evidence, focused_request_memory_evidence_with_peers, request_memory_investigation_fixture,
     request_memory_investigation_fixture_with_peers,

@@ -12,6 +12,36 @@ pub(crate) fn feature(visible: i64, present: i64) -> Rec {
         ("profiles", Val::Int(1)),
     ])
 }
+
+#[test]
+fn oversized_optional_native_binding_rosters_keep_retained_sql_plan_and_statement_counters() {
+    let source = crate::plan_xml::test_source(SnapshotDataset::RetainedPlans);
+    let layout = Layout {
+        maximum_bytes: 128 * 1024,
+        maximum_statement_bytes: retained::MAX_STATEMENT_BYTES,
+        database_setting: Some(true),
+    };
+    for count in [MAX_MSSQL_RELATIONAL_INPUT_BINDINGS, MAX_MSSQL_RELATIONAL_INPUT_BINDINGS + 1] {
+        let row = crate::cached_definitions::tests::joined_parameter_row(count);
+        let mut definition = decode(&row, &layout, Some(&source)).unwrap();
+        assert!(definition.statement.payload.is_available());
+        assert!(definition.batch_plan.payload.is_available());
+        assert!(definition.module_parameters.is_some());
+        assert!(definition.statement_executions.is_some());
+        if count == MAX_MSSQL_RELATIONAL_INPUT_BINDINGS {
+            let proof = definition.relational_input_proof.as_ref().expect("the largest supported native roster");
+            assert_eq!(proof.bindings.len(), count);
+            assert_eq!(serde_json::to_vec(proof).unwrap().len(), 6_962);
+            assert!(proof.matches_retained(&source, &definition));
+        } else {
+            assert!(definition.relational_input_proof.is_none(), "unavailable proof must not discard native bodies");
+        }
+        definition.relational_input_proof = None;
+        assert_eq!(definition, decode(&row, &layout, None).unwrap());
+        assert!(decode(&replace(&row, &[("plan_bytes", Val::Int(2))]), &layout, Some(&source)).is_err());
+    }
+}
+
 #[tokio::test]
 async fn unsupported_hidden_and_failed_feature_reads_cannot_masquerade_as_an_empty_plan_cache() {
     let mut absent = FakeRead::new(vec![Ok(vec![feature(1, 0)])]);
@@ -33,13 +63,13 @@ fn retained_exports_share_native_decoding_and_do_not_claim_a_batch_execution_cou
     };
     let row =
         replace(&crate::cached_definitions::tests::row(), &[("execution_count", Val::Int(9_007_199_254_740_993))]);
-    let native = decode(&row, &layout).unwrap();
+    let native = decode(&row, &layout, None).unwrap();
     assert!(native.batch_plan.payload.is_available());
     assert_eq!(native.database_last_query_plan_stats, Some(false));
     assert_eq!(native.statement_executions.as_deref(), Some("9007199254740993"));
     assert_eq!(native.last_start_without_offset.as_deref(), Some("2020-01-01T08:00:00.0030000"));
     assert!(!serde_json::to_string(&native).unwrap().contains("private-value"));
-    let unsupported = decode(&replace(&row, &[("plan_handle", Val::Bytes(vec![0; 64]))]), &layout).unwrap();
+    let unsupported = decode(&replace(&row, &[("plan_handle", Val::Bytes(vec![0; 64]))]), &layout, None).unwrap();
     assert!(unsupported.statement_executions.is_none());
     assert!(select_sql(&layout).contains(cached_statements::DATABASE_PREDICATE));
 }
@@ -79,10 +109,14 @@ fn same_read_original_module_and_selected_statement_reach_actual_tvp_analysis_wi
         maximum_statement_bytes: retained::MAX_STATEMENT_BYTES,
         database_setting: Some(true),
     };
-    let definition = decode(&tvp_row(), &layout).unwrap();
+    let definition = decode(&tvp_row(), &layout, None).unwrap();
     assert!(definition.statement.payload.is_available());
     assert!(definition.module_parameters.is_some());
-    let plan = crate::plan_xml::parse_retained_definition(&definition).unwrap();
+    let plan = crate::plan_xml::parse_retained_definition(
+        &definition,
+        &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::RetainedPlans),
+    )
+    .unwrap();
     assert_eq!(
         plan.root.facts().relational_input.unwrap().qualified_kind(),
         culprit_core::plan_facts::RelationalInputKind::TableValuedParameter
@@ -110,9 +144,19 @@ fn same_read_original_module_and_selected_statement_reach_actual_tvp_analysis_wi
             _ => unreachable!(),
         }
         if field == "scope" {
-            assert!(crate::plan_xml::parse_retained_definition(&missing).is_err());
+            assert!(
+                crate::plan_xml::parse_retained_definition(
+                    &missing,
+                    &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::RetainedPlans)
+                )
+                .is_err()
+            );
         } else {
-            let unknown = crate::plan_xml::parse_retained_definition(&missing).unwrap();
+            let unknown = crate::plan_xml::parse_retained_definition(
+                &missing,
+                &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::RetainedPlans),
+            )
+            .unwrap();
             assert_eq!(
                 unknown.root.facts().relational_input.unwrap().qualified_kind(),
                 culprit_core::plan_facts::RelationalInputKind::Unknown
@@ -133,13 +177,17 @@ async fn statement_retention_intersects_the_existing_budget_and_never_adds_a_nat
         (layout.maximum_bytes + layout.maximum_statement_bytes) * JSON_BYTES_PER_UTF16_BYTE + RECORD_METADATA_BYTES
             <= budget.page_bytes as usize
     );
-    let record = decode(&tvp_row(), &layout).unwrap();
+    let record = decode(&tvp_row(), &layout, None).unwrap();
     assert!(matches!(
         record.statement.payload,
         DefinitionPayload::Unavailable { reason: PayloadUnavailable::Oversized }
     ));
     assert!(record.batch_plan.payload.is_available());
-    let plan = crate::plan_xml::parse_retained_definition(&record).unwrap();
+    let plan = crate::plan_xml::parse_retained_definition(
+        &record,
+        &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::RetainedPlans),
+    )
+    .unwrap();
     assert_eq!(
         plan.root.facts().relational_input.unwrap().qualified_kind(),
         culprit_core::plan_facts::RelationalInputKind::Unknown

@@ -522,6 +522,18 @@ async fn authenticate_report_participants(
         return Err(invalid());
     }
     match report {
+        DiagnosticReport::CompilationAdmission { .. } => {
+            let observations = rows
+                .iter()
+                .map(|(reference, row)| match &row.record {
+                    TelemetryRecord::Operational(observation) => Ok((reference, observation)),
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !report.matches_compiler_admission_input(&manifest.source, observations) {
+                return Err(invalid());
+            }
+        }
         DiagnosticReport::RequestMemory { .. } => {
             let grants = rows
                 .iter()

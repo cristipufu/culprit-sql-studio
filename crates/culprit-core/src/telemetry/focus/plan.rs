@@ -37,8 +37,10 @@ impl DiagnosticEpisode {
                 PageWaitFocusPlan::NotRequired => DiagnosticFocusPlan::NotRequired,
             });
         }
-        let DiagnosticSignal::RequestMemory { key, statement_identity } = &self.signal else {
-            return Ok(DiagnosticFocusPlan::NotRequired);
+        let (key, statement_identity, compilation) = match &self.signal {
+            DiagnosticSignal::RequestMemory { key, statement_identity } => (key, statement_identity, false),
+            DiagnosticSignal::CompilationAdmission { key, statement_identity } => (key, statement_identity, true),
+            _ => return Ok(DiagnosticFocusPlan::NotRequired),
         };
         let native = source.observation.activity().filter(|snapshot| snapshot.is_valid()).ok_or_else(invalid)?;
         DiagnosticActivityRow { reference, observation: original }.verify(source, &reference.capture_ref())?;
@@ -71,10 +73,15 @@ impl DiagnosticEpisode {
             original: original.clone(),
             statement_identity: statement.clone(),
         };
-        if !focus.matches_parent(source, original, reference) || !self.matches_request_memory_focus(&focus) {
+        let question = if compilation {
+            DiagnosticFocus::CompilationAdmission { focus: Box::new(focus) }
+        } else {
+            DiagnosticFocus::RequestMemory { focus: Box::new(focus) }
+        };
+        if !question.matches_parent(source, original, reference) || !self.matches_focus(&question) {
             return Err(invalid());
         }
-        Ok(DiagnosticFocusPlan::Ready(Box::new(DiagnosticFocus::RequestMemory { focus: Box::new(focus) })))
+        Ok(DiagnosticFocusPlan::Ready(Box::new(question)))
     }
 
     /// Reconstruct a question from an original baseline row authenticated by the caller's outbox/recovery owner.

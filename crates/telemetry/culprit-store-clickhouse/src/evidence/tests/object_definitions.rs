@@ -107,7 +107,10 @@ async fn explicit_recovery_hydrates_large_native_plans_from_one_exact_batch_with
     for (source, records) in [
         test_support::object_definition_hydration_evidence(),
         test_support::object_definition_retained_input_evidence(),
-    ] {
+    ]
+    .into_iter()
+    .chain(test_support::object_definition_bound_join_evidence())
+    {
         let fixture =
             Fixture::new_for_stream(source.clone(), records.clone(), TelemetryStream::ObjectDefinitions).await;
         let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);
@@ -154,7 +157,10 @@ async fn recovery_hydration_cannot_repair_a_changed_native_definition_receipt() 
     for (source, records) in [
         test_support::object_definition_hydration_evidence(),
         test_support::object_definition_retained_input_evidence(),
-    ] {
+    ]
+    .into_iter()
+    .chain(test_support::object_definition_bound_join_evidence())
+    {
         let fixture = Fixture::new_for_stream(source, records, TelemetryStream::ObjectDefinitions).await;
         let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);
         *fixture.recovery.fault.lock().unwrap() = Fault::None;

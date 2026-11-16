@@ -146,6 +146,8 @@ impl ActivityCounters {
 pub enum ActivityWaitClass {
     /// A native execution-memory grant wait, distinct from compilation admission and allocator contention.
     ExecutionGrant,
+    /// A native optimizer admission wait. It identifies an affected request, not a memory holder.
+    CompilationAdmission,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]

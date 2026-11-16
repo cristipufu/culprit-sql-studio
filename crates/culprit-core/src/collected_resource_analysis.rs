@@ -82,9 +82,23 @@ pub struct CollectedCompilationAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedCompilerAdmissionAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::CompilerAdmissionReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedMaintenanceAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::MaintenanceReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedMaintenanceProgressAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::MaintenanceProgressReport,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]

@@ -32,12 +32,27 @@ impl Row {
                 .map(|(index, column)| (column.name().to_owned(), row.get(index).map(str::to_owned))),
         )
     }
-    pub(crate) fn value(&self, column: &str) -> Option<Option<&str>> {
+    /// Preserve absent columns separately from native NULL when another PostgreSQL-wire provider decodes a row.
+    pub fn value(&self, column: &str) -> Option<Option<&str>> {
         self.columns.iter().find(|(name, _)| name == column).map(|(_, value)| value.as_deref())
     }
 
     pub fn text(&self, column: &str) -> Option<String> {
         self.value(column).flatten().map(str::to_owned)
+    }
+
+    /// Retain exact unsigned native text. NULL is unknown; absent columns and noncanonical values are invalid.
+    pub fn unsigned_text(&self, column: &str) -> Result<Option<String>> {
+        match self.value(column) {
+            Some(Some(value)) => value
+                .parse::<u64>()
+                .ok()
+                .filter(|parsed| parsed.to_string() == value)
+                .map(|_| Some(value.to_owned()))
+                .ok_or_else(|| CollectionStop::InvalidPage.error()),
+            Some(None) => Ok(None),
+            None => Err(CollectionStop::InvalidPage.error()),
+        }
     }
 
     pub fn string(&self, column: &str) -> String {
@@ -141,5 +156,20 @@ mod tests {
         assert_eq!(quote_ident("app_user"), "app_user");
         assert_eq!(quote_ident("AppUser"), "\"AppUser\"");
         assert_eq!(quote_ident("we\"ird"), "\"we\"\"ird\"");
+    }
+
+    #[test]
+    fn exact_unsigned_text_preserves_native_null_and_full_precision_without_accepting_missing_or_malformed_values() {
+        for value in ["0", "9007199254740993", "18446744073709551615"] {
+            let row = Row::from_fields([("counter".into(), Some(value.into()))]);
+            assert_eq!(row.unsigned_text("counter").unwrap().as_deref(), Some(value));
+        }
+        let row = Row::from_fields([("counter".into(), None)]);
+        assert_eq!(row.unsigned_text("counter").unwrap(), None);
+        assert!(row.unsigned_text("missing").is_err());
+        for value in ["", " 1", "1 ", "+1", "-1", "01", "1.0", "18446744073709551616"] {
+            let row = Row::from_fields([("counter".into(), Some(value.into()))]);
+            assert!(row.unsigned_text("counter").is_err(), "accepted {value:?}");
+        }
     }
 }

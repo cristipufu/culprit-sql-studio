@@ -26,10 +26,39 @@ pub(crate) fn test_read_context(database: &str) -> culprit_core::telemetry::Nati
             incarnation: None,
         }
         .into(),
-        partition: SourcePartition::InstanceLocal { member: None, epoch: None },
+        partition: SourcePartition::InstanceLocal {
+            member: Some(SharedResourceIdentity {
+                engine: Engine::Mssql,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("controlled-test"),
+                native: NativeIdentity::new("instance"),
+            }),
+            epoch: Some("controlled-native-epoch".into()),
+        },
         observed_from: "2026-11-14T12:00:00Z".into(),
         observed_until: "2026-11-14T12:00:01Z".into(),
         database_writable: None,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_source(
+    dataset: culprit_core::telemetry::SnapshotDataset,
+) -> culprit_core::telemetry::CollectionDescription {
+    use culprit_core::telemetry::*;
+    let read = test_read_context("app");
+    CollectionDescription {
+        target: read.target,
+        partition: read.partition,
+        source: "controlled-cache-source".into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::Snapshot(StateSnapshotDescription {
+            dataset,
+            observed_from: read.observed_from,
+            observed_until: read.observed_until,
+            records: 1,
+            sources: vec![StateSourceCoverage::observed("controlled-native".into(), 1, true)],
+        }),
     }
 }
 
@@ -131,14 +160,39 @@ pub(crate) enum PlanInputOrigin<'a> {
     OriginalNative {
         read: Option<&'a culprit_core::telemetry::NativeReadContext>,
     },
-    StoredRedacted,
+    OriginalCapture {
+        source: &'a culprit_core::telemetry::CollectionDescription,
+    },
+    StoredRedacted {
+        proof: Option<&'a culprit_core::telemetry::MssqlRelationalInputProof>,
+    },
 }
 
 impl PlanInputOrigin<'_> {
     fn native_read(&self) -> Option<&culprit_core::telemetry::NativeReadContext> {
         match self {
             Self::OriginalNative { read } => *read,
-            Self::StoredRedacted => None,
+            _ => None,
+        }
+    }
+
+    fn original_target(&self) -> Option<&culprit_core::telemetry::CollectionTarget> {
+        match self {
+            Self::OriginalNative { read: Some(read) } if read.has_qualified_local_owner() => Some(&read.target),
+            Self::OriginalCapture { source }
+                if source.is_partition_qualified()
+                    && matches!(source.partition, culprit_core::telemetry::SourcePartition::InstanceLocal { .. }) =>
+            {
+                Some(&source.target)
+            }
+            _ => None,
+        }
+    }
+
+    fn retained_proof(&self) -> Option<&culprit_core::telemetry::MssqlRelationalInputProof> {
+        match self {
+            Self::StoredRedacted { proof } => *proof,
+            _ => None,
         }
     }
 }
@@ -146,19 +200,55 @@ impl PlanInputOrigin<'_> {
 /// Parse once and qualify declarations while the exact native statement/scope still exists. A detached Plan tree
 /// or a variable-shaped display name cannot establish which module owns an input introduced by inlined code.
 pub(crate) fn parse_cached_statement(xml: &str, context: CachedInputContext<'_>) -> Result<Plan> {
-    if !context.statement.is_valid()
-        || !context.statement.identity.has_plan_handle()
-        || !context.statement.identity.has_sql_handle()
-        || context.origin.native_read().is_some_and(|read| {
-            !read.is_valid() || read.target.database().is_none() || read.target.engine() != Engine::Mssql
-        })
-    {
+    if !context.is_valid() {
         return Err(crate::read::invalid_data());
     }
     culprit_core::xml::read(xml, |doc| {
         let doc = doc.map_err(unreadable)?;
         let hash = context.statement.query_hash.as_deref();
         read_statement(&doc, xml, StatementSelection::Native(hash), Some(context))
+    })
+}
+
+impl CachedInputContext<'_> {
+    fn is_valid(&self) -> bool {
+        self.statement.is_valid()
+            && self.statement.identity.has_plan_handle()
+            && self.statement.identity.has_sql_handle()
+            && self.origin.native_read().is_none_or(|read| {
+                read.is_valid() && read.target.database().is_some() && read.target.engine() == Engine::Mssql
+            })
+            && match &self.origin {
+                PlanInputOrigin::OriginalCapture { source } => {
+                    source.target.engine() == Engine::Mssql
+                        && source.target.database().is_some()
+                        && source.partition.is_valid_for(&source.target)
+                }
+                _ => true,
+            }
+    }
+}
+
+/// Optional classification of already-retained native bodies. No source I/O, counters or plan display tree are
+/// acquired here; unsupported/ambiguous native scope keeps the payload but supplies no positive proof.
+pub(crate) fn original_input_bindings(
+    xml: &str,
+    context: CachedInputContext<'_>,
+) -> Option<Vec<culprit_core::telemetry::MssqlRelationalInputBinding>> {
+    if !context.is_valid() || matches!(context.origin, PlanInputOrigin::StoredRedacted { .. }) {
+        return None;
+    }
+    culprit_core::xml::read(xml, |doc| {
+        let doc = doc.ok()?;
+        let statement =
+            select_statement(&doc, StatementSelection::Native(context.statement.query_hash.as_deref())).ok()?;
+        let bindings = relational_inputs::classify(statement, Some(&context)).ok()?;
+        (!bindings.is_empty()).then(|| {
+            bindings
+                .into_iter()
+                .map(|(node_id, input)| culprit_core::telemetry::MssqlRelationalInputBinding { node_id, input })
+                .collect()
+        })
     })
 }
 
@@ -172,23 +262,22 @@ enum StatementSelection<'a> {
     Native(Option<&'a str>),
 }
 
-fn read_statement(
-    doc: &Document,
-    xml: &str,
-    selection: StatementSelection<'_>,
-    input: Option<CachedInputContext<'_>>,
-) -> Result<Plan> {
-    fn query_plan_of<'a, 'input>(n: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
-        if n.has_tag_name_local("StmtSimple") {
-            child(n, "QueryPlan")
-        } else if n.has_tag_name_local("StmtCond") {
-            child(n, "Condition").and_then(|c| child(c, "QueryPlan"))
-        } else {
-            None
-        }
+fn query_plan_of<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
+    if node.has_tag_name_local("StmtSimple") {
+        child(node, "QueryPlan")
+    } else if node.has_tag_name_local("StmtCond") {
+        child(node, "Condition").and_then(|condition| child(condition, "QueryPlan"))
+    } else {
+        None
     }
+}
+
+fn select_statement<'a, 'input>(
+    doc: &'a Document<'input>,
+    selection: StatementSelection<'_>,
+) -> Result<Node<'a, 'input>> {
     let candidates = || doc.descendants().filter(|n| query_plan_of(*n).is_some());
-    let statement = match selection {
+    Ok(match selection {
         StatementSelection::Native(hash) => {
             let mut matching = candidates().filter(|node| {
                 hash.is_none_or(|hash| {
@@ -213,13 +302,22 @@ fn read_statement(
                 })
             })
             .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_statement")))?,
-    };
-    let query_plan = query_plan_of(statement).expect("filtered on QueryPlan above");
+    })
+}
+
+fn read_statement(
+    doc: &Document,
+    xml: &str,
+    selection: StatementSelection<'_>,
+    input: Option<CachedInputContext<'_>>,
+) -> Result<Plan> {
+    let statement = select_statement(doc, selection)?;
+    let query_plan = query_plan_of(statement).expect("selected on QueryPlan above");
     let root_op = child(query_plan, "RelOp")
         .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_operators")))?;
 
     let mut root = parse_relop(root_op, 1)?;
-    relational_inputs::qualify(&mut root, statement, input.as_ref());
+    relational_inputs::qualify(&mut root, statement, input.as_ref())?;
     let total_cost =
         statement.attribute("StatementSubTreeCost").and_then(|v| v.parse().ok()).unwrap_or(root.subtree_cost);
     let is_actual = query_plan.descendants().any(|n| n.has_tag_name_local("RunTimeInformation"));

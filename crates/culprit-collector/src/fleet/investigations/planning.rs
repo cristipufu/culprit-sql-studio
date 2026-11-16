@@ -107,7 +107,12 @@ async fn bounded(
             let episode = &checkpoint.episodes[offset];
             scanned += 1;
             if episode.analysis.needs_work()
-                && matches!(episode.signal, DiagnosticSignal::PageWait { .. } | DiagnosticSignal::RequestMemory { .. })
+                && matches!(
+                    episode.signal,
+                    DiagnosticSignal::PageWait { .. }
+                        | DiagnosticSignal::RequestMemory { .. }
+                        | DiagnosticSignal::CompilationAdmission { .. }
+                )
             {
                 let mut selected_resources = BTreeSet::new();
                 for target in targets {
@@ -127,9 +132,13 @@ async fn bounded(
                     }
                     let selector = match episode.signal {
                         DiagnosticSignal::RequestMemory { .. } => RecipeSelector::FocusedRequestMemory,
+                        DiagnosticSignal::CompilationAdmission { .. } => RecipeSelector::FocusedCompilationAdmission,
                         _ => RecipeSelector::FocusedPageWait,
                     };
-                    let route_key = (target.id.clone(), selector == RecipeSelector::FocusedRequestMemory);
+                    let route_key = (
+                        target.id.clone(),
+                        serde_json::to_vec(&selector).map_err(|_| CollectionStop::InvalidPage.error())?,
+                    );
                     if !routes.contains_key(&route_key) {
                         routes.insert(route_key.clone(), select_route(backend, target, &binding.revision, selector)?);
                     }

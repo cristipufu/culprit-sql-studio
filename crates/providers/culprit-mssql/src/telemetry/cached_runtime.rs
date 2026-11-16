@@ -15,7 +15,7 @@ impl SnapshotRecipe for CachedRuntime {
     fn query(&self, layout: &Self::Layout) -> String {
         cached_runtime::select_sql(layout)
     }
-    fn decode(&self, row: &Rec, _: &Self::Layout) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, _: &Self::Layout, _source: &CollectionDescription) -> Result<TelemetryRecord> {
         let runtime = cached_runtime::decode(row)?;
         Ok(TelemetryRecord::Operational(OperationalObservation {
             source: Self::SOURCE.name.into(),

@@ -62,6 +62,8 @@ fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_sel
         "statement-grants",
         "runtime-distributions",
         "compilation",
+        "compiler-admission",
+        "maintenance-progress",
         "cleanup",
     ] {
         let parsed = crate::Cli::try_parse_from([
@@ -239,6 +241,66 @@ fn human_summaries_bound_the_number_and_length_of_finding_titles() {
     let long = "x".repeat(1000);
     crate::output::append_brief_titles(&mut text, [long.as_str()].into_iter());
     assert_eq!(text.chars().filter(|character| *character == 'x').count(), crate::output::BRIEF_TITLE_CHARS);
+}
+
+#[test]
+fn maintenance_text_retains_native_phase_and_exact_counters_without_private_read_context() {
+    use culprit_core::{MaintenanceProgressEntry, MaintenanceProgressReport, Metric, SourceState, telemetry::*};
+    let exact = format::digits("9007199254740993".into());
+    let phase = "building index: scanning table";
+    let report = MaintenanceProgressReport {
+        source: "pg_stat_progress_create_index".into(),
+        context: NativeReadContext {
+            target: culprit_core::DatabaseIdentity::server(
+                culprit_core::Engine::Postgres,
+                "db",
+                "private-maintenance-cli-route.invalid",
+                5432,
+                None,
+            )
+            .into(),
+            partition: SourcePartition::Target,
+            observed_from: "2020-01-01T12:00:00Z".into(),
+            observed_until: "2020-01-01T12:00:01Z".into(),
+            database_writable: None,
+        },
+        source_state: SourceState::Partial,
+        source_reason: None,
+        read_complete: true,
+        native_rows: 1,
+        observed_rows: 1,
+        binding: MaintenanceProgressBinding::UnverifiedOriginalScope,
+        membership: MaintenanceProgressMembership::Observed,
+        title: t!("view.maintenance_progress.title"),
+        summary: t!("view.maintenance_progress.summary.unverified"),
+        limitations: vec![t!("view.maintenance_progress.limit.point")],
+        entries: vec![MaintenanceProgressEntry {
+            observation_key: digest(b"native-maintenance-point"),
+            actor: ActivityKey {
+                session: NativeActivityIdentity { id: "61".into(), generation: "native-login".into() },
+                request: Some(NativeActivityIdentity { id: "statement".into(), generation: "native-start".into() }),
+                transaction: None,
+            },
+            database_oid: "16384".into(),
+            relation: None,
+            index: None,
+            command: IndexBuildCommand::CreateIndex,
+            phase: phase.into(),
+            title: t!("view.maintenance_progress.entry.title", session = "61"),
+            explanation: t!("view.maintenance_progress.entry.postgres"),
+            metrics: vec![Metric::said_text(
+                culprit_core::key!("view.maintenance_progress.metric.blocks_total"),
+                exact.clone(),
+            )],
+            investigation: t!("view.maintenance_progress.investigate"),
+            verify: t!("view.maintenance_progress.verify"),
+        }],
+    };
+    let text = observations::maintenance_progress(&report);
+    assert!(text.contains(phase) && text.contains(&exact));
+    assert!(text.contains(&t!("evidence.cli.source_partial")));
+    assert!(!text.contains("private-maintenance-cli-route"));
+    assert!(!text.contains("9007199254740992"));
 }
 
 #[test]
@@ -506,6 +568,8 @@ async fn group_selection_on_non_query_analysis_stops_before_opening_configuratio
         "runtime-distributions",
         "cached-plans",
         "compilation",
+        "compiler-admission",
+        "maintenance-progress",
         "maintenance",
         "cleanup",
         "tuning",

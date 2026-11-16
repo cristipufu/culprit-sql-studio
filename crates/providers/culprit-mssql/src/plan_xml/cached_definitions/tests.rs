@@ -56,6 +56,7 @@ fn payload(raw: &str, redact: fn(&str, Engine) -> DefinitionPayload) -> MssqlCac
 fn cached(xml: &str) -> MssqlCachedDefinition {
     let context = context();
     MssqlCachedDefinition {
+        relational_input_proof: None,
         query_plan_hash: None,
         statement: payload(SQL, DefinitionPayload::sql),
         estimated_plan: payload(xml, DefinitionPayload::plan),
@@ -73,7 +74,11 @@ fn cached(xml: &str) -> MssqlCachedDefinition {
 #[test]
 fn native_statement_selection_does_not_substitute_the_heaviest_plan() {
     let xml = document(&format!("{}{}", statement(HASH, 1, false), statement("0xFEDCBA9876543210", 99, false)));
-    let selected = parse_cached_definition(&cached(&xml)).unwrap();
+    let selected = parse_cached_definition(
+        &cached(&xml),
+        &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions),
+    )
+    .unwrap();
     assert_eq!(selected.total_cost, 1.0);
     assert_eq!(selected.facts().query_hash.as_deref(), Some(HASH));
     assert_eq!(super::super::parse(&xml).unwrap().total_cost, 99.0, "pasted-plan behavior is independent");
@@ -86,7 +91,13 @@ fn missing_and_duplicate_native_hash_matches_cannot_become_another_statement() {
         format!("{}{}", statement(HASH, 1, false), statement(HASH, 99, false)),
     ] {
         let xml = document(&statements);
-        assert!(parse_cached_definition(&cached(&xml)).is_err());
+        assert!(
+            parse_cached_definition(
+                &cached(&xml),
+                &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions)
+            )
+            .is_err()
+        );
         assert!(super::super::parse(&xml).is_ok(), "a pasted batch remains independently inspectable");
     }
 }
@@ -95,12 +106,24 @@ fn missing_and_duplicate_native_hash_matches_cannot_become_another_statement() {
 fn a_missing_hash_requires_one_statement_and_nonzero_native_tokens() {
     let mut definition = cached(&document(&statement(HASH, 1, false)));
     definition.context.query_hash = None;
-    assert!(parse_cached_definition(&definition).is_ok());
+    assert!(
+        parse_cached_definition(
+            &definition,
+            &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions)
+        )
+        .is_ok()
+    );
     definition.estimated_plan = payload(
         &document(&format!("{}{}", statement(HASH, 1, false), statement("0xFEDCBA9876543210", 99, false))),
         DefinitionPayload::plan,
     );
-    assert!(parse_cached_definition(&definition).is_err());
+    assert!(
+        parse_cached_definition(
+            &definition,
+            &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions)
+        )
+        .is_err()
+    );
     for zero in ["plan", "sql"] {
         let mut definition = cached(&document(&statement(HASH, 1, false)));
         if zero == "plan" {
@@ -109,14 +132,24 @@ fn a_missing_hash_requires_one_statement_and_nonzero_native_tokens() {
             definition.context.identity.sql_handle = "0x0000".into();
             definition.module_parameters = None;
         }
-        assert!(parse_cached_definition(&definition).is_err());
+        assert!(
+            parse_cached_definition(
+                &definition,
+                &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions)
+            )
+            .is_err()
+        );
     }
 }
 
 #[test]
 fn cached_module_classification_does_not_manufacture_actual_rows_or_a_tvp_problem() {
     let definition = cached(&document(&statement(HASH, 1, false)));
-    let plan = parse_cached_definition(&definition).unwrap();
+    let plan = parse_cached_definition(
+        &definition,
+        &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions),
+    )
+    .unwrap();
     assert_eq!(plan.root.facts().relational_input.unwrap().qualified_kind(), RelationalInputKind::TableValuedParameter);
     assert_eq!(plan.kind, PlanKind::Estimated);
     assert_eq!(plan.root.est_rows, 100.0);
@@ -124,12 +157,19 @@ fn cached_module_classification_does_not_manufacture_actual_rows_or_a_tvp_proble
     assert!(!culprit_core::insights::insights(&plan).iter().any(|insight| insight.rule == "misestimate"));
     let mut foreign = definition;
     foreign.module_parameters.as_mut().unwrap().sql_handle = "0x0506".into();
-    assert!(parse_cached_definition(&foreign).is_err());
+    assert!(
+        parse_cached_definition(
+            &foreign,
+            &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions)
+        )
+        .is_err()
+    );
 }
 
 #[test]
 fn retained_actual_rows_have_no_borrowed_module_kind_cache_population_or_placeholder_time() {
     let definition = MssqlRetainedPlanDefinition {
+        relational_input_proof: None,
         context: context(),
         statement_executions: Some(u64::MAX.to_string()),
         last_start_without_offset: Some("2026-11-14T11:59:59.997".into()),
@@ -142,7 +182,11 @@ fn retained_actual_rows_have_no_borrowed_module_kind_cache_population_or_placeho
         module_parameters: None,
         batch_plan: payload(&document(&statement(HASH, 1, true)), DefinitionPayload::plan),
     };
-    let plan = parse_retained_definition(&definition).unwrap();
+    let plan = parse_retained_definition(
+        &definition,
+        &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::RetainedPlans),
+    )
+    .unwrap();
     assert_eq!(plan.kind, PlanKind::Actual);
     assert_eq!(plan.root.act_rows, Some(10000.0));
     assert_eq!(plan.root.act_executions, Some(1.0));
@@ -157,10 +201,23 @@ fn retained_actual_rows_have_no_borrowed_module_kind_cache_population_or_placeho
 fn unavailable_and_malformed_native_plans_remain_unusable() {
     let mut definition = cached(&document(&statement(HASH, 1, false)));
     definition.estimated_plan.payload = DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted };
-    assert!(parse_cached_definition(&definition).is_err());
+    assert!(
+        parse_cached_definition(
+            &definition,
+            &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions)
+        )
+        .is_err()
+    );
     definition.estimated_plan = payload("<ShowPlanXML><broken>", DefinitionPayload::plan);
-    assert!(parse_cached_definition(&definition).is_err());
+    assert!(
+        parse_cached_definition(
+            &definition,
+            &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::CachedDefinitions)
+        )
+        .is_err()
+    );
     let retained = MssqlRetainedPlanDefinition {
+        relational_input_proof: None,
         context: context(),
         statement_executions: Some("0".into()),
         last_start_without_offset: None,
@@ -173,7 +230,13 @@ fn unavailable_and_malformed_native_plans_remain_unusable() {
         module_parameters: None,
         batch_plan: definition.estimated_plan,
     };
-    assert!(parse_retained_definition(&retained).is_err());
+    assert!(
+        parse_retained_definition(
+            &retained,
+            &crate::plan_xml::test_source(culprit_core::telemetry::SnapshotDataset::RetainedPlans)
+        )
+        .is_err()
+    );
 }
 
 #[test]

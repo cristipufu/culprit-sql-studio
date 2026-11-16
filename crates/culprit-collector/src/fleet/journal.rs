@@ -11,7 +11,7 @@ pub(in crate::fleet) use investigations::FocusedSettlement;
 pub(in crate::fleet) use investigations::FocusedStage;
 
 const MAX_CHECKPOINT_BYTES: usize = 256 * 1024;
-const JOURNAL_VERSION: i64 = 6;
+const JOURNAL_VERSION: i64 = 7;
 
 pub struct FleetJournal {
     files: BlockingState<Files>,
@@ -109,7 +109,8 @@ impl Files {
             .map_err(|_| state_failed())?;
         if created {
             let transaction = connection.unchecked_transaction().map_err(|_| state_failed())?;
-            transaction.execute_batch("PRAGMA user_version=6; CREATE TABLE assignment(id TEXT NOT NULL); CREATE TABLE jobs(id TEXT PRIMARY KEY,state_json TEXT NOT NULL); CREATE TABLE gaps(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,event_json TEXT NOT NULL);
+            transaction.pragma_update(None, "user_version", JOURNAL_VERSION).map_err(|_| state_failed())?;
+            transaction.execute_batch("CREATE TABLE assignment(id TEXT NOT NULL); CREATE TABLE jobs(id TEXT PRIMARY KEY,state_json TEXT NOT NULL); CREATE TABLE gaps(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,event_json TEXT NOT NULL);
                 CREATE TABLE admission_clock(id INTEGER PRIMARY KEY CHECK(id=1),state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
                 CREATE TABLE admission_jobs(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));
                 CREATE TABLE admission_resources(id TEXT PRIMARY KEY,state_json TEXT NOT NULL CHECK(length(state_json)<=4096));

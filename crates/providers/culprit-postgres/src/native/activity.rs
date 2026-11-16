@@ -74,8 +74,10 @@ pub fn target_query(query_id: bool, pid: u32, backend_types: &str, extra_columns
 }
 fn metadata_query(query_id: bool, extra_columns: &str, selection: &str, limit: usize, ctes: &str) -> String {
     let query_id = if query_id { "a.query_id::text" } else { "NULL::text" };
+    // A volatile clock keeps this one-row CTE from being folded on PostgreSQL 12+; earlier versions materialize
+    // CTEs already. The explicit MATERIALIZED keyword would needlessly exclude PostgreSQL 11 Live reads.
     format!(
-        "WITH {ctes}stamp AS MATERIALIZED (SELECT pg_catalog.clock_timestamp() AS at)
+        "WITH {ctes}stamp AS (SELECT pg_catalog.clock_timestamp() AS at)
         SELECT {} AS observed_at,a.pid::text AS pid,{} AS backend_start,{} AS query_start,{} AS transaction_start,
         a.datid::text AS database_oid,a.datname AS database,a.usename AS username,a.application_name,
         coalesce(a.client_hostname,pg_catalog.host(a.client_addr)) AS host,coalesce(a.state,a.backend_type) AS state,
@@ -131,11 +133,8 @@ pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             (Some(kind), None) => Some(kind),
             _ => None,
         };
-        let statement_identity = request.as_ref().map(|request| {
-            NativeIdentity::new(digest(format!("{pid}|{backend_start}|{}", request.generation).as_bytes()))
-                .qualified("source", "pg_stat_activity")
-                .qualified("basis", "backend-query-start")
-        });
+        let statement_identity =
+            request.as_ref().map(|request| statement_identity(&pid, &backend_start, &request.generation));
         let observation = ActivityObservation {
             waiting_on_lock: waiting_on_lock(&row),
             blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
@@ -180,6 +179,13 @@ pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
         None
     };
     Ok(ActivityRecord { facts, row, sql: None })
+}
+
+/// One source-owned token representation for Activity and generation-bound native progress.
+pub fn statement_identity(pid: &str, backend_start: &str, query_start: &str) -> NativeIdentity {
+    NativeIdentity::new(digest(format!("{pid}|{backend_start}|{query_start}").as_bytes()))
+        .qualified("source", "pg_stat_activity")
+        .qualified("basis", "backend-query-start")
 }
 
 /// Match the native SQL projection's UTC microsecond spelling without rounding a finer supplied timestamp.

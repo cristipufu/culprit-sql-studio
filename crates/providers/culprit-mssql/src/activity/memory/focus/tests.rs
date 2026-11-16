@@ -80,7 +80,7 @@ pub(crate) fn replies(rows: Vec<Rec>, enrich: bool) -> Vec<crate::read::ReadResu
 fn only_the_native_execution_grant_wait_class_authorizes_the_memory_question() {
     for (name, expected) in [
         ("RESOURCE_SEMAPHORE", Some(ActivityWaitClass::ExecutionGrant)),
-        ("RESOURCE_SEMAPHORE_QUERY_COMPILE", None),
+        ("RESOURCE_SEMAPHORE_QUERY_COMPILE", Some(ActivityWaitClass::CompilationAdmission)),
         ("CMEMTHREAD", None),
         ("MEMORY_ALLOCATION_EXT", None),
         ("RESOURCE_SEMAPHORE_FUTURE", None),

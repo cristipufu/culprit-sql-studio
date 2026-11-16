@@ -45,7 +45,7 @@ pub mod catalog {
 pub mod activity {
     pub use crate::native::activity::{
         ActivityFrame, ActivityRecord, BaselineFrame, decode_row, enrich_for, generation_timestamp,
-        observe_baseline_rows, observe_rows, query_layout, target_query,
+        observe_baseline_rows, observe_rows, query_layout, statement_identity, target_query,
     };
 }
 /// Native SQL configuration layout, with an explicit allowlist and source scope supplied by its provider.

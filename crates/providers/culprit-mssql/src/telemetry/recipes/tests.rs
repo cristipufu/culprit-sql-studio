@@ -37,6 +37,10 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
         RecipeSelector::FocusedRequestMemory => CollectionSelection::FocusedRequestMemory {
             focus: Box::new(crate::activity::memory::focus::tests::original_focus()),
         },
+        RecipeSelector::FocusedCompilationAdmission => CollectionSelection::FocusedCompilationAdmission {
+            focus: Box::new(crate::activity::compiler_admission::tests::focus()),
+        },
+        RecipeSelector::MaintenanceProgress => panic!("the SQL Server catalog does not declare maintenance progress"),
         RecipeSelector::CacheEntryMemory => {
             CollectionSelection::CacheEntryMemory { focus: Box::new(crate::cache_entry_memory::tests::focus().await) }
         }
@@ -72,6 +76,24 @@ async fn every_declared_recipe_uses_exactly_one_actual_constructor_without_nativ
                     partition: SourcePartition::InstanceLocal {
                         member: Some(resource.clone()),
                         epoch: Some("native-shared-generation".into()),
+                    },
+                };
+            }
+            if let (
+                CollectionSelection::FocusedCompilationAdmission { focus },
+                CollectionSubject::Shared { resource },
+            ) = (&mut selection, &subject)
+            {
+                // Constructor-only identity relation; no source has observed or authenticated these fixture names.
+                let SourcePartition::InstanceLocal { member, .. } = &mut focus.partition else {
+                    panic!("native member")
+                };
+                *member = Some(resource.clone());
+                selection = CollectionSelection::SharedCompilationAdmissionFocus {
+                    focus: focus.clone(),
+                    partition: SourcePartition::InstanceLocal {
+                        member: Some(resource.clone()),
+                        epoch: Some("synthetic-shared-compiler-generation".into()),
                     },
                 };
             }

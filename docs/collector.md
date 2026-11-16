@@ -331,6 +331,12 @@ cannot supply it. Standalone compilation-counter capture does not fetch statemen
 unavailable there. An explicit policy is not proof of every individual compilation cause, harmful plan reuse,
 concurrent compilers or current memory pressure.
 
+`compiler-admission` explains an exact affected request and independently captured optimizer gateways. It preserves
+native resource-pool identities, active/waiting counts and admission policy. The request's pool membership and
+current compilation-memory holders remain unknown; gateway counts do not establish memory exhaustion. Scans retain
+the gateway facts they already read. A focused collector selection binds the original request, statement and native
+compute generation, stays within its declared budget, and remains cost-unqualified until native qualification passes.
+
 `maintenance` explains current maintenance statements and their participation in blocking from an authenticated
 activity capture. It reuses captured statements, request/session generations and native wait-owner relationships;
 it does not query operation progress or locks again. Complete SQL identifies the operation, while missing SQL stays
@@ -340,6 +346,13 @@ locks, especially when several requests share that session. Raw statement text s
 the report carries references, explanations and explicit gaps. Full text outside the warehouse preview requires
 the same bounded recovery option. This mode does not establish operation-specific resource consumption, an object
 target or completed/paused/failed maintenance history from a current statement alone.
+
+`maintenance-progress` reads retained PostgreSQL or YugabyteDB index-build points through the same native readers
+as live progress. A `maintenance-progress` selection names the original Activity participant. The capture retains
+its native object IDs, command, phase and exact work counters, with PostgreSQL heap/phase work separate from YSQL
+backfill estimates. Missing original compute identity prevents a matched historical attribution; the current read
+cannot fill it retroactively. An absent progress row never establishes completion. This investigation adds no
+ordinary scan query and remains cost-unqualified.
 
 `cleanup` explains retained cleanup horizons and version-store observations through the scan's pure view.
 PostgreSQL `cleanup` captures retain sessions, prepared transactions and replication slots, their separate data

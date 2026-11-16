@@ -4,6 +4,7 @@ use super::*;
 #[derive(Clone, Copy)]
 enum Route {
     Activity,
+    MaintenanceProgress,
     Operational,
     Snapshot(Recipe),
 }
@@ -11,22 +12,28 @@ impl Route {
     fn collection(self) -> TelemetryCollection {
         match self {
             Self::Activity => TelemetryCollection::Activity,
+            Self::MaintenanceProgress => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
             Self::Operational => TelemetryCollection::Snapshot(SnapshotDataset::Operational),
             Self::Snapshot(recipe) => TelemetryCollection::Snapshot(recipe.dataset()),
         }
     }
     fn selector(self) -> RecipeSelector {
-        RecipeSelector::Collection(self.collection())
+        match self {
+            Self::MaintenanceProgress => RecipeSelector::MaintenanceProgress,
+            _ => RecipeSelector::Collection(self.collection()),
+        }
     }
     fn bounded_budget(self, requested: &CollectionBudget) -> CollectionBudget {
         match self {
             Self::Activity => activity::bounded_budget(requested),
+            Self::MaintenanceProgress => crate::progress::bounded_budget(requested),
             Self::Operational | Self::Snapshot(_) => requested.clone(),
         }
     }
     fn open(self, connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
         match self {
             Self::Activity => activity::source(connector, request),
+            Self::MaintenanceProgress => crate::progress::source(connector, request),
             Self::Operational => operational::source(connector, request),
             Self::Snapshot(recipe) => snapshot_source(connector, request, recipe),
         }
@@ -72,6 +79,11 @@ impl Registration {
 
 const REGISTRATIONS: &[Registration] = &[
     Registration { id: "yugabyte.activity", purpose: RecipePurpose::Baseline, route: Route::Activity },
+    Registration {
+        id: "yugabyte.maintenance-progress",
+        purpose: RecipePurpose::Investigation,
+        route: Route::MaintenanceProgress,
+    },
     Registration { id: "yugabyte.operational", purpose: RecipePurpose::Baseline, route: Route::Operational },
     Registration::snapshot("yugabyte.statement-counters", Recipe::Statements).baseline(),
     Registration::snapshot("yugabyte.statement-definitions", Recipe::Definitions),

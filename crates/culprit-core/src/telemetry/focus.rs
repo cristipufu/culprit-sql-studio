@@ -2,9 +2,11 @@
 use super::*;
 use crate::{ObservedWaitResource, WaitResourceKind};
 
+mod compiler_admission;
 mod plan;
 mod question;
 mod request_memory;
+pub use compiler_admission::{ActivityCompilationAdmissionFocusResult, CompilationAdmissionMembership};
 pub use plan::{DiagnosticFocusPlan, PageWaitFocusPlan};
 pub use question::DiagnosticFocus;
 pub use request_memory::{ActivityRequestMemoryFocusResult, RequestMemoryMembership};
@@ -101,7 +103,7 @@ impl ActivityRequestFocus {
             && canonical_time(&self.original_observed_at).is_ok()
             && self.original.is_valid()
             && self.original.key.request.is_some()
-            && self.original.scope == ActivityScopeBasis::RequestDatabase
+            && matches!(self.original.scope, ActivityScopeBasis::RequestDatabase | ActivityScopeBasis::SessionDatabase)
             && self
                 .target
                 .database()
@@ -135,6 +137,7 @@ impl ActivityWaitFocus {
     }
     pub fn is_valid(&self) -> bool {
         self.participant.is_valid()
+            && self.participant.original.scope == ActivityScopeBasis::RequestDatabase
             && self.resource.is_valid()
             && matches!(self.resource.kind, WaitResourceKind::MemoryPage | WaitResourceKind::PageIo)
             && self

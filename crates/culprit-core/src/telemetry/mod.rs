@@ -18,6 +18,7 @@ mod check_constraints;
 mod cleanup;
 mod columns;
 mod compilation;
+mod compiler_admission;
 mod counters;
 mod definitions;
 mod delivery;
@@ -36,6 +37,7 @@ mod indexes;
 mod investigation_events;
 mod investigations;
 mod io;
+mod maintenance_progress;
 mod memory_failures;
 mod missing_indexes;
 mod monitor;
@@ -54,6 +56,7 @@ mod queues;
 mod read_accounting;
 mod read_metrics;
 mod recipes;
+mod relational_input_proof;
 mod replication;
 mod request_resources;
 mod resources;
@@ -88,6 +91,7 @@ pub use check_constraints::*;
 pub use cleanup::*;
 pub use columns::*;
 pub use compilation::*;
+pub use compiler_admission::*;
 pub use counters::*;
 pub use definitions::*;
 pub use delivery::*;
@@ -106,6 +110,7 @@ pub use indexes::*;
 pub use investigation_events::*;
 pub use investigations::*;
 pub use io::*;
+pub use maintenance_progress::*;
 pub use memory_failures::*;
 pub use missing_indexes::*;
 pub use monitor::*;
@@ -124,6 +129,7 @@ pub use queues::*;
 pub use read_accounting::*;
 pub use read_metrics::*;
 pub use recipes::*;
+pub use relational_input_proof::*;
 pub use replication::*;
 pub use request_resources::*;
 pub use resources::*;
@@ -267,10 +273,18 @@ impl CollectionRequest {
         self.subject.validate()?;
         self.budget.validate()?;
         match &self.selection {
-            CollectionSelection::Snapshot { dataset: SnapshotDataset::CacheEntryMemory } => {
+            CollectionSelection::Snapshot {
+                dataset: SnapshotDataset::CacheEntryMemory | SnapshotDataset::MaintenanceProgress,
+            } => {
                 return Err(CollectionStop::InvalidPage.error());
             }
             CollectionSelection::CacheEntryMemory { focus } => {
+                self.subject.require_database()?;
+                if !focus.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::MaintenanceProgress { focus } => {
                 self.subject.require_database()?;
                 if !focus.is_valid() {
                     return Err(CollectionStop::InvalidPage.error());
@@ -282,22 +296,28 @@ impl CollectionRequest {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
+            CollectionSelection::FocusedCompilationAdmission { focus } => {
+                self.subject.require_database()?;
+                if !focus.is_compilation_admission_focus() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
             CollectionSelection::FocusedPageWait { focus } => {
                 if self.subject != CollectionSubject::Database || !focus.is_valid_for(&self.subject) {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
             CollectionSelection::SharedPageWaitFocus { focus, partition } => {
-                let CollectionSubject::Shared { resource } = &self.subject else {
-                    return Err(CollectionStop::InvalidPage.error());
-                };
-                if !focus.is_valid_for(&self.subject)
-                    || !partition.is_valid_for(&CollectionTarget::Shared(resource.clone()))
-                    || !matches!(partition, SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) }
-                        if member == resource)
-                {
+                if !focus.is_valid_for(&self.subject) {
                     return Err(CollectionStop::InvalidPage.error());
                 }
+                self.validate_shared_participant(focus.participant(), partition)?;
+            }
+            CollectionSelection::SharedCompilationAdmissionFocus { focus, partition } => {
+                if !focus.is_compilation_admission_focus() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                self.validate_shared_participant(focus, partition)?;
             }
             CollectionSelection::Diagnostics { parent, controller_version, step_id } => {
                 if !parent.is_valid() || *controller_version == 0 || !valid_digest(step_id) {
@@ -308,6 +328,20 @@ impl CollectionRequest {
             _ => {
                 self.bounds()?;
             }
+        }
+        Ok(())
+    }
+
+    fn validate_shared_participant(&self, focus: &ActivityRequestFocus, partition: &SourcePartition) -> Result<()> {
+        let CollectionSubject::Shared { resource } = &self.subject else {
+            return Err(CollectionStop::InvalidPage.error());
+        };
+        if !focus.is_valid_for(&self.subject)
+            || !partition.is_valid_for(&CollectionTarget::Shared(resource.clone()))
+            || !matches!(partition, SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) }
+                if member == resource)
+        {
+            return Err(CollectionStop::InvalidPage.error());
         }
         Ok(())
     }
@@ -529,6 +563,11 @@ impl TelemetryRecord {
                 row.fact.redact(source.target.engine());
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
+                    (SourceObservation::MaintenanceProgress { .. }, OperationalFact::MaintenanceProgress(point)) => {
+                        accepted && point.fits_source_scope(source)
+                    }
+                    (SourceObservation::MaintenanceProgress { .. }, _)
+                    | (_, OperationalFact::MaintenanceProgress(_)) => false,
                     (_, OperationalFact::PageWait(page)) => {
                         accepted
                             && page.fits_source_scope(source)
@@ -552,6 +591,10 @@ impl TelemetryRecord {
                         accepted && result.focus.matches_capture_scope(source) && result.accepts_observation(row)
                     }
                     (SourceObservation::FocusedRequestMemory { .. }, _) => false,
+                    (SourceObservation::FocusedCompilationAdmission { result, .. }, _) => {
+                        accepted && result.focus.matches_capture_scope(source) && result.accepts_observation(row)
+                    }
+                    (_, OperationalFact::CompilerWaiter(_)) => false,
                     (SourceObservation::CacheEntryMemory { .. }, _)
                     | (_, OperationalFact::MssqlCacheEntryMemory(_)) => false,
                     (SourceObservation::Diagnostics(description), OperationalFact::DiagnosticRevision(revision)) => {
@@ -567,6 +610,7 @@ impl TelemetryRecord {
             Self::ObjectDefinition(row) => {
                 *row = row.for_export(source.target.engine())?;
                 source.observation.accepts_snapshot_record(TelemetryStream::ObjectDefinitions, &row.source)
+                    && row.fact.relational_input_proof_matches(source)
             }
             Self::WaitCounter(row) => {
                 source.observation.accepts_snapshot_record(TelemetryStream::WaitCounterSamples, &row.source)

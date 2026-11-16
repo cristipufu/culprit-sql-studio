@@ -187,6 +187,12 @@ fn signals(
     if row.key.request.is_none() {
         return signals;
     }
+    if row.wait.as_ref().is_some_and(|wait| wait.class == Some(ActivityWaitClass::CompilationAdmission)) {
+        signals.push(DiagnosticSignal::CompilationAdmission {
+            key: row.key.clone(),
+            statement_identity: row.statement_identity.clone(),
+        });
+    }
     if row.wait.as_ref().is_some_and(|wait| wait.class == Some(ActivityWaitClass::ExecutionGrant)) {
         signals.push(DiagnosticSignal::RequestMemory {
             key: row.key.clone(),

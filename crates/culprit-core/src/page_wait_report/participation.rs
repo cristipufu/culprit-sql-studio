@@ -21,6 +21,7 @@ impl PageWaitActivityEvidence<'_> {
     pub fn validate(&self) -> Result<()> {
         let snapshot = self.source.observation.snapshot().ok_or_else(|| CollectionStop::InvalidPage.error())?;
         if snapshot.dataset != SnapshotDataset::PageWaitTargets
+            || self.original.original.scope != ActivityScopeBasis::RequestDatabase
             || !self.source.observation.covers_request()
             || !self.original.matches_capture_scope(self.source)
             || ObservationBounds::new(&self.original.original_observed_at, &snapshot.observed_until).is_none()

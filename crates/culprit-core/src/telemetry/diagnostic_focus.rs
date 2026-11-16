@@ -1,6 +1,8 @@
 //! A later lookup can explain retained evidence without rewriting its original native observation.
 use super::*;
+mod compiler_admission;
 mod request_memory;
+pub use compiler_admission::{DiagnosticCompilerRow, analyze_diagnostic_compilation_admission};
 pub use request_memory::{DiagnosticMemoryRow, analyze_diagnostic_memory};
 
 pub struct DiagnosticFocusRow<'a> {

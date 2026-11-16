@@ -6,7 +6,7 @@ use crate::read::{
 use culprit_core::{Coverage, MeasurementScope, Result, Signal, SignalScope, SignalUnit, telemetry::*};
 
 const NATIVE_OBJECT: &str = "sys.dm_exec_query_optimizer_memory_gateways";
-const MAX_GATEWAYS: usize = 512;
+const MAX_GATEWAYS: usize = MAX_COMPILER_GATEWAYS;
 const SQL: &str = r#"SELECT /* culprit */ TOP (@P1)
  pool_id,name,max_count,active_count,waiter_count,threshold_factor,threshold,is_active
  FROM sys.dm_exec_query_optimizer_memory_gateways ORDER BY pool_id,name OPTION(MAXDOP 1)"#;
@@ -138,17 +138,22 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R, limit: usize) -> Result<
     Ok(samples)
 }
 
+pub(crate) struct CollectedGateways {
+    pub signals: Vec<Signal>,
+    pub snapshot: CompilerAdmissionSnapshot,
+}
+
 pub(crate) async fn collect(
     pool: std::sync::Arc<crate::conn::Pool>,
     probe: &crate::probe::Probe,
     coverage: &mut Coverage,
-) -> Vec<Signal> {
+) -> Option<CollectedGateways> {
     if probe.major < 13 && !probe.is_azure_sql_database() {
         coverage.not_applicable(
             &crate::sources::COMPILATION_GATEWAYS,
             culprit_core::message!("provider.mssql.compiler_gateways.unavailable_version"),
         );
-        return vec![];
+        return None;
     }
     let mut reader = ReadSession::new(pool, CollectionBudget::default());
     let result = read(&mut reader, MAX_GATEWAYS).await;
@@ -159,13 +164,29 @@ pub(crate) async fn collect(
             error
         }
     });
-    let Some(gateways) = coverage.read_rows(&crate::sources::COMPILATION_GATEWAYS, result) else { return vec![] };
+    let gateways = coverage.read_rows(&crate::sources::COMPILATION_GATEWAYS, result)?;
     let signals = gateways.iter().filter_map(|sample| sample.waiting_signal().transpose()).collect::<Result<Vec<_>>>();
     match signals {
-        Ok(signals) => signals,
+        Ok(signals) => {
+            let observations = match gateways.iter().map(Gateway::observation).collect::<Result<Vec<_>>>() {
+                Ok(rows) => rows,
+                Err(error) => {
+                    coverage.source_failed(&crate::sources::COMPILATION_GATEWAYS, &error);
+                    return None;
+                }
+            };
+            Some(CollectedGateways {
+                signals,
+                snapshot: CompilerAdmissionSnapshot {
+                    source: crate::sources::COMPILATION_GATEWAYS.name.into(),
+                    context: None,
+                    observations,
+                },
+            })
+        }
         Err(error) => {
             coverage.source_failed(&crate::sources::COMPILATION_GATEWAYS, &error);
-            vec![]
+            None
         }
     }
 }

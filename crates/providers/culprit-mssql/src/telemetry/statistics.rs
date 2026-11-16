@@ -19,7 +19,7 @@ impl SnapshotRecipe for Statistics {
     fn complete_record_scope(&self, record: &TelemetryRecord) -> bool {
         matches!(record,TelemetryRecord::Operational(OperationalObservation { fact:OperationalFact::MssqlStatistics(statistics),.. }) if statistics.properties_available)
     }
-    fn decode(&self, row: &Rec, _: &()) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, _: &(), _source: &CollectionDescription) -> Result<TelemetryRecord> {
         let statistics = statistics::decode(row)?;
         Ok(TelemetryRecord::Operational(OperationalObservation {
             source: Self::SOURCE.name.into(),

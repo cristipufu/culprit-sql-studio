@@ -16,7 +16,7 @@ impl SnapshotRecipe for Objects {
     fn query(&self, _: &()) -> String {
         recorded::select_sql(false)
     }
-    fn decode(&self, row: &Rec, _: &()) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, _: &(), _source: &CollectionDescription) -> Result<TelemetryRecord> {
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),
             ObjectDefinitionFact::MssqlObject(Box::new(recorded::decode(row)?)),

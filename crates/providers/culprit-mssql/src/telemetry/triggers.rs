@@ -16,7 +16,7 @@ impl SnapshotRecipe for Triggers {
     fn query(&self, _: &()) -> String {
         triggers::select_sql(triggers::Selection::AllDml)
     }
-    fn decode(&self, row: &Rec, _: &()) -> Result<TelemetryRecord> {
+    fn decode(&self, row: &Rec, _: &(), _source: &CollectionDescription) -> Result<TelemetryRecord> {
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),
             ObjectDefinitionFact::MssqlDmlTrigger(Box::new(triggers::decode(row)?)),

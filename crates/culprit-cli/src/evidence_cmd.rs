@@ -166,7 +166,9 @@ enum Analysis {
     RuntimeDistributions,
     CachedPlans,
     Compilation,
+    CompilerAdmission,
     Maintenance,
+    MaintenanceProgress,
     Cleanup,
     Tuning,
 }
@@ -193,6 +195,8 @@ impl Analysis {
             | Self::CacheEntryMemory
             | Self::RuntimeDistributions
             | Self::Compilation
+            | Self::CompilerAdmission
+            | Self::MaintenanceProgress
             | Self::Cleanup => {
                 vec![EvidenceFamily::OperationalSamples]
             }
@@ -287,9 +291,17 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             let analysis = culprit_engine::collected_resources::compilation(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::compilation(&analysis.report))?;
         }
+        Some(Analysis::CompilerAdmission) => {
+            let analysis = culprit_engine::collected_resources::compiler_admission(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::compiler_admission(&analysis.report))?;
+        }
         Some(Analysis::Maintenance) => {
             let analysis = culprit_engine::collected_resources::maintenance(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::maintenance(&analysis.report))?;
+        }
+        Some(Analysis::MaintenanceProgress) => {
+            let analysis = culprit_engine::collected_resources::maintenance_progress(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::maintenance_progress(&analysis.report))?;
         }
         Some(Analysis::Tuning) => {
             let analysis = culprit_engine::collected_resources::tuning(&capture)?;

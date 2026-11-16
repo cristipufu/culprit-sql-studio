@@ -9,6 +9,7 @@ enum InputInstallation {
 struct StoredDiagnosticInput {
     parent: String,
     source: String,
+    connection: String,
     restored: Option<String>,
     checksum: Option<String>,
     evidence_only: bool,
@@ -346,7 +347,7 @@ impl Files {
             .journal
             .conn
             .query_row(
-                "SELECT parent_json,source_json,restored_json,restored_sha,evidence_only,lineage_json,charged_bytes FROM diagnostic_inputs WHERE observation_id=?1",
+                "SELECT parent_json,source_json,restored_json,restored_sha,evidence_only,lineage_json,charged_bytes,connection FROM diagnostic_inputs WHERE observation_id=?1",
                 [&input.parent.capture.observation_id],
                 |row| Ok(StoredDiagnosticInput {
                     parent: row.get(0)?,
@@ -356,6 +357,7 @@ impl Files {
                     evidence_only: row.get(4)?,
                     investigation: row.get(5)?,
                     charged_bytes: row.get(6)?,
+                    connection: row.get(7)?,
                 }),
             )
             .optional()
@@ -394,9 +396,24 @@ impl Files {
         } else if self.epoch.is_some() && installation == InputInstallation::Pending {
             return Err(DeliveryProblem::Conflict.error());
         }
-        let charge = encoded.len() as u64
-            + investigation.as_ref().map_or(0, String::len) as u64
-            + super::super::CAPTURE_ACCOUNTING;
+        let parent_json = encode(&input.parent)?;
+        let source_json = encode(&input.source)?;
+        let metadata_charge = match &existing {
+            Some(stored) => super::journal::input_metadata_charge(
+                &stored.parent,
+                &stored.source,
+                &stored.connection,
+                stored.investigation.as_deref(),
+            )?,
+            None => super::journal::input_metadata_charge(
+                &parent_json,
+                &source_json,
+                &input.connection,
+                investigation.as_deref(),
+            )?,
+        };
+        let charge =
+            metadata_charge.checked_add(encoded.len() as u64).ok_or_else(|| problem(OutboxProblem::Capacity))?;
         let previous_charge = existing
             .as_ref()
             .map(|stored| super::super::journal::bytes_from_sql(stored.charged_bytes))
@@ -421,8 +438,8 @@ impl Files {
                 params![
                     input.parent.capture.observation_id,
                     DIAGNOSTIC_CONTROLLER_VERSION,
-                    encode(&input.parent)?,
-                    encode(&input.source)?,
+                    parent_json,
+                    source_json,
                     input.connection,
                     encoded,
                     super::super::journal::bytes_to_sql(charge)?,
