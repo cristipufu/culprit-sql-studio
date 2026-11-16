@@ -44,7 +44,7 @@ impl ColdCapture {
         let parent = hot.capture(baseline(0, vec![participant()])).await;
         assert_eq!(hot.work(1).await, 1);
         let focus = hot.focus(&parent).await;
-        let original = hot.outbox.diagnostic_evidence(&focus.parent).await.unwrap();
+        let original = hot.outbox.diagnostic_evidence(&focus.participant().parent).await.unwrap();
         let native = archive_capture(&hot.outbox, store.as_ref(), owner.fence(), &contract, &parent).await;
         let payload_object = native.manifest().batches[0].object.clone();
         let derived = hot
@@ -86,11 +86,11 @@ impl ColdCapture {
             .unwrap();
         harness.outbox.begin_diagnostic_epoch(owner.fence(), pending.high_sequence).await.unwrap();
         assert_eq!(harness.checkpoint().await, checkpoint);
-        assert_missing_parent(&harness.outbox, &focus.parent).await;
+        assert_missing_parent(&harness.outbox, &focus.participant().parent).await;
         Self { harness, store, focus, input, original, checkpoint, payload_object, _owner: owner, _archive: archive }
     }
     async fn assert_untouched(&self) {
-        assert_missing_parent(&self.harness.outbox, &self.focus.parent).await;
+        assert_missing_parent(&self.harness.outbox, &self.focus.participant().parent).await;
         assert_eq!(self.harness.checkpoint().await, self.checkpoint);
         let pending = self.harness.outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap();
         assert_eq!(pending.parent.capture, self.input);
@@ -246,12 +246,12 @@ async fn an_archived_already_analyzed_parent_is_hydrated_exactly_without_requeue
     .unwrap();
     assert_eq!(processed, 1);
     assert_eq!(cold.harness.calls.counts(), calls);
-    assert_eq!(cold.harness.outbox.diagnostic_evidence(&cold.focus.parent).await.unwrap(), cold.original);
+    assert_eq!(cold.harness.outbox.diagnostic_evidence(&cold.focus.participant().parent).await.unwrap(), cold.original);
     assert!(cold.harness.checkpoint().await.episodes.is_empty());
     let revisions = cold.harness.revisions(&cold.input).await;
     assert_eq!(revisions.len(), 1);
     assert_eq!(revisions[0].episode.analysis, DiagnosticAnalysisStatus::Unresolved);
-    assert_eq!(revisions[0].episode.first, cold.focus.parent);
+    assert_eq!(revisions[0].episode.first, cold.focus.participant().parent);
     assert!(
         cold.harness.outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none(),
         "hydrating historical evidence must not rerun its already committed original analysis"
@@ -260,7 +260,7 @@ async fn an_archived_already_analyzed_parent_is_hydrated_exactly_without_requeue
     drop(cold.harness.outbox);
     let mut reopened = Outbox::open(&path).unwrap();
     assert_eq!(reopened.recover().await.unwrap().source_debts, 0);
-    assert_eq!(reopened.diagnostic_evidence(&cold.focus.parent).await.unwrap(), cold.original);
+    assert_eq!(reopened.diagnostic_evidence(&cold.focus.participant().parent).await.unwrap(), cold.original);
     assert!(reopened.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
 }
 
@@ -451,7 +451,7 @@ async fn a_recovered_activity_parent_can_be_pinned_without_becoming_consumed_or_
     let resolved = resolve_evidence(
         &mut cold.harness.outbox,
         "fixture",
-        &cold.focus.parent,
+        &cold.focus.participant().parent,
         Some(cold.store.as_ref()),
         &CollectionCancellation::default(),
     )
@@ -461,7 +461,7 @@ async fn a_recovered_activity_parent_can_be_pinned_without_becoming_consumed_or_
     assert_eq!(
         cold.harness
             .outbox
-            .diagnostic_input_state(&cold.focus.parent.capture_ref(), DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input_state(&cold.focus.participant().parent.capture_ref(), DIAGNOSTIC_CONTROLLER_VERSION)
             .await
             .unwrap(),
         DiagnosticInputState::EvidenceOnly,
@@ -474,7 +474,7 @@ async fn a_recovered_activity_parent_can_be_pinned_without_becoming_consumed_or_
     assert_eq!(cold.harness.outbox.status(10, None).await.unwrap().captures, 0);
     let episode = &cold.checkpoint.episodes[0];
     let mut intent = crate::analytical::test_support::investigation_fixture().intent;
-    intent.focus = cold.focus.clone();
+    intent.focus = cold.focus.clone().into();
     intent.episode_id = episode.id.clone();
     intent.episode_revision = episode.revision.clone();
     intent.qualification.scope = RecipeCostScope::Activity(episode.scope.clone());
@@ -489,7 +489,7 @@ async fn a_recovered_activity_parent_can_be_pinned_without_becoming_consumed_or_
 async fn wrong_manifest_position_hash_or_native_identity_cannot_hydrate_an_archived_parent() {
     let mut cold = ColdCapture::new().await;
     for mismatch in ["manifest", "ordinal", "payload", "record", "scope", "native"] {
-        let mut reference = cold.focus.parent.clone();
+        let mut reference = cold.focus.participant().parent.clone();
         match mismatch {
             "manifest" => reference.manifest_sha256 = digest(b"another original manifest"),
             "ordinal" => reference.row_ordinal += 1,
@@ -573,7 +573,7 @@ async fn a_corrupt_local_evidence_cache_is_never_hidden_by_an_archive_read() {
     resolve_evidence(
         &mut cold.harness.outbox,
         "fixture",
-        &cold.focus.parent,
+        &cold.focus.participant().parent,
         Some(cold.store.as_ref()),
         &CollectionCancellation::default(),
     )
@@ -584,7 +584,10 @@ async fn a_corrupt_local_evidence_cache_is_never_hidden_by_an_archive_read() {
     connection
         .execute(
             "UPDATE diagnostic_inputs SET restored_sha=?1 WHERE observation_id=?2",
-            rusqlite::params![digest(b"altered cached evidence"), cold.focus.parent.capture.observation_id],
+            rusqlite::params![
+                digest(b"altered cached evidence"),
+                cold.focus.participant().parent.capture.observation_id
+            ],
         )
         .unwrap();
     let reads = Arc::new(Reads::default());
@@ -598,7 +601,7 @@ async fn a_corrupt_local_evidence_cache_is_never_hidden_by_an_archive_read() {
     let error = resolve_evidence(
         &mut cold.harness.outbox,
         "fixture",
-        &cold.focus.parent,
+        &cold.focus.participant().parent,
         Some(&recovery),
         &CollectionCancellation::default(),
     )
@@ -615,13 +618,13 @@ async fn archive_identity_and_advertised_manifest_changes_cannot_replace_the_exa
     let other_directory = tempfile::tempdir().unwrap();
     let other = FileRecoveryStore::create(
         &other_directory.path().join("different-store"),
-        cold.store.capture_manifest(&cold.focus.parent.capture).await.unwrap().contract,
+        cold.store.capture_manifest(&cold.focus.participant().parent.capture).await.unwrap().contract,
     )
     .unwrap();
     let error = resolve_evidence(
         &mut cold.harness.outbox,
         "fixture",
-        &cold.focus.parent,
+        &cold.focus.participant().parent,
         Some(&other),
         &CollectionCancellation::default(),
     )
@@ -630,7 +633,7 @@ async fn archive_identity_and_advertised_manifest_changes_cannot_replace_the_exa
     assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::DestinationChanged)));
     cold.assert_untouched().await;
 
-    let mut changed = cold.store.capture_manifest(&cold.focus.parent.capture).await.unwrap();
+    let mut changed = cold.store.capture_manifest(&cold.focus.participant().parent.capture).await.unwrap();
     changed.collected_from = "2001-01-01T00:00:00Z".into();
     changed.validate().unwrap();
     let reads = Arc::new(Reads::default());
@@ -644,7 +647,7 @@ async fn archive_identity_and_advertised_manifest_changes_cannot_replace_the_exa
     let error = resolve_evidence(
         &mut cold.harness.outbox,
         "fixture",
-        &cold.focus.parent,
+        &cold.focus.participant().parent,
         Some(&recovery),
         &CollectionCancellation::default(),
     )

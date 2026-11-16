@@ -13,6 +13,7 @@ mod cached_runtime;
 mod cleanup;
 mod compilation;
 mod diagnostics;
+mod focused_memory;
 mod object_definitions;
 mod observations;
 mod populations;

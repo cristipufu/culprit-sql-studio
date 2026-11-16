@@ -17,19 +17,21 @@ pub struct DiagnosticSharedOwner<'a> {
 }
 
 impl DiagnosticExecutionBinding {
-    pub(super) fn matches_focus(&self, scope: &RecipeCostScope, focus: &ActivityWaitFocus) -> bool {
+    pub(super) fn matches_focus(&self, scope: &RecipeCostScope, focus: &DiagnosticFocus) -> bool {
+        let participant = focus.participant();
         match (self, scope) {
             (Self::Database, RecipeCostScope::Activity(scope)) => {
-                scope.source == focus.source
-                    && scope.native_epoch.as_deref() == Some(focus.epoch.as_str())
-                    && scope.partition == focus.partition
-                    && scope.target.telemetry_id().ok() == focus.target.telemetry_id().ok()
+                scope.source == participant.source
+                    && scope.native_epoch.as_deref() == Some(participant.epoch.as_str())
+                    && scope.partition == participant.partition
+                    && scope.target.telemetry_id().ok() == participant.target.telemetry_id().ok()
             }
             (Self::Shared { owner }, RecipeCostScope::SharedResource { target, .. }) => {
                 owner.is_valid()
                     && owner.stream == TelemetryStream::OperationalSamples
                     && matches!(owner.native_key, NativeRecordIdentity::Operational { .. })
-                    && focus.is_valid_for(&CollectionSubject::Shared { resource: target.clone() })
+                    && matches!(focus, DiagnosticFocus::PageWait { .. })
+                    && participant.is_valid_for(&CollectionSubject::Shared { resource: target.clone() })
             }
             _ => false,
         }
@@ -42,14 +44,19 @@ impl DiagnosticInvestigationIntent {
     }
 
     pub fn selection(&self) -> CollectionSelection {
-        match &self.execution {
-            DiagnosticExecutionBinding::Database => {
-                CollectionSelection::FocusedPageWait { focus: Box::new(self.focus.clone()) }
+        match (&self.focus, &self.execution) {
+            (DiagnosticFocus::PageWait { focus }, DiagnosticExecutionBinding::Database) => {
+                CollectionSelection::FocusedPageWait { focus: focus.clone() }
             }
-            DiagnosticExecutionBinding::Shared { .. } => CollectionSelection::SharedPageWaitFocus {
-                focus: Box::new(self.focus.clone()),
-                partition: self.qualification.scope.partition().clone(),
-            },
+            (DiagnosticFocus::PageWait { focus }, DiagnosticExecutionBinding::Shared { .. }) => {
+                CollectionSelection::SharedPageWaitFocus {
+                    focus: focus.clone(),
+                    partition: self.qualification.scope.partition().clone(),
+                }
+            }
+            (DiagnosticFocus::RequestMemory { focus }, _) => {
+                CollectionSelection::FocusedRequestMemory { focus: focus.clone() }
+            }
         }
     }
 

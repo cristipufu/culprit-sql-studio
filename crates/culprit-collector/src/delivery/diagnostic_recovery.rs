@@ -323,17 +323,15 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         }
         let native = manifests.get(&range_id).ok_or_else(invalid)?;
         if capture_reference(native)? != *capture
-            || event.intent.focus.target.telemetry_id()? != manifest.source.target.telemetry_id()?
+            || event.intent.focus.participant().target.telemetry_id()? != manifest.source.target.telemetry_id()?
             || !event.intent.matches_result_source(&native.source)
         {
             return Err(invalid());
         }
-        let SourceObservation::FocusedPageWait { result, .. } = &native.source.observation else {
-            return Err(invalid());
-        };
-        if !result.is_valid()
-            || result.focus != event.intent.focus
-            || native.investigation.as_ref().is_none_or(|owner| !owner.matches_intent(&result.focus, &event.intent))
+        let focus = native.source.observation.diagnostic_focus().ok_or_else(invalid)?;
+        if !native.source.observation.covers_request()
+            || focus != event.intent.focus
+            || native.investigation.as_ref().is_none_or(|owner| !owner.matches_intent(&focus, &event.intent))
         {
             return Err(invalid());
         }
@@ -460,7 +458,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             return Err(invalid());
         }
         let intent = native_intent(&parent)?.ok_or_else(invalid)?;
-        if intent.focus.target != manifest.source.target
+        if intent.focus.participant().target != manifest.source.target
             || !matches!(intent.execution, DiagnosticExecutionBinding::Shared { .. })
         {
             return Err(invalid());
@@ -472,10 +470,8 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
 
 fn native_intent(manifest: &RangeManifest) -> Result<Option<DiagnosticInvestigationIntent>> {
     let Some(owner) = &manifest.investigation else { return Ok(None) };
-    let SourceObservation::FocusedPageWait { result, .. } = &manifest.source.observation else {
-        return Err(invalid());
-    };
-    let intent = owner.reconstruct(&result.focus)?;
+    let focus = manifest.source.observation.diagnostic_focus().ok_or_else(invalid)?;
+    let intent = owner.reconstruct(&focus)?;
     if !intent.matches_result_source(&manifest.source) {
         return Err(invalid());
     }
@@ -493,16 +489,9 @@ async fn authenticate_owned_report(
     if recovered.manifest_digest() != manifest.digest()? {
         return Err(invalid());
     }
-    let SourceObservation::FocusedPageWait { result, .. } = &recovered.source().observation else {
-        return Err(invalid());
-    };
-    let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =
-        &recovered.record().record
-    else {
-        return Err(invalid());
-    };
     let intent = native_intent(manifest)?.ok_or_else(invalid)?;
-    if !intent.matches_episode(episode) || !result.accepts_observation(page) {
+    if !intent.matches_episode(episode) || !report.matches_observation(episode, recovered.source(), recovered.record())
+    {
         return Err(invalid());
     }
     authenticate_shared_intent(store, &intent, authenticated).await?;
@@ -532,11 +521,11 @@ async fn authenticate_shared_intent(
     if authenticated.len() >= MAX_DIAGNOSTIC_EPISODES {
         return Err(DeliveryProblem::Capacity.error());
     }
-    let parent = load_diagnostic_evidence(store, &intent.focus.parent).await?;
+    let parent = load_diagnostic_evidence(store, &intent.focus.participant().parent).await?;
     let TelemetryRecord::Activity(original) = &parent.record().record else {
         return Err(invalid());
     };
-    if !intent.focus.matches_parent(parent.source(), original, &intent.focus.parent) {
+    if !intent.focus.matches_parent(parent.source(), original, &intent.focus.participant().parent) {
         return Err(invalid());
     }
     let recovered_owner = load_diagnostic_evidence(store, owner).await?;

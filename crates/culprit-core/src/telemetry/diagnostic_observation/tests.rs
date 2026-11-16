@@ -4,6 +4,7 @@ use crate::{DatabaseIdentity, Engine, MeasurementScope, ObservedWaitResource};
 mod investigations;
 mod partitions;
 mod planning;
+mod request_memory;
 
 fn actor() -> ActivityObservation {
     ActivityObservation {
@@ -26,6 +27,7 @@ fn actor() -> ActivityObservation {
         session_counters: ActivityCounters::default(),
         request_counters: Some(ActivityCounters::default()),
         wait: Some(ActivityWait {
+            class: None,
             identified_resources: vec![ObservedWaitResource {
                 kind: WaitResourceKind::MemoryPage,
                 native: NativeIdentity::new("5:1:99"),
@@ -115,7 +117,7 @@ fn a_short_native_page_wait_is_retained_without_claiming_an_owner_or_a_peak() {
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Pending);
     assert!(episode.peak.is_none() && episode.report.is_none());
     assert_eq!(first.focuses.len(), 1);
-    assert_eq!(first.focuses[0].1.original.elapsed_ms.as_deref(), Some("1"));
+    assert_eq!(first.focuses[0].1.page_wait().unwrap().clone().participant.original.elapsed_ms.as_deref(), Some("1"));
 }
 
 fn lock_wait_actor() -> ActivityObservation {
@@ -377,8 +379,12 @@ fn focus_frame(
 #[test]
 fn a_focused_missing_actor_preserves_the_original_incident_and_records_an_unresolved_history() {
     let first = observe(&frame(1, vec![actor()], true), None);
-    let focused =
-        focus_frame(first.focuses[0].1.clone(), PageWaitRequestState::Missing, PageWaitRelation::Unqualified, vec![]);
+    let focused = focus_frame(
+        first.focuses[0].1.page_wait().unwrap().clone(),
+        PageWaitRequestState::Missing,
+        PageWaitRelation::Unqualified,
+        vec![],
+    );
     let update =
         analyze_diagnostic_focus(&focused.0, &focused.1, &[], &first.checkpoint, "2020-01-01T01:00:00Z").unwrap();
     assert!(update.checkpoint.episodes.is_empty(), "terminal historical evidence remains in its immutable revision");
@@ -419,11 +425,15 @@ fn focused_database_recovery_proof_checks_native_upper_bound_against_the_last_po
     let first = observe(&frame(1, vec![actor()], true), None);
     let newer = observe(&frame(3, vec![actor()], true), Some(&first.checkpoint));
     let episode = &newer.checkpoint.episodes[0];
-    let focused =
-        focus_frame(first.focuses[0].1.clone(), PageWaitRequestState::Missing, PageWaitRelation::Unqualified, vec![]);
+    let focused = focus_frame(
+        first.focuses[0].1.page_wait().unwrap().clone(),
+        PageWaitRequestState::Missing,
+        PageWaitRelation::Unqualified,
+        vec![],
+    );
     let proof = DiagnosticRecoveryProof::FocusedParticipantGone {
         capture: focused.1.clone(),
-        parent: Box::new(first.focuses[0].1.parent.clone()),
+        parent: Box::new(first.focuses[0].1.page_wait().unwrap().clone().participant.parent.clone()),
     };
     assert!(!proof.matches_source(episode, &focused.0, &focused.1));
     let mut source = focused.0;
@@ -444,8 +454,8 @@ fn focused_database_recovery_proof_checks_native_upper_bound_against_the_last_po
 #[test]
 fn a_later_focused_frame_keeps_its_own_counters_and_never_manufactures_an_owner() {
     let first = observe(&frame(1, vec![actor()], true), None);
-    let focus = first.focuses[0].1.clone();
-    let mut request = focus.original.clone();
+    let focus = first.focuses[0].1.page_wait().unwrap().clone();
+    let mut request = focus.participant().original.clone();
     request.elapsed_ms = Some("121000".into());
     request.session_counters.logical_reads = Some("99".into());
     let page = PageWaitObservation {
@@ -477,7 +487,7 @@ fn a_later_focused_frame_keeps_its_own_counters_and_never_manufactures_an_owner(
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Partial);
     assert_eq!(episode.issue, Some(DiagnosticAnalysisIssue::EvidenceUnavailable));
     assert_eq!(episode.first, first.checkpoint.episodes[0].first);
-    assert_eq!(focus.original.elapsed_ms.as_deref(), Some("1"));
+    assert_eq!(focus.participant().original.elapsed_ms.as_deref(), Some("1"));
     assert_eq!(episode.report.as_ref().unwrap().evidence(), &focused.2[0].0);
     let mut substituted = focused.2[0].1.clone();
     substituted.request.statement_identity = Some(NativeIdentity::new("different-statement"));

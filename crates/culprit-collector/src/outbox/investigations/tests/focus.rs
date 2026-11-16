@@ -8,6 +8,7 @@ pub(super) fn page_activity() -> ActivityObservation {
     };
     row.statement_identity = Some(NativeIdentity::new("exact-statement").qualified("offset", "0"));
     row.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![resource],
         native_type: Some("PAGELATCH_EX".into()),
         elapsed_ms: Some("1000".into()),
@@ -24,15 +25,17 @@ fn focus_at(input: &DiagnosticInput, ordinal: usize) -> ActivityWaitFocus {
     let TelemetryRecord::Activity(original) = &row.row.record else { panic!() };
     let native = input.source.observation.activity().unwrap();
     ActivityWaitFocus {
-        database_writable: None,
-        partition: culprit_core::telemetry::SourcePartition::Target,
-        parent: row.reference.clone(),
-        target: input.source.target.clone(),
-        source: input.source.source.clone(),
-        epoch: native.epoch.clone().unwrap(),
-        original_observed_at: native.at.clone(),
-        original: original.as_ref().clone(),
-        statement_identity: original.statement_identity.clone().unwrap(),
+        participant: ActivityRequestFocus {
+            database_writable: None,
+            partition: culprit_core::telemetry::SourcePartition::Target,
+            parent: row.reference.clone(),
+            target: input.source.target.clone(),
+            source: input.source.source.clone(),
+            epoch: native.epoch.clone().unwrap(),
+            original_observed_at: native.at.clone(),
+            original: original.as_ref().clone(),
+            statement_identity: original.statement_identity.clone().unwrap(),
+        },
         resource: original.wait.as_ref().unwrap().identified_resources[0].clone(),
     }
 }
@@ -40,12 +43,12 @@ pub(super) fn page_episode(input: &DiagnosticInput, focus: &ActivityWaitFocus) -
     DiagnosticEpisode::start(
         DiagnosticScope::from_source(&input.source).unwrap(),
         DiagnosticSignal::PageWait {
-            key: focus.original.key.clone(),
-            statement_identity: Some(focus.statement_identity.clone()),
+            key: focus.participant().original.key.clone(),
+            statement_identity: Some(focus.participant().statement_identity.clone()),
             resource: focus.resource.clone(),
         },
-        focus.original_observed_at.clone(),
-        focus.parent.clone(),
+        focus.participant().original_observed_at.clone(),
+        focus.participant().parent.clone(),
     )
     .unwrap()
 }
@@ -68,7 +71,7 @@ pub(super) fn admitted_intent(input: &DiagnosticInput) -> DiagnosticInvestigatio
     let question = focus(input);
     let episode = page_episode(input, &question);
     let mut intent = crate::analytical::test_support::investigation_fixture().intent;
-    intent.focus = question;
+    intent.focus = question.into();
     intent.episode_id = episode.id;
     intent.episode_revision = episode.revision;
     intent.qualification.scope = RecipeCostScope::Activity(episode.scope);
@@ -82,11 +85,11 @@ fn failed_owned_attempt_retains_exact_intent_before_description_and_rejects_fore
     let path = root.path().join("outbox");
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let mut intent = admitted_intent(&input);
     intent.qualification.read_metrics.templates[0].client_elapsed_ms = 0.0;
     let owner = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
-    let mut requested = request(intent.focus.clone());
+    let mut requested = request(intent.focus.page_wait().unwrap().clone());
     requested.budget = intent.budget.clone();
     let reservation = files.reserve("fixture", &requested).unwrap();
     let identity = reservation.entry.identity.clone();
@@ -127,16 +130,16 @@ async fn complete_recovery_range_preserves_owner_without_claiming_incomplete_nat
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let intent = admitted_intent(&input);
     let owner = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
-    let mut requested = request(intent.focus.clone());
+    let mut requested = request(intent.focus.page_wait().unwrap().clone());
     requested.budget = intent.budget.clone();
     let reservation = files.reserve("fixture", &requested).unwrap();
     let identity = reservation.entry.identity.clone();
     let directory = reservation.directory.clone();
     let result = ActivityWaitFocusResult {
-        focus: intent.focus.clone(),
+        focus: intent.focus.page_wait().unwrap().clone(),
         observed_from: "2026-11-14T08:00:02Z".into(),
         observed_until: "2026-11-14T08:00:03Z".into(),
         source: FocusSourceState::Matched,
@@ -145,7 +148,7 @@ async fn complete_recovery_range_preserves_owner_without_claiming_incomplete_nat
     };
     let source = CollectionDescription {
         partition: culprit_core::telemetry::SourcePartition::Target,
-        target: result.focus.target.clone(),
+        target: result.focus.participant().target.clone(),
         source: "focused-page-state".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::FocusedPageWait {
@@ -192,7 +195,7 @@ async fn complete_recovery_range_preserves_owner_without_claiming_incomplete_nat
     let reopened = crate::delivery::recovery::reopen(&store, &archived.manifest().range_id).await.unwrap();
     let retained = reopened.manifest().investigation.as_ref().unwrap();
     let SourceObservation::FocusedPageWait { result, .. } = &reopened.manifest().source.observation else { panic!() };
-    assert_eq!(retained.reconstruct(&result.focus).unwrap().key().unwrap(), intent.key().unwrap());
+    assert_eq!(retained.reconstruct(&result.focus.clone().into()).unwrap().key().unwrap(), intent.key().unwrap());
     let mut wrong_source = reopened.manifest().clone();
     wrong_source.source.target =
         culprit_core::DatabaseIdentity::server(culprit_core::Engine::Mssql, "different", "foreign.invalid", 1433, None)
@@ -217,11 +220,11 @@ fn queued_investigation_parent_is_authenticated_idempotent_and_preserved_across_
     let path = root.path().join("outbox");
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let first = files.next_diagnostic_input(1).unwrap().unwrap();
+    let first = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let intent = admitted_intent(&first);
     let key = intent.key().unwrap();
     let mut substituted = intent.clone();
-    substituted.focus.original.elapsed_ms = Some("90001".into());
+    substituted.focus.participant_mut().original.elapsed_ms = Some("90001".into());
     assert!(files.pin_investigation_parent(&substituted).is_err());
     assert!(files.investigation_parent_keys().unwrap().is_empty());
     files.pin_investigation_parent(&intent).unwrap();
@@ -229,7 +232,7 @@ fn queued_investigation_parent_is_authenticated_idempotent_and_preserved_across_
     assert_eq!(files.investigation_parent_keys().unwrap().as_slice(), std::slice::from_ref(&key));
 
     let newer = baseline(&mut files, vec![page_activity()], true, 10);
-    let newer = files.diagnostic_input(&newer.observation_id, 1).unwrap();
+    let newer = files.diagnostic_input(&newer.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
     assert_ne!(admitted_intent(&newer).key().unwrap(), key, "the API derives the exact original intent key");
     files
         .journal
@@ -271,7 +274,7 @@ fn releasing_a_queued_parent_never_clears_unconfirmed_native_focus_pins_or_sourc
     let path = root.path().join("outbox");
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let question = focus(&input);
     let intent = admitted_intent(&input);
     let key = intent.key().unwrap();
@@ -297,7 +300,7 @@ fn queued_parent_inventory_is_complete_and_capacity_never_drops_an_existing_owne
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let transaction = files.journal.conn.transaction().unwrap();
     for index in 0..MAX_DIAGNOSTIC_EPISODES {
         let key = digest(format!("queued-intent:{index}").as_bytes());
@@ -327,9 +330,9 @@ fn focus_reservation_authenticates_parent_before_creating_a_native_attempt_and_r
     let path = root.path().join("outbox");
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let mut forged = focus(&input);
-    forged.original.elapsed_ms = Some("90001".into());
+    forged.participant.original.elapsed_ms = Some("90001".into());
     assert!(files.reserve("fixture", &request(forged)).is_err());
     assert_eq!(files.journal.status(10, None).unwrap().captures, 1);
     let reservation = files.reserve("fixture", &request(focus(&input))).unwrap();
@@ -348,7 +351,7 @@ fn unconfirmed_focused_work_keeps_its_parent_pin_until_explicit_quiescence_ackno
     let path = root.path().join("outbox");
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let reservation = files.reserve("fixture", &request(focus(&input))).unwrap();
     let id = reservation.entry.identity.observation_id.clone();
     let owner = format!("focus:{id}");
@@ -366,7 +369,7 @@ fn confirmed_cancelled_or_incomplete_focus_releases_its_pin_without_authorizing_
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let reservation = files.reserve("fixture", &request(focus(&input))).unwrap();
     let id = reservation.entry.identity.observation_id.clone();
     let owner = format!("focus:{id}");
@@ -387,8 +390,8 @@ fn attach_page_report(input: &DiagnosticInput, episode_id: &str, focus: &Activit
     episode.report = Some(DiagnosticReport::PageWait { observation: input.rows[0].reference.clone() });
     let analyzed_at = "2026-11-14T08:03:00Z";
     let mut revision = DiagnosticRevision::between(Some(before), episode, analyzed_at).unwrap().unwrap();
-    if !revision.inputs.contains(&focus.parent) {
-        revision.inputs.push(focus.parent.clone());
+    if !revision.inputs.contains(&focus.participant().parent) {
+        revision.inputs.push(focus.participant().parent.clone());
     }
     revision.id = revision.expected_id().unwrap();
     let mut checkpoint = previous.clone();
@@ -410,7 +413,7 @@ fn a_valid_page_report_cannot_be_attached_to_another_native_actor_in_the_same_da
     let mut second = first.clone();
     second.key.session.id = "43".into();
     baseline(&mut files, vec![first, second], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let question = focus_at(&input, 0);
     let first_episode = page_episode(&input, &question);
     let second_episode = page_episode(&input, &focus_at(&input, 1));
@@ -425,7 +428,7 @@ fn a_valid_page_report_cannot_be_attached_to_another_native_actor_in_the_same_da
         source: "page wait targets".into(),
         observed_from: "2026-11-14T08:00:10Z".into(),
         observed_until: "2026-11-14T08:00:11Z".into(),
-        request: question.original.clone(),
+        request: question.participant.original.clone(),
         before_check: None,
         after_check: None,
         statement_identity: None,
@@ -479,22 +482,23 @@ fn a_valid_page_report_cannot_be_attached_to_another_native_actor_in_the_same_da
     assert_eq!(writer.finish(1).unwrap().status, CollectionStatus::Complete);
     files.journal.source_work(&reservation.entry, SourceWorkState::Quiescent).unwrap();
     files.finish(reservation).unwrap();
-    let current = files.next_diagnostic_input(1).unwrap().unwrap();
+    let current = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     assert_eq!(current.parent.capture, capture);
     let captures_before = files.status(10, None).unwrap().captures;
     let forged = attach_page_report(&current, &second_episode.id, &question);
     assert!(forged.revisions[0].is_valid(), "the receipt and proposed revision are independently valid");
     assert!(files.commit_diagnostics(current.clone(), forged).is_err());
     assert_eq!(files.status(10, None).unwrap().captures, captures_before);
-    assert_eq!(files.next_diagnostic_input(1).unwrap().unwrap().parent, current.parent);
+    assert_eq!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap().parent, current.parent);
     let valid = attach_page_report(&current, &first_episode.id, &question);
     files.commit_diagnostics(current, valid).unwrap();
-    let checkpoint = files.diagnostic_checkpoints(1, None, 10).unwrap().checkpoints.remove(0);
+    let checkpoint =
+        files.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).unwrap().checkpoints.remove(0);
     let first = checkpoint.episodes.iter().find(|episode| episode.id == first_episode.id).unwrap();
     let second = checkpoint.episodes.iter().find(|episode| episode.id == second_episode.id).unwrap();
     assert!(first.report.is_some());
     assert_eq!(second, &second_episode, "rejecting the cross-report must leave the other actor untouched");
-    assert!(files.next_diagnostic_input(1).unwrap().is_none());
+    assert!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
 }
 
 #[tokio::test]
@@ -514,7 +518,7 @@ async fn parent_pin_survives_checkpoint_eviction_race_and_transfers_until_result
     files.recover().unwrap();
     files.begin_remote_epoch(owner.fence(), 0).unwrap();
     let native = baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let question = focus(&input);
     let initial = files
         .commit_diagnostics(
@@ -572,7 +576,7 @@ async fn parent_pin_survives_checkpoint_eviction_race_and_transfers_until_result
     files.journal.source_work(&reservation.entry, SourceWorkState::Quiescent).unwrap();
     files.finish(reservation).unwrap();
     assert!(pin(&files, &focus_owner));
-    let current = files.next_diagnostic_input(1).unwrap().unwrap();
+    let current = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let mut episode = current.checkpoint.as_ref().unwrap().episodes[0].clone();
     episode.revision = "2".into();
     episode.lifecycle = DiagnosticLifecycle::Resolved;

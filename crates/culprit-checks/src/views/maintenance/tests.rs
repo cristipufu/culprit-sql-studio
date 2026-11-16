@@ -32,6 +32,7 @@ fn current(session: &str, sql: &str) -> ActivityObservation {
 fn waiting(mut row: ActivityObservation, owner: &ActivityObservation) -> ActivityObservation {
     row.waiting_on_lock = Some(true);
     row.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("LCK_M_X".into()),
         elapsed_ms: Some("1".into()),
         owners: vec![ActivityWaitOwner::Session {

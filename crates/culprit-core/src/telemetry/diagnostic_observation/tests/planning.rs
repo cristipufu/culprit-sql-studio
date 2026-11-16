@@ -34,11 +34,11 @@ fn a_restored_partial_positive_reconstructs_the_original_question_without_mutati
     let checkpoint = restore(&observed.checkpoint);
     let episode = &checkpoint.episodes[0];
     let focus = ready(episode, &baseline);
-    assert_eq!(focus, observed.focuses[0].1);
-    assert_eq!(focus.parent, baseline.2[0].0);
-    assert_eq!(focus.original, baseline.2[0].1);
+    assert_eq!(focus, observed.focuses[0].1.page_wait().unwrap().clone());
+    assert_eq!(focus.participant().parent, baseline.2[0].0);
+    assert_eq!(focus.participant().original, baseline.2[0].1);
     assert!(focus.matches_parent(&baseline.0, &baseline.2[0].1, &baseline.2[0].0));
-    assert!(episode.matches_focus(&focus));
+    assert!(episode.matches_page_wait_focus(&focus));
     assert_eq!(baseline.0.observation.activity().unwrap().coverage.state, crate::SourceState::Partial);
     assert_eq!(checkpoint, observed.checkpoint, "planning does not advance lifecycle, analysis or revision");
 }
@@ -53,8 +53,8 @@ fn qualified_recovery_before_analysis_does_not_erase_the_owed_original_question(
     assert_eq!(episode.lifecycle, DiagnosticLifecycle::Resolved);
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Pending);
     let focus = ready(episode, &baseline);
-    assert_eq!(focus, observed.focuses[0].1);
-    assert_eq!(focus.original_observed_at, episode.first_seen_at);
+    assert_eq!(focus, observed.focuses[0].1.page_wait().unwrap().clone());
+    assert_eq!(focus.participant().original_observed_at, episode.first_seen_at);
     assert_eq!(restored, recovered.checkpoint, "the first recovery proof remains unchanged");
 }
 
@@ -76,10 +76,10 @@ fn a_delayed_middle_parent_keeps_its_own_clock_and_counters_after_a_newer_baseli
     assert_ne!(middle.2[0].0, episode.latest);
     assert_ne!(episode.peak.as_ref(), Some(&middle.2[0].0));
     let focus = ready(episode, &middle);
-    assert_eq!(focus.parent, middle.2[0].0);
-    assert_eq!(focus.original_observed_at, "2020-01-01T00:02:00Z");
-    assert_eq!(focus.original.elapsed_ms.as_deref(), Some("2"));
-    assert!(focus.original.request_counters.unwrap().logical_reads.is_none());
+    assert_eq!(focus.participant().parent, middle.2[0].0);
+    assert_eq!(focus.participant().original_observed_at, "2020-01-01T00:02:00Z");
+    assert_eq!(focus.participant().original.elapsed_ms.as_deref(), Some("2"));
+    assert!(focus.participant().original.request_counters.as_ref().unwrap().logical_reads.is_none());
     assert_eq!(episode.latest, latest.2[0].0);
 }
 
@@ -94,7 +94,7 @@ fn uncertain_visibility_preserves_the_question_from_its_last_positive_native_row
     let restored = restore(&later.checkpoint);
     let episode = &restored.episodes[0];
     assert_eq!(episode.lifecycle, DiagnosticLifecycle::Uncertain);
-    assert_eq!(ready(episode, &baseline), observed.focuses[0].1);
+    assert_eq!(ready(episode, &baseline), observed.focuses[0].1.page_wait().unwrap().clone());
     assert!(episode.recovery.is_none());
 }
 
@@ -217,7 +217,7 @@ fn native_question_planning_does_not_promote_cost_qualification_or_repeat_termin
         episode.analysis = analysis;
         episode.issue = Some(DiagnosticAnalysisIssue::CostUnqualified);
         assert!(episode.is_valid());
-        assert_eq!(ready(&episode, &baseline), observed.focuses[0].1);
+        assert_eq!(ready(&episode, &baseline), observed.focuses[0].1.page_wait().unwrap().clone());
         assert_eq!(episode.analysis, analysis);
         assert_eq!(episode.issue, Some(DiagnosticAnalysisIssue::CostUnqualified));
     }

@@ -156,6 +156,7 @@ pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             session_counters: ActivityCounters::default(),
             request_counters: active.then(ActivityCounters::default),
             wait: native_type.map(|native_type| ActivityWait {
+                class: None,
                 identified_resources: vec![],
                 resources: None,
                 native_type: Some(native_type),

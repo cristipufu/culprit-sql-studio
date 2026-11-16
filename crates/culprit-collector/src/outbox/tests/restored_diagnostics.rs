@@ -37,7 +37,7 @@ async fn archive_input_and_update(
     fence: &Fence,
     contract: &crate::delivery::contract::Contract,
 ) -> CommittedRange {
-    let input = outbox.next_diagnostic_input(1).await.unwrap().unwrap();
+    let input = outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap();
     let prepared =
         outbox.delivery().prepare(&input.parent.capture.observation_id, contract.clone(), vec![]).await.unwrap();
     let head = store.checkpoint_head().await.unwrap();
@@ -70,12 +70,14 @@ async fn volume_loss_restores_native_episode_history_and_a_complete_empty_succes
     drop(outbox);
     let mut outbox = Outbox::open(&destination).unwrap();
     outbox.recover().await.unwrap();
-    let restored = outbox.diagnostic_checkpoints(1, None, 10).await.unwrap();
+    let restored = outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap();
     assert_eq!(restored.checkpoints[0].episodes[0], prior);
     super::eviction::activity(&mut original, "2020-01-01T06:01:00Z", None).await;
     archive_input_and_update(&mut original, &store, owner.fence(), &contract).await;
     outbox.restore_diagnostics(checkpoint(&store).await).await.unwrap();
-    let episode = outbox.diagnostic_checkpoints(1, None, 10).await.unwrap().checkpoints[0].episodes[0].clone();
+    let episode = outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap().checkpoints[0]
+        .episodes[0]
+        .clone();
     assert_eq!(episode.id, prior.id);
     assert_eq!(episode.lifecycle, DiagnosticLifecycle::Resolved);
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Pending);
@@ -91,7 +93,7 @@ async fn interrupted_checkpoint_installation_keeps_the_previous_working_set_and_
         Outbox::create_remote(&root.path().join("replacement"), OutboxLimits::default(), store.id()).unwrap();
     outbox.recover().await.unwrap();
     outbox.restore_diagnostics(checkpoint(&store).await).await.unwrap();
-    let before = outbox.diagnostic_checkpoints(1, None, 10).await.unwrap().checkpoints;
+    let before = outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap().checkpoints;
     super::eviction::activity(&mut original, "2020-01-01T06:01:00Z", None).await;
     archive_input_and_update(&mut original, &store, owner.fence(), &contract).await;
     journal_fault(
@@ -100,10 +102,16 @@ async fn interrupted_checkpoint_installation_keeps_the_previous_working_set_and_
     )
     .await;
     assert!(outbox.restore_diagnostics(checkpoint(&store).await).await.is_err());
-    assert_eq!(outbox.diagnostic_checkpoints(1, None, 10).await.unwrap().checkpoints, before);
+    assert_eq!(
+        outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap().checkpoints,
+        before
+    );
     journal_fault(&outbox, "DROP TRIGGER fail_head").await;
     outbox.restore_diagnostics(checkpoint(&store).await).await.unwrap();
-    assert_ne!(outbox.diagnostic_checkpoints(1, None, 10).await.unwrap().checkpoints, before);
+    assert_ne!(
+        outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap().checkpoints,
+        before
+    );
 }
 #[tokio::test]
 async fn exact_checkpoint_identity_complete_object_eof_and_restored_input_checksum_are_required() {
@@ -149,6 +157,7 @@ async fn volume_loss_preserves_uncertain_signal_without_freshening_last_positive
     let mut row = observation();
     row.elapsed_ms = Some("45000".into());
     row.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![],
         native_type: Some("native-lock".into()),
         elapsed_ms: Some("40000".into()),
@@ -176,7 +185,9 @@ async fn volume_loss_preserves_uncertain_signal_without_freshening_last_positive
     restored.recover().await.unwrap();
     restored.restore_diagnostics(recovered).await.unwrap();
     assert_eq!(
-        restored.diagnostic_checkpoints(1, None, 10).await.unwrap().checkpoints[0].episodes[0].lifecycle,
+        restored.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap().checkpoints[0].episodes
+            [0]
+        .lifecycle,
         DiagnosticLifecycle::Uncertain
     );
 }

@@ -63,11 +63,13 @@ fn receipt_identity_component_budget_hash_and_ordinal_mismatches_never_reach_a_v
     let factories = Arc::new(AtomicUsize::new(0));
     let verifiers = Arc::new(AtomicUsize::new(0));
     let registration = selected(&fixture, factories.clone(), verifiers.clone());
-    for changed in ["recipe", "version", "component", "revision", "budget", "hash", "ordinal", "accounting"] {
+    for changed in ["recipe", "version", "selector", "component", "revision", "budget", "hash", "ordinal", "accounting"]
+    {
         let mut receipt = fixture.intent.qualification.clone();
         match changed {
             "recipe" => receipt.recipe_id = "another-source.page-wait".into(),
             "version" => receipt.recipe_version += 1,
+            "selector" => receipt.selector = RecipeSelector::FocusedRequestMemory,
             "component" => receipt.component.component = "another-native-reader".into(),
             "revision" => receipt.component.revision = Some("different-native-reader-build".into()),
             "budget" => receipt.tested_budget.max_queries += 1,
@@ -246,7 +248,7 @@ fn replacing_a_selected_registration_does_not_borrow_the_old_cost_verifier() {
     let factories = Arc::new(AtomicUsize::new(0));
     let verifiers = Arc::new(AtomicUsize::new(0));
     let directory = tempfile::tempdir().unwrap();
-    let engine = fixture.intent.focus.target.engine();
+    let engine = fixture.intent.focus.participant().target.engine();
     let workspace = Workspace::open_in(directory.path())
         .with_provider(engine, selected(&fixture, factories.clone(), verifiers.clone()))
         .with_provider(engine, registration(factories.clone(), vec![fixture.recipe.clone()]).unwrap());

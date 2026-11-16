@@ -191,15 +191,17 @@ impl Harness {
         let TelemetryRecord::Activity(original) = &row.row.record else { panic!() };
         let native = input.source.observation.activity().unwrap();
         let focus = ActivityWaitFocus {
-            database_writable: None,
-            partition: culprit_core::telemetry::SourcePartition::Target,
-            parent: row.reference.clone(),
-            target: input.source.target.clone(),
-            source: input.source.source.clone(),
-            epoch: native.epoch.clone().unwrap(),
-            original_observed_at: native.at.clone(),
-            original: original.as_ref().clone(),
-            statement_identity: original.statement_identity.clone().unwrap(),
+            participant: ActivityRequestFocus {
+                database_writable: None,
+                partition: culprit_core::telemetry::SourcePartition::Target,
+                parent: row.reference.clone(),
+                target: input.source.target.clone(),
+                source: input.source.source.clone(),
+                epoch: native.epoch.clone().unwrap(),
+                original_observed_at: native.at.clone(),
+                original: original.as_ref().clone(),
+                statement_identity: original.statement_identity.clone().unwrap(),
+            },
             resource: original.wait.as_ref().unwrap().identified_resources[0].clone(),
         };
         assert!(focus.matches_parent(&input.source, original, &row.reference));
@@ -241,6 +243,7 @@ fn participant() -> ActivityObservation {
     ));
     row.elapsed_ms = Some("10".into());
     row.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("PAGELATCH_EX".into()),
         elapsed_ms: Some("1".into()),
         identified_resources: vec![ObservedWaitResource {
@@ -269,7 +272,7 @@ fn missing(focus: ActivityWaitFocus, second: u32) -> Frame {
     Frame {
         source: CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: focus.target.clone(),
+            target: focus.participant().target.clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::FocusedPageWait {
@@ -320,7 +323,7 @@ async fn a_missing_focused_participant_keeps_original_evidence_and_unresolved_hi
     let initial = harness.checkpoint().await.episodes.remove(0);
     assert_eq!(initial.analysis, DiagnosticAnalysisStatus::Pending);
     let focus = harness.focus(&native).await;
-    let original = harness.outbox.diagnostic_evidence(&focus.parent).await.unwrap();
+    let original = harness.outbox.diagnostic_evidence(&focus.participant().parent).await.unwrap();
     let later = harness.capture(missing(focus.clone(), 10)).await;
     assert_eq!(harness.work(1).await, 1);
     assert!(harness.checkpoint().await.episodes.is_empty());
@@ -334,7 +337,7 @@ async fn a_missing_focused_participant_keeps_original_evidence_and_unresolved_hi
     assert_eq!(episode.issue, Some(DiagnosticAnalysisIssue::NativeContextGone));
     assert!(episode.report.is_none(), "a disappeared participant cannot produce a mapped header report");
     assert!(
-        matches!(&episode.recovery, Some(DiagnosticRecoveryProof::FocusedParticipantGone { parent, .. }) if parent.as_ref() == &focus.parent)
+        matches!(&episode.recovery, Some(DiagnosticRecoveryProof::FocusedParticipantGone { parent, .. }) if parent.as_ref() == &focus.participant().parent)
     );
     assert_eq!(harness.calls.counts(), [2, 2, 2, 2]);
     let count = harness.outbox.status(50, None).await.unwrap().captures;
@@ -342,7 +345,7 @@ async fn a_missing_focused_participant_keeps_original_evidence_and_unresolved_hi
     let mut reopened = Outbox::open(&harness.path).unwrap();
     let recovery = reopened.recover().await.unwrap();
     assert_eq!((recovery.interrupted, recovery.quarantined, recovery.source_debts), (0, 0, 0));
-    assert_eq!(reopened.diagnostic_evidence(&focus.parent).await.unwrap(), original);
+    assert_eq!(reopened.diagnostic_evidence(&focus.participant().parent).await.unwrap(), original);
     let rows = replay(&harness.path, &native, &harness.root.path().join("original-after-restart")).await;
     assert_eq!(rows, vec![original.1]);
     assert_eq!(
@@ -391,11 +394,11 @@ async fn a_delayed_middle_parent_is_authenticated_after_a_newer_baseline_without
     assert_eq!(harness.work(1).await, 1);
     let latest_focus = harness.focus(&latest).await;
     let before = harness.checkpoint().await.episodes.remove(0);
-    assert_eq!(before.first, first_focus.parent);
-    assert_eq!(before.latest, latest_focus.parent);
+    assert_eq!(before.first, first_focus.participant.parent);
+    assert_eq!(before.latest, latest_focus.participant.parent);
     assert!(before.peak.is_none());
-    assert_ne!(focus.parent, before.first);
-    assert_ne!(focus.parent, before.latest);
+    assert_ne!(focus.participant().parent, before.first);
+    assert_ne!(focus.participant().parent, before.latest);
     let later = harness.capture(missing(focus.clone(), 30)).await;
     assert_eq!(harness.work(1).await, 1);
     let revisions = harness.revisions(&later).await;
@@ -403,10 +406,10 @@ async fn a_delayed_middle_parent_is_authenticated_after_a_newer_baseline_without
     assert_eq!(revisions[0].episode.first, before.first);
     assert_eq!(revisions[0].episode.latest, before.latest);
     assert_eq!(revisions[0].episode.revision, "4");
-    assert!(revisions[0].inputs.contains(&focus.parent));
+    assert!(revisions[0].inputs.contains(&focus.participant().parent));
     assert_eq!(
-        harness.outbox.diagnostic_evidence(&focus.parent).await.unwrap().1.record,
-        TelemetryRecord::from(focus.original)
+        harness.outbox.diagnostic_evidence(&focus.participant().parent).await.unwrap().1.record,
+        TelemetryRecord::from(focus.participant.original)
     );
     assert!(harness.checkpoint().await.episodes.is_empty());
 }
@@ -422,7 +425,7 @@ async fn a_valid_old_focus_is_acknowledged_without_modifying_a_new_recurrence_or
     harness.capture(baseline(20, vec![participant()])).await;
     assert_eq!(harness.work(1).await, 1);
     let recurrence = harness.checkpoint().await.episodes.remove(0);
-    assert_ne!(recurrence.first, old_focus.parent);
+    assert_ne!(recurrence.first, old_focus.participant.parent);
     let late = harness.capture(missing(old_focus, 30)).await;
     assert_eq!(harness.work(1).await, 1);
     assert!(harness.revisions(&late).await.is_empty());

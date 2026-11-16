@@ -75,6 +75,7 @@ async fn retained_parent_on_member(
     ));
     let resource = ObservedWaitResource { kind: WaitResourceKind::MemoryPage, native: NativeIdentity::new("7:1:4144") };
     observation.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("PAGELATCH_EX".into()),
         elapsed_ms: Some("1".into()),
         identified_resources: vec![resource.clone()],
@@ -115,15 +116,17 @@ async fn retained_parent_on_member(
     let TelemetryRecord::Activity(original) = &row.row.record else { panic!() };
     let snapshot = input.source.observation.activity().unwrap();
     let focus = ActivityWaitFocus {
-        parent: row.reference.clone(),
-        target: input.source.target.clone(),
-        partition: input.source.partition.clone(),
-        database_writable: snapshot.database_writable,
-        source: input.source.source.clone(),
-        epoch: snapshot.epoch.clone().unwrap(),
-        original_observed_at: snapshot.at.clone(),
-        original: original.as_ref().clone(),
-        statement_identity: original.statement_identity.clone().unwrap(),
+        participant: ActivityRequestFocus {
+            parent: row.reference.clone(),
+            target: input.source.target.clone(),
+            partition: input.source.partition.clone(),
+            database_writable: snapshot.database_writable,
+            source: input.source.source.clone(),
+            epoch: snapshot.epoch.clone().unwrap(),
+            original_observed_at: snapshot.at.clone(),
+            original: original.as_ref().clone(),
+            statement_identity: original.statement_identity.clone().unwrap(),
+        },
         resource,
     };
     assert!(focus.matches_parent(&input.source, original, &row.reference));
@@ -155,9 +158,9 @@ async fn forged_original_clock_or_receipt_fails_before_missing_route_or_capture_
     for changed in ["original", "native-clock", "receipt"] {
         let mut forged = focus.clone();
         match changed {
-            "original" => forged.original.elapsed_ms = Some("123".into()),
-            "native-clock" => forged.original_observed_at = "2020-01-01T12:00:00.000100001Z".into(),
-            "receipt" => forged.parent.payload_sha256 = digest(b"a different native payload"),
+            "original" => forged.participant_mut().original.elapsed_ms = Some("123".into()),
+            "native-clock" => forged.participant_mut().original_observed_at = "2020-01-01T12:00:00.000100001Z".into(),
+            "receipt" => forged.participant_mut().parent.payload_sha256 = digest(b"a different native payload"),
             _ => unreachable!(),
         }
         assert!(forged.is_valid(), "{changed} is structurally valid but not the retained original");
@@ -177,14 +180,14 @@ async fn forged_original_clock_or_receipt_fails_before_missing_route_or_capture_
         assert_eq!(outbox.status(10, None).await.unwrap().captures, 1, "{changed} must not reserve a capture");
         assert_eq!(native_calls.load(Ordering::SeqCst), 2);
     }
-    let (source, original) = outbox.diagnostic_evidence(&focus.parent).await.unwrap();
+    let (source, original) = outbox.diagnostic_evidence(&focus.participant().parent).await.unwrap();
     assert!(focus.matches_parent(
         &source,
         match &original.record {
             TelemetryRecord::Activity(row) => row,
             _ => panic!(),
         },
-        &focus.parent
+        &focus.participant().parent
     ));
 }
 

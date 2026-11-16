@@ -106,7 +106,9 @@ async fn bounded(
             }
             let episode = &checkpoint.episodes[offset];
             scanned += 1;
-            if episode.analysis.needs_work() && matches!(episode.signal, DiagnosticSignal::PageWait { .. }) {
+            if episode.analysis.needs_work()
+                && matches!(episode.signal, DiagnosticSignal::PageWait { .. } | DiagnosticSignal::RequestMemory { .. })
+            {
                 let mut selected_resources = BTreeSet::new();
                 for target in targets {
                     if cancellation.is_cancelled() || questions == MAX_QUESTIONS_PER_PASS {
@@ -123,10 +125,15 @@ async fn bounded(
                     if !selected_resources.insert(binding.source.target.telemetry_id()?) {
                         continue;
                     }
-                    if !routes.contains_key(&target.id) {
-                        routes.insert(target.id.clone(), select_route(backend, target, &binding.revision)?);
+                    let selector = match episode.signal {
+                        DiagnosticSignal::RequestMemory { .. } => RecipeSelector::FocusedRequestMemory,
+                        _ => RecipeSelector::FocusedPageWait,
+                    };
+                    let route_key = (target.id.clone(), selector == RecipeSelector::FocusedRequestMemory);
+                    if !routes.contains_key(&route_key) {
+                        routes.insert(route_key.clone(), select_route(backend, target, &binding.revision, selector)?);
                     }
-                    let Some(route) = routes.get(&target.id).and_then(Option::as_ref) else { continue };
+                    let Some(route) = routes.get(&route_key).and_then(Option::as_ref) else { continue };
                     questions += 1;
                     if let Some(candidate) = evidence.question(outbox, target, budget, route, episode, binding).await?
                         && seen.insert(candidate.intent.episode_stage_key()?)
@@ -155,7 +162,12 @@ async fn bounded(
     Ok(prepared)
 }
 
-fn select_route(backend: &dyn FleetBackend, target: &FleetTarget, revision: &str) -> Result<Option<SelectedRoute>> {
+fn select_route(
+    backend: &dyn FleetBackend,
+    target: &FleetTarget,
+    revision: &str,
+    selector: RecipeSelector,
+) -> Result<Option<SelectedRoute>> {
     if metadata(backend.route_revision(&target.connection))?.flatten().as_deref() != Some(revision) {
         return Ok(None);
     }
@@ -165,7 +177,7 @@ fn select_route(backend: &dyn FleetBackend, target: &FleetTarget, revision: &str
     }
     let Some(recipe) = recipes.into_iter().find(|recipe| {
         recipe.purpose == RecipePurpose::Investigation
-            && recipe.selector == RecipeSelector::FocusedPageWait
+            && recipe.selector == selector
             && recipe.subjects.iter().any(|subject| subject.accepts(&target.subject))
             && matches!(recipe.cost, RecipeCostQualification::Measured(_))
     }) else {
@@ -197,7 +209,7 @@ impl EvidencePlanner<'_> {
             return Ok(None);
         };
         let TelemetryRecord::Activity(original) = &row.record else { return Err(DeliveryProblem::Integrity.error()) };
-        let PageWaitFocusPlan::Ready(focus) = episode.plan_page_wait_focus(&source, original, &episode.latest)? else {
+        let DiagnosticFocusPlan::Ready(focus) = episode.plan_focus(&source, original, &episode.latest)? else {
             return Ok(None);
         };
         let proposed = if let Some(owner) = &binding.shared_owner {

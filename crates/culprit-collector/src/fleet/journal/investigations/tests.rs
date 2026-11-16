@@ -407,7 +407,7 @@ async fn an_oversized_original_statement_cannot_consume_unbounded_journal_metada
     let (journal, mut scheduler) = fixture.initialize().await;
     let mut intent = investigation_fixture().intent;
     let text = "x".repeat(MAX_INTENT_BYTES);
-    intent.focus.original.statement =
+    intent.focus.participant_mut().original.statement =
         DefinitionPayload::Available { sha256: digest(text.as_bytes()), text, redaction_version: REDACTION_VERSION };
     assert!(intent.is_valid(), "the metadata owner enforces its own byte ceiling");
     let update = enrollment(&mut scheduler, fixture.focused_job(&intent), 0);

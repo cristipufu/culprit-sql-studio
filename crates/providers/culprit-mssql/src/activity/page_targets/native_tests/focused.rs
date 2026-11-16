@@ -72,17 +72,19 @@ async fn a_retained_native_baseline_survives_work_ending_before_its_focused_look
                         .unwrap()
                         .clone();
                     selected = Some(ActivityWaitFocus {
-                        partition: captured.description.partition.clone(),
-                        database_writable: activity.database_writable,
-                        parent,
-                        target: captured.description.target.clone(),
-                        source: captured.description.source.clone(),
-                        epoch: activity.epoch.clone().unwrap(),
-                        original_observed_at: activity.at.clone(),
-                        statement_identity: original.statement_identity.clone().unwrap(),
-                        original,
-                        resource,
-                    });
+participant: ActivityRequestFocus {
+partition: captured.description.partition.clone(),
+database_writable: activity.database_writable,
+parent,
+target: captured.description.target.clone(),
+source: captured.description.source.clone(),
+epoch: activity.epoch.clone().unwrap(),
+original_observed_at: activity.at.clone(),
+statement_identity: original.statement_identity.clone().unwrap(),
+original,
+},
+resource,
+});
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -95,8 +97,8 @@ async fn a_retained_native_baseline_survives_work_ending_before_its_focused_look
             if !focus.is_valid() {
                 return Err(invalid("original native row receipt did not yield a valid focus"));
             }
-            let original = focus.original.clone();
-            let parent = focus.parent.clone();
+            let original = focus.participant().original.clone();
+            let parent = focus.participant().parent.clone();
             let detail =
                 capture(fixture, CollectionSelection::FocusedPageWait { focus: Box::new(focus.clone()) }).await?;
             let SourceObservation::FocusedPageWait { snapshot, result } = &detail.description.observation else {
@@ -105,8 +107,8 @@ async fn a_retained_native_baseline_survives_work_ending_before_its_focused_look
             if !matches!(result.request, PageWaitRequestState::Missing | PageWaitRequestState::Changed)
                 || snapshot.records != 0
                 || !detail.records.is_empty()
-                || result.focus.original != original
-                || result.focus.parent != parent
+                || result.focus.participant().original != original
+                || result.focus.participant().parent != parent
                 || result.focus != focus
             {
                 return Err(invalid("ended native work was replaced, erased or described as a current mapped page"));

@@ -443,7 +443,7 @@ async fn explicit_shared_snapshots_and_focus_retain_actual_resource_authority_an
         }
         if let SourceObservation::FocusedPageWait { result, .. } = &source.observation {
             focused += 1;
-            assert!(result.focus.target.database().is_some());
+            assert!(result.focus.participant().target.database().is_some());
             assert!(matches!(source.target, CollectionTarget::Shared(_)));
             assert!(result.focus.matches_capture_scope(&source));
             assert!(result.accepts_observation(observations(&rows)[0]));

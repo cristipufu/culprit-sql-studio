@@ -106,8 +106,8 @@ pub async fn analyze_pending(
         let Some(input) = outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await? else {
             break;
         };
-        if let SourceObservation::FocusedPageWait { result, .. } = &input.source.observation
-            && !verify_focus_parent(outbox, &input.connection, &result.focus, recovery, cancellation).await?
+        if let Some(focus) = input.source.observation.focus()
+            && !verify_focus_parent(outbox, &input.connection, focus, recovery, cancellation).await?
         {
             break;
         }
@@ -153,7 +153,7 @@ pub async fn drain_pending(
 async fn verify_focus_parent(
     outbox: &mut Outbox,
     connection: &str,
-    focus: &ActivityWaitFocus,
+    focus: &ActivityRequestFocus,
     recovery: Option<&dyn RecoveryStore>,
     cancellation: &CollectionCancellation,
 ) -> Result<bool> {
@@ -297,6 +297,24 @@ fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) 
                 )?,
                 None => analyze_diagnostic_focus(&input.source, &input.parent, &rows, previous, analyzed_at)?,
             };
+            (update.revisions, update.checkpoint)
+        }
+        SourceObservation::FocusedRequestMemory { .. } => {
+            let rows = input
+                .rows
+                .iter()
+                .map(|row| match &row.row.record {
+                    TelemetryRecord::Operational(OperationalObservation {
+                        fact: OperationalFact::ExecutionGrant(observation),
+                        ..
+                    }) => Ok(DiagnosticMemoryRow { reference: &row.reference, observation }),
+                    _ => Err(CollectionStop::InvalidPage.error()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let previous = input.checkpoint.as_ref().ok_or_else(|| DeliveryProblem::Conflict.error())?;
+            let intent = input.investigation_intent()?;
+            let update =
+                analyze_diagnostic_memory(&input.source, &input.parent, &rows, previous, analyzed_at, intent.as_ref())?;
             (update.revisions, update.checkpoint)
         }
         _ => return Err(CollectionStop::InvalidPage.error()),

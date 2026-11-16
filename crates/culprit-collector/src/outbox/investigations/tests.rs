@@ -120,7 +120,7 @@ fn update(
             }
             let mut revision = DiagnosticRevision {
                 id: String::new(),
-                controller_version: 1,
+                controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
                 episode,
                 previous_revision,
                 investigation: None,
@@ -136,7 +136,7 @@ fn update(
         analyzed_at: at,
         revisions,
         checkpoint: DiagnosticCheckpoint {
-            controller_version: 1,
+            controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
             target: input.source.target.clone(),
             input: input.parent.clone(),
             episodes: episodes.into_iter().filter(DiagnosticEpisode::retained_in_checkpoint).collect(),
@@ -148,22 +148,28 @@ fn only_exact_committed_analysis_acknowledgement_establishes_input_consumption()
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![activity("42")], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
-    assert_eq!(files.diagnostic_input_state(&input.parent, 1).unwrap(), DiagnosticInputState::Pending);
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
+    assert_eq!(
+        files.diagnostic_input_state(&input.parent, DIAGNOSTIC_CONTROLLER_VERSION).unwrap(),
+        DiagnosticInputState::Pending
+    );
     let mut wrong = input.parent.clone();
     wrong.manifest_sha256 = digest(b"another immutable manifest");
-    assert!(files.diagnostic_input_state(&wrong, 1).is_err());
-    assert!(files.diagnostic_input_state(&input.parent, 2).is_err());
+    assert!(files.diagnostic_input_state(&wrong, DIAGNOSTIC_CONTROLLER_VERSION).is_err());
+    assert!(files.diagnostic_input_state(&input.parent, DIAGNOSTIC_CONTROLLER_VERSION + 1).is_err());
     let mut unknown = input.parent.clone();
     unknown.capture.observation_id = "never-cached-capture".into();
     assert_eq!(
-        files.diagnostic_input_state(&unknown, 1).unwrap(),
+        files.diagnostic_input_state(&unknown, DIAGNOSTIC_CONTROLLER_VERSION).unwrap(),
         DiagnosticInputState::Missing,
         "absence is never an analysis acknowledgement"
     );
     files.commit_diagnostics(input.clone(), start(&input)).unwrap();
-    assert_eq!(files.diagnostic_input_state(&input.parent, 1).unwrap(), DiagnosticInputState::Consumed);
-    assert!(files.diagnostic_input_state(&wrong, 1).is_err());
+    assert_eq!(
+        files.diagnostic_input_state(&input.parent, DIAGNOSTIC_CONTROLLER_VERSION).unwrap(),
+        DiagnosticInputState::Consumed
+    );
+    assert!(files.diagnostic_input_state(&wrong, DIAGNOSTIC_CONTROLLER_VERSION).is_err());
     files
         .journal
         .conn
@@ -173,7 +179,7 @@ fn only_exact_committed_analysis_acknowledgement_establishes_input_consumption()
         )
         .unwrap();
     assert!(
-        files.diagnostic_input_state(&input.parent, 1).is_err(),
+        files.diagnostic_input_state(&input.parent, DIAGNOSTIC_CONTROLLER_VERSION).is_err(),
         "even an acknowledged row must retain a valid matching source"
     );
 }
@@ -185,13 +191,13 @@ fn ready_input_and_derived_revision_acknowledgement_are_durable_and_idempotent()
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     let native = baseline(&mut files, vec![activity("42")], true, 0);
     assert!(super::journal::is_pinned(&files.journal.conn, &native.observation_id).unwrap());
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let update = start(&input);
     let expected = update.checkpoint.clone();
     let derived = files.commit_diagnostics(input.clone(), update.clone()).unwrap();
     assert_eq!(files.journal.capture(&derived.observation_id).unwrap().source_work, SourceWorkState::Quiescent);
     assert_eq!(files.journal.debts().unwrap(), 0);
-    assert!(files.next_diagnostic_input(1).unwrap().is_none());
+    assert!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
     assert_eq!(
         files.commit_diagnostics(input, update).unwrap(),
         derived,
@@ -200,31 +206,34 @@ fn ready_input_and_derived_revision_acknowledgement_are_durable_and_idempotent()
     drop(files);
     let mut files = Files::open(&path).unwrap();
     files.recover().unwrap();
-    assert_eq!(files.diagnostic_input(&native.observation_id, 1).unwrap().checkpoint, Some(expected));
-    assert!(files.next_diagnostic_input(1).unwrap().is_none());
+    assert_eq!(
+        files.diagnostic_input(&native.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap().checkpoint,
+        Some(expected)
+    );
+    assert!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
 }
 #[test]
 fn a_partial_or_empty_later_population_cannot_silently_drop_old_episodes() {
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![activity("42")], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     files.commit_diagnostics(input.clone(), start(&input)).unwrap();
     baseline(&mut files, vec![], false, 10);
-    let partial = files.next_diagnostic_input(1).unwrap().unwrap();
+    let partial = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let mut forged = DiagnosticUpdate {
         step_id: digest(b"drop"),
         analyzed_at: "2026-11-14T08:03:00Z".into(),
         revisions: vec![],
         checkpoint: DiagnosticCheckpoint {
-            controller_version: 1,
+            controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
             target: partial.source.target.clone(),
             input: partial.parent.clone(),
             episodes: vec![],
         },
     };
     assert!(files.commit_diagnostics(partial.clone(), forged.clone()).is_err());
-    assert!(files.next_diagnostic_input(1).unwrap().is_some());
+    assert!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_some());
     let mut resolved = partial.checkpoint.as_ref().unwrap().episodes[0].clone();
     resolved.revision = "2".into();
     resolved.lifecycle = DiagnosticLifecycle::Resolved;
@@ -238,7 +247,7 @@ fn a_crash_after_local_sealing_replays_cas_and_ack_without_creating_native_debt(
     let path = root.path().join("outbox");
     let mut files = Files::create(&path, OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![activity("42")], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     files
         .journal
         .conn
@@ -255,7 +264,7 @@ fn a_crash_after_local_sealing_replays_cas_and_ack_without_creating_native_debt(
     let recovery = files.recover().unwrap();
     assert_eq!(recovery.committed, 1);
     assert_eq!(recovery.source_debts, 0);
-    assert!(files.next_diagnostic_input(1).unwrap().is_none());
+    assert!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
 }
 #[test]
 fn quota_backpressure_keeps_the_native_input_pending_and_pinned() {
@@ -263,9 +272,9 @@ fn quota_backpressure_keeps_the_native_input_pending_and_pinned() {
     let limits = OutboxLimits { max_bytes: 8 * 1024 * 1024, ..Default::default() };
     let mut files = Files::create(&root.path().join("outbox"), limits).unwrap();
     let native = baseline(&mut files, vec![activity("42")], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     assert!(files.commit_diagnostics(input.clone(), start(&input)).is_err());
-    assert!(files.next_diagnostic_input(1).unwrap().is_some());
+    assert!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_some());
     assert_eq!(files.journal.debts().unwrap(), 0);
     assert!(super::journal::is_pinned(&files.journal.conn, &native.observation_id).unwrap());
 }
@@ -296,7 +305,7 @@ async fn publication_before_analysis_survives_volume_loss_and_preserves_the_full
     let native = baseline(&mut files, vec![activity("42"), activity("43")], true, 0);
     let prepared = files.prepare_delivery(&native.observation_id, contract.clone(), vec![]).unwrap();
     let committed = stage_and_commit(store.as_ref(), owner.fence(), None, &prepared).await.unwrap();
-    let original = files.next_diagnostic_input(1).unwrap().unwrap();
+    let original = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let reference = original.rows[0].reference.clone();
     crate::delivery::diagnostic_recovery::verify_reference(committed.manifest(), &reference).unwrap();
     let mut wrong = reference.clone();
@@ -338,7 +347,7 @@ async fn publication_before_analysis_survives_volume_loss_and_preserves_the_full
     })
     .unwrap();
     cold.begin_remote_epoch(owner.fence(), 1).unwrap();
-    let input = cold.next_diagnostic_input(1).unwrap().unwrap();
+    let input = cold.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let mut initial = start(&input);
     let second = DiagnosticEpisode::start(
         DiagnosticScope::from_source(&input.source).unwrap(),
@@ -377,10 +386,10 @@ fn recovery_before_enrichment_retains_pending_analysis_and_a_later_result_does_n
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![activity("42")], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     files.commit_diagnostics(input.clone(), start(&input)).unwrap();
     let empty = baseline(&mut files, vec![], true, 10);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let mut episode = input.checkpoint.as_ref().unwrap().episodes[0].clone();
     let last_seen = episode.last_seen_at.clone();
     episode.revision = "2".into();
@@ -389,7 +398,7 @@ fn recovery_before_enrichment_retains_pending_analysis_and_a_later_result_does_n
     files
         .commit_diagnostics(input.clone(), update(&input, vec![episode], vec![Some("1".into())], "resolved-pending"))
         .unwrap();
-    let input = files.diagnostic_input(&empty.observation_id, 1).unwrap();
+    let input = files.diagnostic_input(&empty.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
     let mut episode = input.checkpoint.as_ref().unwrap().episodes[0].clone();
     assert_eq!(episode.lifecycle, DiagnosticLifecycle::Resolved);
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Pending);
@@ -400,14 +409,22 @@ fn recovery_before_enrichment_retains_pending_analysis_and_a_later_result_does_n
     files
         .commit_diagnostics(input.clone(), update(&input, vec![episode], vec![Some("2".into())], "no-more-evidence"))
         .unwrap();
-    assert!(files.diagnostic_input(&empty.observation_id, 1).unwrap().checkpoint.unwrap().episodes.is_empty());
+    assert!(
+        files
+            .diagnostic_input(&empty.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .unwrap()
+            .checkpoint
+            .unwrap()
+            .episodes
+            .is_empty()
+    );
 }
 #[test]
 fn stale_head_cas_cannot_replace_a_newer_episode_working_set() {
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![activity("42")], true, 0);
-    let stale = files.next_diagnostic_input(1).unwrap().unwrap();
+    let stale = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     files.commit_diagnostics(stale.clone(), start(&stale)).unwrap();
     let mut later = start(&stale);
     later.step_id = digest(b"different-step-same-stale-head");
@@ -420,10 +437,10 @@ fn a_large_checkpoint_is_packed_as_bounded_complete_parts_instead_of_one_oversiz
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![activity("42")], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let original = start(&input).checkpoint.episodes.remove(0);
     let mut checkpoint = DiagnosticCheckpoint {
-        controller_version: 1,
+        controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
         target: input.source.target.clone(),
         input: input.parent,
         episodes: vec![],
@@ -476,7 +493,7 @@ fn offline_diagnostic_authority_does_not_clear_native_debt_or_enable_source_rese
     assert!(files.begin_remote_epoch(&fence, 2).is_err());
     files.begin_diagnostic_epoch(&fence, 2).unwrap();
     assert!(files.reserve("fixture", &request).is_err());
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let derived = files.commit_diagnostics(input.clone(), start(&input)).unwrap();
     assert_eq!(files.journal.capture(&derived.observation_id).unwrap().source_work, SourceWorkState::Quiescent);
     assert_eq!(files.journal.debts().unwrap(), 1);
@@ -489,13 +506,13 @@ fn a_complete_inventory_cannot_resolve_a_present_actor_whose_required_measuremen
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![activity("42")], true, 0);
-    let first = files.next_diagnostic_input(1).unwrap().unwrap();
+    let first = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     files.commit_diagnostics(first.clone(), start(&first)).unwrap();
     let mut unknown = activity("42");
     unknown.elapsed_ms = None;
     unknown.blocking_status = ActivityBlockingStatus::Unknown;
     baseline(&mut files, vec![unknown], true, 10);
-    let current = files.next_diagnostic_input(1).unwrap().unwrap();
+    let current = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let mut episode = current.checkpoint.as_ref().unwrap().episodes[0].clone();
     episode.lifecycle = DiagnosticLifecycle::Resolved;
     episode.recovery = Some(DiagnosticRecoveryProof::CompleteScope { capture: current.parent.clone() });
@@ -508,7 +525,7 @@ fn a_complete_inventory_cannot_resolve_a_present_actor_whose_required_measuremen
             )
             .is_err()
     );
-    assert!(files.next_diagnostic_input(1).unwrap().is_some());
+    assert!(files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_some());
     assert_eq!(files.journal.status(10, None).unwrap().captures, 3);
 }
 
@@ -532,7 +549,7 @@ async fn caching_unknown_authenticated_history_after_epoch_binding_does_not_enqu
     let first = baseline(&mut original, vec![activity("42")], true, 0);
     let prepared = original.prepare_delivery(&first.observation_id, contract.clone(), vec![]).unwrap();
     let first_commit = stage_and_commit(&store, owner.fence(), None, &prepared).await.unwrap();
-    let initial_input = original.next_diagnostic_input(1).unwrap().unwrap();
+    let initial_input = original.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let initial = original.commit_diagnostics(initial_input.clone(), start(&initial_input)).unwrap();
     let prepared = original.prepare_delivery(&initial.observation_id, contract.clone(), vec![]).unwrap();
     let initial_commit =
@@ -572,8 +589,8 @@ async fn caching_unknown_authenticated_history_after_epoch_binding_does_not_enqu
         rows,
     })
     .unwrap();
-    assert_eq!(cold.next_diagnostic_input(1).unwrap().unwrap().parent.capture, second);
-    let historical = cold.diagnostic_input(&first.observation_id, 1).unwrap();
+    assert_eq!(cold.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap().parent.capture, second);
+    let historical = cold.diagnostic_input(&first.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
     assert_eq!(historical.rows.len(), 1);
     let (_, resolved) = cold.diagnostic_reference(&historical.rows[0].reference).unwrap();
     assert_eq!(resolved, historical.rows[0].row);

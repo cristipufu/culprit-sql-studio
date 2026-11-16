@@ -4,4 +4,4 @@ import type { DiagnosticEvidenceRef } from "./DiagnosticEvidenceRef";
 /**
  * A typed reference to a durable result keeps rendering language-neutral and avoids copying native evidence.
  */
-export type DiagnosticReport = { "kind": "page-wait", observation: DiagnosticEvidenceRef, };
+export type DiagnosticReport = { "kind": "page-wait", observation: DiagnosticEvidenceRef, } | { "kind": "request-memory", observation: DiagnosticEvidenceRef, };

@@ -1,6 +1,8 @@
 //! Structural admission fixture only. Its synthetic cost artifact does not qualify any production recipe.
 use super::*;
 use culprit_core::{ComponentVersion, MeasurementScope, ObservedWaitResource, WaitResourceKind};
+mod memory;
+pub use memory::{focused_request_memory_evidence, request_memory_investigation_fixture};
 mod shared;
 pub use shared::{SharedInvestigationFixture, shared_investigation_evidence, shared_investigation_fixture};
 
@@ -21,6 +23,7 @@ pub fn investigation_fixture() -> InvestigationFixture {
     observation.waiting_on_lock = None;
     observation.elapsed_ms = Some("1".into());
     observation.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("PAGELATCH_EX".into()),
         elapsed_ms: Some("1".into()),
         owners: vec![],
@@ -102,6 +105,7 @@ pub fn investigation_fixture() -> InvestigationFixture {
     .unwrap();
     let component = ComponentVersion::package("fixture-native-reader", "1.0.0", Some("fixture-native-reader-build"));
     let receipt = RecipeCostReceipt {
+        selector: RecipeSelector::FocusedPageWait,
         recipe_id: "fixture.page-wait-focus".into(),
         recipe_version: 1,
         scope: RecipeCostScope::Activity(episode.scope.clone()),

@@ -228,6 +228,7 @@ fn focused_episode() -> (DiagnosticEpisode, ActivityWaitFocus) {
     episode.id = episode.expected_id().unwrap();
     original.statement_identity = Some(token.clone());
     original.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![resource.clone()],
         native_type: Some("PAGELATCH_EX".into()),
         elapsed_ms: Some("1000".into()),
@@ -235,15 +236,17 @@ fn focused_episode() -> (DiagnosticEpisode, ActivityWaitFocus) {
         resources: None,
     });
     let focus = ActivityWaitFocus {
-        database_writable: None,
-        partition: crate::telemetry::SourcePartition::Target,
-        parent: episode.first.clone(),
-        target: episode.scope.target.clone(),
-        source: episode.scope.source.clone(),
-        epoch: episode.scope.native_epoch.clone().unwrap(),
-        original_observed_at: episode.first_seen_at.clone(),
-        original,
-        statement_identity: token,
+        participant: ActivityRequestFocus {
+            database_writable: None,
+            partition: crate::telemetry::SourcePartition::Target,
+            parent: episode.first.clone(),
+            target: episode.scope.target.clone(),
+            source: episode.scope.source.clone(),
+            epoch: episode.scope.native_epoch.clone().unwrap(),
+            original_observed_at: episode.first_seen_at.clone(),
+            original,
+            statement_identity: token,
+        },
         resource,
     };
     (episode, focus)
@@ -252,29 +255,32 @@ fn focused_episode() -> (DiagnosticEpisode, ActivityWaitFocus) {
 #[test]
 fn an_episode_focus_binding_requires_the_same_native_actor_statement_resource_scope_and_clock() {
     let (episode, focus) = focused_episode();
-    assert!(episode.matches_focus(&focus));
+    assert!(episode.matches_page_wait_focus(&focus));
     let mut other_actor = focus.clone();
-    other_actor.original.key.session.id = "43".into();
-    other_actor.parent.native_key = NativeRecordIdentity::Activity(other_actor.original.key.clone());
+    other_actor.participant.original.key.session.id = "43".into();
+    other_actor.participant.parent.native_key =
+        NativeRecordIdentity::Activity(other_actor.participant.original.key.clone());
     let mut other_statement = focus.clone();
-    other_statement.statement_identity = NativeIdentity::new("another-native-token");
-    other_statement.original.statement_identity = Some(other_statement.statement_identity.clone());
+    other_statement.participant.statement_identity = NativeIdentity::new("another-native-token");
+    other_statement.participant.original.statement_identity =
+        Some(other_statement.participant.statement_identity.clone());
     let mut other_resource = focus.clone();
     other_resource.resource.native = NativeIdentity::new("5:1:43");
-    other_resource.original.wait.as_mut().unwrap().identified_resources = vec![other_resource.resource.clone()];
+    other_resource.participant.original.wait.as_mut().unwrap().identified_resources =
+        vec![other_resource.resource.clone()];
     let mut other_scope = focus.clone();
-    other_scope.parent.source_scope_id = digest(b"another-native-scope");
+    other_scope.participant.parent.source_scope_id = digest(b"another-native-scope");
     let mut other_epoch = focus.clone();
-    other_epoch.epoch = "another-native-epoch".into();
+    other_epoch.participant.epoch = "another-native-epoch".into();
     let mut other_source = focus.clone();
-    other_source.source = "another-native-source".into();
+    other_source.participant.source = "another-native-source".into();
     let mut outside_episode = focus;
-    outside_episode.original_observed_at = "2026-11-14T08:00:01Z".into();
+    outside_episode.participant.original_observed_at = "2026-11-14T08:00:01Z".into();
     for changed in
         [other_actor, other_statement, other_resource, other_scope, other_epoch, other_source, outside_episode]
     {
         assert!(changed.is_valid(), "the other native question remains independently valid");
-        assert!(!episode.matches_focus(&changed));
+        assert!(!episode.matches_page_wait_focus(&changed));
     }
 }
 
@@ -324,6 +330,6 @@ fn only_matched_exact_focused_missing_can_resolve_a_participant_without_complete
     }
     let mut changed = source.clone();
     let SourceObservation::FocusedPageWait { result, .. } = &mut changed.observation else { panic!() };
-    result.focus.epoch = "restarted".into();
+    result.focus.participant_mut().epoch = "restarted".into();
     assert!(!proof.matches_source(&episode, &changed, &capture));
 }

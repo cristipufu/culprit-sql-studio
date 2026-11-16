@@ -1,3 +1,4 @@
+mod memory;
 use super::*;
 use crate::{
     analytical::{catalog::PhysicalCatalog, envelope, test_support},
@@ -27,6 +28,7 @@ fn focused_source() -> CollectionDescription {
     });
     let resource = ObservedWaitResource { kind: WaitResourceKind::MemoryPage, native: NativeIdentity::new("7:1:4144") };
     original.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![resource.clone()],
         native_type: Some("PAGELATCH_EX".into()),
         elapsed_ms: Some("1".into()),
@@ -40,15 +42,17 @@ fn focused_source() -> CollectionDescription {
     let row = ExportedRecord::new(&baseline, &capture, TelemetryRecord::from(original.clone())).unwrap();
     let parent = DiagnosticEvidenceRef::from_export(&baseline, &digest(b"original private manifest"), &row, 0).unwrap();
     let focus = ActivityWaitFocus {
-        database_writable: None,
-        partition: culprit_core::telemetry::SourcePartition::Target,
-        parent,
-        target: baseline.target.clone(),
-        source: baseline.source.clone(),
-        epoch,
-        original_observed_at: at,
-        statement_identity: original.statement_identity.clone().unwrap(),
-        original,
+        participant: ActivityRequestFocus {
+            database_writable: None,
+            partition: culprit_core::telemetry::SourcePartition::Target,
+            parent,
+            target: baseline.target.clone(),
+            source: baseline.source.clone(),
+            epoch,
+            original_observed_at: at,
+            statement_identity: original.statement_identity.clone().unwrap(),
+            original,
+        },
         resource,
     };
     let result = ActivityWaitFocusResult {
@@ -97,10 +101,13 @@ async fn public_focus_context_keeps_exact_work_identity_without_private_target_o
     );
     let SourceObservation::FocusedPageWait { result, .. } = &source.observation else { panic!() };
     assert_eq!(public["data"]["result"]["focus"]["key"], result.focus.key().unwrap());
-    assert_eq!(public["data"]["result"]["focus"]["parent"], serde_json::to_value(&result.focus.parent).unwrap());
+    assert_eq!(
+        public["data"]["result"]["focus"]["parent"],
+        serde_json::to_value(&result.focus.participant().parent).unwrap()
+    );
     assert_eq!(
         public["data"]["result"]["focus"]["statement_identity"],
-        serde_json::to_value(&result.focus.statement_identity).unwrap()
+        serde_json::to_value(&result.focus.participant().statement_identity).unwrap()
     );
     assert_eq!(public["data"]["result"]["request"], "missing");
     assert_eq!(published["_culprit"]["range_kind"], "focused");
@@ -128,7 +135,7 @@ fn diagnostic_analysis_time_remains_typed_context_and_never_becomes_a_native_obs
         source_scope_id: manifest.source.captured_range().unwrap().scope_id,
     };
     let description = DiagnosticCaptureDescription {
-        controller_version: 1,
+        controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
         parent,
         step_id: digest(b"step"),
         analyzed_at: "2020-01-01T12:30:00Z".into(),
@@ -158,11 +165,11 @@ fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sq
     let mut source = focused_source();
     let SourceObservation::FocusedPageWait { result, .. } = &mut source.observation else { panic!() };
     let mut intent = test_support::investigation_fixture().intent;
-    intent.focus = result.focus.clone();
+    intent.focus = result.focus.clone().into();
     let RecipeCostScope::Activity(scope) = &mut intent.qualification.scope else { panic!() };
-    scope.target = intent.focus.target.clone();
-    scope.source = intent.focus.source.clone();
-    scope.native_epoch = Some(intent.focus.epoch.clone());
+    scope.target = intent.focus.participant().target.clone();
+    scope.source = intent.focus.participant().source.clone();
+    scope.native_epoch = Some(intent.focus.participant().epoch.clone());
     intent.qualification.read_metrics.templates[0].statement = DefinitionPayload::sql(
         "SELECT private_qualification_query FROM private_cost_observer WHERE label='private-client'",
         Engine::Mssql,

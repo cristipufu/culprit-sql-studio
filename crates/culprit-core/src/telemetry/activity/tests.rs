@@ -47,6 +47,7 @@ fn idle(id: &str) -> ActivityObservation {
 fn blocked(row: &mut ActivityObservation, owners: Vec<ActivityWaitOwner>) {
     row.elapsed_ms = Some("1000".into());
     row.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![],
         resources: None,
         native_type: Some("LCK_M_X".into()),
@@ -123,6 +124,7 @@ fn native_lock_wait_without_visible_owner_needs_measured_wait_duration_for_thres
     row.blocking_status = ActivityBlockingStatus::Unknown;
     row.waiting_on_lock = Some(true);
     row.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![],
         native_type: Some("native-lock-wait".into()),
         elapsed_ms: None,
@@ -144,6 +146,7 @@ fn request_age_never_supplies_wait_duration_and_unknown_lock_measurements_stay_u
     row.elapsed_ms = Some("40000".into());
     row.blocking_status = ActivityBlockingStatus::Unknown;
     row.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![],
         native_type: Some("native-wait".into()),
         elapsed_ms: None,

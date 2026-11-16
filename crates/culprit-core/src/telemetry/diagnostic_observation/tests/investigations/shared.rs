@@ -15,7 +15,7 @@ impl SharedScenario {
         DiagnosticInvestigationIntent::new_shared(
             &self.scenario.episode,
             &self.scenario.recipe,
-            self.scenario.focus.clone(),
+            self.scenario.focus.clone().into(),
             &self.scenario.component,
             &CollectionBudget::default(),
             DiagnosticSharedOwner { source: &self.owner_source, row: &self.owner_row, reference: &self.owner },
@@ -52,7 +52,7 @@ fn shared_scenario() -> SharedScenario {
     };
     let observed = observe(&baseline(1, true, &member), None);
     scenario.episode = observed.checkpoint.episodes[0].clone();
-    scenario.focus = observed.focuses[0].1.clone();
+    scenario.focus = observed.focuses[0].1.page_wait().unwrap().clone();
     let partition = SourcePartition::InstanceLocal {
         member: Some(member.clone()),
         epoch: Some("independent-instance-epoch".into()),
@@ -129,8 +129,12 @@ fn result(
     shared: &SharedScenario,
     intent: &DiagnosticInvestigationIntent,
 ) -> (CollectionDescription, DiagnosticCaptureRef) {
-    let (mut source, mut capture, _) =
-        focus_frame(intent.focus.clone(), PageWaitRequestState::Missing, PageWaitRelation::Unqualified, vec![]);
+    let (mut source, mut capture, _) = focus_frame(
+        intent.focus.page_wait().unwrap().clone(),
+        PageWaitRequestState::Missing,
+        PageWaitRelation::Unqualified,
+        vec![],
+    );
     source.target = shared.owner_source.target.clone();
     source.partition = shared.owner_source.partition.clone();
     capture.source_scope_id = source.captured_range().unwrap().scope_id;
@@ -144,15 +148,15 @@ fn shared_cost_scope_retains_native_owner_without_inventing_activity_population_
     assert!(intent.is_valid() && intent.matches_episode(&shared.scenario.episode));
     assert!(intent.matches_shared_owner(&shared.owner_source, &shared.owner_row));
     assert!(intent.qualification.scope.as_activity().is_none());
-    assert_ne!(intent.qualification.scope.native_epoch(), Some(intent.focus.epoch.as_str()));
-    assert_eq!(intent.focus.target, shared.scenario.episode.scope.target);
+    assert_ne!(intent.qualification.scope.native_epoch(), Some(intent.focus.participant().epoch.as_str()));
+    assert_eq!(intent.focus.participant().target, shared.scenario.episode.scope.target);
     assert_eq!(intent.subject(), CollectionSubject::Shared { resource: shared.member });
     assert_eq!(intent.qualification.scope.target(), shared.owner_source.target);
     assert!(
         DiagnosticInvestigationIntent::new(
             &shared.scenario.episode,
             &shared.scenario.recipe,
-            shared.scenario.focus.clone(),
+            shared.scenario.focus.clone().into(),
             &shared.scenario.component,
             &CollectionBudget::default()
         )
@@ -169,7 +173,7 @@ fn exact_positive_owner_row_is_required_and_tampered_receipts_descriptors_or_emp
         let mut row = shared.owner_row.clone();
         let mut reference = shared.owner.clone();
         match mutation {
-            "target" => source.target = shared.scenario.focus.target.clone(),
+            "target" => source.target = shared.scenario.focus.participant().target.clone(),
             "epoch" => {
                 source.partition = SourcePartition::InstanceLocal {
                     member: Some(shared.member.clone()),
@@ -205,7 +209,7 @@ fn exact_positive_owner_row_is_required_and_tampered_receipts_descriptors_or_emp
         let changed = DiagnosticInvestigationIntent::new_shared(
             &shared.scenario.episode,
             &shared.scenario.recipe,
-            shared.scenario.focus.clone(),
+            shared.scenario.focus.clone().into(),
             &shared.scenario.component,
             &CollectionBudget::default(),
             DiagnosticSharedOwner { source: &source, row: &row, reference: &reference },
@@ -252,7 +256,7 @@ fn a_partial_positive_owner_is_usable_but_unknown_owner_or_another_member_cannot
             DiagnosticInvestigationIntent::new_shared(
                 &shared.scenario.episode,
                 &recipe,
-                shared.scenario.focus.clone(),
+                shared.scenario.focus.clone().into(),
                 &shared.scenario.component,
                 &CollectionBudget::default(),
                 DiagnosticSharedOwner {
@@ -283,7 +287,8 @@ fn shared_lineage_preserves_exact_selection_subject_budget_and_owner_without_an_
         let mut changed = request.clone();
         match mutation {
             "database-selection" => {
-                changed.selection = CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.clone()) }
+                changed.selection =
+                    CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.page_wait().unwrap().clone()) }
             }
             "subject" => changed.subject = CollectionSubject::Database,
             "epoch" => {
@@ -339,13 +344,13 @@ fn shared_result_cannot_change_the_database_incident_without_exact_admitted_inte
         &intent,
     )
     .unwrap();
-    assert_eq!(update.checkpoint.target, shared.scenario.focus.target);
+    assert_eq!(update.checkpoint.target, shared.scenario.focus.participant().target);
     assert!(update.checkpoint.episodes.is_empty());
     assert_eq!(update.revisions.len(), 1);
     let revision = &update.revisions[0];
     assert_eq!(revision.episode.lifecycle, DiagnosticLifecycle::Resolved);
     assert_eq!(revision.episode.analysis, DiagnosticAnalysisStatus::Unresolved);
-    assert!(revision.inputs.contains(&intent.focus.parent) && revision.inputs.contains(&shared.owner));
+    assert!(revision.inputs.contains(&intent.focus.participant().parent) && revision.inputs.contains(&shared.owner));
     assert_eq!(revision.episode.first, shared.scenario.episode.first);
     assert_eq!(revision.episode.latest, shared.scenario.episode.latest);
     let proof = revision.episode.recovery.as_ref().unwrap();
@@ -365,7 +370,7 @@ fn shared_result_cannot_change_the_database_incident_without_exact_admitted_inte
                 let SourceObservation::FocusedPageWait { result, .. } = &mut changed_source.observation else {
                     panic!()
                 };
-                result.focus.original.elapsed_ms = Some("2".into());
+                result.focus.participant_mut().original.elapsed_ms = Some("2".into());
             }
             _ => changed_intent.episode_id = digest(b"unrelated-episode"),
         }
@@ -473,7 +478,7 @@ fn admitted_shared_recovery_proof_rejects_delayed_and_malformed_native_upper_bou
     let (mut source, capture) = result(&shared, &intent);
     let proof = DiagnosticRecoveryProof::FocusedParticipantGone {
         capture: capture.clone(),
-        parent: Box::new(intent.focus.parent.clone()),
+        parent: Box::new(intent.focus.participant().parent.clone()),
     };
     assert!(intent.matches_result_source(&source), "a valid admitted result is still too early to establish recovery");
     assert!(!proof.matches_source_with_intent(episode, &source, &capture, &intent));
@@ -506,7 +511,7 @@ fn admitted_and_failed_shared_events_pin_both_authorities_and_replay_without_dup
     next.analysis = DiagnosticAnalysisStatus::Collecting;
     let revision =
         DiagnosticRevision::with_investigation(before, next, event.clone(), "2020-01-01T01:00:00Z").unwrap().unwrap();
-    assert!(revision.inputs.contains(&intent.focus.parent) && revision.inputs.contains(&shared.owner));
+    assert!(revision.inputs.contains(&intent.focus.participant().parent) && revision.inputs.contains(&shared.owner));
     assert!(
         DiagnosticRevision::with_investigation(
             &revision.episode,

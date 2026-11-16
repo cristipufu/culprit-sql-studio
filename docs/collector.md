@@ -767,7 +767,7 @@ an episode. Absence-based recovery requires the matching native source, epoch, p
 an old epoch is not declared healthy when a different source generation is observed.
 
 The selected provider's static catalog is read without constructing a provider, resolving credentials or opening a
-connection. For a page-wait question from the current baseline, the worker records `deferred` with `cost-unqualified`
+connection. For a supported focused question from the current baseline, the worker records `deferred` with `cost-unqualified`
 when its native recipe has no production cost qualification, or `unsupported` when no matching recipe is declared.
 An offline worker with no selected catalog preserves pending analysis rather than guessing provider support.
 Catalog ordering does not change the durable analysis identity; changed recipe versions or budget envelopes do.
@@ -790,10 +790,16 @@ metadata was removed. An older capture still pending in recovery remains admissi
 and owner epoch never substitute for that exact check. A checkpoint from another analysis-controller version cannot
 acknowledge the current version's native obligation.
 
-Qualified page-wait investigations share the existing fleet scheduler. A durable immutable question owns its original
+Qualified page-wait and execution-grant investigations share the existing fleet scheduler. A durable immutable question owns its original
 evidence pin; repeated baselines cannot enqueue competing work for that episode/stage. Periodic collection takes
 precedence. Focused work must fit its native timeout, shutdown and resource gap before another periodic deadline.
 After restart, a fresh baseline must establish the source behind the saved route before a focused job can run.
+
+An execution-grant follow-up requires the original request, statement and independently qualified native member and
+process generation. It reuses the existing current-request-memory reader and selects that exact participant before
+SQL enrichment. A later grant row adds historical context; an empty result proves neither request disappearance nor
+recovery. This question has its own finite receipt, and changing the question invalidates a different recipe's cost
+approval. Its recipe remains cost-unqualified and adds no routine baseline query.
 
 A shared-resource follow-up preserves the original database question and binds a separate positive operational
 capture of its exact native member and process generation. Discovery labels, empty captures and unknown generations

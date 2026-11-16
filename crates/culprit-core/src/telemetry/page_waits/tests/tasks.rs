@@ -22,6 +22,7 @@ fn task_observation() -> PageWaitObservation {
     });
     row.resource = resource;
     row.request.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("CXCONSUMER".into()),
         elapsed_ms: Some("1".into()),
         owners: vec![],

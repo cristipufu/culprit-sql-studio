@@ -10,7 +10,7 @@ pub struct SharedInvestigationFixture {
 
 pub fn shared_investigation_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
     let fixture = shared_investigation_fixture().investigation;
-    let parent = fixture.intent.focus.parent.capture_ref();
+    let parent = fixture.intent.focus.participant().parent.capture_ref();
     let mut next = fixture.episode.clone();
     next.analysis = DiagnosticAnalysisStatus::Collecting;
     let event = DiagnosticInvestigationEvent {

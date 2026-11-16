@@ -46,12 +46,12 @@ async fn shared_owner_executes_exact_question_and_updates_only_its_original_data
     let DiagnosticExecutionBinding::Shared { owner } = &intent.execution else { panic!() };
     let (owner_source, owner_row) = runtime.fixture.outbox.diagnostic_evidence(owner).await.unwrap();
     assert!(intent.matches_shared_owner(&owner_source, &owner_row));
-    assert_eq!(intent.focus.target, runtime.fixture.backend.activity.source.target);
-    assert_ne!(owner_source.target, intent.focus.target);
-    assert_ne!(owner_source.partition.native_epoch(), intent.focus.partition.native_epoch());
+    assert_eq!(intent.focus.participant().target, runtime.fixture.backend.activity.source.target);
+    assert_ne!(owner_source.target, intent.focus.participant().target);
+    assert_ne!(owner_source.partition.native_epoch(), intent.focus.participant().partition.native_epoch());
     assert_eq!(intent.qualification.scope.target(), owner_source.target);
     assert!(matches!(intent.selection(), CollectionSelection::SharedPageWaitFocus { .. }));
-    let original = runtime.fixture.outbox.diagnostic_evidence(&intent.focus.parent).await.unwrap();
+    let original = runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap();
     let owner_before = (owner_source, owner_row);
 
     let job = runtime.take_focus().await;
@@ -71,7 +71,7 @@ async fn shared_owner_executes_exact_question_and_updates_only_its_original_data
         .diagnostic_input(&capture.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await
         .unwrap();
-    assert_eq!(input.controller_target().unwrap(), &intent.focus.target);
+    assert_eq!(input.controller_target().unwrap(), &intent.focus.participant().target);
     assert_eq!(input.source.target, intent.qualification.scope.target());
     assert!(input.rows.is_empty(), "a disappeared participant supplies no borrowed SQL, plan or page participant");
     runtime.finish(result.outcome).await;
@@ -87,16 +87,16 @@ async fn shared_owner_executes_exact_question_and_updates_only_its_original_data
     assert_eq!(revisions.len(), 1);
     let episode = &revisions[0].episode;
     assert_eq!(episode.id, intent.episode_id);
-    assert_eq!(episode.scope.target, intent.focus.target);
-    assert_eq!(episode.scope.partition, intent.focus.partition);
-    assert_eq!(episode.latest, intent.focus.parent);
+    assert_eq!(episode.scope.target, intent.focus.participant().target);
+    assert_eq!(episode.scope.partition, intent.focus.participant().partition);
+    assert_eq!(episode.latest, intent.focus.participant().parent);
     assert_eq!(episode.issue, Some(DiagnosticAnalysisIssue::NativeContextGone));
     assert!(episode.report.is_none());
     let checkpoints =
         runtime.fixture.outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap();
     assert_eq!(checkpoints.checkpoints.len(), 1, "shared execution must not create a different controller head");
-    assert_eq!(checkpoints.checkpoints[0].target, intent.focus.target);
-    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.parent).await.unwrap(), original);
+    assert_eq!(checkpoints.checkpoints[0].target, intent.focus.participant().target);
+    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap(), original);
     assert_eq!(runtime.fixture.outbox.diagnostic_evidence(owner).await.unwrap(), owner_before);
     assert_eq!(
         runtime.fixture.outbox.diagnostic_input_state(&capture, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
@@ -156,7 +156,7 @@ async fn database_outside_scope_result_can_progress_to_a_distinct_explicit_share
     assert_eq!(revisions.len(), 1);
     assert_eq!(revisions[0].episode.id, partial.id);
     assert_eq!(revisions[0].episode.scope, partial.scope);
-    assert_eq!(revisions[0].episode.latest, database_intent.focus.parent);
+    assert_eq!(revisions[0].episode.latest, database_intent.focus.participant().parent);
     assert_eq!(runtime.native_calls(), [4; 5]);
 }
 
@@ -271,7 +271,7 @@ async fn recovered_database_symptom_still_owes_shared_question_without_reassigni
     let input = runtime
         .fixture
         .outbox
-        .diagnostic_input(&intent.focus.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+        .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await
         .unwrap();
     let before =
@@ -279,7 +279,7 @@ async fn recovered_database_symptom_still_owes_shared_question_without_reassigni
     assert_eq!(before.lifecycle, DiagnosticLifecycle::Resolved);
     assert!(before.analysis.needs_work());
     assert!(matches!(before.recovery, Some(DiagnosticRecoveryProof::CompleteScope { .. })));
-    let original = runtime.fixture.outbox.diagnostic_evidence(&intent.focus.parent).await.unwrap();
+    let original = runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap();
     runtime.fixture.backend.focus_request = PageWaitRequestState::Changed;
     let job = runtime.take_focus().await;
     let result = runtime.execute(&job).await;
@@ -292,10 +292,10 @@ async fn recovered_database_symptom_still_owes_shared_question_without_reassigni
     let after = &revisions[0].episode;
     assert_eq!(after.id, before.id);
     assert_eq!(after.scope, before.scope);
-    assert_eq!(after.latest, intent.focus.parent);
+    assert_eq!(after.latest, intent.focus.participant().parent);
     assert_eq!(after.lifecycle, DiagnosticLifecycle::Resolved);
     assert!(after.report.is_none(), "a reused request cannot borrow the original SQL or page participant");
-    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.parent).await.unwrap(), original);
+    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap(), original);
     assert_eq!(runtime.native_calls(), [2; 5]);
 }
 

@@ -52,7 +52,9 @@ fn question(output: PathBuf, stage: FailureStage) -> AdmittedQuestion {
 fn request(question: &DiagnosticInvestigationIntent) -> CollectionRequest {
     let value = CollectionRequest {
         subject: CollectionSubject::Database,
-        selection: CollectionSelection::FocusedPageWait { focus: Box::new(question.focus.clone()) },
+        selection: CollectionSelection::FocusedPageWait {
+            focus: Box::new(question.focus.page_wait().unwrap().clone()),
+        },
         budget: question.budget.clone(),
     };
     value.validate().unwrap();
@@ -214,6 +216,7 @@ async fn invalid_or_different_admitted_question_and_budget_fail_before_factory_o
                 let original_resource = focus.resource.clone();
                 focus.resource.native.id = "7:1:9999".into();
                 let observed = focus
+                    .participant
                     .original
                     .wait
                     .as_mut()
@@ -248,7 +251,7 @@ async fn the_bounded_initial_manifest_rejects_an_oversized_admitted_envelope_bef
     let root = tempfile::tempdir().unwrap();
     let mut factory = question(root.path().join("capture"), FailureStage::AuthenticationFailed);
     // Structural validity is not native/cost authority. This exercises an oversized supplied question, not SQL execution.
-    factory.intent.focus.original.statement = DefinitionPayload::sql(
+    factory.intent.focus.participant_mut().original.statement = DefinitionPayload::sql(
         &format!("SELECT {} FROM fixture_metadata", "column_identifier".repeat(10_000)),
         culprit_core::Engine::Mssql,
     );

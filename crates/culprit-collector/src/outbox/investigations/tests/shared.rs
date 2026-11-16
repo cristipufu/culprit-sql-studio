@@ -101,7 +101,7 @@ impl SharedInvestigation {
             budget: self.intent.budget.clone(),
         };
         let result = ActivityWaitFocusResult {
-            focus: self.intent.focus.clone(),
+            focus: self.intent.focus.page_wait().unwrap().clone(),
             observed_from: "2020-01-01T12:00:02Z".into(),
             observed_until: "2020-01-01T12:00:03Z".into(),
             source: FocusSourceState::Matched,
@@ -116,7 +116,7 @@ impl SharedInvestigation {
                 source: "fixture-focused-shared".into(),
                 observed_from: result.observed_from.clone(),
                 observed_until: result.observed_until.clone(),
-                request: result.focus.original.clone(),
+                request: result.focus.participant().original.clone(),
                 before_check: None,
                 after_check: None,
                 statement_identity: None,
@@ -194,20 +194,20 @@ fn seal(
 fn shared_input_keeps_immutable_lineage_and_the_original_database_head_after_restart() {
     let mut fixture = SharedInvestigation::new();
     let focused = fixture.focused(true, false);
-    let input = fixture.files.diagnostic_input(&focused.observation_id, 1).unwrap();
-    assert_ne!(input.source.target, fixture.intent.focus.target);
-    assert_eq!(input.controller_target().unwrap(), &fixture.intent.focus.target);
-    assert_eq!(input.checkpoint.as_ref().unwrap().target, fixture.intent.focus.target);
+    let input = fixture.files.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
+    assert_ne!(input.source.target, fixture.intent.focus.participant().target);
+    assert_eq!(input.controller_target().unwrap(), &fixture.intent.focus.participant().target);
+    assert_eq!(input.checkpoint.as_ref().unwrap().target, fixture.intent.focus.participant().target);
     assert_eq!(input.investigation_intent().unwrap().unwrap().key().unwrap(), fixture.intent.key().unwrap());
     let expected = input.checkpoint.clone();
     let path = fixture.root.path().join("outbox");
     drop(fixture.files);
     let mut reopened = Files::open(&path).unwrap();
     reopened.recover().unwrap();
-    let input = reopened.next_diagnostic_input(1).unwrap().unwrap();
+    let input = reopened.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     assert_eq!(input.parent.capture, focused);
     assert_eq!(input.checkpoint, expected);
-    assert_eq!(input.controller_target().unwrap(), &fixture.intent.focus.target);
+    assert_eq!(input.controller_target().unwrap(), &fixture.intent.focus.participant().target);
     assert_eq!(input.investigation_intent().unwrap().unwrap().key().unwrap(), fixture.intent.key().unwrap());
 }
 
@@ -255,8 +255,8 @@ async fn manual_shared_focus_never_enters_the_database_controller_and_its_parent
     let owner = store.acquire().await.unwrap();
     let mut fixture = SharedInvestigation::with_recovery(root, &store, owner.fence());
     let focused = fixture.focused(false, true);
-    assert!(fixture.files.next_diagnostic_input(1).unwrap().is_none());
-    assert!(fixture.files.diagnostic_input(&focused.observation_id, 1).is_err());
+    assert!(fixture.files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
+    assert!(fixture.files.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).is_err());
     let focus_owner = format!("focus:{}", focused.observation_id);
     let archive_owner = format!("derived:{}", focused.observation_id);
     assert!(!super::focus::pin(&fixture.files, &focus_owner));
@@ -272,7 +272,8 @@ async fn manual_shared_focus_never_enters_the_database_controller_and_its_parent
 async fn offline_shared_result_updates_only_the_original_database_checkpoint() {
     let mut fixture = SharedInvestigation::new();
     let focused = fixture.focused(true, false);
-    let native_source = fixture.files.diagnostic_input(&focused.observation_id, 1).unwrap().source;
+    let native_source =
+        fixture.files.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap().source;
     let path = fixture.root.path().join("outbox");
     drop(fixture.files);
     let mut outbox = crate::outbox::Outbox::open(&path).unwrap();
@@ -295,21 +296,24 @@ async fn offline_shared_result_updates_only_the_original_database_checkpoint() {
         .unwrap(),
         1
     );
-    let input = outbox.diagnostic_input(&focused.observation_id, 1).await.unwrap();
+    let input = outbox.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap();
     assert_eq!(input.source, native_source);
     let checkpoint = input.checkpoint.unwrap();
-    assert_eq!(checkpoint.target, fixture.intent.focus.target);
+    assert_eq!(checkpoint.target, fixture.intent.focus.participant().target);
     assert_eq!(checkpoint.episodes.len(), 1);
-    assert_eq!(checkpoint.episodes[0].first, fixture.intent.focus.parent);
+    assert_eq!(checkpoint.episodes[0].first, fixture.intent.focus.participant().parent);
     assert_eq!(checkpoint.episodes[0].report.as_ref().unwrap().evidence().capture, focused);
-    assert_eq!(outbox.diagnostic_input_state(&input.parent, 1).await.unwrap(), DiagnosticInputState::Consumed);
+    assert_eq!(
+        outbox.diagnostic_input_state(&input.parent, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
+        DiagnosticInputState::Consumed
+    );
 }
 
 #[test]
 fn a_shared_intent_or_epoch_substitution_is_rejected_before_derived_allocation() {
     let mut fixture = SharedInvestigation::new();
     let focused = fixture.focused(true, true);
-    let input = fixture.files.diagnostic_input(&focused.observation_id, 1).unwrap();
+    let input = fixture.files.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
     let previous = input.checkpoint.as_ref().unwrap();
     let result = analyze_diagnostic_focus_with_intent(
         &input.source,
@@ -362,7 +366,7 @@ fn zero_or_unknown_shared_native_owners_do_not_become_positive_admission_referen
     assert!(unknown.partition_is_consistent());
     let capture = seal(&mut fixture.files, request, unknown, vec![model.owner_record.record], None);
     assert!(fixture.files.diagnostic_owner(&capture).unwrap().is_none());
-    assert!(fixture.files.next_diagnostic_input(1).unwrap().is_none());
+    assert!(fixture.files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
     let mut foreign = fixture.owner.clone();
     foreign.revision.as_mut().unwrap().sequence = "999".into();
     assert!(fixture.files.diagnostic_owner(&foreign).is_err());
@@ -382,7 +386,7 @@ fn a_shared_page_snapshot_is_retained_without_becoming_an_operational_owner_bind
     let capture = seal(&mut fixture.files, request, source.clone(), rows, None);
     assert!(fixture.files.diagnostic_owner(&capture).unwrap().is_none());
     assert_eq!(fixture.files.verify(&capture.observation_id).unwrap().description, Some(source));
-    assert!(fixture.files.next_diagnostic_input(1).unwrap().is_none());
+    assert!(fixture.files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
 }
 
 #[test]
@@ -392,7 +396,9 @@ fn local_lineage_metadata_cannot_replace_the_sealed_native_intent() {
     let mut foreign = fixture.intent.clone();
     foreign.qualification.read_metrics.templates[0].client_elapsed_ms += 1.0;
     let lineage = DiagnosticInvestigationLineage::from_intent(&foreign).unwrap();
-    assert!(foreign.matches_result_source(&fixture.files.diagnostic_input(&focused.observation_id, 1).unwrap().source));
+    assert!(foreign.matches_result_source(
+        &fixture.files.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap().source
+    ));
     fixture
         .files
         .journal
@@ -402,7 +408,7 @@ fn local_lineage_metadata_cannot_replace_the_sealed_native_intent() {
             params![encode(&lineage).unwrap(), focused.observation_id],
         )
         .unwrap();
-    assert!(fixture.files.diagnostic_input(&focused.observation_id, 1).is_err());
+    assert!(fixture.files.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).is_err());
 }
 
 #[tokio::test]
@@ -447,13 +453,13 @@ async fn cold_shared_inputs_authenticate_and_cache_both_originals_without_revivi
     cold.begin_diagnostic_epoch(ownership.fence(), focused.revision.as_ref().unwrap().sequence.parse().unwrap())
         .await
         .unwrap();
-    let pending = cold.next_diagnostic_input(1).await.unwrap().unwrap();
+    let pending = cold.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap();
     assert_eq!(pending.investigation_intent().unwrap().unwrap().key().unwrap(), fixture.intent.key().unwrap());
     let owner = match &fixture.intent.execution {
         DiagnosticExecutionBinding::Shared { owner } => owner.as_ref(),
         _ => unreachable!(),
     };
-    for reference in [&fixture.intent.focus.parent, owner] {
+    for reference in [&fixture.intent.focus.participant().parent, owner] {
         assert_eq!(
             cold.diagnostic_evidence(reference).await.unwrap_err().detail,
             Some(culprit_core::ErrorDetail::Outbox(OutboxProblem::MissingCapture))
@@ -477,14 +483,14 @@ async fn cold_shared_inputs_authenticate_and_cache_both_originals_without_revivi
         .unwrap(),
         1
     );
-    for reference in [&fixture.intent.focus.parent, owner] {
+    for reference in [&fixture.intent.focus.participant().parent, owner] {
         assert!(cold.diagnostic_evidence(reference).await.is_ok());
         assert_eq!(
-            cold.diagnostic_input_state(&reference.capture_ref(), 1).await.unwrap(),
+            cold.diagnostic_input_state(&reference.capture_ref(), DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
             DiagnosticInputState::EvidenceOnly
         );
     }
-    assert!(cold.next_diagnostic_input(1).await.unwrap().is_none());
+    assert!(cold.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
     let status = cold.status(10, None).await.unwrap();
     assert_eq!((status.captures, status.source_debts, status.unfinished), (1, 0, 0));
     let derived = &status.entries[0].capture;
@@ -499,21 +505,26 @@ async fn cold_shared_inputs_authenticate_and_cache_both_originals_without_revivi
         "archive ownership independently authenticates the positive shared owner through EOF"
     );
     assert_eq!(store.checkpoint_head().await.unwrap(), previous);
-    assert!(store.diagnostic_input_pending(&pending.parent, 1).await.unwrap());
+    assert!(store.diagnostic_input_pending(&pending.parent, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap());
     std::fs::write(&owner_object, owner_bytes).unwrap();
     let committed = stage_and_commit(&store, ownership.fence(), previous.as_deref(), &prepared).await.unwrap();
     let head = store.diagnostic_heads(None, 10).await.unwrap().heads.remove(0);
     let restored = crate::delivery::diagnostic_recovery::load_diagnostic_checkpoint(&store, &head).await.unwrap();
-    assert_eq!(restored.checkpoint().target, fixture.intent.focus.target);
+    assert_eq!(restored.checkpoint().target, fixture.intent.focus.participant().target);
     assert_eq!(restored.checkpoint().input.capture, focused);
     assert_eq!(head.range_id, committed.manifest().range_id);
-    assert!(!store.diagnostic_input_pending(&pending.parent, 1).await.unwrap());
+    assert!(!store.diagnostic_input_pending(&pending.parent, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap());
     drop(cold);
     let mut reopened = crate::outbox::Outbox::open(&cold_path).unwrap();
     reopened.recover().await.unwrap();
-    assert!(reopened.next_diagnostic_input(1).await.unwrap().is_none());
+    assert!(reopened.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none());
     assert_eq!(
-        reopened.diagnostic_input(&focused.observation_id, 1).await.unwrap().controller_target().unwrap(),
-        &fixture.intent.focus.target
+        reopened
+            .diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .await
+            .unwrap()
+            .controller_target()
+            .unwrap(),
+        &fixture.intent.focus.participant().target
     );
 }

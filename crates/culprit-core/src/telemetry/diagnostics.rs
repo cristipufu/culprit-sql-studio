@@ -6,7 +6,7 @@ mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 64;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 1;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 2;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -248,8 +248,8 @@ impl DiagnosticRecoveryProof {
                         && result.source == FocusSourceState::Matched
                         && result.request == PageWaitRequestState::Missing
                         && result.wait == PageWaitRelation::Unqualified
-                        && &result.focus.parent == parent.as_ref()
-                        && episode.matches_focus(&result.focus)
+                        && &result.focus.participant().parent == parent.as_ref()
+                        && episode.matches_page_wait_focus(&result.focus)
                 }
                 _ => false,
             },
@@ -281,7 +281,7 @@ impl DiagnosticRecoveryProof {
                     && result.request == PageWaitRequestState::Missing
                     && result.wait == PageWaitRelation::Unqualified
                     && ObservationBounds::new(&episode.last_seen_at, &result.observed_until).is_some()
-                    && result.focus.parent == **parent)
+                    && result.focus.participant().parent == **parent)
     }
     fn qualifies(&self, original: &DiagnosticEvidenceRef) -> bool {
         self.capture().is_valid()
@@ -311,6 +311,10 @@ pub enum DiagnosticSignal {
     LockWait {
         key: ActivityKey,
     },
+    RequestMemory {
+        key: ActivityKey,
+        statement_identity: Option<NativeIdentity>,
+    },
     PageWait {
         key: ActivityKey,
         statement_identity: Option<NativeIdentity>,
@@ -323,6 +327,9 @@ impl DiagnosticSignal {
             && match self {
                 Self::Activity { policy, .. } => policy.validate().is_ok(),
                 Self::LockWait { key } => key.request.is_some(),
+                Self::RequestMemory { key, statement_identity } => {
+                    key.request.is_some() && statement_identity.as_ref().is_none_or(NativeIdentity::is_valid)
+                }
                 Self::PageWait { key, statement_identity, resource } => {
                     key.request.is_some()
                         && statement_identity.as_ref().is_none_or(NativeIdentity::is_valid)
@@ -342,7 +349,10 @@ impl DiagnosticSignal {
     }
     pub fn activity_key(&self) -> &ActivityKey {
         match self {
-            Self::Activity { key, .. } | Self::LockWait { key } | Self::PageWait { key, .. } => key,
+            Self::Activity { key, .. }
+            | Self::LockWait { key }
+            | Self::PageWait { key, .. }
+            | Self::RequestMemory { key, .. } => key,
         }
     }
     fn matches_reference(&self, reference: &DiagnosticEvidenceRef) -> bool {
@@ -394,10 +404,14 @@ impl DiagnosticEpisode {
             && (self.analysis != DiagnosticAnalysisStatus::Analyzed || self.report.is_some())
             && (!matches!(self.analysis, DiagnosticAnalysisStatus::Deferred | DiagnosticAnalysisStatus::Unresolved)
                 || self.issue.is_some())
-            && self
-                .report
-                .as_ref()
-                .is_none_or(|report| report.is_valid() && matches!(self.signal, DiagnosticSignal::PageWait { .. }))
+            && self.report.as_ref().is_none_or(|report| {
+                report.is_valid()
+                    && matches!(
+                        (&self.signal, report),
+                        (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWait { .. })
+                            | (DiagnosticSignal::RequestMemory { .. }, DiagnosticReport::RequestMemory { .. })
+                    )
+            })
             && match (&self.lifecycle, &self.recovery) {
                 (DiagnosticLifecycle::Resolved, Some(proof)) => {
                     proof.qualifies(&self.first)
@@ -442,13 +456,32 @@ impl DiagnosticEpisode {
     }
     /// Bind a focused question to this episode's native participant, statement, resource and original scope.
     /// The caller separately authenticates the focus's original row through its exact evidence receipt.
-    pub fn matches_focus(&self, focus: &ActivityWaitFocus) -> bool {
+    pub fn matches_page_wait_focus(&self, focus: &ActivityWaitFocus) -> bool {
         self.is_valid()
             && focus.is_valid()
             && matches!(&self.signal, DiagnosticSignal::PageWait { key, statement_identity, resource }
-                if *key == focus.original.key
-                    && statement_identity.as_ref() == Some(&focus.statement_identity)
+                if *key == focus.participant().original.key
+                    && statement_identity.as_ref() == Some(&focus.participant().statement_identity)
                     && *resource == focus.resource)
+            && self.scope.source == focus.participant().source
+            && self.scope.native_epoch.as_deref() == Some(focus.participant().epoch.as_str())
+            && self.scope.partition == focus.participant().partition
+            && self.scope.target.telemetry_id().ok() == focus.participant().target.telemetry_id().ok()
+            && self.first.source_scope_id == focus.participant().parent.source_scope_id
+            && ObservationBounds::new(&self.first_seen_at, &self.last_seen_at)
+                .is_some_and(|bounds| bounds.contains(&focus.participant().original_observed_at))
+    }
+    pub fn matches_focus(&self, focus: &DiagnosticFocus) -> bool {
+        match focus {
+            DiagnosticFocus::PageWait { focus } => self.matches_page_wait_focus(focus),
+            DiagnosticFocus::RequestMemory { focus } => self.matches_request_memory_focus(focus),
+        }
+    }
+    pub fn matches_request_memory_focus(&self, focus: &ActivityRequestFocus) -> bool {
+        self.is_valid()
+            && focus.is_request_memory_focus()
+            && matches!(&self.signal, DiagnosticSignal::RequestMemory { key, statement_identity }
+                if *key == focus.original.key && statement_identity.as_ref() == Some(&focus.statement_identity))
             && self.scope.source == focus.source
             && self.scope.native_epoch.as_deref() == Some(focus.epoch.as_str())
             && self.scope.partition == focus.partition
@@ -468,11 +501,43 @@ impl DiagnosticEpisode {
 #[ts(export)]
 pub enum DiagnosticReport {
     PageWait { observation: DiagnosticEvidenceRef },
+    RequestMemory { observation: DiagnosticEvidenceRef },
 }
 impl DiagnosticReport {
+    pub fn matches_observation(
+        &self,
+        episode: &DiagnosticEpisode,
+        source: &CollectionDescription,
+        row: &ExportedRecord,
+    ) -> bool {
+        match (self, &source.observation, &row.record) {
+            (
+                Self::PageWait { .. },
+                SourceObservation::FocusedPageWait { result, .. },
+                TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }),
+            ) => {
+                episode.matches_page_wait_focus(&result.focus)
+                    && result.focus.matches_capture_scope(source)
+                    && result.accepts_observation(page)
+            }
+            (
+                Self::RequestMemory { .. },
+                SourceObservation::FocusedRequestMemory { result, .. },
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(grant),
+                    ..
+                }),
+            ) => {
+                episode.matches_request_memory_focus(&result.focus)
+                    && result.focus.matches_capture_scope(source)
+                    && result.accepts_observation(grant)
+            }
+            _ => false,
+        }
+    }
     pub fn evidence(&self) -> &DiagnosticEvidenceRef {
         match self {
-            Self::PageWait { observation } => observation,
+            Self::PageWait { observation } | Self::RequestMemory { observation } => observation,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -515,7 +580,7 @@ impl DiagnosticRevision {
             && self.investigation.as_ref().is_none_or(|event| {
                 event.matches_episode(&self.episode)
                     && event.key().ok().as_deref() == self.episode.investigation_event.as_deref()
-                    && self.inputs.contains(&event.intent.focus.parent)
+                    && self.inputs.contains(&event.intent.focus.participant().parent)
                     && match &event.intent.execution {
                         DiagnosticExecutionBinding::Database => true,
                         DiagnosticExecutionBinding::Shared { owner } => self.inputs.contains(owner),

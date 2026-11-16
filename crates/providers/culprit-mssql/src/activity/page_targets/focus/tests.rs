@@ -17,28 +17,31 @@ pub(crate) fn focus(row: &Rec) -> ActivityWaitFocus {
             sequence: "1".into(),
         }),
     };
+    let resource = original.wait.as_ref().unwrap().identified_resources[0].clone();
     ActivityWaitFocus {
-        partition: authority.source_partition().unwrap(),
-        database_writable: context.writable,
-        parent: DiagnosticEvidenceRef {
-            batch_id: batch_id(&capture.observation_id, TelemetryStream::ActivityObservations).unwrap(),
-            capture,
-            manifest_sha256: digest(b"original manifest"),
-            source_scope_id: digest(b"original native scope"),
-            stream: TelemetryStream::ActivityObservations,
-            native_key: NativeRecordIdentity::Activity(original.key.clone()),
-            record_id: digest(b"original row"),
-            payload_sha256: digest(b"original payload"),
-            representation_version: REPRESENTATION_VERSION,
-            row_ordinal: 0,
+        participant: ActivityRequestFocus {
+            partition: authority.source_partition().unwrap(),
+            database_writable: context.writable,
+            parent: DiagnosticEvidenceRef {
+                batch_id: batch_id(&capture.observation_id, TelemetryStream::ActivityObservations).unwrap(),
+                capture,
+                manifest_sha256: digest(b"original manifest"),
+                source_scope_id: digest(b"original native scope"),
+                stream: TelemetryStream::ActivityObservations,
+                native_key: NativeRecordIdentity::Activity(original.key.clone()),
+                record_id: digest(b"original row"),
+                payload_sha256: digest(b"original payload"),
+                representation_version: REPRESENTATION_VERSION,
+                row_ordinal: 0,
+            },
+            target: context.database.into(),
+            source: culprit_core::source_id::SESSIONS.into(),
+            epoch: context.epoch.unwrap(),
+            original_observed_at: context.at,
+            statement_identity: original.statement_identity.clone().unwrap(),
+            original,
         },
-        target: context.database.into(),
-        source: culprit_core::source_id::SESSIONS.into(),
-        epoch: context.epoch.unwrap(),
-        original_observed_at: context.at,
-        statement_identity: original.statement_identity.clone().unwrap(),
-        resource: original.wait.as_ref().unwrap().identified_resources[0].clone(),
-        original,
+        resource,
     }
 }
 
@@ -54,7 +57,10 @@ async fn focus_uses_only_the_original_native_request_and_retains_baseline_contex
     let point = &captured.capture.snapshot.observations[0];
     assert!(point.target.is_some());
     assert_eq!(point.request.client.as_ref().unwrap().application.as_deref(), Some("later native client"));
-    assert_eq!(captured.result.focus.original.client.as_ref().unwrap().application.as_deref(), Some("app"));
+    assert_eq!(
+        captured.result.focus.participant().original.client.as_ref().unwrap().application.as_deref(),
+        Some("app")
+    );
     let query = &native.io.calls[1];
     assert!(query.sql.contains("r.session_id=@P2 AND r.request_id=@P3"));
     assert!(!query.sql.contains("LIKE 'PAGELATCH"));
@@ -73,7 +79,7 @@ async fn focused_work_rejects_a_changed_role_on_the_same_member_and_process_befo
     let authority = crate::activity::database_context::test_azure_authority(&changed).unwrap();
     assert_eq!(
         authority.source_partition().unwrap(),
-        original.partition,
+        original.participant().partition,
         "role is deliberately excluded the member/epoch key"
     );
     let mut owner = reader(vec![Ok(vec![changed])]);
@@ -86,12 +92,12 @@ async fn focused_work_rejects_a_changed_role_on_the_same_member_and_process_befo
 #[tokio::test]
 async fn unknown_original_or_current_role_never_authorizes_focused_request_sql_or_page_reads() {
     let mut original = focus(&page_wait(42, "PAGELATCH_EX", "7:1:4144"));
-    original.database_writable = None;
+    original.participant_mut().database_writable = None;
     let mut owner = reader(vec![]);
     let error = owner.capture_focused_page_wait_targets(&original).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceUnavailable);
     assert_eq!(owner.query_count(), 0);
-    original.database_writable = Some(true);
+    original.participant_mut().database_writable = Some(true);
     let unknown = replace(&context(), &[("updateability", Val::Null)]);
     let mut owner = reader(vec![Ok(vec![unknown])]);
     let error = owner.capture_focused_page_wait_targets(&original).await.err().unwrap();
@@ -113,9 +119,9 @@ async fn boxed_baseline_native_recovery_epoch_is_accepted_by_the_same_focused_re
     let native_authority = crate::activity::database_context::initial(&mut authority_reader).await.unwrap();
     let authority = native_authority.capture_context().unwrap();
     let mut focus = focus(&original);
-    focus.target = authority.database.into();
-    focus.epoch = authority.epoch.unwrap();
-    focus.partition = native_authority.source_partition().unwrap();
+    focus.participant_mut().target = authority.database.into();
+    focus.participant_mut().epoch = authority.epoch.unwrap();
+    focus.participant_mut().partition = native_authority.source_partition().unwrap();
     let mut supplied = successful_replies(vec![local]);
     supplied.remove(6).unwrap();
     supplied.remove(3).unwrap();
@@ -219,10 +225,10 @@ async fn a_non_native_statement_token_or_source_is_rejected_before_any_work() {
     for source in [false, true] {
         let mut focus = focus.clone();
         if source {
-            focus.source = "foreign-native-source".into();
+            focus.participant_mut().source = "foreign-native-source".into();
         } else {
-            focus.statement_identity = NativeIdentity::new("looks like a statement");
-            focus.original.statement_identity = Some(focus.statement_identity.clone());
+            focus.participant_mut().statement_identity = NativeIdentity::new("looks like a statement");
+            focus.participant_mut().original.statement_identity = Some(focus.participant().statement_identity.clone());
         }
         assert!(focus.is_valid());
         let mut native = reader(vec![]);

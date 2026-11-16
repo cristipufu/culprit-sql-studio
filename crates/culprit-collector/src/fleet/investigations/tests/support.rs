@@ -198,9 +198,18 @@ impl FleetBackend for Backend {
                 CollectionSelection::FocusedPageWait { focus } => {
                     let intent =
                         admission.investigation.as_ref().expect("automatic focus must retain its admitted intent");
-                    assert_eq!(&intent.focus, focus.as_ref());
+                    assert_eq!(intent.selection(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution)
+                }
+                CollectionSelection::FocusedRequestMemory { focus } => {
+                    let intent = admission
+                        .investigation
+                        .as_ref()
+                        .expect("automatic memory question retains its admitted intent");
+                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.budget, request.budget);
+                    super::request_memory::focused_frame(focus)
                 }
                 CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational } => {
                     assert!(admission.investigation.is_none());
@@ -486,7 +495,7 @@ fn focused_frame(
     request: PageWaitRequestState,
     resolution: Option<PageWaitResolution>,
 ) -> Frame {
-    let at = chrono::DateTime::parse_from_rfc3339(&focus.original_observed_at).unwrap();
+    let at = chrono::DateTime::parse_from_rfc3339(&focus.participant().original_observed_at).unwrap();
     let from = (at + chrono::Duration::seconds(1)).to_rfc3339();
     let until = (at + chrono::Duration::seconds(2)).to_rfc3339();
     let source = "fixture-focused-pages".to_owned();
@@ -496,7 +505,7 @@ fn focused_frame(
                 source: source.clone(),
                 observed_from: from.clone(),
                 observed_until: until.clone(),
-                request: focus.original.clone(),
+                request: focus.participant().original.clone(),
                 task_wait: None,
                 before_check: Some(PageWaitRecheck {
                     observed_at: from.clone(),
@@ -536,8 +545,8 @@ fn focused_frame(
     assert!(result.is_valid());
     Frame {
         source: CollectionDescription {
-            partition: result.focus.partition.clone(),
-            target: result.focus.target.clone(),
+            partition: result.focus.participant().partition.clone(),
+            target: result.focus.participant().target.clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::FocusedPageWait {

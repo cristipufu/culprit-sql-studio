@@ -34,6 +34,9 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
                 &crate::activity::page_targets::tests::page_wait(42, "PAGELATCH_EX", "7:1:4144"),
             )),
         },
+        RecipeSelector::FocusedRequestMemory => CollectionSelection::FocusedRequestMemory {
+            focus: Box::new(crate::activity::memory::focus::tests::original_focus()),
+        },
         RecipeSelector::CacheEntryMemory => {
             CollectionSelection::CacheEntryMemory { focus: Box::new(crate::cache_entry_memory::tests::focus().await) }
         }
@@ -60,7 +63,7 @@ async fn every_declared_recipe_uses_exactly_one_actual_constructor_without_nativ
                 (&mut selection, &subject)
             {
                 // This constructor-only fixture names an original instance member; no native authority is acquired.
-                let SourcePartition::InstanceLocal { member, .. } = &mut focus.partition else {
+                let SourcePartition::InstanceLocal { member, .. } = &mut focus.participant_mut().partition else {
                     panic!("a shared follow-up requires the original native member")
                 };
                 *member = Some(resource.clone());

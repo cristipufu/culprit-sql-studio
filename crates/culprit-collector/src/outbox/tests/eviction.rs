@@ -115,7 +115,7 @@ async fn a_native_baseline_is_pinned_until_its_diagnostic_input_has_a_durable_su
     let prepared = delivery.prepare(&first.capture.observation_id, contract.clone(), vec![]).await.unwrap();
     let native = stage_and_commit(&store, owner.fence(), None, &prepared).await.unwrap();
     assert!(!delivery.evict(&native).await.unwrap());
-    let input = outbox.next_diagnostic_input(1).await.unwrap().unwrap();
+    let input = outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap();
     let derived = outbox
         .commit_diagnostics(input.clone(), super::restored_diagnostics::pending_update(&input, "initial"))
         .await
@@ -153,7 +153,7 @@ async fn archived_baseline_markers_survive_restart_and_do_not_rearchive_the_prot
     drop(owner);
     let owner = store.acquire().await.unwrap();
     outbox.begin_remote_epoch(owner.fence(), 1).await.unwrap();
-    let input = outbox.next_diagnostic_input(1).await.unwrap().unwrap();
+    let input = outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap();
     let derived = outbox
         .commit_diagnostics(input.clone(), super::restored_diagnostics::pending_update(&input, "initial"))
         .await

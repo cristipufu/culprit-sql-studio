@@ -4,13 +4,14 @@ import type { ComponentVersion } from "./ComponentVersion";
 import type { DiagnosticEvidenceRef } from "./DiagnosticEvidenceRef";
 import type { ReadWorkMetrics } from "./ReadWorkMetrics";
 import type { RecipeCostScope } from "./RecipeCostScope";
+import type { RecipeSelector } from "./RecipeSelector";
 
 /**
  * Approval issued by the selected source registration for one measured native context and exact tested budget.
  * Before native admission, the caller must authenticate `evidence` and run that registration's pure verifier
  * against the recovered native artifact. Client read metrics alone establish neither native cost nor safety.
  */
-export type RecipeCostReceipt = { recipe_id: string, recipe_version: number, scope: RecipeCostScope, 
+export type RecipeCostReceipt = { recipe_id: string, recipe_version: number, selector: RecipeSelector, scope: RecipeCostScope, 
 /**
  * Exact native-reader/qualification authority identity supplied by the selected registration.
  */

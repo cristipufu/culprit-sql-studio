@@ -178,6 +178,7 @@ pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -
         session_counters: Default::default(),
         request_counters: request.is_some().then(ActivityCounters::default),
         wait: lock_wait.map(|_| ActivityWait {
+            class: None,
             identified_resources: vec![],
             native_type: Some(state),
             elapsed_ms: wait_elapsed,

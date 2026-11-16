@@ -44,7 +44,7 @@ impl Investigations {
                 match resolve_optional_evidence(
                     storage.outbox,
                     &job.connection,
-                    &intent.focus.parent,
+                    &intent.focus.participant().parent,
                     storage.recovery,
                     cancellation,
                 )
@@ -222,7 +222,7 @@ impl Investigations {
         let Some((source, original)) = resolve_optional_evidence(
             storage.outbox,
             &job.connection,
-            &intent.focus.parent,
+            &intent.focus.participant().parent,
             storage.recovery,
             cancellation,
         )
@@ -233,7 +233,7 @@ impl Investigations {
         let TelemetryRecord::Activity(original) = &original.record else {
             return Err(CollectionStop::InvalidPage.error());
         };
-        if !intent.focus.matches_parent(&source, original, &intent.focus.parent) {
+        if !intent.focus.matches_parent(&source, original, &intent.focus.participant().parent) {
             return Err(CollectionStop::InvalidPage.error());
         }
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
@@ -250,7 +250,7 @@ impl Investigations {
         storage.outbox.pin_investigation_parent(intent).await?;
         let current = storage
             .outbox
-            .diagnostic_input(&intent.focus.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
             .await?;
         let episode = current
             .checkpoint

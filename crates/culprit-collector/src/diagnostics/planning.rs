@@ -39,7 +39,7 @@ pub(super) fn qualify_questions(
         }
     }
     for episode in &mut update.checkpoint.episodes {
-        if !matches!(episode.signal, DiagnosticSignal::PageWait { .. })
+        if !matches!(episode.signal, DiagnosticSignal::PageWait { .. } | DiagnosticSignal::RequestMemory { .. })
             || !episode.analysis.needs_work()
             || episode.latest.capture_ref() != input.parent
         {
@@ -52,13 +52,13 @@ pub(super) fn qualify_questions(
         let TelemetryRecord::Activity(original) = &row.row.record else {
             return Err(CollectionStop::InvalidPage.error());
         };
-        let issue = match episode.plan_page_wait_focus(&input.source, original, &row.reference)? {
-            PageWaitFocusPlan::NotRequired => continue,
-            PageWaitFocusPlan::Unavailable(issue) => {
+        let issue = match episode.plan_focus(&input.source, original, &row.reference)? {
+            DiagnosticFocusPlan::NotRequired => continue,
+            DiagnosticFocusPlan::Unavailable(issue) => {
                 episode.analysis = DiagnosticAnalysisStatus::Unresolved;
                 issue
             }
-            PageWaitFocusPlan::Ready(focus) => {
+            DiagnosticFocusPlan::Ready(focus) => {
                 episode.analysis = DiagnosticAnalysisStatus::Deferred;
                 qualification_issue(recipes, &assignment.subject, &focus)
             }
@@ -75,11 +75,16 @@ pub(super) fn qualify_questions(
 fn qualification_issue(
     recipes: &[RecipeDescriptor],
     subject: &CollectionSubject,
-    focus: &ActivityWaitFocus,
+    focus: &DiagnosticFocus,
 ) -> DiagnosticAnalysisIssue {
     let request = CollectionRequest {
         subject: subject.clone(),
-        selection: CollectionSelection::FocusedPageWait { focus: Box::new(focus.clone()) },
+        selection: match focus {
+            DiagnosticFocus::PageWait { focus } => CollectionSelection::FocusedPageWait { focus: focus.clone() },
+            DiagnosticFocus::RequestMemory { focus } => {
+                CollectionSelection::FocusedRequestMemory { focus: focus.clone() }
+            }
+        },
         budget: CollectionBudget::default(),
     };
     let recipe =

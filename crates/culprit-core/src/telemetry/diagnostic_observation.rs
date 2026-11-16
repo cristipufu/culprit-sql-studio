@@ -28,7 +28,7 @@ impl DiagnosticActivityRow<'_> {
 pub struct DiagnosticObservationUpdate {
     pub revisions: Vec<DiagnosticRevision>,
     pub checkpoint: DiagnosticCheckpoint,
-    pub focuses: Vec<(String, ActivityWaitFocus)>,
+    pub focuses: Vec<(String, DiagnosticFocus)>,
 }
 
 /// Detection records symptoms and a bounded question. It establishes neither a latch owner nor a causal fix.
@@ -111,13 +111,13 @@ pub fn observe_diagnostic_activity(
                 None => DiagnosticEpisode::start(scope.clone(), signal, native.at.clone(), row.reference.clone())?,
             };
             observed.insert(episode.id.clone());
-            match episode.plan_page_wait_focus(source, row.observation, row.reference)? {
-                PageWaitFocusPlan::Ready(focus) => focuses.push((episode.id.clone(), *focus)),
-                PageWaitFocusPlan::Unavailable(issue) => {
+            match episode.plan_focus(source, row.observation, row.reference)? {
+                DiagnosticFocusPlan::Ready(focus) => focuses.push((episode.id.clone(), *focus)),
+                DiagnosticFocusPlan::Unavailable(issue) => {
                     episode.analysis = DiagnosticAnalysisStatus::Unresolved;
                     episode.issue = Some(issue);
                 }
-                PageWaitFocusPlan::NotRequired => (),
+                DiagnosticFocusPlan::NotRequired => (),
             }
             record_transition(&mut revisions, before.as_ref(), &mut episode, analyzed_at)?;
             episodes.insert(episode.id.clone(), episode);
@@ -186,6 +186,12 @@ fn signals(
     }
     if row.key.request.is_none() {
         return signals;
+    }
+    if row.wait.as_ref().is_some_and(|wait| wait.class == Some(ActivityWaitClass::ExecutionGrant)) {
+        signals.push(DiagnosticSignal::RequestMemory {
+            key: row.key.clone(),
+            statement_identity: row.statement_identity.clone(),
+        });
     }
     if row.waiting_on_lock == Some(true) {
         signals.push(DiagnosticSignal::LockWait { key: row.key.clone() });

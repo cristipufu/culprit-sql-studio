@@ -15,6 +15,7 @@ pub use scope::RecipeCostScope;
 pub struct RecipeCostReceipt {
     pub recipe_id: String,
     pub recipe_version: u32,
+    pub selector: RecipeSelector,
     pub scope: RecipeCostScope,
     /// Exact native-reader/qualification authority identity supplied by the selected registration.
     pub component: ComponentVersion,
@@ -30,6 +31,7 @@ impl RecipeCostReceipt {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.recipe_id)
             && self.recipe_version > 0
+            && matches!(self.selector, RecipeSelector::FocusedPageWait | RecipeSelector::FocusedRequestMemory)
             && self.scope.is_valid()
             && self.scope.native_epoch().is_some()
             && self.scope.partition().is_qualified()
@@ -46,19 +48,19 @@ impl RecipeCostReceipt {
         hash(&("recipe-cost-receipt-v1", self))
     }
 
-    /// Check the declared context of the concrete page investigation without granting authority or live admission.
+    /// Check the declared context of the focused investigation without granting authority or live admission.
     pub fn matches_recipe(&self, recipe: &RecipeDescriptor) -> bool {
         self.is_valid()
             && self.recipe_id == recipe.id
             && self.recipe_version == recipe.version
             && recipe.purpose == RecipePurpose::Investigation
-            && recipe.selector == RecipeSelector::FocusedPageWait
+            && recipe.selector == self.selector
             && recipe.subjects.iter().any(|subject| subject.accepts(&self.scope.subject()))
             && within(&self.tested_budget, &recipe.budget)
     }
 }
 
-/// One immutable attempt to investigate one page-wait episode. Route/admission ownership stays with the scheduler.
+/// One immutable focused question for an episode. Route/admission ownership stays with the scheduler.
 /// The selected registration's authenticated cost verifier remains mandatory even when every relation here matches.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -68,7 +70,7 @@ pub struct DiagnosticInvestigationIntent {
     pub episode_revision: String,
     pub recipe_id: String,
     pub recipe_version: u32,
-    pub focus: ActivityWaitFocus,
+    pub focus: DiagnosticFocus,
     pub execution: DiagnosticExecutionBinding,
     pub budget: CollectionBudget,
     pub qualification: RecipeCostReceipt,
@@ -107,7 +109,7 @@ impl DiagnosticInvestigationLineage {
 
     /// Reconstruct the exact retired intent using only the request's original question and this provenance.
     /// Parent/cost artifact authentication and selected-source authority remain separate caller-owned checks.
-    pub fn reconstruct(&self, focus: &ActivityWaitFocus) -> Result<DiagnosticInvestigationIntent> {
+    pub fn reconstruct(&self, focus: &DiagnosticFocus) -> Result<DiagnosticInvestigationIntent> {
         if !valid_digest(&self.intent_key) {
             return Err(invalid());
         }
@@ -128,7 +130,7 @@ impl DiagnosticInvestigationLineage {
     }
 
     /// Match immutable provenance, including the exact native accounting encoding, to the original question.
-    pub fn matches_intent(&self, focus: &ActivityWaitFocus, intent: &DiagnosticInvestigationIntent) -> bool {
+    pub fn matches_intent(&self, focus: &DiagnosticFocus, intent: &DiagnosticInvestigationIntent) -> bool {
         intent.key().is_ok_and(|expected| self.intent_key == expected && self.reconstruct(focus).is_ok())
     }
 
@@ -139,8 +141,8 @@ impl DiagnosticInvestigationLineage {
 
     pub(super) fn intent_for_request(&self, request: &CollectionRequest) -> Result<DiagnosticInvestigationIntent> {
         request.validate()?;
-        let focus = request.focus().ok_or_else(invalid)?;
-        let intent = self.reconstruct(focus)?;
+        let focus = DiagnosticFocus::from_selection(&request.selection).ok_or_else(invalid)?;
+        let intent = self.reconstruct(&focus)?;
         if intent.budget != request.budget
             || intent.subject() != request.subject
             || intent.selection() != request.selection
@@ -157,7 +159,7 @@ impl DiagnosticInvestigationIntent {
     pub fn new(
         episode: &DiagnosticEpisode,
         recipe: &RecipeDescriptor,
-        focus: ActivityWaitFocus,
+        focus: DiagnosticFocus,
         component: &ComponentVersion,
         caller_budget: &CollectionBudget,
     ) -> Result<Self> {
@@ -184,7 +186,7 @@ impl DiagnosticInvestigationIntent {
     pub fn new_shared(
         episode: &DiagnosticEpisode,
         recipe: &RecipeDescriptor,
-        focus: ActivityWaitFocus,
+        focus: DiagnosticFocus,
         component: &ComponentVersion,
         caller_budget: &CollectionBudget,
         owner: DiagnosticSharedOwner<'_>,
@@ -218,6 +220,7 @@ impl DiagnosticInvestigationIntent {
             && self.recipe_version > 0
             && self.focus.is_valid()
             && self.qualification.is_valid()
+            && self.focus.selector() == self.qualification.selector
             && self.recipe_id == self.qualification.recipe_id
             && self.recipe_version == self.qualification.recipe_version
             && self.budget == self.qualification.tested_budget
@@ -236,7 +239,12 @@ impl DiagnosticInvestigationIntent {
         if !self.is_valid() {
             return Err(invalid());
         }
-        hash(&("diagnostic-page-wait-stage-v2", &self.episode_id, self.qualification.scope.target().telemetry_id()?))
+        hash(&(
+            "diagnostic-question-stage-v3",
+            &self.episode_id,
+            self.focus.selector(),
+            self.qualification.scope.target().telemetry_id()?,
+        ))
     }
 
     /// Revalidate the immutable question against current, authenticated context. A newer same-episode revision

@@ -253,5 +253,10 @@ pub(crate) fn wait_type_category(wait_type: &str) -> &'static str {
     "Other"
 }
 
+/// Native execution-grant admission only; compiler gateways and allocator waits have different owners.
+pub(crate) fn is_execution_grant_wait(native: &str) -> bool {
+    native == "RESOURCE_SEMAPHORE"
+}
+
 #[cfg(test)]
 pub(crate) mod tests;

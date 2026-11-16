@@ -8,7 +8,75 @@ pub enum PageWaitFocusPlan {
     NotRequired,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DiagnosticFocusPlan {
+    Ready(Box<DiagnosticFocus>),
+    Unavailable(DiagnosticAnalysisIssue),
+    NotRequired,
+}
+
 impl DiagnosticEpisode {
+    pub fn plan_focus(
+        &self,
+        source: &CollectionDescription,
+        original: &ActivityObservation,
+        reference: &DiagnosticEvidenceRef,
+    ) -> Result<DiagnosticFocusPlan> {
+        if !self.is_valid() {
+            return Err(invalid());
+        }
+        if !self.analysis.needs_work() {
+            return Ok(DiagnosticFocusPlan::NotRequired);
+        }
+        if matches!(self.signal, DiagnosticSignal::PageWait { .. }) {
+            return Ok(match self.plan_page_wait_focus(source, original, reference)? {
+                PageWaitFocusPlan::Ready(focus) => {
+                    DiagnosticFocusPlan::Ready(Box::new(DiagnosticFocus::PageWait { focus }))
+                }
+                PageWaitFocusPlan::Unavailable(issue) => DiagnosticFocusPlan::Unavailable(issue),
+                PageWaitFocusPlan::NotRequired => DiagnosticFocusPlan::NotRequired,
+            });
+        }
+        let DiagnosticSignal::RequestMemory { key, statement_identity } = &self.signal else {
+            return Ok(DiagnosticFocusPlan::NotRequired);
+        };
+        let native = source.observation.activity().filter(|snapshot| snapshot.is_valid()).ok_or_else(invalid)?;
+        DiagnosticActivityRow { reference, observation: original }.verify(source, &reference.capture_ref())?;
+        let scope = DiagnosticScope::from_source(source)?;
+        if *key != original.key
+            || scope.key()? != self.scope.key()?
+            || !ObservationBounds::new(&self.first_seen_at, &self.last_seen_at)
+                .is_some_and(|bounds| bounds.contains(&native.at))
+        {
+            return Err(invalid());
+        }
+        let (Some(epoch), Some(statement)) = (&native.epoch, &original.statement_identity) else {
+            return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
+        };
+        if statement_identity.is_none()
+            || !scope.partition.is_qualified()
+            || scope.partition.native_epoch().is_none()
+            || original.scope != ActivityScopeBasis::RequestDatabase
+        {
+            return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
+        }
+        let focus = ActivityRequestFocus {
+            parent: reference.clone(),
+            target: source.target.clone(),
+            partition: source.partition.clone(),
+            database_writable: native.database_writable,
+            source: source.source.clone(),
+            epoch: epoch.clone(),
+            original_observed_at: native.at.clone(),
+            original: original.clone(),
+            statement_identity: statement.clone(),
+        };
+        if !focus.matches_parent(source, original, reference) || !self.matches_request_memory_focus(&focus) {
+            return Err(invalid());
+        }
+        Ok(DiagnosticFocusPlan::Ready(Box::new(DiagnosticFocus::RequestMemory { focus: Box::new(focus) })))
+    }
+
     /// Reconstruct a question from an original baseline row authenticated by the caller's outbox/recovery owner.
     /// Receipt derivation checks consistency here; it cannot prove manifest membership or authenticate storage.
     /// Native visibility may be partial, and a resolved episode may still owe analysis of its original evidence.
@@ -53,18 +121,20 @@ impl DiagnosticEpisode {
             return Ok(PageWaitFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
         }
         let focus = ActivityWaitFocus {
-            parent: reference.clone(),
-            target: source.target.clone(),
-            partition: source.partition.clone(),
-            database_writable: native.database_writable,
-            source: source.source.clone(),
-            epoch: epoch.clone(),
-            original_observed_at: native.at.clone(),
-            original: original.clone(),
-            statement_identity: statement.clone(),
+            participant: ActivityRequestFocus {
+                parent: reference.clone(),
+                target: source.target.clone(),
+                partition: source.partition.clone(),
+                database_writable: native.database_writable,
+                source: source.source.clone(),
+                epoch: epoch.clone(),
+                original_observed_at: native.at.clone(),
+                original: original.clone(),
+                statement_identity: statement.clone(),
+            },
             resource: resource.clone(),
         };
-        if !focus.matches_parent(source, original, reference) || !self.matches_focus(&focus) {
+        if !focus.matches_parent(source, original, reference) || !self.matches_page_wait_focus(&focus) {
             return Err(invalid());
         }
         Ok(PageWaitFocusPlan::Ready(Box::new(focus)))

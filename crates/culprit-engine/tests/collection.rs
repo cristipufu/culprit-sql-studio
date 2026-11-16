@@ -1360,6 +1360,7 @@ fn activity_rows(scenario: Scenario, step: usize) -> Vec<culprit_core::telemetry
         row.waiting_on_lock = Some(true);
         row.elapsed_ms = Some("40000".into());
         row.wait = Some(ActivityWait {
+            class: None,
             native_type: Some("LCK_M_X".into()),
             elapsed_ms: None,
             identified_resources: vec![],

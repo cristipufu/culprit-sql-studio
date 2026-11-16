@@ -240,9 +240,9 @@ async fn an_explicit_shared_focus_keeps_its_original_request_and_never_discovers
     let mut authority = native_reader(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)]), Ok(vec![boxed_context()])]);
     let native = crate::activity::database_context::initial(&mut authority).await.unwrap();
     let original_context = native.capture_context().unwrap();
-    focus.target = original_context.database.into();
-    focus.epoch = original_context.epoch.unwrap();
-    focus.partition = native.source_partition().unwrap();
+    focus.participant_mut().target = original_context.database.into();
+    focus.participant_mut().epoch = original_context.epoch.unwrap();
+    focus.participant_mut().partition = native.source_partition().unwrap();
     let resource = resource().await;
     let partition = SourcePartition::InstanceLocal {
         member: Some(resource.clone()),
@@ -269,9 +269,9 @@ async fn stale_shared_execution_generation_refuses_before_tempdb_metadata_activi
     let mut authority = native_reader(vec![Ok(vec![metadata()]), Ok(vec![epoch(100)]), Ok(vec![boxed_context()])]);
     let native = crate::activity::database_context::initial(&mut authority).await.unwrap();
     let current = native.capture_context().unwrap();
-    focus.target = current.database.into();
-    focus.epoch = current.epoch.unwrap();
-    focus.partition = native.source_partition().unwrap();
+    focus.participant_mut().target = current.database.into();
+    focus.participant_mut().epoch = current.epoch.unwrap();
+    focus.participant_mut().partition = native.source_partition().unwrap();
     let resource = resource().await;
     for stale_member in [false, true] {
         let mut member = resource.clone();

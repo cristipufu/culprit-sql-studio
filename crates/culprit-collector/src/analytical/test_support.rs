@@ -15,8 +15,8 @@ pub use source_partitions::{
 };
 mod investigations;
 pub use investigations::{
-    InvestigationFixture, SharedInvestigationFixture, investigation_fixture, shared_investigation_evidence,
-    shared_investigation_fixture,
+    InvestigationFixture, SharedInvestigationFixture, focused_request_memory_evidence, investigation_fixture,
+    request_memory_investigation_fixture, shared_investigation_evidence, shared_investigation_fixture,
 };
 
 mod queries;
@@ -823,6 +823,7 @@ pub fn activity_with_wait_resource(
     let mut row = activity_sample();
     row.state = "waiting".into();
     row.wait = Some(ActivityWait {
+        class: None,
         native_type: Some(
             match kind {
                 culprit_core::WaitResourceKind::MemoryPage => "PAGELATCH_EX",

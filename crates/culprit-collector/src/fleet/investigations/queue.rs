@@ -73,7 +73,7 @@ impl Investigations {
                 FocusEnrollment::Capacity => {
                     set_analysis(
                         storage.outbox,
-                        &candidate.intent.focus.parent,
+                        &candidate.intent.focus.participant().parent,
                         &candidate.intent.episode_id,
                         DiagnosticAnalysisStatus::Deferred,
                         Some(DiagnosticAnalysisIssue::Capacity),
@@ -199,7 +199,7 @@ impl Investigations {
         let evidence = match resolve_evidence(
             owners.storage.outbox,
             &job.connection,
-            &intent.focus.parent,
+            &intent.focus.participant().parent,
             owners.storage.recovery,
             cancellation,
         )
@@ -211,13 +211,13 @@ impl Investigations {
         };
         let Some((source, row)) = evidence else { return Ok(()) };
         let TelemetryRecord::Activity(original) = &row.record else { return Err(DeliveryProblem::Integrity.error()) };
-        if !intent.focus.matches_parent(&source, original, &intent.focus.parent) {
+        if !intent.focus.matches_parent(&source, original, &intent.focus.participant().parent) {
             return Err(DeliveryProblem::Integrity.error());
         }
         let current = owners
             .storage
             .outbox
-            .diagnostic_input(&intent.focus.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
             .await?;
         let Some(checkpoint) = current.checkpoint else { return Ok(()) };
         let episode = checkpoint.episodes.iter().find(|episode| episode.id == intent.episode_id);
@@ -234,8 +234,14 @@ impl Investigations {
             return Ok(());
         }
         if let Some(status) = status {
-            set_analysis(owners.storage.outbox, &intent.focus.parent, &intent.episode_id, status, Some(issue.clone()))
-                .await?;
+            set_analysis(
+                owners.storage.outbox,
+                &intent.focus.participant().parent,
+                &intent.episode_id,
+                status,
+                Some(issue.clone()),
+            )
+            .await?;
         }
         let update = owners.scheduler.cancel_focused(&job.key, started.elapsed(), chrono::Utc::now())?;
         owners.scheduler.persisted(owners.journal.cancel_focused(update, issue).await?)?;
@@ -407,11 +413,9 @@ pub(super) fn result_matches_intent(
     lineage: Option<&DiagnosticInvestigationLineage>,
     intent: &DiagnosticInvestigationIntent,
 ) -> Result<bool> {
-    let SourceObservation::FocusedPageWait { result, .. } = &source.observation else {
-        return Err(DeliveryProblem::Integrity.error());
-    };
-    Ok(result.is_valid()
+    let focus = source.observation.diagnostic_focus().ok_or_else(|| DeliveryProblem::Integrity.error())?;
+    Ok(focus.is_valid()
         && intent.matches_result_source(source)
-        && result.focus == intent.focus
-        && lineage.is_some_and(|lineage| lineage.matches_intent(&result.focus, intent)))
+        && focus == intent.focus
+        && lineage.is_some_and(|lineage| lineage.matches_intent(&focus, intent)))
 }

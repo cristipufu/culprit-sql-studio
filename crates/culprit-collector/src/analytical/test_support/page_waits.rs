@@ -194,17 +194,24 @@ pub fn shared_page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<Tele
     let original =
         ExportedRecord::new(&manifest.source, &manifest.capture, TelemetryRecord::from(first.request.clone())).unwrap();
     let focus = ActivityWaitFocus {
-        target: manifest.source.target.clone(),
-        source: manifest.source.source.clone(),
-        partition: manifest.source.partition.clone(),
-        database_writable: Some(true),
-        epoch: "native-original-database-epoch".into(),
-        original_observed_at: original_at,
-        parent: DiagnosticEvidenceRef::from_export(&manifest.source, &manifest.capture_manifest_sha256, &original, 0)
+        participant: ActivityRequestFocus {
+            target: manifest.source.target.clone(),
+            source: manifest.source.source.clone(),
+            partition: manifest.source.partition.clone(),
+            database_writable: Some(true),
+            epoch: "native-original-database-epoch".into(),
+            original_observed_at: original_at,
+            parent: DiagnosticEvidenceRef::from_export(
+                &manifest.source,
+                &manifest.capture_manifest_sha256,
+                &original,
+                0,
+            )
             .unwrap(),
-        statement_identity: first.request.statement_identity.clone().unwrap(),
+            statement_identity: first.request.statement_identity.clone().unwrap(),
+            original: first.request.clone(),
+        },
         resource: first.resource.clone(),
-        original: first.request.clone(),
     };
     focused.observation = SourceObservation::FocusedPageWait {
         snapshot: snapshot.clone(),
@@ -293,6 +300,7 @@ fn parallel_observation(session: &str, kind: WaitResourceKind, page: u32, contex
         blocking_execution_context_id: None,
     });
     row.request.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("CXCONSUMER".into()),
         elapsed_ms: Some("17".into()),
         owners: vec![],
@@ -401,6 +409,7 @@ fn observation(session: &str, address: &str, kind: WaitResourceKind, page: u32) 
     request.statement =
         DefinitionPayload::sql("INSERT INTO dbo.orders(customer_id) VALUES (9264)", culprit_core::Engine::Mssql);
     request.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![resource.clone()],
         native_type: Some(
             match kind {

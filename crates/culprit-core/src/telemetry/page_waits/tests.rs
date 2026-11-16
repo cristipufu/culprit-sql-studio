@@ -48,6 +48,7 @@ fn observation() -> PageWaitObservation {
     let resource = resource();
     let mut request = super::super::activity::tests::request("42");
     request.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("PAGELATCH_EX".into()),
         elapsed_ms: Some("1000".into()),
         owners: vec![ActivityWaitOwner::Unknown { native_id: "-5".into(), reason: UnknownWaitOwner::UntrackedLatch }],

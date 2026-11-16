@@ -17,7 +17,7 @@ pub(crate) async fn record_investigation(
     status: DiagnosticAnalysisStatus,
     issue: Option<DiagnosticAnalysisIssue>,
 ) -> Result<()> {
-    let parent = event.intent.focus.parent.clone();
+    let parent = event.intent.focus.participant().parent.clone();
     let episode_id = event.intent.episode_id.clone();
     update_analysis(outbox, &parent, &episode_id, status, issue, Some(event)).await
 }
@@ -50,7 +50,7 @@ async fn update_analysis(
         Some(event) => {
             event.matches_episode(episode) && event.intent.focus.matches_parent(&input.source, original, parent)
         }
-        None => matches!(episode.plan_page_wait_focus(&input.source, original, parent)?, PageWaitFocusPlan::Ready(_)),
+        None => matches!(episode.plan_focus(&input.source, original, parent)?, DiagnosticFocusPlan::Ready(_)),
     };
     if !matches_parent {
         return Err(DeliveryProblem::Integrity.error());

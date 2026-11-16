@@ -11,8 +11,20 @@ enum PublicObservation<'a> {
     RetainedEvents(&'a EventHistoryDescription),
     Activity(&'a ActivitySnapshotDescription),
     Snapshot(&'a StateSnapshotDescription),
-    FocusedPageWaitContext { snapshot: &'a StateSnapshotDescription, result: Box<FocusResult<'a>> },
-    CacheEntryMemoryContext { snapshot: &'a StateSnapshotDescription, focus_key: String },
+    FocusedPageWaitContext {
+        snapshot: &'a StateSnapshotDescription,
+        result: Box<FocusResult<'a>>,
+    },
+    FocusedRequestMemoryContext {
+        snapshot: &'a StateSnapshotDescription,
+        focus_key: String,
+        source: FocusSourceState,
+        membership: RequestMemoryMembership,
+    },
+    CacheEntryMemoryContext {
+        snapshot: &'a StateSnapshotDescription,
+        focus_key: String,
+    },
     DiagnosticContext(Value),
 }
 #[derive(Serialize)]
@@ -45,16 +57,24 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::CacheEntryMemory { snapshot, focus } => {
             PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }
         }
+        SourceObservation::FocusedRequestMemory { snapshot, result } => {
+            PublicObservation::FocusedRequestMemoryContext {
+                snapshot,
+                focus_key: result.focus.key()?,
+                source: result.source,
+                membership: result.membership,
+            }
+        }
         SourceObservation::FocusedPageWait { snapshot, result } => PublicObservation::FocusedPageWaitContext {
             snapshot,
             result: Box::new(FocusResult {
                 focus: Focus {
                     key: result.focus.key()?,
-                    parent: &result.focus.parent,
-                    source: &result.focus.source,
-                    epoch: &result.focus.epoch,
-                    original_observed_at: &result.focus.original_observed_at,
-                    statement_identity: &result.focus.statement_identity,
+                    parent: &result.focus.participant().parent,
+                    source: &result.focus.participant().source,
+                    epoch: &result.focus.participant().epoch,
+                    original_observed_at: &result.focus.participant().original_observed_at,
+                    statement_identity: &result.focus.participant().statement_identity,
                     resource: &result.focus.resource,
                 },
                 observed_from: &result.observed_from,

@@ -4,6 +4,7 @@ mod cache_entry_memory;
 mod cleanup;
 mod compilation;
 mod diagnostics;
+mod focused_memory;
 mod object_definitions;
 mod populations;
 mod queries;

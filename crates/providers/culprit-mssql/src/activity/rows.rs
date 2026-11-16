@@ -49,6 +49,10 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
     let owner = owner(row)?;
     let wait = if native_type.is_some() || owner.is_some() {
         Some(ActivityWait {
+            class: native_type
+                .as_deref()
+                .filter(|wait| crate::waits::is_execution_grant_wait(wait))
+                .map(|_| ActivityWaitClass::ExecutionGrant),
             identified_resources: resources::identify(
                 native_type.as_deref(),
                 optional_text(row, "wait_resource")?.as_deref(),

@@ -30,13 +30,13 @@ impl<R: NativeRead> ActivityReader<R> {
         resource: Option<(&SharedResourceIdentity, &SourcePartition)>,
     ) -> Result<FocusedPageWaitCapture> {
         if !focus.is_valid()
-            || focus.source != culprit_core::source_id::SESSIONS
-            || RequestLocator::from_identity(&focus.statement_identity).is_none()
+            || focus.participant().source != culprit_core::source_id::SESSIONS
+            || RequestLocator::from_identity(&focus.participant().statement_identity).is_none()
             || !matches!(self.options.scope, ActivityScope::CurrentDatabase)
         {
             return Err(invalid_data());
         }
-        if focus.database_writable.is_none() {
+        if focus.participant().database_writable.is_none() {
             return Err(CollectionStop::SourceUnavailable.error());
         }
         let initial = match resource {
@@ -47,16 +47,16 @@ impl<R: NativeRead> ActivityReader<R> {
         if current.writable.is_none() {
             return Err(CollectionStop::SourceUnavailable.error());
         }
-        if current.database != *focus.target.database().ok_or_else(invalid_data)?
-            || current.epoch.as_deref() != Some(focus.epoch.as_str())
-            || initial.authority.source_partition()? != focus.partition
-            || current.writable != focus.database_writable
-            || !chronological(&[&canonical_time(&focus.original_observed_at)?, &current.at])
+        if current.database != *focus.participant().target.database().ok_or_else(invalid_data)?
+            || current.epoch.as_deref() != Some(focus.participant().epoch.as_str())
+            || initial.authority.source_partition()? != focus.participant().partition
+            || current.writable != focus.participant().database_writable
+            || !chronological(&[&canonical_time(&focus.participant().original_observed_at)?, &current.at])
         {
             return Err(CollectionStop::SourceChanged.error());
         }
-        let session = native_id(&focus.original.key.session.id)?;
-        let request = native_id(&focus.original.key.request.as_ref().ok_or_else(invalid_data)?.id)?;
+        let session = native_id(&focus.participant().original.key.session.id)?;
+        let request = native_id(&focus.participant().original.key.request.as_ref().ok_or_else(invalid_data)?.id)?;
         let frame = self
             .read_frame(
                 &sql::focused_observation(self.options.identity),
@@ -67,7 +67,7 @@ impl<R: NativeRead> ActivityReader<R> {
             return Err(CollectionStop::SourceChanged.error());
         }
         let checked = frame.records.first().map(|record| Check::from_record(record, &frame.context.at));
-        let recheck = checked.map(|check| check.recheck_observation(&focus.original, &focus.resource));
+        let recheck = checked.map(|check| check.recheck_observation(&focus.participant().original, &focus.resource));
         let (request, wait) =
             recheck.as_ref().map_or((PageWaitRequestState::Missing, PageWaitRelation::Unqualified), |check| {
                 (check.request, check.wait)

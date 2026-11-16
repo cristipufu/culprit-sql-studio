@@ -14,16 +14,16 @@ impl Harness {
         let root = tempfile::tempdir().unwrap();
         let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
         let original = baseline(&mut files, vec![page_activity()], true, 0);
-        let input = files.next_diagnostic_input(1).unwrap().unwrap();
+        let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
         let episode = page_episode(&input, &focus(&input));
         files.commit_diagnostics(input.clone(), update(&input, vec![episode], vec![None], "page-baseline")).unwrap();
-        let input = files.diagnostic_input(&original.observation_id, 1).unwrap();
+        let input = files.diagnostic_input(&original.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
         let intent = admitted_intent(&input);
         Self { root, files, original, intent }
     }
 
     fn input(&mut self) -> DiagnosticInput {
-        self.files.diagnostic_input(&self.original.observation_id, 1).unwrap()
+        self.files.diagnostic_input(&self.original.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap()
     }
 
     fn episode(&mut self) -> DiagnosticEpisode {
@@ -43,7 +43,9 @@ impl Harness {
     fn failed_before_authentication(&mut self) -> DiagnosticInvestigationEvent {
         let request = CollectionRequest {
             subject: CollectionSubject::Database,
-            selection: CollectionSelection::FocusedPageWait { focus: Box::new(self.intent.focus.clone()) },
+            selection: CollectionSelection::FocusedPageWait {
+                focus: Box::new(self.intent.focus.page_wait().unwrap().clone()),
+            },
             budget: self.intent.budget.clone(),
         };
         let owner = DiagnosticInvestigationLineage::from_intent(&self.intent).unwrap();
@@ -70,7 +72,9 @@ impl Harness {
     fn captured(&mut self) -> DiagnosticInvestigationEvent {
         let request = CollectionRequest {
             subject: CollectionSubject::Database,
-            selection: CollectionSelection::FocusedPageWait { focus: Box::new(self.intent.focus.clone()) },
+            selection: CollectionSelection::FocusedPageWait {
+                focus: Box::new(self.intent.focus.page_wait().unwrap().clone()),
+            },
             budget: self.intent.budget.clone(),
         };
         let owner = DiagnosticInvestigationLineage::from_intent(&self.intent).unwrap();
@@ -79,7 +83,7 @@ impl Harness {
         let source = "focused-native-pages".to_owned();
         let description = CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: self.intent.focus.target.clone(),
+            target: self.intent.focus.participant().target.clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::FocusedPageWait {
@@ -91,7 +95,7 @@ impl Harness {
                     sources: vec![StateSourceCoverage::observed(source, 0, false)],
                 },
                 result: Box::new(ActivityWaitFocusResult {
-                    focus: self.intent.focus.clone(),
+                    focus: self.intent.focus.page_wait().unwrap().clone(),
                     observed_from: "2026-11-14T08:00:02Z".into(),
                     observed_until: "2026-11-14T08:00:03Z".into(),
                     source: FocusSourceState::Matched,
@@ -166,9 +170,9 @@ fn raw_revision(
     next.revision = (before.revision.parse::<u64>().unwrap() + 1).to_string();
     let mut inputs = vec![next.latest.clone()];
     if let Some(event) = &investigation
-        && !inputs.contains(&event.intent.focus.parent)
+        && !inputs.contains(&event.intent.focus.participant().parent)
     {
-        inputs.push(event.intent.focus.parent.clone());
+        inputs.push(event.intent.focus.participant().parent.clone());
     }
     let mut revision = DiagnosticRevision {
         id: String::new(),
@@ -236,7 +240,7 @@ fn events_must_refer_to_an_existing_episode_revision_not_the_revision_they_are_c
     let root = tempfile::tempdir().unwrap();
     let mut files = Files::create(&root.path().join("outbox"), OutboxLimits::default()).unwrap();
     baseline(&mut files, vec![page_activity()], true, 0);
-    let input = files.next_diagnostic_input(1).unwrap().unwrap();
+    let input = files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     let intent = admitted_intent(&input);
     let event = DiagnosticInvestigationEvent {
         intent: Box::new(intent),
@@ -251,7 +255,10 @@ fn events_must_refer_to_an_existing_episode_revision_not_the_revision_they_are_c
     native.checkpoint.episodes[0] = native.revisions[0].episode.clone();
     assert!(native.revisions[0].is_valid());
     assert!(files.commit_diagnostics(input.clone(), native).is_err());
-    assert_eq!(files.diagnostic_input_state(&input.parent, 1).unwrap(), DiagnosticInputState::Pending);
+    assert_eq!(
+        files.diagnostic_input_state(&input.parent, DIAGNOSTIC_CONTROLLER_VERSION).unwrap(),
+        DiagnosticInputState::Pending
+    );
 }
 
 #[test]
@@ -261,9 +268,9 @@ fn full_event_original_is_authenticated_even_when_its_compact_native_relation_is
     for changed in ["original", "receipt"] {
         let mut event = harness.admitted();
         if changed == "original" {
-            event.intent.focus.original.elapsed_ms = Some("90001".into());
+            event.intent.focus.participant_mut().original.elapsed_ms = Some("90001".into());
         } else {
-            event.intent.focus.parent.row_ordinal += 1;
+            event.intent.focus.participant_mut().parent.row_ordinal += 1;
         }
         assert!(event.matches_episode(&before));
         let revision =
@@ -317,7 +324,12 @@ fn sealed_event_replay_is_idempotent_but_a_distinct_failed_attempt_creates_same_
         "lost acknowledgement after restart adds no history"
     );
     assert_eq!(
-        reopened.diagnostic_input(&harness.original.observation_id, 1).unwrap().checkpoint.unwrap().episodes[0],
+        reopened
+            .diagnostic_input(&harness.original.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .unwrap()
+            .checkpoint
+            .unwrap()
+            .episodes[0],
         expected
     );
 }
@@ -385,14 +397,16 @@ fn allocation_only_attempts_still_require_the_exact_native_focus_and_admitted_bu
         let mut harness = Harness::new();
         let mut request = CollectionRequest {
             subject: CollectionSubject::Database,
-            selection: CollectionSelection::FocusedPageWait { focus: Box::new(harness.intent.focus.clone()) },
+            selection: CollectionSelection::FocusedPageWait {
+                focus: Box::new(harness.intent.focus.page_wait().unwrap().clone()),
+            },
             budget: harness.intent.budget.clone(),
         };
         if changed == "focus" {
             let mut row = page_activity();
             row.wait.as_mut().unwrap().identified_resources[0].native = NativeIdentity::new("5:1:43");
             let other = baseline(&mut harness.files, vec![row], true, 10);
-            let input = harness.files.diagnostic_input(&other.observation_id, 1).unwrap();
+            let input = harness.files.diagnostic_input(&other.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
             request.selection = CollectionSelection::FocusedPageWait { focus: Box::new(focus(&input)) };
         } else {
             request.budget.max_queries += 1;
@@ -430,6 +444,9 @@ fn captured_events_bind_the_actual_local_capture_scope_and_preserve_pending_nati
     harness.commit(revision);
     assert_eq!(harness.episode().analysis, before.analysis, "captured output alone is not completed analysis");
     let DiagnosticInvestigationOutcome::Captured { capture } = event.outcome else { panic!() };
-    assert_eq!(harness.files.diagnostic_input_state(&capture, 1).unwrap(), DiagnosticInputState::Pending);
+    assert_eq!(
+        harness.files.diagnostic_input_state(&capture, DIAGNOSTIC_CONTROLLER_VERSION).unwrap(),
+        DiagnosticInputState::Pending
+    );
     assert_eq!(harness.files.journal.debts().unwrap(), 0);
 }

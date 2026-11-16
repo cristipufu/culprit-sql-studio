@@ -1,6 +1,8 @@
 use super::*;
 use crate::ComponentVersion;
 
+mod request_memory;
+
 struct Scenario {
     episode: DiagnosticEpisode,
     focus: ActivityWaitFocus,
@@ -15,7 +17,7 @@ impl Scenario {
         DiagnosticInvestigationIntent::new(
             &self.episode,
             &self.recipe,
-            self.focus.clone(),
+            self.focus.clone().into(),
             &self.component,
             &CollectionBudget::default(),
         )
@@ -31,7 +33,7 @@ fn scenario() -> Scenario {
     let baseline = frame(1, vec![actor()], true);
     let observed = observe(&baseline, None);
     let episode = observed.checkpoint.episodes[0].clone();
-    let focus = observed.focuses[0].1.clone();
+    let focus = observed.focuses[0].1.page_wait().unwrap().clone();
     // These are source-owned fixture facts. Core validates their relations/accounting; only the selected source's
     // verifier can authenticate this artifact and decide whether its native work qualifies the recipe.
     let cost_source = CollectionDescription {
@@ -83,6 +85,7 @@ fn scenario() -> Scenario {
             .unwrap();
     let component = ComponentVersion::package("fixture-native-reader", "1.0.0", Some("native-reader-build-42"));
     let receipt = RecipeCostReceipt {
+        selector: RecipeSelector::FocusedPageWait,
         recipe_id: "fixture.page-wait-focus".into(),
         recipe_version: 1,
         scope: episode.scope.clone().into(),
@@ -136,8 +139,8 @@ fn an_immutable_question_preserves_its_parent_tested_budget_and_independent_nati
         &scenario.component,
         &CollectionBudget::default()
     ));
-    assert_eq!(intent.focus, scenario.focus);
-    assert_ne!(intent.qualification.evidence.capture, intent.focus.parent.capture);
+    assert_eq!(intent.focus, DiagnosticFocus::from(scenario.focus.clone()));
+    assert_ne!(intent.qualification.evidence.capture, intent.focus.participant().parent.capture);
     assert_eq!(intent.budget, intent.qualification.tested_budget);
     assert_eq!(intent.episode_revision, scenario.episode.revision);
     assert_eq!(
@@ -166,7 +169,7 @@ fn package_version_alone_and_unqualified_routes_cannot_construct_investigation_i
         DiagnosticInvestigationIntent::new(
             &unqualified.episode,
             &unqualified.recipe,
-            unqualified.focus.clone(),
+            unqualified.focus.clone().into(),
             &unqualified.component,
             &CollectionBudget::default(),
         )
@@ -322,7 +325,7 @@ fn full_intent_identity_binds_receipt_revision_and_budget_while_stage_identity_d
         let mut other = first.clone();
         match changed {
             "revision" => other.episode_revision = "2".into(),
-            "parent" => other.focus.parent.row_ordinal += 1,
+            "parent" => other.focus.participant_mut().parent.row_ordinal += 1,
             "recipe" => {
                 other.recipe_version += 1;
                 other.qualification.recipe_version = other.recipe_version;
@@ -405,7 +408,7 @@ fn result_source(result: ActivityWaitFocusResult) -> CollectionDescription {
     let source = "native-page-targets".to_owned();
     CollectionDescription {
         partition: crate::telemetry::SourcePartition::Target,
-        target: result.focus.target.clone(),
+        target: result.focus.participant().target.clone(),
         source: source.clone(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::FocusedPageWait {
@@ -439,7 +442,9 @@ fn owner_manifest(scenario: &Scenario) -> CollectionManifest {
         finished_at: None,
         request: CollectionRequest {
             subject: CollectionSubject::Database,
-            selection: CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.clone()) },
+            selection: CollectionSelection::FocusedPageWait {
+                focus: Box::new(intent.focus.page_wait().unwrap().clone()),
+            },
             budget: intent.budget.clone(),
         },
         investigation: Some(DiagnosticInvestigationLineage::from_intent(&intent).unwrap()),
@@ -507,9 +512,9 @@ fn owner_lineage_rejects_changed_intent_episode_recipe_budget_approval_and_origi
             _ => {
                 let CollectionSelection::FocusedPageWait { focus } = &mut manifest.request.selection else { panic!() };
                 if changed == "parent" {
-                    focus.parent.row_ordinal += 1;
+                    focus.participant_mut().parent.row_ordinal += 1;
                 } else {
-                    focus.original.elapsed_ms = Some("2".into());
+                    focus.participant_mut().original.elapsed_ms = Some("2".into());
                 }
             }
         }
@@ -595,7 +600,7 @@ fn initial_owner_metadata_rejects_wrong_selection_subject_or_a_contradictory_nat
             }
             _ => {
                 let mut result = completed_result(&scenario);
-                result.focus.original.elapsed_ms = Some("2".into());
+                result.focus.participant_mut().original.elapsed_ms = Some("2".into());
                 assert!(result.is_valid(), "the other native result is structurally valid but is not this request");
                 manifest.description = Some(result_source(result));
             }

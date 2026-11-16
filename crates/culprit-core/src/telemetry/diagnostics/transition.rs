@@ -57,9 +57,9 @@ impl DiagnosticRevision {
             inputs.push(report.evidence().clone());
         }
         if let Some(event) = &investigation
-            && !inputs.contains(&event.intent.focus.parent)
+            && !inputs.contains(&event.intent.focus.participant().parent)
         {
-            inputs.push(event.intent.focus.parent.clone());
+            inputs.push(event.intent.focus.participant().parent.clone());
         }
         if let Some(event) = &investigation
             && let DiagnosticExecutionBinding::Shared { owner } = &event.intent.execution

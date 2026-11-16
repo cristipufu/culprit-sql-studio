@@ -1,5 +1,7 @@
 //! A later lookup can explain retained evidence without rewriting its original native observation.
 use super::*;
+mod request_memory;
+pub use request_memory::{DiagnosticMemoryRow, analyze_diagnostic_memory};
 
 pub struct DiagnosticFocusRow<'a> {
     pub reference: &'a DiagnosticEvidenceRef,
@@ -30,7 +32,9 @@ pub fn analyze_diagnostic_focus_with_intent(
     analyzed_at: &str,
     intent: &DiagnosticInvestigationIntent,
 ) -> Result<DiagnosticFocusUpdate> {
-    if !intent.matches_result_source(source) || previous.target.telemetry_id()? != intent.focus.target.telemetry_id()? {
+    if !intent.matches_result_source(source)
+        || previous.target.telemetry_id()? != intent.focus.participant().target.telemetry_id()?
+    {
         return Err(invalid());
     }
     analyze_focus(source, input, rows, previous, analyzed_at, Some(intent))
@@ -82,13 +86,13 @@ fn analyze_focus(
     for before in &previous.episodes {
         let mut next = before.clone();
         if before.analysis.needs_work()
-            && before.matches_focus(&result.focus)
+            && before.matches_page_wait_focus(&result.focus)
             && intent.is_none_or(|intent| intent.matches_episode(before))
         {
             apply_result(&mut next, result, input, rows.first())?;
             if let Some(mut revision) = DiagnosticRevision::between(Some(before), next.clone(), analyzed_at)? {
-                if !revision.inputs.contains(&result.focus.parent) {
-                    revision.inputs.push(result.focus.parent.clone());
+                if !revision.inputs.contains(&result.focus.participant().parent) {
+                    revision.inputs.push(result.focus.participant().parent.clone());
                 }
                 if let Some(DiagnosticInvestigationIntent {
                     execution: DiagnosticExecutionBinding::Shared { owner },
@@ -164,7 +168,7 @@ fn apply_result(
         episode.lifecycle = DiagnosticLifecycle::Resolved;
         episode.recovery = Some(DiagnosticRecoveryProof::FocusedParticipantGone {
             capture: input.clone(),
-            parent: Box::new(result.focus.parent.clone()),
+            parent: Box::new(result.focus.participant().parent.clone()),
         });
     } else if episode.lifecycle != DiagnosticLifecycle::Resolved && !result.permits_page_lookup() {
         episode.lifecycle = DiagnosticLifecycle::Uncertain;

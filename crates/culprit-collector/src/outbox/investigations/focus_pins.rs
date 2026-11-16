@@ -14,7 +14,7 @@ impl Files {
     pub(in crate::outbox) fn pin_investigation_parent(&mut self, intent: &DiagnosticInvestigationIntent) -> Result<()> {
         let owner = owner(&intent.key()?)?;
         self.verify_investigation_intent(intent)?;
-        let mut expected = BTreeSet::from([intent.focus.parent.capture.observation_id.clone()]);
+        let mut expected = BTreeSet::from([intent.focus.participant().parent.capture.observation_id.clone()]);
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
             expected.insert(owner.capture.observation_id.clone());
         }

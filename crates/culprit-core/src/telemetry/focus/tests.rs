@@ -6,6 +6,7 @@ fn focus() -> ActivityWaitFocus {
     let statement_identity = NativeIdentity::new("native-statement").qualified("offset", "2");
     original.statement_identity = Some(statement_identity.clone());
     original.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("PAGELATCH_EX".into()),
         identified_resources: vec![resource.clone()],
         elapsed_ms: Some("1".into()),
@@ -21,26 +22,29 @@ fn focus() -> ActivityWaitFocus {
         }),
     };
     ActivityWaitFocus {
-        database_writable: None,
-        partition: crate::telemetry::SourcePartition::Target,
-        parent: DiagnosticEvidenceRef {
-            batch_id: batch_id(&capture.observation_id, TelemetryStream::ActivityObservations).unwrap(),
-            capture,
-            manifest_sha256: digest(b"manifest"),
-            source_scope_id: digest(b"scope"),
-            stream: TelemetryStream::ActivityObservations,
-            native_key: NativeRecordIdentity::Activity(original.key.clone()),
-            record_id: digest(b"record"),
-            payload_sha256: digest(b"payload"),
-            representation_version: REPRESENTATION_VERSION,
-            row_ordinal: 0,
+        participant: ActivityRequestFocus {
+            database_writable: None,
+            partition: crate::telemetry::SourcePartition::Target,
+            parent: DiagnosticEvidenceRef {
+                batch_id: batch_id(&capture.observation_id, TelemetryStream::ActivityObservations).unwrap(),
+                capture,
+                manifest_sha256: digest(b"manifest"),
+                source_scope_id: digest(b"scope"),
+                stream: TelemetryStream::ActivityObservations,
+                native_key: NativeRecordIdentity::Activity(original.key.clone()),
+                record_id: digest(b"record"),
+                payload_sha256: digest(b"payload"),
+                representation_version: REPRESENTATION_VERSION,
+                row_ordinal: 0,
+            },
+            target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "sample", "fixture.invalid", 1433, None)
+                .into(),
+            source: "native-activity".into(),
+            epoch: "native-epoch".into(),
+            original_observed_at: "2020-01-01T00:00:00Z".into(),
+            original,
+            statement_identity,
         },
-        target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "sample", "fixture.invalid", 1433, None).into(),
-        source: "native-activity".into(),
-        epoch: "native-epoch".into(),
-        original_observed_at: "2020-01-01T00:00:00Z".into(),
-        original,
-        statement_identity,
         resource,
     }
 }
@@ -53,15 +57,15 @@ fn one_original_row_and_native_token_are_required_without_interpreting_provider_
     for field in ["parent-key", "statement", "wait", "resource", "scope", "database", "request"] {
         let mut changed = focus.clone();
         match field {
-            "parent-key" => changed.original.key.session.generation = "reused".into(),
-            "statement" => changed.statement_identity.id = "different-token".into(),
-            "wait" => changed.original.wait.as_mut().unwrap().native_type = None,
+            "parent-key" => changed.participant.original.key.session.generation = "reused".into(),
+            "statement" => changed.participant.statement_identity.id = "different-token".into(),
+            "wait" => changed.participant.original.wait.as_mut().unwrap().native_type = None,
             "resource" => changed.resource.native.id = "7:1:4145".into(),
-            "scope" => changed.original.scope = ActivityScopeBasis::OtherDatabase,
-            "database" => changed.original.database = Some("another-db".into()),
+            "scope" => changed.participant.original.scope = ActivityScopeBasis::OtherDatabase,
+            "database" => changed.participant.original.database = Some("another-db".into()),
             _ => {
-                changed.original.key.request = None;
-                changed.original.request_counters = None;
+                changed.participant.original.key.request = None;
+                changed.participant.original.request_counters = None;
             }
         }
         assert!(!changed.is_valid(), "{field}");
@@ -77,8 +81,10 @@ fn a_shared_followup_keeps_the_database_parent_and_verifies_a_distinct_native_re
         native: NativeIdentity::new("native-member"),
     };
     let mut original = focus();
-    original.partition =
-        SourcePartition::InstanceLocal { member: Some(resource.clone()), epoch: Some(original.epoch.clone()) };
+    original.participant.partition = SourcePartition::InstanceLocal {
+        member: Some(resource.clone()),
+        epoch: Some(original.participant.epoch.clone()),
+    };
     let request = CollectionRequest {
         subject: CollectionSubject::Shared { resource: resource.clone() },
         selection: CollectionSelection::SharedPageWaitFocus {
@@ -122,7 +128,7 @@ fn a_shared_followup_keeps_the_database_parent_and_verifies_a_distinct_native_re
         },
     };
     assert!(source.matches_request(&request));
-    assert!(original.target.database().is_some(), "the original waiter stays in its application database");
+    assert!(original.participant.target.database().is_some(), "the original waiter stays in its application database");
     let mut wrong_subject = request.clone();
     let CollectionSubject::Shared { resource } = &mut wrong_subject.subject else { panic!() };
     resource.native.id = "another-native-member".into();
@@ -140,12 +146,12 @@ fn focus_identity_binds_original_receipt_and_client_without_a_warehouse_range_re
     for field in ["ordinal", "manifest", "source", "epoch", "clock", "sql"] {
         let mut changed = first.clone();
         match field {
-            "ordinal" => changed.parent.row_ordinal += 1,
-            "manifest" => changed.parent.manifest_sha256 = digest(b"another manifest"),
-            "source" => changed.source = "another native source".into(),
-            "epoch" => changed.epoch = "another source incarnation".into(),
-            "clock" => changed.original_observed_at = "2020-01-01T00:00:01Z".into(),
-            _ => changed.original.statement = DefinitionPayload::sql("SELECT 1", crate::Engine::Mssql),
+            "ordinal" => changed.participant.parent.row_ordinal += 1,
+            "manifest" => changed.participant.parent.manifest_sha256 = digest(b"another manifest"),
+            "source" => changed.participant.source = "another native source".into(),
+            "epoch" => changed.participant.epoch = "another source incarnation".into(),
+            "clock" => changed.participant.original_observed_at = "2020-01-01T00:00:01Z".into(),
+            _ => changed.participant.original.statement = DefinitionPayload::sql("SELECT 1", crate::Engine::Mssql),
         }
         assert!(changed.is_valid(), "structural validity cannot authenticate modified {field}");
         assert_ne!(changed.key().unwrap(), key, "exact parent resolution must bind {field}");
@@ -192,7 +198,7 @@ fn later_lookup_bounds_cannot_move_the_original_native_observation_forward() {
     assert!(!result.is_valid());
     result.observed_from = "2020-01-01T00:00:00Z".into();
     assert!(result.is_valid());
-    assert_eq!(result.focus.original_observed_at, "2020-01-01T00:00:00Z");
+    assert_eq!(result.focus.participant().original_observed_at, "2020-01-01T00:00:00Z");
     result.observed_until = "2019-12-31T23:59:59Z".into();
     assert!(!result.is_valid());
 }
@@ -202,7 +208,7 @@ fn coordinator_focus_cannot_accept_a_parallel_task_with_the_same_request_and_pag
     let mut focus = focus();
     focus.resource.native =
         focus.resource.native.clone().qualified("source", "sys.dm_os_waiting_tasks.resource_description");
-    focus.original.wait.as_mut().unwrap().identified_resources = vec![focus.resource.clone()];
+    focus.participant_mut().original.wait.as_mut().unwrap().identified_resources = vec![focus.resource.clone()];
     let result = ActivityWaitFocusResult {
         focus,
         observed_from: "2020-01-01T00:00:01Z".into(),
@@ -215,7 +221,7 @@ fn coordinator_focus_cannot_accept_a_parallel_task_with_the_same_request_and_pag
         source: "focused-page-fixture".into(),
         observed_from: result.observed_from.clone(),
         observed_until: result.observed_until.clone(),
-        request: result.focus.original.clone(),
+        request: result.focus.participant().original.clone(),
         task_wait: None,
         before_check: None,
         after_check: None,

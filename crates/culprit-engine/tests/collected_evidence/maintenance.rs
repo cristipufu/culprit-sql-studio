@@ -20,6 +20,7 @@ fn recorded() -> (CollectionDescription, Vec<TelemetryRecord>) {
     waiter.blocking_status = ActivityBlockingStatus::Known;
     waiter.waiting_on_lock = Some(true);
     waiter.wait = Some(ActivityWait {
+        class: None,
         native_type: Some("LCK_M_X".into()),
         elapsed_ms: Some("40000".into()),
         owners: vec![ActivityWaitOwner::Session { id: owner.id, generation: Some(owner.generation) }],

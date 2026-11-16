@@ -212,7 +212,7 @@ impl Files {
             }
             if let Some(intent) = &intent
                 && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
-                && (!revision.inputs.contains(&intent.focus.parent) || !revision.inputs.contains(owner))
+                && (!revision.inputs.contains(&intent.focus.participant().parent) || !revision.inputs.contains(owner))
             {
                 return Err(integrity());
             }
@@ -247,20 +247,11 @@ impl Files {
                     .and_then(|episode| episode.report.as_ref());
                 if previous_report != Some(report) {
                     let (source, row) = self.diagnostic_reference(report.evidence())?;
-                    let SourceObservation::FocusedPageWait { result, .. } = &source.observation else {
-                        return Err(integrity());
-                    };
-                    let TelemetryRecord::Operational(OperationalObservation {
-                        fact: OperationalFact::PageWait(page),
-                        ..
-                    }) = &row.record
-                    else {
-                        return Err(integrity());
-                    };
-                    if !revision.episode.matches_focus(&result.focus) {
+                    if !report.matches_observation(&revision.episode, &source, &row) {
                         return Err(integrity());
                     }
-                    self.verify_focus_parent(&result.focus)?;
+                    let focus = source.observation.focus().ok_or_else(integrity)?;
+                    self.verify_focus_parent(focus)?;
                     let report_input =
                         self.diagnostic_input(&report.evidence().capture.observation_id, input.controller_version)?;
                     let report_intent = report_input.investigation_intent()?;
@@ -269,8 +260,7 @@ impl Files {
                         || report_input.controller_target()?.telemetry_id()?
                             != revision.episode.scope.target.telemetry_id()?
                         || report_intent.as_ref().is_some_and(|intent| !intent.matches_episode(&revision.episode))
-                        || !revision.inputs.contains(&result.focus.parent)
-                        || !result.accepts_observation(page)
+                        || !revision.inputs.contains(&focus.parent)
                     {
                         return Err(integrity());
                     }
@@ -313,7 +303,7 @@ impl Files {
                     let SourceObservation::FocusedPageWait { result, .. } = &current.source.observation else {
                         return Err(integrity());
                     };
-                    self.verify_focus_parent(&result.focus)?;
+                    self.verify_focus_parent(&result.focus.participant)?;
                     if !revision.inputs.contains(parent) {
                         return Err(integrity());
                     }
@@ -347,8 +337,7 @@ impl Files {
                     .investigation
                     .as_ref()
                     .is_none_or(|owner| !owner.matches_intent(&event.intent.focus, &event.intent))
-                || !matches!(&input.source.observation, SourceObservation::FocusedPageWait { result, .. }
-                    if result.focus == event.intent.focus)
+                || input.source.observation.diagnostic_focus().as_ref() != Some(&event.intent.focus)
             {
                 return Err(integrity());
             }

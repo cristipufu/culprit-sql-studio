@@ -30,6 +30,7 @@ pub fn activity_observation(statement: DefinitionPayload) -> ActivityObservation
             ..Default::default()
         }),
         wait: Some(ActivityWait {
+            class: None,
             identified_resources: vec![],
             resources: None,
             native_type: Some("LCK_M_X".into()),
@@ -69,6 +70,7 @@ pub fn activity_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRec
     page.blocking_status = ActivityBlockingStatus::Unknown;
     page.waiting_on_lock = Some(false);
     page.wait = Some(ActivityWait {
+        class: None,
         identified_resources: vec![ObservedWaitResource {
             kind: WaitResourceKind::MemoryPage,
             native: NativeIdentity::new("7:1:4144").qualified("source", "native-wait-resource"),

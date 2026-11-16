@@ -26,9 +26,13 @@ impl MemorySource {
     }
 }
 impl<R: NativeRead> MemorySource<R> {
-    fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {
+    pub(super) fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {
         request.subject.require_database()?;
-        if request.selection != (CollectionSelection::Snapshot { dataset: SnapshotDataset::CurrentRequestMemory }) {
+        if !matches!(
+            request.selection,
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::CurrentRequestMemory }
+                | CollectionSelection::FocusedRequestMemory { .. }
+        ) {
             return Err(crate::read::invalid_data());
         }
         Ok(Self { inner: culprit_read::FrozenSource::new(MemoryObservationReader { reader, context: None }, request)? })
@@ -36,8 +40,14 @@ impl<R: NativeRead> MemorySource<R> {
 }
 #[async_trait::async_trait]
 impl<R: NativeRead> culprit_read::ObservationReader for MemoryObservationReader<R> {
-    async fn observe(&mut self, _: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
-        let captured = self.reader.capture_memory().await?;
+    async fn observe(&mut self, request: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
+        let (captured, focused) = match &request.selection {
+            CollectionSelection::FocusedRequestMemory { focus } => {
+                let observed = self.reader.capture_focused_memory(focus).await?;
+                (observed.capture, Some(observed.result))
+            }
+            _ => (self.reader.capture_memory().await?, None),
+        };
         let at = captured.context.at.clone();
         let records = captured
             .observations
@@ -50,22 +60,26 @@ impl<R: NativeRead> culprit_read::ObservationReader for MemoryObservationReader<
                 }))
             })
             .collect::<Result<Vec<_>>>()?;
+        let snapshot = StateSnapshotDescription {
+            dataset: SnapshotDataset::CurrentRequestMemory,
+            observed_from: focused.as_ref().map_or_else(|| at.clone(), |result| result.observed_from.clone()),
+            observed_until: at,
+            records: records.len() as u32,
+            sources: vec![StateSourceCoverage::observed(
+                sources::CURRENT_REQUEST_MEMORY.name.into(),
+                records.len() as u32,
+                captured.complete_scope,
+            )],
+        };
         let description = CollectionDescription {
             partition: captured.owner.source_partition()?,
             target: captured.owner.activity.database.clone().into(),
             source: sources::CURRENT_REQUEST_MEMORY.name.into(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::CurrentRequestMemory,
-                observed_from: at.clone(),
-                observed_until: at,
-                records: records.len() as u32,
-                sources: vec![StateSourceCoverage::observed(
-                    sources::CURRENT_REQUEST_MEMORY.name.into(),
-                    records.len() as u32,
-                    captured.complete_scope,
-                )],
-            }),
+            observation: match focused {
+                Some(result) => SourceObservation::FocusedRequestMemory { snapshot, result: Box::new(result) },
+                None => SourceObservation::Snapshot(snapshot),
+            },
         };
         self.context = Some(captured.owner);
         Ok(culprit_read::FrozenObservation { description, records })
@@ -111,3 +125,6 @@ impl<R: NativeRead> TelemetrySource for MemorySource<R> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod focused_tests;

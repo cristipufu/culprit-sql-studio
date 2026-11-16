@@ -8,8 +8,10 @@ async fn an_admitted_shared_question_requires_its_sealed_owner_before_route_cred
     let CollectionTarget::Shared(member) = &fixture.owner_source.target else { panic!() };
     let (mut outbox, focus, native_calls) =
         retained_parent_on_member(&root.path().join("outbox"), Some(member.clone())).await;
-    let input =
-        outbox.diagnostic_input(&focus.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap();
+    let input = outbox
+        .diagnostic_input(&focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+        .await
+        .unwrap();
     let TelemetryRecord::Activity(original) = &input.rows[0].row.record else { panic!() };
     let update = observe_diagnostic_activity(
         &input.source,
@@ -17,16 +19,19 @@ async fn an_admitted_shared_question_requires_its_sealed_owner_before_route_cred
         &[DiagnosticActivityRow { reference: &input.rows[0].reference, observation: original }],
         None,
         &ActivityPolicy::default(),
-        &focus.original_observed_at,
+        &focus.participant().original_observed_at,
     )
     .unwrap();
+    let mut matching = update.checkpoint.episodes.iter().filter(|episode| episode.matches_page_wait_focus(&focus));
+    let episode = matching.next().expect("the original page-wait focus selects its exact native episode");
+    assert!(matching.next().is_none(), "one original focus cannot select multiple native episodes");
     let recipe = &fixture.investigation.recipe;
     let RecipeCostQualification::Measured(receipt) = &recipe.cost else { panic!() };
     let DiagnosticExecutionBinding::Shared { owner } = &fixture.investigation.intent.execution else { panic!() };
     let intent = DiagnosticInvestigationIntent::new_shared(
-        &update.checkpoint.episodes[0],
+        episode,
         recipe,
-        focus,
+        focus.into(),
         &receipt.component,
         &CollectionBudget::default(),
         DiagnosticSharedOwner { source: &fixture.owner_source, row: &fixture.owner_record, reference: owner },

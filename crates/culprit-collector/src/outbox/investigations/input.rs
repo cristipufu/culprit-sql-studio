@@ -239,7 +239,7 @@ impl Files {
             .ok_or_else(integrity)
     }
 
-    pub(in crate::outbox) fn verify_focus_parent(&mut self, focus: &ActivityWaitFocus) -> Result<()> {
+    pub(in crate::outbox) fn verify_focus_parent(&mut self, focus: &ActivityRequestFocus) -> Result<()> {
         let (source, row) = self.diagnostic_reference(&focus.parent)?;
         let TelemetryRecord::Activity(original) = &row.record else {
             return Err(integrity());
@@ -256,7 +256,7 @@ impl Files {
         if !intent.is_valid() {
             return Err(integrity());
         }
-        self.verify_focus_parent(&intent.focus)?;
+        self.verify_focus_parent(intent.focus.participant())?;
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
             let (source, row) = self.diagnostic_reference(owner)?;
             if !intent.matches_shared_owner(&source, &row) {
@@ -449,10 +449,10 @@ impl Files {
 }
 
 fn pin_restored_focus(tx: &Transaction<'_>, input: &RestoredInput) -> Result<()> {
-    if let SourceObservation::FocusedPageWait { result, .. } = &input.source.observation {
+    if let Some(focus) = input.source.observation.focus() {
         tx.execute(
             "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM diagnostic_inputs WHERE observation_id=?3 AND acknowledged=0)",
-            params![format!("focus:{}",input.parent.capture.observation_id),result.focus.parent.capture.observation_id,input.parent.capture.observation_id],
+            params![format!("focus:{}",input.parent.capture.observation_id),focus.parent.capture.observation_id,input.parent.capture.observation_id],
         ).map_err(storage)?;
         if let Some(intent) = investigation_intent(&input.source, input.investigation.as_ref())?
             && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution

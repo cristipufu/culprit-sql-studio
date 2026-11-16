@@ -245,7 +245,7 @@ pub struct CollectionRequest {
 }
 
 impl CollectionRequest {
-    pub fn focus(&self) -> Option<&ActivityWaitFocus> {
+    pub fn focus(&self) -> Option<&ActivityRequestFocus> {
         self.selection.focus()
     }
     pub fn collection(&self) -> TelemetryCollection {
@@ -271,6 +271,12 @@ impl CollectionRequest {
             CollectionSelection::CacheEntryMemory { focus } => {
                 self.subject.require_database()?;
                 if !focus.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::FocusedRequestMemory { focus } => {
+                self.subject.require_database()?;
+                if !(DiagnosticFocus::RequestMemory { focus: focus.clone() }).is_valid() {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
@@ -540,6 +546,10 @@ impl TelemetryRecord {
                                 .is_some_and(|bounds| bounds.contains(&entry.observed_at))
                             && focus.accepts_entry(entry)
                     }
+                    (SourceObservation::FocusedRequestMemory { result, .. }, OperationalFact::ExecutionGrant(row)) => {
+                        accepted && result.focus.matches_capture_scope(source) && result.accepts_observation(row)
+                    }
+                    (SourceObservation::FocusedRequestMemory { .. }, _) => false,
                     (SourceObservation::CacheEntryMemory { .. }, _)
                     | (_, OperationalFact::MssqlCacheEntryMemory(_)) => false,
                     (SourceObservation::Diagnostics(description), OperationalFact::DiagnosticRevision(revision)) => {

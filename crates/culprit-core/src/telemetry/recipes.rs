@@ -44,6 +44,7 @@ pub enum RecipeSelector {
     Collection(TelemetryCollection),
     CacheEntryMemory,
     FocusedPageWait,
+    FocusedRequestMemory,
 }
 
 #[cfg(test)]
@@ -52,6 +53,8 @@ mod tests;
 impl RecipeSelector {
     pub fn matches(&self, request: &CollectionRequest) -> bool {
         match (self, &request.selection) {
+            (Self::FocusedRequestMemory, CollectionSelection::FocusedRequestMemory { .. }) => true,
+            (Self::Collection(_), CollectionSelection::FocusedRequestMemory { .. }) => false,
             (Self::CacheEntryMemory, CollectionSelection::CacheEntryMemory { .. }) => true,
             (Self::Collection(_), CollectionSelection::CacheEntryMemory { .. }) => false,
             (

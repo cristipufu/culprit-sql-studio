@@ -83,9 +83,9 @@ fn repeated_unknown_local_positive_points_keep_checkpoint_progress_without_unres
 fn native_focus_binds_member_generation_and_original_role_without_making_role_a_member_identity() {
     let original = local_frame(1, partition(Some("member-a"), Some("start")), vec![actor()]);
     let update = observe(&original, None);
-    let focus = &update.focuses[0].1;
-    assert_eq!(focus.partition, original.0.partition);
-    assert_eq!(focus.database_writable, Some(true));
+    let focus = &update.focuses[0].1.page_wait().unwrap().clone();
+    assert_eq!(focus.participant().partition, original.0.partition);
+    assert_eq!(focus.participant().database_writable, Some(true));
     assert!(focus.matches_parent(&original.0, &original.2[0].1, &original.2[0].0));
     let mut role_changed = original.0.clone();
     let SourceObservation::Activity(native) = &mut role_changed.observation else { panic!() };

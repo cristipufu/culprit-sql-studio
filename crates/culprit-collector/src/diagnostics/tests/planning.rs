@@ -31,7 +31,7 @@ async fn an_unqualified_native_recipe_defers_the_question_without_reopening_the_
     assert_eq!(episode.lifecycle, DiagnosticLifecycle::Active);
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Deferred);
     assert_eq!(episode.issue, Some(DiagnosticAnalysisIssue::CostUnqualified));
-    assert_eq!(episode.first, harness.focus(&native).await.parent);
+    assert_eq!(episode.first, harness.focus(&native).await.participant.parent);
     assert_eq!(episode.latest, episode.first);
     assert_eq!(episode.revision, "1");
     assert!(episode.report.is_none());
@@ -68,7 +68,10 @@ async fn recovery_and_restart_keep_deferred_analysis_and_the_original_native_rec
         analyze_pending(&mut outbox, &harness.policies, &CollectionCancellation::default(), 10, None).await.unwrap(),
         0
     );
-    assert_eq!(outbox.diagnostic_checkpoints(1, None, 10).await.unwrap().checkpoints, vec![checkpoint]);
+    assert_eq!(
+        outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap().checkpoints,
+        vec![checkpoint]
+    );
     assert_eq!(outbox.status(50, None).await.unwrap().captures, count);
     assert!(outbox.diagnostic_evidence(&first.first).await.is_ok());
     assert_eq!(harness.calls.counts(), calls);

@@ -22,7 +22,7 @@ export function pageWait(session = "42", page = 42): PageWaitObservation {
       last_request_age_ms: null, open_transactions: 0, elapsed_ms: "100000", transaction_age_ms: null,
       session_counters: { cpu_ms: null, logical_reads: null, physical_reads: null, writes: null },
       request_counters: { cpu_ms: "0", logical_reads: "18446744073709551615", physical_reads: null, writes: "0" },
-      wait: { native_type: "PAGELATCH_EX", elapsed_ms: "9007199254740993", resources: null, identified_resources: [structuredClone(resource)], owners: [{ kind: "unknown", native_id: "-5", reason: "untracked-latch" }] },
+      wait: { class: null, native_type: "PAGELATCH_EX", elapsed_ms: "9007199254740993", resources: null, identified_resources: [structuredClone(resource)], owners: [{ kind: "unknown", native_id: "-5", reason: "untracked-latch" }] },
       query_hash: null, client: { application: "observed-label", user: null, host: null },
       statement: { state: "available", text: "SELECT * FROM [orders] WHERE name=N'<script>canary</script>'", sha256: "a".repeat(64), redaction_version: 1 },
     },
@@ -48,7 +48,7 @@ export function pageEvidence(observations = [pageWait()]): PageWaitSnapshot {
 export function pageTaskWait(context = 1): PageWaitObservation {
   const row = pageWait();
   row.request.state = "running";
-  row.request.wait = { native_type: "CXCONSUMER", elapsed_ms: "777", resources: null, identified_resources: [], owners: [] };
+  row.request.wait = { class: null, native_type: "CXCONSUMER", elapsed_ms: "777", resources: null, identified_resources: [], owners: [] };
   row.resource.native.qualifiers.source = "sys.dm_os_waiting_tasks.resource_description";
   row.task_wait = {
     observed_at: PAGE_FROM, session_id: 42, request_id: 0, execution_context_id: context,

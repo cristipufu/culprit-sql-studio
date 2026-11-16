@@ -103,7 +103,10 @@ pub(crate) fn eligible_source(
     let intent = investigation_intent(source, investigation)?;
     Ok(match (&source.observation, &source.target) {
         (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
-        (SourceObservation::FocusedPageWait { .. }, CollectionTarget::Database(_)) => true,
+        (
+            SourceObservation::FocusedPageWait { .. } | SourceObservation::FocusedRequestMemory { .. },
+            CollectionTarget::Database(_),
+        ) => true,
         (SourceObservation::FocusedPageWait { .. }, CollectionTarget::Shared(_)) => intent.is_some(),
         _ => false,
     })
@@ -114,10 +117,8 @@ fn investigation_intent(
     investigation: Option<&DiagnosticInvestigationLineage>,
 ) -> Result<Option<DiagnosticInvestigationIntent>> {
     let Some(investigation) = investigation else { return Ok(None) };
-    let SourceObservation::FocusedPageWait { result, .. } = &source.observation else {
-        return Err(integrity());
-    };
-    let intent = investigation.reconstruct(&result.focus).map_err(|_| integrity())?;
+    let focus = source.observation.diagnostic_focus().ok_or_else(integrity)?;
+    let intent = investigation.reconstruct(&focus).map_err(|_| integrity())?;
     if !intent.matches_result_source(source) {
         return Err(integrity());
     }
@@ -132,7 +133,8 @@ fn controller_target<'a>(
         return Err(integrity());
     }
     Ok(match &source.observation {
-        SourceObservation::FocusedPageWait { result, .. } => &result.focus.target,
+        SourceObservation::FocusedPageWait { result, .. } => &result.focus.participant.target,
+        SourceObservation::FocusedRequestMemory { result, .. } => &result.focus.target,
         _ => &source.target,
     })
 }

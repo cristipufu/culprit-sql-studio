@@ -152,25 +152,28 @@ fn event_relation_requires_the_original_native_focus_scope_and_monotonic_episode
             "episode" => other.intent.episode_id = digest(b"other-episode"),
             "future-revision" => other.intent.episode_revision = "4".into(),
             "epoch" => {
-                other.intent.focus.epoch = "another-generation".into();
-                activity_scope(&mut other.intent.qualification).native_epoch = Some(other.intent.focus.epoch.clone());
+                other.intent.focus.participant_mut().epoch = "another-generation".into();
+                activity_scope(&mut other.intent.qualification).native_epoch =
+                    Some(other.intent.focus.participant().epoch.clone());
             }
             "source" => {
-                other.intent.focus.source = "other-native-source".into();
-                activity_scope(&mut other.intent.qualification).source = other.intent.focus.source.clone();
+                other.intent.focus.participant_mut().source = "other-native-source".into();
+                activity_scope(&mut other.intent.qualification).source =
+                    other.intent.focus.participant().source.clone();
             }
             "population" => {
                 activity_scope(&mut other.intent.qualification).population = ActivityPopulation::ClientBackends
             }
             "scope" => activity_scope(&mut other.intent.qualification).measurement_scope = MeasurementScope::Server,
             "statement" => {
-                other.intent.focus.statement_identity = NativeIdentity::new("different-statement");
-                other.intent.focus.original.statement_identity = Some(other.intent.focus.statement_identity.clone());
+                other.intent.focus.participant_mut().statement_identity = NativeIdentity::new("different-statement");
+                other.intent.focus.participant_mut().original.statement_identity =
+                    Some(other.intent.focus.participant().statement_identity.clone());
             }
             _ => {
-                other.intent.focus.resource.native = NativeIdentity::new("5:1:100");
-                other.intent.focus.original.wait.as_mut().unwrap().identified_resources =
-                    vec![other.intent.focus.resource.clone()];
+                other.intent.focus.page_wait_mut().unwrap().resource.native = NativeIdentity::new("5:1:100");
+                other.intent.focus.participant_mut().original.wait.as_mut().unwrap().identified_resources =
+                    vec![other.intent.focus.page_wait().unwrap().resource.clone()];
             }
         }
         assert!(
@@ -267,9 +270,9 @@ fn delayed_parent_event_is_an_exact_input_and_missing_or_conflicting_provenance_
         .unwrap()
         .unwrap();
     assert_eq!(revision.inputs.len(), 2);
-    assert!(revision.inputs.contains(&scenario.focus.parent));
+    assert!(revision.inputs.contains(&scenario.focus.participant().parent));
     let mut missing = revision.clone();
-    missing.inputs.retain(|input| input != &scenario.focus.parent);
+    missing.inputs.retain(|input| input != &scenario.focus.participant().parent);
     missing.id = missing.expected_id().unwrap();
     assert!(!missing.is_valid());
     let mut conflicting = revision.clone();

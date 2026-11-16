@@ -59,13 +59,13 @@ impl CapturedInvestigation {
         )
         .unwrap();
         let mut intent = fixture.intent;
-        intent.focus.parent = original.clone();
+        intent.focus.participant_mut().parent = original.clone();
         intent.episode_id = episode.id.clone();
         intent.episode_revision = episode.revision.clone();
         intent.qualification.read_metrics.templates[0].client_elapsed_ms = 0.0;
         assert!(intent.is_valid(), "this structural fixture does not qualify any production recipe");
         let result = ActivityWaitFocusResult {
-            focus: intent.focus.clone(),
+            focus: intent.focus.page_wait().unwrap().clone(),
             observed_from: "2020-01-01T12:00:01Z".into(),
             observed_until: "2020-01-01T12:00:02Z".into(),
             source: FocusSourceState::Matched,
@@ -77,7 +77,7 @@ impl CapturedInvestigation {
             source: "page wait targets".into(),
             observed_from: result.observed_from.clone(),
             observed_until: result.observed_until.clone(),
-            request: result.focus.original.clone(),
+            request: result.focus.participant().original.clone(),
             before_check: None,
             after_check: None,
             statement_identity: None,
@@ -91,7 +91,7 @@ impl CapturedInvestigation {
         assert!(result.accepts_observation(&page));
         let source = CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: intent.focus.target.clone(),
+            target: intent.focus.participant().target.clone(),
             source: "focused-pages".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::FocusedPageWait {
@@ -114,7 +114,9 @@ impl CapturedInvestigation {
             capture,
             CollectionRequest {
                 subject: CollectionSubject::Database,
-                selection: CollectionSelection::FocusedPageWait { focus: Box::new(intent.focus.clone()) },
+                selection: CollectionSelection::FocusedPageWait {
+                    focus: Box::new(intent.focus.page_wait().unwrap().clone()),
+                },
                 budget: intent.budget.clone(),
             },
             owned.then(|| DiagnosticInvestigationLineage::from_intent(&intent).unwrap()),
@@ -155,7 +157,7 @@ impl CapturedInvestigation {
         let mut checkpoint = DiagnosticCheckpointPart {
             id: String::new(),
             controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
-            target: self.intent.focus.target.clone(),
+            target: self.intent.focus.participant().target.clone(),
             input: self.original.capture_ref(),
             part: 0,
             parts: 1,
@@ -164,7 +166,7 @@ impl CapturedInvestigation {
         checkpoint.id = checkpoint.expected_id().unwrap();
         let source = CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: self.intent.focus.target.clone(),
+            target: self.intent.focus.participant().target.clone(),
             source: DIAGNOSTICS_SOURCE.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Diagnostics(DiagnosticCaptureDescription {

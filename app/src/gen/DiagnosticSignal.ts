@@ -8,4 +8,4 @@ import type { ObservedWaitResource } from "./ObservedWaitResource";
 /**
  * The implemented native questions retain typed evidence; hashes are storage indexes, never diagnostic policy.
  */
-export type DiagnosticSignal = { "kind": "activity", key: ActivityKey, condition: ActivityCondition, policy: ActivityPolicy, } | { "kind": "lock-wait", key: ActivityKey, } | { "kind": "page-wait", key: ActivityKey, statement_identity: NativeIdentity | null, resource: ObservedWaitResource, };
+export type DiagnosticSignal = { "kind": "activity", key: ActivityKey, condition: ActivityCondition, policy: ActivityPolicy, } | { "kind": "lock-wait", key: ActivityKey, } | { "kind": "request-memory", key: ActivityKey, statement_identity: NativeIdentity | null, } | { "kind": "page-wait", key: ActivityKey, statement_identity: NativeIdentity | null, resource: ObservedWaitResource, };

@@ -23,7 +23,7 @@ fn private_investigation() -> (DiagnosticInvestigationIntent, DiagnosticEpisode)
     );
     database.incarnation = Some(PRIVATE_VALUES[3].into());
     fixture.baseline_source.target = database.into();
-    let mut observation = fixture.intent.focus.original.clone();
+    let mut observation = fixture.intent.focus.participant().original.clone();
     observation.database = Some(PRIVATE_VALUES[0].into());
     observation.client = Some(ActivityClient { application: Some(PRIVATE_VALUES[4].into()), user: None, host: None });
     observation.statement = DefinitionPayload::sql(
@@ -68,7 +68,7 @@ fn private_investigation() -> (DiagnosticInvestigationIntent, DiagnosticEpisode)
 
 fn focused_capture(intent: &DiagnosticInvestigationIntent) -> test_support::Recovery {
     let result = ActivityWaitFocusResult {
-        focus: intent.focus.clone(),
+        focus: intent.focus.page_wait().unwrap().clone(),
         observed_from: "2020-01-01T12:00:01Z".into(),
         observed_until: "2020-01-01T12:00:02Z".into(),
         source: FocusSourceState::Matched,
@@ -224,11 +224,11 @@ async fn capture_envelope_keeps_admitted_lineage_without_private_scope_original_
     envelope::Envelope::new(manifest, &batch.batch_id).unwrap();
     let context = envelope::capture_context(manifest, &manifest.digest().unwrap()).unwrap();
     assert_eq!(context["investigation"], expected_lineage(&intent));
-    assert_eq!(context["focus_key"], intent.focus.key().unwrap());
+    assert_eq!(context["focus_key"], intent.focus.page_wait().unwrap().key().unwrap());
     assert_eq!(context["range_kind"], "focused");
     assert_eq!(context["observed_from"], "2020-01-01T12:00:01Z");
     assert_eq!(context["observed_until"], "2020-01-01T12:00:02Z");
-    assert_eq!(context["resource_id"], intent.focus.target.telemetry_id().unwrap());
+    assert_eq!(context["resource_id"], intent.focus.participant().target.telemetry_id().unwrap());
     assert_private_values_absent(&context);
     assert_eq!(serde_json::to_vec(manifest).unwrap(), original, "public projection cannot change the native manifest");
     let restored = manifest.investigation.as_ref().unwrap().reconstruct(&intent.focus).unwrap();

@@ -3,12 +3,16 @@ use super::*;
 use crate::{ObservedWaitResource, WaitResourceKind};
 
 mod plan;
-pub use plan::PageWaitFocusPlan;
+mod question;
+mod request_memory;
+pub use plan::{DiagnosticFocusPlan, PageWaitFocusPlan};
+pub use question::DiagnosticFocus;
+pub use request_memory::{ActivityRequestMemoryFocusResult, RequestMemoryMembership};
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
-pub struct ActivityWaitFocus {
+pub struct ActivityRequestFocus {
     pub parent: DiagnosticEvidenceRef,
     pub target: CollectionTarget,
     pub partition: SourcePartition,
@@ -24,10 +28,9 @@ pub struct ActivityWaitFocus {
     pub original: ActivityObservation,
     /// Required source-owned native statement token; a query hash or display SQL is insufficient.
     pub statement_identity: NativeIdentity,
-    pub resource: ObservedWaitResource,
 }
 
-impl ActivityWaitFocus {
+impl ActivityRequestFocus {
     /// A shared follow-up needs the original native member; a database route cannot confer shared authority.
     pub fn is_valid_for(&self, subject: &CollectionSubject) -> bool {
         self.is_valid()
@@ -105,15 +108,56 @@ impl ActivityWaitFocus {
                 .is_some_and(|database| self.original.database_context_is_consistent(&database.database))
             && self.statement_identity.is_valid()
             && self.original.statement_identity.as_ref() == Some(&self.statement_identity)
+    }
+
+    pub fn key(&self) -> Result<String> {
+        if !self.is_valid() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        serde_json::to_vec(self).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct ActivityWaitFocus {
+    pub participant: ActivityRequestFocus,
+    pub resource: ObservedWaitResource,
+}
+
+impl ActivityWaitFocus {
+    pub fn participant(&self) -> &ActivityRequestFocus {
+        &self.participant
+    }
+    pub fn participant_mut(&mut self) -> &mut ActivityRequestFocus {
+        &mut self.participant
+    }
+    pub fn is_valid(&self) -> bool {
+        self.participant.is_valid()
             && self.resource.is_valid()
             && matches!(self.resource.kind, WaitResourceKind::MemoryPage | WaitResourceKind::PageIo)
             && self
+                .participant
                 .original
                 .wait
                 .as_ref()
                 .is_some_and(|wait| wait.native_type.is_some() && wait.identified_resources.contains(&self.resource))
     }
-
+    pub fn is_valid_for(&self, subject: &CollectionSubject) -> bool {
+        self.is_valid() && self.participant.is_valid_for(subject)
+    }
+    pub fn matches_capture_scope(&self, source: &CollectionDescription) -> bool {
+        self.is_valid() && self.participant.matches_capture_scope(source)
+    }
+    pub fn matches_parent(
+        &self,
+        source: &CollectionDescription,
+        original: &ActivityObservation,
+        reference: &DiagnosticEvidenceRef,
+    ) -> bool {
+        self.is_valid() && self.participant.matches_parent(source, original, reference)
+    }
     pub fn key(&self) -> Result<String> {
         if !self.is_valid() {
             return Err(CollectionStop::InvalidPage.error());
@@ -159,10 +203,10 @@ impl ActivityWaitFocusResult {
             && self.source == FocusSourceState::Matched
             && bounds.contains(&page.observed_from)
             && bounds.contains(&page.observed_until)
-            && page.request.key == self.focus.original.key
-            && page.request.statement_identity.as_ref() == Some(&self.focus.statement_identity)
+            && page.request.key == self.focus.participant().original.key
+            && page.request.statement_identity.as_ref() == Some(&self.focus.participant().statement_identity)
             && page.request.wait.as_ref().and_then(|wait| wait.native_type.as_ref())
-                == self.focus.original.wait.as_ref().and_then(|wait| wait.native_type.as_ref())
+                == self.focus.participant().original.wait.as_ref().and_then(|wait| wait.native_type.as_ref())
             && page.resource == self.focus.resource
     }
 
@@ -170,7 +214,8 @@ impl ActivityWaitFocusResult {
         self.focus.is_valid()
             && ObservationBounds::new(&self.observed_from, &self.observed_until).is_some()
             && (self.source != FocusSourceState::Matched
-                || ObservationBounds::new(&self.focus.original_observed_at, &self.observed_from).is_some())
+                || ObservationBounds::new(&self.focus.participant().original_observed_at, &self.observed_from)
+                    .is_some())
             && (self.source == FocusSourceState::Matched
                 || self.request == PageWaitRequestState::Unverified && self.wait == PageWaitRelation::Unqualified)
             && (self.request == PageWaitRequestState::SameStatement || self.wait == PageWaitRelation::Unqualified)

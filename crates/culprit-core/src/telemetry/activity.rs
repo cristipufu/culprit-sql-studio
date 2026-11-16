@@ -140,9 +140,18 @@ impl ActivityCounters {
     }
 }
 
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ActivityWaitClass {
+    /// A native execution-memory grant wait, distinct from compilation admission and allocator contention.
+    ExecutionGrant,
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ActivityWait {
+    pub class: Option<ActivityWaitClass>,
     /// Identified wait targets only. An empty list does not establish absence of resource contention.
     pub identified_resources: Vec<crate::ObservedWaitResource>,
     pub native_type: Option<String>,

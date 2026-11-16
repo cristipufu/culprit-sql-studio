@@ -3,6 +3,7 @@
 //! another request's wait, and absent/masked Resource Governor identifiers never become Azure pool identities.
 //! https://learn.microsoft.com/sql/relational-databases/system-dynamic-management-objects/sys-dm-exec-query-memory-grants-transact-sql
 mod fields;
+pub(crate) mod focus;
 mod sql;
 
 use super::{ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, ActivityScope, IdentityDetail, rows};
@@ -69,6 +70,9 @@ impl<R: NativeRead> ActivityReader<R> {
         Ok(MemoryCapture { context, owner, complete_scope, observations: frame.into_observations()? })
     }
     pub(crate) async fn observe_memory(&mut self) -> Result<MemoryFrame> {
+        self.observe_memory_for(None).await
+    }
+    async fn observe_memory_for(&mut self, focus: Option<&ActivityRequestFocus>) -> Result<MemoryFrame> {
         if self.observed || !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
             return Err(invalid_data());
         }
@@ -92,6 +96,9 @@ impl<R: NativeRead> ActivityReader<R> {
                 ));
             }
             crate::read::require_primary(initial.activity.writable)?;
+        }
+        if let Some(focus) = focus {
+            focus::matches_owner(focus, &initial)?;
         }
         let layout = fields::Layout::read(&mut self.io).await?;
         let limit = (self.options.budget.max_snapshot_rows as usize).min(MAX_REQUEST_MEMORY_OBSERVATIONS);

@@ -1,6 +1,7 @@
 use super::super::tests::{contract, prepared, problem};
 use super::*;
 use async_trait::async_trait;
+use culprit_core::telemetry::DIAGNOSTIC_CONTROLLER_VERSION;
 use std::{collections::BTreeMap, sync::Mutex};
 
 #[tokio::test]
@@ -165,16 +166,22 @@ async fn diagnostic_recovery_heads_follow_the_same_root_cas_even_when_index_writ
     let (blobs, store, fence) = fixture().await;
     let parent = stage_and_commit(&store, &fence, None, &native).await.unwrap();
     let reference = super::super::diagnostic_recovery::capture_reference(parent.manifest()).unwrap();
-    assert!(store.diagnostic_input_pending(&reference, 1).await.unwrap());
+    assert!(store.diagnostic_input_pending(&reference, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap());
     let mut wrong = reference.clone();
     wrong.manifest_sha256 = culprit_core::telemetry::digest(b"wrong-original-manifest");
-    assert_eq!(failure(store.diagnostic_input_pending(&wrong, 1).await), DeliveryProblem::Integrity);
-    assert_eq!(failure(store.diagnostic_input_pending(&reference, 2).await), DeliveryProblem::UnsupportedSchema);
+    assert_eq!(
+        failure(store.diagnostic_input_pending(&wrong, DIAGNOSTIC_CONTROLLER_VERSION).await),
+        DeliveryProblem::Integrity
+    );
+    assert_eq!(
+        failure(store.diagnostic_input_pending(&reference, DIAGNOSTIC_CONTROLLER_VERSION + 1).await),
+        DeliveryProblem::UnsupportedSchema
+    );
     let previous = Some(parent.manifest().range_id.as_str());
     blobs.fail(ROOT_KEY, false);
     assert_eq!(failure(stage_and_commit(&store, &fence, previous, &prepared).await), DeliveryProblem::Transport);
     assert!(store.diagnostic_heads(None, 10).await.unwrap().heads.is_empty());
-    assert!(store.diagnostic_input_pending(&reference, 1).await.unwrap());
+    assert!(store.diagnostic_input_pending(&reference, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap());
     blobs.fail(ROOT_KEY, true);
     assert_eq!(failure(stage_and_commit(&store, &fence, previous, &prepared).await), DeliveryProblem::Transport);
     let heads = store.diagnostic_heads(None, 10).await.unwrap();
@@ -183,12 +190,12 @@ async fn diagnostic_recovery_heads_follow_the_same_root_cas_even_when_index_writ
     assert_eq!(heads.heads[0].range_id, prepared.manifest().range_id);
     assert_eq!(heads.heads[0].manifest_digest, prepared.manifest().digest().unwrap());
     assert!(
-        !store.diagnostic_input_pending(&reference, 1).await.unwrap(),
+        !store.diagnostic_input_pending(&reference, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
         "the root CAS acknowledges exactly this native obligation despite a lost HTTP ack"
     );
     drop(store);
     let reopened = ObjectRecoveryStore::open(blobs, contract()).await.unwrap();
-    assert!(!reopened.diagnostic_input_pending(&reference, 1).await.unwrap());
+    assert!(!reopened.diagnostic_input_pending(&reference, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap());
     assert_eq!(reopened.diagnostic_heads(None, 10).await.unwrap().heads, heads.heads);
     assert_eq!(reopened.load(&heads.heads[0].range_id).await.unwrap(), *prepared.manifest());
     assert!(reopened.captured_range(&native.manifest().source.captured_range().unwrap()).await.unwrap().is_none());

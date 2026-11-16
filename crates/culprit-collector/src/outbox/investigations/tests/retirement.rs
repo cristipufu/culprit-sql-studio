@@ -38,7 +38,7 @@ impl Fixture {
     }
     async fn native(&mut self, rows: Vec<ActivityObservation>, second: u32) -> (DiagnosticInput, CommittedRange) {
         let capture = baseline(&mut self.files, rows, true, second);
-        let input = self.files.diagnostic_input(&capture.observation_id, 1).unwrap();
+        let input = self.files.diagnostic_input(&capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
         let committed = self.archive(&capture, true).await;
         (input, committed)
     }
@@ -126,7 +126,7 @@ async fn archived_metadata_stays_bounded_across_restarts_without_closing_an_unkn
         .query_row("SELECT count(*) FROM diagnostic_steps WHERE update_json IS NOT NULL", [], |row| row.get(0))
         .unwrap();
     assert_eq!(full_updates, 0);
-    assert!(fixture.store.diagnostic_input_pending(&older.parent, 1).await.unwrap());
+    assert!(fixture.store.diagnostic_input_pending(&older.parent, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap());
     let cold_path = fixture.root.path().join("never-local");
     let mut cold = Outbox::create_remote(&cold_path, OutboxLimits::default(), fixture.store.id()).unwrap();
     cold.recover().await.unwrap();
@@ -139,7 +139,7 @@ async fn archived_metadata_stays_bounded_across_restarts_without_closing_an_unkn
     )
     .await
     .unwrap();
-    assert_eq!(cold.next_diagnostic_input(1).await.unwrap().unwrap().parent, older.parent);
+    assert_eq!(cold.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().unwrap().parent, older.parent);
     assert!(
         older.parent.capture.revision.as_ref().unwrap().owner_epoch.parse::<u64>().unwrap()
             < fixture.owner.fence().epoch()
@@ -207,7 +207,7 @@ async fn a_stale_pending_proof_cannot_install_work_after_metadata_retirement() {
         rows,
     };
     assert!(fixture.files.restore_diagnostic_input_at_generation(restored, stale_generation).is_err());
-    assert!(fixture.files.next_diagnostic_input(1).unwrap().is_none());
+    assert!(fixture.files.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
     let Fixture { root, files, store, owner: _owner, .. } = fixture;
     drop(files);
     let mut outbox = Outbox::open(&root.path().join("outbox")).unwrap();
@@ -221,7 +221,7 @@ async fn a_stale_pending_proof_cannot_install_work_after_metadata_retirement() {
         .await
         .unwrap();
     assert!(
-        outbox.next_diagnostic_input(1).await.unwrap().is_none(),
+        outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap().is_none(),
         "authoritative acknowledgement forbids replay after restart"
     );
 }
@@ -248,7 +248,7 @@ async fn acknowledged_evidence_cache_reclaims_its_charge_once_without_becoming_p
     .unwrap();
     assert!(cold.diagnostic_reference(&original).is_ok());
     assert!(cold.status(1, None).unwrap().charged_bytes > 0);
-    assert!(cold.next_diagnostic_input(1).unwrap().is_none());
+    assert!(cold.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().is_none());
     let tx = cold.journal.conn.transaction().unwrap();
     super::super::retirement::compact(&tx).unwrap();
     tx.commit().unwrap();
@@ -260,7 +260,7 @@ async fn acknowledged_evidence_cache_reclaims_its_charge_once_without_becoming_p
     assert_eq!(cold.status(1, None).unwrap().charged_bytes, 0);
     assert_eq!(super::super::retirement::generation(&cold.journal.conn).unwrap(), generation);
     assert!(
-        fixture.store.diagnostic_input_pending(&first.parent, 1).await.unwrap(),
+        fixture.store.diagnostic_input_pending(&first.parent, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
         "cache retirement cannot acknowledge a genuine remote obligation"
     );
 }
@@ -288,7 +288,10 @@ async fn resolved_but_deferred_work_keeps_original_metadata_until_its_terminal_r
         )
         .await;
     assert!(fixture.files.evict(&empty_native).unwrap());
-    assert_eq!(fixture.files.diagnostic_checkpoints(1, None, 1).unwrap().checkpoints[0].episodes, [episode.clone()]);
+    assert_eq!(
+        fixture.files.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 1).unwrap().checkpoints[0].episodes,
+        [episode.clone()]
+    );
     assert_eq!(
         fixture.metadata_charge(&input.parent.capture.observation_id),
         Some(0),
@@ -298,7 +301,8 @@ async fn resolved_but_deferred_work_keeps_original_metadata_until_its_terminal_r
     assert_eq!(fixture.files.diagnostic_reference(&input.rows[0].reference).unwrap().1, input.rows[0].row);
     let original_charge = fixture.metadata_charge(&input.parent.capture.observation_id).unwrap();
     assert!(original_charge > 0);
-    let replay = fixture.files.diagnostic_input(&input.parent.capture.observation_id, 1).unwrap();
+    let replay =
+        fixture.files.diagnostic_input(&input.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
     let captures = fixture.files.status(1, None).unwrap().captures;
     assert!(
         fixture.files.commit_diagnostics(replay, initial).is_err(),
@@ -308,21 +312,26 @@ async fn resolved_but_deferred_work_keeps_original_metadata_until_its_terminal_r
     fixture.cache(&empty_native).await;
     let current_charge = fixture.metadata_charge(&empty.parent.capture.observation_id).unwrap();
     assert!(current_charge > 0);
-    let current = fixture.files.diagnostic_input(&empty.parent.capture.observation_id, 1).unwrap();
+    let current =
+        fixture.files.diagnostic_input(&empty.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
     episode.analysis = DiagnosticAnalysisStatus::Unresolved;
     episode.revision = "3".into();
     let terminal = fixture
         .derive(current.clone(), update(&current, vec![episode], vec![Some("2".into())], "terminal"), false)
         .await;
     assert!(
-        fixture.files.diagnostic_input(&input.parent.capture.observation_id, 1).is_ok(),
+        fixture.files.diagnostic_input(&input.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).is_ok(),
         "the unarchived terminal result still owns its native inputs"
     );
     fixture.files.mark_archived(&terminal).unwrap();
     assert_eq!(fixture.metadata_charge(&input.parent.capture.observation_id), None);
     assert_eq!(fixture.metadata_charge(&empty.parent.capture.observation_id), Some(current_charge));
     assert_eq!(super::super::journal::charged_bytes(&fixture.files.journal.conn).unwrap(), current_charge);
-    assert!(fixture.files.diagnostic_checkpoints(1, None, 1).unwrap().checkpoints[0].episodes.is_empty());
+    assert!(
+        fixture.files.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 1).unwrap().checkpoints[0]
+            .episodes
+            .is_empty()
+    );
 }
 
 #[tokio::test]
