@@ -162,6 +162,7 @@ class Database:
         self.fixture = fixture
         self.owner = secrets.token_hex(12)
         self.name = f"culprit-smoke-{fixture.name}-{self.owner}"
+        self.hostname = f"culprit-smoke-{fixture.engine}-{self.owner}"
         self.password = f"Smoke!{secrets.token_hex(16)}Aa9"
         self.limited_password = f"Reader!{secrets.token_hex(16)}Aa9"
         self.commands = Commands([self.password, self.limited_password])
@@ -191,7 +192,7 @@ class Database:
         if found:
             self.commands.run(["docker", "pull", fixture.image], timeout=600, echo=True)
         args = ["docker", "create", "--pull=never", "--name", self.name,
-                "--hostname", f"culprit-smoke-{fixture.engine}-{self.owner}",
+                "--hostname", self.hostname,
                 "--label", f"{OWNER_LABEL}={self.owner}",
                 "--cpus", "3" if fixture.engine == "yugabyte" else "2", "--memory", fixture.memory]
         for port in self.published_ports():

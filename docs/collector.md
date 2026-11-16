@@ -1249,6 +1249,8 @@ PostgreSQL uses physical streaming, a native slot and a restricted monitor, incl
 permissions. MySQL and MariaDB exercise native channel status with Performance Schema on and off; the separate
 MySQL moving pair verifies actual source-to-replica position movement. SQL Server uses a populated availability
 group and records native work, complete/partial member visibility, query/row limits and confirmed reader shutdown.
+Its physical hostnames meet Linux's fifteen-character limit; native admission checks both full owner nonces in
+the database name as well as each member's exact hostname.
 Each topology owns its generated credentials, loopback ports, labelled containers and network, and removes them on
 exit. These tests never select saved connection profiles or cloud resources.
 

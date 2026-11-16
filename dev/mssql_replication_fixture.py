@@ -11,6 +11,7 @@ https://learn.microsoft.com/en-us/sql/t-sql/statements/create-certificate-transa
 """
 
 from contextlib import ExitStack
+from dataclasses import replace
 import os
 from pathlib import Path
 import re
@@ -41,7 +42,7 @@ def sql_string(value):
 
 
 def member_hostname(database):
-    return f"culprit-smoke-mssql-{database.owner}"
+    return database.hostname
 
 
 def prefixed_values(output, prefix):
@@ -81,9 +82,15 @@ class SqlServerReplication:
         self.stack = ExitStack()
         self.network = OwnedNetwork(primary.commands, primary.owner, owner_label)
         self.name = f"culprit_ag_{primary.owner}"
+        self.database_name = f"{DATABASE_NAME}_{primary.owner}_{secondary.owner}"
         self.native_names = {}
         self.setup_elapsed_seconds = None
-        for _, database, _ in self.members:
+        for role, database, _ in self.members:
+            # Linux requires physical hostnames of at most fifteen characters. Keep both full owner
+            # nonces in the native database name; the Rust admission checks that native ownership proof.
+            prefix = {"primary": "p", "secondary": "s"}[role]
+            database.hostname = prefix + database.owner[:14]
+            database.fixture = replace(database.fixture, database=self.database_name)
             enable_hadr(database, self.network)
 
     def __enter__(self):
@@ -93,7 +100,7 @@ class SqlServerReplication:
             self.stack.enter_context(self.network)
             for role, database, _ in self.members:
                 self.stack.enter_context(database)
-                self.configure_instance_name(role, database)
+                self.verify_instance_name(role, database)
             self.prepare_database()
             certificates = {role: self.create_endpoint(database) for role, database, _ in self.members}
             self.trust_peer(self.primary, certificates["secondary"])
@@ -133,27 +140,17 @@ class SqlServerReplication:
     def verify_machine(self, database):
         machine = self.value(database, "SERVERPROPERTY('MachineName')")
         if machine != member_hostname(database):
-            raise RuntimeError("native SQL MachineName does not match this member's full owner nonce")
+            raise RuntimeError("native SQL MachineName does not match this member's owned physical hostname")
         if self.value(database, "CONCAT(CONVERT(varchar(10),SERVERPROPERTY('ProductMajorVersion')), ':', "
                       "CONVERT(varchar(10),SERVERPROPERTY('EngineEdition')), ':', "
                       "CONVERT(varchar(10),SERVERPROPERTY('IsHadrEnabled')))") != "16:3:1":
             raise RuntimeError("the owned AG member is not HADR-enabled SQL Server 2022 Developer")
 
-    def configure_instance_name(self, role, database):
-        self.verify_machine(database)
-        # Linux's documented read-scale prerequisite limits instance names to fifteen characters.
-        # MachineName remains the long nonce hostname; only the fresh instance's local SQL name changes.
-        selected_name = ("p" if role == "primary" else "s") + database.owner[:14]
-        previous_name = self.value(database, "@@SERVERNAME")
-        if not previous_name or len(previous_name) > 128:
-            raise RuntimeError("the owned AG member has no bounded native local server name")
-        self.sql(database, f"EXEC sys.sp_dropserver @server={sql_string(previous_name)}; "
-                 f"EXEC sys.sp_addserver @server={sql_string(selected_name)}, @local=N'local';")
-        database.restart()
+    def verify_instance_name(self, role, database):
         self.verify_machine(database)
         actual_name = self.value(database, "@@SERVERNAME")
-        if actual_name != selected_name:
-            raise RuntimeError("the owned AG instance did not retain its exact native server name after restart")
+        if actual_name != member_hostname(database):
+            raise RuntimeError(f"the owned AG server name differs from its hostname: {actual_name!r}")
         self.native_names[role] = actual_name
 
     def prepare_database(self):
@@ -162,12 +159,12 @@ class SqlServerReplication:
         self.primary.seed()
         self.sql(self.primary, "CREATE TABLE dbo.culprit_ag_marker (owner char(24) NOT NULL PRIMARY KEY); "
                  f"INSERT dbo.culprit_ag_marker VALUES ({sql_string(self.primary.owner)});",
-                 selected_database=DATABASE_NAME)
+                 selected_database=self.database_name)
         prefix = f"/var/opt/mssql/data/culprit_ag_{self.primary.owner}"
-        self.sql(self.primary, f"ALTER DATABASE [{DATABASE_NAME}] SET RECOVERY FULL; "
-                 f"BACKUP DATABASE [{DATABASE_NAME}] TO DISK={sql_string(prefix + '.bak')} "
+        self.sql(self.primary, f"ALTER DATABASE [{self.database_name}] SET RECOVERY FULL; "
+                 f"BACKUP DATABASE [{self.database_name}] TO DISK={sql_string(prefix + '.bak')} "
                  "WITH INIT, COMPRESSION, CHECKSUM; "
-                 f"BACKUP LOG [{DATABASE_NAME}] TO DISK={sql_string(prefix + '.trn')} "
+                 f"BACKUP LOG [{self.database_name}] TO DISK={sql_string(prefix + '.trn')} "
                  "WITH INIT, COMPRESSION, CHECKSUM;", timeout=60)
 
     def create_endpoint(self, database):
@@ -224,7 +221,7 @@ FROM chunks WHERE n*{CERTIFICATE_CHUNK_HEX}<DATALENGTH(@encoded) ORDER BY n;
                  "FOR REPLICA ON " + ",".join(replicas) + ";")
         self.sql(self.secondary, f"ALTER AVAILABILITY GROUP [{self.name}] JOIN WITH (CLUSTER_TYPE=NONE); "
                  f"ALTER AVAILABILITY GROUP [{self.name}] GRANT CREATE ANY DATABASE;")
-        self.sql(self.primary, f"ALTER AVAILABILITY GROUP [{self.name}] ADD DATABASE [{DATABASE_NAME}];")
+        self.sql(self.primary, f"ALTER AVAILABILITY GROUP [{self.name}] ADD DATABASE [{self.database_name}];")
 
     def ready(self, role, database, visible_rows, timeout):
         writable = "READ_WRITE" if role == "primary" else "READ_ONLY"
@@ -234,13 +231,13 @@ EXISTS (SELECT 1 FROM sys.availability_groups ag
  WHERE ag.name={sql_string(self.name)} AND ars.is_local=1 AND ars.role_desc={sql_string(role.upper())})
 AND EXISTS (SELECT 1 FROM sys.dm_hadr_database_replica_states drs
  JOIN sys.availability_groups ag ON ag.group_id=drs.group_id
- WHERE ag.name={sql_string(self.name)} AND drs.database_id=DB_ID(N'{DATABASE_NAME}')
+ WHERE ag.name={sql_string(self.name)} AND drs.database_id=DB_ID(N'{self.database_name}')
  AND drs.is_local=1 AND drs.synchronization_state IN (1,2) AND drs.is_suspended=0)
 AND (SELECT COUNT(*) FROM sys.dm_hadr_database_replica_states drs
  JOIN sys.availability_groups ag ON ag.group_id=drs.group_id
- WHERE ag.name={sql_string(self.name)} AND drs.database_id=DB_ID(N'{DATABASE_NAME}'))={visible_rows}
-AND DATABASEPROPERTYEX(N'{DATABASE_NAME}','Status')=N'ONLINE'
-AND DATABASEPROPERTYEX(N'{DATABASE_NAME}','Updateability')={sql_string(writable)}
+ WHERE ag.name={sql_string(self.name)} AND drs.database_id=DB_ID(N'{self.database_name}'))={visible_rows}
+AND DATABASEPROPERTYEX(N'{self.database_name}','Status')=N'ONLINE'
+AND DATABASEPROPERTYEX(N'{self.database_name}','Updateability')={sql_string(writable)}
 THEN N'ready' ELSE N'pending' END"""
         return self.value(database, expression, timeout=timeout) == "ready"
 
@@ -263,7 +260,7 @@ THEN N'ready' ELSE N'pending' END"""
     def verify_marker(self):
         for _, database, _ in self.members:
             _, output = self.sql(database, f"SET NOCOUNT ON; SELECT {sql_string(VALUE_PREFIX)} + owner "
-                                 "FROM dbo.culprit_ag_marker;", selected_database=DATABASE_NAME)
+                                 "FROM dbo.culprit_ag_marker;", selected_database=self.database_name)
             owners = prefixed_values(output, VALUE_PREFIX)
             if owners != [self.primary.owner]:
                 raise RuntimeError("the readable replica did not retain the exact primary's seeded marker")
@@ -271,7 +268,7 @@ THEN N'ready' ELSE N'pending' END"""
     def topology(self):
         return {"kind": "owned-sql-server-2022-ag-pair", "group": self.name, "cluster_type": "NONE",
                 "availability_mode": "ASYNCHRONOUS_COMMIT", "failover_mode": "MANUAL",
-                "database": DATABASE_NAME, "setup_client_elapsed_seconds": self.setup_elapsed_seconds,
+                "database": self.database_name, "setup_client_elapsed_seconds": self.setup_elapsed_seconds,
                 "production_admission": "unqualified", "production_cost_qualified": False,
                 "members": [{"role": role, "machine": member_hostname(database),
                              "native_server_name": self.native_names[role], "loopback_port": database.port,
