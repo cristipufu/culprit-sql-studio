@@ -56,6 +56,14 @@ impl AccessComparison {
         Some(Self { estimated, actual, estimated_output, actual_output, difference, completed_input })
     }
 
+    pub(super) fn output_counts(&self) -> Option<(f64, f64)> {
+        self.estimated_output.zip(self.actual_output)
+    }
+
+    pub(super) fn actual_accessed(&self) -> f64 {
+        self.actual
+    }
+
     pub(super) fn detail(&self) -> String {
         let counts = if self.completed_input {
             t!(

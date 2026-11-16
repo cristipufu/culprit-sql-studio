@@ -74,9 +74,10 @@ mod task_space;
 pub use task_space::{assert_task_space_capture, task_space_evidence_cases};
 mod object_definitions;
 pub use object_definitions::{
-    MemoryFeedbackCase, assert_object_definition_capture, memory_feedback_evidence, memory_feedback_evidence_cases,
-    object_definition_bound_join_evidence, object_definition_evidence_cases, object_definition_hydration_evidence,
-    object_definition_recovery_only_evidence, object_definition_retained_input_evidence,
+    MemoryFeedbackCase, TvpLoopCase, assert_object_definition_capture, memory_feedback_evidence,
+    memory_feedback_evidence_cases, object_definition_bound_join_evidence, object_definition_evidence_cases,
+    object_definition_hydration_evidence, object_definition_recovery_only_evidence,
+    object_definition_retained_input_evidence, tvp_loop_evidence, tvp_loop_evidence_cases,
 };
 mod projection;
 pub use projection::JsonProjection;

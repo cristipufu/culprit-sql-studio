@@ -2,6 +2,8 @@
 
 use culprit_core::{Finding, Snapshot};
 
+mod tvp_loops;
+
 fn report(name: &str) -> Snapshot {
     let path = format!("{}/../../fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
     let report: culprit_core::Report = serde_json::from_slice(&std::fs::read(path).expect("fixture")).expect("report");

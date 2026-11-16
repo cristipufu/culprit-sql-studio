@@ -1,6 +1,8 @@
 use super::*;
 use std::sync::atomic::Ordering;
 
+mod tvp_loops;
+
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::ObjectDefinitions];
 
 #[tokio::test]
@@ -107,6 +109,7 @@ async fn explicit_recovery_hydrates_large_native_plans_from_one_exact_batch_with
     ]
     .into_iter()
     .chain(test_support::object_definition_bound_join_evidence())
+    .chain(test_support::tvp_loop_evidence_cases())
     {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);
@@ -155,6 +158,7 @@ async fn recovery_hydration_cannot_repair_a_changed_native_definition_receipt() 
     ]
     .into_iter()
     .chain(test_support::object_definition_bound_join_evidence())
+    .chain(test_support::tvp_loop_evidence_cases())
     {
         let fixture = Fixture::new(source, records).await;
         let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);

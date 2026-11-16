@@ -3,6 +3,25 @@ use super::children;
 use culprit_core::plan_facts::{MAX_PLAN_SCAN_THREADS, PlanScanCompletion, PlanScanThread};
 use roxmltree::Node;
 
+/// Reuse the same native population interpretation as table-scan completion. Missing Parallel, multiple runtime
+/// populations, worker-only counters and malformed actual rows cannot become a serial execution claim.
+pub(super) fn serial_execution_count(relop: Node<'_, '_>, population: &PlanScanCompletion) -> Option<String> {
+    if population.parallel != Some(false) {
+        return None;
+    }
+    let [thread] = population.threads.as_slice() else { return None };
+    if thread.thread != 0 {
+        return None;
+    }
+    let executions = thread.executions.as_ref()?;
+    if executions.parse::<u64>().ok()? == 0 {
+        return None;
+    }
+    let native = children(children(relop, "RunTimeInformation").next()?, "RunTimeCountersPerThread").next()?;
+    native.attribute("ActualRows")?.parse::<u64>().ok()?;
+    Some(executions.clone())
+}
+
 pub(super) fn read(relop: Node<'_, '_>) -> Option<PlanScanCompletion> {
     let parallel = match relop.attribute("Parallel") {
         Some("0" | "false") => Some(false),

@@ -185,6 +185,7 @@
             },
             "estimated_row_bytes": 127.0,
             "expression_cache": false,
+            "inner_join": true,
             "output_columns": [
               "id",
               "name",
@@ -523,6 +524,7 @@
             },
             "estimated_row_bytes": 127.0,
             "expression_cache": false,
+            "inner_join": true,
             "output_columns": [
               "id",
               "name",

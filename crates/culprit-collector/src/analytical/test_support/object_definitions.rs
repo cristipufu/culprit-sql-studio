@@ -6,6 +6,8 @@ mod bound_joins;
 pub use bound_joins::object_definition_bound_join_evidence;
 mod memory_feedback;
 pub use memory_feedback::{MemoryFeedbackCase, memory_feedback_evidence, memory_feedback_evidence_cases};
+mod tvp_loops;
+pub use tvp_loops::{TvpLoopCase, tvp_loop_evidence, tvp_loop_evidence_cases};
 
 const OBSERVED_FROM: &str = "2020-01-01T12:00:00Z";
 const OBSERVED_UNTIL: &str = "2020-01-01T12:00:01Z";

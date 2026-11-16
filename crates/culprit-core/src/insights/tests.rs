@@ -2,6 +2,7 @@ mod compilation;
 mod memory_feedback;
 mod parameters;
 mod relational_inputs;
+mod relational_loops;
 mod spills;
 mod temporary;
 

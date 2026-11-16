@@ -581,8 +581,24 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
     let est_executions = 1.0 + attr_f64(relop, "EstimateRebinds") + attr_f64(relop, "EstimateRewinds");
     let table_rows = relop.attribute("TableCardinality").and_then(|v| v.parse().ok());
 
+    let execution_population = scan_completion::read(relop);
     let mut facts = culprit_core::PlanNodeFacts {
         relational_input: operator.and_then(relational_inputs::from_operator),
+        serial_execution_count: execution_population
+            .as_ref()
+            .and_then(|population| scan_completion::serial_execution_count(relop, population)),
+        inner_join: match logical.as_str() {
+            "Inner Join" => Some(true),
+            "Left Outer Join"
+            | "Right Outer Join"
+            | "Full Outer Join"
+            | "Left Semi Join"
+            | "Right Semi Join"
+            | "Left Anti Semi Join"
+            | "Right Anti Semi Join"
+            | "Cross Join" => Some(false),
+            _ => None,
+        },
         estimated_row_bytes: relop
             .attribute("AvgRowSize")
             .and_then(|v| v.parse::<f64>().ok())
@@ -647,7 +663,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
     let estimated_read = relop.attribute("EstimatedRowsRead").and_then(|v| v.parse::<f64>().ok());
     facts.access_rows = culprit_core::plan_facts::PlanAccessRows::new(estimated_read, actual_rows_read);
     facts.scan_completion =
-        operator.filter(|operator| operator.has_tag_name_local("TableScan")).and_then(|_| scan_completion::read(relop));
+        operator.filter(|operator| operator.has_tag_name_local("TableScan")).and(execution_population);
 
     let mut node = PlanNode {
         facts,

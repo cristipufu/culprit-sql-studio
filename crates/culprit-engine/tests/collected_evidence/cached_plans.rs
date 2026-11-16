@@ -15,6 +15,7 @@ use culprit_core::{
 use culprit_engine::collected_resources;
 
 mod memory_feedback;
+mod tvp_loops;
 
 fn case(index: usize) -> (CollectionDescription, Vec<TelemetryRecord>) {
     object_definition_evidence_cases().swap_remove(index)

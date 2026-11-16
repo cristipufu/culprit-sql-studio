@@ -5,6 +5,7 @@ use ts_rs::TS;
 
 mod access_rows;
 pub use access_rows::PlanAccessRows;
+mod execution_count;
 mod memory_feedback;
 pub use memory_feedback::{PlanMemoryGrantFeedback, PlanMemoryGrantFeedbackIssue, PlanMemoryGrantFeedbackState};
 mod parameters;
@@ -199,6 +200,16 @@ pub struct PlanNodeFacts {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "relational_input::deserialize")]
     #[ts(optional)]
     pub relational_input: Option<RelationalInput>,
+    /// Positive native actual executions from one explicitly serial coordinator counter population. This is
+    /// neither an estimated count nor the absence of observed parallel workers. Consumers must additionally
+    /// match the operator's actual execution count within an exactly representable range before normalizing.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "execution_count::deserialize")]
+    #[ts(optional)]
+    pub serial_execution_count: Option<String>,
+    /// Native logical join semantics. Unknown or absent semantics cannot authorize an inner-join diagnosis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub inner_join: Option<bool>,
     #[serde(default, skip_serializing_if = "is_false")]
     #[ts(as = "Option<bool>", optional)]
     pub estimated_rows_unavailable: bool,

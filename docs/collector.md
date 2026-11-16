@@ -271,6 +271,10 @@ suppress an independent native Cartesian-join warning.
 For a qualified TVP, a complete serial native table scan can distinguish consumed input, rows kept by its filter and
 statement output. Missing end-of-scan counters, repeated or parallel execution, seeks and early-stop paths retain
 access/output context. Input volume alone does not establish harmful reuse or the cause of a spill.
+The shared loop diagnosis can link an underestimated TVP access to material repeated inner reads in the same
+selected actual plan. It requires original TVP binding and explicit serial counter populations; one observed
+worker is insufficient. Healthy single-row seeks and unsupported or missing evidence receive no TVP loop verdict.
+It does not recommend statistics on a TVP or assert that a different join would be faster.
 Available SQL Server parameter metadata retains names, types and explicit availability states. A native comparison
 describes only compiled/runtime representations in the same selected actual plan; literals and new value hashes
 are not retained. That difference alone establishes neither parameter skew nor harmful cached-plan reuse.

@@ -426,6 +426,16 @@ pub(super) fn nested_loops(cx: &Cx) -> Vec<Draft> {
         if inner_nodes.iter().any(|x| x.op == "Index Spool" && x.detail.as_deref() == Some("Eager Spool")) {
             continue;
         }
+        // Variable/native relational inputs do not have persistent-table statistics by default. Their stronger
+        // measured loop case owns its scope; a missing native proof must not fall back to generic statistics or
+        // an assertion that another join is cheaper.
+        let outer_has_relational_input = relational_loops::has_relational_input(outer);
+        if outer_has_relational_input || n.children.iter().skip(1).any(relational_loops::has_relational_input) {
+            if outer_has_relational_input {
+                out.extend(relational_loops::tvp_loop(cx, n));
+            }
+            continue;
+        }
         // Times the inner side is asked for rows: once per outer row.
         let asked =
             if inner.act_executions.is_some() || inner.est_executions > 1.0 { inner.runs() } else { rows_out(outer) };

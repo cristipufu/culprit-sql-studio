@@ -14,6 +14,45 @@ fn parsed(parallel: &str, counters: &str, operator: &str) -> culprit_core::Plan 
 const TABLE: &str = r#"<TableScan><Object Table="[@rows]" /></TableScan>"#;
 
 #[test]
+fn serial_execution_counts_require_explicit_serial_native_scope_and_preserve_exact_values() {
+    for value in ["1", "10000", "9007199254740993", "18446744073709551615"] {
+        let counters = format!(r#"<RunTimeCountersPerThread Thread="0" ActualRows="1" ActualExecutions="{value}" />"#);
+        let plan = parsed(r#"Parallel="0""#, &counters, TABLE);
+        assert_eq!(plan.root.facts().serial_execution_count.as_deref(), Some(value));
+    }
+    let counter = r#"<RunTimeCountersPerThread Thread="0" ActualRows="1" ActualExecutions="1" />"#;
+    for (parallel, counters) in [
+        ("", counter.to_owned()),
+        (r#"Parallel="unknown""#, counter.to_owned()),
+        (r#"Parallel="1""#, counter.to_owned()),
+        (r#"Parallel="1""#, counter.replace("Thread=\"0\"", "Thread=\"1\"")),
+        (r#"Parallel="0""#, counter.replace("Thread=\"0\"", "Thread=\"1\"")),
+        (r#"Parallel="0""#, counter.repeat(2)),
+        (r#"Parallel="0""#, counter.replace("ActualRows=\"1\"", "")),
+        (r#"Parallel="0""#, counter.replace("ActualRows=\"1\"", "ActualRows=\"NaN\"")),
+        (r#"Parallel="0""#, counter.replace("ActualExecutions=\"1\"", "ActualExecutions=\"0\"")),
+        (r#"Parallel="0""#, counter.replace("ActualExecutions=\"1\"", "ActualExecutions=\"1.5\"")),
+    ] {
+        let plan = parsed(parallel, &counters, TABLE);
+        assert!(plan.root.facts().serial_execution_count.is_none(), "{parallel} {counters}");
+    }
+}
+
+#[test]
+fn duplicate_runtime_populations_cannot_authorize_serial_scope_even_when_the_first_one_looks_valid() {
+    let xml = r#"<ShowPlanXML><BatchSequence><Batch><Statements><StmtSimple QueryHash="0xA"><QueryPlan>
+        <RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" Parallel="0" EstimateRows="1">
+        <RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1" ActualExecutions="1" /></RunTimeInformation>
+        <RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1" ActualExecutions="1" /></RunTimeInformation>
+        <TableScan><Object Table="[@rows]" /></TableScan></RelOp>
+        </QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#;
+    let plan = crate::plan_xml::parse_statement(xml, Some("0xA")).unwrap();
+    assert!(plan.root.facts().serial_execution_count.is_none());
+    assert!(plan.root.facts().scan_completion.is_none());
+    assert_eq!(plan.root.act_rows, Some(1.0));
+}
+
+#[test]
 fn native_eof_counts_preserve_zero_missing_and_large_integers_without_float_or_property_fallbacks() {
     for value in [None, Some("0"), Some("1"), Some("9007199254740993"), Some("18446744073709551615")] {
         let eof = value.map(|value| format!(r#" ActualEndOfScans="{value}""#)).unwrap_or_default();

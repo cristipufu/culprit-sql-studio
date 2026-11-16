@@ -29,6 +29,7 @@ mod parameters;
 mod predicates;
 mod query;
 mod relational_inputs;
+mod relational_loops;
 mod server;
 mod statistics;
 #[cfg(test)]
