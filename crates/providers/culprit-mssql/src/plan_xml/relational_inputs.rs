@@ -7,8 +7,10 @@ use culprit_core::{
     plan_facts::{RelationalInput, RelationalInputKind as Kind, RelationalInputProvenance as Provenance},
 };
 use roxmltree::Node;
+use std::collections::BTreeMap;
 
 use super::LocalName;
+mod bindings;
 
 pub(super) fn from_operator(operator: Node<'_, '_>) -> Option<RelationalInput> {
     if operator.has_tag_name_local("TableValuedFunction") {
@@ -29,69 +31,76 @@ pub(super) fn from_operator(operator: Node<'_, '_>) -> Option<RelationalInput> {
     }
 }
 
-/// Only preceding declarations in the very same native statement list can qualify a local input. Declarations in
-/// another batch, procedure, conditional branch or dynamic SQL are not in this scope. Retained single-statement
-/// plans commonly omit declarations, and then their variable-backed inputs deliberately remain unknown.
-pub(super) fn qualify_local_declarations(root: &mut PlanNode, statement: Node<'_, '_>) {
+/// Bind the complete original relation inventory before assigning any variable kind. Native Object aliases and
+/// NodeIds select the operator; neither a token elsewhere in SQL nor a detached display name establishes ownership.
+pub(super) fn qualify(root: &mut PlanNode, statement: Node<'_, '_>, context: Option<&super::CachedInputContext<'_>>) {
     if !direct_statement_scope(statement) {
         return;
     }
-    let Some(name) = statement.attribute("StatementText").and_then(culprit_core::sql::mssql_direct_table_parameter)
-    else {
+    let Some(bound) = bindings::parameters(statement, context.and_then(|context| context.origin.native_read())) else {
         return;
     };
-    let Some(scope) = statement.parent().filter(|node| node.has_tag_name_local("Statements")) else { return };
+    let inputs = bound
+        .into_iter()
+        .filter_map(|(id, name)| {
+            let local = local_declaration(statement, &name);
+            let parameter = context.and_then(|context| module_parameter(statement, context, &name));
+            match (local, parameter) {
+                (Some(input), None) | (None, Some(input)) => Some((id, input)),
+                _ => None,
+            }
+        })
+        .collect();
+    apply_inputs(root, &inputs);
+}
+
+/// Only preceding declarations in the very same native statement list can qualify a local input. Declarations in
+/// another batch, procedure, conditional branch or dynamic SQL are not in this scope.
+fn local_declaration(statement: Node<'_, '_>, name: &str) -> Option<RelationalInput> {
+    let scope = statement.parent().filter(|node| node.has_tag_name_local("Statements"))?;
     let declarations = scope
         .children()
         .filter(Node::is_element)
         .take_while(|node| *node != statement)
         .filter(|node| node.has_tag_name_local("StmtSimple"))
         .filter_map(|node| node.attribute("StatementText").and_then(culprit_core::sql::mssql_declared_table_variable))
-        .filter(|declared| declared == &name)
+        .filter(|declared| declared.as_str() == name)
         .count();
-    if declarations == 1 {
-        apply_direct_input(
-            root,
-            &name,
-            RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration },
-        );
-    }
+    (declarations == 1)
+        .then_some(RelationalInput { kind: Kind::LocalTableVariable, provenance: Provenance::NativeDeclaration })
 }
 
-/// The selected SQL must have one direct relational parameter and no other expansion scope. Showplan Object's
-/// TableReferenceId is a local reference, not a documented module/parameter owner ID. Do not infer that binding.
-pub(super) fn qualify_module_parameters(
-    root: &mut PlanNode,
+/// Original module proof remains useful without a reader namespace for a closed all-variable query. Namespace-
+/// sensitive named relations have already been refused by the shared binding pass when that context is absent.
+fn module_parameter(
     statement: Node<'_, '_>,
-    context: &culprit_core::telemetry::CachedStatementContext,
-    parameters: &culprit_core::telemetry::MssqlModuleParameters,
-    native_statement: &str,
-) {
-    if !parameters.is_valid_for(context)
+    context: &super::CachedInputContext<'_>,
+    name: &str,
+) -> Option<RelationalInput> {
+    let parameters = context.module_parameters?;
+    let native_statement = context.text?;
+    if !parameters.is_valid_for(context.statement)
         || !statement.has_tag_name_local("StmtSimple")
         || statement.attribute("StatementText").map(str::trim) != Some(native_statement.trim())
         || !statement
             .attribute("QueryHash")
-            .zip(context.query_hash.as_deref())
+            .zip(context.statement.query_hash.as_deref())
             .is_some_and(|(native, observed)| native.eq_ignore_ascii_case(observed))
-        || !direct_statement_scope(statement)
     {
-        return;
+        return None;
     }
-    let Some(name) = culprit_core::sql::mssql_direct_table_parameter(native_statement) else { return };
-    let Some(input) = parameters.input(context, &name) else { return };
-    apply_direct_input(root, &name, input);
+    parameters.input(context.statement, name)
 }
 
-fn apply_direct_input(node: &mut PlanNode, name: &str, input: RelationalInput) {
+fn apply_inputs(node: &mut PlanNode, inputs: &BTreeMap<u32, RelationalInput>) {
     if matches!(node.kind, culprit_core::NodeKind::Scan | culprit_core::NodeKind::Seek)
-        && node.object.as_deref() == Some(name)
         && node.facts.relational_input.is_some_and(|old| old.qualified_kind() == Kind::Unknown)
+        && let Some(input) = inputs.get(&node.id)
     {
-        node.facts.relational_input = Some(input);
+        node.facts.relational_input = Some(*input);
     }
     for child in &mut node.children {
-        apply_direct_input(child, name, input);
+        apply_inputs(child, inputs);
     }
 }
 

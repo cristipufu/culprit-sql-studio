@@ -145,7 +145,9 @@ async fn original_module_headers_bind_tvp_kind_and_withhold_reused_handle_enrich
         let hash=original.context.query_hash.clone().unwrap();
         let details=crate::cached_statements::details(&mut reader,std::slice::from_ref(&hash),1,&ReadSession::application_budget()).await.unwrap();
         let detail=&details[&hash];
-        let plan=crate::plan_xml::parse_cached_statement(detail.plan.text().unwrap(),&detail.context,detail.module_parameters.as_ref(),detail.statement.text()).unwrap();
+        let plan=crate::plan_xml::parse_cached_statement(detail.plan.text().unwrap(),crate::plan_xml::CachedInputContext{
+            statement:&detail.context,module_parameters:detail.module_parameters.as_ref(),text:detail.statement.text(),origin:crate::plan_xml::PlanInputOrigin::OriginalNative{read:None},
+        }).unwrap();
         assert!(qualified_input(&plan),"the actual selected native plan must carry the proven READONLY input kind");
         let mut bindings=Bindings::default();
         bindings.admit(&original.context).unwrap();

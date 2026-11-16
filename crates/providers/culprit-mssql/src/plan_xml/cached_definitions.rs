@@ -12,7 +12,15 @@ pub fn parse_cached_definition(definition: &MssqlCachedDefinition) -> Result<Pla
         DefinitionPayload::Available { text, .. } => Some(text.as_str()),
         DefinitionPayload::Unavailable { .. } => None,
     };
-    super::parse_cached_statement(xml, &definition.context, definition.module_parameters.as_ref(), statement)
+    super::parse_cached_statement(
+        xml,
+        super::CachedInputContext {
+            statement: &definition.context,
+            module_parameters: definition.module_parameters.as_ref(),
+            text: statement,
+            origin: super::PlanInputOrigin::StoredRedacted,
+        },
+    )
 }
 
 pub fn parse_retained_definition(definition: &MssqlRetainedPlanDefinition) -> Result<Plan> {
@@ -26,8 +34,15 @@ pub fn parse_retained_definition(definition: &MssqlRetainedPlanDefinition) -> Re
         DefinitionPayload::Available { text, .. } => Some(text.as_str()),
         DefinitionPayload::Unavailable { .. } => None,
     };
-    let mut plan =
-        super::parse_cached_statement(xml, &definition.context, definition.module_parameters.as_ref(), statement)?;
+    let mut plan = super::parse_cached_statement(
+        xml,
+        super::CachedInputContext {
+            statement: &definition.context,
+            module_parameters: definition.module_parameters.as_ref(),
+            text: statement,
+            origin: super::PlanInputOrigin::StoredRedacted,
+        },
+    )?;
     crate::actual::clear_unrecorded_times(&mut plan);
     Ok(plan)
 }

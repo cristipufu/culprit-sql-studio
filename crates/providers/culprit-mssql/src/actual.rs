@@ -104,10 +104,11 @@ async fn read_retained_plan<R: NativeRead>(
         query: row.query.clone(),
         native_plan: row.native_plan.clone(),
     };
-    Ok(RetainedActualPlan { plan: plan_from_retained(read)?, provenance })
+    let plan = plan_from_retained(read, &provenance.read)?;
+    Ok(RetainedActualPlan { plan, provenance })
 }
 
-fn plan_from_retained(read: retained::Read) -> Result<Plan> {
+fn plan_from_retained(read: retained::Read, context: &culprit_core::telemetry::NativeReadContext) -> Result<Plan> {
     let Some(row) = read.plan else {
         return Err(if read.setting_on == Some(false) { not_kept() } else { no_matching_plan() });
     };
@@ -122,8 +123,15 @@ fn plan_from_retained(read: retained::Read) -> Result<Plan> {
         ) => return Err(no_matching_plan()),
         crate::query_store::payload::Payload::Unavailable(_) => return Err(not_kept()),
     };
-    let mut plan =
-        plan_xml::parse_cached_statement(&xml, &row.context, row.module_parameters.as_ref(), row.statement.text())?;
+    let mut plan = plan_xml::parse_cached_statement(
+        &xml,
+        plan_xml::CachedInputContext {
+            statement: &row.context,
+            module_parameters: row.module_parameters.as_ref(),
+            text: row.statement.text(),
+            origin: plan_xml::PlanInputOrigin::OriginalNative { read: Some(context) },
+        },
+    )?;
     if plan.kind != PlanKind::Actual {
         return Err(not_kept());
     }
@@ -385,7 +393,11 @@ mod tests {
         let row = retained_row();
         assert_eq!(row.executions, "9007199254740993");
         assert!(row.last_start_without_offset.is_some());
-        let plan = plan_from_retained(retained::Read { setting_on: Some(false), plan: Some(row) }).unwrap();
+        let plan = plan_from_retained(
+            retained::Read { setting_on: Some(false), plan: Some(row) },
+            &crate::plan_xml::test_read_context("app"),
+        )
+        .unwrap();
         assert_eq!(plan.kind, PlanKind::Actual);
         assert_eq!(plan.root.act_rows, Some(10000.0));
         assert!(plan.facts().last_run_at.is_none());
@@ -400,7 +412,11 @@ mod tests {
         row.payload = crate::query_store::payload::Payload::Unavailable(
             culprit_core::telemetry::PayloadUnavailable::SourceUnavailable,
         );
-        let error = plan_from_retained(retained::Read { setting_on: Some(true), plan: Some(row) }).unwrap_err();
+        let error = plan_from_retained(
+            retained::Read { setting_on: Some(true), plan: Some(row) },
+            &crate::plan_xml::test_read_context("app"),
+        )
+        .unwrap_err();
         assert_eq!(error.code, ErrorCode::NotFound);
         assert!(!error.hint.unwrap_or_default().contains(TURN_ON));
     }

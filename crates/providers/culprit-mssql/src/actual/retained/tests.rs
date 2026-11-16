@@ -154,7 +154,11 @@ async fn original_tvp_metadata_travels_with_the_retained_read_and_is_withheld_wh
         if changed {
             assert!(matches!(retained.payload, Payload::Unavailable(PayloadUnavailable::SourceUnavailable)));
         } else {
-            let plan = super::super::plan_from_retained(Read { setting_on: Some(true), plan: Some(retained) }).unwrap();
+            let plan = super::super::plan_from_retained(
+                Read { setting_on: Some(true), plan: Some(retained) },
+                &crate::plan_xml::test_read_context("app"),
+            )
+            .unwrap();
             assert_eq!(
                 plan.root.facts().relational_input.unwrap().qualified_kind(),
                 culprit_core::plan_facts::RelationalInputKind::TableValuedParameter

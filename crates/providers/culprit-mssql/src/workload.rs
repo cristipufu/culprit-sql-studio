@@ -777,9 +777,12 @@ pub(crate) async fn from_plan_cache(
                 detail.and_then(|d| d.plan.text().map(|xml| (d, xml))).and_then(|(detail, xml)| {
                     match plan_xml::parse_cached_statement(
                         xml,
-                        &detail.context,
-                        detail.module_parameters.as_ref(),
-                        detail.statement.text(),
+                        plan_xml::CachedInputContext {
+                            statement: &detail.context,
+                            module_parameters: detail.module_parameters.as_ref(),
+                            text: detail.statement.text(),
+                            origin: plan_xml::PlanInputOrigin::OriginalNative { read: None },
+                        },
                     ) {
                         Ok(p) => {
                             plans_parsed += 1;

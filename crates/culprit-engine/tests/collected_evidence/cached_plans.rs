@@ -101,6 +101,8 @@ async fn explicit_hydration_restores_large_native_plans_and_original_tvp_context
     assert_eq!(records.len(), 2);
 
     #[cfg(feature = "mssql")]
+    let mut expected_cartesian = [false, true].into_iter();
+    #[cfg(feature = "mssql")]
     let mut expected_inputs = [RelationalInputKind::TableValuedParameter, RelationalInputKind::Unknown].into_iter();
     for record in records {
         let native_definition = definition(&record);
@@ -121,28 +123,39 @@ async fn explicit_hydration_restores_large_native_plans_and_original_tvp_context
             let plan = entry.plan.as_ref().unwrap();
             assert_eq!(plan.kind, PlanKind::Estimated);
             assert!(plan.nodes().iter().all(|node| node.act_rows.is_none() && node.act_executions.is_none()));
-            let expected_kind = expected_inputs.next().unwrap();
             let inputs = plan
                 .nodes()
                 .iter()
                 .filter_map(|node| node.facts().relational_input.map(|input| input.qualified_kind()))
                 .collect::<Vec<_>>();
+            let expected_kind = expected_inputs.next().unwrap();
             assert_eq!(inputs, [expected_kind]);
             assert_eq!(plan.facts().elapsed_ms, None);
             assert_eq!(plan.facts().last_run_at, None);
             assert!(!plan.props.contains_key("CachedExecutions"));
             assert!(plan.raw.is_none() && plan.statement.is_none());
             let insights = &plan.insights.as_ref().unwrap().items;
-            if expected_kind == RelationalInputKind::Unknown {
+            let cartesian = expected_cartesian.next().unwrap();
+            assert_eq!(
+                direct.nodes().iter().any(|node| node.warnings.contains(&culprit_core::PlanWarning::NoJoinPredicate)),
+                cartesian
+            );
+            assert_eq!(
+                plan.nodes().iter().any(|node| node.warnings.contains(&culprit_core::PlanWarning::NoJoinPredicate)),
+                cartesian
+            );
+            if cartesian {
                 let expected = direct_insights.iter().find(|insight| insight.rule == "no-join-predicate").unwrap();
                 let observed = insights.iter().find(|insight| insight.rule == "no-join-predicate").unwrap();
                 assert_eq!(observed.nodes, expected.nodes);
                 assert_eq!(observed.detail, expected.detail);
-                assert!(entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput));
             } else {
                 assert!(!insights.iter().any(|insight| insight.rule == "no-join-predicate"));
-                assert!(!entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput));
             }
+            assert_eq!(
+                entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput),
+                expected_kind == RelationalInputKind::Unknown
+            );
             assert!(!insights.iter().any(|insight| insight.rule == "misestimate"));
             assert!(insights.iter().all(|insight| insight.fix_sql.is_none()));
             assert!(entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::MissingActualMeasurements));
@@ -159,6 +172,79 @@ async fn explicit_hydration_restores_large_native_plans_and_original_tvp_context
         !report.contains("<ShowPlanXML") && !report.contains("SELECT r.value") && !report.contains("SELECT value FROM")
     );
     assert!(!report.contains("9264"));
+}
+
+#[cfg(feature = "mssql")]
+#[tokio::test]
+async fn redacted_join_namespaces_cannot_be_reconstructed_from_an_authenticated_capture_target() {
+    let (original_source, original_records) = object_definition_hydration_evidence();
+    let original_key = definition(&original_records[1]).key.clone();
+    for evidence in [
+        "original",
+        "other-capture-database",
+        "capture-database-named-database",
+        "missing-native-database",
+        "missing-module",
+    ] {
+        let mut source = original_source.clone();
+        let mut records = original_records.clone();
+        if matches!(evidence, "other-capture-database" | "capture-database-named-database") {
+            let CollectionTarget::Database(database) = &mut source.target else { panic!() };
+            database.database =
+                if evidence == "capture-database-named-database" { "database" } else { "other-captured-database" }
+                    .into();
+        }
+        replace_fact(&mut records[1], |fact| {
+            let ObjectDefinitionFact::MssqlCachedDefinition(native) = fact else { panic!() };
+            if evidence == "missing-module" {
+                native.module_parameters = None;
+            } else if evidence == "missing-native-database" {
+                let DefinitionPayload::Available { text, .. } = &native.estimated_plan.payload else { panic!() };
+                let changed = text.replace("Database=\"[database]\"", "");
+                assert_ne!(&changed, text, "the counterexample must change the original native namespace");
+                native.estimated_plan = payload(&changed);
+            }
+        });
+        assert_eq!(definition(&records[1]).key, original_key);
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let reads_before = fixture.recovery_object_reads();
+        let batch = &fixture.range.manifest().batches[0];
+        let capture = fixture
+            .read_families_with_recovery(
+                &[EvidenceFamily::ObjectDefinitions],
+                RecoveryPayloadBudget { max_objects: 1, max_bytes: batch.bytes },
+            )
+            .await;
+        assert!(capture.is_read_complete(), "{evidence}: {:?}", capture.gaps());
+        assert_eq!(capture.metrics().recovery_objects, 1);
+        assert_eq!(fixture.recovery_object_reads() - reads_before, 1);
+        let analysis = collected_resources::cached_plans(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.sources[0].state, SourceState::Collected);
+        let entry = analysis.report.entries.iter().find(|entry| entry.definition_key == original_key).unwrap();
+        let plan = entry.plan.as_ref().unwrap();
+        assert_eq!(
+            plan.root.children[0].facts().relational_input.unwrap().qualified_kind(),
+            RelationalInputKind::Unknown,
+            "a redacted Object.Database is not the original namespace: {evidence}"
+        );
+        assert!(entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput));
+        assert!(plan.root.warnings.contains(&culprit_core::PlanWarning::NoJoinPredicate));
+        let insights = &plan.insights.as_ref().unwrap().items;
+        assert!(insights.iter().any(|insight| insight.rule == "no-join-predicate"));
+        assert!(!insights.iter().any(|insight| insight.rule == "misestimate"));
+        assert!(plan.nodes().iter().all(|node| node.act_rows.is_none() && node.act_executions.is_none()));
+        assert!(plan.raw.is_none() && plan.statement.is_none());
+        let original = ExportedRecord::new(&source, capture.capture(), records[1].clone()).unwrap();
+        assert!(analysis.context.records.iter().any(|row| row.row == original));
+        let direct_key = &definition(&records[0]).key;
+        let direct = analysis.report.entries.iter().find(|entry| &entry.definition_key == direct_key).unwrap();
+        assert_eq!(
+            direct.plan.as_ref().unwrap().root.facts().relational_input.unwrap().qualified_kind(),
+            RelationalInputKind::TableValuedParameter,
+            "independent direct-module proof remains valid: {evidence}"
+        );
+    }
 }
 
 #[cfg(feature = "mssql")]

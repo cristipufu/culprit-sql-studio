@@ -31,7 +31,9 @@ pub(crate) use lexer::{balanced_parens, split_top_level_and, strip_outer_parens}
 pub use maintenance::maintenance_statement;
 pub use preview::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions, table_preview_sql};
 pub use procedure_parameters::mssql_procedure_table_parameters;
-pub use relational_inputs::{mssql_declared_table_variable, mssql_direct_table_parameter};
+pub use relational_inputs::{
+    MssqlRelationName, MssqlRelationReference, mssql_declared_table_variable, mssql_relational_references,
+};
 pub use safety::{
     check, is_session_statement, mark_mssql_statements, reads_only, single_statement, without_parameter_list,
 };

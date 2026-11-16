@@ -11,6 +11,28 @@ mod relational_inputs;
 mod scan_completion;
 pub use cached_definitions::{parse_cached_definition, parse_retained_definition};
 
+#[cfg(test)]
+pub(crate) fn test_read_context(database: &str) -> culprit_core::telemetry::NativeReadContext {
+    use culprit_core::telemetry::*;
+    NativeReadContext {
+        target: culprit_core::DatabaseIdentity {
+            engine: Engine::Mssql,
+            database: database.into(),
+            location: culprit_core::DatabaseLocation::Server {
+                host: "controlled-fixture.invalid".into(),
+                port: 1433,
+                instance: None,
+            },
+            incarnation: None,
+        }
+        .into(),
+        partition: SourcePartition::InstanceLocal { member: None, epoch: None },
+        observed_from: "2026-11-14T12:00:00Z".into(),
+        observed_until: "2026-11-14T12:00:01Z".into(),
+        database_writable: None,
+    }
+}
+
 /// RelOp children that describe the operator rather than being the operator itself.
 const RELOP_METADATA: &[&str] =
     &["OutputList", "Warnings", "MemoryFractions", "RunTimeInformation", "RunTimePartitionSummary", "InternalInfo"];
@@ -97,31 +119,46 @@ pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
     })
 }
 
-struct CachedModuleInput<'a> {
-    context: &'a culprit_core::telemetry::CachedStatementContext,
-    parameters: &'a culprit_core::telemetry::MssqlModuleParameters,
-    statement: &'a str,
+pub(crate) struct CachedInputContext<'a> {
+    pub(crate) statement: &'a culprit_core::telemetry::CachedStatementContext,
+    pub(crate) module_parameters: Option<&'a culprit_core::telemetry::MssqlModuleParameters>,
+    pub(crate) text: Option<&'a str>,
+    pub(crate) origin: PlanInputOrigin<'a>,
+}
+
+pub(crate) enum PlanInputOrigin<'a> {
+    /// Only the original acquisition can supply this namespace; a pooled probe or current connection cannot.
+    OriginalNative {
+        read: Option<&'a culprit_core::telemetry::NativeReadContext>,
+    },
+    StoredRedacted,
+}
+
+impl PlanInputOrigin<'_> {
+    fn native_read(&self) -> Option<&culprit_core::telemetry::NativeReadContext> {
+        match self {
+            Self::OriginalNative { read } => *read,
+            Self::StoredRedacted => None,
+        }
+    }
 }
 
 /// Parse once and qualify declarations while the exact native statement/scope still exists. A detached Plan tree
 /// or a variable-shaped display name cannot establish which module owns an input introduced by inlined code.
-pub(crate) fn parse_cached_statement(
-    xml: &str,
-    context: &culprit_core::telemetry::CachedStatementContext,
-    parameters: Option<&culprit_core::telemetry::MssqlModuleParameters>,
-    statement: Option<&str>,
-) -> Result<Plan> {
-    if !context.is_valid() || !context.identity.has_plan_handle() || !context.identity.has_sql_handle() {
+pub(crate) fn parse_cached_statement(xml: &str, context: CachedInputContext<'_>) -> Result<Plan> {
+    if !context.statement.is_valid()
+        || !context.statement.identity.has_plan_handle()
+        || !context.statement.identity.has_sql_handle()
+        || context.origin.native_read().is_some_and(|read| {
+            !read.is_valid() || read.target.database().is_none() || read.target.engine() != Engine::Mssql
+        })
+    {
         return Err(crate::read::invalid_data());
     }
     culprit_core::xml::read(xml, |doc| {
         let doc = doc.map_err(unreadable)?;
-        let module = parameters.zip(statement).map(|(parameters, statement)| CachedModuleInput {
-            context,
-            parameters,
-            statement,
-        });
-        read_statement(&doc, xml, StatementSelection::Native(context.query_hash.as_deref()), module)
+        let hash = context.statement.query_hash.as_deref();
+        read_statement(&doc, xml, StatementSelection::Native(hash), Some(context))
     })
 }
 
@@ -139,7 +176,7 @@ fn read_statement(
     doc: &Document,
     xml: &str,
     selection: StatementSelection<'_>,
-    module: Option<CachedModuleInput<'_>>,
+    input: Option<CachedInputContext<'_>>,
 ) -> Result<Plan> {
     fn query_plan_of<'a, 'input>(n: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
         if n.has_tag_name_local("StmtSimple") {
@@ -182,16 +219,7 @@ fn read_statement(
         .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_operators")))?;
 
     let mut root = parse_relop(root_op, 1)?;
-    relational_inputs::qualify_local_declarations(&mut root, statement);
-    if let Some(module) = module {
-        relational_inputs::qualify_module_parameters(
-            &mut root,
-            statement,
-            module.context,
-            module.parameters,
-            module.statement,
-        );
-    }
+    relational_inputs::qualify(&mut root, statement, input.as_ref());
     let total_cost =
         statement.attribute("StatementSubTreeCost").and_then(|v| v.parse().ok()).unwrap_or(root.subtree_cost);
     let is_actual = query_plan.descendants().any(|n| n.has_tag_name_local("RunTimeInformation"));

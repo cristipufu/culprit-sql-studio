@@ -175,3 +175,37 @@ fn unavailable_and_malformed_native_plans_remain_unusable() {
     };
     assert!(parse_retained_definition(&retained).is_err());
 }
+
+#[test]
+fn raw_native_namespace_requires_valid_database_read_context() {
+    let definition = cached(&document(&statement(HASH, 1, false)));
+    let mut reversed = crate::plan_xml::test_read_context("app");
+    reversed.observed_until = "2026-11-14T11:59:59Z".into();
+    let mut shared = crate::plan_xml::test_read_context("app");
+    shared.target = CollectionTarget::Shared(SharedResourceIdentity {
+        engine: Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("controlled-fixture"),
+        native: NativeIdentity::new("instance"),
+    });
+    shared.partition = SourcePartition::Target;
+    assert!(shared.is_valid());
+    let mut foreign = crate::plan_xml::test_read_context("app");
+    let CollectionTarget::Database(database) = &mut foreign.target else { panic!() };
+    database.engine = Engine::Postgres;
+    let DefinitionPayload::Available { text, .. } = &definition.estimated_plan.payload else { panic!() };
+    for read in [reversed, shared, foreign] {
+        assert!(
+            super::super::parse_cached_statement(
+                text,
+                super::super::CachedInputContext {
+                    statement: &definition.context,
+                    module_parameters: definition.module_parameters.as_ref(),
+                    text: Some(SQL),
+                    origin: super::super::PlanInputOrigin::OriginalNative { read: Some(&read) },
+                },
+            )
+            .is_err()
+        );
+    }
+}

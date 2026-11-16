@@ -1,4 +1,4 @@
-//! A deliberately narrow native declaration classifier, not a SQL parser or parameter-kind inference.
+//! Strict relational-reference and declaration recognition for native SQL Server input binding.
 
 use super::lexer::{Token, readings};
 use crate::Engine;
@@ -13,54 +13,8 @@ pub fn mssql_declared_table_variable(text: &str) -> Option<String> {
     candidates.iter().all(|candidate| candidate == first).then(|| first.clone())
 }
 
-/// The sole relational input of one direct SELECT, with exact native parameter spelling. Parentheses, additional
-/// relations, set operations and nested statements are deliberately unqualified: a token elsewhere in a statement
-/// cannot identify an expanded function's local input. Native callers must also qualify the selected plan scope.
-pub fn mssql_direct_table_parameter(text: &str) -> Option<String> {
-    let candidates = readings(text, Engine::Mssql)
-        .ok()?
-        .iter()
-        .map(|tokens| direct_parameter(tokens))
-        .collect::<Option<Vec<_>>>()?;
-    let first = candidates.first()?;
-    candidates.iter().all(|candidate| candidate == first).then(|| first.clone())
-}
-
-fn direct_parameter(tokens: &[Token<'_>]) -> Option<String> {
-    let start = tokens.iter().take_while(|token| matches!(token, Token::Semicolon(_))).count();
-    let end = tokens.iter().rposition(|token| !matches!(token, Token::Semicolon(_)))? + 1;
-    let tokens = &tokens[start..end];
-    if !matches!(tokens.first(),Some(Token::Word(word)) if word.eq_ignore_ascii_case("SELECT"))
-        || tokens.iter().any(|token| matches!(token, Token::Semicolon(_) | Token::Punct('(' | ')')))
-    {
-        return None;
-    }
-    let mut from = None;
-    for (at, token) in tokens.iter().enumerate() {
-        let Token::Word(word) = token else { continue };
-        if word.eq_ignore_ascii_case("FROM") {
-            if from.replace(at).is_some() {
-                return None;
-            }
-        } else if at > 0
-            && ["SELECT", "JOIN", "APPLY", "UNION", "EXCEPT", "INTERSECT", "INTO", "FOR"]
-                .iter()
-                .any(|keyword| word.eq_ignore_ascii_case(keyword))
-        {
-            return None;
-        }
-    }
-    let from = from?;
-    let Token::Word(name) = tokens.get(from + 1)? else { return None };
-    if !name.starts_with('@')
-        || name.starts_with("@@")
-        || name.len() < 2
-        || tokens[from + 2..].contains(&Token::Punct(','))
-    {
-        return None;
-    }
-    Some((*name).into())
-}
+mod references;
+pub use references::{MssqlRelationName, MssqlRelationReference, mssql_relational_references};
 
 fn declaration(tokens: &[Token<'_>]) -> Option<String> {
     let start = tokens.iter().take_while(|token| matches!(token, Token::Semicolon(_))).count();
@@ -122,37 +76,6 @@ mod tests {
             "DECLARE @rows TABLE(id int); /* unclosed",
         ] {
             assert_eq!(mssql_declared_table_variable(text), None, "{text}");
-        }
-    }
-
-    #[test]
-    fn direct_parameter_scope_keeps_exact_names_and_simple_native_predicates() {
-        for text in [
-            "SELECT * FROM @Rows",
-            "SELECT r.id,r.value FROM @Rows AS r WHERE r.id > 10;",
-            "SELECT N'dbo.f(@Other)' AS label FROM @Rows -- @Other",
-        ] {
-            assert_eq!(mssql_direct_table_parameter(text).as_deref(), Some("@Rows"), "{text}");
-        }
-    }
-
-    #[test]
-    fn outer_token_occurrence_does_not_qualify_other_relations_or_expanded_function_scopes() {
-        for text in [
-            "SELECT * FROM dbo.expand(@Rows)",
-            "SELECT r.id,dbo.expand(r.id) FROM @Rows AS r",
-            "SELECT r.id FROM @Rows r CROSS APPLY dbo.expand(r.id) f",
-            "SELECT * FROM @Rows r JOIN dbo.visible_view v ON v.id=r.id",
-            "SELECT * FROM @Rows r, dbo.visible_view v",
-            "SELECT * FROM @Rows UNION ALL SELECT * FROM dbo.visible_view",
-            "SELECT * FROM @Rows WHERE id IN(SELECT id FROM dbo.visible_view)",
-            "SELECT '@Rows' FROM dbo.visible_view",
-            "SELECT * FROM [@Rows]",
-            "SELECT * FROM \"@Rows\"",
-            "EXEC(N'SELECT * FROM @Rows')",
-            "SELECT * FROM @Rows;SELECT * FROM @Other",
-        ] {
-            assert!(mssql_direct_table_parameter(text).is_none(), "{text}");
         }
     }
 }

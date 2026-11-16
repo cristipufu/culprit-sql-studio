@@ -1,5 +1,7 @@
 use super::*;
 
+mod joins;
+
 fn statement(operator: &str, parameters: &str) -> String {
     format!(
         r#"<StmtSimple StatementText="SELECT * FROM @rows" QueryHash="0xA" StatementSubTreeCost="10"><QueryPlan>

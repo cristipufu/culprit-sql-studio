@@ -213,13 +213,21 @@ fn parsed_input(
     parameters: &MssqlModuleParameters,
     statement: &str,
 ) -> RelationalInputKind {
-    crate::plan_xml::parse_cached_statement(xml, context, Some(parameters), Some(statement))
-        .unwrap()
-        .root
-        .facts
-        .relational_input
-        .unwrap()
-        .qualified_kind()
+    crate::plan_xml::parse_cached_statement(
+        xml,
+        crate::plan_xml::CachedInputContext {
+            statement: context,
+            module_parameters: Some(parameters),
+            text: Some(statement),
+            origin: crate::plan_xml::PlanInputOrigin::OriginalNative { read: None },
+        },
+    )
+    .unwrap()
+    .root
+    .facts
+    .relational_input
+    .unwrap()
+    .qualified_kind()
 }
 
 #[test]
@@ -241,9 +249,12 @@ fn annotation_requires_the_selected_statement_hash_and_exact_native_parameter_sp
     assert!(
         crate::plan_xml::parse_cached_statement(
             VARIABLE_PLAN,
-            &changed,
-            Some(&parameters),
-            Some("SELECT * FROM @rows")
+            crate::plan_xml::CachedInputContext {
+                statement: &changed,
+                module_parameters: Some(&parameters),
+                text: Some("SELECT * FROM @rows"),
+                origin: crate::plan_xml::PlanInputOrigin::OriginalNative { read: None },
+            }
         )
         .is_err(),
         "a mismatched native hash cannot substitute another statement's plan"
@@ -269,9 +280,16 @@ fn same_spelling_in_expanded_or_internal_scopes_does_not_borrow_the_outer_module
         "native inlining cannot be authorized by an outer token occurrence"
     );
     let nested=VARIABLE_PLAN.replace("</TableScan>",r#"<InternalInfo><RelOp NodeId="8" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="1" EstimatedTotalSubtreeCost="0"><TableScan><Object Table="[@rows]" /></TableScan></RelOp></InternalInfo></TableScan>"#);
-    let plan =
-        crate::plan_xml::parse_cached_statement(&nested, &context, Some(&parameters), Some("SELECT * FROM @rows"))
-            .unwrap();
+    let plan = crate::plan_xml::parse_cached_statement(
+        &nested,
+        crate::plan_xml::CachedInputContext {
+            statement: &context,
+            module_parameters: Some(&parameters),
+            text: Some("SELECT * FROM @rows"),
+            origin: crate::plan_xml::PlanInputOrigin::OriginalNative { read: None },
+        },
+    )
+    .unwrap();
     assert_eq!(plan.root.facts.relational_input.unwrap().qualified_kind(), RelationalInputKind::Unknown);
     assert_eq!(plan.root.children[0].facts.relational_input.unwrap().qualified_kind(), RelationalInputKind::Unknown);
     let udf=VARIABLE_PLAN.replace("</StmtSimple>",r#"<UDF ProcName="dbo.expanded"><Statements><StmtSimple StatementText="SELECT * FROM @rows"><QueryPlan><RelOp NodeId="9" PhysicalOp="Table Scan" EstimateRows="1"><TableScan><Object Table="[@rows]" /></TableScan></RelOp></QueryPlan></StmtSimple></Statements></UDF></StmtSimple>"#);
