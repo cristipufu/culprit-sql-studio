@@ -393,12 +393,27 @@ event and timer. Exact temporary-table, sorting, row and picosecond counters ret
 establish spill duration, memory pressure or the incident's cause. Stage absence, missing instrumentation, permission
 refusal and unlinked stages remain distinct. The existing long-running incident can retain this evidence and its
 history without treating a later missing request as a resolved explanation. Both warehouses, the SDK and CLI
-`--analyze current-request-work` use the same pure report. The native investigation remains cost-unqualified.
+`--analysis current-request-work` use the same pure report. The native investigation remains cost-unqualified.
 
 Live progress preserves unavailable request evidence as unknown and continues polling. Only directly observed idle
 state supplies `running: false`. Its bounded process-list fallback carries independent session context, without a
 request-owned plan. The UI caches a plan only under an opaque native request key; equal SQL text does not establish
 the same execution.
+
+`replication` explains the original replication capture through the same pure report used by scans. It retains
+SQL Server database, group and replica contexts separately; PostgreSQL sender, receiver and slot positions; and
+MySQL/MariaDB channel, receiver and applier facts. Exact positions, native error codes, source availability and
+clock provenance survive both warehouses and offline analysis. Offset-free native dates remain offset-free.
+A last-commit age is not replay latency, a queue divided by an active-period rate is not a catch-up estimate, and
+an inactive synchronized slot does not establish an abandoned consumer.
+
+Use `evidence analyze ... --analysis replication` or read `--family replication-samples`. Every acquired point is
+examined for supported native states before limiting detailed presentation. Original counts and source states stay
+visible when a warehouse read is incomplete or the detail limit is reached. UI details are folded and paged; CLI and
+MCP use the same explanation. A stopped channel without a recorded error does not establish manual intent or
+promotion. Slot guidance uses read-only inspection; Culprit does not offer slot-drop SQL or an arbitrary retention
+cap. This does not establish an application query responsible for replication delay. Source query shapes still
+require native work-cost and cancellation qualification before automatic production admission.
 
 `cleanup` explains retained cleanup horizons and version-store observations through the scan's pure view.
 PostgreSQL `cleanup` captures retain sessions, prepared transactions and replication slots, their separate data

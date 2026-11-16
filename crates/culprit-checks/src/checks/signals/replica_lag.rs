@@ -1,4 +1,4 @@
-//! The `replica-lag` check: Replicas far behind the primary or stopped, and PostgreSQL replication slots that keep WAL for a consumer that's gone: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS.
+//! Replication states and native lag, with WAL retained by slots without a current consumer.
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
@@ -28,10 +28,8 @@ pub enum ReplicaStatus {
     /// Replication failed or can't connect: the copy stopped with an error, or a standby meant to stream has no
     /// receiver.
     Stopped,
-    /// Both MySQL replication threads are off and nothing failed: someone ran STOP REPLICA.
-    StoppedByHand,
-    /// The same on a server that takes writes: a former replica promoted to primary, its old configuration left behind.
-    LeftConfigured,
+    /// Both threads report No without a recorded error. The source does not establish why or expected intent.
+    ThreadsStopped,
     /// Behind by this many seconds beyond any configured delay (or by bytes, when that is all the engine says).
     Behind(Lag),
     Fine,
@@ -52,8 +50,7 @@ pub(super) fn replica_status(r: &Replica) -> ReplicaStatus {
         return ReplicaStatus::Fine;
     }
     match r.condition {
-        ReplicaCondition::LeftConfigured => return ReplicaStatus::LeftConfigured,
-        ReplicaCondition::StoppedByHand => return ReplicaStatus::StoppedByHand,
+        ReplicaCondition::ThreadsStopped => return ReplicaStatus::ThreadsStopped,
         c if c.is_stopped() => return ReplicaStatus::Stopped,
         _ => {}
     }
@@ -79,10 +76,11 @@ fn lag_words(lag: Lag) -> String {
     }
 }
 
-/// A replica, a logical consumer or this server that is stopped or behind, or a slot that keeps WAL for nothing.
+/// Native replication states and slot retention points; inactivity alone does not establish abandonment.
 pub enum Lagging<'s> {
     Replica { replica: &'s Replica, status: ReplicaStatus },
     Slot(InactiveSlot<'s>),
+    LostSlot(&'s Replica),
 }
 
 /// An inactive replication slot that keeps a gigabyte or more of WAL, and what can cap it.
@@ -97,6 +95,7 @@ pub struct InactiveSlot<'s> {
     /// The server can cap what slots keep: PostgreSQL 13 and later.
     can_cap: bool,
     severity: Severity,
+    actionability: culprit_core::Actionability,
 }
 
 fn lagging(snapshot: &Snapshot) -> Vec<Lagging<'_>> {
@@ -104,6 +103,7 @@ fn lagging(snapshot: &Snapshot) -> Vec<Lagging<'_>> {
     p.replicas
         .iter()
         .filter_map(|r| match r.role {
+            ReplicaRole::Slot if r.wal_status.as_deref() == Some("lost") => Some(Lagging::LostSlot(r)),
             ReplicaRole::Slot => inactive_slot(snapshot, r).map(Lagging::Slot),
             _ => stopped_or_behind(snapshot, r).map(|status| Lagging::Replica { replica: r, status }),
         })
@@ -120,10 +120,9 @@ fn stopped_or_behind(snapshot: &Snapshot, r: &Replica) -> Option<ReplicaStatus> 
     Some(replica_status(r)).filter(|s| *s != ReplicaStatus::Fine)
 }
 
-/// An inactive replication slot that keeps a gigabyte or more of WAL. A physical slot without its replica keeps WAL for
-/// nothing; a logical one belongs to a consumer (a subscription, a CDC tool) that may only be between syncs, and
-/// dropping it forces that consumer to copy everything again. Whether it can fill the disk depends on
-/// max_slot_wal_keep_size (13+): with a cap, PostgreSQL gives the slot up instead.
+/// An inactive replication slot with a current-to-restart WAL position distance of at least a gigabyte.
+/// Inactivity does not establish abandonment, growth, disk occupancy or pressure. Only a native unreserved state
+/// establishes that the slot has lost its reservation; a lost slot is handled separately above.
 fn inactive_slot<'s>(snapshot: &Snapshot, r: &'s Replica) -> Option<InactiveSlot<'s>> {
     let kept = r.lag_bytes.filter(|b| *b >= GB)?;
     if r.condition != ReplicaCondition::SlotInactive || r.wal_status.as_deref() == Some("lost") {
@@ -131,11 +130,9 @@ fn inactive_slot<'s>(snapshot: &Snapshot, r: &'s Replica) -> Option<InactiveSlot
     }
     // safe_wal_size exists from 13 and is empty when nothing caps what slots keep.
     let capped = r.safe_wal_bytes.is_some();
-    let severity = match (capped, r.wal_status.as_deref()) {
-        (true, Some("unreserved")) => Severity::Medium,
-        (true, _) => Severity::Low,
-        (false, _) if kept >= 10.0 * GB => Severity::High,
-        _ => Severity::Medium,
+    let (severity, actionability) = match r.wal_status.as_deref() {
+        Some("unreserved") => (Severity::Medium, culprit_core::Actionability::NeedsAttention),
+        _ => (Severity::Low, culprit_core::Actionability::Information),
     };
     Some(InactiveSlot {
         slot: r,
@@ -146,13 +143,15 @@ fn inactive_slot<'s>(snapshot: &Snapshot, r: &'s Replica) -> Option<InactiveSlot
         // Before 13 nothing can cap a slot; from 13 the scan reads whether something does, unless the read failed.
         can_cap: culprit_core::version_at_least(&snapshot.server.version, [13, 0, 0]),
         severity,
+        actionability,
     })
 }
 
 fn replica_lag_finding(snapshot: &Snapshot, lagging: Lagging<'_>) -> Finding {
     match lagging {
         Lagging::Replica { replica, status } => replica_finding(snapshot, replica, status),
-        Lagging::Slot(slot) => slot_finding(snapshot, slot),
+        Lagging::Slot(slot) => slot_finding(slot),
+        Lagging::LostSlot(slot) => lost_slot_finding(slot),
     }
 }
 
@@ -165,17 +164,12 @@ fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> F
     let mut f = finding("replica-lag", &r.name, Category::Configuration, subject(SubjectKind::Database, &r.name));
     let state = r.state_words().unwrap_or_default();
     match status {
-        ReplicaStatus::LeftConfigured => {
-            f.title = t!("check.replica_lag.title.left_configured");
-            f.summary = t!("check.replica_lag.summary.left_configured");
+        ReplicaStatus::ThreadsStopped => {
+            f.title = t!("check.replica_lag.title.threads_stopped");
+            f.summary = t!("check.replica_lag.summary.threads_stopped");
             f.severity = Severity::Low;
-            f.fix = Some(Fix { summary: t!("check.replica_lag.fix.left_configured"), sql: None, cost: None });
-        }
-        ReplicaStatus::StoppedByHand => {
-            f.title = t!("check.replica_lag.title.stopped_by_hand");
-            f.summary = t!("check.replica_lag.summary.stopped_by_hand");
-            f.severity = Severity::Medium;
-            f.fix = Some(Fix { summary: t!("check.replica_lag.fix.stopped_by_hand"), sql: None, cost: None });
+            f.actionability = culprit_core::Actionability::Information;
+            f.fix = Some(Fix { summary: t!("check.replica_lag.fix.threads_stopped"), sql: None, cost: None });
         }
         ReplicaStatus::Stopped => {
             f.title = match r.role {
@@ -262,14 +256,14 @@ fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> F
     });
     f.confidence = Confidence::High;
     f.verify = vec![match status {
-        ReplicaStatus::LeftConfigured => t!("check.replica_lag.verify.left_configured"),
+        ReplicaStatus::ThreadsStopped => t!("check.replica_lag.verify.threads_stopped"),
         _ => t!("check.replica_lag.verify.lag"),
     }];
     f
 }
 
 /// An inactive replication slot that keeps WAL.
-fn slot_finding(snapshot: &Snapshot, slot: InactiveSlot<'_>) -> Finding {
+fn slot_finding(slot: InactiveSlot<'_>) -> Finding {
     let InactiveSlot { slot: r, kept, logical, capped, cap_known, can_cap, .. } = slot;
     let mut f = finding("replica-lag", &r.name, Category::Configuration, subject(SubjectKind::Database, &r.name));
     f.title = if logical {
@@ -296,37 +290,12 @@ fn slot_finding(snapshot: &Snapshot, slot: InactiveSlot<'_>) -> Finding {
     });
     f.summary = summary.join(" ");
     f.severity = slot.severity;
+    f.actionability = slot.actionability;
     let quoted = r.name.replace('\'', "''");
-    // Only where nothing caps slots yet (or the scan couldn't tell): a cap already set is never lowered.
-    let cap = (!capped && can_cap).then(|| setting_change(&snapshot.server, "max_slot_wal_keep_size", "50GB"));
-    let mut sql = if logical {
-        format!(
-            "-- Only once its consumer is gone for good: dropping it makes the consumer copy everything again\n-- SELECT pg_drop_replication_slot('{}');",
-            crate::support::comment_text(&quoted)
-        )
-    } else {
-        format!("SELECT pg_drop_replication_slot('{quoted}');")
-    };
-    if let Some(statements) = cap.as_ref().and_then(|c| c.sql.as_deref()) {
-        let lead = if cap_known {
-            "Cap what any slot may keep"
-        } else {
-            "If max_slot_wal_keep_size isn't set, cap what any slot may keep"
-        };
-        sql.push_str(&format!("\n-- {lead}:\n{statements}"));
-    }
-    let mut fix = vec![if logical {
-        t!("check.replica_lag.fix.logical_slot")
-    } else {
-        t!("check.replica_lag.fix.physical_slot")
-    }];
-    match &cap {
-        Some(c) if cap_known => fix.push(t!("check.replica_lag.fix.cap", how = &c.how)),
-        Some(c) => fix.push(t!("check.replica_lag.fix.cap_if_unset", how = &c.how)),
-        None if !can_cap => fix.push(t!("check.replica_lag.fix.cap_from_13")),
-        None => {}
-    }
-    f.fix = Some(Fix { summary: fix.join(" "), sql: Some(sql), cost: None });
+    let sql = slot_inspection_sql(&quoted);
+    let fix =
+        if logical { t!("check.replica_lag.fix.logical_slot") } else { t!("check.replica_lag.fix.physical_slot") };
+    f.fix = Some(Fix { summary: fix, sql: Some(sql), cost: None });
     f.metrics = vec![Metric::said(culprit_core::key!("check.replica_lag.metric.wal_kept"), kept, Unit::Bytes)];
     if let Some(s) = r.inactive_seconds {
         f.metrics.push(Metric::said(
@@ -347,4 +316,31 @@ fn slot_finding(snapshot: &Snapshot, slot: InactiveSlot<'_>) -> Finding {
         t!("check.replica_lag.verify.physical_slot")
     }];
     f
+}
+
+fn lost_slot_finding(slot: &Replica) -> Finding {
+    let mut f = finding("replica-lag", &slot.name, Category::Configuration, subject(SubjectKind::Database, &slot.name));
+    f.title = t!("check.replica_lag.title.lost_slot", name = &slot.name);
+    f.summary = t!("check.replica_lag.summary.lost_slot");
+    f.impact.set_label(t!("check.replica_lag.impact.lost_slot"));
+    f.severity = Severity::Medium;
+    f.actionability = culprit_core::Actionability::NeedsAttention;
+    f.confidence = Confidence::High;
+    f.fix = Some(Fix {
+        summary: t!("check.replica_lag.fix.lost_slot"),
+        sql: Some(slot_inspection_sql(&slot.name.replace('\'', "''"))),
+        cost: None,
+    });
+    f.verify = vec![t!("check.replica_lag.verify.lost_slot")];
+    severity_score(&mut f);
+    f
+}
+
+fn slot_inspection_sql(quoted_name: &str) -> String {
+    format!(
+        "SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn \
+        ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status \
+        ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason \
+        FROM pg_catalog.pg_replication_slots s WHERE slot_name='{quoted_name}';"
+    )
 }

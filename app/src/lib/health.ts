@@ -87,10 +87,8 @@ export function replicaState(replica: Replica): string | null {
       return own != null ? t("model.replica.state.receiving_stopped", { thread: own }) : t("model.replica.state.receiving_stopped_unknown");
     case "applying_stopped":
       return t("model.replica.state.applying_stopped");
-    case "left_configured":
-      return t("model.replica.state.left_configured");
-    case "stopped_by_hand":
-      return t("model.replica.state.stopped_by_hand");
+    case "threads_stopped":
+      return t("model.replica.state.stopped");
     case "not_receiving":
       return t("model.replica.state.not_receiving");
     case "restoring_from_archive":

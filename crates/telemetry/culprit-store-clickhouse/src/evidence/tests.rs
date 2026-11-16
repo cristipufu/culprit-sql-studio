@@ -14,6 +14,7 @@ mod object_definitions;
 mod page_writers;
 mod populations;
 mod queries;
+mod replication;
 mod source_partitions;
 mod statement_grants;
 mod statement_work;

@@ -108,7 +108,7 @@ impl Recipe {
             Self::Catalog(kind) => Ok(native::catalog::query(kind, meta.version, false, limit)),
             Self::Sequences => Ok(native::sequences::query(Some(limit))),
             Self::Cleanup => native::cleanup::capture_query(meta.version, meta.standby, limit),
-            Self::Replication => Ok(native::replication::query(meta.version, meta.standby, &meta.database_oid, limit)),
+            Self::Replication => native::replication::query(meta.version, meta.standby, &meta.database_oid, limit),
             Self::Indexes => Ok(native::indexes::query(meta.version, false, false, Some(limit))),
             Self::Tables => Ok(native::relations::table_query(
                 meta.version,

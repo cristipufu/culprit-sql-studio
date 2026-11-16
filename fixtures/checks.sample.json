@@ -729,7 +729,7 @@
   },
   {
     "category": "configuration",
-    "description": "Replicas far behind the primary or stopped, and PostgreSQL replication slots that keep WAL for a consumer that's gone: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS.",
+    "description": "Replicas reported behind or stopped, PostgreSQL slots with no active consumer and native WAL position distance, and slots the source reports as lost: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS.",
     "engines": [
       "mssql",
       "postgres",

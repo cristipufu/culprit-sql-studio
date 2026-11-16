@@ -2563,7 +2563,6 @@
   "pg-demo": {
     "attention": [
       "findings",
-      "replication",
       "plans",
       "indexes"
     ],
@@ -2572,7 +2571,7 @@
     "database": "demo",
     "engine": "postgres",
     "environment": "local",
-    "headline": "14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
+    "headline": "13 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
     "product": "PostgreSQL 18.6",
     "report_id": "20261011T115421.485Z",
     "taken_at": "2026-10-11T11:54:21Z",
@@ -2656,8 +2655,8 @@
           {
             "key": "medium",
             "label": "Medium",
-            "text": "4",
-            "value": 4.0
+            "text": "3",
+            "value": 3.0
           },
           {
             "key": "low",
@@ -2668,13 +2667,13 @@
           {
             "key": "context",
             "label": "Information and history",
-            "text": "3",
-            "value": 3.0
+            "text": "4",
+            "value": 4.0
           }
         ],
         "next": "culprit findings pg-demo",
         "status": "watch",
-        "takeaway": "14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
+        "takeaway": "13 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
         "title": "Findings"
       },
       {
@@ -3174,15 +3173,15 @@
             "label": "analytics_slot (slot)",
             "query_id": null,
             "share": null,
-            "status": "watch",
+            "status": "info",
             "value": "1.1 GB of log"
           }
         ],
         "key": "replication",
         "metrics": [],
         "next": "culprit waits pg-demo",
-        "status": "watch",
-        "takeaway": "The inactive replication slot analytics_slot keeps 1.1 GB of WAL.",
+        "status": "info",
+        "takeaway": "Replication state recorded for 1 copy.",
         "title": "Replication"
       },
       {

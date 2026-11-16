@@ -10,6 +10,7 @@ mod cache_entry_memory;
 mod diagnostics;
 mod empty;
 mod object_definitions;
+mod replication;
 mod statement_grants;
 mod tuning;
 

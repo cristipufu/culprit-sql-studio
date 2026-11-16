@@ -23,6 +23,7 @@ use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot,
 mod cleanup;
 mod compiler_admission;
 mod maintenance_progress;
+mod replication;
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
 /// contradicts itself or the database (a plan older than the table it describes), never to hide a problem.
@@ -263,6 +264,7 @@ impl Pipeline {
         let query_compilation = explained_compilation(&mut snapshot);
         let compiler_admission = compiler_admission::explain(&mut snapshot);
         let maintenance_progress = maintenance_progress::explain(&mut snapshot);
+        let replication = replication::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
@@ -375,6 +377,7 @@ impl Pipeline {
             query_compilation,
             compiler_admission,
             maintenance_progress,
+            replication,
             cleanup,
         }
     }

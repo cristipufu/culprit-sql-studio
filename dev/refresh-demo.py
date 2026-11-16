@@ -58,6 +58,7 @@ def main():
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "share_sample")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "dashboard_live_sample")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "plan_view_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "replication_sample")
 
 
 if __name__ == "__main__":

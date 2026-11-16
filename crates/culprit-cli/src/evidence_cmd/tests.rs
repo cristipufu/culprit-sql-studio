@@ -11,6 +11,40 @@ fn cli_exposes_every_verified_evidence_family() {
 }
 
 #[test]
+fn replication_analysis_and_explicit_reads_select_only_the_replication_stream() {
+    for (options, format) in [(&["--json"][..], Format::Json), (&[][..], Format::Text)] {
+        let args = analyze_args("replication", options);
+        assert!(args.analysis == Analysis::Replication);
+        args.validate_selection().unwrap();
+        let request = args.common.request(args.analysis.families(), format).unwrap();
+        assert_eq!(request.families, [EvidenceFamily::ReplicationSamples]);
+        assert!(request.budget.recovery_payloads.is_none());
+    }
+    let range = culprit_core::telemetry::digest(b"replication-capture");
+    let parsed = crate::Cli::try_parse_from([
+        "culprit",
+        "collect",
+        "evidence",
+        "read",
+        "--config",
+        "archive.json",
+        "--range",
+        &range,
+        "--family",
+        "replication-samples",
+        "--json",
+    ])
+    .unwrap();
+    let crate::Command::Collect(crate::collect_cmd::CollectCommand::Evidence(EvidenceCommand::Read(args))) =
+        parsed.command
+    else {
+        panic!("replication archive read")
+    };
+    let families = args.families.into_iter().map(Into::into).collect();
+    assert_eq!(args.common.request(families, Format::Json).unwrap().families, [EvidenceFamily::ReplicationSamples]);
+}
+
+#[test]
 fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_selection() {
     let range = culprit_core::telemetry::digest(b"capture");
     let base = ["culprit", "collect", "evidence", "read", "--config", "archive.json", "--range", &range];
@@ -574,6 +608,7 @@ async fn group_selection_on_non_query_analysis_stops_before_opening_configuratio
         "maintenance",
         "cleanup",
         "tuning",
+        "replication",
     ] {
         let mut args = analyze_args(mode, &["--workload-population", "17"]);
         args.common.config =

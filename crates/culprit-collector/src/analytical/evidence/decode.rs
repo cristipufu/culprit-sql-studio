@@ -29,6 +29,7 @@ pub(super) fn record(
         TelemetryStream::ActivityObservations => activity(values, &payloads)?,
         TelemetryStream::OperationalSamples
         | TelemetryStream::ObjectDefinitions
+        | TelemetryStream::ReplicationSamples
         | TelemetryStream::TuningObservations => {
             let mut details = match fact_details(values, &payloads)? {
                 Decoded::Record(details) => details,
@@ -91,7 +92,7 @@ fn fact_record(
         "source": text(values, "NativeSource")?,
         "fact": { "kind": text(values, "FactKind")?, "data": details },
     });
-    if stream != TelemetryStream::TuningObservations {
+    if !matches!(stream, TelemetryStream::TuningObservations | TelemetryStream::ReplicationSamples) {
         data["key"] = json!(text(values, "FactKey")?);
     }
     if stream == TelemetryStream::ObjectDefinitions {
@@ -99,8 +100,13 @@ fn fact_record(
     }
     Ok(match serde_json::from_value(json!({"stream": stream, "data": data})) {
         Ok(record) => {
-            if let TelemetryRecord::Tuning(observation) = &record
-                && observation.fact.key() != text(values, "FactKey")?
+            let fact_key = match &record {
+                TelemetryRecord::Tuning(observation) => Some(observation.fact.key()),
+                TelemetryRecord::Replication(observation) => Some(observation.fact.key()),
+                _ => None,
+            };
+            if let Some(key) = fact_key
+                && key != text(values, "FactKey")?
             {
                 return Err(invalid());
             }

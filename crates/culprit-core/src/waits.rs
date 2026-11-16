@@ -493,6 +493,10 @@ pub struct Pressure {
     pub files: Vec<crate::signals::FileIo>,
     /// Replicas and replication slots, and how far behind they are.
     pub replicas: Vec<crate::signals::Replica>,
+    /// Original replication points and native-source visibility; the legacy summary does not replace them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub replication: Option<Box<crate::telemetry::ReplicationSnapshot>>,
     /// Logical processors the server schedules work on (SQL Server `cpu_count`), when the engine says.
     pub cpus: Option<f64>,
     /// NUMA nodes those processors are split into (SQL Server), when the engine says.

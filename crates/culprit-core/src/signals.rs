@@ -352,11 +352,8 @@ pub enum ReplicaCondition {
     /// Replication stopped: both MySQL threads off with an error, a PostgreSQL WAL receiver that says it stopped, or
     /// SQL Server's NOT SYNCHRONIZING. `state` keeps the engine's word when it has one.
     Stopped,
-    /// Both MySQL threads off with no error on a server that takes writes: usually a former replica promoted to
-    /// primary, its old configuration left behind.
-    LeftConfigured,
-    /// Both MySQL threads off with no error: someone ran STOP REPLICA.
-    StoppedByHand,
+    /// Both MySQL threads report No without a recorded error. Intent and promotion history remain unknown.
+    ThreadsStopped,
     /// A PostgreSQL standby meant to stream (primary_conninfo set) without a WAL receiver.
     NotReceiving,
     /// A PostgreSQL standby without a WAL receiver that restores WAL from an archive.
@@ -391,9 +388,8 @@ pub struct Replica {
     pub state: Option<String>,
     /// Synchronous or asynchronous, when known.
     pub sync: Option<String>,
-    /// How far behind it is beyond any apply delay it is configured with (`delay_seconds`). On a PostgreSQL standby,
-    /// counted only while it has received changes it hasn't replayed: with nothing to replay, the time since the last
-    /// replayed commit is how long the primary has been quiet, not lag.
+    /// Native replication timing beyond an explicitly applicable configured delay. A last-replayed-commit age
+    /// does not become replication latency merely because received WAL remains to be replayed.
     pub lag_seconds: Option<f64>,
     /// Bytes not yet applied (PostgreSQL replay lag, SQL Server redo queue) or kept for a slot.
     pub lag_bytes: Option<f64>,
@@ -418,11 +414,6 @@ pub struct Replica {
     /// database. Another database's consumer is that database's lag, though its slot keeps WAL for the whole server.
     pub database: Option<String>,
 }
-
-/// WAL a PostgreSQL standby has received and not replayed that makes the time since its last replayed commit its lag:
-/// a WAL segment. Below it replay is current, and that time is how long the primary went without a commit (one long
-/// CREATE INDEX, COPY or VACUUM), not how far behind the standby is.
-pub const STANDBY_BEHIND_BYTES: f64 = 16.0 * 1024.0 * 1024.0;
 
 impl Replica {
     /// A replica, slot or this server by name, with nothing measured yet.
@@ -459,8 +450,7 @@ impl Replica {
                 None => t!("model.replica.state.receiving_stopped_unknown"),
             },
             ReplicaCondition::ApplyingStopped => t!("model.replica.state.applying_stopped"),
-            ReplicaCondition::LeftConfigured => t!("model.replica.state.left_configured"),
-            ReplicaCondition::StoppedByHand => t!("model.replica.state.stopped_by_hand"),
+            ReplicaCondition::ThreadsStopped => t!("model.replica.state.stopped"),
             ReplicaCondition::NotReceiving => t!("model.replica.state.not_receiving"),
             ReplicaCondition::RestoringFromArchive => t!("model.replica.state.restoring_from_archive"),
             ReplicaCondition::NotStreaming => t!("model.replica.state.not_streaming"),

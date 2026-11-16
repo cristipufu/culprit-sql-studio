@@ -297,6 +297,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
                 &crate::replication::availability_sql(crate::replication::AvailabilityColumns {
                     lag: true,
                     primary_role: true,
+                    ..Default::default()
                 }),
                 vec![],
                 100,

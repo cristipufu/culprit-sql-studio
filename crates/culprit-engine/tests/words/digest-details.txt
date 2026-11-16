@@ -383,21 +383,21 @@
 === pg-demo.report.json replica-lag:analytics_slot
 {
   "confidence": "high",
-  "summary": "A replication slot keeps every WAL file its consumer hasn't confirmed. analytics_slot has no consumer connected, so the WAL it holds keeps growing. It is a physical slot: a standby or a backup tool streams WAL through it. Unless max_slot_wal_keep_size caps what slots keep, it grows until the disk fills and the server stops accepting writes.",
+  "summary": "The slot analytics_slot has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a physical slot: a standby or a backup tool streams WAL through it. The slot's configured WAL retention limit was not established. Check max_slot_wal_keep_size, actual disk headroom and consumer progress before changing retention.",
   "metrics": [
     {
-      "label": "WAL kept",
+      "label": "WAL position distance",
       "value": "1.1 GB"
     }
   ],
   "queries": [],
   "fix": {
-    "summary": "If nothing will stream through this slot again (a standby that was removed), drop it. If max_slot_wal_keep_size isn't set, cap what slots may keep so none can fill the disk: Set max_slot_wal_keep_size to 50GB and reload the configuration (settings marked as needing a restart take effect after one).",
-    "sql": "SELECT pg_drop_replication_slot('analytics_slot');\n-- If max_slot_wal_keep_size isn't set, cap what any slot may keep:\nALTER SYSTEM SET max_slot_wal_keep_size = '50GB';\nSELECT pg_reload_conf();",
+    "summary": "Identify the standby or backup client that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; inactivity does not establish abandonment.",
+    "sql": "SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='analytics_slot';",
     "cost": null
   },
   "verify": [
-    "Re-scan: the slot should be gone, or active again."
+    "Re-read this exact slot's activity and native WAL positions, and confirm with the standby or backup operator whether replication is progressing as expected."
   ],
   "caveats": []
 }

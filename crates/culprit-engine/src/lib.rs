@@ -763,6 +763,15 @@ pub fn explain_waits(snapshot: &culprit_core::Snapshot) -> Option<culprit_core::
     reporting::explain_waits(snapshot)
 }
 
+/// Native replication facts are explained without I/O; the limit bounds presentation, not evidence examination.
+pub fn explain_replication(
+    snapshot: &culprit_core::telemetry::ReplicationSnapshot,
+    read_complete: bool,
+    max_entries: usize,
+) -> culprit_core::Result<culprit_core::ReplicationReport> {
+    culprit_checks::replication::explain_bounded(snapshot, read_complete, max_entries)
+}
+
 /// Lint migration or DDL SQL offline against a saved snapshot's catalog, table sizes and indexes.
 pub fn lint_sql(snapshot: &culprit_core::Snapshot, sql: &str) -> Vec<culprit_core::Finding> {
     culprit_checks::lint_sql(snapshot, sql)

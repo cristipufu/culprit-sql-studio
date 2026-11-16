@@ -1,0 +1,35 @@
+.replication-evidence { margin-top: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.replication-disclosure > summary { padding: 12px; }
+.replication-evidence summary { cursor: pointer; overflow-wrap: anywhere; }
+.replication-disclosure > summary > strong { margin-right: 12px; }
+.replication-summary { color: var(--text-2); font-size: 12px; }
+.replication-badge { display: inline-block; margin: 2px 0 2px 8px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; font-weight: 400; color: var(--text-2); vertical-align: middle; }
+.replication-body { padding: 0 12px 12px; }
+.replication-read { padding-bottom: 12px; }
+.replication-clock { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; font-size: 12px; }
+.replication-counts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 10px 0; }
+.replication-counts dt { color: var(--text-2); font-size: 11px; }
+.replication-counts dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; }
+.replication-sources { margin: 8px 0; padding: 0; list-style: none; }
+.replication-sources li { padding: 6px 0; overflow-wrap: anywhere; }
+.replication-sources p { margin: 4px 0; }
+.replication-source { display: flex; flex-wrap: wrap; align-items: baseline; }
+.replication-entries { display: grid; gap: 8px; }
+.replication-entry { border-top: 1px solid var(--border); padding-top: 8px; }
+.replication-entry > summary { padding: 5px 0; }
+.replication-entry-title { font-weight: 600; }
+.replication-entry-body { padding: 0 4px 6px; }
+.replication-entry-body > p { margin: 8px 0 12px; }
+.replication-fields { margin: 8px 0 12px; display: grid; gap: 6px; }
+.replication-fields > div { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 1.5fr); gap: 6px 16px; font-size: 12px; }
+.replication-fields dt { color: var(--text-2); overflow-wrap: anywhere; }
+.replication-fields dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; white-space: pre-wrap; }
+.replication-group, .replication-investigation, .replication-reference, .replication-qualifications { padding: 6px 0; }
+.replication-group > summary { font-weight: 600; font-size: 12px; }
+.replication-limit { padding-left: 8px; border-left: 2px solid var(--border); }
+.replication-pages { flex-wrap: wrap; margin-top: 12px; }
+@media (max-width: 600px) {
+  .replication-fields > div { grid-template-columns: 1fr; gap: 2px; }
+  .replication-counts { gap: 8px 16px; }
+  .replication-summary { display: block; margin-top: 4px; }
+}

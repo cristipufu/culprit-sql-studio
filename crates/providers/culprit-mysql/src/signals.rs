@@ -2,9 +2,12 @@
 //! recent failed runs raised), file I/O latency (performance_schema), connections opened and threads created, replica
 //! status, and column histograms. Lock time per statement is already part of the digest's waits. Neither engine keeps
 //! redo bytes per statement or row-lock waits per table. Each read is independent and cheap; a failure becomes a note.
+mod replication;
+pub(crate) use replication::settle as settle_replication;
 
 use std::collections::HashMap;
 
+use culprit_core::telemetry::NativeReplicationSample;
 use culprit_core::{
     ColumnHistogram, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaCondition, ReplicaRole, Setting,
     Signal, SignalScope, SignalUnit, Snapshot, key, t,
@@ -17,9 +20,13 @@ use crate::sources;
 
 const PICOS_PER_MS: f64 = 1_000_000_000.0;
 
-/// Collect every signal into `snapshot` on a connection of its own, each source read through `Coverage::read`
-/// (`crate::sources`): these add detail and lock nothing, so a failure is a note.
-pub async fn collect(conn: &mut impl crate::read::QueryRead, probe: &Probe, snapshot: &mut Snapshot) {
+/// Collect signals on the caller-owned reader. Replication remains provisional until that owner confirms
+/// shutdown; the other independent sources publish their own coverage and failure notes.
+pub(crate) async fn collect(
+    conn: &mut impl crate::read::QueryRead,
+    probe: &Probe,
+    snapshot: &mut Snapshot,
+) -> culprit_core::Result<replication::Reading> {
     let mut coverage = Coverage::default();
     let mariadb = probe.version.to_ascii_lowercase().contains("mariadb");
     crate::operations::collect(conn, probe, snapshot).await;
@@ -43,14 +50,18 @@ pub async fn collect(conn: &mut impl crate::read::QueryRead, probe: &Probe, snap
     // What replication and connection advice depend on: whether this server takes writes, and its thread cache.
     let variables =
         coverage.read(&sources::SERVER_VARIABLES, server_variables(conn).await).unwrap_or_else(HashMap::new);
-    let writable = variables.get("read_only").map(|v| !is_on(v));
     // Product/version-specific monitoring privilege; only relevant when replication is configured.
-    let replicas = replica_status(conn, writable, probe.flavor, &probe.version).await.map_err(|e| {
-        let message = needs_replica_privilege(&e.message, mariadb, &probe.version);
-        e.with_message(message)
-    });
-    if let Some(replicas) = coverage.read(&sources::REPLICATION, replicas) {
-        pressure.replicas = replicas;
+    let mut replicas = replication::read(conn, probe.flavor, &probe.version).await;
+    if let Ok(reading) = &mut replicas
+        && let Some(error) = reading.error.take()
+    {
+        let error = if error.code == culprit_core::ErrorCode::PermissionDenied && error.detail.is_none() {
+            let message = needs_replica_privilege(&error.message, mariadb, &probe.version);
+            error.with_message(message)
+        } else {
+            error
+        };
+        reading.error = Some(error);
     }
     if let Some(value) = variables.get("thread_cache_size")
         && snapshot.setting("thread_cache_size").is_none()
@@ -63,6 +74,7 @@ pub async fn collect(conn: &mut impl crate::read::QueryRead, probe: &Probe, snap
         });
     }
     coverage.append_to(snapshot);
+    replicas
 }
 
 /// The server's `message` on failing to read replica status, and the privilege that reading it needs on this product
@@ -335,27 +347,10 @@ fn connection_signals(status: &HashMap<String, f64>) -> Vec<Signal> {
     out
 }
 
-/// Whether a server variable's value means on.
-fn is_on(value: &str) -> bool {
-    matches!(value.trim().to_ascii_uppercase().as_str(), "ON" | "1" | "TRUE" | "YES")
-}
-
 /// The server variables advice depends on: read_only (does it take writes) and thread_cache_size.
 async fn server_variables(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<HashMap<String, String>> {
     let rows = query(conn, "SHOW GLOBAL VARIABLES WHERE Variable_name IN ('read_only', 'thread_cache_size')").await?;
     Ok(rows.iter().filter_map(|r| Some((r.string("variable_name").to_ascii_lowercase(), r.text("value")?))).collect())
-}
-
-/// This server's replication channels when it is a replica: lag beyond any configured delay, thread state and the
-/// last error code. `writable` is whether it takes writes (read_only off), when known.
-async fn replica_status(
-    conn: &mut impl crate::read::QueryRead,
-    writable: Option<bool>,
-    flavor: crate::connect::Flavor,
-    version: &str,
-) -> culprit_core::Result<Vec<Replica>> {
-    let rows = query(conn, crate::native::replication::query(flavor, version)).await?;
-    Ok(rows.iter().filter_map(|r| replica(ChannelRow::from(r), writable)).collect())
 }
 
 /// One row of SHOW REPLICA STATUS, as far as replica-lag reads it.
@@ -372,40 +367,47 @@ struct ChannelRow {
     delay: Option<f64>,
 }
 
-impl From<&Rec> for ChannelRow {
-    fn from(r: &Rec) -> ChannelRow {
-        let either = |a: &str, b: &str| r.text(a).or_else(|| r.text(b));
+impl From<&NativeReplicationSample> for ChannelRow {
+    fn from(r: &NativeReplicationSample) -> ChannelRow {
+        let property = |key: &str| r.measurements.properties.get(key).cloned();
+        let number = |key: &str| {
+            r.measurements
+                .counters
+                .iter()
+                .find(|counter| counter.key == key)
+                .and_then(|counter| counter.value.integer())
+                .map(|value| value as f64)
+        };
         ChannelRow {
-            channel: either("channel_name", "connection_name").filter(|c| !c.is_empty()),
-            source: either("source_host", "master_host").unwrap_or_default(),
-            io: either("replica_io_running", "slave_io_running").unwrap_or_default(),
-            sql: either("replica_sql_running", "slave_sql_running").unwrap_or_default(),
-            io_errno: r.number("last_io_errno").filter(|n| *n > 0.0),
-            sql_errno: r.number("last_sql_errno").filter(|n| *n > 0.0),
-            behind: either("seconds_behind_source", "seconds_behind_master").and_then(|s| s.trim().parse().ok()),
-            delay: r.number("sql_delay").filter(|d| *d > 0.0),
+            channel: property("channel").filter(|c| !c.is_empty()),
+            source: property("source_host").unwrap_or_default(),
+            io: property("io_running").unwrap_or_default(),
+            sql: property("sql_running").unwrap_or_default(),
+            io_errno: number("io-error-code").filter(|n| *n > 0.0),
+            sql_errno: number("sql-error-code").filter(|n| *n > 0.0),
+            behind: number("lag-seconds"),
+            delay: number("configured-delay").filter(|d| *d > 0.0),
         }
     }
 }
 
 /// A channel as replica-lag reads it. Group Replication's own channels (group_replication_applier, …_recovery) are
-/// left out: they sit idle by design and the group reports its members elsewhere. Both threads off with no error is
-/// someone's STOP REPLICA, not a failure; on a server that takes writes it is usually a former replica promoted to
-/// primary, with its old configuration left behind.
-fn replica(r: ChannelRow, writable: Option<bool>) -> Option<Replica> {
+/// left out: they sit idle by design and the group reports its members elsewhere. A stopped thread and a
+/// historical error code remain separate point facts; neither establishes stop intent or promotion.
+fn replica(r: ChannelRow) -> Option<Replica> {
     if r.channel.as_deref().is_some_and(|c| c.to_ascii_lowercase().starts_with("group_replication_")) {
         return None;
     }
     let error = r.sql_errno.or(r.io_errno);
     // How it stands is a fact replica-lag decides on and the catalog words; the I/O thread's own value is the engine's.
     // The name stays one string in every language: it is the finding's id.
-    let (condition, state) = match (r.io.eq_ignore_ascii_case("yes"), r.sql.eq_ignore_ascii_case("yes")) {
-        (true, true) => (ReplicaCondition::Replicating, None),
-        (false, true) => (ReplicaCondition::ReceivingStopped, Some(r.io.clone())),
-        (true, false) => (ReplicaCondition::ApplyingStopped, None),
-        (false, false) if error.is_some() => (ReplicaCondition::Stopped, None),
-        (false, false) if writable == Some(true) => (ReplicaCondition::LeftConfigured, None),
-        (false, false) => (ReplicaCondition::StoppedByHand, None),
+    let (condition, state) = match (r.io.to_ascii_lowercase().as_str(), r.sql.to_ascii_lowercase().as_str()) {
+        ("yes", "yes") => (ReplicaCondition::Replicating, None),
+        ("no" | "connecting", "yes") => (ReplicaCondition::ReceivingStopped, Some(r.io.clone())),
+        ("yes" | "connecting", "no") => (ReplicaCondition::ApplyingStopped, None),
+        ("no", "no") if error.is_some() => (ReplicaCondition::Stopped, None),
+        ("no", "no") => (ReplicaCondition::ThreadsStopped, None),
+        _ => (ReplicaCondition::Reported, None),
     };
     Some(Replica {
         condition,
@@ -545,28 +547,25 @@ mod tests {
     // SOURCE_DELAY = 3600 keeps the replica an hour behind on purpose: only what is beyond it is lag.
     #[test]
     fn a_delayed_replica_counts_only_the_lag_beyond_its_delay() {
-        let r =
-            replica(ChannelRow { behind: Some(3_630.0), delay: Some(3_600.0), ..channel("Yes", "Yes") }, None).unwrap();
+        let r = replica(ChannelRow { behind: Some(3_630.0), delay: Some(3_600.0), ..channel("Yes", "Yes") }).unwrap();
         assert_eq!((r.lag_seconds, r.delay_seconds), (Some(30.0), Some(3_600.0)));
     }
 
-    // Both threads off with no error is a STOP REPLICA; on a server that takes writes, a promoted primary's leftover.
     #[test]
-    fn a_channel_stopped_by_hand_is_not_a_failure() {
-        let promoted = replica(channel("No", "No"), Some(true)).unwrap();
-        assert_eq!(promoted.condition, ReplicaCondition::LeftConfigured);
-        assert_eq!(promoted.state_words().as_deref(), Some("configured, not running (no error; accepts writes)"));
-        let by_hand = replica(channel("No", "No"), Some(false)).unwrap();
-        assert_eq!(by_hand.condition, ReplicaCondition::StoppedByHand);
-        assert_eq!(by_hand.state_words().as_deref(), Some("stopped by hand (no error)"));
-        let failed = replica(ChannelRow { sql_errno: Some(1062.0), ..channel("No", "No") }, Some(true)).unwrap();
+    fn stopped_threads_do_not_establish_manual_stop_promotion_or_application_failure() {
+        let stopped = replica(channel("No", "No")).unwrap();
+        assert_eq!(stopped.condition, ReplicaCondition::ThreadsStopped);
+        assert!(!stopped.condition.is_stopped());
+        assert_eq!(stopped.state_words().as_deref(), Some("stopped"));
+        assert!(stopped.error.is_none());
+        let failed = replica(ChannelRow { sql_errno: Some(1062.0), ..channel("No", "No") }).unwrap();
         assert_eq!(
             (failed.condition, failed.error.as_deref()),
             (ReplicaCondition::Stopped, Some("1062 duplicate key"))
         );
         assert_eq!(failed.state_words().as_deref(), Some("stopped"));
         // The I/O thread's own value is the engine's word, kept as it is.
-        let receiving = replica(channel("Connecting", "Yes"), Some(false)).unwrap();
+        let receiving = replica(channel("Connecting", "Yes")).unwrap();
         assert_eq!(
             (receiving.condition, receiving.state.as_deref()),
             (ReplicaCondition::ReceivingStopped, Some("Connecting"))
@@ -574,12 +573,15 @@ mod tests {
         assert_eq!(receiving.state_words().as_deref(), Some("receiving stopped (I/O thread: Connecting)"));
         // What it decides on holds in another language: the condition is a fact, not its words.
         culprit_core::i18n::scope("fr", || {
-            let by_hand = replica(channel("No", "No"), Some(false)).unwrap();
-            assert_eq!(by_hand.condition, ReplicaCondition::StoppedByHand);
+            let stopped = replica(channel("No", "No")).unwrap();
+            assert_eq!(stopped.condition, ReplicaCondition::ThreadsStopped);
         });
         // Group Replication's own channels idle by design.
         let gr = ChannelRow { channel: Some("group_replication_recovery".into()), ..channel("No", "No") };
-        assert!(replica(gr, Some(true)).is_none());
+        assert!(replica(gr).is_none());
+        for (io, sql) in [("", ""), ("No", ""), ("", "No"), ("Unknown", "No")] {
+            assert_eq!(replica(channel(io, sql)).unwrap().condition, ReplicaCondition::Reported);
+        }
     }
 
     // Connections counts failed attempts too; the rate a pool would cut is the successful ones.
@@ -684,7 +686,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            replica(ChannelRow { io_errno: Some(2003.0), ..channel("No", "Yes") }, None).unwrap().error.as_deref(),
+            replica(ChannelRow { io_errno: Some(2003.0), ..channel("No", "Yes") }).unwrap().error.as_deref(),
             Some("error 2003")
         );
         assert_eq!(

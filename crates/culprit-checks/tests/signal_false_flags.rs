@@ -116,19 +116,50 @@ fn a_replica_delayed_by_design_is_judged_on_the_lag_beyond_its_delay() {
 // ── 3. MySQL channels stopped without an error ─────────────────────────────────────────────────────
 
 #[test]
-fn a_channel_stopped_by_hand_is_not_a_replication_failure() {
-    let promoted = stood("from 10.0.0.5", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::LeftConfigured);
-    let r = replicas("mysql-demo", vec![promoted]);
-    let f = of(&r, "replica-lag")[0];
-    assert_eq!(f.severity, Severity::Low);
-    assert_eq!(f.title, "This server is still set up as a replica, but replication isn't running");
-    assert!(f.fix.as_ref().unwrap().summary.contains("RESET REPLICA ALL"));
-    let r = replicas(
-        "mysql-demo",
-        vec![stood("from 10.0.0.5", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::StoppedByHand)],
-    );
-    assert_eq!(of(&r, "replica-lag")[0].severity, Severity::Medium);
-    // Group Replication's idle recovery channel, in a scan from before the collector left it out.
+fn stopped_threads_without_a_recorded_error_do_not_establish_intent_or_promotion() {
+    for read_only in ["ON", "OFF"] {
+        let mut snapshot = fixture("mysql-demo");
+        set(&mut snapshot, "read_only", read_only);
+        pressure(&mut snapshot).replicas =
+            vec![stood("from 10.0.0.5", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::ThreadsStopped)];
+        let report = analyze(snapshot);
+        let findings = of(&report, "replica-lag");
+        assert_eq!(findings.len(), 1);
+        let finding = findings[0];
+        assert_eq!(finding.severity, Severity::Low);
+        assert_eq!(finding.actionability, culprit_core::Actionability::Information);
+        assert_eq!(finding.title, "Replication threads are stopped; their intent is unknown");
+        assert_eq!(
+            finding.summary,
+            "Both replication threads report No and no error code is recorded. This does not establish who stopped them, whether the stop was intentional, or whether this server was promoted."
+        );
+        let fix = finding.fix.as_ref().unwrap();
+        assert!(fix.sql.is_none());
+        for mutation in ["RESET ", "START ", "ALTER "] {
+            assert!(!fix.summary.contains(mutation), "{read_only}: {}", fix.summary);
+        }
+    }
+}
+
+#[test]
+fn an_explicit_native_error_remains_separate_from_an_unknown_intent_stop() {
+    let failed = Replica {
+        condition: culprit_core::ReplicaCondition::Stopped,
+        error: Some("1045 access denied".into()),
+        ..replica("channel-1", ReplicaRole::ThisServer, "stopped (receiver error)")
+    };
+    let report = replicas("mysql-demo", vec![failed]);
+    let finding = of(&report, "replica-lag")[0];
+    assert_eq!(finding.severity, Severity::High);
+    assert!(finding.summary.contains("The last error was 1045 access denied."));
+    assert_ne!(finding.actionability, culprit_core::Actionability::Information);
+    assert!(finding.fix.as_ref().unwrap().sql.is_none());
+}
+
+#[test]
+fn unqualified_state_text_and_an_idle_group_recovery_channel_do_not_gain_stop_intent() {
+    let unqualified = replica("channel-1", ReplicaRole::ThisServer, "No/No");
+    assert!(of(&replicas("mysql-demo", vec![unqualified]), "replica-lag").is_empty());
     let gr =
         stood("group_replication_recovery (from )", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::Stopped);
     assert!(of(&replicas("mysql-demo", vec![gr]), "replica-lag").is_empty());
@@ -146,28 +177,97 @@ fn slot(name: &str, kind: &str, kept: f64) -> Replica {
     }
 }
 
-// A CDC slot (Fivetran, Debezium) is inactive between syncs: dropping it forces a full resync, and with
-// max_slot_wal_keep_size set it can't fill the disk.
 #[test]
-fn an_inactive_logical_slot_belongs_to_a_consumer_and_a_capped_one_cant_fill_the_disk() {
+fn an_inactive_slot_retains_context_without_authorizing_a_mutation_or_proving_disk_safety() {
     let r = replicas("postgres-demo", vec![slot("fivetran_slot", "logical", 12.0 * GB)]);
     let f = of(&r, "replica-lag")[0];
-    assert_eq!(f.title, "The logical slot fivetran_slot keeps 12.0 GB of WAL while its consumer is away");
-    assert_eq!(f.severity, Severity::High, "nothing caps it");
-    assert!(f.summary.contains("max_slot_wal_keep_size is -1") && f.summary.contains("copy everything again"));
-    let sql = f.fix.as_ref().unwrap().sql.clone().unwrap();
-    assert!(sql.contains("-- SELECT pg_drop_replication_slot('fivetran_slot');"), "{sql}");
-    assert!(sql.contains("ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';"), "{sql}");
+    assert_eq!(f.title, "Logical slot fivetran_slot is inactive; its WAL position distance is 12.0 GB");
+    assert_eq!(f.severity, Severity::Low, "a large position distance does not establish disk pressure");
+    assert_eq!(f.actionability, culprit_core::Actionability::Information);
+    assert!(f.summary.contains("max_slot_wal_keep_size is -1"));
+    assert_eq!(
+        f.fix.as_ref().unwrap().sql.as_deref(),
+        Some(
+            "SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='fivetran_slot';"
+        )
+    );
 
     let capped = Replica { safe_wal_bytes: Some(30.0 * GB), ..slot("fivetran_slot", "logical", 12.0 * GB) };
     let r = replicas("postgres-demo", vec![capped]);
     let f = of(&r, "replica-lag")[0];
     assert_eq!(f.severity, Severity::Low);
-    assert!(f.summary.contains("the disk is safe") && !f.summary.contains("until the disk fills"), "{}", f.summary);
-    assert!(!f.fix.as_ref().unwrap().sql.clone().unwrap().contains("max_slot_wal_keep_size"), "a cap is never lowered");
+    assert_eq!(f.actionability, culprit_core::Actionability::Information);
+    assert!(!f.summary.contains("the disk is safe") && !f.summary.contains("until the disk fills"), "{}", f.summary);
+    assert_eq!(
+        f.fix.as_ref().unwrap().sql.as_deref(),
+        Some(
+            "SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='fivetran_slot';"
+        )
+    );
 
-    let lost = Replica { wal_status: Some("lost".into()), ..slot("old", "physical", 2.0 * GB) };
-    assert!(of(&replicas("postgres-demo", vec![lost]), "replica-lag").is_empty());
+    for kind in ["logical", "physical"] {
+        let report = replicas("postgres-demo", vec![slot("consumer's_slot", kind, 2.0 * GB)]);
+        let finding = of(&report, "replica-lag")[0];
+        assert_eq!(
+            finding.fix.as_ref().unwrap().sql.as_deref(),
+            Some(
+                "SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='consumer''s_slot';"
+            )
+        );
+        assert!(!finding.fix.as_ref().unwrap().summary.contains("drop"));
+    }
+
+    let unreserved = Replica {
+        wal_status: Some("unreserved".into()),
+        safe_wal_bytes: Some(0.0),
+        ..slot("at-native-risk", "physical", 2.0 * GB)
+    };
+    let report = replicas("postgres-demo", vec![unreserved]);
+    let finding = of(&report, "replica-lag")[0];
+    assert_eq!(finding.severity, Severity::Medium);
+    assert_eq!(finding.actionability, culprit_core::Actionability::NeedsAttention);
+    assert!(finding.fix.as_ref().unwrap().sql.as_ref().unwrap().starts_with("SELECT "));
+}
+
+#[test]
+fn unverified_or_active_slots_cannot_establish_an_inactive_or_abandoned_consumer() {
+    for condition in [culprit_core::ReplicaCondition::Reported, culprit_core::ReplicaCondition::SlotActive] {
+        let current = Replica { condition, ..slot("unverified-or-active-slot", "logical", 12.0 * GB) };
+        assert!(of(&replicas("postgres-demo", vec![current]), "replica-lag").is_empty());
+    }
+}
+
+#[test]
+fn a_native_lost_slot_remains_unusable_with_unknown_activity_and_without_a_large_position_distance() {
+    for kind in ["logical", "physical"] {
+        for distance in [None, Some(0.0), Some(0.5 * GB)] {
+            let lost = Replica {
+                condition: culprit_core::ReplicaCondition::Reported,
+                wal_status: Some("lost".into()),
+                lag_bytes: distance,
+                logical: Some(kind == "logical"),
+                ..Replica::new("lost-slot", ReplicaRole::Slot)
+            };
+            let report = replicas("postgres-demo", vec![lost]);
+            let findings = of(&report, "replica-lag");
+            assert_eq!(findings.len(), 1);
+            let finding = findings[0];
+            assert_eq!(finding.severity, Severity::Medium);
+            assert_eq!(finding.actionability, culprit_core::Actionability::NeedsAttention);
+            assert_eq!(finding.title, "Replication slot lost-slot is no longer usable");
+            assert!(finding.summary.contains("PostgreSQL reports wal_status=lost"));
+            assert!(
+                finding.metrics.is_empty(),
+                "missing or small position distance is not replaced by an invented value"
+            );
+            let fix = finding.fix.as_ref().unwrap();
+            let sql = fix.sql.as_deref().unwrap();
+            assert!(sql.starts_with("SELECT ") && sql.ends_with("WHERE slot_name='lost-slot';"), "{sql}");
+            for mutation in ["pg_drop_replication_slot", "ALTER SYSTEM", "pg_reload_conf", "RESET "] {
+                assert!(!sql.contains(mutation), "{sql}");
+            }
+        }
+    }
 }
 
 // A logical walsender is a consumer of decoded changes, not a copy to fail over to.

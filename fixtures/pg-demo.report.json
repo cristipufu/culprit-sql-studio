@@ -588,48 +588,6 @@
       ]
     },
     {
-      "actionability": "needs-attention",
-      "category": "configuration",
-      "caveats": [],
-      "check": "replica-lag",
-      "confidence": "high",
-      "fix": {
-        "cost": null,
-        "sql": "SELECT pg_drop_replication_slot('analytics_slot');\n-- If max_slot_wal_keep_size isn't set, cap what any slot may keep:\nALTER SYSTEM SET max_slot_wal_keep_size = '50GB';\nSELECT pg_reload_conf();",
-        "summary": "If nothing will stream through this slot again (a standby that was removed), drop it. If max_slot_wal_keep_size isn't set, cap what slots may keep so none can fill the disk: Set max_slot_wal_keep_size to 50GB and reload the configuration (settings marked as needing a restart take effect after one)."
-      },
-      "id": "replica-lag:analytics_slot",
-      "impact": {
-        "db_time_share": null,
-        "label": "1.1 GB of WAL kept",
-        "score": 22.0,
-        "time_ms_per_day": null
-      },
-      "inactive": false,
-      "last_seen": null,
-      "metrics": [
-        {
-          "key": "check.replica_lag.metric.wal_kept",
-          "label": "WAL kept",
-          "text": null,
-          "unit": "bytes",
-          "value": 1172682184.0
-        }
-      ],
-      "queries": [],
-      "severity": "medium",
-      "subject": {
-        "kind": "database",
-        "name": "analytics_slot"
-      },
-      "summary": "A replication slot keeps every WAL file its consumer hasn't confirmed. analytics_slot has no consumer connected, so the WAL it holds keeps growing. It is a physical slot: a standby or a backup tool streams WAL through it. Unless max_slot_wal_keep_size caps what slots keep, it grows until the disk fills and the server stops accepting writes.",
-      "title": "The inactive replication slot analytics_slot keeps 1.1 GB of WAL",
-      "verification_basis": "rescan",
-      "verify": [
-        "Re-scan: the slot should be gone, or active again."
-      ]
-    },
-    {
       "actionability": "optional-improvement",
       "category": "maintenance",
       "caveats": [
@@ -1358,6 +1316,48 @@
       "verification_basis": "rescan",
       "verify": [
         "Compare the same native resource metrics and independently measured query latency under comparable load. Only derive counter differences when source identity, scope and reset continuity are verified; do not reset production statistics to measure a change."
+      ]
+    },
+    {
+      "actionability": "information",
+      "category": "configuration",
+      "caveats": [],
+      "check": "replica-lag",
+      "confidence": "high",
+      "fix": {
+        "cost": null,
+        "sql": "SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='analytics_slot';",
+        "summary": "Identify the standby or backup client that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; inactivity does not establish abandonment."
+      },
+      "id": "replica-lag:analytics_slot",
+      "impact": {
+        "db_time_share": null,
+        "label": "1.1 GB WAL position distance",
+        "score": 8.0,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": null,
+      "metrics": [
+        {
+          "key": "check.replica_lag.metric.wal_kept",
+          "label": "WAL position distance",
+          "text": null,
+          "unit": "bytes",
+          "value": 1172682184.0
+        }
+      ],
+      "queries": [],
+      "severity": "low",
+      "subject": {
+        "kind": "database",
+        "name": "analytics_slot"
+      },
+      "summary": "The slot analytics_slot has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a physical slot: a standby or a backup tool streams WAL through it. The slot's configured WAL retention limit was not established. Check max_slot_wal_keep_size, actual disk headroom and consumer progress before changing retention.",
+      "title": "Replication slot analytics_slot is inactive; its WAL position distance is 1.1 GB",
+      "verification_basis": "rescan",
+      "verify": [
+        "Re-read this exact slot's activity and native WAL positions, and confirm with the standby or backup operator whether replication is progressing as expected."
       ]
     },
     {
@@ -9630,15 +9630,11 @@
       {
         "category": "maintenance",
         "count": 3
-      },
-      {
-        "category": "configuration",
-        "count": 1
       }
     ],
     "by_severity": [
       {
-        "count": 4,
+        "count": 3,
         "severity": "medium"
       },
       {
@@ -9666,7 +9662,7 @@
         "table": "order_items"
       }
     ],
-    "headline": "14 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
+    "headline": "13 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
     "headline_message": {
       "kind": "sequence",
       "messages": [
@@ -9674,11 +9670,11 @@
           "arguments": {
             "count": {
               "kind": "digits",
-              "value": "14"
+              "value": "13"
             },
             "n": {
               "kind": "number",
-              "value": 14.0
+              "value": 13.0
             }
           },
           "key": "summary.headline.opportunities",
@@ -9775,7 +9771,7 @@
       }
     ],
     "no_workload": null,
-    "opportunities": 14,
+    "opportunities": 13,
     "over_scans": [
       {
         "activity": {

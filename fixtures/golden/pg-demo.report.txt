@@ -1,5 +1,5 @@
 reading: PostgreSQL 18.6 · database demo · scanned 2026-10-11T11:54:21Z
-headline: 14 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
+headline: 13 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
 top share: 67%
 findings: 17
 
@@ -174,53 +174,6 @@ brief:
     ## What to do in the codebase
 
     Find where the application sends the statements above (search for their table and column names) and apply the fix in that calling code. Where it changes SQL, use the way this project ships query changes (an ORM change or a query rewrite). After any change is live, run `culprit scan pg-demo` and check `planning-time:-967240904657798800` the way *How to verify* says.
-
-=== finding replica-lag:analytics_slot
-Needs attention · medium severity · high confidence · configuration
-title: The inactive replication slot analytics_slot keeps 1.1 GB of WAL
-summary: A replication slot keeps every WAL file its consumer hasn't confirmed. analytics_slot has no consumer connected, so the WAL it holds keeps growing. It is a physical slot: a standby or a backup tool streams WAL through it. Unless max_slot_wal_keep_size caps what slots keep, it grows until the disk fills and the server stops accepting writes.
-impact: 1.1 GB of WAL kept
-metrics:
-  - WAL kept: 1.1 GB
-fix: If nothing will stream through this slot again (a standby that was removed), drop it. If max_slot_wal_keep_size isn't set, cap what slots may keep so none can fill the disk: Set max_slot_wal_keep_size to 50GB and reload the configuration (settings marked as needing a restart take effect after one).
-  sql:
-      SELECT pg_drop_replication_slot('analytics_slot');
-      -- If max_slot_wal_keep_size isn't set, cap what any slot may keep:
-      ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';
-      SELECT pg_reload_conf();
-verify:
-  1. Re-scan: the slot should be gone, or active again.
-brief:
-    # The inactive replication slot analytics_slot keeps 1.1 GB of WAL
-
-    Database: **pg-demo** (PostgreSQL 18.6, database `demo`, local environment). Finding `replica-lag:analytics_slot`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T11:54:21Z.
-
-    ## What's happening
-
-    A replication slot keeps every WAL file its consumer hasn't confirmed. analytics_slot has no consumer connected, so the WAL it holds keeps growing. It is a physical slot: a standby or a backup tool streams WAL through it. Unless max_slot_wal_keep_size caps what slots keep, it grows until the disk fills and the server stops accepting writes.
-
-    ## Evidence
-
-    - WAL kept: 1.1 GB
-
-    ## Suggested fix
-
-    If nothing will stream through this slot again (a standby that was removed), drop it. If max_slot_wal_keep_size isn't set, cap what slots may keep so none can fill the disk: Set max_slot_wal_keep_size to 50GB and reload the configuration (settings marked as needing a restart take effect after one).
-
-    ```sql
-    SELECT pg_drop_replication_slot('analytics_slot');
-    -- If max_slot_wal_keep_size isn't set, cap what any slot may keep:
-    ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';
-    SELECT pg_reload_conf();
-    ```
-
-    ## How to verify
-
-    - Re-scan: the slot should be gone, or active again.
-
-    ## What to do in the codebase
-
-    The fix is a setting of the database server, not a change to the application's code: apply it where this project manages the server's configuration (infrastructure as code, the platform's parameter group, the server's configuration file). Where nothing manages it, run the fix's SQL against the server as a login allowed to change its settings, the way the fix says. After any change is live, run `culprit scan pg-demo` and check `replica-lag:analytics_slot` the way *How to verify* says.
 
 === finding hot-updates:archive.wide
 Optional improvement · low severity · high confidence · maintenance
@@ -792,6 +745,47 @@ brief:
 
     - Resource totals can include planning and execution work. Parallel I/O times are not an exclusive elapsed-time component, and zero timings do not establish complete historical timing coverage.
     - These observations identify statement resource work, without establishing memory exhaustion, an allocating operator or the cause of a slow run.
+
+    ## What to do in the codebase
+
+    Information: inspect the evidence and follow its verification guidance if the workload warrants it. This observation requests no immediate database change. Use `culprit scan pg-demo` for a later comparison if needed, as *How to verify* describes.
+
+=== finding replica-lag:analytics_slot
+Information · low severity · high confidence · configuration
+title: Replication slot analytics_slot is inactive; its WAL position distance is 1.1 GB
+summary: The slot analytics_slot has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a physical slot: a standby or a backup tool streams WAL through it. The slot's configured WAL retention limit was not established. Check max_slot_wal_keep_size, actual disk headroom and consumer progress before changing retention.
+impact: 1.1 GB WAL position distance
+metrics:
+  - WAL position distance: 1.1 GB
+fix: Identify the standby or backup client that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; inactivity does not establish abandonment.
+  sql:
+      SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='analytics_slot';
+verify:
+  1. Re-read this exact slot's activity and native WAL positions, and confirm with the standby or backup operator whether replication is progressing as expected.
+brief:
+    # Replication slot analytics_slot is inactive; its WAL position distance is 1.1 GB
+
+    Database: **pg-demo** (PostgreSQL 18.6, database `demo`, local environment). Finding `replica-lag:analytics_slot`: Information, low impact, high confidence. Scanned 2026-10-11T11:54:21Z.
+
+    ## What's happening
+
+    The slot analytics_slot has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a physical slot: a standby or a backup tool streams WAL through it. The slot's configured WAL retention limit was not established. Check max_slot_wal_keep_size, actual disk headroom and consumer progress before changing retention.
+
+    ## Evidence
+
+    - WAL position distance: 1.1 GB
+
+    ## Suggested fix
+
+    Identify the standby or backup client that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; inactivity does not establish abandonment.
+
+    ```sql
+    SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='analytics_slot';
+    ```
+
+    ## How to verify
+
+    - Re-read this exact slot's activity and native WAL positions, and confirm with the standby or backup operator whether replication is progressing as expected.
 
     ## What to do in the codebase
 

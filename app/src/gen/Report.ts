@@ -10,6 +10,7 @@ import type { MaintenanceProgressReport } from "./MaintenanceProgressReport";
 import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
 import type { PageWaitReport } from "./PageWaitReport";
 import type { RefinementDecision } from "./RefinementDecision";
+import type { ReplicationReport } from "./ReplicationReport";
 import type { ReportEvidence } from "./ReportEvidence";
 import type { RetainedFailureReport } from "./RetainedFailureReport";
 import type { Snapshot } from "./Snapshot";
@@ -55,4 +56,8 @@ compiler_admission?: CompilerAdmissionReport,
 /**
  * Generation-bound native progress is a point observation, not completion or incident causality.
  */
-maintenance_progress?: MaintenanceProgressReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+maintenance_progress?: MaintenanceProgressReport, 
+/**
+ * Native replication points retain original scope, clocks and availability independently of legacy summaries.
+ */
+replication?: ReplicationReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

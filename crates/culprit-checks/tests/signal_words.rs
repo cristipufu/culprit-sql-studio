@@ -140,7 +140,7 @@ Recorded timing per native storage operation, with each source’s scope and res
 connection-churn: Applications that connect for every request
 New connections per second since startup (SQL Server logins, PostgreSQL 14+ sessions, MySQL and MariaDB Connections), with how long sessions last and how many came from a pool where the engine says.
 replica-lag: Replicas that fall behind
-Replicas far behind the primary or stopped, and PostgreSQL replication slots that keep WAL for a consumer that's gone: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS."#,
+Replicas reported behind or stopped, PostgreSQL slots with no active consumer and native WAL position distance, and slots the source reports as lost: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS."#,
     );
 }
 
@@ -2257,14 +2257,14 @@ fn stood(
 }
 
 #[test]
-fn replicas_stopped_or_left_configured() {
+fn replicas_stopped_with_unknown_intent_or_native_error() {
     use culprit_core::{Replica, ReplicaCondition as C, ReplicaRole::Replica as Sends, ReplicaRole::ThisServer};
     let mut findings = lagging(
         "mysql-demo",
         None,
         vec![
-            stood("from 10.0.0.5", ThisServer, C::LeftConfigured),
-            stood("from 10.0.0.6", ThisServer, C::StoppedByHand),
+            stood("from 10.0.0.5", ThisServer, C::ThreadsStopped),
+            stood("from 10.0.0.6", ThisServer, C::ThreadsStopped),
             Replica {
                 error: Some("1062 duplicate entry".into()),
                 condition: C::Stopped,
@@ -2284,18 +2284,18 @@ fn replicas_stopped_or_left_configured() {
     says(
         &findings,
         r#"id: replica-lag:from 10.0.0.5
-title: This server is still set up as a replica, but replication isn't running
-summary: Both replication threads are off and no error is recorded, so someone stopped them, and this server takes writes (read_only is off). A former replica promoted to primary looks like this: its old replication settings stay behind, and starting them by mistake would apply another server's changes on top of this one's.
-impact: configured, not running (no error; accepts writes)
-fix: If it is no longer a replica, remove the configuration with RESET REPLICA ALL (RESET SLAVE ALL before MySQL 8.0.22 and MariaDB 10.5.1). If it should replicate, make it read-only and START REPLICA.
-verify: Re-scan: the leftover replication configuration should be gone.
+title: Replication threads are stopped; their intent is unknown
+summary: Both replication threads report No and no error code is recorded. This does not establish who stopped them, whether the stop was intentional, or whether this server was promoted.
+impact: stopped
+fix: Confirm whether this channel is expected to replicate with its operator before changing its configuration or restarting its threads.
+verify: Re-read the same channel's receiver and applier states and recorded error codes, then confirm them against its expected role.
 
 id: replica-lag:from 10.0.0.6
-title: Replication to this server was stopped by hand
-summary: Both replication threads are off and no error is recorded: someone ran STOP REPLICA, for a backup or maintenance perhaps. While it stays stopped the copy gets older by the minute, and failing over to it would lose the changes since.
-impact: stopped by hand (no error)
-fix: If it should replicate, START REPLICA and let it catch up before relying on it; if it is no longer a replica, RESET REPLICA ALL removes the configuration.
-verify: Re-scan: the lag should be seconds.
+title: Replication threads are stopped; their intent is unknown
+summary: Both replication threads report No and no error code is recorded. This does not establish who stopped them, whether the stop was intentional, or whether this server was promoted.
+impact: stopped
+fix: Confirm whether this channel is expected to replicate with its operator before changing its configuration or restarting its threads.
+verify: Re-read the same channel's receiver and applier states and recorded error codes, then confirm them against its expected role.
 
 id: replica-lag:from 10.0.0.7
 title: Replication to this server has stopped (stopped (SQL thread error))
@@ -2454,74 +2454,82 @@ fn inactive_replication_slots() {
     says(
         &findings,
         r#"id: replica-lag:old_standby
-title: The inactive replication slot old_standby keeps 12.0 GB of WAL
-summary: A replication slot keeps every WAL file its consumer hasn't confirmed. old_standby has had no consumer for 24 h, so the WAL it holds keeps growing. It is a physical slot: a standby or a backup tool streams WAL through it. Nothing caps what it keeps (max_slot_wal_keep_size is -1), so it grows until the disk fills and the server stops accepting writes.
-impact: 12.0 GB of WAL kept
-metric: WAL kept
-metric: Without a consumer for
-fix: If nothing will stream through this slot again (a standby that was removed), drop it. To keep any slot from filling the disk, cap what slots may keep: Set max_slot_wal_keep_size to 50GB and reload the configuration (settings marked as needing a restart take effect after one).
-sql: SELECT pg_drop_replication_slot('old_standby');
--- Cap what any slot may keep:
-ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';
-SELECT pg_reload_conf();
-verify: Re-scan: the slot should be gone, or active again.
+title: Replication slot old_standby is inactive; its WAL position distance is 12.0 GB
+summary: The slot old_standby has been inactive for 24 h. The reported value is a native WAL position distance; actual retained files, disk occupancy and consumer intent are not established. It is a physical slot: a standby or a backup tool streams WAL through it. The slot has no configured WAL retention limit (max_slot_wal_keep_size is -1). Continued WAL generation can increase retained files; check actual disk headroom and consumer progress.
+impact: 12.0 GB WAL position distance
+metric: WAL position distance
+metric: Observed inactive for
+fix: Identify the standby or backup client that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; inactivity does not establish abandonment.
+sql: SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='old_standby';
+verify: Re-read this exact slot's activity and native WAL positions, and confirm with the standby or backup operator whether replication is progressing as expected.
 
 id: replica-lag:debezium_slot
-title: The logical slot debezium_slot keeps 3.0 GB of WAL while its consumer is away
-summary: A replication slot keeps every WAL file its consumer hasn't confirmed. debezium_slot has no consumer connected, so the WAL it holds keeps growing. It is a logical slot: a subscription or a CDC tool (Debezium, Fivetran, Airbyte…) reads changes through it, and many connect only between syncs. Dropping it makes that consumer copy everything again. max_slot_wal_keep_size caps what it can keep: 2.0 GB more WAL and PostgreSQL gives the slot up, so the disk is safe, but its consumer then has to start over.
-impact: 3.0 GB of WAL kept
-metric: WAL kept
-metric: WAL left before it is given up
-fix: Find its consumer first: the slot's name and plugin usually say which subscription or connector it is. If it still syncs, leave the slot: it catches up when the consumer connects. If the consumer is gone for good, drop it.
-sql: -- Only once its consumer is gone for good: dropping it makes the consumer copy everything again
--- SELECT pg_drop_replication_slot('debezium_slot');
-verify: Re-scan once the consumer has synced: the WAL kept should drop, or the slot be gone.
+title: Logical slot debezium_slot is inactive; its WAL position distance is 3.0 GB
+summary: The slot debezium_slot has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a logical slot for a subscription or CDC connector; some consumers connect only between syncs. Removing the slot can require rebuilding its consumer. The slot's reported WAL safety margin is 2.0 GB. Required WAL can be removed at a checkpoint under the configured retention limit, interrupting the consumer. Confirm disk headroom separately.
+impact: 3.0 GB WAL position distance
+metric: WAL position distance
+metric: WAL safety margin
+fix: Identify the subscription or connector that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; an inactive observation does not establish abandonment.
+sql: SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='debezium_slot';
+verify: Re-read this exact slot's activity and native WAL positions, and confirm with the consumer's operator whether replication is progressing as expected.
 
 id: replica-lag:airbyte
-title: The logical slot airbyte keeps 2.0 GB of WAL while its consumer is away
-summary: A replication slot keeps every WAL file its consumer hasn't confirmed. airbyte has no consumer connected, so the WAL it holds keeps growing. It is a logical slot: a subscription or a CDC tool (Debezium, Fivetran, Airbyte…) reads changes through it, and many connect only between syncs. Dropping it makes that consumer copy everything again. max_slot_wal_keep_size caps what it can keep: 5.0 GB more WAL and PostgreSQL gives the slot up, so the disk is safe, but its consumer then has to start over.
-impact: 2.0 GB of WAL kept
-metric: WAL kept
-metric: WAL left before it is given up
-fix: Find its consumer first: the slot's name and plugin usually say which subscription or connector it is. If it still syncs, leave the slot: it catches up when the consumer connects. If the consumer is gone for good, drop it.
-sql: -- Only once its consumer is gone for good: dropping it makes the consumer copy everything again
--- SELECT pg_drop_replication_slot('airbyte');
-verify: Re-scan once the consumer has synced: the WAL kept should drop, or the slot be gone.
+title: Logical slot airbyte is inactive; its WAL position distance is 2.0 GB
+summary: The slot airbyte has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a logical slot for a subscription or CDC connector; some consumers connect only between syncs. Removing the slot can require rebuilding its consumer. The slot's reported WAL safety margin is 5.0 GB. Required WAL can be removed at a checkpoint under the configured retention limit, interrupting the consumer. Confirm disk headroom separately.
+impact: 2.0 GB WAL position distance
+metric: WAL position distance
+metric: WAL safety margin
+fix: Identify the subscription or connector that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; an inactive observation does not establish abandonment.
+sql: SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='airbyte';
+verify: Re-read this exact slot's activity and native WAL positions, and confirm with the consumer's operator whether replication is progressing as expected.
 
 id: replica-lag:unknown_cap
-title: The inactive replication slot unknown_cap keeps 2.0 GB of WAL
-summary: A replication slot keeps every WAL file its consumer hasn't confirmed. unknown_cap has no consumer connected, so the WAL it holds keeps growing. It is a physical slot: a standby or a backup tool streams WAL through it. Unless max_slot_wal_keep_size caps what slots keep, it grows until the disk fills and the server stops accepting writes.
-impact: 2.0 GB of WAL kept
-metric: WAL kept
-fix: If nothing will stream through this slot again (a standby that was removed), drop it. If max_slot_wal_keep_size isn't set, cap what slots may keep so none can fill the disk: Set max_slot_wal_keep_size to 50GB and reload the configuration (settings marked as needing a restart take effect after one).
-sql: SELECT pg_drop_replication_slot('unknown_cap');
--- If max_slot_wal_keep_size isn't set, cap what any slot may keep:
-ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';
-SELECT pg_reload_conf();
-verify: Re-scan: the slot should be gone, or active again.
+title: Replication slot unknown_cap is inactive; its WAL position distance is 2.0 GB
+summary: The slot unknown_cap has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a physical slot: a standby or a backup tool streams WAL through it. The slot's configured WAL retention limit was not established. Check max_slot_wal_keep_size, actual disk headroom and consumer progress before changing retention.
+impact: 2.0 GB WAL position distance
+metric: WAL position distance
+fix: Identify the standby or backup client that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; inactivity does not establish abandonment.
+sql: SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='unknown_cap';
+verify: Re-read this exact slot's activity and native WAL positions, and confirm with the standby or backup operator whether replication is progressing as expected.
 
 id: replica-lag:logical_unknown
-title: The logical slot logical_unknown keeps 2.0 GB of WAL while its consumer is away
-summary: A replication slot keeps every WAL file its consumer hasn't confirmed. logical_unknown has had no consumer for 1 h, so the WAL it holds keeps growing. It is a logical slot: a subscription or a CDC tool (Debezium, Fivetran, Airbyte…) reads changes through it, and many connect only between syncs. Dropping it makes that consumer copy everything again. Unless max_slot_wal_keep_size caps what slots keep, it grows until the disk fills and the server stops accepting writes.
-impact: 2.0 GB of WAL kept
-metric: WAL kept
-metric: Without a consumer for
-fix: Find its consumer first: the slot's name and plugin usually say which subscription or connector it is. If it still syncs, leave the slot: it catches up when the consumer connects. If the consumer is gone for good, drop it. If max_slot_wal_keep_size isn't set, cap what slots may keep so none can fill the disk: Set max_slot_wal_keep_size to 50GB and reload the configuration (settings marked as needing a restart take effect after one).
-sql: -- Only once its consumer is gone for good: dropping it makes the consumer copy everything again
--- SELECT pg_drop_replication_slot('logical_unknown');
--- If max_slot_wal_keep_size isn't set, cap what any slot may keep:
-ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';
-SELECT pg_reload_conf();
-verify: Re-scan once the consumer has synced: the WAL kept should drop, or the slot be gone.
+title: Logical slot logical_unknown is inactive; its WAL position distance is 2.0 GB
+summary: The slot logical_unknown has been inactive for 1 h. The reported value is a native WAL position distance; actual retained files, disk occupancy and consumer intent are not established. It is a logical slot for a subscription or CDC connector; some consumers connect only between syncs. Removing the slot can require rebuilding its consumer. The slot's configured WAL retention limit was not established. Check max_slot_wal_keep_size, actual disk headroom and consumer progress before changing retention.
+impact: 2.0 GB WAL position distance
+metric: WAL position distance
+metric: Observed inactive for
+fix: Identify the subscription or connector that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; an inactive observation does not establish abandonment.
+sql: SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='logical_unknown';
+verify: Re-read this exact slot's activity and native WAL positions, and confirm with the consumer's operator whether replication is progressing as expected.
 
 id: replica-lag:old_server_slot
-title: The inactive replication slot old_server_slot keeps 2.0 GB of WAL
-summary: A replication slot keeps every WAL file its consumer hasn't confirmed. old_server_slot has no consumer connected, so the WAL it holds keeps growing. It is a physical slot: a standby or a backup tool streams WAL through it. Before PostgreSQL 13 nothing can cap it: it grows until the disk fills and the server stops accepting writes.
-impact: 2.0 GB of WAL kept
-metric: WAL kept
-fix: If nothing will stream through this slot again (a standby that was removed), drop it. PostgreSQL 13 and later can cap what slots keep (max_slot_wal_keep_size).
-sql: SELECT pg_drop_replication_slot('old_server_slot');
-verify: Re-scan: the slot should be gone, or active again."#,
+title: Replication slot old_server_slot is inactive; its WAL position distance is 2.0 GB
+summary: The slot old_server_slot has no active consumer in this observation. The reported value is a native WAL position distance; actual retained files, disk occupancy and expected use are not established. It is a physical slot: a standby or a backup tool streams WAL through it. This PostgreSQL version does not provide max_slot_wal_keep_size. Continued WAL generation can increase retained files; check actual disk headroom and consumer progress.
+impact: 2.0 GB WAL position distance
+metric: WAL position distance
+fix: Identify the standby or backup client that uses this exact slot and confirm its expected activity with its operator. Inspect the slot and WAL retention before planning any change; inactivity does not establish abandonment.
+sql: SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='old_server_slot';
+verify: Re-read this exact slot's activity and native WAL positions, and confirm with the standby or backup operator whether replication is progressing as expected."#,
+    );
+}
+
+#[test]
+fn a_native_lost_slot_is_reported_without_a_size_or_inactivity_inference() {
+    use culprit_core::{Replica, ReplicaRole::Slot};
+    let findings = lagging(
+        "postgres-demo",
+        None,
+        vec![Replica { wal_status: Some("lost".into()), ..Replica::new("lost_consumer", Slot) }],
+    );
+    says(
+        &findings,
+        r#"id: replica-lag:lost_consumer
+title: Replication slot lost_consumer is no longer usable
+summary: PostgreSQL reports wal_status=lost for this slot. The slot cannot continue serving its consumer; this does not identify the responsible workload or establish current disk pressure.
+impact: native slot verdict: unusable
+fix: Identify the consumer and coordinate a recovery or rebuild using its documented procedure. Inspect this exact slot and the consumer's state before changing replication configuration.
+sql: SELECT slot_name,slot_type,active,active_pid,restart_lsn,confirmed_flush_lsn ,pg_catalog.to_jsonb(s)->>'wal_status' AS wal_status ,pg_catalog.to_jsonb(s)->>'invalidation_reason' AS invalidation_reason FROM pg_catalog.pg_replication_slots s WHERE slot_name='lost_consumer';
+verify: Re-read this exact slot's wal_status and confirm with the consumer's operator that replication has resumed from a usable slot."#,
     );
 }
 

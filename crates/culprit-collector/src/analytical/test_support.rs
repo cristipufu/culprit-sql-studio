@@ -89,6 +89,8 @@ mod native_failures;
 pub use native_failures::native_failure_evidence_cases;
 mod maintenance_progress;
 pub use maintenance_progress::maintenance_progress_evidence_cases;
+mod replication;
+pub use replication::{ReplicationCase, assert_replication_capture, replication_evidence, replication_evidence_cases};
 
 pub fn assert_memory_participants_capture(
     capture: &crate::analytical::evidence::EvidenceCapture,

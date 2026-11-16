@@ -8,9 +8,12 @@ const COMPILER_ADMISSION_ENTRIES: usize = 5;
 const CLEANUP_ENTRIES: usize = 5;
 const CLEANUP_BOUNDARY_REFERENCES: usize = 5;
 const PARTICIPANT_ENTRIES: usize = 5;
+const REPLICATION_ENTRIES: usize = 16;
 
 #[cfg(test)]
 mod compiler_admission_tests;
+#[cfg(test)]
+mod replication_tests;
 
 fn signal(s: &Signal) -> Value {
     json!({
@@ -95,6 +98,29 @@ pub fn report(report: &Report) -> Value {
             "session": t.session, "open_for": format::duration(t.seconds * 1000.0), "state": t.state_words(), "program": t.program,
         })),
     });
+    if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
+        match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {
+            Ok(evidence) => {
+                let (from, until) = evidence.context.bounds();
+                response["replication_evidence"] = json!({
+                    "title": evidence.title, "summary": evidence.summary,
+                    "sources": evidence.sources, "read_complete": evidence.read_complete,
+                    "read_context": {
+                        "native": evidence.context.native().is_some(),
+                        "observed_from": from, "observed_until": until,
+                    },
+                    "native_rows": evidence.native_rows, "observed_rows": evidence.observed_rows,
+                    "state_rows": evidence.state_rows, "presented_rows": evidence.presented_rows,
+                    "entries_limited": evidence.entries_limited,
+                    "entries": evidence.entries, "limitations": evidence.limitations,
+                });
+            }
+            Err(_) => {
+                response["replication_evidence_unavailable"] =
+                    json!(culprit_core::t!("mcp.waits.replication_unavailable"));
+            }
+        }
+    }
     if let Some(compilation) = &report.query_compilation {
         response["query_compilation"] = json!({
             "title": compilation.title,

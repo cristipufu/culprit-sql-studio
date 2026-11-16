@@ -24,9 +24,8 @@ state: string | null,
  */
 sync: string | null, 
 /**
- * How far behind it is beyond any apply delay it is configured with (`delay_seconds`). On a PostgreSQL standby,
- * counted only while it has received changes it hasn't replayed: with nothing to replay, the time since the last
- * replayed commit is how long the primary has been quiet, not lag.
+ * Native replication timing beyond an explicitly applicable configured delay. A last-replayed-commit age
+ * does not become replication latency merely because received WAL remains to be replayed.
  */
 lag_seconds: number | null, 
 /**

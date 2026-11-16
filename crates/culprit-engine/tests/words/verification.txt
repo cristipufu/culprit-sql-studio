@@ -44,14 +44,13 @@
 <sub>Scans Sun 12:13 UTC → Sun 13:13 UTC.</sub>
 
 === pg-demo.report.json
-**1 of 14 fixed; 13 still present. 1 new finding.**
+**1 of 13 fixed; 12 still present. 1 new finding.**
 
 - ✅ Fixed: A read from orders returns 247K rows (≈ 17.4 MB) per run (was 247K rows per run)
 - ⏳ Still present: orders is read in full to find rows by customer\_id (37.7 s of database time over the 5 hours since statistics were reset (23%))
   pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
 - ⏳ Still present: Planning takes almost all of the time of a read from orders (100% planning)
   pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
-- ⏳ Still present: The inactive replication slot analytics\_slot keeps 1.1 GB of WAL (1.1 GB of WAL kept)
 - ⏳ Still present: No update to wide is HOT: each one rewrites every index (0% HOT)
   pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
 - ⏳ Still present: A read from customers runs 8.2K times in 5 hours, one key at a time (129 ms of database time over the 5 hours since statistics were reset (&lt;1%))

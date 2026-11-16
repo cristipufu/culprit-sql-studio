@@ -14,6 +14,7 @@ import { waitKey } from "../lib/waits";
 import { fileIoKey, ioContext, recordedIoDetails, storageAverage } from "../lib/file-io";
 import { querySignalStatus, replicaState, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
 import { SignalTile } from "./Health";
+import { ReplicationEvidence } from "./ReplicationEvidence";
 
 /**
  * Signals beyond run time: what a query costs besides its duration (failed runs, planning, JIT, lock waits, log, result
@@ -345,7 +346,7 @@ function roleLabel(role: Replica["role"]): string {
 
 /** Replicas, this server's own lag when it is one, and replication slots. */
 export function Replication({ replicas, report }: { replicas: Replica[]; report: Report }) {
-  if (replicas.length === 0) return null;
+  if (replicas.length === 0) return report.replication ? <ReplicationEvidence key={report.snapshot.id} report={report.replication} /> : null;
   const worst = [...replicas].sort((a, b) => RANK[replicaStatus(report, a)] - RANK[replicaStatus(report, b)])[0]!;
   const ws = replicaStatus(report, worst);
   const finding = worstFinding(report, (f) => f.check === "replica-lag");
@@ -380,6 +381,7 @@ export function Replication({ replicas, report }: { replicas: Replica[]; report:
           </IoRow>
         ))}
       </div>
+      {report.replication && <ReplicationEvidence key={report.snapshot.id} report={report.replication} />}
     </section>
   );
 }
@@ -519,10 +521,10 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
         </section>
       ) : null;
     case "replica-lag":
-      return p?.replicas?.length ? (
+      return p?.replicas?.length || report.replication ? (
         <section>
           <h3>{t("ui.beyond_time.evidence")}</h3>
-          <Replication replicas={p.replicas} report={report} />
+          <Replication replicas={p?.replicas ?? []} report={report} />
         </section>
       ) : null;
     case "connection-churn": {

@@ -3,6 +3,7 @@ import type { FileIo } from "./FileIo";
 import type { NativeCounterSet } from "./NativeCounterSet";
 import type { OpenTransaction } from "./OpenTransaction";
 import type { Replica } from "./Replica";
+import type { ReplicationSnapshot } from "./ReplicationSnapshot";
 import type { RequestMemorySnapshot } from "./RequestMemorySnapshot";
 import type { RetentionSnapshot } from "./RetentionSnapshot";
 import type { Signal } from "./Signal";
@@ -32,6 +33,10 @@ files: Array<FileIo>,
  * Replicas and replication slots, and how far behind they are.
  */
 replicas: Array<Replica>, 
+/**
+ * Original replication points and native-source visibility; the legacy summary does not replace them.
+ */
+replication?: ReplicationSnapshot, 
 /**
  * Logical processors the server schedules work on (SQL Server `cpu_count`), when the engine says.
  */

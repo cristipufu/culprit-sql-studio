@@ -1070,7 +1070,10 @@ fn replicas_lagging_stopped_and_slots() {
     let titles: Vec<String> = ReplicaLagCheck.run(&s).into_iter().map(|f| f.title).collect();
     assert_eq!(
         titles,
-        vec!["The replica reporting is 2 min behind", "The inactive replication slot old_etl keeps 14.0 GB of WAL"]
+        vec![
+            "The replica reporting is 2 min behind",
+            "Replication slot old_etl is inactive; its WAL position distance is 14.0 GB"
+        ]
     );
     // What it finds holds in another language: it decides on the conditions, not on their words.
     let ids = |s: &Snapshot| ReplicaLagCheck.run(s).into_iter().map(|f| f.id).collect::<Vec<_>>();

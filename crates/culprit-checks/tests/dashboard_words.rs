@@ -994,7 +994,7 @@ Now Watch Right now: 2 sessions are waiting on another session's lock.
   item Session 54 · active: 2.0 s
 Now Unavailable Right now: Couldn't read sessions: Permission denied for pg_stat_activity
   detail: Everything else here comes from the latest scan.
-headline: 14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
+headline: 13 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
 headline: Nothing needs a look right now.
 headline: Nothing needs a look in what this scan can see; one tile has no data here.
 headline: Nothing needs a look in what this scan can see; 2 tiles have no data here."#;

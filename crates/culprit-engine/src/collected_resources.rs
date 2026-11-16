@@ -23,6 +23,8 @@ mod maintenance_progress;
 pub use maintenance_progress::maintenance_progress;
 mod current_request_work;
 pub use current_request_work::current_request_work;
+mod replication;
+pub use replication::replication;
 mod maintenance;
 pub use maintenance::maintenance;
 mod request_memory;

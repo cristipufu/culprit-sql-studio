@@ -260,7 +260,7 @@ Storage (average per operation, since start)
   tempdb · tempdev7                  reads     16 µs × 63      writes     33 µs × 60    
   tempdb · tempdev8                  reads     16 µs × 63      writes     33 µs × 60    
 $ culprit --format text findings x --report <repo>/fixtures/pg-demo.report.json
-14 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
+13 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
 
   1  ●  A read from orders returns 247K rows (≈ 17.4 MB) per run  · 247K rows per run
        big-result:9065391607317686058
@@ -268,32 +268,32 @@ $ culprit --format text findings x --report <repo>/fixtures/pg-demo.report.json
        filtered-scan:public.orders(customer_id)
   3  ●  Planning takes almost all of the time of a read from orders  · 100% planning
        planning-time:-967240904657798800
-  4  ●  The inactive replication slot analytics_slot keeps 1.1 GB of WAL  · 1.1 GB of WAL kept
-       replica-lag:analytics_slot
-  5  ●  No update to wide is HOT: each one rewrites every index  · 0% HOT
+  4  ●  No update to wide is HOT: each one rewrites every index  · 0% HOT
        hot-updates:archive.wide
-  6  ●  A read from customers runs 8.2K times in 5 hours, one key at a time  · 129 ms of database time over the 5 hours since statistics were reset (<1%)
+  5  ●  A read from customers runs 8.2K times in 5 hours, one key at a time  · 129 ms of database time over the 5 hours since statistics were reset (<1%)
        chatty-query:3432126458605143571
-  7  ●  order_items is read in full to find rows by product_id  · 6.8 s of database time over the 5 hours since statistics were reset (4%)
+  6  ●  order_items is read in full to find rows by product_id  · 6.8 s of database time over the 5 hours since statistics were reset (4%)
        filtered-scan:public.order_items(product_id)
-  8  ●  JIT compilation takes longer than running a read from products  · 98% JIT
+  7  ●  JIT compilation takes longer than running a read from products  · 98% JIT
        jit-overhead:6425265648074738764
-  9  ●  74% of wide is dead rows  · 126K dead rows
+  8  ●  74% of wide is dead rows  · 126K dead rows
        dead-rows:archive.wide
- 10  ●  order_items has no index on order_id, its foreign key to orders  · 1.0M rows unindexed
+  9  ●  order_items has no index on order_id, its foreign key to orders  · 1.0M rows unindexed
        unindexed-fk:public.order_items(order_id)
- 11  ●  orders_status_idx is covered by the wider orders_status_created_idx on orders  · 13.3 MB redundant
+ 10  ●  orders_status_idx is covered by the wider orders_status_created_idx on orders  · 13.3 MB redundant
        duplicate-index:public.orders.orders_status_idx
- 12  ●  products_sku_idx duplicates products_sku_key on products  · 328 KB redundant
+ 11  ●  products_sku_idx duplicates products_sku_key on products  · 328 KB redundant
        duplicate-index:public.products.products_sku_idx
- 13  ●  PostgreSQL resolved 1 deadlock since Oct 11  · 1 deadlock
+ 12  ●  PostgreSQL resolved 1 deadlock since Oct 11  · 1 deadlock
        deadlocks:counter
- 14  ●  The check constraint wide_touched_positive on wide was never validated  · 1 untrusted
+ 13  ●  The check constraint wide_touched_positive on wide was never validated  · 1 untrusted
        untrusted-constraint:archive.wide
 
-Information and history (3)
- 15  ○  A read from orders: Recorded temporary I/O
+Information and history (4)
+ 14  ○  A read from orders: Recorded temporary I/O
        temp-spill:9065391607317686058
+ 15  ○  Replication slot analytics_slot is inactive; its WAL position distance is 1.1 GB
+       replica-lag:analytics_slot
  16  ○  An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%)
        heavy-query:4911431806993420100
  17  ○  A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping
@@ -356,14 +356,14 @@ $ culprit --format text dashboard <repo>/fixtures/pg-demo.report.json
 pg-demo · PostgreSQL 18.6 · demo
 pg_stat_statements, the 5 hours since statistics were reset · local · scanned <age>
 
-Needs a look: 14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
+Needs a look: 13 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
 
 ● Database time     Database time is steady: 3 min over the 5 hours since statistics were reset.
                     Database time 3 min · Runs 12K · Covers 5 hours
                     → culprit changes pg-demo
 
-● Findings          14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
-                    High 0 · Medium 4 · Low 10 · Information and history 3
+● Findings          13 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
+                    High 0 · Medium 3 · Low 10 · Information and history 4
                     ● A read from orders returns 247K rows (≈ 17.4 MB) per run  247K rows per run
                     ● orders is read in full to find rows by customer_id  37.7 s of database time over the 5 hours since statistics were reset (23%)
                     ● Planning takes almost all of the time of a read from orders  100% planning
@@ -427,8 +427,8 @@ Needs a look: 14 opportunities; the top ones touch 2 min of database time over t
                     ○ Sessions the client abandoned  1.09%
                     → culprit waits pg-demo
 
-● Replication       The inactive replication slot analytics_slot keeps 1.1 GB of WAL.
-                    ● analytics_slot (slot)  1.1 GB of log
+○ Replication       Replication state recorded for 1 copy.
+                    ○ analytics_slot (slot)  1.1 GB of log
                     → culprit waits pg-demo
 
 ○ Failing queries   PostgreSQL doesn't count failed runs per statement; its log does (log_min_error_statement).
@@ -1039,30 +1039,30 @@ $ culprit --format md analyze <repo>/fixtures/pg-demo.report.json
 
 PostgreSQL 18.6 · database `demo` · Sun Oct 11 11:54 UTC
 
-**14 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).**
+**13 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).**
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
 | 1 | Needs attention | A read from orders returns 247K rows (≈ 17.4 MB) per run | 247K rows per run | `big-result:9065391607317686058` |
 | 2 | Needs attention | orders is read in full to find rows by customer_id | 37.7 s of database time over the 5 hours since statistics were reset (23%) | `filtered-scan:public.orders(customer_id)` |
 | 3 | Needs attention | Planning takes almost all of the time of a read from orders | 100% planning | `planning-time:-967240904657798800` |
-| 4 | Needs attention | The inactive replication slot analytics_slot keeps 1.1 GB of WAL | 1.1 GB of WAL kept | `replica-lag:analytics_slot` |
-| 5 | Optional improvement | No update to wide is HOT: each one rewrites every index | 0% HOT | `hot-updates:archive.wide` |
-| 6 | Optional improvement | A read from customers runs 8.2K times in 5 hours, one key at a time | 129 ms of database time over the 5 hours since statistics were reset (&lt;1%) | `chatty-query:3432126458605143571` |
-| 7 | Optional improvement | order_items is read in full to find rows by product_id | 6.8 s of database time over the 5 hours since statistics were reset (4%) | `filtered-scan:public.order_items(product_id)` |
-| 8 | Optional improvement | JIT compilation takes longer than running a read from products | 98% JIT | `jit-overhead:6425265648074738764` |
-| 9 | Optional improvement | 74% of wide is dead rows | 126K dead rows | `dead-rows:archive.wide` |
-| 10 | Optional improvement | order_items has no index on order_id, its foreign key to orders | 1.0M rows unindexed | `unindexed-fk:public.order_items(order_id)` |
-| 11 | Optional improvement | orders_status_idx is covered by the wider orders_status_created_idx on orders | 13.3 MB redundant | `duplicate-index:public.orders.orders_status_idx` |
-| 12 | Optional improvement | products_sku_idx duplicates products_sku_key on products | 328 KB redundant | `duplicate-index:public.products.products_sku_idx` |
-| 13 | Optional improvement | PostgreSQL resolved 1 deadlock since Oct 11 | 1 deadlock | `deadlocks:counter` |
-| 14 | Optional improvement | The check constraint wide_touched_positive on wide was never validated | 1 untrusted | `untrusted-constraint:archive.wide` |
+| 4 | Optional improvement | No update to wide is HOT: each one rewrites every index | 0% HOT | `hot-updates:archive.wide` |
+| 5 | Optional improvement | A read from customers runs 8.2K times in 5 hours, one key at a time | 129 ms of database time over the 5 hours since statistics were reset (&lt;1%) | `chatty-query:3432126458605143571` |
+| 6 | Optional improvement | order_items is read in full to find rows by product_id | 6.8 s of database time over the 5 hours since statistics were reset (4%) | `filtered-scan:public.order_items(product_id)` |
+| 7 | Optional improvement | JIT compilation takes longer than running a read from products | 98% JIT | `jit-overhead:6425265648074738764` |
+| 8 | Optional improvement | 74% of wide is dead rows | 126K dead rows | `dead-rows:archive.wide` |
+| 9 | Optional improvement | order_items has no index on order_id, its foreign key to orders | 1.0M rows unindexed | `unindexed-fk:public.order_items(order_id)` |
+| 10 | Optional improvement | orders_status_idx is covered by the wider orders_status_created_idx on orders | 13.3 MB redundant | `duplicate-index:public.orders.orders_status_idx` |
+| 11 | Optional improvement | products_sku_idx duplicates products_sku_key on products | 328 KB redundant | `duplicate-index:public.products.products_sku_idx` |
+| 12 | Optional improvement | PostgreSQL resolved 1 deadlock since Oct 11 | 1 deadlock | `deadlocks:counter` |
+| 13 | Optional improvement | The check constraint wide_touched_positive on wide was never validated | 1 untrusted | `untrusted-constraint:archive.wide` |
 
-## Information and history (3)
+## Information and history (4)
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
-| 15 | Information | A read from orders: Recorded temporary I/O |  | `temp-spill:9065391607317686058` |
+| 14 | Information | A read from orders: Recorded temporary I/O |  | `temp-spill:9065391607317686058` |
+| 15 | Information | Replication slot analytics_slot is inactive; its WAL position distance is 1.1 GB | 1.1 GB WAL position distance | `replica-lag:analytics_slot` |
 | 16 | History | An update of products takes 19.0 s of database time over the 5 hours since statistics were reset (12%) | 19.0 s of database time over the 5 hours since statistics were reset (12%) | `heavy-query:4911431806993420100` |
 | 17 | History | A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping | 20.0 s of database time over the 5 hours since statistics were reset (12%) | `heavy-query:-8886085649470066503` |
 $ culprit --format md dashboard <repo>/fixtures/pg-demo.report.json
@@ -1070,10 +1070,10 @@ $ culprit --format md dashboard <repo>/fixtures/pg-demo.report.json
 
 _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11 11:54 UTC_
 
-**Needs a look:** 14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
+**Needs a look:** 13 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
 
 - **Database time** (fine): Database time is steady: 3 min over the 5 hours since statistics were reset.
-- **Findings** (worth a look): 14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
+- **Findings** (worth a look): 13 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
   - A read from orders returns 247K rows (≈ 17.4 MB) per run — 247K rows per run
   - orders is read in full to find rows by customer_id — 37.7 s of database time over the 5 hours since statistics were reset (23%)
   - Planning takes almost all of the time of a read from orders — 100% planning
@@ -1109,7 +1109,7 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
   - Connections in use (whole server) — 6.19%
   - Average session length — 1.3 s
   - Sessions the client abandoned — 1.09%
-- **Replication** (worth a look): The inactive replication slot analytics_slot keeps 1.1 GB of WAL.
+- **Replication** (for context): Replication state recorded for 1 copy.
   - analytics_slot (slot) — 1.1 GB of log
 - **Failing queries** (not available here): PostgreSQL doesn't count failed runs per statement; its log does (log_min_error_statement).
 - **Query statistics** (fine): pg_stat_statements covers the 5 hours since statistics were reset: 19 queries, 12 with plans.

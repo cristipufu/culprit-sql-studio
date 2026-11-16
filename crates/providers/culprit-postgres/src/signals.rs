@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use culprit_core::{
-    ConstraintIssue, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, Setting, Signal, SignalScope,
-    SignalUnit, Snapshot, TableStorage, t,
+    ConstraintIssue, Coverage, FileIo, FileKind, Pressure, QueryStat, Setting, Signal, SignalScope, SignalUnit,
+    Snapshot, TableStorage, t,
 };
 use tokio_postgres::Client;
 
@@ -52,11 +52,26 @@ pub async fn collect(client: &Client, probe: &Probe, snapshot: &mut Snapshot) {
     if probe.version_num >= 140_000 {
         pressure.signals.extend(coverage.read(&sources::SESSIONS, sessions(client).await).unwrap_or_default());
     }
+    let mut replication_io = client;
     if probe.version_num >= 100_000
-        && let Some(replicas) =
-            coverage.read(&sources::REPLICATION, replicas(client, probe.version_num, probe.platform).await)
+        && let Some(acquired) = coverage
+            .read(&sources::REPLICATION, crate::native::replication::acquire(&mut replication_io, probe.platform).await)
     {
-        pressure.replicas = replicas;
+        if acquired.profile_unavailable {
+            coverage.not_applicable(
+                &sources::REPLICATION,
+                culprit_core::message!("provider.postgres.coverage.replication_profile_unavailable"),
+            );
+        } else if !acquired.complete_visibility {
+            coverage.partial(
+                &sources::REPLICATION,
+                culprit_core::message!("provider.postgres.coverage.replication_hidden"),
+            );
+        } else {
+            coverage.completed(&sources::REPLICATION, acquired.snapshot.observations.len());
+        }
+        pressure.replicas = acquired.replicas;
+        pressure.replication = Some(Box::new(acquired.snapshot));
     }
     coverage.append_to(snapshot);
 }
@@ -552,23 +567,6 @@ fn session_signals(
         );
     }
     out
-}
-
-/// Replication uses the same native relation and decoder as background capture.
-async fn replicas(
-    client: &Client,
-    version_num: u32,
-    platform: Option<culprit_core::Platform>,
-) -> culprit_core::Result<Vec<Replica>> {
-    let context=query_one(client,"SELECT pg_catalog.pg_is_in_recovery() AS standby,(SELECT oid::text FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()) AS database_oid").await?.ok_or_else(crate::native::invalid)?;
-    let standby = crate::native::flag(&context, "standby")?;
-    if standby && platform == Some(culprit_core::Platform::AmazonAurora) {
-        return Ok(vec![]);
-    }
-    let database_oid = crate::native::text(&context, "database_oid")?;
-    let rows = query(client, &crate::native::replication::query(version_num, standby, &database_oid, 100_001)).await?;
-    let facts = rows.iter().map(crate::native::replication::decode).collect::<culprit_core::Result<Vec<_>>>()?;
-    Ok(facts.iter().filter_map(|row| crate::native::replication::project(&row.fact)).collect())
 }
 
 #[cfg(test)]

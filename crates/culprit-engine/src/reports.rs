@@ -45,6 +45,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         maintenance_progress: &'a Option<culprit_core::MaintenanceProgressReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        replication: &'a Option<Box<culprit_core::ReplicationReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
@@ -64,6 +66,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         maintenance_progress,
+        replication,
         evidence: _,
         cleanup,
     } = report;
@@ -84,6 +87,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         query_compilation,
         compiler_admission,
         maintenance_progress,
+        replication,
         cleanup,
     }
 }
@@ -956,6 +960,29 @@ mod tests {
         fs::remove_file(dir.join(format!("{}.summary.json", report.snapshot.id))).unwrap();
         assert!(list(&dir).unwrap().is_empty());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn client_reports_keep_unavailable_replication_evidence_without_retained_replay_copies() {
+        use culprit_core::telemetry::*;
+        use std::time::SystemTime;
+        let mut snapshot = fixture_report("20261021T100000.000Z", 60).snapshot;
+        snapshot.pressure.get_or_insert_default().replication = Some(Box::new(ReplicationSnapshot {
+            context: ReplicationReadContext::collector(SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH).unwrap(),
+            sources: vec![StateSourceCoverage::unavailable(
+                "replication-channels".into(),
+                culprit_core::ErrorCode::PermissionDenied,
+                Some(CollectionStop::SourceUnavailable),
+            )],
+            observations: vec![],
+        }));
+        let report = culprit_checks::analyze(snapshot);
+        let explanation = report.replication.as_ref().expect("native source unavailability remains visible");
+        assert!(explanation.entries.is_empty());
+        assert_eq!(explanation.sources[0].state, culprit_core::SourceState::Unavailable);
+        let client = serde_json::to_value(display(&report)).unwrap();
+        assert_eq!(client["replication"], serde_json::to_value(explanation).unwrap());
+        assert!(client.get("evidence").is_none());
     }
 
     #[test]

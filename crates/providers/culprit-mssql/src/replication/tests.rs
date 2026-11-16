@@ -1,4 +1,5 @@
 use super::*;
+mod breadth;
 use crate::{
     resources::test_support::{FakeRead, replace},
     value::Val,
@@ -13,13 +14,28 @@ fn observed(part: selection::Part) -> Vec<ReplicationFact> {
     facts
 }
 pub(crate) fn layout(enabled: Val, lag: i64) -> Rec {
-    Rec::of(&[("hadr_enabled", enabled), ("lag_column", Val::Int(lag)), ("primary_column", Val::Int(1))])
+    Rec::of(&[
+        ("hadr_enabled", enabled),
+        ("lag_column", Val::Int(lag)),
+        ("primary_column", Val::Int(1)),
+        ("distributed_column", Val::Int(1)),
+        ("basic_column", Val::Int(1)),
+        ("dtc_column", Val::Int(1)),
+        ("database_failover_column", Val::Int(1)),
+        ("cluster_column", Val::Int(1)),
+        ("required_secondaries_column", Val::Int(1)),
+        ("sequence_column", Val::Int(1)),
+        ("seeding_column", Val::Int(1)),
+        ("read_write_routing_column", Val::Int(1)),
+    ])
 }
 pub(crate) fn availability() -> Rec {
     Rec::of(&[
         ("group_id", Val::Text(ID.into())),
         ("group_database_id", Val::Text(ID.into())),
         ("replica_id", Val::Text(ID.into())),
+        ("database_id", Val::Int(5)),
+        ("database_name", Val::Text("shop".into())),
         ("native_name", Val::Text("secondary".into())),
         ("is_local", Val::Int(0)),
         ("is_primary", Val::Int(0)),
@@ -35,6 +51,77 @@ pub(crate) fn availability() -> Rec {
         ("log_send_rate_kb_per_second", Val::Null),
         ("redo_rate_kb_per_second", Val::Int(0)),
         ("secondary_lag_seconds", Val::Int(31)),
+        ("is_commit_participant", Val::Int(0)),
+        ("database_state", Val::Int(0)),
+        ("native_database_state", Val::Text("ONLINE".into())),
+        ("native_synchronization_health", Val::Text("NOT_HEALTHY".into())),
+        ("native_suspend_reason", Val::Text("SUSPEND_FROM_REDO".into())),
+        ("filestream_send_rate_kb_per_second", Val::Int(0)),
+        ("low_water_mark_for_ghosts", Val::Null),
+        ("recovery_lsn", Val::Text("9999999999999999999999999".into())),
+        ("truncation_lsn", Val::Null),
+        ("last_sent_lsn", Val::Text("9007199254740993".into())),
+        ("last_received_lsn", Val::Null),
+        ("last_hardened_lsn", Val::Text("0".into())),
+        ("last_redone_lsn", Val::Text("42".into())),
+        ("end_of_log_lsn", Val::Null),
+        ("last_commit_lsn", Val::Text("41".into())),
+        ("last_sent_without_offset", Val::Text("2020-01-01T01:00:00.003".into())),
+        ("last_received_without_offset", Val::Null),
+        ("last_hardened_without_offset", Val::Null),
+        ("last_redone_without_offset", Val::Text("2020-01-01T01:00:01.007".into())),
+        ("last_commit_without_offset", Val::Text("2020-01-01T01:00:00.000".into())),
+        ("group_catalog_id", Val::Text(ID.into())),
+        ("group_state_id", Val::Text(ID.into())),
+        ("group_name", Val::Text("shop-group".into())),
+        ("group_primary_replica", Val::Text("primary".into())),
+        ("group_primary_recovery_health", Val::Int(1)),
+        ("group_native_primary_recovery_health", Val::Text("ONLINE".into())),
+        ("group_secondary_recovery_health", Val::Null),
+        ("group_native_secondary_recovery_health", Val::Null),
+        ("group_synchronization_health", Val::Int(1)),
+        ("group_native_synchronization_health", Val::Text("PARTIALLY_HEALTHY".into())),
+        ("group_failure_condition_level", Val::Int(3)),
+        ("group_health_check_timeout_ms", Val::Int(30_000)),
+        ("group_automated_backup_preference", Val::Int(2)),
+        ("group_native_automated_backup_preference", Val::Text("SECONDARY".into())),
+        ("group_is_distributed", Val::Int(0)),
+        ("group_is_basic", Val::Int(0)),
+        ("group_dtc_support", Val::Int(0)),
+        ("group_database_failover", Val::Int(0)),
+        ("group_cluster_type", Val::Int(0)),
+        ("group_native_cluster_type", Val::Text("WSFC".into())),
+        ("group_required_secondaries", Val::Int(0)),
+        ("group_configuration_sequence", Val::Int(9_007_199_254_740_993)),
+        ("replica_catalog_id", Val::Text(ID.into())),
+        ("replica_state_id", Val::Text(ID.into())),
+        ("replica_role", Val::Int(2)),
+        ("replica_native_role", Val::Text("SECONDARY".into())),
+        ("replica_operational_state", Val::Null),
+        ("replica_native_operational_state", Val::Null),
+        ("replica_connected_state", Val::Int(0)),
+        ("replica_native_connected_state", Val::Text("DISCONNECTED".into())),
+        ("replica_recovery_health", Val::Null),
+        ("replica_native_recovery_health", Val::Null),
+        ("replica_synchronization_health", Val::Int(0)),
+        ("replica_native_synchronization_health", Val::Text("NOT_HEALTHY".into())),
+        ("replica_last_connect_error_number", Val::Int(35206)),
+        ("replica_last_connect_error_without_offset", Val::Text("2020-01-01T00:59:00.003".into())),
+        ("replica_failover_mode", Val::Int(1)),
+        ("replica_native_failover_mode", Val::Text("MANUAL".into())),
+        ("replica_session_timeout_seconds", Val::Int(10)),
+        ("replica_primary_role_allow_connections", Val::Int(2)),
+        ("replica_native_primary_role_allow_connections", Val::Text("ALL".into())),
+        ("replica_secondary_role_allow_connections", Val::Int(1)),
+        ("replica_native_secondary_role_allow_connections", Val::Text("READ_ONLY".into())),
+        ("replica_seeding_mode", Val::Int(1)),
+        ("replica_native_seeding_mode", Val::Text("MANUAL".into())),
+        ("replica_endpoint_url", Val::Text("TCP://native-replica.invalid:5022".into())),
+        ("replica_read_only_routing_url", Val::Text("TCP://read-replica.invalid:1433".into())),
+        ("replica_read_write_routing_url", Val::Null),
+        ("replica_backup_priority", Val::Int(50)),
+        ("replica_created_without_offset", Val::Text("2020-01-01T00:00:00.003".into())),
+        ("replica_modified_without_offset", Val::Text("2020-01-01T00:30:00.003".into())),
     ])
 }
 pub(crate) fn primary() -> Rec {
@@ -42,6 +129,10 @@ pub(crate) fn primary() -> Rec {
         &availability(),
         &[
             ("replica_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("replica_catalog_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("replica_state_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("replica_role", Val::Int(1)),
+            ("replica_native_role", Val::Text("PRIMARY".into())),
             ("native_name", Val::Text("primary".into())),
             ("is_local", Val::Int(1)),
             ("is_primary", Val::Int(1)),
@@ -54,10 +145,14 @@ pub(crate) fn geo() -> Rec {
         ("partner_server", Val::Text("replica.example".into())),
         ("partner_database", Val::Text("shop".into())),
         ("role", Val::Int(0)),
+        ("native_role", Val::Text("PRIMARY".into())),
+        ("secondary_allow_connections", Val::Int(2)),
+        ("native_secondary_allow_connections", Val::Text("All".into())),
         ("state", Val::Int(2)),
         ("native_state", Val::Text("CATCH_UP".into())),
         ("lag_seconds", Val::Int(3)),
         ("last_replication_at", Val::Text("2020-01-01T01:00:00+01:00".into())),
+        ("last_commit_at", Val::Text("2020-01-01T01:00:00.1234567+01:00".into())),
     ])
 }
 #[tokio::test]
@@ -98,6 +193,8 @@ async fn unknown_roles_and_missing_metadata_are_retained_without_inventing_repli
         &availability(),
         &[
             ("replica_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("replica_catalog_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("replica_state_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
             ("is_local", Val::Int(1)),
             ("is_primary", Val::Int(1)),
         ],
@@ -192,7 +289,12 @@ async fn local_secondary_scope_comes_from_shared_native_facts_without_another_se
     let mut settings = Vec::new();
     let unknown = replace(
         &availability(),
-        &[("is_local", Val::Null), ("replica_id", Val::Text("22222222-2222-3333-4444-555555555555".into()))],
+        &[
+            ("is_local", Val::Null),
+            ("replica_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("replica_catalog_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+            ("replica_state_id", Val::Text("22222222-2222-3333-4444-555555555555".into())),
+        ],
     );
     let mut reader = FakeRead::new(vec![Ok(vec![layout(Val::Int(1), 1)]), Ok(vec![unknown, availability()])]);
     let facts = observed(read(&mut reader, 3, Selection::AvailabilityGroup, 100).await.unwrap());

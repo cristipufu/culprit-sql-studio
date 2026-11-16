@@ -118,7 +118,7 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, compilerAdmission && compilerAdmissionReport, cleanup, cleanupUnexplained].some(Boolean);
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, compilerAdmission && compilerAdmissionReport, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, compilerAdmissionIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (

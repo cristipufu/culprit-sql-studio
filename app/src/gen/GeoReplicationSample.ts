@@ -4,8 +4,12 @@ export type GeoReplicationSample = { link_id: string, partner_server: string | n
 /**
  * Native local-endpoint role: 0 primary, 1 secondary. Other codes remain unknown.
  */
-role: number | null, state: number | null, native_state: string | null, 
+role: number | null, native_role: string | null, state: number | null, native_state: string | null, 
 /**
  * These measurements are available on the primary only; absence is never zero lag.
  */
-lag_seconds: string | null, last_replication_at: string | null, };
+lag_seconds: string | null, last_replication_at: string | null, secondary_allow_connections: number | null, native_secondary_allow_connections: string | null, 
+/**
+ * Local endpoint's last committed transaction time, retaining its native offset as an instant.
+ */
+last_commit_at: string | null, };

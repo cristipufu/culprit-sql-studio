@@ -35,21 +35,34 @@ impl SelectedRead {
         qualified: bool,
         qualification_error: Option<ErrorCode>,
     ) -> (Vec<TelemetryRecord>, Vec<StateSourceCoverage>) {
+        let (observations, sources) = self.into_observations(ReadAuthority::Native { qualified, qualification_error });
+        (observations.into_iter().map(TelemetryRecord::Replication).collect(), sources)
+    }
+
+    /// A confirmed scan retains query visibility; its separate Collector context supplies no native member proof.
+    pub(super) fn into_scan_observations(self) -> (Vec<ReplicationObservation>, Vec<StateSourceCoverage>) {
+        self.into_observations(ReadAuthority::Collector)
+    }
+
+    fn into_observations(self, authority: ReadAuthority) -> (Vec<ReplicationObservation>, Vec<StateSourceCoverage>) {
         let mut records = Vec::new();
         let mut sources = Vec::new();
         for part in self.parts {
             match part {
                 Part::Observed { selection, facts, complete } => {
                     let source = selection.source();
+                    let (qualified, qualification_error) = match authority {
+                        ReadAuthority::Collector => (true, None),
+                        ReadAuthority::Native { qualified, qualification_error } => (qualified, qualification_error),
+                    };
                     let mut coverage =
                         StateSourceCoverage::observed(source.into(), facts.len() as u32, complete && qualified);
                     if !qualified {
                         coverage.error_code = qualification_error;
                     }
                     sources.push(coverage);
-                    records.extend(facts.into_iter().map(|fact| {
-                        TelemetryRecord::Replication(ReplicationObservation { source: source.into(), fact })
-                    }));
+                    records
+                        .extend(facts.into_iter().map(|fact| ReplicationObservation { source: source.into(), fact }));
                 }
                 Part::Unavailable { selection, error } => {
                     sources.push(StateSourceCoverage::unavailable(selection.source().into(), error.code, None))
@@ -58,6 +71,12 @@ impl SelectedRead {
         }
         (records, sources)
     }
+}
+
+#[derive(Clone, Copy)]
+enum ReadAuthority {
+    Native { qualified: bool, qualification_error: Option<ErrorCode> },
+    Collector,
 }
 
 pub(crate) async fn read_selected<R: NativeRead>(reader: &mut R, edition: i64, limit: usize) -> Result<SelectedRead> {
@@ -100,7 +119,9 @@ fn scope_complete(selection: Selection, facts: &[ReplicationFact]) -> bool {
             }) && facts.iter().all(|fact| {
                 matches!(fact, ReplicationFact::AvailabilityGroup(row)
                     if row.is_local.is_some() && row.is_primary.is_some()
-                        && row.native_name.is_some() && row.mode.is_some() && row.state.is_some())
+                        && row.native_name.is_some() && row.mode.is_some() && row.state.is_some()
+                        && row.group.as_ref().is_some_and(|context| context.catalog_observed && context.state_observed)
+                        && row.replica.as_ref().is_some_and(|context| context.catalog_observed && context.state_observed))
             })
         }
     }

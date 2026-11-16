@@ -5,4 +5,4 @@
  * replica-lag decides on, said from the catalog ([`Replica::state_words`]). `Reported` leaves the engine's own word in
  * [`Replica::state`].
  */
-export type ReplicaCondition = "reported" | "replicating" | "receiving_stopped" | "applying_stopped" | "stopped" | "left_configured" | "stopped_by_hand" | "not_receiving" | "restoring_from_archive" | "not_streaming" | "slot_active" | "slot_inactive";
+export type ReplicaCondition = "reported" | "replicating" | "receiving_stopped" | "applying_stopped" | "stopped" | "threads_stopped" | "not_receiving" | "restoring_from_archive" | "not_streaming" | "slot_active" | "slot_inactive";

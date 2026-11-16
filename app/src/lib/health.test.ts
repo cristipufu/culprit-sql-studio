@@ -8,6 +8,7 @@ import type { Report } from "../gen/Report";
 import type { QueryStat } from "../gen/QueryStat";
 import { findingStatus, querySignalStatus, replicaState, replicaStatus, storageStatus } from "./health";
 import { partial } from "../test/fixtures";
+import { t } from "./i18n";
 
 const check = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
 const finding = (extra: Partial<Finding>): Finding => {
@@ -78,4 +79,12 @@ test("A replica's state is its condition said from the catalog, or the engine's 
   check(replicaState(replica({ condition: "receiving_stopped", state: "Connecting" })) === "receiving stopped (I/O thread: Connecting)", "The I/O thread's own value stays inside the words");
   check(replicaState(replica({ condition: "slot_inactive" })) === "inactive", "A slot says whether a consumer is attached");
   check(replicaState(replica({ condition: "stopped", state: "NOT SYNCHRONIZING" })) === "NOT SYNCHRONIZING", "A stop the engine words keeps its word");
+});
+
+test("Stopped native threads remain informational without inventing manual stop or promotion intent", () => {
+  for (const role of ["this-server", "replica"] as const) {
+    const replica = partial<Replica>({ name: "channel", role, condition: "threads_stopped", state: "independent native context" });
+    check(replicaState(replica) === t("model.replica.state.stopped"), "Both stopped threads use the neutral stopped label");
+    check(replicaStatus(report([]), replica) === "info", "A thread state alone cannot create a health warning");
+  }
 });

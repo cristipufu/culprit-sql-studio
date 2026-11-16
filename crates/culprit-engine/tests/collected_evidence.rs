@@ -20,6 +20,7 @@ mod page_waits;
 mod page_writers;
 mod plan_groups;
 mod populations;
+mod replication;
 mod request_memory;
 mod runtime_distributions;
 mod session_memory;

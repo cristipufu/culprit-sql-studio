@@ -120,7 +120,7 @@ slow-storage      Storage that's slow to read or write
 connection-churn  Applications that connect for every request
                   SQL Server, PostgreSQL, MySQL/MariaDB · New connections per second since startup (SQL Server logins, PostgreSQL 14+ sessions, MySQL and MariaDB Connections), with how long sessions last and how many came from a pool where the engine says.
 replica-lag       Replicas that fall behind
-                  SQL Server, PostgreSQL, MySQL/MariaDB · Replicas far behind the primary or stopped, and PostgreSQL replication slots that keep WAL for a consumer that's gone: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS.
+                  SQL Server, PostgreSQL, MySQL/MariaDB · Replicas reported behind or stopped, PostgreSQL slots with no active consumer and native WAL position distance, and slots the source reports as lost: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS.
 last-actual-plans  Actual plans without re-running queries
                   SQL Server · SQL Server 2019+ can keep each query's last actual plan (LAST_QUERY_PLAN_STATS) and report live per-operator progress (LIGHTWEIGHT_QUERY_PROFILING).
 $ culprit --format text sources

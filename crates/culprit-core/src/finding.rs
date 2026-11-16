@@ -412,6 +412,10 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub maintenance_progress: Option<crate::MaintenanceProgressReport>,
+    /// Native replication points retain original scope, clocks and availability independently of legacy summaries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub replication: Option<Box<crate::ReplicationReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cleanup: Option<crate::CleanupReport>,

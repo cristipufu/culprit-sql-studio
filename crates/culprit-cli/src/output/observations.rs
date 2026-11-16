@@ -84,6 +84,72 @@ pub(crate) fn cleanup(report: &culprit_core::CleanupReport) -> String {
     )
 }
 
+pub(crate) fn replication(report: &culprit_core::ReplicationReport) -> String {
+    let (from, until) = report.context.bounds();
+    render_summary(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Multiple(&report.sources),
+            limitations: &report.limitations,
+        },
+        |text| {
+            text.push('\n');
+            text.push_str(&t!("evidence.cli.replication_bounds", from = from, until = until));
+            text.push('\n');
+            text.push_str(&t!(
+                "evidence.cli.replication_counts",
+                native = format::digits(report.native_rows.to_string()),
+                observed = format::digits(report.observed_rows.to_string()),
+                states = format::digits(report.state_rows.to_string()),
+                presented = format::digits(report.presented_rows.to_string()),
+                printed = format::digits(report.entries.len().min(super::BRIEF_FINDING_LIMIT).to_string())
+            ));
+            for entry in report.entries.iter().take(super::BRIEF_FINDING_LIMIT) {
+                append_replication_entry(text, entry);
+            }
+            for limitation in report.limitations.iter().skip(1) {
+                text.push('\n');
+                text.push_str(limitation);
+            }
+        },
+    )
+}
+
+fn append_replication_entry(text: &mut String, entry: &culprit_core::ReplicationEntry) {
+    text.push_str("\n• ");
+    text.push_str(&t!("evidence.cli.observation_entry", title = &entry.title, explanation = &entry.explanation));
+    text.push('\n');
+    text.push_str(&t!(
+        "evidence.cli.replication_reference",
+        source = &entry.reference.source,
+        scope = culprit_core::wire_name(&entry.scope),
+        key = &entry.reference.observation_key
+    ));
+    if !entry.conditions.is_empty() {
+        text.push('\n');
+        text.push_str(&format::list(&entry.conditions.iter().map(|condition| condition.label()).collect::<Vec<_>>()));
+    }
+    append_replication_fields(text, &entry.fields);
+    for group in &entry.groups {
+        text.push('\n');
+        text.push_str(&group.title);
+        append_replication_fields(text, &group.fields);
+    }
+}
+
+fn append_replication_fields(text: &mut String, fields: &[culprit_core::ReplicationField]) {
+    for field in fields {
+        let value = match field.value.as_deref() {
+            None => t!("evidence.cli.replication_unknown"),
+            Some("") => t!("evidence.cli.replication_empty"),
+            Some(value) => value.into(),
+        };
+        text.push('\n');
+        text.push_str(&t!("evidence.cli.replication_field", label = &field.label, value = value));
+    }
+}
+
 pub(crate) fn tuning(report: &culprit_core::TuningReport) -> String {
     let title = report.title.render();
     let summary = report.summary.render();
@@ -456,6 +522,147 @@ fn append_native_sources(text: &mut String, sources: &[SourceOutcome]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn replication_report() -> culprit_core::ReplicationReport {
+        use culprit_core::{
+            ReplicationEntry, ReplicationField, ReplicationFieldGroup, ReplicationReference, telemetry::*,
+        };
+        culprit_core::ReplicationReport {
+            context: ReplicationReadContext::Native {
+                context: Box::new(NativeReadContext {
+                    target: culprit_core::DatabaseIdentity::server(
+                        culprit_core::Engine::Mysql,
+                        "app",
+                        "private-cli-replication-member.invalid",
+                        3306,
+                        None,
+                    )
+                    .into(),
+                    partition: SourcePartition::Target,
+                    observed_from: "2026-11-16T10:00:00Z".into(),
+                    observed_until: "2026-11-16T10:00:01Z".into(),
+                    database_writable: None,
+                }),
+            },
+            sources: vec![SourceOutcome {
+                source: "replication-channels".into(),
+                state: SourceState::Partial,
+                reason: Some("Native visibility is incomplete.".into()),
+                reason_message: None,
+            }],
+            read_complete: false,
+            native_rows: 7,
+            observed_rows: 5,
+            state_rows: 1,
+            presented_rows: 5,
+            entries_limited: false,
+            title: "Native replication".into(),
+            summary: "Five original points.".into(),
+            limitations: vec![
+                "A recorded error is not an application owner.".into(),
+                "The archive read is incomplete.".into(),
+            ],
+            entries: (0..5)
+                .map(|i| ReplicationEntry {
+                    reference: ReplicationReference {
+                        source: "replication-channels".into(),
+                        observation_key: format!("point-{i}"),
+                    },
+                    scope: culprit_core::MeasurementScope::Server,
+                    conditions: vec![culprit_core::ReplicationCondition::ReceiverStopped],
+                    title: format!("Channel-{i}"),
+                    explanation: "Original native state.".into(),
+                    fields: vec![ReplicationField {
+                        key: "received-source-log-position".into(),
+                        label: "Received position".into(),
+                        value: Some(format::digits("9007199254740993".into())),
+                    }],
+                    groups: vec![ReplicationFieldGroup {
+                        title: "Recorded coordinates".into(),
+                        fields: vec![
+                            ReplicationField {
+                                key: "source_log_file".into(),
+                                label: "Source file".into(),
+                                value: Some("bin.000007".into()),
+                            },
+                            ReplicationField {
+                                key: "io_error_at_without_offset".into(),
+                                label: "Native error time".into(),
+                                value: Some("261115 01:02:03".into()),
+                            },
+                            ReplicationField {
+                                key: "configured-delay".into(),
+                                label: "Configured delay".into(),
+                                value: Some("0".into()),
+                            },
+                            ReplicationField {
+                                key: "source_uuid".into(),
+                                label: "Source identifier".into(),
+                                value: None,
+                            },
+                            ReplicationField {
+                                key: "channel".into(),
+                                label: "Native channel name".into(),
+                                value: Some("".into()),
+                            },
+                        ],
+                    }],
+                    session: None,
+                    unresolved_session_id: None,
+                    investigation: String::new(),
+                    verify: String::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn replication_text_keeps_exact_fields_refs_read_gaps_and_an_explicit_printed_entry_bound() {
+        culprit_core::i18n::scope("en", || {
+            let report = replication_report();
+            let text = replication(&report);
+            assert!(text.contains(&format::digits("9007199254740993".into())));
+            assert!(text.contains("bin.000007") && text.contains("261115 01:02:03"));
+            assert!(text.contains("Recorded coordinates") && text.contains("2026-11-16T10:00:00Z"));
+            assert!(text.contains(&t!("evidence.cli.replication_field", label = "Configured delay", value = "0")));
+            assert!(
+                text.contains(&t!("evidence.cli.replication_unknown"))
+                    && text.contains(&t!("evidence.cli.replication_empty"))
+            );
+            assert!(text.contains(&t!(
+                "evidence.cli.replication_counts",
+                native = "7",
+                observed = "5",
+                states = "1",
+                presented = "5",
+                printed = "3"
+            )));
+            assert!(text.contains("point-0") && text.contains("point-2"));
+            assert!(!text.contains("point-3") && !text.contains("Channel-3"));
+            assert!(
+                text.contains("Native visibility is incomplete.") && text.contains("The archive read is incomplete.")
+            );
+            assert!(!text.contains("private-cli-replication-member") && !text.contains("9007199254740992"));
+        });
+    }
+
+    #[test]
+    fn replication_empty_partial_and_unavailable_text_keep_independent_source_qualification() {
+        for (state, key) in [
+            (SourceState::Empty, "evidence.cli.native_source.empty"),
+            (SourceState::Partial, "evidence.cli.native_source.partial"),
+            (SourceState::Unavailable, "evidence.cli.native_source.unavailable"),
+        ] {
+            let mut report = replication_report();
+            report.sources[0].state = state;
+            report.entries.clear();
+            report.presented_rows = 0;
+            let text = replication(&report);
+            assert!(text.contains(&culprit_core::i18n::t(key, &[("source", "replication-channels".into())])));
+            assert!(text.contains("Native visibility is incomplete."));
+            assert!(!text.contains("point-0"));
+        }
+    }
 
     #[test]
     fn query_sections_keep_exact_native_context_and_distinguish_unknown_from_unpartitioned_history() {

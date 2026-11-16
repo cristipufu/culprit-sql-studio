@@ -134,6 +134,7 @@ enum Family {
     PlanDefinitions,
     QueryRuntime,
     QueryWaits,
+    ReplicationSamples,
 }
 impl From<Family> for EvidenceFamily {
     fn from(family: Family) -> Self {
@@ -147,6 +148,7 @@ impl From<Family> for EvidenceFamily {
             Family::PlanDefinitions => Self::PlanDefinitions,
             Family::QueryRuntime => Self::QueryRuntime,
             Family::QueryWaits => Self::QueryWaits,
+            Family::ReplicationSamples => Self::ReplicationSamples,
         }
     }
 }
@@ -171,6 +173,7 @@ enum Analysis {
     Maintenance,
     MaintenanceProgress,
     CurrentRequestWork,
+    Replication,
     Cleanup,
     Tuning,
 }
@@ -180,6 +183,7 @@ impl Analysis {
             Self::Maintenance => vec![EvidenceFamily::ActivityObservations],
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
+            Self::Replication => vec![EvidenceFamily::ReplicationSamples],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
                 EvidenceFamily::PlanDefinitions,
@@ -314,6 +318,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::CurrentRequestWork) => {
             let analysis = culprit_engine::collected_resources::current_request_work(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::current_request_work(&analysis.report))?;
+        }
+        Some(Analysis::Replication) => {
+            let analysis = culprit_engine::collected_resources::replication(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::replication(&analysis.report))?;
         }
         Some(Analysis::Tuning) => {
             let analysis = culprit_engine::collected_resources::tuning(&capture)?;

@@ -8,6 +8,7 @@ use crate::finding::Finding;
 use crate::model::{Engine, Snapshot};
 
 mod plan;
+mod replication;
 mod sql;
 #[cfg(test)]
 mod tests;
@@ -525,6 +526,8 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
                 if e.is_empty() { "".into() } else { "Replication error details omitted from shared data.".into() }
             });
         }
+        // A failed re-key cannot leave a raw native identity in the shared snapshot.
+        p.replication = p.replication.take().and_then(|read| replication::redact(read).ok());
     }
     for space in &mut s.operations.spaces {
         space.name = shareable_name(&space.name);

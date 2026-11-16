@@ -20,6 +20,7 @@ pub mod native_failures;
 pub mod page_waits;
 pub(crate) mod plan_advice;
 pub mod plan_view;
+pub mod replication;
 pub mod request_memory;
 pub mod runtime_distributions;
 pub mod session_memory;

@@ -117,6 +117,13 @@ pub struct CollectedCurrentRequestWorkAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedReplicationAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::ReplicationReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedTuningAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::TuningReport,

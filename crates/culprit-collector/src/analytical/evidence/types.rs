@@ -34,6 +34,7 @@ impl RecoveryPayloadBudget {
 pub enum EvidenceFamily {
     ResourceSamples,
     OperationalSamples,
+    ReplicationSamples,
     ActivityObservations,
     ObjectDefinitions,
     TuningObservations,
@@ -46,6 +47,7 @@ impl EvidenceFamily {
     pub const ALL: &[Self] = &[
         Self::ResourceSamples,
         Self::OperationalSamples,
+        Self::ReplicationSamples,
         Self::ActivityObservations,
         Self::ObjectDefinitions,
         Self::TuningObservations,
@@ -59,6 +61,7 @@ impl EvidenceFamily {
         match self {
             Self::ResourceSamples => TelemetryStream::ResourceSamples,
             Self::OperationalSamples => TelemetryStream::OperationalSamples,
+            Self::ReplicationSamples => TelemetryStream::ReplicationSamples,
             Self::ActivityObservations => TelemetryStream::ActivityObservations,
             Self::ObjectDefinitions => TelemetryStream::ObjectDefinitions,
             Self::TuningObservations => TelemetryStream::TuningObservations,
