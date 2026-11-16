@@ -4,6 +4,8 @@ use culprit_core::{Engine, MeasurementScope, SourceState};
 
 mod bound_joins;
 pub use bound_joins::object_definition_bound_join_evidence;
+mod memory_feedback;
+pub use memory_feedback::{MemoryFeedbackCase, memory_feedback_evidence, memory_feedback_evidence_cases};
 
 const OBSERVED_FROM: &str = "2020-01-01T12:00:00Z";
 const OBSERVED_UNTIL: &str = "2020-01-01T12:00:01Z";
@@ -293,6 +295,20 @@ fn source(engine: Engine, dataset: SnapshotDataset, count: usize, state: SourceS
             }],
         }),
     }
+}
+
+fn qualified_source(dataset: SnapshotDataset, count: usize, state: SourceState) -> CollectionDescription {
+    let mut source = source(Engine::Mssql, dataset, count, state);
+    source.partition = SourcePartition::InstanceLocal {
+        member: Some(SharedResourceIdentity {
+            engine: Engine::Mssql,
+            kind: SharedResourceKind::Instance,
+            namespace: NativeIdentity::new("private-cache-machine-canary"),
+            native: NativeIdentity::new("private-cache-instance-canary"),
+        }),
+        epoch: Some("native-cache-epoch-a".into()),
+    };
+    source
 }
 
 fn case(

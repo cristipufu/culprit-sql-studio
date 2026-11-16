@@ -123,3 +123,63 @@ fn the_selected_native_operator_cannot_borrow_another_spills_sort_advice() {
     assert!(finding.title.contains("Hash Match"));
     assert!(!finding.fix.unwrap().summary.contains("required order"));
 }
+
+#[test]
+fn a_native_disabled_feedback_verdict_adds_context_without_replacing_the_spill_or_its_advice() {
+    let mut snapshot = snapshot(NodeKind::Sort, "Sort");
+    let baseline = spill(&snapshot);
+    let plan = snapshot.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap();
+    plan.facts.memory_grant_feedback = Some(PlanMemoryGrantFeedback {
+        state: PlanMemoryGrantFeedbackState::DisabledUnstable,
+        previous_grant_kb: Some("9007199254740993".into()),
+        runtime_observed: true,
+        issues: vec![],
+    });
+    let finding = spill(&snapshot);
+    assert!(finding.metrics.iter().any(|metric| metric.is("check.plan_warnings.metric.memory_feedback")));
+    assert_eq!(finding.severity, baseline.severity);
+    assert_eq!(finding.confidence, baseline.confidence);
+    assert_eq!(finding.fix.as_ref().unwrap().summary, baseline.fix.as_ref().unwrap().summary);
+    assert!(finding.fix.as_ref().unwrap().sql.is_none());
+    assert_eq!(finding.facts.cause, Some(culprit_core::FindingCause::Spill));
+    assert_eq!(finding.verify[0], baseline.verify[0]);
+    assert_eq!(finding.verify.len(), 2);
+    assert_eq!(
+        finding.summary,
+        t!(
+            "check.plan_warnings.summary.spill_with_feedback",
+            spill = baseline.summary,
+            feedback = t!("insight.memory_grant_feedback.detail")
+        )
+    );
+    let facts = &snapshot.queries()[0].plan.as_ref().unwrap().facts;
+    assert_eq!(facts.memory_requested_kb, Some(8192.0));
+    assert_eq!(facts.memory_granted_kb, Some(512.0));
+}
+
+#[test]
+fn healthy_unknown_estimated_and_runtime_free_feedback_cannot_become_a_spill_mechanism() {
+    for (state, runtime_observed, kind) in [
+        (PlanMemoryGrantFeedbackState::Stable, true, PlanKind::Actual),
+        (PlanMemoryGrantFeedbackState::AccurateGrant, true, PlanKind::Actual),
+        (PlanMemoryGrantFeedbackState::Unrecognized, true, PlanKind::Actual),
+        (PlanMemoryGrantFeedbackState::DisabledUnstable, false, PlanKind::Actual),
+        (PlanMemoryGrantFeedbackState::DisabledUnstable, true, PlanKind::Estimated),
+    ] {
+        let mut snapshot = snapshot(NodeKind::Sort, "Sort");
+        snapshot.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap().kind = kind;
+        let baseline = spill(&snapshot);
+        let plan = snapshot.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap();
+        plan.props.insert("IsMemoryGrantFeedbackAdjusted".into(), "No: Feedback disabled".into());
+        plan.facts.memory_grant_feedback = Some(PlanMemoryGrantFeedback {
+            state,
+            previous_grant_kb: Some("8192".into()),
+            runtime_observed,
+            issues: vec![],
+        });
+        let finding = spill(&snapshot);
+        assert!(!finding.metrics.iter().any(|metric| metric.is("check.plan_warnings.metric.memory_feedback")));
+        assert_eq!(finding.summary, baseline.summary);
+        assert_eq!(finding.verify, baseline.verify);
+    }
+}

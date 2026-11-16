@@ -6,6 +6,7 @@ use culprit_core::{
 use roxmltree::{Document, Node};
 
 mod cached_definitions;
+mod memory_feedback;
 mod parameters;
 mod relational_inputs;
 mod scan_completion;
@@ -262,7 +263,7 @@ enum StatementSelection<'a> {
     Native(Option<&'a str>),
 }
 
-fn query_plan_of<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
+pub(crate) fn query_plan_of<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
     if node.has_tag_name_local("StmtSimple") {
         child(node, "QueryPlan")
     } else if node.has_tag_name_local("StmtCond") {
@@ -272,24 +273,44 @@ fn query_plan_of<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>>
     }
 }
 
+/// Native selection never substitutes another statement when the requested hash is missing or ambiguous. An
+/// independently statement-scoped payload without a hash must contain exactly one candidate.
+pub(crate) fn select_native_statement<'a, 'input>(
+    doc: &'a Document<'input>,
+    query_hash: Option<&str>,
+) -> Result<Node<'a, 'input>> {
+    let mut matching = doc.descendants().filter(|node| {
+        query_plan_of(*node).is_some()
+            && query_hash.is_none_or(|hash| {
+                node.attribute("QueryHash").is_some_and(|native| native.eq_ignore_ascii_case(hash.trim()))
+            })
+    });
+    let statement = matching.next().ok_or_else(crate::read::invalid_data)?;
+    if matching.next().is_some() {
+        return Err(crate::read::invalid_data());
+    }
+    Ok(statement)
+}
+
+fn query_plan_has_runtime(query_plan: Node<'_, '_>) -> bool {
+    let number = |node: Node<'_, '_>, attribute: &str| {
+        node.attribute(attribute)?.parse::<f64>().ok().filter(|value| value.is_finite())
+    };
+    query_plan.descendants().any(|node| {
+        node.has_tag_name_local("RunTimeCountersPerThread")
+            && node.ancestors().find(|ancestor| ancestor.has_tag_name_local("QueryPlan")) == Some(query_plan)
+            && number(node, "ActualRows").is_some_and(|rows| rows >= 0.0)
+            && number(node, "ActualExecutions").is_some_and(|executions| executions >= 1.0 && executions.fract() == 0.0)
+    })
+}
+
 fn select_statement<'a, 'input>(
     doc: &'a Document<'input>,
     selection: StatementSelection<'_>,
 ) -> Result<Node<'a, 'input>> {
     let candidates = || doc.descendants().filter(|n| query_plan_of(*n).is_some());
     Ok(match selection {
-        StatementSelection::Native(hash) => {
-            let mut matching = candidates().filter(|node| {
-                hash.is_none_or(|hash| {
-                    node.attribute("QueryHash").is_some_and(|native| native.eq_ignore_ascii_case(hash.trim()))
-                })
-            });
-            let statement = matching.next().ok_or_else(crate::read::invalid_data)?;
-            if matching.next().is_some() {
-                return Err(crate::read::invalid_data());
-            }
-            statement
-        }
+        StatementSelection::Native(hash) => select_native_statement(doc, hash)?,
         StatementSelection::Pasted(hash) => hash
             .and_then(|hash| {
                 candidates().find(|node| {
@@ -457,6 +478,7 @@ fn statement_facts(statement: Node, plan: Node) -> culprit_core::PlanFacts {
         memory_granted_kb: memory("GrantedMemory"),
         memory_max_used_kb: memory("MaxUsedMemory"),
         memory_grant_wait_ms: memory("GrantWaitTime").and_then(|seconds| nonnegative(seconds * 1000.0)),
+        memory_grant_feedback: memory_feedback::read(plan),
         udf_elapsed_ms: timing("UdfElapsedTime"),
         udf_cpu_ms: timing("UdfCpuTime"),
         ..Default::default()
@@ -665,7 +687,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
     Ok(node)
 }
 
-fn operator_element<'a, 'i>(relop: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+pub(crate) fn operator_element<'a, 'i>(relop: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
     relop.children().rfind(|n| n.is_element() && !RELOP_METADATA.contains(&n.tag_name().name()))
 }
 

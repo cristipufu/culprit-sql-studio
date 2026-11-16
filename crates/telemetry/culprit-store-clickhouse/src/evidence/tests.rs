@@ -7,6 +7,7 @@ mod compiler_admission;
 mod diagnostics;
 mod focused_memory;
 mod maintenance_progress;
+mod memory_feedback;
 mod object_definitions;
 mod populations;
 mod queries;

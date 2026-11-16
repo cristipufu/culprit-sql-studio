@@ -263,6 +263,10 @@ describes only compiled/runtime representations in the same selected actual plan
 are not retained. That difference alone establishes neither parameter skew nor harmful cached-plan reuse.
 The derived report references exact definitions and omits duplicate SQL/XML and executable change SQL. Truncated
 warehouse previews remain explicit recovery gaps; this mode does not fetch the missing native body automatically.
+An actual SQL Server plan can also preserve the engine's verdict that unstable adjustments disabled memory grant
+feedback. The shared insight keeps prior-execution granted memory separate from current grants, spills and pressure;
+healthy feedback states and plans without matching runtime evidence do not produce this diagnosis. It requires no
+additional source query and does not establish harmful parameter reuse.
 Add `--with-recovery-payloads` to either `read` or `analyze` to permit bounded native recovery reads. For example:
 
 ```sh

@@ -145,7 +145,8 @@ pub use plan_diff::{
 };
 pub use plan_facts::{
     PlanAutomaticIndex, PlanChangedColumn, PlanConversion, PlanConversionIssue, PlanExecutionMode, PlanFacts,
-    PlanIndexColumns, PlanNodeFacts, PlanParentRelationship, PlanSampleSource,
+    PlanIndexColumns, PlanMemoryGrantFeedback, PlanMemoryGrantFeedbackIssue, PlanMemoryGrantFeedbackState,
+    PlanNodeFacts, PlanParentRelationship, PlanSampleSource,
 };
 pub use plan_view::{PlanInsightShare, PlanOperatorView, PlanView};
 pub use platform::Platform;

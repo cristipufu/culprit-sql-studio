@@ -9,7 +9,7 @@ pub fn object_definition_bound_join_evidence() -> Vec<(CollectionDescription, Ve
 
 fn bound_join(sql: &str, raw_xml: &str, retained: bool) -> (CollectionDescription, Vec<TelemetryRecord>) {
     let dataset = if retained { SnapshotDataset::RetainedPlans } else { SnapshotDataset::CachedDefinitions };
-    let source = qualified_source(dataset);
+    let source = qualified_source(dataset, 1, SourceState::Collected);
     let mut definition = cached_definition();
     definition.context.query_hash = Some("0x1023456789ABCDEF".into());
     definition.statement = cached_payload(sql, DefinitionPayload::sql);
@@ -46,20 +46,6 @@ fn bound_join(sql: &str, raw_xml: &str, retained: bool) -> (CollectionDescriptio
         ObjectDefinitionRecord::new("native-object-definitions".into(), fact).unwrap(),
     );
     (source, vec![record])
-}
-
-fn qualified_source(dataset: SnapshotDataset) -> CollectionDescription {
-    let mut source = source(Engine::Mssql, dataset, 1, SourceState::Collected);
-    source.partition = SourcePartition::InstanceLocal {
-        member: Some(SharedResourceIdentity {
-            engine: Engine::Mssql,
-            kind: SharedResourceKind::Instance,
-            namespace: NativeIdentity::new("private-cache-machine-canary"),
-            native: NativeIdentity::new("private-cache-instance-canary"),
-        }),
-        epoch: Some("native-cache-epoch-a".into()),
-    };
-    source
 }
 
 fn retained_xml(raw: &str) -> String {

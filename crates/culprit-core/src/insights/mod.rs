@@ -129,6 +129,9 @@ pub struct PlanInsights {
     pub scan_context: Option<bool>,
 }
 
+/// Native feedback and spill consumers reference the same independent mechanism insight.
+pub const MEMORY_GRANT_FEEDBACK_RULE: &str = "memory-grant-feedback";
+
 /// Every rule, for docs and `culprit checks`-style listings: (id, engines, one line).
 pub const RULES: &[(&str, &[Engine], RuleLine)] = &[
     ("deep-pagination", ALL, RuleLine(key!("insight.deep_pagination.rule"))),
@@ -148,6 +151,7 @@ pub const RULES: &[(&str, &[Engine], RuleLine)] = &[
     ("automatic-index", &[Engine::Sqlite], RuleLine(key!("insight.automatic_index.rule"))),
     ("spill", ALL, RuleLine(key!("insight.spill.rule"))),
     ("memory-grant", &[Engine::Mssql], RuleLine(key!("insight.memory_grant.rule"))),
+    (MEMORY_GRANT_FEEDBACK_RULE, &[Engine::Mssql], RuleLine(key!("insight.memory_grant_feedback.rule"))),
     ("misestimate", ALL, RuleLine(key!("insight.misestimate.rule"))),
     ("relational-input-access", ALL, RuleLine(key!("insight.relational_input_access.rule"))),
     ("parameter-context", ALL, RuleLine(key!("insight.parameter_context.rule"))),
@@ -292,6 +296,7 @@ pub fn insights(plan: &Plan) -> Vec<PlanInsight> {
         automatic_index,
         spill,
         memory_grant,
+        memory::memory_grant_feedback,
         misestimate,
         parameters::context,
         nested_loops,

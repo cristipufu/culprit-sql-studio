@@ -342,10 +342,9 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
         }
         Warned::Spill { node } => {
             f.facts.cause = Some(culprit_core::FindingCause::Spill);
+            let native_insights = q.plan.as_ref().map(culprit_core::insights::insights).unwrap_or_default();
             let insight = node.and_then(|node| {
-                culprit_core::insights::insights(q.plan.as_ref()?)
-                    .into_iter()
-                    .find(|insight| insight.rule == "spill" && insight.nodes.contains(&node))
+                native_insights.iter().find(|insight| insight.rule == "spill" && insight.nodes.contains(&node))
             });
             let fix = if let Some(insight) = insight {
                 f.title = t!(
@@ -353,15 +352,30 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
                     query = capitalize(&query),
                     observation = &insight.title
                 );
-                f.summary = insight.detail;
-                f.verify = vec![insight.verify];
-                insight.fix
+                f.summary = insight.detail.clone();
+                f.verify = vec![insight.verify.clone()];
+                insight.fix.clone()
             } else {
                 f.title = t!("check.plan_warnings.title.spill", query = capitalize(&query), tense = tense);
                 f.summary = t!("check.plan_warnings.summary.spill");
                 f.verify = vec![t!("check.plan_warnings.verify.spill")];
                 t!("check.plan_warnings.fix.spill")
             };
+            if let Some(feedback) = native_insights
+                .iter()
+                .find(|insight| insight.rule == culprit_core::insights::MEMORY_GRANT_FEEDBACK_RULE)
+            {
+                f.summary = t!(
+                    "check.plan_warnings.summary.spill_with_feedback",
+                    spill = &f.summary,
+                    feedback = t!("insight.memory_grant_feedback.detail")
+                );
+                f.metrics.push(Metric::said_text(
+                    culprit_core::key!("check.plan_warnings.metric.memory_feedback"),
+                    feedback.title.clone(),
+                ));
+                f.verify.push(feedback.verify.clone());
+            }
             f.fix = Some(Fix { summary: fix, sql: None, cost: None });
         }
         Warned::NoJoinPredicate(join) => {

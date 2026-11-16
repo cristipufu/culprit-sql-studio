@@ -1,5 +1,5 @@
 //! Parameter representations are compared only while their selected native XML is in memory. Values are discarded.
-use super::{LocalName, child, children};
+use super::{child, children, query_plan_has_runtime};
 use culprit_core::plan_facts::{
     MAX_PLAN_PARAMETERS, PlanParameter, PlanParameterComparison as Comparison, PlanParameterContext,
     PlanParameterIssue as Issue, PlanParameterValueState as State, parameter_name_is_valid, parameter_type_is_valid,
@@ -13,7 +13,7 @@ pub(super) fn read(query_plan: Node<'_, '_>) -> Option<PlanParameterContext> {
     child(query_plan, "ParameterList")?;
     let lists = || children(query_plan, "ParameterList");
     let ambiguous = lists().take(2).count() > 1;
-    let runtime = !ambiguous && has_runtime_evidence(query_plan);
+    let runtime = !ambiguous && query_plan_has_runtime(query_plan);
     let mut issues = BTreeSet::new();
     if ambiguous {
         issues.insert(Issue::InvalidMetadata);
@@ -117,19 +117,6 @@ fn withhold_duplicate_comparisons(parameters: &mut [PlanParameter], issues: &mut
             parameter.comparison = Comparison::Unavailable;
         }
     }
-}
-
-fn has_runtime_evidence(query_plan: Node<'_, '_>) -> bool {
-    query_plan.descendants().any(|node| {
-        node.has_tag_name_local("RunTimeCountersPerThread")
-            && node.ancestors().find(|ancestor| ancestor.has_tag_name_local("QueryPlan")) == Some(query_plan)
-            && number(node, "ActualRows").is_some_and(|rows| rows >= 0.0)
-            && number(node, "ActualExecutions").is_some_and(|executions| executions >= 1.0 && executions.fract() == 0.0)
-    })
-}
-
-fn number(node: Node<'_, '_>, attribute: &str) -> Option<f64> {
-    node.attribute(attribute)?.parse::<f64>().ok().filter(|value| value.is_finite())
 }
 
 #[cfg(test)]

@@ -5,6 +5,8 @@ use ts_rs::TS;
 
 mod access_rows;
 pub use access_rows::PlanAccessRows;
+mod memory_feedback;
+pub use memory_feedback::{PlanMemoryGrantFeedback, PlanMemoryGrantFeedbackIssue, PlanMemoryGrantFeedbackState};
 mod parameters;
 pub use parameters::{
     MAX_PARAMETER_NAME_UTF16, MAX_PARAMETER_TYPE_BYTES, MAX_PLAN_PARAMETERS, PlanParameter, PlanParameterComparison,
@@ -68,6 +70,10 @@ pub struct PlanFacts {
     #[serde(default, skip_serializing_if = "Option::is_none", with = "nonnegative_number")]
     #[ts(as = "Option<f64>")]
     pub memory_grant_wait_ms: Option<f64>,
+    /// Native feedback belongs to this selected plan; it establishes neither parameter causation nor current load.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "memory_feedback::deserialize")]
+    #[ts(optional)]
+    pub memory_grant_feedback: Option<PlanMemoryGrantFeedback>,
     #[serde(default, skip_serializing_if = "Option::is_none", with = "nonnegative_number")]
     #[ts(as = "Option<f64>")]
     pub udf_elapsed_ms: Option<f64>,

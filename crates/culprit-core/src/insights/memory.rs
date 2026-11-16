@@ -2,6 +2,25 @@
 
 use super::*;
 
+pub(super) fn memory_grant_feedback(cx: &Cx) -> Vec<Draft> {
+    let Some(feedback) = crate::plan_facts::PlanMemoryGrantFeedback::disabled_in(cx.plan) else {
+        return Vec::new();
+    };
+    let mut concern = Draft::new(MEMORY_GRANT_FEEDBACK_RULE, InsightArea::Memory, 0.0, vec![cx.plan.root.id]);
+    concern.fixed_weight = true;
+    concern.cap = Severity::Low;
+    concern.title = t!("insight.memory_grant_feedback.title");
+    let mut detail = vec![t!("insight.memory_grant_feedback.detail")];
+    detail.extend(feedback.previous_grant_kb.as_ref().map(|kilobytes| {
+        t!("insight.memory_grant_feedback.previous_grant", kilobytes = format::digits(kilobytes.clone()))
+    }));
+    detail.push(t!("insight.memory_grant_feedback.limit"));
+    concern.detail = detail.join(" ");
+    concern.fix = t!("insight.memory_grant_feedback.fix");
+    concern.verify = t!("insight.memory_grant_feedback.verify");
+    vec![concern]
+}
+
 pub(super) fn memory_grant(cx: &Cx) -> Vec<Draft> {
     if cx.engine() != Engine::Mssql {
         return Vec::new();

@@ -3,6 +3,7 @@ import type { DocdbMetrics } from "./DocdbMetrics";
 import type { ExecutionProtection } from "./ExecutionProtection";
 import type { PlanChangedColumn } from "./PlanChangedColumn";
 import type { PlanConversion } from "./PlanConversion";
+import type { PlanMemoryGrantFeedback } from "./PlanMemoryGrantFeedback";
 import type { PlanParameterContext } from "./PlanParameterContext";
 import type { PlanSampleSource } from "./PlanSampleSource";
 import type { RetainedPlanProvenance } from "./RetainedPlanProvenance";
@@ -17,7 +18,11 @@ retained?: RetainedPlanProvenance,
  * Protection confirmed by the native provider for this measured execution. An imported or retained plan cannot
  * establish how Culprit executed it, and therefore leaves this unknown.
  */
-execution_protection?: ExecutionProtection, constants_redacted?: boolean, estimated_cost_unavailable?: boolean, elapsed_ms?: number | null, cpu_ms?: number | null, planning_ms?: number | null, compile_ms?: number | null, compile_cpu_ms?: number | null, compile_memory_kb?: number | null, memory_desired_kb?: number | null, memory_requested_kb?: number | null, memory_granted_kb?: number | null, memory_max_used_kb?: number | null, memory_grant_wait_ms?: number | null, udf_elapsed_ms?: number | null, udf_cpu_ms?: number | null, degree_of_parallelism?: number | null, used_threads?: number | null, cardinality_estimator?: number | null, cost_threshold_for_parallelism?: number | null, server_maxdop?: number | null, database_maxdop?: number | null, jit_time_ms?: number | null, trigger_timings: Array<TriggerTiming>, parallelism_blocker?: string | null, optimization_early_abort?: string | null, server_version?: string | null, flavor?: string | null, cost_basis?: string | null, generic_plan_reason?: string | null, statistics_maintenance?: string | null, compiled_parameters?: string | null, 
+execution_protection?: ExecutionProtection, constants_redacted?: boolean, estimated_cost_unavailable?: boolean, elapsed_ms?: number | null, cpu_ms?: number | null, planning_ms?: number | null, compile_ms?: number | null, compile_cpu_ms?: number | null, compile_memory_kb?: number | null, memory_desired_kb?: number | null, memory_requested_kb?: number | null, memory_granted_kb?: number | null, memory_max_used_kb?: number | null, memory_grant_wait_ms?: number | null, 
+/**
+ * Native feedback belongs to this selected plan; it establishes neither parameter causation nor current load.
+ */
+memory_grant_feedback?: PlanMemoryGrantFeedback, udf_elapsed_ms?: number | null, udf_cpu_ms?: number | null, degree_of_parallelism?: number | null, used_threads?: number | null, cardinality_estimator?: number | null, cost_threshold_for_parallelism?: number | null, server_maxdop?: number | null, database_maxdop?: number | null, jit_time_ms?: number | null, trigger_timings: Array<TriggerTiming>, parallelism_blocker?: string | null, optimization_early_abort?: string | null, server_version?: string | null, flavor?: string | null, cost_basis?: string | null, generic_plan_reason?: string | null, statistics_maintenance?: string | null, compiled_parameters?: string | null, 
 /**
  * Native parameter metadata from this selected plan, with value availability and a pre-redaction comparison.
  * The plan's retained/execution provenance remains separate; this does not describe a workload population.

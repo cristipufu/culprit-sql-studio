@@ -1,4 +1,5 @@
 mod compilation;
+mod memory_feedback;
 mod parameters;
 mod relational_inputs;
 mod spills;
@@ -2901,6 +2902,7 @@ rule eager-spool [Mssql]: A temporary index built on every run
 rule automatic-index [Sqlite]: SQLite builds a throwaway index on every run because none fits
 rule spill [Mssql, Postgres, Yugabyte, Mysql]: A sort or hash that ran out of memory and wrote to disk, or an exchange that spilled
 rule memory-grant [Mssql]: A memory grant far larger than what the query uses, or a wait for one
+rule memory-grant-feedback [Mssql]: Native memory grant feedback disabled after unstable adjustments
 rule misestimate [Mssql, Postgres, Yugabyte, Mysql]: Actual rows far from the estimate
 rule relational-input-access [Mssql, Postgres, Yugabyte, Mysql]: Recorded access exceeds the estimate for a relational input
 rule parameter-context [Mssql, Postgres, Yugabyte, Mysql]: Recorded runtime parameter representations differ from compilation
