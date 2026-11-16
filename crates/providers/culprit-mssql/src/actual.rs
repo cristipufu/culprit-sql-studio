@@ -3,17 +3,19 @@
 //! sys.dm_exec_query_statistics_xml). Nothing here runs the user's statement.
 
 use culprit_core::{
-    Engine, Error, ErrorCode, NodeProgress, NodeState, Plan, PlanKind, QueryProgress, Result, session_number, t,
+    Error, ErrorCode, NodeProgress, NodeState, Plan, PlanKind, Result, t,
     telemetry::{CollectionStop, RetainedActualPlan, RetainedActualPlanRequest, RetainedPlanProvenance},
 };
 
 mod layout;
+mod progress;
+pub(crate) use progress::query_progress;
 #[cfg(test)]
 mod native_tests;
 pub(crate) mod retained;
 use crate::conn::{Pool, permission_hint};
 use crate::plan_xml;
-use crate::read::{NativeRead, rows as query};
+use crate::read::NativeRead;
 use crate::value::Rec;
 pub(crate) use layout::{Availability, Layout};
 use std::sync::Arc;
@@ -156,45 +158,6 @@ pub(crate) fn clear_unrecorded_times(plan: &mut Plan) {
     }
 }
 
-const REQUEST_SQL: &str = r#"
-SELECT r.status, r.command, r.wait_type, r.wait_time, r.total_elapsed_time AS elapsed_ms, r.cpu_time AS cpu_ms,
-       r.logical_reads, r.percent_complete, CONVERT(varchar(20), r.query_hash, 1) AS query_hash,
-       SUBSTRING(t.text, r.statement_start_offset / 2 + 1,
-         (CASE r.statement_end_offset WHEN -1 THEN DATALENGTH(t.text) ELSE r.statement_end_offset END - r.statement_start_offset) / 2 + 1) AS statement_text,
-       CONVERT(nvarchar(max), sx.query_plan) AS live_plan,
-       qp.query_plan AS cached_plan
-  FROM sys.dm_exec_requests r
- OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
- OUTER APPLY sys.dm_exec_query_statistics_xml(r.session_id) sx
- OUTER APPLY sys.dm_exec_text_query_plan(r.plan_handle, r.statement_start_offset, r.statement_end_offset) qp
- WHERE r.session_id = {id}
-"#;
-
-/// Servers without sys.dm_exec_query_statistics_xml (2014 and older) or without permission to call it.
-const REQUEST_BASIC_SQL: &str = r#"
-SELECT r.status, r.command, r.wait_type, r.wait_time, r.total_elapsed_time AS elapsed_ms, r.cpu_time AS cpu_ms,
-       r.logical_reads, r.percent_complete, CONVERT(varchar(20), r.query_hash, 1) AS query_hash,
-       SUBSTRING(t.text, r.statement_start_offset / 2 + 1,
-         (CASE r.statement_end_offset WHEN -1 THEN DATALENGTH(t.text) ELSE r.statement_end_offset END - r.statement_start_offset) / 2 + 1) AS statement_text,
-       qp.query_plan AS cached_plan
-  FROM sys.dm_exec_requests r
- OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
- OUTER APPLY sys.dm_exec_text_query_plan(r.plan_handle, r.statement_start_offset, r.statement_end_offset) qp
- WHERE r.session_id = {id}
-"#;
-
-/// One row per operator, added up across threads. Lightweight profiling (the default) leaves the open/close timestamps
-/// at zero, so state comes from rows, scans finished and re-executions instead.
-const PROFILES_SQL: &str = r#"
-SELECT node_id, SUM(row_count) AS row_count, MAX(estimate_row_count) AS estimate_row_count,
-       MAX(elapsed_time_ms) AS elapsed_ms, SUM(cpu_time_ms) AS cpu_ms, SUM(logical_read_count) AS logical_reads,
-       SUM(end_of_scan_count) AS end_of_scans, SUM(rebind_count) + SUM(rewind_count) AS replays,
-       MIN(CASE WHEN close_time > 0 THEN 1 ELSE 0 END) AS closed
-  FROM sys.dm_exec_query_profiles
- WHERE session_id = {id}
- GROUP BY node_id
-"#;
-
 /// Why a running statement shows no per-operator progress.
 pub(crate) fn no_profiling() -> String {
     t!("provider.mssql.progress.no_profiling")
@@ -208,63 +171,6 @@ pub(crate) fn own_estimate(command: &str) -> String {
 fn metadata_unavailable() -> Error {
     Error::new(ErrorCode::PermissionDenied, t!("provider.mssql.actual.metadata_unavailable"))
         .with_hint("GRANT VIEW DEFINITION TO [<user>];")
-}
-async fn progress_rows<R: NativeRead>(reader: &mut R, id: u64) -> Result<(Vec<Rec>, Vec<Rec>)> {
-    let layout = Layout::read(reader).await?;
-    let sql = if layout.live_xml == Availability::Available { REQUEST_SQL } else { REQUEST_BASIC_SQL };
-    let request = query(reader, &sql.replace("{id}", &id.to_string())).await?;
-    let profiles = if layout.profiles == Availability::Available {
-        query(reader, &PROFILES_SQL.replace("{id}", &id.to_string())).await?
-    } else {
-        vec![]
-    };
-    Ok((request, profiles))
-}
-
-pub(crate) async fn query_progress(pool: &Arc<Pool>, session: &str) -> Result<QueryProgress> {
-    let id = session_number(session)?;
-    let taken_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    let (request, profiles) = pool.observe(|reader| Box::pin(async move { progress_rows(reader, id).await })).await?;
-    let mut progress = QueryProgress::unobserved(session, Engine::Mssql, taken_at);
-    let Some(r) = request.into_iter().next() else {
-        return Ok(progress);
-    };
-    progress.running = Some(true);
-    progress.state = r.str("status");
-    progress.wait = r.str("wait_type");
-    progress.wait_ms = r.f64("wait_time").filter(|w| *w > 0.0);
-    progress.elapsed_ms = r.f64("elapsed_ms");
-    progress.cpu_ms = r.f64("cpu_ms");
-    progress.logical_reads = r.f64("logical_reads");
-    progress.statement = r.str("statement_text").map(|s| s.trim().to_string());
-    let hash = r.str("query_hash");
-    let live = r.str("live_plan").and_then(|xml| plan_xml::parse_statement(&xml, hash.as_deref()).ok());
-    let plan =
-        live.or_else(|| r.str("cached_plan").and_then(|xml| plan_xml::parse_statement(&xml, hash.as_deref()).ok()));
-    progress.plan = plan.map(|mut p| {
-        p.raw = None;
-        p
-    });
-    progress.nodes = node_progress(&profiles, progress.plan.as_ref());
-    // Backups, index rebuilds, DBCC and a few other commands report their own percentage; trust it over row counts.
-    match r.f64("percent_complete").filter(|p| *p > 0.0) {
-        Some(pct) => {
-            progress.percent = Some((pct / 100.0).clamp(0.0, 1.0));
-            progress.percent_basis = Some(own_estimate(r.string("command").trim()));
-            if !progress.nodes.is_empty() {
-                let percent = progress.percent;
-                let basis = progress.percent_basis.clone();
-                progress.summarize_nodes();
-                progress.percent = percent;
-                progress.percent_basis = basis;
-            }
-        }
-        None => progress.summarize_nodes(),
-    }
-    if progress.nodes.is_empty() {
-        progress.note = Some(no_profiling());
-    }
-    Ok(progress)
 }
 
 struct Counters {
@@ -455,38 +361,5 @@ mod tests {
         assert!(!finished(&counters(9_000.0, 200_000.0, 0.0, 1.0, 22_000.0), 200_000.0, false));
         assert!(producing(&counters(0.0, 1.0, 0.0, 0.0, 5.0)));
         assert!(!producing(&Counters { elapsed: None, ..counters(0.0, 1.0, 0.0, 0.0, 0.0) }));
-    }
-}
-
-#[cfg(test)]
-mod reader_tests {
-    use super::*;
-    use crate::{
-        read::{ReadError, invalid_data},
-        resources::test_support::FakeRead,
-        value::Val,
-    };
-    fn metadata(live: bool, profiles: bool) -> Rec {
-        Rec::of(&[
-            ("metadata_visibility", Val::Int(1)),
-            ("last_actual", Val::Int(1)),
-            ("live_xml", Val::Int(i64::from(live))),
-            ("profiles", Val::Int(i64::from(profiles))),
-        ])
-    }
-    #[tokio::test]
-    async fn a_known_old_layout_selects_the_basic_query_before_any_request_and_native_failures_never_retry() {
-        let mut old = FakeRead::new(vec![Ok(vec![metadata(false, false)]), Ok(vec![])]);
-        let (request, profiles) = progress_rows(&mut old, 42).await.unwrap();
-        assert!(request.is_empty() && profiles.is_empty());
-        assert_eq!(old.calls.len(), 2);
-        assert!(!old.calls[1].sql.contains("dm_exec_query_statistics_xml"));
-        let mut failed = FakeRead::new(vec![Ok(vec![metadata(true, true)]), Err(ReadError::Source(invalid_data()))]);
-        assert!(progress_rows(&mut failed, 42).await.is_err());
-        assert_eq!(failed.calls.len(), 2);
-        let mut profiles =
-            FakeRead::new(vec![Ok(vec![metadata(true, true)]), Ok(vec![]), Err(ReadError::Source(invalid_data()))]);
-        assert!(progress_rows(&mut profiles, 42).await.is_err());
-        assert_eq!(profiles.calls.len(), 3);
     }
 }

@@ -149,6 +149,14 @@ pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
     })
 }
 
+/// Native progress cannot substitute a different statement when its selected hash is absent or ambiguous.
+pub(crate) fn parse_native_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
+    culprit_core::xml::read(xml, |doc| {
+        let doc = doc.map_err(unreadable)?;
+        read_statement(&doc, xml, StatementSelection::Native(query_hash), None)
+    })
+}
+
 pub(crate) struct CachedInputContext<'a> {
     pub(crate) statement: &'a culprit_core::telemetry::CachedStatementContext,
     pub(crate) module_parameters: Option<&'a culprit_core::telemetry::MssqlModuleParameters>,

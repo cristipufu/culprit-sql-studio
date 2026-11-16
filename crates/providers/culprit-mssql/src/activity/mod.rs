@@ -3,7 +3,7 @@ pub(crate) mod compiler_admission;
 pub(crate) mod database_context;
 pub(crate) mod memory;
 pub(crate) mod page_targets;
-mod participants;
+pub(crate) mod participants;
 mod resources;
 mod rows;
 pub(crate) mod sql;
@@ -130,7 +130,7 @@ impl NativeStatement {
     }
 }
 #[derive(Clone)]
-struct RequestLocator {
+pub(crate) struct RequestLocator {
     handle: String,
     start: i32,
     end: i32,

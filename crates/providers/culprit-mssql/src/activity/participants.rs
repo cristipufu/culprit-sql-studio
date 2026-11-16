@@ -11,7 +11,7 @@ use culprit_core::{
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RequestState {
+pub(crate) enum RequestState {
     SameStatement,
     Missing,
     Changed,
@@ -19,7 +19,7 @@ pub(super) enum RequestState {
 }
 
 #[derive(Clone)]
-pub(super) struct Check {
+pub(crate) struct Check {
     pub ordinal: usize,
     pub at: String,
     session: Option<String>,
@@ -61,7 +61,7 @@ impl Check {
         }
     }
 
-    pub(super) fn decode(row: &Rec) -> Result<Self> {
+    pub(crate) fn decode(row: &Rec) -> Result<Self> {
         Ok(Self {
             ordinal: usize::try_from(integer(row, "ordinal")?).map_err(|_| invalid_data())?,
             at: canonical_time(&text(row, "observed_at")?)?,
@@ -83,6 +83,31 @@ impl Check {
 
     pub(super) fn request_state(&self, record: &ActivityRecord) -> RequestState {
         self.matches_request(&record.facts, record.current_locator.as_ref())
+    }
+
+    /// A native current-row selector preserves the same generations and locator as Activity enrichment.
+    pub(crate) fn selector(&self) -> Option<(ActivityKey, NativeIdentity)> {
+        let key = ActivityKey {
+            session: super::NativeActivityIdentity { id: self.session.clone()?, generation: self.login.clone()? },
+            request: Some(super::NativeActivityIdentity {
+                id: self.request.clone()?,
+                generation: self.started.clone()?,
+            }),
+            transaction: None,
+        };
+        let statement = self.statement_locator()?.identity();
+        (key.is_valid() && statement.is_valid()).then_some((key, statement))
+    }
+
+    pub(crate) fn matches_check(&self, original: &Self) -> bool {
+        let Some((key, _)) = original.selector() else { return false };
+        self.matches_selector(&key, original.statement_locator().as_ref(), original.query_hash.as_deref())
+            == RequestState::SameStatement
+            && self.same_plan(original)
+    }
+
+    pub(crate) fn query_hash(&self) -> Option<&str> {
+        self.query_hash.as_deref()
     }
 
     fn matches_request(
@@ -144,7 +169,7 @@ impl Check {
         RequestLocator::from_native(self.sql_handle.clone()?, self.begin?, self.end?, self.database?)
     }
 
-    pub(super) fn identities(&self, other: &Self) -> Option<(NativeIdentity, Option<NativeIdentity>)> {
+    pub(crate) fn identities(&self, other: &Self) -> Option<(NativeIdentity, Option<NativeIdentity>)> {
         let statement = self.statement_locator()?.identity();
         let plan = self.plan_handle.as_ref().filter(|_| self.same_plan(other)).map(|handle| {
             let mut identity =
@@ -193,7 +218,7 @@ fn signed_integer(row: &Rec, name: &str) -> Result<Option<i32>> {
         .transpose()
 }
 
-pub(super) const CHECK_COLUMNS: &str = r#"a.ordinal,CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
+pub(crate) const CHECK_COLUMNS: &str = r#"a.ordinal,CONVERT(varchar(40),@at,126)+'Z' AS observed_at,
  r.session_id AS checked_session_id,CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS checked_session_generation,
  r.request_id AS checked_request_id,CONVERT(varchar(40),CAST(r.start_time AS datetime2),126) AS checked_request_generation,
  CONVERT(varchar(128),r.sql_handle,2) AS checked_sql_handle,r.statement_start_offset AS checked_begin,r.statement_end_offset AS checked_end,
