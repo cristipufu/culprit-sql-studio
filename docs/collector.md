@@ -234,9 +234,12 @@ tempdb contention.
 
 `cached-plans` analyzes `cached-definitions` or `retained-plans` captures from `object-definitions`. It reuses the native
 plan parsers and existing plan insights. SQL Server statement selection requires one matching native hash, or one
-unambiguous statement when the hash is unavailable. Original module metadata can establish a cached TVP input;
+unambiguous statement when the hash is unavailable. Original module metadata can establish a cached or retained TVP input;
 another capture's module header cannot supply missing historical metadata. Estimated rows, actual rows and cache
 execution counters remain separate. Yugabyte node-cache counters retain node scope and use the Yugabyte parser.
+For a qualified TVP, a complete serial native table scan can distinguish consumed input, rows kept by its filter and
+statement output. Missing end-of-scan counters, repeated or parallel execution, seeks and early-stop paths retain
+access/output context. Input volume alone does not establish harmful reuse or the cause of a spill.
 Available SQL Server parameter metadata retains names, types and explicit availability states. A native comparison
 describes only compiled/runtime representations in the same selected actual plan; literals and new value hashes
 are not retained. That difference alone establishes neither parameter skew nor harmful cached-plan reuse.

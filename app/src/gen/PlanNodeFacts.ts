@@ -6,6 +6,7 @@ import type { PlanConversion } from "./PlanConversion";
 import type { PlanExecutionMode } from "./PlanExecutionMode";
 import type { PlanIndexColumns } from "./PlanIndexColumns";
 import type { PlanParentRelationship } from "./PlanParentRelationship";
+import type { PlanScanCompletion } from "./PlanScanCompletion";
 import type { PlanTemporaryTableUse } from "./PlanTemporaryTableUse";
 import type { RelationalInput } from "./RelationalInput";
 
@@ -25,6 +26,11 @@ filesort?: boolean,
  * estimated fallback and cannot authorize comparisons requiring actual access provenance.
  */
 access_rows?: PlanAccessRows, 
+/**
+ * Exact native completion counters for a source-established full physical table scan. Other access paths
+ * cannot supply this fact. Completion alone establishes neither the input kind nor its cardinality.
+ */
+scan_completion?: PlanScanCompletion, 
 /**
  * The input's native kind and how it was established. A variable-shaped name alone does not distinguish a
  * procedure's table-valued parameter from a local table variable.

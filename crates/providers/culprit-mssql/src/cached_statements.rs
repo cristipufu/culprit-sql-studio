@@ -7,7 +7,7 @@ use crate::{
 };
 use culprit_core::{Result, telemetry::*};
 pub(crate) use details::read as details;
-pub(crate) use statement::statement_from_prefix;
+pub(crate) use statement::{native_statement_from_prefix, statement_from_prefix};
 
 pub(crate) fn relation() -> &'static str {
     "FROM sys.dm_exec_query_stats qs CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) pa OUTER APPLY sys.dm_exec_sql_text(qs.sql_handle) st"

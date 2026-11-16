@@ -20,6 +20,9 @@ fn row() -> Rec {
         (String::from("plan_bytes"), Val::Int(2)),
         ("query_plan".into(), Val::Text("x".into())),
         ("encrypted".into(), Val::Bool(false)),
+        ("module_database_id".into(), Val::Null),
+        ("module_object_id".into(), Val::Null),
+        ("module_number".into(), Val::Null),
         ("last_start_without_offset".into(), Val::Text("2020-01-01T08:00:00.003".into())),
     ]);
     let identities = replace(
@@ -98,7 +101,7 @@ async fn oversized_retained_xml_is_unavailable_without_truncation() {
 
 #[tokio::test]
 async fn reused_or_missing_plan_binding_withholds_xml_and_preserves_the_earlier_native_context_and_counters() {
-    let original = decode(&row(), 1024).unwrap();
+    let original = decode(&row(), 1024, MAX_STATEMENT_BYTES).unwrap();
     let binding = crate::relational_inputs::tests::binding_row(&original.context);
     for sql_handle in [Val::Text("0x9999".into()), Val::Null] {
         let mut reader = FakeRead::new(vec![
@@ -118,6 +121,46 @@ async fn reused_or_missing_plan_binding_withholds_xml_and_preserves_the_earlier_
         );
         assert_eq!(observed.last_start_without_offset, original.last_start_without_offset);
         assert_eq!(reader.calls.len(), 4);
+    }
+}
+
+#[tokio::test]
+async fn original_tvp_metadata_travels_with_the_retained_read_and_is_withheld_when_the_binding_changes() {
+    let native = crate::retained_definitions::tests::tvp_row();
+    let mut columns = native.columns().map(|(name, value)| (name.to_string(), value.clone())).collect::<Vec<_>>();
+    columns.extend(
+        row()
+            .columns()
+            .filter(|(name, _)| name.starts_with("query_store_"))
+            .map(|(name, value)| (name.to_string(), value.clone())),
+    );
+    let native = Rec::of(&columns.iter().map(|(name, value)| (name.as_str(), value.clone())).collect::<Vec<_>>());
+    let original = cached_statements::context(&native).unwrap();
+    let binding = crate::relational_inputs::tests::binding_row(&original);
+    for changed in [false, true] {
+        let observed_binding =
+            if changed { replace(&binding, &[("sql_handle", Val::Text("0x9999".into()))]) } else { binding.clone() };
+        let mut reader = FakeRead::new(vec![
+            Ok(vec![layout()]),
+            Ok(vec![Rec::of(&[("value", Val::Int(1))])]),
+            Ok(vec![native.clone()]),
+            Ok(vec![observed_binding]),
+        ]);
+        let retained = read(&mut reader, &request(Some("9")), 4096).await.unwrap().plan.unwrap();
+        assert_eq!(reader.calls.len(), 4, "module and statement metadata do not add another native call");
+        assert_eq!(retained.context, original);
+        assert_eq!(retained.statement.text(), Some("SELECT id FROM @Rows WHERE id > 10"));
+        assert_eq!(retained.module_parameters.is_some(), !changed);
+        if changed {
+            assert!(matches!(retained.payload, Payload::Unavailable(PayloadUnavailable::SourceUnavailable)));
+        } else {
+            let plan = super::super::plan_from_retained(Read { setting_on: Some(true), plan: Some(retained) }).unwrap();
+            assert_eq!(
+                plan.root.facts().relational_input.unwrap().qualified_kind(),
+                culprit_core::plan_facts::RelationalInputKind::TableValuedParameter
+            );
+            assert_eq!(plan.root.facts().access_rows.unwrap().actual_total, Some(10000.0));
+        }
     }
 }
 

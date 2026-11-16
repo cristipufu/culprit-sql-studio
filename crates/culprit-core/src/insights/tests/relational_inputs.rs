@@ -1,6 +1,8 @@
 use super::*;
 use crate::plan_facts::{RelationalInput, RelationalInputKind as Kind, RelationalInputProvenance as Provenance};
 
+mod completion;
+
 fn input_plan(input: Option<RelationalInput>, estimate: f64, output: f64) -> Plan {
     let mut scan = measured(1, "Table Scan", NodeKind::Scan, estimate, output, 1.0);
     scan.object = Some("@input".into());
@@ -170,7 +172,11 @@ fn convenience_rows_read_missing_actuals_partial_workers_or_invalid_counts_do_no
             "inconsistent-output" => node.facts_mut().access_rows.as_mut().unwrap().actual_total = Some(100.0),
             _ => unreachable!(),
         }
-        assert!(super::super::relational_inputs::AccessComparison::from_node(node).is_none(), "{missing}");
+        assert!(
+            super::super::relational_inputs::AccessComparison::from_node(&super::super::Cx::new(&plan), &plan.root)
+                .is_none(),
+            "{missing}"
+        );
         if missing != "zero-executions" {
             let concern = estimate_concern(&plan);
             assert!(!concern.detail.contains(&t!("insight.relational_input.selectivity")), "{missing}");

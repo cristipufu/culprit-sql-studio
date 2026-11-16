@@ -1,7 +1,10 @@
 use super::fixture::Fixture;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason, RecoveryPayloadBudget},
-    test_support::{memory_failure_evidence, object_definition_evidence_cases, object_definition_hydration_evidence},
+    test_support::{
+        memory_failure_evidence, object_definition_evidence_cases, object_definition_hydration_evidence,
+        object_definition_retained_input_evidence,
+    },
 };
 #[cfg(feature = "mssql")]
 use culprit_core::plan_facts::RelationalInputKind;
@@ -184,6 +187,74 @@ async fn retained_actual_rows_never_borrow_the_cached_modules_kind_or_execution_
     assert!(entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput));
     assert!(serde_json::to_string(&result.context.records).unwrap().contains("9007199254740993"));
     assert!(!serde_json::to_string(&result.report).unwrap().contains("9007199254740993"));
+}
+
+#[cfg(feature = "mssql")]
+#[tokio::test]
+async fn retained_input_completion_survives_authenticated_hydration_and_requires_its_own_native_proof() {
+    for evidence in ["complete", "unfinished", "unknown-module", "unavailable-statement"] {
+        let (source, mut records) = object_definition_retained_input_evidence();
+        replace_fact(&mut records[0], |fact| {
+            let ObjectDefinitionFact::MssqlRetainedPlan(native) = fact else { panic!() };
+            match evidence {
+                "unfinished" => {
+                    let DefinitionPayload::Available { text, .. } = &native.batch_plan.payload else { panic!() };
+                    native.batch_plan = payload(&text.replace("ActualEndOfScans=\"1\"", "ActualEndOfScans=\"0\""));
+                }
+                "unknown-module" => native.module_parameters = None,
+                "unavailable-statement" => {
+                    native.statement.payload =
+                        DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted };
+                }
+                _ => {}
+            }
+        });
+        let ObjectDefinitionFact::MssqlRetainedPlan(native) = &definition(&records[0]).fact else { panic!() };
+        let direct = culprit_mssql::plan_xml::parse_retained_definition(native).unwrap();
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let preview = fixture.read_families(&[EvidenceFamily::ObjectDefinitions]).await;
+        assert!(!preview.is_read_complete());
+        assert!(preview.records().is_empty());
+        let capture = fixture
+            .read_families_with_recovery(
+                &[EvidenceFamily::ObjectDefinitions],
+                RecoveryPayloadBudget { max_objects: 1, max_bytes: fixture.range.manifest().batches[0].bytes },
+            )
+            .await;
+        assert!(capture.is_read_complete(), "{evidence}: {:?}", capture.gaps());
+        let result = collected_resources::cached_plans(&capture).unwrap();
+        assert_eq!(result.context.source, source);
+        assert_eq!(result.context.records.len(), 1);
+        assert_eq!(result.context.records[0].row.record, records[0]);
+        let [entry] = result.report.entries.as_slice() else { panic!("one retained definition") };
+        let plan = entry.plan.as_ref().unwrap();
+        assert_eq!(plan.kind, PlanKind::Actual);
+        assert_eq!(plan.root.facts(), direct.root.facts());
+        assert_eq!(plan.root.act_rows, Some(1000.0));
+        assert_eq!(plan.root.facts().access_rows.unwrap().actual_total, Some(10_000.0));
+        assert_eq!(plan.facts().last_run_at, None);
+        assert_eq!(plan.facts().elapsed_ms, None);
+        let expected_kind = if matches!(evidence, "unknown-module" | "unavailable-statement") {
+            RelationalInputKind::Unknown
+        } else {
+            RelationalInputKind::TableValuedParameter
+        };
+        assert_eq!(plan.root.facts().relational_input.unwrap().qualified_kind(), expected_kind, "{evidence}");
+        let completion =
+            culprit_core::t!("insight.relational_input.completed_input_counts", estimated = "100", actual = "10K");
+        let insights = &plan.insights.as_ref().unwrap().items;
+        assert_eq!(
+            insights.iter().any(|insight| insight.detail.contains(&completion)),
+            evidence == "complete",
+            "{evidence}"
+        );
+        assert!(insights.iter().all(|insight| insight.fix_sql.is_none()));
+        assert!(entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::MissingCurrentPrerequisites));
+        assert!(plan.raw.is_none() && plan.statement.is_none());
+        let report = serde_json::to_string(&result.report).unwrap();
+        assert!(!report.contains("<ShowPlanXML") && !report.contains("SELECT value FROM") && !report.contains("9264"));
+        assert!(!report.contains("9007199254740993"));
+    }
 }
 
 #[tokio::test]

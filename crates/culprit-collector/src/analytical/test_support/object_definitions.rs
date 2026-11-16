@@ -35,6 +35,8 @@ pub fn object_definition_evidence_cases() -> Vec<(CollectionDescription, Vec<Tel
     )];
     let retained = MssqlRetainedPlanDefinition {
         context: cached.context.clone(),
+        statement: missing_payload(PayloadUnavailable::NotCollected),
+        module_parameters: None,
         statement_executions: Some("9007199254740993".into()),
         last_start_without_offset: Some("2020-01-01T11:59:00.003".into()),
         database_last_query_plan_stats: Some(true),
@@ -148,6 +150,63 @@ pub fn object_definition_hydration_evidence() -> (CollectionDescription, Vec<Tel
             ObjectDefinitionFact::MssqlCachedDefinition(Box::new(first)),
             ObjectDefinitionFact::MssqlCachedDefinition(Box::new(second)),
         ],
+        SourceState::Collected,
+    )
+}
+
+/// Synthetic same-read retained evidence, independent of the estimated-definition population above. The native
+/// TableScan counters distinguish consumed input from output; the large plan requires authenticated hydration.
+pub fn object_definition_retained_input_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let context = CachedStatementContext {
+        identity: CachedStatementIdentity {
+            plan_handle: "0x11223344".into(),
+            sql_handle: "0x55667788".into(),
+            statement_start_bytes: 0,
+            statement_end_bytes: -1,
+            created_without_offset: "2020-01-01T11:30:00.003".into(),
+            plan_generation: "2".into(),
+        },
+        database_id: 7,
+        query_hash: Some("0x0123456789ABCDEF".into()),
+        origin: StatementOrigin::Application,
+        monitoring_template_id: None,
+        source_text_bytes: Some((SQL.encode_utf16().count() * 2).to_string()),
+        source_text_complete: true,
+    };
+    let module_parameters = MssqlModuleParameters {
+        database_id: context.database_id,
+        object_id: 2001,
+        module_number: 1,
+        sql_handle: context.identity.sql_handle.clone(),
+        table_parameters: [("@Rows".into(), vec!["dbo".into(), "RowsType".into()])].into(),
+    };
+    let xml = format!(
+        r#"<ShowPlanXML><BatchSequence><Batch><Statements>
+        <StmtSimple StatementText="{SQL}" QueryHash="0x0123456789ABCDEF" StatementType="SELECT" StatementSubTreeCost="10">
+        <QueryPlan><RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="100" EstimatedRowsRead="100" Parallel="false">
+        <OutputList><ColumnReference Table="[@Rows]" Column="value" /></OutputList>
+        <RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1000" ActualRowsRead="10000" ActualExecutions="1" ActualEndOfScans="1" ActualRebinds="0" ActualRewinds="0" /></RunTimeInformation>
+        <TableScan Ordered="false" Storage="RowStore"><DefinedValues>
+        <DefinedValue><ColumnReference Table="[@Rows]" Column="value" /></DefinedValue></DefinedValues>
+        <Object Table="[@Rows]" /><Predicate><ScalarOperator ScalarString="[@Rows].[value]=(9264)">
+        <Compare CompareOp="EQ"><ScalarOperator><Identifier><ColumnReference Table="[@Rows]" Column="value" /></Identifier></ScalarOperator>
+        <ScalarOperator><Const ConstValue="(9264)" /></ScalarOperator></Compare>
+        </ScalarOperator></Predicate></TableScan></RelOp></QueryPlan></StmtSimple>
+        </Statements></Batch></BatchSequence></ShowPlanXML>"#
+    );
+    let retained = MssqlRetainedPlanDefinition {
+        context,
+        statement: cached_payload(SQL, DefinitionPayload::sql),
+        module_parameters: Some(module_parameters),
+        statement_executions: Some("9007199254740993".into()),
+        last_start_without_offset: Some("2020-01-01T11:59:00.003".into()),
+        database_last_query_plan_stats: Some(true),
+        batch_plan: cached_payload(&xml, DefinitionPayload::plan),
+    };
+    case(
+        Engine::Mssql,
+        SnapshotDataset::RetainedPlans,
+        vec![ObjectDefinitionFact::MssqlRetainedPlan(Box::new(retained))],
         SourceState::Collected,
     )
 }

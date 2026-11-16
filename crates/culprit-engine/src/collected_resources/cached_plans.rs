@@ -71,6 +71,7 @@ fn explain(
         (ObjectDefinitionFact::MssqlRetainedPlan(native), SnapshotDataset::RetainedPlans) => {
             require_mssql(capture)?;
             entry.identity = Some(CachedPlanIdentity::Mssql(native.context.identity.clone()));
+            payload_available(&native.statement.payload, CachedPlanPayload::Statement, &mut entry);
             if payload_available(&native.batch_plan.payload, CachedPlanPayload::RetainedPlan, &mut entry) {
                 attach_mssql(&mut entry, || parse_retained(native));
             }

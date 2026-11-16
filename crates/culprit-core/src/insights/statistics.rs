@@ -75,7 +75,7 @@ fn output_misestimates(cx: &Cx) -> Vec<Draft> {
                 || wrapped_column(&cond, cx.engine()).is_some();
             let cols: Vec<String> = if on_expression { Vec::new() } else { filter_columns(&cond) };
             let input = relational_input_kind(n);
-            let access = input.and_then(|_| relational_inputs::AccessComparison::from_node(n));
+            let access = input.and_then(|_| relational_inputs::AccessComparison::from_node(cx, n));
             let mut detail = vec![if let Some(input) = input {
                 t!("insight.misestimate.detail.relational_input", kind = input_key(input))
             } else if !consumers {
@@ -87,6 +87,7 @@ fn output_misestimates(cx: &Cx) -> Vec<Draft> {
             }];
             if let Some(access) = &access {
                 detail.push(access.detail());
+                detail.extend(access.root_output_detail(cx, n));
             }
             if input.is_none() && cols.len() >= 2 {
                 detail.push(t!("insight.misestimate.detail.correlated", columns = format::list(&cols)));

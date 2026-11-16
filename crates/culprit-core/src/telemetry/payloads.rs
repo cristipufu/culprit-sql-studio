@@ -87,7 +87,13 @@ impl ObjectDefinitionFact {
                 Some(reference("/record/data/fact/data/definition/plan", &value.definition.plan))
             }
             Self::MssqlRetainedPlan(value) => {
-                Some(reference("/record/data/fact/data/batch_plan/payload", &value.batch_plan.payload))
+                return [
+                    Some(reference("/record/data/fact/data/statement/payload", &value.statement.payload)),
+                    Some(reference("/record/data/fact/data/batch_plan/payload", &value.batch_plan.payload)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
             }
             Self::MssqlForeignKey(_) | Self::MssqlObject(_) | Self::MssqlDmlTrigger(_) => None,
         };

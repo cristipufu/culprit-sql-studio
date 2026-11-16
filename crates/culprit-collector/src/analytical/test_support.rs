@@ -69,7 +69,7 @@ pub use task_space::{assert_task_space_capture, task_space_evidence_cases};
 mod object_definitions;
 pub use object_definitions::{
     assert_object_definition_capture, object_definition_evidence_cases, object_definition_hydration_evidence,
-    object_definition_recovery_only_evidence,
+    object_definition_recovery_only_evidence, object_definition_retained_input_evidence,
 };
 mod projection;
 pub use projection::JsonProjection;

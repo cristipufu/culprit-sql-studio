@@ -4,6 +4,9 @@ mod module_parameters;
 pub use module_parameters::MssqlModuleParameters;
 const MAX_CACHED_TEXT_BYTES: usize = 4 * 1024 * 1024;
 
+#[cfg(test)]
+mod retained_tests;
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct MssqlCachedPayload {
@@ -69,6 +72,12 @@ impl MssqlCachedDefinition {
 #[ts(export)]
 pub struct MssqlRetainedPlanDefinition {
     pub context: CachedStatementContext,
+    /// Complete bounded statement from this retained read's original native SQL handle and offsets.
+    pub statement: MssqlCachedPayload,
+    /// Original module declarations, qualified independently against this retained plan's native binding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub module_parameters: Option<MssqlModuleParameters>,
     /// Native statement-cache counter; it is not the number of measured executions in the XML batch.
     pub statement_executions: Option<String>,
     pub last_start_without_offset: Option<String>,
@@ -80,12 +89,15 @@ pub struct MssqlRetainedPlanDefinition {
 impl MssqlRetainedPlanDefinition {
     pub fn is_valid(&self) -> bool {
         self.context.is_valid()
+            && self.statement.is_valid()
+            && self.module_parameters.as_ref().is_none_or(|parameters| parameters.is_valid_for(&self.context))
             && self.statement_executions.as_deref().is_none_or(valid_counter)
             && self.statement_executions.is_some() == self.context.identity.has_plan_handle()
             && self.last_start_without_offset.as_deref().is_none_or(super::catalog::local_time)
             && self.batch_plan.is_valid()
     }
     pub(super) fn redact(&mut self, engine: crate::Engine) {
+        self.statement.redact(engine, DefinitionPayload::sql);
         self.batch_plan.redact(engine, DefinitionPayload::plan);
     }
 }

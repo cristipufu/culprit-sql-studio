@@ -26,7 +26,11 @@ async fn unsupported_hidden_and_failed_feature_reads_cannot_masquerade_as_an_emp
 }
 #[test]
 fn retained_exports_share_native_decoding_and_do_not_claim_a_batch_execution_count_or_utc_clock() {
-    let layout = Layout { maximum_bytes: 4096, database_setting: Some(false) };
+    let layout = Layout {
+        maximum_bytes: 4096,
+        maximum_statement_bytes: retained::MAX_STATEMENT_BYTES,
+        database_setting: Some(false),
+    };
     let row =
         replace(&crate::cached_definitions::tests::row(), &[("execution_count", Val::Int(9_007_199_254_740_993))]);
     let native = decode(&row, &layout).unwrap();
@@ -38,4 +42,109 @@ fn retained_exports_share_native_decoding_and_do_not_claim_a_batch_execution_cou
     let unsupported = decode(&replace(&row, &[("plan_handle", Val::Bytes(vec![0; 64]))]), &layout).unwrap();
     assert!(unsupported.statement_executions.is_none());
     assert!(select_sql(&layout).contains(cached_statements::DATABASE_PREDICATE));
+}
+
+pub(crate) fn tvp_row() -> Rec {
+    let statement = "SELECT id FROM @Rows WHERE id > 10";
+    let header = format!("CREATE PROC dbo.consume @Rows dbo.RowsType READONLY AS {statement}");
+    let start = header.find("SELECT").unwrap();
+    let xml = format!(
+        r#"<ShowPlanXML><BatchSequence><Batch><Statements><StmtSimple StatementText="{statement}" QueryHash="0x0123456789ABCDEF" StatementSubTreeCost="1"><QueryPlan>
+        <RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" Parallel="0" EstimateRows="100" EstimatedRowsRead="100" EstimatedTotalSubtreeCost="1">
+        <RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1000" ActualRowsRead="10000" ActualExecutions="1" ActualEndOfScans="1" /></RunTimeInformation>
+        <TableScan><Object Table="[@Rows]" /><Predicate><ScalarOperator ScalarString="[@Rows].[id]&gt;(10)" /></Predicate></TableScan>
+        </RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#
+    );
+    replace(
+        &crate::cached_definitions::tests::row(),
+        &[
+            ("statement_start_offset", Val::Int((header[..start].encode_utf16().count() * 2) as i64)),
+            ("statement_end_offset", Val::Int(-1)),
+            ("source_text_bytes", Val::Int((header.encode_utf16().count() * 2) as i64)),
+            ("text_prefix", Val::Text(header)),
+            ("text_complete", Val::Int(1)),
+            ("module_database_id", Val::Int(5)),
+            ("module_object_id", Val::Int(1001)),
+            ("module_number", Val::Int(1)),
+            ("plan_bytes", Val::Int((xml.encode_utf16().count() * 2) as i64)),
+            ("query_plan", Val::Text(xml)),
+        ],
+    )
+}
+
+#[test]
+fn same_read_original_module_and_selected_statement_reach_actual_tvp_analysis_without_borrowing_other_definitions() {
+    let layout = Layout {
+        maximum_bytes: 4096,
+        maximum_statement_bytes: retained::MAX_STATEMENT_BYTES,
+        database_setting: Some(true),
+    };
+    let definition = decode(&tvp_row(), &layout).unwrap();
+    assert!(definition.statement.payload.is_available());
+    assert!(definition.module_parameters.is_some());
+    let plan = crate::plan_xml::parse_retained_definition(&definition).unwrap();
+    assert_eq!(
+        plan.root.facts().relational_input.unwrap().qualified_kind(),
+        culprit_core::plan_facts::RelationalInputKind::TableValuedParameter
+    );
+    assert_eq!(plan.root.act_rows, Some(1000.0));
+    assert_eq!(plan.root.facts().access_rows.unwrap().actual_total, Some(10000.0));
+    assert!(plan.root.facts().scan_completion.as_ref().unwrap().is_single_completed_serial_scan());
+    let insight =
+        culprit_core::insights::insights(&plan).into_iter().find(|insight| insight.rule == "misestimate").unwrap();
+    assert!(insight.detail.contains(&culprit_core::t!(
+        "insight.relational_input.completed_input_counts",
+        estimated = "100",
+        actual = "10K"
+    )));
+    assert!(insight.fix_sql.is_none());
+
+    for field in ["module", "statement", "scope"] {
+        let mut missing = definition.clone();
+        match field {
+            "module" => missing.module_parameters = None,
+            "statement" => {
+                missing.statement.payload = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }
+            }
+            "scope" => missing.module_parameters.as_mut().unwrap().database_id += 1,
+            _ => unreachable!(),
+        }
+        if field == "scope" {
+            assert!(crate::plan_xml::parse_retained_definition(&missing).is_err());
+        } else {
+            let unknown = crate::plan_xml::parse_retained_definition(&missing).unwrap();
+            assert_eq!(
+                unknown.root.facts().relational_input.unwrap().qualified_kind(),
+                culprit_core::plan_facts::RelationalInputKind::Unknown
+            );
+            assert_eq!(unknown.root.act_rows, Some(1000.0));
+        }
+    }
+}
+
+#[tokio::test]
+async fn statement_retention_intersects_the_existing_budget_and_never_adds_a_native_read() {
+    let budget = CollectionBudget { max_sql_bytes: 16, ..Default::default() };
+    let mut io = FakeRead::new(vec![Ok(vec![feature(1, 1)]), Ok(vec![Rec::of(&[("value", Val::Int(1))])])]);
+    let layout = layout(&mut io, &budget).await.unwrap().unwrap();
+    assert_eq!(io.calls.len(), 2);
+    assert_eq!(layout.maximum_statement_bytes, 16);
+    assert!(
+        (layout.maximum_bytes + layout.maximum_statement_bytes) * JSON_BYTES_PER_UTF16_BYTE + RECORD_METADATA_BYTES
+            <= budget.page_bytes as usize
+    );
+    let record = decode(&tvp_row(), &layout).unwrap();
+    assert!(matches!(
+        record.statement.payload,
+        DefinitionPayload::Unavailable { reason: PayloadUnavailable::Oversized }
+    ));
+    assert!(record.batch_plan.payload.is_available());
+    let plan = crate::plan_xml::parse_retained_definition(&record).unwrap();
+    assert_eq!(
+        plan.root.facts().relational_input.unwrap().qualified_kind(),
+        culprit_core::plan_facts::RelationalInputKind::Unknown
+    );
+    let sql = select_sql(&layout);
+    assert_eq!(sql.matches("sys.dm_exec_query_plan_stats(").count(), 1);
+    assert!(!sql.contains("sys.parameters") && !sql.contains("sys.table_types"));
 }

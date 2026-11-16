@@ -22,7 +22,12 @@ pub fn parse_retained_definition(definition: &MssqlRetainedPlanDefinition) -> Re
     let DefinitionPayload::Available { text: xml, .. } = &definition.batch_plan.payload else {
         return Err(crate::read::invalid_data());
     };
-    let mut plan = super::parse_cached_statement(xml, &definition.context, None, None)?;
+    let statement = match &definition.statement.payload {
+        DefinitionPayload::Available { text, .. } => Some(text.as_str()),
+        DefinitionPayload::Unavailable { .. } => None,
+    };
+    let mut plan =
+        super::parse_cached_statement(xml, &definition.context, definition.module_parameters.as_ref(), statement)?;
     crate::actual::clear_unrecorded_times(&mut plan);
     Ok(plan)
 }

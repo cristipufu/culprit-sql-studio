@@ -1,11 +1,20 @@
 //! A complete native batch prefix can supply only its own UTF-16 statement slice, never a hash representative.
+use crate::query_store::payload::Payload;
 use culprit_core::{
     Engine,
     telemetry::{CachedStatementContext, DefinitionPayload, PayloadUnavailable},
 };
 
 pub(crate) fn statement_from_prefix(context: &CachedStatementContext, prefix: Option<&str>) -> DefinitionPayload {
-    let unavailable = |reason| DefinitionPayload::Unavailable { reason };
+    match native_statement_from_prefix(context, prefix) {
+        Payload::Text(statement) => DefinitionPayload::sql(&statement, Engine::Mssql),
+        Payload::Unavailable(reason) => DefinitionPayload::Unavailable { reason },
+    }
+}
+
+/// The same slice remains private while binding the original selected statement to native plan XML.
+pub(crate) fn native_statement_from_prefix(context: &CachedStatementContext, prefix: Option<&str>) -> Payload {
+    let unavailable = Payload::Unavailable;
     if !context.identity.has_sql_handle() || !context.identity.has_plan_handle() {
         return unavailable(PayloadUnavailable::SourceUnavailable);
     }
@@ -25,9 +34,5 @@ pub(crate) fn statement_from_prefix(context: &CachedStatementContext, prefix: Op
     };
     let Some(selected) = utf16.get(start..end) else { return unavailable(PayloadUnavailable::SourceUnavailable) };
     let Ok(statement) = String::from_utf16(selected) else { return unavailable(PayloadUnavailable::SourceUnavailable) };
-    if statement.trim().is_empty() {
-        unavailable(PayloadUnavailable::Missing)
-    } else {
-        DefinitionPayload::sql(&statement, Engine::Mssql)
-    }
+    if statement.trim().is_empty() { unavailable(PayloadUnavailable::Missing) } else { Payload::Text(statement) }
 }

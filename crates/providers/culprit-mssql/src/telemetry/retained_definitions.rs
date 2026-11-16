@@ -25,6 +25,7 @@ impl SnapshotRecipe for RetainedPlans {
         let mut definition = retained_definitions::decode(row, &layout.native)?;
         if !layout.bindings.contains(&definition.context) {
             definition.batch_plan.payload = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
+            definition.module_parameters = None;
         }
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),

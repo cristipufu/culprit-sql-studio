@@ -13,6 +13,8 @@ pub use parameters::{
 };
 mod relational_input;
 pub use relational_input::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
+mod scan_completion;
+pub use scan_completion::{MAX_PLAN_SCAN_THREADS, PlanScanCompletion, PlanScanThread};
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
@@ -181,6 +183,11 @@ pub struct PlanNodeFacts {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "access_rows::deserialize")]
     #[ts(optional)]
     pub access_rows: Option<PlanAccessRows>,
+    /// Exact native completion counters for a source-established full physical table scan. Other access paths
+    /// cannot supply this fact. Completion alone establishes neither the input kind nor its cardinality.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "scan_completion::deserialize")]
+    #[ts(optional)]
+    pub scan_completion: Option<PlanScanCompletion>,
     /// The input's native kind and how it was established. A variable-shaped name alone does not distinguish a
     /// procedure's table-valued parameter from a local table variable.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "relational_input::deserialize")]

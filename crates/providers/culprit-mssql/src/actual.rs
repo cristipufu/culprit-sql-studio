@@ -122,7 +122,8 @@ fn plan_from_retained(read: retained::Read) -> Result<Plan> {
         ) => return Err(no_matching_plan()),
         crate::query_store::payload::Payload::Unavailable(_) => return Err(not_kept()),
     };
-    let mut plan = plan_xml::parse_cached_statement(&xml, &row.context, None, None)?;
+    let mut plan =
+        plan_xml::parse_cached_statement(&xml, &row.context, row.module_parameters.as_ref(), row.statement.text())?;
     if plan.kind != PlanKind::Actual {
         return Err(not_kept());
     }
@@ -367,6 +368,11 @@ mod tests {
             context: crate::cached_statements::context(&crate::grants::tests::row()).unwrap(),
             query: None,
             native_plan: None,
+            statement: crate::query_store::payload::Payload::Unavailable(
+                culprit_core::telemetry::PayloadUnavailable::NotCollected,
+            ),
+            statement_utf16_bytes: None,
+            module_parameters: None,
             source_utf16_bytes: Some(xml.encode_utf16().count() * 2),
             payload: crate::query_store::payload::Payload::Text(xml.into()),
             executions: "9007199254740993".into(),

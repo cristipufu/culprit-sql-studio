@@ -8,6 +8,7 @@ use roxmltree::{Document, Node};
 mod cached_definitions;
 mod parameters;
 mod relational_inputs;
+mod scan_completion;
 pub use cached_definitions::{parse_cached_definition, parse_retained_definition};
 
 /// RelOp children that describe the operator rather than being the operator itself.
@@ -497,6 +498,8 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
     }
     let estimated_read = relop.attribute("EstimatedRowsRead").and_then(|v| v.parse::<f64>().ok());
     facts.access_rows = culprit_core::plan_facts::PlanAccessRows::new(estimated_read, actual_rows_read);
+    facts.scan_completion =
+        operator.filter(|operator| operator.has_tag_name_local("TableScan")).and_then(|_| scan_completion::read(relop));
 
     let mut node = PlanNode {
         facts,

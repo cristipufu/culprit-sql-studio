@@ -134,6 +134,12 @@ fn retained_actual_rows_have_no_borrowed_module_kind_cache_population_or_placeho
         statement_executions: Some(u64::MAX.to_string()),
         last_start_without_offset: Some("2026-11-14T11:59:59.997".into()),
         database_last_query_plan_stats: Some(false),
+        statement: MssqlCachedPayload {
+            source_utf16_bytes: None,
+            native_sha256: None,
+            payload: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+        },
+        module_parameters: None,
         batch_plan: payload(&document(&statement(HASH, 1, true)), DefinitionPayload::plan),
     };
     let plan = parse_retained_definition(&definition).unwrap();
@@ -159,6 +165,12 @@ fn unavailable_and_malformed_native_plans_remain_unusable() {
         statement_executions: Some("0".into()),
         last_start_without_offset: None,
         database_last_query_plan_stats: None,
+        statement: MssqlCachedPayload {
+            source_utf16_bytes: None,
+            native_sha256: None,
+            payload: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+        },
+        module_parameters: None,
         batch_plan: definition.estimated_plan,
     };
     assert!(parse_retained_definition(&retained).is_err());

@@ -101,69 +101,77 @@ async fn truncated_object_preview_requires_native_representation_without_rereadi
 
 #[tokio::test]
 async fn explicit_recovery_hydrates_large_native_plans_from_one_exact_batch_without_changing_source_coverage() {
-    let (source, records) = test_support::object_definition_hydration_evidence();
-    let fixture = Fixture::new(source.clone(), records.clone()).await;
-    let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);
-    fixture.reply_families(FAMILY, 250);
-    let preview = fixture.reader().read_capture(&fixture.range, FAMILY, budget(), None).await.unwrap();
-    assert!(!preview.is_read_complete());
-    assert!(preview.records().is_empty());
-    assert_eq!(preview.gaps().len(), records.len());
-    assert!(preview.gaps().iter().all(|gap| gap.reason == EvidenceGapReason::DetailInRecovery));
-    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), reads_before);
-    assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+    for (source, records) in [
+        test_support::object_definition_hydration_evidence(),
+        test_support::object_definition_retained_input_evidence(),
+    ] {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        fixture.reply_families(FAMILY, 250);
+        let preview = fixture.reader().read_capture(&fixture.range, FAMILY, budget(), None).await.unwrap();
+        assert!(!preview.is_read_complete());
+        assert!(preview.records().is_empty());
+        assert_eq!(preview.gaps().len(), records.len());
+        assert!(preview.gaps().iter().all(|gap| gap.reason == EvidenceGapReason::DetailInRecovery));
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), reads_before);
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
 
-    let batch = &fixture.range.manifest().batches[0];
-    *fixture.recovery.fault.lock().unwrap() = Fault::None;
-    fixture.reply_families(FAMILY, 1);
-    let hydrated = fixture
-        .reader()
-        .read_capture(
-            &fixture.range,
-            FAMILY,
-            EvidenceReadBudget {
-                page_rows: 1,
-                recovery_payloads: Some(RecoveryPayloadBudget { max_objects: 1, max_bytes: batch.bytes }),
-                ..budget()
-            },
-            Some(fixture.recovery.as_ref()),
-        )
-        .await
-        .unwrap();
-    test_support::assert_object_definition_capture(&hydrated, &source, &records);
-    assert_eq!(hydrated.metrics().pages as usize, records.len());
-    assert_eq!(hydrated.metrics().recovery_objects, 1);
-    assert_eq!(hydrated.metrics().recovery_bytes, batch.bytes);
-    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst) - reads_before, 1);
-    assert_eq!(hydrated.source(), preview.source());
-    assert_eq!(hydrated.recovery_manifest_sha256(), fixture.range.manifest_digest());
-    assert_eq!(hydrated.capture_manifest_sha256(), fixture.range.manifest().capture_manifest_sha256);
+        let batch = &fixture.range.manifest().batches[0];
+        *fixture.recovery.fault.lock().unwrap() = Fault::None;
+        fixture.reply_families(FAMILY, 1);
+        let hydrated = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                FAMILY,
+                EvidenceReadBudget {
+                    page_rows: 1,
+                    recovery_payloads: Some(RecoveryPayloadBudget { max_objects: 1, max_bytes: batch.bytes }),
+                    ..budget()
+                },
+                Some(fixture.recovery.as_ref()),
+            )
+            .await
+            .unwrap();
+        test_support::assert_object_definition_capture(&hydrated, &source, &records);
+        assert_eq!(hydrated.metrics().pages as usize, records.len());
+        assert_eq!(hydrated.metrics().recovery_objects, 1);
+        assert_eq!(hydrated.metrics().recovery_bytes, batch.bytes);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst) - reads_before, 1);
+        assert_eq!(hydrated.source(), preview.source());
+        assert_eq!(hydrated.recovery_manifest_sha256(), fixture.range.manifest_digest());
+        assert_eq!(hydrated.capture_manifest_sha256(), fixture.range.manifest().capture_manifest_sha256);
+    }
 }
 
 #[tokio::test]
 async fn recovery_hydration_cannot_repair_a_changed_native_definition_receipt() {
-    let (source, records) = test_support::object_definition_hydration_evidence();
-    let fixture = Fixture::new(source, records).await;
-    let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);
-    *fixture.recovery.fault.lock().unwrap() = Fault::None;
-    let schema = fixture.catalog.get(TelemetryStream::ObjectDefinitions).unwrap();
-    let version = schema.columns().iter().position(|column| column.name == "DefinitionVersion").unwrap();
-    let mut rows = fixture.rows_for(EvidenceFamily::ObjectDefinitions);
-    rows[0][version] = json!(digest(b"unrelated native definition version"));
-    fixture.replies(vec![rows]);
-    let error = fixture
-        .reader()
-        .read_capture(
-            &fixture.range,
-            FAMILY,
-            EvidenceReadBudget { recovery_payloads: Some(RecoveryPayloadBudget::default()), ..budget() },
-            Some(fixture.recovery.as_ref()),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
-    assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), reads_before);
-    assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::None));
+    for (source, records) in [
+        test_support::object_definition_hydration_evidence(),
+        test_support::object_definition_retained_input_evidence(),
+    ] {
+        let fixture = Fixture::new(source, records).await;
+        let reads_before = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        *fixture.recovery.fault.lock().unwrap() = Fault::None;
+        let schema = fixture.catalog.get(TelemetryStream::ObjectDefinitions).unwrap();
+        let version = schema.columns().iter().position(|column| column.name == "DefinitionVersion").unwrap();
+        let mut rows = fixture.rows_for(EvidenceFamily::ObjectDefinitions);
+        rows[0][version] = json!(digest(b"unrelated native definition version"));
+        fixture.replies(vec![rows]);
+        let error = fixture
+            .reader()
+            .read_capture(
+                &fixture.range,
+                FAMILY,
+                EvidenceReadBudget { recovery_payloads: Some(RecoveryPayloadBudget::default()), ..budget() },
+                Some(fixture.recovery.as_ref()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), reads_before);
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::None));
+    }
 }
 
 #[tokio::test]

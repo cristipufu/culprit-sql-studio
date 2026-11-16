@@ -14,12 +14,18 @@ use culprit_core::{
     },
 };
 
+/// The existing native prefix bounds the only additional retained SQL; no statement payload is read again.
+pub(crate) const MAX_STATEMENT_BYTES: usize = crate::statement_origin::PROVENANCE_PREFIX_CHARACTERS * 4;
+
 pub(crate) struct RetainedPlan {
     /// Native statement-counter context observed alongside the lookup. The XML and these counters are separate
     /// point observations; a checked module token does not prove one execution or counter generation.
     pub context: CachedStatementContext,
     pub query: Option<NativeQueryIdentity>,
     pub native_plan: Option<NativePlanIdentity>,
+    pub statement: Payload,
+    pub statement_utf16_bytes: Option<usize>,
+    pub module_parameters: Option<culprit_core::telemetry::MssqlModuleParameters>,
     pub payload: Payload,
     pub source_utf16_bytes: Option<usize>,
     pub executions: String,
@@ -71,7 +77,7 @@ pub(crate) async fn read<R: NativeRead>(
     let mut plan = match rows.as_slice() {
         [] => None,
         [row] => {
-            let mut plan = decode(row, maximum_bytes)?;
+            let mut plan = decode(row, maximum_bytes, MAX_STATEMENT_BYTES)?;
             let query = crate::query_store::decode::prefixed_query_identity(row, "query_store_")?;
             let native_plan = crate::query_store::decode::plan_identity_for_query(row, "query_store_", query.clone())?
                 .ok_or_else(invalid_data)?;
@@ -100,6 +106,7 @@ pub(crate) async fn read<R: NativeRead>(
         };
         if let Some(reason) = unavailable {
             plan.payload = Payload::Unavailable(reason);
+            plan.module_parameters = None;
         }
     }
     Ok(Read { setting_on, plan })
@@ -123,14 +130,31 @@ pub(crate) async fn setting<R: NativeRead>(reader: &mut R) -> Result<Option<bool
         _ => Err(invalid_data()),
     }
 }
-pub(crate) fn decode(row: &crate::value::Rec, maximum_bytes: usize) -> Result<RetainedPlan> {
+pub(crate) fn decode(
+    row: &crate::value::Rec,
+    maximum_bytes: usize,
+    maximum_statement_bytes: usize,
+) -> Result<RetainedPlan> {
     let bytes =
         optional_integer(row, "plan_bytes")?.map(|value| value.try_into().map_err(|_| invalid_data())).transpose()?;
+    let context = cached_statements::context(row)?;
+    let prefix = optional_text(row, "text_prefix")?;
+    let mut statement = cached_statements::native_statement_from_prefix(&context, prefix.as_deref());
+    let statement_utf16_bytes = statement.text().map(|text| text.encode_utf16().count() * 2);
+    if statement.text().is_some_and(|text| text.len() > maximum_statement_bytes) {
+        statement = Payload::Unavailable(PayloadUnavailable::Oversized);
+    }
+    let payload = Payload::read_column(row, "query_plan", bytes, maximum_bytes)?;
+    let module_parameters =
+        if payload.text().is_some() { crate::relational_inputs::parameters(row, &context)? } else { None };
     let plan = RetainedPlan {
-        context: cached_statements::context(row)?,
+        context,
         query: None,
         native_plan: None,
-        payload: Payload::read_column(row, "query_plan", bytes, maximum_bytes)?,
+        statement,
+        statement_utf16_bytes,
+        module_parameters,
+        payload,
         source_utf16_bytes: bytes,
         executions: integer(row, "execution_count")?.to_string(),
         last_start_without_offset: optional_text(row, "last_start_without_offset")?
@@ -140,7 +164,7 @@ pub(crate) fn decode(row: &crate::value::Rec, maximum_bytes: usize) -> Result<Re
     Ok(plan)
 }
 fn sql() -> String {
-    let projection = projection(cached_statements::context_columns(), "st.encrypted", "@P3");
+    let projection = projection(cached_statements::context_columns(), "st", "st.encrypted", "@P3");
     format!(
         r#"SELECT TOP(1) {projection},{query_identity},{plan_identity}
 {relation}
@@ -156,11 +180,12 @@ ORDER BY qs.last_execution_time DESC,qs.creation_time DESC,qs.statement_start_of
         database = cached_statements::DATABASE_PREDICATE,
     )
 }
-pub(crate) fn projection(context: String, encrypted: &str, maximum: &str) -> String {
+pub(crate) fn projection(context: String, text_alias: &str, encrypted: &str, maximum: &str) -> String {
     let payload =
         crate::cached_payload::columns("CONVERT(nvarchar(max),ps.query_plan)", "plan_bytes", "query_plan", maximum);
+    let module = crate::relational_inputs::module_columns(text_alias);
     format!(
-        "{context},{encrypted} AS encrypted,{payload},qs.execution_count,CONVERT(varchar(40),qs.last_execution_time,126) AS last_start_without_offset"
+        "{context},{module},{encrypted} AS encrypted,{payload},qs.execution_count,CONVERT(varchar(40),qs.last_execution_time,126) AS last_start_without_offset"
     )
 }
 

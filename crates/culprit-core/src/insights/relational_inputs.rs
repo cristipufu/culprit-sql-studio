@@ -15,10 +15,11 @@ pub(super) struct AccessComparison {
     estimated_output: Option<f64>,
     actual_output: Option<f64>,
     difference: Option<AccessDifference>,
+    completed_input: bool,
 }
 
 impl AccessComparison {
-    pub(super) fn from_node(node: &PlanNode) -> Option<Self> {
+    pub(super) fn from_node(cx: &Cx, node: &PlanNode) -> Option<Self> {
         let access = node.facts().access_rows.filter(|access| access.is_valid())?;
         let executions =
             node.act_executions.filter(|value| value.is_finite() && *value >= 1.0 && value.fract() == 0.0)?;
@@ -51,16 +52,31 @@ impl AccessComparison {
                 (false, false) => AccessDifference::Undetermined,
             }
         });
-        Some(Self { estimated, actual, estimated_output, actual_output, difference })
+        let completed_input = completed_tvp_input(cx, node, actual, actual_output);
+        Some(Self { estimated, actual, estimated_output, actual_output, difference, completed_input })
     }
 
     pub(super) fn detail(&self) -> String {
-        let counts = t!(
-            "insight.relational_input.access_counts",
-            estimated = rows_text(self.estimated),
-            actual = rows_text(self.actual)
-        );
+        let counts = if self.completed_input {
+            t!(
+                "insight.relational_input.completed_input_counts",
+                estimated = rows_text(self.estimated),
+                actual = rows_text(self.actual)
+            )
+        } else {
+            t!(
+                "insight.relational_input.access_counts",
+                estimated = rows_text(self.estimated),
+                actual = rows_text(self.actual)
+            )
+        };
         let distinction = match self.difference {
+            Some(AccessDifference::Volume) if self.completed_input => {
+                t!("insight.relational_input.completed_input_volume")
+            }
+            Some(AccessDifference::Undetermined) if self.completed_input => {
+                t!("insight.relational_input.completed_input_undetermined")
+            }
             Some(AccessDifference::Volume) => t!("insight.relational_input.access_volume"),
             Some(AccessDifference::Selectivity) => t!("insight.relational_input.selectivity"),
             Some(AccessDifference::Both) => t!("insight.relational_input.access_and_selectivity"),
@@ -72,6 +88,9 @@ impl AccessComparison {
 
     pub(super) fn investigation(&self) -> String {
         match self.difference {
+            Some(AccessDifference::Volume) if self.completed_input => {
+                t!("insight.relational_input.investigate_completed_input")
+            }
             Some(AccessDifference::Volume) => t!("insight.relational_input.investigate_volume"),
             Some(AccessDifference::Selectivity) => t!("insight.relational_input.investigate_selectivity"),
             Some(AccessDifference::Both | AccessDifference::Undetermined) | None => {
@@ -95,6 +114,14 @@ impl AccessComparison {
         ))
     }
 
+    pub(super) fn root_output_detail(&self, cx: &Cx, node: &PlanNode) -> Option<String> {
+        (self.completed_input && cx.plan.root.id != node.id)
+            .then_some(cx.plan.root.act_rows)
+            .flatten()
+            .filter(|value| exact_observed_rows(*value))
+            .map(|rows| t!("insight.relational_input.root_output", actual = rows_text(rows)))
+    }
+
     fn unavailable_output_detail(&self) -> String {
         match (self.estimated_output, self.actual_output) {
             (Some(estimated), None) => {
@@ -106,6 +133,38 @@ impl AccessComparison {
             _ => t!("insight.relational_input_access.output_unavailable"),
         }
     }
+}
+
+fn exact_observed_rows(rows: f64) -> bool {
+    rows.is_finite() && rows >= 0.0 && rows <= (1u64 << 53) as f64 && rows.fract() == 0.0
+}
+
+/// EOF proves only this native operator exhausted its stream. Input size additionally needs one complete serial
+/// TVP table scan, actual before-filter counts, and an enclosing path without repetition or early-stop semantics.
+fn completed_tvp_input(cx: &Cx, node: &PlanNode, accessed: f64, output: Option<f64>) -> bool {
+    use crate::plan_facts::RelationalInputKind;
+    let mut identities = std::collections::BTreeSet::new();
+    cx.plan.kind == PlanKind::Actual
+        && cx.nodes.iter().all(|node| identities.insert(node.id))
+        && node
+            .facts()
+            .relational_input
+            .is_some_and(|input| input.qualified_kind() == RelationalInputKind::TableValuedParameter)
+        && node.kind == NodeKind::Scan
+        && node.index.is_none()
+        && node.seek_predicate.is_none()
+        && node.children.is_empty()
+        && node.act_executions == Some(1.0)
+        && node.facts().estimated_rows_without_goal.is_none()
+        && node.facts().scan_completion.as_ref().is_some_and(|completion| completion.is_single_completed_serial_scan())
+        && exact_observed_rows(accessed)
+        && output.is_some_and(exact_observed_rows)
+        && cx.ancestors(node).all(|parent| {
+            matches!(parent.kind, NodeKind::Sort | NodeKind::Aggregate | NodeKind::Compute)
+                && parent.facts().estimated_rows_without_goal.is_none()
+                && parent.facts().parallel_threads.is_none()
+                && parent.act_executions == Some(1.0)
+        })
 }
 
 const MAX_ACCESS_CONCERNS: usize = 2;
@@ -123,7 +182,7 @@ pub(super) fn access_misestimates(cx: &Cx, output_concerns: &[Draft]) -> Vec<Dra
         .filter(|node| !output_concerns.iter().any(|concern| concern.nodes.contains(&node.id)))
         .filter_map(|node| {
             let kind = relational_input_kind(node)?;
-            let access = AccessComparison::from_node(node)?;
+            let access = AccessComparison::from_node(cx, node)?;
             access.underestimated().then_some((node, kind, access))
         })
         .collect();
@@ -152,6 +211,7 @@ fn access_concern(
     );
     let mut detail = vec![access.detail()];
     detail.extend(access.output_detail());
+    detail.extend(access.root_output_detail(cx, node));
     concern.detail = detail.join(" ");
     concern.fix =
         format!("{} {}", access.investigation(), statistics::relational_input_advice(kind, &table_leaf(&input)));
