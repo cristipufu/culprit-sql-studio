@@ -18,14 +18,19 @@ impl<R: NativeRead> ActivityReader<R> {
             return Err(invalid_data());
         }
         let mut frame = self.observe_memory_for(Some(focus)).await?;
-        let membership = select(&mut frame, focus)?;
-        self.enrich_memory(&mut frame).await?;
+        let selected = select(&mut frame, focus)?;
+        let original =
+            if selected.subject.is_some() { BTreeSet::from([focus.original.key.clone()]) } else { BTreeSet::new() };
+        self.enrich_memory_for(&mut frame, &original).await?;
         let result = ActivityRequestMemoryFocusResult {
             focus: focus.clone(),
             observed_from: frame.owner.activity.at.clone(),
             observed_until: frame.context.at.clone(),
             source: FocusSourceState::Matched,
-            membership,
+            membership: selected.membership,
+            subject: selected.subject,
+            resource: selected.resource,
+            peers: selected.peers,
         };
         let capture = MemoryCapture {
             owner: frame.owner.clone(),
@@ -33,7 +38,7 @@ impl<R: NativeRead> ActivityReader<R> {
             complete_scope: frame.complete_scope,
             observations: frame.into_observations()?,
         };
-        if !result.is_valid() || capture.observations.iter().any(|row| !result.accepts_observation(row)) {
+        if !result.matches_observations(&capture.observations) {
             return Err(invalid_data());
         }
         Ok(FocusedMemoryCapture { capture, result })
@@ -56,7 +61,14 @@ pub(super) fn matches_owner(focus: &ActivityRequestFocus, owner: &crate::local_s
     Ok(())
 }
 
-fn select(frame: &mut MemoryFrame, focus: &ActivityRequestFocus) -> Result<RequestMemoryMembership> {
+struct Selection {
+    membership: RequestMemoryMembership,
+    subject: Option<NativeIdentity>,
+    resource: Option<NativeIdentity>,
+    peers: Vec<NativeIdentity>,
+}
+
+fn select(frame: &mut MemoryFrame, focus: &ActivityRequestFocus) -> Result<Selection> {
     let original = &focus.original;
     let numeric_key =
         format!("{}:{}", original.key.session.id, original.key.request.as_ref().ok_or_else(invalid_data)?.id);
@@ -66,23 +78,49 @@ fn select(frame: &mut MemoryFrame, focus: &ActivityRequestFocus) -> Result<Reque
                 request.key != original.key || request.statement_identity.as_ref() != Some(&focus.statement_identity)
             })
     });
-    frame.activity.records.retain(|row| {
-        row.facts.key == original.key && row.facts.statement_identity.as_ref() == Some(&focus.statement_identity)
+    let database = focus.target.database().ok_or_else(invalid_data)?;
+    let mut subjects = frame.grants.iter().filter(|row| {
+        row.is_admission_participant(&database.database)
+            && row.request.as_ref().is_some_and(|request| {
+                request.key == original.key && request.statement_identity.as_ref() == Some(&focus.statement_identity)
+            })
     });
-    frame.grants.retain(|row| {
-        row.request.as_ref().is_some_and(|request| {
-            request.key == original.key && request.statement_identity.as_ref() == Some(&focus.statement_identity)
-        })
-    });
-    if frame.grants.len() > 1 || frame.activity.records.len() > 1 {
+    let subject = subjects.next().cloned();
+    if subjects.next().is_some() {
         return Err(invalid_data());
     }
-    Ok(if !frame.grants.is_empty() {
-        RequestMemoryMembership::Observed
-    } else if unverified {
-        RequestMemoryMembership::Unverified
-    } else {
-        RequestMemoryMembership::NotObserved
+    let peers = subject
+        .as_ref()
+        .map(|subject| {
+            frame
+                .grants
+                .iter()
+                .filter(|row| subject.shares_admission_resource(row, &database.database))
+                .map(|row| row.identity.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    frame.grants.retain(|row| {
+        subject.as_ref().is_some_and(|subject| row.identity == subject.identity) || peers.contains(&row.identity)
+    });
+    frame.activity.records.retain(|row| {
+        frame.grants.iter().any(|grant| {
+            grant.request.as_ref().is_some_and(|request| {
+                request.key == row.facts.key && request.statement_identity == row.facts.statement_identity
+            })
+        })
+    });
+    Ok(Selection {
+        membership: if subject.is_some() {
+            RequestMemoryMembership::Observed
+        } else if unverified {
+            RequestMemoryMembership::Unverified
+        } else {
+            RequestMemoryMembership::NotObserved
+        },
+        resource: subject.as_ref().and_then(|row| row.resource.clone()),
+        subject: subject.map(|row| row.identity),
+        peers,
     })
 }
 

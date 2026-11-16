@@ -114,17 +114,17 @@ fn measured_zero_missing_and_positive_partial_counters_never_invent_a_healthy_or
 }
 
 fn checked_context(row: &mut TaskSpaceObservation) {
-    let mut grant = crate::views::request_memory::tests::observation("context", ExecutionGrantState::Granted);
+    let mut grant = crate::views::request_memory::tests::observation("61", ExecutionGrantState::Granted);
     crate::views::request_memory::tests::associated(&mut grant);
     let mut request = grant.request.unwrap();
     request.statement = DefinitionPayload::sql("SELECT unrelated_context FROM dbo.orders", culprit_core::Engine::Mssql);
     row.task.session_id = request.key.session.id.clone();
+    row.statement_identity = request.statement_identity.clone();
     row.request = Some(request);
     row.before_check =
         Some(TaskRequestCheck { observed_at: "2026-11-13T10:00:00.1Z".into(), state: TaskRequestState::SameStatement });
     row.after_check =
         Some(TaskRequestCheck { observed_at: "2026-11-13T10:00:00.3Z".into(), state: TaskRequestState::SameStatement });
-    row.statement_identity = Some(NativeIdentity { id: "checked-statement".into(), qualifiers: Default::default() });
     assert!(row.is_valid());
 }
 

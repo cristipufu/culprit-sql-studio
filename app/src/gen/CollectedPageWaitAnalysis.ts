@@ -2,4 +2,8 @@
 import type { CollectedEvidenceContext } from "./CollectedEvidenceContext";
 import type { PageWaitReport } from "./PageWaitReport";
 
-export type CollectedPageWaitAnalysis = { context: CollectedEvidenceContext, report: PageWaitReport, };
+export type CollectedPageWaitAnalysis = { context: CollectedEvidenceContext, 
+/**
+ * Optional original Activity evidence, retained once and independently from the later page lookup.
+ */
+activity_context?: CollectedEvidenceContext, report: PageWaitReport, };

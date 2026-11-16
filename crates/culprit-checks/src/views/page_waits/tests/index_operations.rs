@@ -45,7 +45,7 @@ fn separate_native_memory_and_io_counters_keep_exact_totals_without_an_elapsed_s
         (WaitResourceKind::PageIo, "view.page_waits.index.io", "1", "12"),
     ] {
         let row = with_point(kind);
-        let report = explain(&[&row], Some(&source(SourceState::Partial))).unwrap();
+        let report = explain(&[&row], Some(&source(SourceState::Partial)), None).unwrap();
         let expected =
             culprit_core::i18n::t(message, &[("waits", waits.into()), ("milliseconds", milliseconds.into())]);
         assert!(report.entries[0].explanation.contains(&expected));
@@ -61,12 +61,12 @@ fn unknown_counter_components_are_never_inserted_as_measured_zero() {
     let mut row = with_point(WaitResourceKind::MemoryPage);
     let Some(PageIndexOperations::Observed { counters, .. }) = &mut row.index_operations else { panic!() };
     assert!(counters.counters.insert(MssqlIndexCounter::PageLatchWaits, None).is_some());
-    let report = explain(&[&row], None).unwrap();
+    let report = explain(&[&row], None, None).unwrap();
     assert!(report.entries[0].explanation.contains(&t!("view.page_waits.index.memory_unknown")));
     let Some(PageIndexOperations::Observed { counters, .. }) = &mut row.index_operations else { panic!() };
     assert!(counters.counters.insert(MssqlIndexCounter::PageLatchWaits, Some("0".into())).is_some());
     assert!(counters.counters.insert(MssqlIndexCounter::PageLatchWaitMs, Some("0".into())).is_some());
-    let report = explain(&[&row], None).unwrap();
+    let report = explain(&[&row], None, None).unwrap();
     assert!(report.entries[0].explanation.contains(&t!(
         "view.page_waits.index.memory",
         waits = "0",
@@ -87,7 +87,7 @@ fn changed_or_unqualified_mapping_keeps_positive_points_with_an_explicit_unlinke
             panic!()
         };
         *native_relation = relation;
-        let report = explain(&[&row], None).unwrap();
+        let report = explain(&[&row], None, None).unwrap();
         assert!(report.entries[0].explanation.contains("9007199254740993"));
         assert!(report.entries[0].explanation.contains(&culprit_core::i18n::t(message, &[])));
         assert!(!report.entries[0].explanation.contains("app.orders"));
@@ -103,7 +103,7 @@ fn missing_or_denied_points_have_explicit_unknowns_without_erasing_current_page_
     ] {
         let mut row = observation("61", WaitResourceKind::MemoryPage);
         row.index_operations = Some(point);
-        let report = explain(&[&row], None).unwrap();
+        let report = explain(&[&row], None, None).unwrap();
         assert!(report.entries[0].explanation.contains(&culprit_core::i18n::t(message, &[])));
         assert!(report.entries[0].explanation.contains("app.orders"));
     }

@@ -201,6 +201,9 @@ whole-capture archive read, without another source read or a change to recovery-
 Waiting requests are affected participants; granted and used amounts are separate measurements. A matching current
 statement or native resource ID does not establish which statement acquired a reservation or caused another wait.
 Unassigned observations remain unassigned rather than becoming the selected database's demand.
+The same bounded read retains native queue position and other generation-checked reservations on the same resource.
+Those entries describe the observed database subset; they do not establish available pool capacity, complete queue
+membership or which reservation caused a wait. Native queue positions from different queues are not comparable.
 
 `session-memory` explains tracked allocations from a shared-instance `session-memory` capture. Current allocations,
 controlled allocations and session high-water marks remain distinct, with exact integer byte values. A separately
@@ -223,6 +226,18 @@ Verified SQL Server headers distinguish PFS, GAM, SGAM and IAM maps from heap an
 address the observed allocation mechanism; page-I/O waits retain storage guidance. These classes do not establish
 which writer caused contention or qualify an application-database reader to inspect shared tempdb.
 
+For a focused page capture, supply its original Activity range to retain historical blocking-session context:
+
+```sh
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis page-waits --activity-range "$CULPRIT_ACTIVITY_RANGE" --json
+```
+
+Both captures share one cumulative read budget and deadline. The original capture, manifest, source scope and native
+generations must match the focused receipt. All matching requests on a reported blocking session remain separate.
+Missing or incomplete original rows stay explicit; a later session or current SQL never replaces them. These
+historical commands do not establish latch acquisition, a current latch holder or the query that wrote the page.
+
 The SQL Server shared-tempdb reader separately verifies the native instance, process, tempdb and selected files.
 The affected request keeps its application database; the mapped page keeps its shared-resource owner. Scans reuse
 that reader when both page-target and shared-resource collection are selected. One population supplies at most eight
@@ -237,6 +252,9 @@ plan parsers and existing plan insights. SQL Server statement selection requires
 unambiguous statement when the hash is unavailable. Original module metadata can establish a cached or retained TVP input;
 another capture's module header cannot supply missing historical metadata. Estimated rows, actual rows and cache
 execution counters remain separate. Yugabyte node-cache counters retain node scope and use the Yugabyte parser.
+Stored SQL Server plans mask database names, so named relations in JOINs remain unclassified without retained proof
+of their original bindings. Direct and all-variable module proofs remain available. A TVP classification does not
+suppress an independent native Cartesian-join warning.
 For a qualified TVP, a complete serial native table scan can distinguish consumed input, rows kept by its filter and
 statement output. Missing end-of-scan counters, repeated or parallel execution, seeks and early-stop paths retain
 access/output context. Input volume alone does not establish harmful reuse or the cause of a spill.

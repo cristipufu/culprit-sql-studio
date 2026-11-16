@@ -93,6 +93,9 @@ async fn native_grant_probe_reuses_request_generations_exact_counters_and_guarde
     assert_eq!(grant.requested_kibibytes.as_deref(), Some("9007199254740993"));
     assert_eq!(grant.used_kibibytes.as_deref(), Some("0"));
     assert_eq!(grant.ideal_kibibytes, None);
+    assert_eq!(grant.queue.small, Some(false));
+    assert_eq!(grant.queue.next_candidate, None);
+    assert!(grant.queue.identity.is_none() && grant.queue.position.is_none());
     assert_eq!(grant.native_properties["plan_handle"], format!("0x{}", "CD".repeat(64)));
     assert_eq!(grant.statement_relationship, GrantStatementRelationship::ObservedCurrentStatement);
     assert_eq!(grant.request.as_ref().unwrap().key.session.id, "42");
@@ -151,6 +154,49 @@ async fn native_nulls_and_version_unavailable_fields_preserve_unknowns_without_i
     assert!(!grant.available_columns.contains(&"used_worker_count".into()));
     assert_eq!(reader.query_count(), 4);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn queue_fields_keep_exact_zero_large_order_false_and_native_null_without_duplicate_properties() {
+    for next in [Val::Int(0), Val::Int(1), Val::Null] {
+        let native = replace(
+            &row(),
+            &[
+                ("grant_queue_id", Val::Int(0)),
+                ("grant_wait_order", Val::Int(9_007_199_254_740_993)),
+                ("grant_is_next_candidate", next.clone()),
+                ("grant_is_small", Val::Int(1)),
+            ],
+        );
+        let mut reader = reader(vec![
+            Ok(vec![crate::grants::tests::platform()]),
+            Ok(vec![context()]),
+            Ok(columns()),
+            Ok(vec![native]),
+        ]);
+        let observations = reader.observe_memory().await.unwrap().into_observations().unwrap();
+        let observed = &observations[0];
+        assert_eq!(observed.queue.identity, Some(NativeIdentity::new("0")));
+        assert_eq!(observed.queue.position.as_deref(), Some("9007199254740993"));
+        assert_eq!(
+            observed.queue.next_candidate,
+            match next {
+                Val::Int(0) => Some(false),
+                Val::Int(1) => Some(true),
+                _ => None,
+            }
+        );
+        assert_eq!(observed.queue.small, Some(true));
+        for name in ["queue_id", "wait_order", "is_next_candidate", "is_small"] {
+            assert!(observed.available_columns.iter().any(|column| column == name));
+            assert!(!observed.native_properties.contains_key(name));
+        }
+        assert_eq!(
+            observed.native_null_columns.iter().any(|name| name == "is_next_candidate"),
+            observed.queue.next_candidate.is_none()
+        );
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
 }
 
 #[tokio::test]

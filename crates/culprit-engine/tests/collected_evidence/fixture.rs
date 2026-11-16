@@ -65,8 +65,11 @@ pub(super) struct Fixture {
 }
 impl Fixture {
     pub async fn new(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+        Self::with_sequence(source, records, 100_000).await
+    }
+    pub async fn with_sequence(source: CollectionDescription, records: Vec<TelemetryRecord>, sequence: u64) -> Self {
         let catalog = Arc::new(PhysicalCatalog::<Schema>::new().unwrap());
-        let mut recovery = Recovery::capture("fixture:offline-analysis", catalog.digest(), source, records, 100_000);
+        let mut recovery = Recovery::capture("fixture:offline-analysis", catalog.digest(), source, records, sequence);
         if let Some(history) = recovery.manifest.source.query_history() {
             recovery.manifest.collected_from = history.interval.until.clone();
             recovery.manifest.collected_until = history.interval.until.clone();

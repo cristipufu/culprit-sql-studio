@@ -1,7 +1,9 @@
 //! Read existing committed captures without creating history, acquiring write ownership or opening a source database.
 mod config;
+mod session;
 pub(super) mod stores;
 pub use config::{EvidenceConfig, EvidenceStoreConfig};
+pub use session::EvidenceSession;
 pub use stores::EvidenceStoreProvider;
 
 use super::CollectorRuntime;
@@ -11,17 +13,13 @@ use culprit_collector::{
         indexes::ProjectionIndexes,
     },
     capture::CollectionCancellation,
-    delivery::{
-        contract::Contract,
-        object_store::{ObjectRecoveryStore, transport::ObjectTransport},
-        recovery::reopen,
-    },
+    delivery::{contract::Contract, object_store::transport::ObjectTransport},
 };
 use culprit_core::{
     Result,
-    telemetry::{CollectionStop, DeliveryProblem, valid_digest},
+    telemetry::{DeliveryProblem, valid_digest},
 };
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 pub struct EvidenceRequest {
     pub range_id: String,
@@ -72,26 +70,22 @@ impl CollectorRuntime {
     }
 }
 impl EvidenceService {
-    /// The deadline and cancellation bound caller wait, including recovery proof reads. Native transports retain
-    /// their own bounded request lifecycle; this API makes no claim that a warehouse query was cancelled remotely.
     pub async fn read(
         &self,
         request: &EvidenceRequest,
         cancellation: &CollectionCancellation,
     ) -> Result<EvidenceCapture> {
         request.validate()?;
-        let reading = async {
-            let recovery = ObjectRecoveryStore::open(self.recovery.clone(), self.contract.clone()).await?;
-            let range = reopen(&recovery, &request.range_id).await?;
-            self.reader.read_capture(&range, &request.families, request.budget, Some(&recovery)).await
-        };
-        tokio::select! {
-            biased;
-            _ = cancellation.cancelled() => Err(CollectionStop::Cancelled.error()),
-            result = tokio::time::timeout(Duration::from_millis(u64::from(request.budget.timeout_ms)), reading) => {
-                result.map_err(|_| CollectionStop::TimedOut.error())?
-            }
-        }
+        self.session(request.budget, cancellation)?.read(&request.range_id, &request.families).await
+    }
+
+    /// Related captures share one allowance and deadline. Failure closes the session; retries require a new action.
+    pub fn session<'a>(
+        &'a self,
+        budget: EvidenceReadBudget,
+        cancellation: &'a CollectionCancellation,
+    ) -> Result<EvidenceSession<'a>> {
+        EvidenceSession::new(self, budget, cancellation)
     }
 }
 

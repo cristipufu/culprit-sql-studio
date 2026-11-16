@@ -98,6 +98,10 @@ function RequestMetadata({ row }: { row: ExecutionGrantObservation }) {
       {GRANT_COUNTS.map(([field, label]) => <NativeValue key={field} label={t(label)} value={row[field] == null ? null : digits(row[field])} />)}
       <NativeValue label={t("ui.memory_participants.native_resource")} value={row.resource && <NativeReference identity={row.resource} />} />
       <NativeValue label={t("ui.memory_participants.workload_group")} value={row.workload_group && <NativeReference identity={row.workload_group} />} />
+      <NativeValue label={t("ui.memory_participants.queue")} value={row.queue.identity && <NativeReference identity={row.queue.identity} />} />
+      <NativeValue label={t("ui.memory_participants.queue_position")} value={row.queue.position == null ? null : digits(row.queue.position)} />
+      <NativeValue label={t("ui.memory_participants.next_candidate")} value={row.queue.next_candidate == null ? null : t(row.queue.next_candidate ? "ui.common.yes" : "ui.common.no")} />
+      <NativeValue label={t("ui.memory_participants.small_grant")} value={row.queue.small == null ? null : t(row.queue.small ? "ui.common.yes" : "ui.common.no")} />
     </dl>
     <NativeProperties properties={row.native_properties} />
     {row.request_association === "generation-checked" && row.statement_relationship === "observed-current-statement" && request?.statement.state === "available" && <details>

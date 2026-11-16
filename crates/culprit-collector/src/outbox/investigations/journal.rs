@@ -218,7 +218,7 @@ pub(in crate::outbox) fn checkpoint_references(
         [&episode.first, &episode.latest]
             .into_iter()
             .chain(episode.peak.iter())
-            .chain(episode.report.as_ref().map(DiagnosticReport::evidence))
+            .chain(episode.report.iter().flat_map(DiagnosticReport::references))
     })
 }
 fn pin(tx: &Transaction<'_>, owner: &str, observation_id: &str) -> Result<()> {

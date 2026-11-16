@@ -66,6 +66,22 @@ pub enum GrantStatementRelationship {
     Unresolved,
 }
 
+/// Source-reported admission queue facts, local to this native read/resource. Unknown and NULL stay absent.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq, Eq)]
+#[ts(export)]
+pub struct ExecutionGrantQueue {
+    pub identity: Option<NativeIdentity>,
+    pub position: Option<String>,
+    pub next_candidate: Option<bool>,
+    pub small: Option<bool>,
+}
+impl ExecutionGrantQueue {
+    pub fn is_valid(&self) -> bool {
+        self.identity.as_ref().is_none_or(NativeIdentity::is_valid)
+            && self.position.as_deref().is_none_or(valid_counter)
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ExecutionGrantObservation {
@@ -97,7 +113,8 @@ pub struct ExecutionGrantObservation {
     /// Native resource identifiers, such as Resource Governor pools, are not cloud elastic-pool identities.
     pub resource: Option<NativeIdentity>,
     pub workload_group: Option<NativeIdentity>,
-    /// Exact native identifiers and queue metadata can remain useful when they are insufficient to prove a shared
+    pub queue: ExecutionGrantQueue,
+    /// Exact native identifiers and other properties can remain useful when they are insufficient to prove a shared
     /// resource link. These source-owned properties do not establish portable units or causal relationships.
     pub native_properties: std::collections::BTreeMap<String, String>,
     pub available_columns: Vec<String>,
@@ -109,6 +126,29 @@ fn local_time(value: &str) -> bool {
 }
 
 impl ExecutionGrantObservation {
+    /// Source-checked request context, not proof that its current statement acquired the reservation.
+    pub fn is_admission_participant(&self, database: &str) -> bool {
+        self.is_valid()
+            && self.request_association == RequestGrantAssociation::GenerationChecked
+            && self.scope == Some(MeasurementScope::Database)
+            && self.fits_database_capture(database)
+            && self
+                .request
+                .as_ref()
+                .is_some_and(|request| request.statement_identity.as_ref().is_some_and(NativeIdentity::is_valid))
+    }
+
+    /// Same-read candidates, never blockers or a complete resource population. Caller owns the read context.
+    pub fn shares_admission_resource(&self, other: &Self, database: &str) -> bool {
+        self.is_admission_participant(database)
+            && other.is_admission_participant(database)
+            && self.source == other.source
+            && self.resource.is_some()
+            && self.resource == other.resource
+            && canonical_time(&self.observed_at).ok() == canonical_time(&other.observed_at).ok()
+            && self.request.as_ref().map(|request| &request.key) != other.request.as_ref().map(|request| &request.key)
+    }
+
     /// Database captures retain unresolved native reservations without claiming them as database demand.
     pub fn fits_database_capture(&self, database: &str) -> bool {
         match self.scope {
@@ -131,6 +171,7 @@ impl ExecutionGrantObservation {
             && self.identity.is_valid()
             && self.resource.as_ref().is_none_or(NativeIdentity::is_valid)
             && self.workload_group.as_ref().is_none_or(NativeIdentity::is_valid)
+            && self.queue.is_valid()
             && native_properties_valid(&self.native_properties)
             && self.observed_at.len() <= 64
             && canonical_time(&self.observed_at).is_ok()

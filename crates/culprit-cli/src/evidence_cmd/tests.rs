@@ -389,6 +389,32 @@ fn analyze_args(analysis: &str, options: &[&str]) -> AnalyzeArgs {
     args
 }
 
+#[test]
+fn original_activity_selection_is_an_independent_exact_archive_range() {
+    let parent = culprit_core::telemetry::digest(b"original-activity-capture");
+    let args = analyze_args("page-waits", &["--activity-range", &parent]);
+    args.validate_selection().unwrap();
+    assert_eq!(args.activity_range.as_deref(), Some(parent.as_str()));
+    assert_eq!(args.analysis.families(), [EvidenceFamily::OperationalSamples]);
+    assert!(args.common.budget.read_budget().recovery_payloads.is_none());
+}
+
+#[tokio::test]
+async fn unrelated_or_invalid_activity_ranges_fail_before_configuration_and_credentials() {
+    let parent = culprit_core::telemetry::digest(b"original-activity-capture");
+    for analysis in ["queries", "maintenance", "request-memory"] {
+        let args = analyze_args(analysis, &["--activity-range", &parent]);
+        let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+        assert_eq!(error.message, t!("evidence.cli.activity_page_waits_only"));
+    }
+    let same = culprit_core::telemetry::digest(b"archive-population-capture");
+    for range in ["../range", "", same.as_str()] {
+        let args = analyze_args("page-waits", &["--activity-range", range]);
+        let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::InvalidContract)));
+    }
+}
+
 fn population_catalog(identities: Vec<NativeIdentity>) -> NativeRuntimePopulationCatalog {
     NativeRuntimePopulationCatalog {
         source: "native-query-history".into(),

@@ -6,6 +6,7 @@ use culprit_core::{
 };
 mod state;
 use state::CapturedState;
+mod activity;
 mod cached_plans;
 pub use cached_plans::cached_plans;
 mod cache_entry_memory;

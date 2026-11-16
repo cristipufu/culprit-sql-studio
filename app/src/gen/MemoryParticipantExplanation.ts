@@ -9,4 +9,8 @@ observation_key: string,
 /**
  * Exact native reference also permits a scan UI to find its bare native row without hashing identifiers.
  */
-observation_identity: NativeIdentity, title: string, explanation: string, investigation: string, verify: string, };
+observation_identity: NativeIdentity, title: string, explanation: string, investigation: string, verify: string, 
+/**
+ * Same-read admission context only. It neither establishes a blocker nor complete shared-resource coverage.
+ */
+grant_admission: NativeIdentity | null, };

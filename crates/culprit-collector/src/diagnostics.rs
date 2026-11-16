@@ -125,11 +125,68 @@ pub async fn analyze_pending(
         }
         let analyzed_at = chrono::Utc::now().to_rfc3339();
         let mut update = analyze(&input, &policies.for_input(&input)?, &analyzed_at)?;
+        attach_page_contexts(outbox, &input, &mut update).await?;
         planning::qualify_questions(&input, policies.assignment(&input)?, &mut update)?;
         outbox.commit_diagnostics(input, update).await?;
         processed += 1;
     }
     Ok(processed)
+}
+
+async fn attach_page_contexts(
+    outbox: &mut Outbox,
+    input: &DiagnosticInput,
+    update: &mut DiagnosticUpdate,
+) -> Result<()> {
+    let SourceObservation::FocusedPageWait { result, .. } = &input.source.observation else { return Ok(()) };
+    let original = outbox
+        .diagnostic_input(&result.focus.participant.parent.capture.observation_id, input.controller_version)
+        .await?;
+    let rows = original
+        .rows
+        .iter()
+        .map(|row| match &row.row.record {
+            TelemetryRecord::Activity(observation) => {
+                Ok(ActivityFrameRow { observation, reference: Some(&row.reference) })
+            }
+            _ => Err(CollectionStop::InvalidPage.error()),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let frame = ActivityFrameEvidence::new(&original.source, &rows, true)?;
+    for revision in &mut update.revisions {
+        let Some(DiagnosticReport::PageWait { observation, blocking_contexts }) = &mut revision.episode.report else {
+            continue;
+        };
+        if observation.capture_ref() != input.parent {
+            continue;
+        }
+        let native = input
+            .rows
+            .iter()
+            .find(|row| row.reference == *observation)
+            .ok_or_else(|| DeliveryProblem::Integrity.error())?;
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =
+            &native.row.record
+        else {
+            return Err(DeliveryProblem::Integrity.error());
+        };
+        let participation =
+            culprit_core::page_wait_blocking_participation(&input.source, page, &result.focus.participant, &frame)?;
+        *blocking_contexts = participation.references().cloned().collect();
+        for reference in blocking_contexts {
+            if !revision.inputs.contains(reference) {
+                revision.inputs.push(reference.clone());
+            }
+        }
+        revision.id = revision.expected_id()?;
+        if !revision.is_valid() {
+            return Err(DeliveryProblem::Integrity.error());
+        }
+        if let Some(episode) = update.checkpoint.episodes.iter_mut().find(|episode| episode.id == revision.episode.id) {
+            *episode = revision.episode.clone();
+        }
+    }
+    Ok(())
 }
 
 /// Drain sealed inputs inside an existing host turn. Each batch is bounded and yields; no source is opened.

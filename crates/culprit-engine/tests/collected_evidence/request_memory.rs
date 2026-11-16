@@ -1,7 +1,9 @@
 use super::fixture::Fixture;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason},
-    test_support::{request_memory_evidence, request_memory_evidence_cases},
+    test_support::{
+        focused_request_memory_evidence_with_peers, request_memory_evidence, request_memory_evidence_cases,
+    },
 };
 use culprit_core::{Snapshot, SourceOutcome, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
@@ -31,7 +33,7 @@ fn scan(source: &CollectionDescription, rows: &[TelemetryRecord]) -> Snapshot {
     let database = source.target.database().unwrap();
     scan.server.database = database.database.clone();
     scan.identity = Some(database.clone());
-    let SourceObservation::Snapshot(native) = &source.observation else { panic!("native fixture") };
+    let native = source.observation.snapshot().expect("native request-memory fixture");
     let coverage = &native.sources[0];
     scan.sources.retain(|source| source.source != coverage.source);
     scan.sources.push(SourceOutcome {
@@ -51,9 +53,12 @@ fn scan(source: &CollectionDescription, rows: &[TelemetryRecord]) -> Snapshot {
 
 #[tokio::test]
 async fn authenticated_request_memory_reuses_scan_explanations_and_keeps_native_ownership_exact() {
-    for (source, rows) in request_memory_evidence_cases() {
+    for (source, rows) in
+        request_memory_evidence_cases().into_iter().chain([focused_request_memory_evidence_with_peers(3)])
+    {
         let expected = culprit_checks::analyze(scan(&source, &rows)).request_memory.unwrap();
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let recovery_before = fixture.recovery_object_reads();
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete(), "{:?}", capture.gaps());
         let result = collected_resources::request_memory(&capture).unwrap();
@@ -68,6 +73,85 @@ async fn authenticated_request_memory_reuses_scan_explanations_and_keeps_native_
         let keys = observations(&rows).iter().map(|row| row.key().unwrap()).collect::<std::collections::BTreeSet<_>>();
         assert!(result.report.entries.iter().all(|entry| keys.contains(&entry.observation_key)));
         assert!(!serde_json::to_string(&result.report).unwrap().contains("SELECT payload"));
+        assert_eq!(fixture.recovery_object_reads(), recovery_before);
+        if let SourceObservation::FocusedRequestMemory { result: focused, .. } = &source.observation {
+            let raw = observations(&rows);
+            assert_eq!(focused.peers.len(), 3);
+            assert!(focused.matches_observations(raw.iter().copied()));
+            assert_eq!(result.report.admission_resources.len(), 1);
+            let resource = &result.report.admission_resources[0];
+            assert_eq!(Some(&resource.resource), focused.resource.as_ref());
+            assert_eq!(resource.participants.len(), 4);
+            for grant in raw {
+                assert!(
+                    resource.participants.iter().any(|participant| participant.observation_identity == grant.identity)
+                );
+                if focused.is_peer(grant) {
+                    assert_eq!(grant.statement_relationship, GrantStatementRelationship::Unresolved);
+                    assert!(matches!(
+                        grant.request.as_ref().unwrap().statement,
+                        DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }
+                    ));
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_missing_focused_subject_or_peer_remains_partial_without_completing_the_sealed_roster() {
+    for missing_subject in [true, false] {
+        let (source, mut rows) = focused_request_memory_evidence_with_peers(3);
+        if !missing_subject {
+            rows.swap(0, 1);
+        }
+        let fixture = Fixture::new(source.clone(), rows).await;
+        let recovery_before = fixture.recovery_object_reads();
+        fixture.remove_first_row(TelemetryStream::OperationalSamples);
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        assert!(!capture.is_read_complete());
+        let result = collected_resources::request_memory(&capture).unwrap();
+        assert_eq!(result.context.source, source);
+        assert_eq!(result.report.source_state, Some(SourceState::Partial));
+        assert_eq!(
+            result.report.source_reason.as_deref(),
+            Some(culprit_core::t!("engine.collected_resources.incomplete_read").as_str())
+        );
+        assert_eq!(result.context.records.len(), 3);
+        assert_eq!(result.report.entries.len(), 3);
+        assert_eq!(result.context.read_gaps.len(), 1);
+        assert_eq!(result.context.read_gaps[0].reason, EvidenceGapReason::MissingRows);
+        let SourceObservation::FocusedRequestMemory { result: focused, snapshot } = &result.context.source.observation
+        else {
+            panic!()
+        };
+        assert_eq!(snapshot.records, 4);
+        assert_eq!(snapshot.sources[0].state, SourceState::Collected);
+        assert_eq!(focused.peers.len(), 3);
+        let native = result
+            .context
+            .records
+            .iter()
+            .map(|row| match &row.row.record {
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(grant),
+                    ..
+                }) => grant.as_ref(),
+                _ => panic!(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(native.iter().any(|grant| focused.is_subject(grant)), !missing_subject);
+        assert!(native.iter().all(|grant| focused.accepts_observation(grant)));
+        assert!(!focused.matches_observations(native));
+        assert_eq!(result.report.admission_resources.len(), 1);
+        assert_eq!(
+            result.report.admission_resources[0].participants.len(),
+            3,
+            "the view references only the readable subset"
+        );
+        assert!(result.report.limitations.contains(&culprit_core::t!("view.request_memory.limit.population")));
+        assert_eq!(capture.metrics().recovery_objects, 0);
+        assert_eq!(fixture.recovery_object_reads(), recovery_before);
     }
 }
 

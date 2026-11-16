@@ -122,7 +122,7 @@ fn analysis_success_requires_a_durable_typed_result_and_contiguous_revision() {
     result.stream = TelemetryStream::OperationalSamples;
     result.batch_id = batch_id("detail", result.stream).unwrap();
     result.native_key = NativeRecordIdentity::Operational { source: "page wait targets".into(), key: digest(b"page") };
-    row.episode.report = Some(DiagnosticReport::PageWait { observation: result.clone() });
+    row.episode.report = Some(DiagnosticReport::PageWait { observation: result.clone(), blocking_contexts: vec![] });
     row.id = row.expected_id().unwrap();
     assert!(!row.is_valid(), "result must be one of the exact input receipts");
     row.inputs.push(result);

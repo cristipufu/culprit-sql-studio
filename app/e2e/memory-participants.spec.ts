@@ -34,12 +34,14 @@ function explanation(evidence: SessionMemorySnapshot): MemoryParticipantsReport 
     title: TITLE, summary: "12 native sessions retained; no allocating statement established.",
     source_state: "partial", source_reason: "Only a bounded native population was read.",
     limitations: ["The current event is context, not the statement that allocated this session's memory."],
+    admission_resources: [],
     entries: [...evidence.observations].reverse().map((row, index) => ({
       observation_key: `backend-reference-${index}`,
       observation_identity: { id: row.identity.id, qualifiers: { generation: "1770000000", namespace: "native-instance" } },
       title: `Native participant ${index}`, explanation: "This is tracked session allocation, without an established allocating statement.",
       investigation: "Correlate native identity and capture clocks before testing a code change.",
       verify: "Compare the same native measurement after the tested change.",
+      grant_admission: null,
     })),
   };
 }

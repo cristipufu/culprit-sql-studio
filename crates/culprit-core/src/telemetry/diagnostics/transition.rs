@@ -51,10 +51,12 @@ impl DiagnosticRevision {
                 .to_string();
         }
         let mut inputs = vec![next.latest.clone()];
-        if let Some(report) = &next.report
-            && !inputs.contains(report.evidence())
-        {
-            inputs.push(report.evidence().clone());
+        if let Some(report) = &next.report {
+            for reference in report.references() {
+                if !inputs.contains(reference) {
+                    inputs.push(reference.clone());
+                }
+            }
         }
         if let Some(event) = &investigation
             && !inputs.contains(&event.intent.focus.participant().parent)

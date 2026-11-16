@@ -224,6 +224,7 @@ mod tests {
                         native: NativeIdentity::new("5:1:42"),
                     },
                     title: "Observed task wait".into(),
+                    blocking: culprit_core::PageWaitBlockingParticipation::unavailable(),
                     explanation: "Coordinator context is separate.".into(),
                     investigation: "Inspect qualified participants.".into(),
                     verify: "Compare representative load.".into(),

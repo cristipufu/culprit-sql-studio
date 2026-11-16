@@ -15,8 +15,9 @@ pub use source_partitions::{
 };
 mod investigations;
 pub use investigations::{
-    InvestigationFixture, SharedInvestigationFixture, focused_request_memory_evidence, investigation_fixture,
-    request_memory_investigation_fixture, shared_investigation_evidence, shared_investigation_fixture,
+    InvestigationFixture, SharedInvestigationFixture, focused_request_memory_evidence,
+    focused_request_memory_evidence_with_peers, investigation_fixture, request_memory_investigation_fixture,
+    request_memory_investigation_fixture_with_peers, shared_investigation_evidence, shared_investigation_fixture,
 };
 
 mod queries;

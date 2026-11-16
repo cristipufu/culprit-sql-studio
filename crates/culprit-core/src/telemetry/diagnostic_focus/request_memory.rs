@@ -23,8 +23,8 @@ pub fn analyze_diagnostic_memory(
         || previous.controller_version != DIAGNOSTIC_CONTROLLER_VERSION
         || source.target.telemetry_id()? != previous.target.telemetry_id()?
         || input.source_scope_id != source.captured_range()?.scope_id
-        || rows.len() > 1
         || rows.len() != snapshot.records as usize
+        || !result.matches_observations(rows.iter().map(|row| row.observation))
         || intent.is_some_and(|intent| !intent.matches_result_source(source))
     {
         return Err(invalid());
@@ -56,10 +56,27 @@ pub fn analyze_diagnostic_memory(
             && before.matches_request_memory_focus(&result.focus)
             && intent.is_none_or(|intent| intent.matches_episode(before))
         {
-            if let Some(row) = rows.first() {
-                next.report = Some(DiagnosticReport::RequestMemory { observation: row.reference.clone() });
-                next.analysis = DiagnosticAnalysisStatus::Analyzed;
-                next.issue = None;
+            if let Some(row) = rows.iter().find(|row| result.is_subject(row.observation)) {
+                let report = DiagnosticReport::RequestMemory {
+                    observation: row.reference.clone(),
+                    peers: rows
+                        .iter()
+                        .filter(|row| result.is_peer(row.observation))
+                        .map(|row| row.reference.clone())
+                        .collect(),
+                };
+                let mut inputs = std::collections::BTreeSet::new();
+                for reference in report.references().chain([&result.focus.parent, &next.latest]) {
+                    inputs.insert(reference.key()?);
+                }
+                if inputs.len() > MAX_DIAGNOSTIC_INPUTS {
+                    next.analysis = DiagnosticAnalysisStatus::Unresolved;
+                    next.issue = Some(DiagnosticAnalysisIssue::BudgetExhausted);
+                } else {
+                    next.report = Some(report);
+                    next.analysis = DiagnosticAnalysisStatus::Analyzed;
+                    next.issue = None;
+                }
             } else {
                 next.analysis = DiagnosticAnalysisStatus::Unresolved;
                 next.issue = Some(if result.source == FocusSourceState::Changed {

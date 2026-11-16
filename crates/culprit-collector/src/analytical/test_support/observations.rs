@@ -106,7 +106,8 @@ pub fn request_memory_evidence(
         maximum_used_workers: None,
         resource: None,
         workload_group: None,
-        native_properties: [("resource_semaphore_id".into(), "0".into()), ("queue_id".into(), "3".into())].into(),
+        queue: ExecutionGrantQueue { identity: Some(NativeIdentity::new("3")), ..Default::default() },
+        native_properties: [("resource_semaphore_id".into(), "0".into())].into(),
         available_columns: [
             "session_id",
             "request_id",
@@ -124,6 +125,7 @@ pub fn request_memory_evidence(
             "pool_id",
             "group_id",
             "resource_semaphore_id",
+            "queue_id",
         ]
         .into_iter()
         .map(str::to_owned)

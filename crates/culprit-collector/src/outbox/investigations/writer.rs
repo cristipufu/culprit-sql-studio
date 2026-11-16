@@ -1,6 +1,12 @@
 use super::*;
 use crate::collection_files::ObservationFiles;
 
+// A revision retains the raw roster both as report references and as its immutable input inventory.
+const DIAGNOSTIC_PAGE_BYTES: u32 = 512 * 1024;
+
+#[cfg(test)]
+mod limits;
+
 struct StoredDiagnosticStep {
     id: String,
     update_digest: String,
@@ -11,7 +17,7 @@ fn local_budget() -> CollectionBudget {
     CollectionBudget {
         page_rows: 128,
         max_snapshot_rows: (MAX_DIAGNOSTIC_EPISODES * 2) as u32,
-        page_bytes: 256 * 1024,
+        page_bytes: DIAGNOSTIC_PAGE_BYTES,
         total_bytes: 16 * 1024 * 1024,
         max_pages: 128,
         max_queries: 1,
@@ -264,6 +270,7 @@ impl Files {
                     {
                         return Err(integrity());
                     }
+                    self.validate_report_participants(report, &source, &row, &report_input)?;
                     if let Some(intent) = &report_intent {
                         self.verify_investigation_intent(intent)?;
                         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
@@ -307,6 +314,65 @@ impl Files {
                     if !revision.inputs.contains(parent) {
                         return Err(integrity());
                     }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_report_participants(
+        &mut self,
+        report: &DiagnosticReport,
+        source: &CollectionDescription,
+        row: &ExportedRecord,
+        input: &DiagnosticInput,
+    ) -> Result<()> {
+        match report {
+            DiagnosticReport::RequestMemory { .. } => {
+                let rows = input
+                    .rows
+                    .iter()
+                    .map(|row| match &row.row.record {
+                        TelemetryRecord::Operational(OperationalObservation {
+                            fact: OperationalFact::ExecutionGrant(grant),
+                            ..
+                        }) => Ok((&row.reference, grant.as_ref())),
+                        _ => Err(integrity()),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if !report.matches_request_memory_input(source, rows) {
+                    return Err(integrity());
+                }
+            }
+            DiagnosticReport::PageWait { blocking_contexts, .. } => {
+                let SourceObservation::FocusedPageWait { result, .. } = &source.observation else {
+                    return Err(integrity());
+                };
+                let TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::PageWait(page), ..
+                }) = &row.record
+                else {
+                    return Err(integrity());
+                };
+                let parent = self.diagnostic_input(
+                    &result.focus.participant.parent.capture.observation_id,
+                    input.controller_version,
+                )?;
+                let rows = parent
+                    .rows
+                    .iter()
+                    .map(|row| match &row.row.record {
+                        TelemetryRecord::Activity(observation) => {
+                            Ok(ActivityFrameRow { observation, reference: Some(&row.reference) })
+                        }
+                        _ => Err(integrity()),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let frame = ActivityFrameEvidence::new(&parent.source, &rows, true)?;
+                let participation =
+                    culprit_core::page_wait_blocking_participation(source, page, &result.focus.participant, &frame)?;
+                if !blocking_contexts.iter().eq(participation.references()) {
+                    return Err(integrity());
                 }
             }
         }

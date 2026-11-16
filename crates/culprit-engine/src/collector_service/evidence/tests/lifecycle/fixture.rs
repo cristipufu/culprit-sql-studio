@@ -12,10 +12,11 @@ use culprit_collector::{
     },
     delivery::{
         object_store::{
+            ObjectRecoveryStore,
             provider::{RecoveryProvider, RecoveryTarget},
             transport::*,
         },
-        recovery::{CommittedRange, PayloadObject, RecoveryStore},
+        recovery::{CommittedRange, PayloadObject, RecoveryStore, reopen},
     },
 };
 use serde_json::{Map, Value};
@@ -35,28 +36,28 @@ use tokio::{
 };
 
 #[derive(Default)]
-pub(super) struct Objects {
+pub(in crate::collector_service::evidence::tests) struct Objects {
     entries: Mutex<BTreeMap<String, (Vec<u8>, String)>>,
     revision: AtomicUsize,
     readonly: AtomicBool,
-    pub(super) reads: Mutex<Vec<String>>,
-    pub(super) stall: AtomicBool,
-    pub(super) allow_payloads: AtomicBool,
-    pub(super) stall_payload_body: AtomicBool,
-    pub(super) payload_started: Arc<Notify>,
-    pub(super) active: Arc<AtomicUsize>,
+    pub(in crate::collector_service::evidence::tests) reads: Mutex<Vec<String>>,
+    pub(in crate::collector_service::evidence::tests) stall: AtomicBool,
+    pub(in crate::collector_service::evidence::tests) allow_payloads: AtomicBool,
+    pub(in crate::collector_service::evidence::tests) stall_payload_body: AtomicBool,
+    pub(in crate::collector_service::evidence::tests) payload_started: Arc<Notify>,
+    pub(in crate::collector_service::evidence::tests) active: Arc<AtomicUsize>,
 }
 impl Objects {
-    pub(super) fn snapshot(&self) -> BTreeMap<String, (Vec<u8>, String)> {
+    pub(in crate::collector_service::evidence::tests) fn snapshot(&self) -> BTreeMap<String, (Vec<u8>, String)> {
         self.entries.lock().unwrap().clone()
     }
-    pub(super) fn remove_proofs(&self) {
+    pub(in crate::collector_service::evidence::tests) fn remove_proofs(&self) {
         self.entries.lock().unwrap().retain(|key, _| !key.starts_with("validation/"));
     }
-    pub(super) fn remove_history(&self) {
+    pub(in crate::collector_service::evidence::tests) fn remove_history(&self) {
         self.entries.lock().unwrap().clear();
     }
-    pub(super) fn corrupt_manifest(&self) {
+    pub(in crate::collector_service::evidence::tests) fn corrupt_manifest(&self) {
         let mut entries = self.entries.lock().unwrap();
         let (_, (bytes, _)) = entries.iter_mut().find(|(key, _)| key.starts_with("manifests/")).unwrap();
         bytes.push(b' ');
@@ -140,12 +141,12 @@ impl ObjectTransport for Objects {
     }
 }
 
-pub(super) struct Store {
+pub(in crate::collector_service::evidence::tests) struct Store {
     catalog: Arc<PhysicalCatalog<JsonProjection>>,
     rows: Mutex<BTreeMap<String, Vec<Vec<Value>>>>,
-    pub(super) publication: Mutex<Option<Vec<Value>>>,
-    pub(super) requests: AtomicUsize,
-    pub(super) denied: AtomicBool,
+    pub(in crate::collector_service::evidence::tests) publication: Mutex<Option<Vec<Value>>>,
+    pub(in crate::collector_service::evidence::tests) requests: AtomicUsize,
+    pub(in crate::collector_service::evidence::tests) denied: AtomicBool,
 }
 #[async_trait]
 impl AnalyticalReadStore for Store {
@@ -190,10 +191,10 @@ impl AnalyticalReadStore for Store {
     }
 }
 impl Store {
-    pub(super) fn omit_first_row(&self) {
+    pub(in crate::collector_service::evidence::tests) fn omit_first_row(&self) {
         self.rows.lock().unwrap().values_mut().next().unwrap().remove(0);
     }
-    pub(super) fn corrupt_row(&self) {
+    pub(in crate::collector_service::evidence::tests) fn corrupt_row(&self) {
         let schema = self.catalog.get(TelemetryStream::OperationalSamples).unwrap();
         let column = schema.columns().iter().position(|column| column.name == "FactKind").unwrap();
         self.rows.lock().unwrap().values_mut().next().unwrap()[0][column] = serde_json::json!("unproven-fact");
@@ -225,21 +226,26 @@ impl EvidenceStoreProvider for Warehouse {
     }
 }
 
-pub(super) struct Fixture {
-    pub(super) objects: Arc<Objects>,
-    pub(super) store: Arc<Store>,
-    pub(super) service: EvidenceService,
-    pub(super) request: EvidenceRequest,
-    pub(super) config: EvidenceConfig,
-    pub(super) runtime: CollectorRuntime,
-    pub(super) profiles: Arc<super::super::profiles::Profiles>,
+pub(in crate::collector_service::evidence::tests) struct Fixture {
+    pub(in crate::collector_service::evidence::tests) objects: Arc<Objects>,
+    pub(in crate::collector_service::evidence::tests) store: Arc<Store>,
+    pub(in crate::collector_service::evidence::tests) service: EvidenceService,
+    pub(in crate::collector_service::evidence::tests) request: EvidenceRequest,
+    pub(in crate::collector_service::evidence::tests) config: EvidenceConfig,
+    pub(in crate::collector_service::evidence::tests) runtime: CollectorRuntime,
+    pub(in crate::collector_service::evidence::tests) profiles: Arc<super::super::profiles::Profiles>,
+    /// Authenticated conservative row-planning bound, separate from bytes actually returned by the transport.
+    pub(in crate::collector_service::evidence::tests) largest_row_response_bytes: u32,
 }
 impl Fixture {
-    pub(super) async fn new() -> Self {
+    pub(in crate::collector_service::evidence::tests) async fn new() -> Self {
         let (source, records) = culprit_collector::analytical::test_support::memory_failure_evidence();
         Self::capture(source, records).await
     }
-    pub(super) async fn capture(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+    pub(in crate::collector_service::evidence::tests) async fn capture(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+    ) -> Self {
         let objects = Arc::new(Objects::default());
         let catalog = Arc::new(PhysicalCatalog::<JsonProjection>::new().unwrap());
         let native = Recovery::capture("fixture:archive", catalog.digest(), source, records, 100_000);
@@ -262,8 +268,11 @@ impl Fixture {
         let indexes = ProjectionIndexes::new(objects.clone());
         let encoder = BatchEncoder::new(catalog.clone(), archive, scratch.path()).unwrap();
         let mut rows = BTreeMap::new();
+        let mut largest_row_response_bytes = 0u32;
         for batch in &manifest.batches {
             let encoded = encoder.encode(&range, &batch.batch_id).await.unwrap();
+            largest_row_response_bytes =
+                largest_row_response_bytes.max(encoded.digests.iter().map(|row| row.response_bytes).max().unwrap_or(0));
             indexes.put(&encoded.index_key, &encoded.digests).await.unwrap();
             rows.insert(
                 batch.batch_id.clone(),
@@ -314,7 +323,7 @@ impl Fixture {
         };
         objects.readonly.store(true, Ordering::SeqCst);
         objects.reads.lock().unwrap().clear();
-        Self { objects, store, service, request, config, runtime, profiles }
+        Self { objects, store, service, request, config, runtime, profiles, largest_row_response_bytes }
     }
 }
 fn physical_row(schema: &JsonProjection, bytes: &[u8]) -> Vec<Value> {

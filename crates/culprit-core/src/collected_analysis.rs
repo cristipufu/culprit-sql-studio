@@ -40,6 +40,7 @@ pub struct CollectedAnalysisRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[ts(export)]
 pub struct CollectedEvidenceMetrics {
+    pub selected_rows: u32,
     pub queries: u32,
     pub pages: u32,
     pub returned_rows: u32,

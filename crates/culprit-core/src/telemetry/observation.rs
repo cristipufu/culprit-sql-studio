@@ -385,8 +385,8 @@ impl SourceObservation {
                 snapshot.is_valid()
                     && result.is_valid()
                     && snapshot.dataset == SnapshotDataset::CurrentRequestMemory
-                    && snapshot.records <= 1
-                    && (snapshot.records == 1) == (result.membership == RequestMemoryMembership::Observed)
+                    && snapshot.records as usize
+                        == result.peers.len() + usize::from(result.membership == RequestMemoryMembership::Observed)
                     && snapshot.observed_from == result.observed_from
                     && snapshot.observed_until == result.observed_until
             }

@@ -38,6 +38,7 @@ pub fn explain(
         },
         limitations,
         entries: cases.into_iter().map(render).collect(),
+        admission_resources: vec![],
     })
 }
 
@@ -106,6 +107,7 @@ fn render(participant: Participant<'_>) -> MemoryParticipantExplanation {
         explanation: details.join(" "),
         investigation: t!("view.session_memory.investigation"),
         verify: t!("view.session_memory.verify"),
+        grant_admission: None,
     }
 }
 

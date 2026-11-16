@@ -145,15 +145,16 @@ impl<R: NativeRead> ActivityReader<R> {
     }
     pub(crate) async fn enrich_memory(&mut self, frame: &mut MemoryFrame) -> Result<ActivityDetailStatus> {
         let selected = frame.activity.keys();
+        self.enrich_memory_for(frame, &selected).await
+    }
+    async fn enrich_memory_for(
+        &mut self,
+        frame: &mut MemoryFrame,
+        selected: &BTreeSet<ActivityKey>,
+    ) -> Result<ActivityDetailStatus> {
         let limit = self.options.budget.max_sql_bytes.min(16 * 1024);
-        self.enrich_using_policy(
-            &mut frame.activity,
-            &selected,
-            false,
-            limit,
-            super::sql::QueryPolicy::MemoryDiagnostic,
-        )
-        .await
+        self.enrich_using_policy(&mut frame.activity, selected, false, limit, super::sql::QueryPolicy::MemoryDiagnostic)
+            .await
     }
     pub(crate) async fn verify_memory_context(
         &mut self,
@@ -287,6 +288,7 @@ fn decode(
         resource,
         workload_group: optional_counter(row, "grant_group_id")?
             .map(|group| NativeIdentity::new(group).qualified("kind", "sql-server-resource-governor-group")),
+        queue: ExecutionGrantQueue::default(),
         native_properties: Default::default(),
         available_columns: vec!["session_id".into(), "request_id".into(), "request_time".into()],
         native_null_columns: vec![],

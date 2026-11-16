@@ -397,7 +397,10 @@ fn explained_request_memory(snapshot: &mut Snapshot) -> Option<culprit_core::Mem
         && captured.observations.iter().all(|row| row.fits_database_capture(&snapshot.server.database))
     {
         let rows: Vec<_> = captured.observations.iter().collect();
-        crate::request_memory::explain(&rows, source)
+        crate::request_memory::explain(
+            crate::request_memory::RequestMemoryEvidence { context: &captured.context, observations: &rows },
+            source,
+        )
     } else {
         Err(culprit_core::Error::invalid(culprit_core::t!("view.request_memory.invalid_capture")))
     };
@@ -425,7 +428,7 @@ fn explained_page_waits(snapshot: &mut Snapshot) -> Option<culprit_core::PageWai
         && captured.observations.iter().all(|row| row.fits_database_capture(&snapshot.server.database))
     {
         let rows: Vec<_> = captured.observations.iter().collect();
-        crate::page_waits::explain(&rows, source)
+        crate::page_waits::explain(&rows, source, None)
     } else {
         Err(culprit_core::Error::invalid(culprit_core::t!("view.page_waits.invalid_capture")))
     };

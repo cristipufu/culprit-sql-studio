@@ -98,9 +98,14 @@ async fn the_original_generation_and_statement_are_filtered_before_sql_enrichmen
     let focused = reader.capture_focused_memory(&original).await.unwrap();
     assert_eq!(focused.result.focus, original);
     assert_eq!(focused.result.membership, RequestMemoryMembership::Observed);
-    assert_eq!(focused.capture.observations.len(), 1);
+    assert_eq!(focused.capture.observations.len(), 2);
     assert_eq!(focused.capture.observations[0].requested_kibibytes.as_deref(), Some("9007199254740993"));
     assert!(focused.result.accepts_observation(&focused.capture.observations[0]));
+    assert_eq!(focused.result.subject.as_ref(), Some(&focused.capture.observations[0].identity));
+    assert_eq!(focused.result.peers, vec![focused.capture.observations[1].identity.clone()]);
+    assert!(!focused.capture.observations[1].request.as_ref().unwrap().statement.is_available());
+    assert_eq!(focused.capture.observations[1].statement_relationship, GrantStatementRelationship::Unresolved);
+    assert!(focused.result.matches_observations(&focused.capture.observations));
     assert_eq!(reader.query_count(), 5);
     let [Parameter::Text(selectors), ..] = reader.io.calls[4].parameters.as_slice() else { panic!() };
     assert!(selectors.contains("42"));
@@ -161,4 +166,52 @@ async fn a_changed_native_owner_or_unknown_parent_role_stops_before_grant_column
         assert_eq!(reader.query_count(), 2);
         assert_eq!(reader.close().await, SourceShutdown::Quiescent);
     }
+}
+
+#[tokio::test]
+async fn only_verified_same_resource_peers_survive_and_masked_resources_never_gain_a_roster() {
+    for masked in [false, true] {
+        let original = if masked { replace(&native_row(), &[("grant_pool_id", Val::Null)]) } else { native_row() };
+        let peer = replace(&native_row(), &[("session_id", Val::Int(43)), ("grant_session_id", Val::Int(43))]);
+        let other_resource = replace(
+            &peer,
+            &[("session_id", Val::Int(44)), ("grant_session_id", Val::Int(44)), ("grant_semaphore_id", Val::Int(1))],
+        );
+        let changed = replace(
+            &peer,
+            &[("session_id", Val::Int(45)), ("grant_session_id", Val::Int(45)), ("grant_sql_handle", Val::Null)],
+        );
+        let foreign = replace(
+            &peer,
+            &[("session_id", Val::Int(46)), ("grant_session_id", Val::Int(46)), ("scope_basis", Val::Int(5))],
+        );
+        let mut reader = reader_with_identity(
+            replies(vec![original, peer, other_resource, changed, foreign], true),
+            IdentityDetail::AzureDatabase,
+        );
+        let focused = reader.capture_focused_memory(&original_focus()).await.unwrap();
+        assert_eq!(focused.capture.observations.len(), if masked { 1 } else { 2 });
+        assert_eq!(focused.result.peers.len(), usize::from(!masked));
+        assert_eq!(focused.result.resource.is_none(), masked);
+        assert!(focused.result.matches_observations(&focused.capture.observations));
+        assert_eq!(reader.query_count(), 5, "peer metadata uses the existing native frame");
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn one_row_cost_approval_cannot_read_or_publish_a_larger_native_set_by_filtering_it() {
+    let peer = replace(&native_row(), &[("session_id", Val::Int(43)), ("grant_session_id", Val::Int(43))]);
+    let io = crate::resources::test_support::FakeRead::new(replies(vec![native_row(), peer], false));
+    let options = crate::activity::ReadOptions {
+        budget: CollectionBudget { max_snapshot_rows: 1, ..Default::default() },
+        scope: ActivityScope::CurrentDatabase,
+        identity: IdentityDetail::AzureDatabase,
+    };
+    let mut reader = crate::activity::memory::tests::reader_with_options(io, options);
+    let error = reader.capture_focused_memory(&original_focus()).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::RowLimit);
+    assert_eq!(reader.query_count(), 4, "the limit applies before selection and SQL enrichment");
+    assert_eq!(reader.io.calls[3].limit, 2, "one native allowance plus its overflow sentinel");
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }

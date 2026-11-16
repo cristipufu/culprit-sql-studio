@@ -1,5 +1,6 @@
 mod events;
 mod focus;
+mod request_memory;
 mod retirement;
 mod shared;
 use super::*;

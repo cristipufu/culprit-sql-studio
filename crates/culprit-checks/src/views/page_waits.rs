@@ -1,6 +1,8 @@
 //! Observed wait targets explain affected requests, never transient latch holders or an exclusive cause.
 use culprit_core::{
-    Error, PageWaitExplanation, PageWaitReport, Result, SourceOutcome, SourceState, WaitResourceKind, format, key, t,
+    Error, PageWaitActivityEvidence, PageWaitBlockingIssue, PageWaitBlockingParticipation, PageWaitExplanation,
+    PageWaitReport, Result, SourceOutcome, SourceState, WaitResourceKind, format, key,
+    page_wait_blocking_participation, t,
     telemetry::{
         MAX_PAGE_WAIT_OBSERVATIONS, MssqlIndexCounter, PageIndexOperationRelation, PageIndexOperations,
         PageWaitObservation, PageWaitRecheck, PageWaitRelation, PageWaitRequestState, PageWaitResolution,
@@ -11,8 +13,16 @@ use std::collections::BTreeSet;
 
 /// Native scans and authenticated readback call the same pure explanation over their original bounded rows.
 /// Source availability is independent from the ability to retrieve those rows, including an empty population.
-pub fn explain(observations: &[&PageWaitObservation], source: Option<&SourceOutcome>) -> Result<PageWaitReport> {
+pub fn explain(
+    observations: &[&PageWaitObservation],
+    source: Option<&SourceOutcome>,
+    activity: Option<PageWaitActivityEvidence<'_>>,
+) -> Result<PageWaitReport> {
+    if let Some(activity) = activity {
+        activity.validate()?;
+    }
     let cases = validate(observations, source)?;
+    let entries = cases.into_iter().map(|case| render(case, activity)).collect::<Result<Vec<_>>>()?;
     Ok(PageWaitReport {
         source_state: source.map(|source| source.state),
         source_reason: source.and_then(|source| source.reason.clone()),
@@ -27,7 +37,7 @@ pub fn explain(observations: &[&PageWaitObservation], source: Option<&SourceOutc
             )
         },
         limitations: limitations(source, observations.iter().any(|row| row.index_operations.is_some())),
-        entries: cases.into_iter().map(render).collect(),
+        entries,
     })
 }
 
@@ -124,7 +134,7 @@ fn limitations(source: Option<&SourceOutcome>, has_index_points: bool) -> Vec<St
     limits
 }
 
-fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
+fn render(case: ObservedPage<'_>, activity: Option<PageWaitActivityEvidence<'_>>) -> Result<PageWaitExplanation> {
     let observation = case.observation;
     let (title, base) = match (case.wait, observation.task_wait.is_some()) {
         (WaitKind::Memory, false) => (t!("view.page_waits.memory.title"), t!("view.page_waits.memory.explanation")),
@@ -161,12 +171,20 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
     if let Some(point) = &case.index {
         render_index_point(&mut details, point, case.wait);
     }
+    let blocking = match activity {
+        Some(activity) => {
+            page_wait_blocking_participation(activity.source, observation, activity.original, activity.frame)?
+        }
+        None => PageWaitBlockingParticipation::unavailable(),
+    };
+    render_blocking(&blocking, &mut details);
     let investigation = culprit_core::i18n::t(investigation_message(case.investigation), &[]);
-    PageWaitExplanation {
+    Ok(PageWaitExplanation {
         observation_key: case.key,
         request_key: observation.request.key.clone(),
         task: observation.task_wait.as_ref().map(Into::into),
         resource: observation.resource.clone(),
+        blocking,
         title,
         explanation: details.join(" "),
         investigation,
@@ -176,6 +194,36 @@ fn render(case: ObservedPage<'_>) -> PageWaitExplanation {
             ) => t!("view.page_waits.verify.allocation"),
             _ => t!("view.page_waits.verify"),
         },
+    })
+}
+
+fn render_blocking(blocking: &PageWaitBlockingParticipation, details: &mut Vec<String>) {
+    if !blocking.contexts.is_empty() {
+        details.push(t!(
+            "view.page_waits.blocking.observed",
+            n = blocking.contexts.len(),
+            count = format::digits(blocking.contexts.len().to_string()),
+            at = blocking.basis.as_ref().map(|basis| basis.observed_at.as_str()).unwrap_or_default()
+        ));
+        details.push(t!("view.page_waits.blocking.historical"));
+    }
+    for issue in &blocking.issues {
+        let message = match issue {
+            PageWaitBlockingIssue::FrameUnavailable => key!("view.page_waits.blocking.frame_unavailable"),
+            PageWaitBlockingIssue::NativeScopeUnqualified => key!("view.page_waits.blocking.scope_unqualified"),
+            PageWaitBlockingIssue::ParallelTaskUnresolved => key!("view.page_waits.blocking.task_unresolved"),
+            PageWaitBlockingIssue::WaitOwnerUnavailable => key!("view.page_waits.blocking.owner_unavailable"),
+            PageWaitBlockingIssue::OwnerGenerationUnavailable => {
+                key!("view.page_waits.blocking.generation_unavailable")
+            }
+            PageWaitBlockingIssue::OwnerContextUnavailable => key!("view.page_waits.blocking.context_unavailable"),
+            PageWaitBlockingIssue::SelfReference => key!("view.page_waits.blocking.self_reference"),
+            PageWaitBlockingIssue::MultipleOwnerContexts => key!("view.page_waits.blocking.multiple_requests"),
+            PageWaitBlockingIssue::ContextsLimited => key!("view.page_waits.blocking.contexts_limited"),
+            PageWaitBlockingIssue::ReadIncomplete => key!("view.page_waits.blocking.read_incomplete"),
+            PageWaitBlockingIssue::NativePopulationPartial => key!("view.page_waits.blocking.population_partial"),
+        };
+        details.push(culprit_core::i18n::t(message, &[]));
     }
 }
 

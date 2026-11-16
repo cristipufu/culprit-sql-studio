@@ -129,6 +129,7 @@ fn current_grant(context: &NativeReadContext) -> RequestMemorySnapshot {
             maximum_used_workers: None,
             resource: None,
             workload_group: None,
+            queue: ExecutionGrantQueue::default(),
             native_properties: Default::default(),
             available_columns: vec!["granted_memory_kb".into(), "used_memory_kb".into()],
             native_null_columns: vec![],

@@ -455,6 +455,11 @@ a committed range neither acquires collector ownership nor changes remote histor
 deadline bound the caller's wait; native transports retain their own request lifecycle, and a dropped caller does
 not establish remote query cancellation. ClickHouse's query transport has no insertion method; its ingestor owns
 `WritePolicy`, and destination identity depends on the endpoint and database rather than insertion quorum.
+An `EvidenceSession` bounds related captures with one cumulative warehouse/recovery allowance and absolute deadline.
+Selected manifest rows are charged even when publication or returned rows are missing. A failed read closes that
+session because its incomplete metrics cannot authorize a retry. Focused page analysis can accept the authenticated
+original Activity capture through this route; maintenance and page waits share one frame validator and exact receipt
+builder, with no source-database dependency or reconstructed session ownership.
 
 The optional engine `collected_evidence` consumer adapts one authenticated query-history capture to the existing
 pure pipeline. It joins exact native references within that capture, weights interval statistics by execution

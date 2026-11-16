@@ -307,7 +307,7 @@ async fn owned_report_rejects_replaced_lineage_even_when_native_payload_and_rece
     )
     .unwrap();
     let mut episode = fixture.episode.clone();
-    episode.report = Some(DiagnosticReport::PageWait { observation: reference });
+    episode.report = Some(DiagnosticReport::PageWait { observation: reference, blocking_contexts: vec![] });
     let authenticated =
         authenticate_owned_report(&fixture.store, &fixture.native, &episode, &mut BTreeSet::new()).await.unwrap();
     assert_eq!(authenticated.key().unwrap(), fixture.intent.key().unwrap());

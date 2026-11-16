@@ -73,10 +73,7 @@ fn report(
 ) -> Result<MaintenanceReport> {
     explain(
         source,
-        &observations
-            .iter()
-            .map(|observation| MaintenanceActivityRow { observation, reference: None })
-            .collect::<Vec<_>>(),
+        &observations.iter().map(|observation| ActivityFrameRow { observation, reference: None }).collect::<Vec<_>>(),
         complete,
     )
 }
@@ -300,8 +297,8 @@ fn receipt(source: &CollectionDescription, row: &ActivityObservation, ordinal: u
 fn with_receipt<'a>(
     observation: &'a ActivityObservation,
     reference: &'a DiagnosticEvidenceRef,
-) -> MaintenanceActivityRow<'a> {
-    MaintenanceActivityRow { observation, reference: Some(reference) }
+) -> ActivityFrameRow<'a> {
+    ActivityFrameRow { observation, reference: Some(reference) }
 }
 
 #[test]
@@ -330,8 +327,7 @@ fn original_source_capture_and_payload_receipts_cannot_be_reassigned_to_differen
     let mut changed_row = row.clone();
     changed_row.key.request.as_mut().unwrap().generation = "reused-request".into();
     assert!(
-        explain(&source, &[MaintenanceActivityRow { observation: &changed_row, reference: Some(&original) }], true)
-            .is_err()
+        explain(&source, &[ActivityFrameRow { observation: &changed_row, reference: Some(&original) }], true).is_err()
     );
 }
 
@@ -372,8 +368,8 @@ fn archive_references_must_share_one_capture_and_unique_original_positions() {
         explain(
             &source,
             &[
-                MaintenanceActivityRow { observation: &maintenance, reference: Some(&owner_reference) },
-                MaintenanceActivityRow { observation: &waiter, reference: None }
+                ActivityFrameRow { observation: &maintenance, reference: Some(&owner_reference) },
+                ActivityFrameRow { observation: &waiter, reference: None }
             ],
             true
         )

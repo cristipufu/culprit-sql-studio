@@ -68,6 +68,7 @@ export function pageReport(observations = [pageWait()]): PageWaitReport {
     entries: observations.map((row, index) => ({
       observation_key: `opaque-backend-page-reference-${index}`, request_key: structuredClone(row.request.key), resource: structuredClone(row.resource),
       task: row.task_wait ? { task_address: row.task_wait.task_address, execution_context_id: row.task_wait.execution_context_id } : undefined,
+      blocking: { basis: null, reported_owners: [], contexts: [], context_count: 0, issues: ["frame-unavailable"] },
       title: `Affected request ${index}`, explanation: "The request waited on the reported resource; an exclusive cause or owner is not established.",
       investigation: "Correlate the original request and native metadata before a measured code change.",
       verify: "Compare the same native evidence after the tested change.",

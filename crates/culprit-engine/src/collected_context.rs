@@ -15,6 +15,7 @@ pub(crate) fn from_capture(capture: &EvidenceCapture) -> CollectedEvidenceContex
         selected_streams: capture.families().iter().map(|family| family.stream()).collect(),
         read_gaps: capture.gaps().to_vec(),
         metrics: CollectedEvidenceMetrics {
+            selected_rows: metrics.selected_rows,
             queries: metrics.queries,
             pages: metrics.pages,
             returned_rows: metrics.returned_rows,

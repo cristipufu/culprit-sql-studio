@@ -5,13 +5,16 @@ use crate::{
 };
 use clap::{Args, Subcommand, ValueEnum};
 use culprit_collector::{
-    analytical::evidence::{EvidenceFamily, EvidenceReadBudget, RecoveryPayloadBudget},
+    analytical::evidence::{EvidenceCapture, EvidenceFamily, EvidenceReadBudget, RecoveryPayloadBudget},
     capture::CollectionCancellation,
 };
-use culprit_core::{NativeRuntimePopulationCatalog, Result, format, t, telemetry::NativeIdentity};
+use culprit_core::{
+    NativeRuntimePopulationCatalog, Result, format, t,
+    telemetry::{DeliveryProblem, NativeIdentity, SourceObservation, valid_digest},
+};
 use culprit_engine::collector_service::{
     CollectorRuntime,
-    evidence::{EvidenceConfig, EvidenceRequest},
+    evidence::{EvidenceConfig, EvidenceRequest, EvidenceService},
 };
 use serde::Serialize;
 use std::{io::Write, path::PathBuf};
@@ -39,6 +42,30 @@ pub(crate) struct AnalyzeArgs {
     analysis: Analysis,
     #[arg(long, value_name="ID", value_parser=crate::parse_workload_population, help=culprit_core::t!("evidence.cli.workload_population"))]
     workload_population: Option<NativeIdentity>,
+    #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.activity_range"))]
+    activity_range: Option<String>,
+}
+
+impl AnalyzeArgs {
+    fn validate_selection(&self) -> Result<()> {
+        if let Some(population) = &self.workload_population {
+            if !population.is_valid() {
+                return Err(culprit_core::Error::invalid(t!("cli.scan.workload_population_invalid")));
+            }
+            if self.analysis != Analysis::Queries {
+                return Err(culprit_core::Error::invalid(t!("evidence.cli.population_queries_only")));
+            }
+        }
+        if let Some(range) = &self.activity_range {
+            if self.analysis != Analysis::PageWaits {
+                return Err(culprit_core::Error::invalid(t!("evidence.cli.activity_page_waits_only")));
+            }
+            if !valid_digest(range) || range == &self.common.range {
+                return Err(DeliveryProblem::InvalidContract.error());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Args)]
@@ -186,26 +213,22 @@ impl CommonArgs {
 }
 
 pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
-    let (common, families, analysis, requested_population) = match command {
-        EvidenceCommand::Read(args) => (args.common, args.families.into_iter().map(Into::into).collect(), None, None),
+    let (common, families, analysis, requested_population, activity_range) = match command {
+        EvidenceCommand::Read(args) => {
+            (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None)
+        }
         EvidenceCommand::Analyze(args) => {
-            if let Some(population) = &args.workload_population {
-                if !population.is_valid() {
-                    return Err(culprit_core::Error::invalid(t!("cli.scan.workload_population_invalid")));
-                }
-                if args.analysis != Analysis::Queries {
-                    return Err(culprit_core::Error::invalid(t!("evidence.cli.population_queries_only")));
-                }
-            }
-            (args.common, args.analysis.families(), Some(args.analysis), args.workload_population)
+            args.validate_selection()?;
+            (args.common, args.analysis.families(), Some(args.analysis), args.workload_population, args.activity_range)
         }
     };
     let request = common.request(families, out.format())?;
     let config = EvidenceConfig::from_file(&common.config)?;
     let service = CollectorRuntime::default().evidence(&config)?;
     let cancellation = CollectionCancellation::default();
-    let capture = crate::collection_shutdown::run(&cancellation, service.read(&request, &cancellation)).await?;
-    let complete = capture.is_read_complete();
+    let reading = read_captures(&service, &request, activity_range.as_deref(), &cancellation);
+    let (capture, activity) = crate::collection_shutdown::run(&cancellation, reading).await?;
+    let complete = capture.is_read_complete() && activity.as_ref().is_none_or(|capture| capture.is_read_complete());
     match analysis {
         None => emit(out, &capture, common.max_output_bytes, || {
             read_summary(capture.range_id(), capture.records().len(), capture.gaps().len())
@@ -233,7 +256,7 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             emit(out, &analysis, common.max_output_bytes, || observations::participants(&analysis.report))?;
         }
         Some(Analysis::PageWaits) => {
-            let analysis = culprit_engine::collected_resources::page_waits(&capture)?;
+            let analysis = culprit_engine::collected_resources::page_waits(&capture, activity.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::page_waits(&analysis.report))?;
         }
         Some(Analysis::TaskSpace) => {
@@ -281,6 +304,25 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         println!("{}", t!("evidence.cli.read_incomplete"));
     }
     Ok(if complete { 0 } else { 2 })
+}
+
+async fn read_captures(
+    service: &EvidenceService,
+    request: &EvidenceRequest,
+    activity_range: Option<&str>,
+    cancellation: &CollectionCancellation,
+) -> Result<(EvidenceCapture, Option<EvidenceCapture>)> {
+    let mut session = service.session(request.budget, cancellation)?;
+    let capture = session.read(&request.range_id, &request.families).await?;
+    let activity = if let Some(range) = activity_range {
+        if !matches!(capture.source().observation, SourceObservation::FocusedPageWait { .. }) {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        Some(session.read(range, &[EvidenceFamily::ActivityObservations]).await?)
+    } else {
+        None
+    };
+    Ok((capture, activity))
 }
 
 /// CLI IDs select an exact captured identity only when its native ID is unambiguous; labels and native properties

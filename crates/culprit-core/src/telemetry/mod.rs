@@ -8,6 +8,7 @@ use ts_rs::TS;
 use crate::{DatabaseIdentity, Error, ErrorCode, Result, t};
 
 mod activity;
+pub(crate) mod activity_frame;
 mod admission;
 mod cache_entry_memory;
 mod cached_definitions;
@@ -77,6 +78,7 @@ mod triggers;
 mod tuning;
 mod wait_semantics;
 pub use activity::*;
+pub use activity_frame::*;
 pub use admission::*;
 pub use cache_entry_memory::*;
 pub use cached_definitions::*;

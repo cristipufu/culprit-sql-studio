@@ -65,9 +65,10 @@ impl EvidenceReader {
         if rows > budget.max_rows as usize {
             return Err(capacity());
         }
-        let capture = tokio::time::timeout_at(deadline, self.read(range, families, budget, catalog, recovery))
+        let mut capture = tokio::time::timeout_at(deadline, self.read(range, families, budget, catalog, recovery))
             .await
             .map_err(|_| CollectionStop::TimedOut.error())??;
+        capture.metrics.selected_rows = u32::try_from(rows).map_err(|_| capacity())?;
         // Timeout polls its inner future first. A synchronous parse/validation overrun must not return success
         // merely because the inner future completed before the timer received another poll.
         if tokio::time::Instant::now() >= deadline {

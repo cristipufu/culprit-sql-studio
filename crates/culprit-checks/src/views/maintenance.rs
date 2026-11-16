@@ -1,28 +1,22 @@
 //! One native Activity frame establishes participation and session blocking direction, not lock acquisition by SQL.
 use culprit_core::{
-    Error, MaintenanceClassification, MaintenanceDirection, MaintenanceKind, MaintenanceParticipation,
-    MaintenanceReference, MaintenanceRelationIssue, MaintenanceReport, Metric, Result, SourceState,
-    classify_maintenance, format, key,
-    maintenance::{MAX_MAINTENANCE_ENTRIES, MAX_MAINTENANCE_OBSERVATIONS, MAX_MAINTENANCE_REFERENCES_PER_ENTRY},
+    MaintenanceClassification, MaintenanceDirection, MaintenanceKind, MaintenanceParticipation, MaintenanceReference,
+    MaintenanceRelationIssue, MaintenanceReport, Metric, Result, SourceState, classify_maintenance, format, key,
+    maintenance::{MAX_MAINTENANCE_ENTRIES, MAX_MAINTENANCE_REFERENCES_PER_ENTRY},
     t,
     telemetry::*,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-pub struct MaintenanceActivityRow<'a> {
-    pub observation: &'a ActivityObservation,
-    pub reference: Option<&'a DiagnosticEvidenceRef>,
-}
-
 pub fn explain(
     source: &CollectionDescription,
-    rows: &[MaintenanceActivityRow<'_>],
+    rows: &[ActivityFrameRow<'_>],
     read_complete: bool,
 ) -> Result<MaintenanceReport> {
-    let native = validate(source, rows, read_complete)?;
-    let qualified = source.is_partition_qualified() && native.epoch.is_some();
-    let sessions = session_rows(rows);
-    let dependents = blocking_dependents(rows, &sessions, qualified);
+    let frame = ActivityFrameEvidence::new(source, rows, read_complete)?;
+    let native = frame.native();
+    let qualified = frame.is_qualified();
+    let dependents = blocking_dependents(rows, &frame);
     let mut maintenance = Vec::new();
     let mut unclassified_requests = 0u32;
     for row in rows {
@@ -38,7 +32,7 @@ pub fn explain(
     let entries = maintenance
         .into_iter()
         .take(MAX_MAINTENANCE_ENTRIES)
-        .map(|(row, kind)| render(row, kind, qualified, &sessions, &dependents))
+        .map(|(row, kind)| render(row, kind, &frame, &dependents))
         .collect();
     let source_state = if !read_complete && matches!(native.coverage.state, SourceState::Collected | SourceState::Empty)
     {
@@ -76,7 +70,7 @@ pub fn explain(
     }
     Ok(MaintenanceReport {
         source: source.source.clone(),
-        context: read_context(source, native),
+        context: frame.context(),
         native_epoch: native.epoch.clone(),
         population: native.population,
         source_state,
@@ -93,97 +87,18 @@ pub fn explain(
     })
 }
 
-fn validate<'a>(
-    source: &'a CollectionDescription,
-    rows: &[MaintenanceActivityRow<'_>],
-    read_complete: bool,
-) -> Result<&'a ActivitySnapshotDescription> {
-    let SourceObservation::Activity(native) = &source.observation else {
-        return Err(invalid());
-    };
-    if !source.target.is_valid()
-        || !source.partition_is_consistent()
-        || !native.is_valid()
-        || !read_context(source, native).is_valid()
-        || native.coverage.source != source.source
-        || rows.len() > MAX_MAINTENANCE_OBSERVATIONS
-        || rows.len() > native.observations as usize
-        || read_complete && rows.len() != native.observations as usize
-    {
-        return Err(invalid());
-    }
-    ActivityEvidence::validate_references(rows.iter().map(|row| row.observation))?;
-    let scope = source.captured_range()?.scope_id;
-    let mut capture = None;
-    let mut referenced = 0;
-    let mut positions = BTreeSet::new();
-    for row in rows {
-        if source
-            .target
-            .database()
-            .is_some_and(|database| !row.observation.database_context_is_consistent(&database.database))
-        {
-            return Err(invalid());
-        }
-        if let Some(reference) = row.reference {
-            if !reference.is_valid()
-                || reference.source_scope_id != scope
-                || reference.row_ordinal >= native.observations
-                || capture.as_ref().is_some_and(|expected| *expected != reference.capture_ref())
-                || !positions.insert((&reference.batch_id, reference.row_ordinal))
-            {
-                return Err(invalid());
-            }
-            let exported =
-                ExportedRecord::new(source, &reference.capture, TelemetryRecord::from(row.observation.clone()))?;
-            if DiagnosticEvidenceRef::from_export(source, &reference.manifest_sha256, &exported, reference.row_ordinal)?
-                != *reference
-            {
-                return Err(invalid());
-            }
-            capture = Some(reference.capture_ref());
-            referenced += 1;
-        }
-    }
-    if referenced != 0 && referenced != rows.len() {
-        return Err(invalid());
-    }
-    Ok(native)
-}
-
-fn read_context(source: &CollectionDescription, native: &ActivitySnapshotDescription) -> NativeReadContext {
-    NativeReadContext {
-        target: source.target.clone(),
-        partition: source.partition.clone(),
-        observed_from: native.observed_from.clone(),
-        observed_until: native.observed_until.clone(),
-        database_writable: native.database_writable,
-    }
-}
-
-fn session_rows<'a>(
-    rows: &'a [MaintenanceActivityRow<'a>],
-) -> BTreeMap<&'a NativeActivityIdentity, Vec<&'a MaintenanceActivityRow<'a>>> {
-    let mut sessions = BTreeMap::<_, Vec<_>>::new();
-    for row in rows.iter().filter(|row| row.observation.key.request.is_some()) {
-        sessions.entry(&row.observation.key.session).or_default().push(row);
-    }
-    sessions
-}
-
 #[derive(Default)]
 struct Dependents<'a> {
     total: u32,
-    retained: Vec<&'a MaintenanceActivityRow<'a>>,
+    retained: Vec<ActivityFrameRow<'a>>,
 }
 
 fn blocking_dependents<'a>(
-    rows: &'a [MaintenanceActivityRow<'a>],
-    sessions: &BTreeMap<&NativeActivityIdentity, Vec<&MaintenanceActivityRow<'_>>>,
-    qualified: bool,
+    rows: &[ActivityFrameRow<'a>],
+    frame: &ActivityFrameEvidence<'a>,
 ) -> BTreeMap<NativeActivityIdentity, Dependents<'a>> {
     let mut dependents = BTreeMap::<_, Dependents<'_>>::new();
-    if !qualified {
+    if !frame.is_qualified() {
         return dependents;
     }
     for row in rows.iter().filter(|row| is_lock_wait(row.observation)) {
@@ -198,13 +113,15 @@ fn blocking_dependents<'a>(
             .filter_map(ActivityWaitOwner::session)
             .collect::<BTreeSet<_>>();
         for owner in owners {
-            if owner == row.observation.key.session || !sessions.contains_key(&owner) {
+            if owner == row.observation.key.session
+                || !frame.session_rows(&owner).any(|row| row.observation.key.request.is_some())
+            {
                 continue;
             }
             let entry = dependents.entry(owner).or_default();
             entry.total += 1;
             if entry.retained.len() < MAX_MAINTENANCE_REFERENCES_PER_ENTRY {
-                entry.retained.push(row);
+                entry.retained.push(*row);
             }
         }
     }
@@ -215,7 +132,7 @@ fn is_lock_wait(row: &ActivityObservation) -> bool {
     row.key.request.is_some() && row.waiting_on_lock == Some(true)
 }
 
-fn reference(row: &MaintenanceActivityRow<'_>) -> MaintenanceReference {
+fn reference(row: &ActivityFrameRow<'_>) -> MaintenanceReference {
     MaintenanceReference {
         activity: row.observation.key.clone(),
         statement: row.observation.statement_identity.clone(),
@@ -224,13 +141,13 @@ fn reference(row: &MaintenanceActivityRow<'_>) -> MaintenanceReference {
 }
 
 fn render(
-    row: &MaintenanceActivityRow<'_>,
+    row: &ActivityFrameRow<'_>,
     kind: MaintenanceKind,
-    qualified: bool,
-    sessions: &BTreeMap<&NativeActivityIdentity, Vec<&MaintenanceActivityRow<'_>>>,
+    frame: &ActivityFrameEvidence<'_>,
     dependents: &BTreeMap<NativeActivityIdentity, Dependents<'_>>,
 ) -> MaintenanceParticipation {
     let observation = row.observation;
+    let qualified = frame.is_qualified();
     let affected = dependents.get(&observation.key.session);
     let affected_count = affected.map_or(0, |entry| entry.total);
     let waiting = is_lock_wait(observation);
@@ -240,11 +157,9 @@ fn render(
         (false, true) => MaintenanceDirection::Waiting,
         (false, false) => MaintenanceDirection::Unlinked,
     };
-    let competing = sessions
-        .get(&observation.key.session)
-        .into_iter()
-        .flatten()
-        .filter(|other| other.observation.key != observation.key)
+    let competing = frame
+        .session_rows(&observation.key.session)
+        .filter(|other| other.observation.key.request.is_some() && other.observation.key != observation.key)
         .collect::<Vec<_>>();
     let mut issues = Vec::new();
     if !qualified {
@@ -287,14 +202,10 @@ fn render(
         reference: reference(row),
         kind,
         direction,
-        affected: affected.into_iter().flat_map(|entry| &entry.retained).map(|row| reference(row)).collect(),
+        affected: affected.into_iter().flat_map(|entry| &entry.retained).map(reference).collect(),
         affected_count,
         waiting_on,
-        competing_requests: competing
-            .iter()
-            .take(MAX_MAINTENANCE_REFERENCES_PER_ENTRY)
-            .map(|row| reference(row))
-            .collect(),
+        competing_requests: competing.iter().take(MAX_MAINTENANCE_REFERENCES_PER_ENTRY).map(reference).collect(),
         competing_request_count: competing.len() as u32,
         issues,
         title: t!(
@@ -356,10 +267,6 @@ fn metrics(row: &ActivityObservation) -> Vec<Metric> {
         }
     }
     metrics
-}
-
-fn invalid() -> Error {
-    Error::invalid(t!("collection.invalid_source"))
 }
 
 #[cfg(test)]

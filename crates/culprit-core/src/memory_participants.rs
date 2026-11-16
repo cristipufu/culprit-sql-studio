@@ -13,6 +13,8 @@ pub struct MemoryParticipantsReport {
     pub summary: String,
     pub limitations: Vec<String>,
     pub entries: Vec<MemoryParticipantExplanation>,
+    /// Each independently verified resource roster is retained once for this read, never once per waiter.
+    pub admission_resources: Vec<MemoryGrantAdmission>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -26,4 +28,19 @@ pub struct MemoryParticipantExplanation {
     pub explanation: String,
     pub investigation: String,
     pub verify: String,
+    /// Same-read admission context only. It neither establishes a blocker nor complete shared-resource coverage.
+    pub grant_admission: Option<crate::telemetry::NativeIdentity>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct MemoryGrantAdmission {
+    pub resource: crate::telemetry::NativeIdentity,
+    pub participants: Vec<MemoryParticipantReference>,
+}
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct MemoryParticipantReference {
+    pub observation_key: String,
+    pub observation_identity: crate::telemetry::NativeIdentity,
 }

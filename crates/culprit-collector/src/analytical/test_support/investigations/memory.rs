@@ -2,6 +2,11 @@
 use super::*;
 
 pub fn request_memory_investigation_fixture() -> InvestigationFixture {
+    request_memory_investigation_fixture_with_peers(0)
+}
+
+pub fn request_memory_investigation_fixture_with_peers(peers: usize) -> InvestigationFixture {
+    assert!(peers < MAX_REQUEST_MEMORY_OBSERVATIONS);
     let mut fixture = investigation_fixture();
     let (native, _) =
         request_memory_evidence(DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }, true);
@@ -76,6 +81,8 @@ pub fn request_memory_investigation_fixture() -> InvestigationFixture {
     receipt.recipe_id = fixture.recipe.id.clone();
     receipt.selector = fixture.recipe.selector;
     receipt.scope = fixture.episode.scope.clone().into();
+    receipt.tested_budget.max_snapshot_rows = (peers + 1).try_into().unwrap();
+    receipt.tested_budget.page_rows = receipt.tested_budget.max_snapshot_rows.min(64);
     let component = receipt.component.clone();
     fixture.intent = DiagnosticInvestigationIntent::new(
         &fixture.episode,
@@ -89,7 +96,12 @@ pub fn request_memory_investigation_fixture() -> InvestigationFixture {
 }
 
 pub fn focused_request_memory_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
-    let fixture = request_memory_investigation_fixture();
+    focused_request_memory_evidence_with_peers(0)
+}
+
+/// One original waiter and a bounded observed resource subset. The synthetic approval has no production authority.
+pub fn focused_request_memory_evidence_with_peers(peers: usize) -> (CollectionDescription, Vec<TelemetryRecord>) {
+    let fixture = request_memory_investigation_fixture_with_peers(peers);
     let focus = fixture.intent.focus.participant();
     let (_, mut rows) =
         request_memory_evidence(DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }, true);
@@ -107,8 +119,13 @@ pub fn focused_request_memory_evidence() -> (CollectionDescription, Vec<Telemetr
     grant.native_null_columns.extend(["grant_time".into(), "granted_memory_kb".into()]);
     grant.request = Some(focus.original.clone());
     grant.statement_relationship = GrantStatementRelationship::ObservedCurrentStatement;
+    if peers > 0 {
+        grant.resource = Some(NativeIdentity::new("2").qualified("resource_semaphore_id", "0"));
+        grant.native_properties.insert("pool_id".into(), "2".into());
+        grant.native_null_columns.retain(|column| column != "pool_id");
+    }
     row.key = grant.key().unwrap();
-    let source = CollectionDescription {
+    let mut source = CollectionDescription {
         target: focus.target.clone(),
         partition: focus.partition.clone(),
         source: grant.source.clone(),
@@ -127,13 +144,62 @@ pub fn focused_request_memory_evidence() -> (CollectionDescription, Vec<Telemetr
                 observed_until: at,
                 source: FocusSourceState::Matched,
                 membership: RequestMemoryMembership::Observed,
+                subject: Some(grant.identity.clone()),
+                resource: grant.resource.clone(),
+                peers: vec![],
             }),
         },
     };
+    for index in 0..peers {
+        rows.push(peer(&rows[0], index));
+    }
+    let SourceObservation::FocusedRequestMemory { snapshot, result } = &mut source.observation else { unreachable!() };
+    snapshot.records = rows.len().try_into().unwrap();
+    snapshot.sources[0].records = snapshot.records;
+    result.peers = rows.iter().skip(1).map(|row| grant_observation(row).identity.clone()).collect();
     assert!(source.matches_request(&CollectionRequest {
         subject: fixture.intent.subject(),
         selection: fixture.intent.selection(),
         budget: fixture.intent.budget
     }));
     (source, rows)
+}
+
+fn grant_observation(row: &TelemetryRecord) -> &ExecutionGrantObservation {
+    let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::ExecutionGrant(grant), .. }) = row
+    else {
+        unreachable!()
+    };
+    grant
+}
+
+fn peer(original: &TelemetryRecord, index: usize) -> TelemetryRecord {
+    let mut grant = grant_observation(original).clone();
+    let identity = format!("{}:0", 1000 + index);
+    grant.identity = NativeIdentity::new(identity).qualified("request-generation", format!("peer-request-{index}"));
+    grant.state = ExecutionGrantState::Granted;
+    grant.granted_without_offset = Some("2020-01-01T11:59:59.003".into());
+    grant.granted_kibibytes = Some("64".into());
+    grant.requested_kibibytes = Some("64".into());
+    grant.required_kibibytes = Some("64".into());
+    grant.wait_ms = None;
+    grant.native_null_columns.retain(|name| !matches!(name.as_str(), "grant_time" | "granted_memory_kb"));
+    if !grant.native_null_columns.iter().any(|name| name == "wait_time_ms") {
+        grant.native_null_columns.push("wait_time_ms".into());
+    }
+    let request = grant.request.as_mut().unwrap();
+    request.key.session =
+        NativeActivityIdentity { id: (1000 + index).to_string(), generation: format!("peer-login-{index}") };
+    request.key.request = Some(NativeActivityIdentity { id: "0".into(), generation: format!("peer-request-{index}") });
+    request.statement_identity = Some(NativeIdentity::new(format!("peer-statement-{index}")));
+    request.statement = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
+    request.state = "running".into();
+    request.wait = None;
+    grant.statement_relationship = GrantStatementRelationship::Unresolved;
+    assert!(grant.is_valid());
+    TelemetryRecord::Operational(OperationalObservation {
+        source: grant.source.clone(),
+        key: grant.key().unwrap(),
+        fact: OperationalFact::ExecutionGrant(Box::new(grant)),
+    })
 }

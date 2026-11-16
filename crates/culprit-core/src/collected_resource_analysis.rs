@@ -31,6 +31,10 @@ pub struct CollectedMemoryParticipantsAnalysis {
 #[ts(export)]
 pub struct CollectedPageWaitAnalysis {
     pub context: CollectedEvidenceContext,
+    /// Optional original Activity evidence, retained once and independently from the later page lookup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub activity_context: Option<CollectedEvidenceContext>,
     pub report: PageWaitReport,
 }
 

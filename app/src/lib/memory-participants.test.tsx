@@ -29,6 +29,7 @@ function grant(): ExecutionGrantObservation {
     wait_ms: "18446744073709551615", timeout_seconds: "25", degree_of_parallelism: "1",
     reserved_workers: "4", used_workers: "0", maximum_used_workers: "3",
     resource: { id: "2", qualifiers: { resource_semaphore_id: "0" } }, workload_group: null, native_properties: {},
+    queue: { identity: null, position: null, next_candidate: null, small: null },
     request: {
       key: { session: { id: "42", generation: "native-login-1" }, request: { id: "0", generation: "native-request-1" } },
       client: { application: "<img src=x onerror=alert(1)>" },
@@ -56,6 +57,7 @@ function explanation(native: NativeIdentity, index = 0): MemoryParticipantExplan
     title: `Backend participant ${index}`, explanation: "The native participant is observed; the allocating statement is unresolved.",
     investigation: "Correlate matching native evidence without treating current context as the allocator.",
     verify: "Compare the same native measurement after a tested change.",
+    grant_admission: null,
   };
 }
 
@@ -64,7 +66,7 @@ function report(identities = [identity()]): MemoryParticipantsReport {
     title: "Observed native memory participants", summary: `${identities.length} retained participants; no causal owner established.`,
     source_state: "partial", source_reason: "Only a bounded native population was read.",
     limitations: ["A current statement is context, not proof of allocation ownership."],
-    entries: identities.map(explanation),
+    entries: identities.map(explanation), admission_resources: [],
   };
 }
 
@@ -103,6 +105,23 @@ test("participant metadata joins exact native references despite reordered rows 
   expect(html).not.toContain("2999 KiB");
   expect(html).toContain("Backend participant 0");
   expect(html).not.toContain("backend-reference-0");
+});
+
+test("native queue metadata preserves zero, false, exact integers and unavailable values", () => {
+  const row = grant();
+  row.queue = { identity: identity("native-queue-3"), position: "18446744073709551615", next_candidate: false, small: true };
+  let html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={report()} />);
+  expect(html).toContain("native-queue-3");
+  expect(html).toContain("18446744073709551615");
+  expect(html).toContain(`${t("ui.memory_participants.next_candidate")}</dt><dd>${t("ui.common.no")}`);
+  expect(html).toContain(`${t("ui.memory_participants.small_grant")}</dt><dd>${t("ui.common.yes")}`);
+  row.queue.position = "0";
+  row.queue.next_candidate = null;
+  row.queue.small = null;
+  html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={report()} />);
+  expect(html).toContain(`${t("ui.memory_participants.queue_position")}</dt><dd>0</dd>`);
+  expect(html).toContain(`${t("ui.memory_participants.next_candidate")}</dt><dd>${t("ui.memory_failures.not_reported")}`);
+  expect(html).toContain(`${t("ui.memory_participants.small_grant")}</dt><dd>${t("ui.memory_failures.not_reported")}`);
 });
 
 test("different native generations, duplicate identities and wrong sources cannot borrow another row's counters", () => {

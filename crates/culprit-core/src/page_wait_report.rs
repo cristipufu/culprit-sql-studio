@@ -3,6 +3,9 @@ use crate::{ObservedWaitResource, SourceState, telemetry::ActivityKey};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod participation;
+pub use participation::*;
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct PageWaitReport {
@@ -26,6 +29,9 @@ pub struct PageWaitExplanation {
     #[ts(optional)]
     pub task: Option<PageWaitTaskReference>,
     pub resource: ObservedWaitResource,
+    /// Historical engine-reported blocking-session context from the authenticated original Activity frame.
+    /// This never identifies the request that acquired a latch, a present owner or a page-writing cause.
+    pub blocking: PageWaitBlockingParticipation,
     pub title: String,
     pub explanation: String,
     pub investigation: String,

@@ -3,7 +3,7 @@ use culprit_collector::analytical::evidence::{EvidenceGapReason, RecoveryPayload
 use culprit_core::{ErrorDetail, SourceState, telemetry::*};
 use std::sync::atomic::Ordering;
 
-mod fixture;
+pub(super) mod fixture;
 use fixture::Fixture;
 
 #[tokio::test]
@@ -48,7 +48,7 @@ async fn committed_page_wait_investigation_reads_only_authenticated_original_wai
         let fixture = Fixture::capture(source.clone(), records.clone()).await;
         let before = fixture.objects.snapshot();
         let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
-        let analysis = crate::collected_resources::page_waits(&capture).unwrap();
+        let analysis = crate::collected_resources::page_waits(&capture, None).unwrap();
         assert_eq!(analysis.context.source, source);
         assert_eq!(analysis.report.source_state, Some(expected_state));
         assert_eq!(analysis.report.entries.len(), records.len());

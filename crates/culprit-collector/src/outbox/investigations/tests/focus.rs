@@ -387,7 +387,8 @@ fn attach_page_report(input: &DiagnosticInput, episode_id: &str, focus: &Activit
     let mut episode = before.clone();
     episode.analysis = DiagnosticAnalysisStatus::Partial;
     episode.issue = Some(DiagnosticAnalysisIssue::EvidenceUnavailable);
-    episode.report = Some(DiagnosticReport::PageWait { observation: input.rows[0].reference.clone() });
+    episode.report =
+        Some(DiagnosticReport::PageWait { observation: input.rows[0].reference.clone(), blocking_contexts: vec![] });
     let analyzed_at = "2026-11-14T08:03:00Z";
     let mut revision = DiagnosticRevision::between(Some(before), episode, analyzed_at).unwrap().unwrap();
     if !revision.inputs.contains(&focus.participant().parent) {

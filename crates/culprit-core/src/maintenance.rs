@@ -11,7 +11,7 @@ use ts_rs::TS;
 mod classification;
 pub use classification::{MAX_MAINTENANCE_STATEMENT_BYTES, classify_maintenance};
 
-pub const MAX_MAINTENANCE_OBSERVATIONS: usize = 10_000;
+pub const MAX_MAINTENANCE_OBSERVATIONS: usize = crate::telemetry::MAX_ACTIVITY_FRAME_OBSERVATIONS;
 pub const MAX_MAINTENANCE_ENTRIES: usize = 256;
 pub const MAX_MAINTENANCE_REFERENCES_PER_ENTRY: usize = 16;
 

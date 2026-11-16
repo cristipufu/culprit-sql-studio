@@ -482,12 +482,12 @@ impl ActivityEvidence {
         Ok(Self { observations, blocking: blocking.into_iter().collect(), conditions, uncertain })
     }
 }
-struct ActivityIndex<'a> {
-    by_key: BTreeMap<ActivityKey, &'a ActivityObservation>,
-    by_session: BTreeMap<NativeActivityIdentity, Vec<&'a ActivityObservation>>,
+pub(super) struct ActivityIndex<'a> {
+    pub(super) by_key: BTreeMap<ActivityKey, &'a ActivityObservation>,
+    pub(super) by_session: BTreeMap<NativeActivityIdentity, Vec<&'a ActivityObservation>>,
 }
 impl<'a> ActivityIndex<'a> {
-    fn new(rows: impl IntoIterator<Item = &'a ActivityObservation>) -> Result<Self> {
+    pub(super) fn new(rows: impl IntoIterator<Item = &'a ActivityObservation>) -> Result<Self> {
         let mut by_key = BTreeMap::new();
         let mut by_session: BTreeMap<NativeActivityIdentity, Vec<&ActivityObservation>> = BTreeMap::new();
         let mut generations = BTreeMap::new();

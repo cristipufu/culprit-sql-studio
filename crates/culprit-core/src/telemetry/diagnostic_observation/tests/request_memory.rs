@@ -71,6 +71,7 @@ fn grant(focus: &ActivityRequestFocus) -> ExecutionGrantObservation {
         maximum_used_workers: None,
         resource: None,
         workload_group: None,
+        queue: ExecutionGrantQueue::default(),
         native_properties: Default::default(),
         available_columns: vec![],
         native_null_columns: vec![],
@@ -102,6 +103,9 @@ fn captured(
                 observed_until: value.observed_at.clone(),
                 source: FocusSourceState::Matched,
                 membership,
+                subject: (membership == RequestMemoryMembership::Observed).then(|| value.identity.clone()),
+                resource: None,
+                peers: vec![],
             }),
         },
     };
@@ -117,21 +121,62 @@ fn captured(
         manifest_sha256: digest(b"sealed grant result"),
         source_scope_id: source.captured_range().unwrap().scope_id,
     };
-    let rows = if count == 0 {
-        vec![]
-    } else {
-        let row = ExportedRecord::new(
-            &source,
-            &input.capture,
-            TelemetryRecord::Operational(OperationalObservation {
-                source: value.source.clone(),
-                key: value.key().unwrap(),
-                fact: OperationalFact::ExecutionGrant(Box::new(value.clone())),
-            }),
-        )
-        .unwrap();
-        vec![(DiagnosticEvidenceRef::from_export(&source, &input.manifest_sha256, &row, 0).unwrap(), value)]
-    };
+    let rows = references(&source, &input, if count == 0 { vec![] } else { vec![value] });
+    (source, input, rows)
+}
+
+fn references(
+    source: &CollectionDescription,
+    input: &DiagnosticCaptureRef,
+    observations: Vec<ExecutionGrantObservation>,
+) -> Vec<(DiagnosticEvidenceRef, ExecutionGrantObservation)> {
+    observations
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, value)| {
+            let row = ExportedRecord::new(
+                source,
+                &input.capture,
+                TelemetryRecord::Operational(OperationalObservation {
+                    source: value.source.clone(),
+                    key: value.key().unwrap(),
+                    fact: OperationalFact::ExecutionGrant(Box::new(value.clone())),
+                }),
+            )
+            .unwrap();
+            (DiagnosticEvidenceRef::from_export(source, &input.manifest_sha256, &row, ordinal as u32).unwrap(), value)
+        })
+        .collect()
+}
+
+fn with_peers(
+    original: ActivityRequestFocus,
+    peers: usize,
+) -> (CollectionDescription, DiagnosticCaptureRef, Vec<(DiagnosticEvidenceRef, ExecutionGrantObservation)>) {
+    let (mut source, mut input, rows) = captured(original, RequestMemoryMembership::Observed);
+    let mut subject = rows[0].1.clone();
+    subject.resource = Some(NativeIdentity::new("native-resource").qualified("semaphore", "0"));
+    let mut observations = (0..peers)
+        .map(|index| {
+            let mut peer = subject.clone();
+            peer.identity = NativeIdentity::new(format!("grant-peer-{index}"));
+            let request = peer.request.as_mut().unwrap();
+            request.key.session.id = format!("peer-{index}");
+            request.statement_identity = Some(NativeIdentity::new(format!("native-statement-{index}")));
+            peer.state = ExecutionGrantState::Granted;
+            peer.granted_without_offset = Some("2020-01-01T00:01:01.003".into());
+            peer.granted_kibibytes = Some("64".into());
+            peer
+        })
+        .collect::<Vec<_>>();
+    let SourceObservation::FocusedRequestMemory { result, snapshot } = &mut source.observation else { panic!() };
+    result.resource = subject.resource.clone();
+    result.peers = observations.iter().map(|row| row.identity.clone()).collect();
+    observations.push(subject);
+    snapshot.records = observations.len() as u32;
+    snapshot.sources[0] = StateSourceCoverage::observed(source.source.clone(), snapshot.records, true);
+    input.source_scope_id = source.captured_range().unwrap().scope_id;
+    let rows = references(&source, &input, observations);
     (source, input, rows)
 }
 
@@ -201,6 +246,79 @@ fn no_matching_or_unverified_grant_never_proves_the_original_request_disappeared
         assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Unresolved);
         assert_eq!(episode.issue, Some(DiagnosticAnalysisIssue::EvidenceUnavailable));
         assert!(episode.recovery.is_none() && episode.report.is_none());
+    }
+}
+
+#[test]
+fn the_original_subject_is_found_by_native_identity_and_every_peer_receipt_enters_history() {
+    let baseline = observe(&memory_frame(1, vec![memory_actor()], true), None);
+    let (source, input, rows) = with_peers(focus(&baseline), 199);
+    let native =
+        rows.iter().map(|(reference, observation)| DiagnosticMemoryRow { reference, observation }).collect::<Vec<_>>();
+    let update =
+        analyze_diagnostic_memory(&source, &input, &native, &baseline.checkpoint, "2020-01-01T01:00:00Z", None)
+            .unwrap();
+    let revision = &update.revisions[0];
+    let DiagnosticReport::RequestMemory { observation, peers } = revision.episode.report.as_ref().unwrap() else {
+        panic!()
+    };
+    assert_eq!(*observation, rows.last().unwrap().0, "the first row is a peer, not a representative original");
+    assert_eq!(peers.len(), 199);
+    assert!(
+        revision.episode.report.as_ref().unwrap().references().all(|reference| revision.inputs.contains(reference))
+    );
+    assert!(revision.inputs.len() <= MAX_DIAGNOSTIC_INPUTS);
+    assert!(revision.is_valid());
+    assert!(serde_json::to_vec(&source).unwrap().len() < 128 * 1024);
+    assert_eq!(revision.episode.lifecycle, baseline.checkpoint.episodes[0].lifecycle);
+    assert_eq!(revision.episode.latest, baseline.checkpoint.episodes[0].latest);
+}
+
+#[test]
+fn a_larger_plugin_roster_preserves_raw_evidence_and_records_explicit_analysis_budget_exhaustion() {
+    let baseline = observe(&memory_frame(1, vec![memory_actor()], true), None);
+    let (source, input, rows) = with_peers(focus(&baseline), MAX_DIAGNOSTIC_INPUTS);
+    let raw = rows.clone();
+    let native =
+        rows.iter().map(|(reference, observation)| DiagnosticMemoryRow { reference, observation }).collect::<Vec<_>>();
+    let update =
+        analyze_diagnostic_memory(&source, &input, &native, &baseline.checkpoint, "2020-01-01T01:00:00Z", None)
+            .unwrap();
+    let revision = &update.revisions[0];
+    assert_eq!(revision.episode.analysis, DiagnosticAnalysisStatus::Unresolved);
+    assert_eq!(revision.episode.issue, Some(DiagnosticAnalysisIssue::BudgetExhausted));
+    assert!(revision.episode.report.is_none());
+    assert_eq!(rows, raw);
+    assert!(revision.is_valid());
+    assert_eq!(revision.episode.first, baseline.checkpoint.episodes[0].first);
+}
+
+#[test]
+fn peer_only_missing_duplicate_foreign_clock_source_or_resource_cannot_close_a_focused_input() {
+    let baseline = observe(&memory_frame(1, vec![memory_actor()], true), None);
+    let (source, _, rows) = with_peers(focus(&baseline), 1);
+    let SourceObservation::FocusedRequestMemory { result, .. } = &source.observation else { panic!() };
+    assert!(result.matches_observations(rows.iter().map(|(_, row)| row)));
+    assert!(!result.matches_observations([&rows[0].1]));
+    assert!(!result.matches_observations([&rows[1].1]));
+    assert!(!result.matches_observations([&rows[0].1, &rows[0].1, &rows[1].1]));
+    for mismatch in ["resource", "clock", "source", "database", "generation", "token"] {
+        let mut peer = rows[0].1.clone();
+        match mismatch {
+            "resource" => peer.resource = Some(NativeIdentity::new("other-resource")),
+            "clock" => peer.observed_at = "2020-01-01T00:02:01Z".into(),
+            "source" => peer.source = "other-native-source".into(),
+            "database" => peer.request.as_mut().unwrap().database = Some("other-database".into()),
+            "generation" => {
+                peer.request_association = RequestGrantAssociation::ChangedRequest;
+                peer.request = None;
+                peer.scope = None;
+            }
+            "token" => peer.request.as_mut().unwrap().statement_identity = None,
+            _ => unreachable!(),
+        }
+        assert!(peer.is_valid(), "{mismatch}");
+        assert!(!result.matches_observations([&peer, &rows[1].1]), "{mismatch}");
     }
 }
 

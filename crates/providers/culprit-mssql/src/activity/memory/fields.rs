@@ -25,13 +25,28 @@ const FIELDS: &[Field] = &[
 struct Property {
     name: &'static str,
     read: fn(&Rec, &str) -> Result<Option<String>>,
+    assign: fn(&mut ExecutionGrantObservation, String),
 }
 const PROPERTIES: &[Property] = &[
-    Property { name: "queue_id", read: optional_counter },
-    Property { name: "wait_order", read: optional_counter },
-    Property { name: "is_next_candidate", read: read_boolean },
-    Property { name: "is_small", read: read_boolean },
-    Property { name: "query_cost", read: read_cost },
+    Property {
+        name: "queue_id",
+        read: optional_counter,
+        assign: |row, value| row.queue.identity = Some(NativeIdentity::new(value)),
+    },
+    Property { name: "wait_order", read: optional_counter, assign: |row, value| row.queue.position = Some(value) },
+    Property {
+        name: "is_next_candidate",
+        read: read_boolean,
+        assign: |row, value| row.queue.next_candidate = Some(value == "1"),
+    },
+    Property { name: "is_small", read: read_boolean, assign: |row, value| row.queue.small = Some(value == "1") },
+    Property {
+        name: "query_cost",
+        read: read_cost,
+        assign: |row, value| {
+            row.native_properties.insert("query_cost".into(), value);
+        },
+    },
 ];
 fn names() -> impl Iterator<Item = &'static str> {
     FIELDS.iter().map(|field| field.name).chain(PROPERTIES.iter().map(|field| field.name))
@@ -98,9 +113,7 @@ impl Layout {
         for field in PROPERTIES {
             grant.available_columns.push(field.name.into());
             match (field.read)(row, &format!("grant_{}", field.name))? {
-                Some(value) => {
-                    grant.native_properties.insert(field.name.into(), value);
-                }
+                Some(value) => (field.assign)(grant, value),
                 None => grant.native_null_columns.push(field.name.into()),
             }
         }

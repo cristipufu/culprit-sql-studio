@@ -118,7 +118,9 @@ pub use finding_facts::*;
 pub use io_accounting::{FileIoContext, IoAccounting};
 pub use maintenance::*;
 pub use measurement::*;
-pub use memory_participants::{MemoryParticipantExplanation, MemoryParticipantsReport};
+pub use memory_participants::{
+    MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantReference, MemoryParticipantsReport,
+};
 pub use model::*;
 pub use native_log_analysis::{
     NativeLogAnalysis, NativeLogArtifact, NativeLogFormat, NativeLogIssue, NativeLogLimits, NativeLogProblem,
@@ -126,7 +128,11 @@ pub use native_log_analysis::{
 pub use operations::{
     MemoryLimit, NodeResource, NodeResources, ProcessMemory, QueryTermination, TerminationHistory, TerminationReason,
 };
-pub use page_wait_report::{PageWaitExplanation, PageWaitReport, PageWaitTaskReference};
+pub use page_wait_report::{
+    PageWaitActivityEvidence, PageWaitActivityReference, PageWaitBlockingBasis, PageWaitBlockingContext,
+    PageWaitBlockingIssue, PageWaitBlockingParticipation, PageWaitExplanation, PageWaitReport, PageWaitTaskReference,
+    page_wait_blocking_participation,
+};
 pub use plan::*;
 pub use plan_compare::{CompareContext, Scenario, ScenarioKind};
 pub use plan_diff::{

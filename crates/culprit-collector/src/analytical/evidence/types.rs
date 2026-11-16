@@ -122,6 +122,8 @@ impl EvidenceReadBudget {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct EvidenceReadMetrics {
+    /// Rows selected by the authenticated manifest, including rows that were missing or unavailable.
+    pub selected_rows: u32,
     pub queries: u32,
     pub pages: u32,
     pub returned_rows: u32,

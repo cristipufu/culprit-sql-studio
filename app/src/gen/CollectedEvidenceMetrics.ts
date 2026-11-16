@@ -3,4 +3,4 @@
 /**
  * Work performed by this archive read, independently of native source coverage.
  */
-export type CollectedEvidenceMetrics = { queries: number, pages: number, returned_rows: number, response_bytes: bigint, proof_bytes: bigint, recovery_objects: number, recovery_bytes: bigint, };
+export type CollectedEvidenceMetrics = { selected_rows: number, queries: number, pages: number, returned_rows: number, response_bytes: bigint, proof_bytes: bigint, recovery_objects: number, recovery_bytes: bigint, };

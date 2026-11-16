@@ -265,6 +265,13 @@ pub async fn load_diagnostic_input(store: &dyn RecoveryStore, range_id: &str) ->
         return Err(invalid());
     }
     let rows = read_rows(store, range.manifest(), None).await?;
+    let mut references = crate::collection_references::ObservationReferences::default();
+    for row in &rows {
+        references.record(&row.record);
+    }
+    if !references.coverage(true, Some(&range.manifest().source)).complete {
+        return Err(invalid());
+    }
     Ok(RecoveredDiagnosticInput { range, rows })
 }
 pub async fn load_diagnostic_checkpoint(
@@ -305,6 +312,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
     }
     let mut manifests = BTreeMap::new();
     let mut authenticated = BTreeSet::new();
+    let mut authenticated_reports = BTreeSet::new();
     let mut shared_references = BTreeMap::<String, BTreeSet<String>>::new();
     for revision in &references.diagnostic_revisions {
         let Some(event) = &revision.investigation else { continue };
@@ -347,6 +355,10 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             manifests.insert(range_id.clone(), store.load(&range_id).await?);
         }
         let native = manifests.get(&range_id).ok_or_else(invalid)?;
+        let report_key = digest(&serde_json::to_vec(&(&episode.id, report)).map_err(|_| invalid())?);
+        if authenticated_reports.insert(report_key) {
+            authenticate_report_participants(store, native, episode).await?;
+        }
         if matches!(native.source.target, CollectionTarget::Shared(_)) {
             let intent = authenticate_owned_report(store, native, episode, &mut authenticated).await?;
             authorize_shared_owner(&mut shared_references, &intent)?;
@@ -412,7 +424,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             .iter()
             .chain([&revision.episode.first, &revision.episode.latest])
             .chain(revision.episode.peak.iter())
-            .chain(revision.episode.report.as_ref().map(DiagnosticReport::evidence))
+            .chain(revision.episode.report.iter().flat_map(DiagnosticReport::references))
         {
             let entry = exact_refs.entry(reference.key()?).or_insert_with(|| (reference.clone(), BTreeSet::new()));
             entry.1.insert(revision.episode.id.clone());
@@ -422,7 +434,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         for reference in [&episode.first, &episode.latest]
             .into_iter()
             .chain(episode.peak.iter())
-            .chain(episode.report.as_ref().map(DiagnosticReport::evidence))
+            .chain(episode.report.iter().flat_map(DiagnosticReport::references))
         {
             let entry = exact_refs.entry(reference.key()?).or_insert_with(|| (reference.clone(), BTreeSet::new()));
             entry.1.insert(episode.id.clone());
@@ -476,6 +488,86 @@ fn native_intent(manifest: &RangeManifest) -> Result<Option<DiagnosticInvestigat
         return Err(invalid());
     }
     Ok(Some(intent))
+}
+
+fn input_rows(input: &RecoveredDiagnosticInput) -> Result<Vec<(DiagnosticEvidenceRef, &ExportedRecord)>> {
+    let manifest = input.range().manifest();
+    let mut ordinals = BTreeMap::<&str, u32>::new();
+    input
+        .rows
+        .iter()
+        .map(|row| {
+            let ordinal = ordinals.entry(&row.batch_id).or_default();
+            let reference =
+                DiagnosticEvidenceRef::from_export(&manifest.source, &manifest.capture_manifest_sha256, row, *ordinal)?;
+            *ordinal = ordinal.checked_add(1).ok_or_else(invalid)?;
+            Ok((reference, row))
+        })
+        .collect()
+}
+
+async fn authenticate_report_participants(
+    store: &dyn RecoveryStore,
+    manifest: &RangeManifest,
+    episode: &DiagnosticEpisode,
+) -> Result<()> {
+    let report = episode.report.as_ref().ok_or_else(invalid)?;
+    let input = load_diagnostic_input(store, &manifest.range_id).await?;
+    if input.range().manifest_digest() != manifest.digest()? {
+        return Err(invalid());
+    }
+    let rows = input_rows(&input)?;
+    let primary = rows.iter().find(|(reference, _)| reference == report.evidence()).ok_or_else(invalid)?;
+    if !report.matches_observation(episode, &manifest.source, primary.1) {
+        return Err(invalid());
+    }
+    match report {
+        DiagnosticReport::RequestMemory { .. } => {
+            let grants = rows
+                .iter()
+                .map(|(reference, row)| match &row.record {
+                    TelemetryRecord::Operational(OperationalObservation {
+                        fact: OperationalFact::ExecutionGrant(grant),
+                        ..
+                    }) => Ok((reference, grant.as_ref())),
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !report.matches_request_memory_input(&manifest.source, grants) {
+                return Err(invalid());
+            }
+        }
+        DiagnosticReport::PageWait { blocking_contexts, .. } => {
+            let SourceObservation::FocusedPageWait { result, .. } = &manifest.source.observation else {
+                return Err(invalid());
+            };
+            let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =
+                &primary.1.record
+            else {
+                return Err(invalid());
+            };
+            let focus = &result.focus.participant;
+            let parent_id = range_id_for(&manifest.contract, &focus.parent.capture)?;
+            let parent = load_diagnostic_input(store, &parent_id).await?;
+            verify_reference(parent.range().manifest(), &focus.parent)?;
+            let original_rows = input_rows(&parent)?;
+            let activity = original_rows
+                .iter()
+                .map(|(reference, row)| match &row.record {
+                    TelemetryRecord::Activity(observation) => {
+                        Ok(ActivityFrameRow { observation, reference: Some(reference) })
+                    }
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let frame = ActivityFrameEvidence::new(&parent.range().manifest().source, &activity, true)?;
+            let participation = culprit_core::page_wait_blocking_participation(&manifest.source, page, focus, &frame)?;
+            if !blocking_contexts.iter().eq(participation.references()) {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn authenticate_owned_report(

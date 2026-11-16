@@ -580,6 +580,7 @@ mod tests {
             title: "observed request-memory participants".into(),
             summary: "one waiter and one reservation".into(),
             limitations: vec!["only the recorded observation is covered".into()],
+            admission_resources: vec![],
             entries: (0..8)
                 .map(|index| culprit_core::MemoryParticipantExplanation {
                     observation_key: format!("native-{index}"),
@@ -588,6 +589,7 @@ mod tests {
                     explanation: "not included in concise output".into(),
                     investigation: "resource-first investigation".into(),
                     verify: "equivalent work".into(),
+                    grant_admission: None,
                 })
                 .collect(),
         };
@@ -671,6 +673,7 @@ mod tests {
                     native: culprit_core::telemetry::NativeIdentity::new("5:1:42"),
                 },
                 title: "memory-page wait".into(),
+                blocking: culprit_core::PageWaitBlockingParticipation::unavailable(),
                 explanation: "private detailed explanation".into(),
                 investigation: "resource investigation".into(),
                 verify: "equivalent load".into(),

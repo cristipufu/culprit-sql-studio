@@ -133,7 +133,8 @@ fn apply_result(
     row: Option<&DiagnosticFocusRow<'_>>,
 ) -> Result<()> {
     if let Some(row) = row {
-        episode.report = Some(DiagnosticReport::PageWait { observation: row.reference.clone() });
+        episode.report =
+            Some(DiagnosticReport::PageWait { observation: row.reference.clone(), blocking_contexts: vec![] });
         episode.analysis = if row.observation.target.is_some() {
             DiagnosticAnalysisStatus::Analyzed
         } else {

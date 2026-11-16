@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
-pub const MAX_DIAGNOSTIC_INPUTS: usize = 64;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 2;
+pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 3;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -500,8 +500,8 @@ impl DiagnosticEpisode {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticReport {
-    PageWait { observation: DiagnosticEvidenceRef },
-    RequestMemory { observation: DiagnosticEvidenceRef },
+    PageWait { observation: DiagnosticEvidenceRef, blocking_contexts: Vec<DiagnosticEvidenceRef> },
+    RequestMemory { observation: DiagnosticEvidenceRef, peers: Vec<DiagnosticEvidenceRef> },
 }
 impl DiagnosticReport {
     pub fn matches_observation(
@@ -530,18 +530,60 @@ impl DiagnosticReport {
             ) => {
                 episode.matches_request_memory_focus(&result.focus)
                     && result.focus.matches_capture_scope(source)
-                    && result.accepts_observation(grant)
+                    && result.is_subject(grant)
             }
             _ => false,
         }
     }
     pub fn evidence(&self) -> &DiagnosticEvidenceRef {
         match self {
-            Self::PageWait { observation } | Self::RequestMemory { observation } => observation,
+            Self::PageWait { observation, .. } | Self::RequestMemory { observation, .. } => observation,
         }
     }
+    /// Every raw row used by this explanation participates in pinning, validation and immutable history.
+    pub fn references(&self) -> impl Iterator<Item = &DiagnosticEvidenceRef> {
+        let secondary = match self {
+            Self::PageWait { blocking_contexts, .. } => blocking_contexts,
+            Self::RequestMemory { peers, .. } => peers,
+        };
+        std::iter::once(self.evidence()).chain(secondary)
+    }
     pub fn is_valid(&self) -> bool {
-        self.evidence().is_valid() && matches!(self.evidence().native_key, NativeRecordIdentity::Operational { .. })
+        let mut unique = BTreeSet::new();
+        self.references().count() <= MAX_DIAGNOSTIC_INPUTS
+            && self.references().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
+            && matches!(self.evidence().native_key, NativeRecordIdentity::Operational { .. })
+            && match self {
+                Self::PageWait { blocking_contexts, .. } => {
+                    blocking_contexts.len() <= crate::page_wait_report::MAX_PAGE_WAIT_BLOCKING_CONTEXTS
+                        && blocking_contexts
+                            .iter()
+                            .all(|reference| reference.stream == TelemetryStream::ActivityObservations)
+                }
+                Self::RequestMemory { peers, .. } => peers.iter().all(|reference| {
+                    reference.capture_ref() == self.evidence().capture_ref()
+                        && matches!(reference.native_key, NativeRecordIdentity::Operational { .. })
+                }),
+            }
+    }
+
+    /// A focused grant report retains every declared raw participant from the same authenticated input.
+    pub fn matches_request_memory_input<'a>(
+        &self,
+        source: &CollectionDescription,
+        rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a ExecutionGrantObservation)>,
+    ) -> bool {
+        let Self::RequestMemory { observation, peers } = self else { return false };
+        let SourceObservation::FocusedRequestMemory { result, .. } = &source.observation else { return false };
+        let rows = rows.into_iter().collect::<Vec<_>>();
+        let mut references = BTreeSet::new();
+        self.is_valid()
+            && rows.len() == peers.len() + 1
+            && result.matches_observations(rows.iter().map(|(_, row)| *row))
+            && rows.iter().all(|(reference, row)| {
+                reference.key().is_ok_and(|key| references.insert(key))
+                    && if result.is_subject(row) { *reference == observation } else { peers.contains(reference) }
+            })
     }
 }
 
@@ -590,11 +632,9 @@ impl DiagnosticRevision {
                 || self.investigation.is_some()
                 || self.episode.investigation_event.is_none())
             && (self.episode.analysis != DiagnosticAnalysisStatus::Analyzed || self.episode.report.is_some())
-            && self
-                .episode
-                .report
-                .as_ref()
-                .is_none_or(|report| report.is_valid() && self.inputs.contains(report.evidence()))
+            && self.episode.report.as_ref().is_none_or(|report| {
+                report.is_valid() && report.references().all(|reference| self.inputs.contains(reference))
+            })
             && self.expected_id().is_ok_and(|expected| expected == self.id)
     }
     pub fn expected_id(&self) -> Result<String> {

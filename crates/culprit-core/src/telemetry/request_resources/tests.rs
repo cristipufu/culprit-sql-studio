@@ -44,6 +44,7 @@ pub(crate) fn grant() -> ExecutionGrantObservation {
         maximum_used_workers: None,
         resource: Some(NativeIdentity::new("2").qualified("resource_semaphore_id", "0")),
         workload_group: None,
+        queue: ExecutionGrantQueue::default(),
         native_properties: Default::default(),
         available_columns: vec!["requested_memory_kb".into(), "ideal_memory_kb".into()],
         native_null_columns: vec!["ideal_memory_kb".into()],

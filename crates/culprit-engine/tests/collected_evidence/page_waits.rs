@@ -6,6 +6,8 @@ use culprit_collector::analytical::{
 use culprit_core::{Snapshot, SourceOutcome, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
 
+mod participation;
+
 fn observations(rows: &[TelemetryRecord]) -> Vec<&PageWaitObservation> {
     rows.iter()
         .map(|row| {
@@ -57,12 +59,12 @@ async fn authenticated_page_targets_reuse_scan_explanations_and_reference_origin
                 reason: None,
                 reason_message: None,
             };
-            culprit_checks::page_waits::explain(&observations(&rows), Some(&outcome)).unwrap()
+            culprit_checks::page_waits::explain(&observations(&rows), Some(&outcome), None).unwrap()
         };
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-        let result = collected_resources::page_waits(&capture).unwrap();
+        let result = collected_resources::page_waits(&capture, None).unwrap();
         assert_eq!(result.report, expected);
         assert_eq!(result.context.source, source);
         assert_eq!(result.context.records.len(), rows.len());
@@ -105,7 +107,7 @@ async fn parallel_page_workers_survive_unrelated_or_absent_coordinator_waits_wit
     let fixture = Fixture::new(source, rows.clone()).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert_eq!(result.report.entries.len(), expected.len());
     assert_eq!(result.context.records.len(), expected.len());
     let keys = result
@@ -148,7 +150,7 @@ async fn native_task_owner_sentinels_and_addresses_stay_raw_without_becoming_own
     let fixture = Fixture::new(source, rows.clone()).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert_eq!(result.report.entries.len(), rows.len());
     for original in &rows {
         assert!(result.context.records.iter().any(|row| &row.row.record == original));
@@ -173,7 +175,7 @@ async fn ended_and_changed_tasks_keep_original_page_and_index_points_without_cur
     let fixture = Fixture::new(source, rows.clone()).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert_eq!(result.report.source_state, Some(SourceState::Partial));
     for row in observations(&rows) {
         assert!(row.statement_identity.is_none() && row.plan_identity.is_none());
@@ -230,7 +232,7 @@ async fn request_rechecks_preserve_original_waiters_and_independent_page_metadat
     let (source, rows) = page_wait_evidence_cases().remove(1);
     let fixture = Fixture::new(source, rows).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert_eq!(result.report.source_state, Some(SourceState::Partial));
     for request in [PageWaitRequestState::Changed, PageWaitRequestState::Missing, PageWaitRequestState::Unverified] {
         let native = result
@@ -274,7 +276,7 @@ async fn ended_waits_and_missing_requests_do_not_erase_independently_checked_ori
     row.after_check.as_mut().unwrap().request = PageWaitRequestState::Missing;
     let fixture = Fixture::new(source, rows).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     let native = result
         .context
         .records
@@ -320,7 +322,7 @@ async fn missing_page_rows_and_publication_are_store_gaps_without_rewriting_nati
     let fixture = Fixture::new(source, rows).await;
     fixture.remove_first_row(TelemetryStream::OperationalSamples);
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert_eq!(result.report.source_state, Some(SourceState::Partial));
     assert_eq!(result.report.entries.len(), 1);
     assert!(result.report.source_reason.is_some());
@@ -328,7 +330,7 @@ async fn missing_page_rows_and_publication_are_store_gaps_without_rewriting_nati
     assert!(result.context.read_gaps.iter().any(|gap| gap.reason == EvidenceGapReason::MissingRows));
     fixture.unpublish();
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert!(result.report.entries.is_empty());
     assert_eq!(result.report.source_state, Some(SourceState::Partial));
     assert_eq!(result.context.read_gaps[0].reason, EvidenceGapReason::NotPublished);
@@ -373,7 +375,7 @@ async fn an_unrelated_archive_family_cannot_acquire_page_target_semantics() {
     let fixture = Fixture::new(source, rows).await;
     let capture = fixture.read_families(&[EvidenceFamily::ResourceSamples]).await;
     assert_eq!(
-        collected_resources::page_waits(&capture).unwrap_err().detail,
+        collected_resources::page_waits(&capture, None).unwrap_err().detail,
         Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::UnsupportedSchema))
     );
 }
@@ -385,7 +387,7 @@ async fn explicit_shared_snapshots_and_focus_retain_actual_resource_authority_an
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
         let reads_before = fixture.recovery_object_reads();
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-        let analyzed = collected_resources::page_waits(&capture).unwrap();
+        let analyzed = collected_resources::page_waits(&capture, None).unwrap();
         assert_eq!(analyzed.context.source.target, source.target);
         assert_eq!(analyzed.context.source.partition, source.partition);
         assert_eq!(analyzed.report.source_state, Some(source.observation.snapshot().unwrap().sources[0].state));
@@ -465,7 +467,7 @@ async fn an_empty_shared_focused_result_still_requires_the_original_native_membe
     result.wait = PageWaitRelation::Unqualified;
     let fixture = Fixture::new(source.clone(), vec![]).await;
     let captured = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let analyzed = collected_resources::page_waits(&captured).unwrap();
+    let analyzed = collected_resources::page_waits(&captured, None).unwrap();
     assert!(analyzed.report.entries.is_empty());
     assert_eq!(analyzed.report.source_state, Some(SourceState::Partial));
     for change in ["target-owner", "partition-owner"] {
@@ -488,7 +490,7 @@ async fn an_empty_shared_focused_result_still_requires_the_original_native_membe
         let captured = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(captured.records().is_empty());
         assert_eq!(
-            collected_resources::page_waits(&captured).unwrap_err().detail,
+            collected_resources::page_waits(&captured, None).unwrap_err().detail,
             Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)),
             "{change}"
         );
@@ -515,7 +517,7 @@ async fn restricted_and_recovery_only_page_sql_follow_the_existing_payload_inven
         row.request.statement = statement;
         let fixture = Fixture::new(source, rows).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-        let result = collected_resources::page_waits(&capture).unwrap();
+        let result = collected_resources::page_waits(&capture, None).unwrap();
         if recovery_only {
             assert_eq!(result.report.entries.len(), 1);
             assert_eq!(result.report.source_state, Some(SourceState::Partial));
@@ -543,7 +545,7 @@ async fn unresolved_waiters_from_another_scope_remain_unowned_original_context()
     let original = record.clone();
     let fixture = Fixture::new(source, rows).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert!(result.context.records.iter().any(|row| row.row.record == TelemetryRecord::Operational(original.clone())));
     assert!(result.report.entries.iter().any(|entry| entry.observation_key == original.key));
 }
@@ -596,7 +598,7 @@ async fn unparseable_original_page_address_survives_authenticated_readback_witho
     let original = record.clone();
     let fixture = Fixture::new(source, rows).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let result = collected_resources::page_waits(&capture).unwrap();
+    let result = collected_resources::page_waits(&capture, None).unwrap();
     assert_eq!(result.report.entries.len(), 2);
     assert!(
         result.context.records.iter().any(|record| record.row.record == TelemetryRecord::Operational(original.clone()))
