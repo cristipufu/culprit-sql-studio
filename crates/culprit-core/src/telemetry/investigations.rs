@@ -34,6 +34,7 @@ impl RecipeCostReceipt {
             && matches!(
                 self.selector,
                 RecipeSelector::FocusedPageWait
+                    | RecipeSelector::FocusedPageWaitWriters
                     | RecipeSelector::FocusedRequestMemory
                     | RecipeSelector::FocusedCompilationAdmission
             )

@@ -238,6 +238,19 @@ generations must match the focused receipt. All matching requests on a reported 
 Missing or incomplete original rows stay explicit; a later session or current SQL never replaces them. These
 historical commands do not establish latch acquisition, a current latch holder or the query that wrote the page.
 
+`page-wait-writers` analyzes a separately captured investigation of at most eight original requests. The native
+reader rechecks the waiter, mapped target and request generations, then binds selected write operators to the
+original object or index. A planned write makes that statement a candidate contributor; it does not establish
+physical-page access or latch ownership. Read-only and unrelated plans remain distinct. Changed or missing
+requests never inherit another request's SQL. This profile adds no ordinary scan queries and remains
+cost-unqualified. Its automatic stage requires authenticated original Activity/page receipts and a measured
+source-cost approval. Preview-only bodies stay unavailable until explicit bounded recovery hydration.
+
+```sh
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis page-wait-writers --with-recovery-payloads --json
+```
+
 The SQL Server shared-tempdb reader separately verifies the native instance, process, tempdb and selected files.
 The affected request keeps its application database; the mapped page keeps its shared-resource owner. Scans reuse
 that reader when both page-target and shared-resource collection are selected. One population supplies at most eight

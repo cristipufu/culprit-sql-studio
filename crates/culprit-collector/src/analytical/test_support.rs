@@ -58,6 +58,10 @@ mod session_memory;
 pub use session_memory::session_memory_evidence_cases;
 mod page_waits;
 pub use page_waits::{page_wait_evidence_cases, page_wait_tamper_cases, shared_page_wait_evidence_cases};
+mod page_writers;
+pub use page_writers::{
+    PageWriterCase, PageWriterFixture, page_writer_evidence, page_writer_evidence_cases, page_writer_fixture,
+};
 mod statement_work;
 pub use statement_work::statement_work_evidence_cases;
 mod statement_grants;

@@ -189,7 +189,8 @@ pub async fn load_diagnostic_evidence(
     if range.manifest_digest() != advertised_digest || capture_reference(range.manifest())? != reference.capture_ref() {
         return Err(invalid());
     }
-    let cacheable = crate::outbox::shared_owner_source(&range.manifest().source);
+    let cacheable =
+        crate::outbox::evidence_cache_source(&range.manifest().source, range.manifest().investigation.as_ref())?;
     let rows = read_rows(store, range.manifest(), (!cacheable).then_some(reference.stream)).await?;
     // A validated range has one batch per stream. EOF authenticates the entire selected batch before its
     // exact receipt position is returned, including when the requested row occurs near the start.
@@ -316,7 +317,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
     let mut shared_references = BTreeMap::<String, BTreeSet<String>>::new();
     for revision in &references.diagnostic_revisions {
         let Some(event) = &revision.investigation else { continue };
-        authenticate_shared_intent(store, &event.intent, &mut authenticated).await?;
+        authenticate_investigation_intent(store, &manifest.contract, &event.intent, &mut authenticated).await?;
         authorize_shared_owner(&mut shared_references, &event.intent)?;
         let DiagnosticInvestigationOutcome::Captured { capture } = &event.outcome else { continue };
         let range_id = range_id_for(&manifest.contract, &capture.capture)?;
@@ -396,7 +397,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             if !intent.matches_episode(&episode) {
                 return Err(invalid());
             }
-            authenticate_shared_intent(store, intent, &mut authenticated).await?;
+            authenticate_investigation_intent(store, &capture.contract, intent, &mut authenticated).await?;
             authorize_shared_owner(&mut shared_references, intent)?;
         }
         let matches_source = match &intent {
@@ -475,7 +476,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         {
             return Err(invalid());
         }
-        authenticate_shared_intent(store, &intent, &mut authenticated).await?;
+        authenticate_investigation_intent(store, &parent.contract, &intent, &mut authenticated).await?;
     }
     Ok(())
 }
@@ -522,6 +523,24 @@ async fn authenticate_report_participants(
         return Err(invalid());
     }
     match report {
+        DiagnosticReport::PageWaitWriters { blocking_contexts, .. } => {
+            let SourceObservation::PageWaitWriters { focus, .. } = &manifest.source.observation else {
+                return Err(invalid());
+            };
+            let observations = rows
+                .iter()
+                .map(|(reference, row)| match &row.record {
+                    TelemetryRecord::Operational(observation) => Ok((reference, observation)),
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !report.matches_writer_input(&manifest.source, observations) {
+                return Err(invalid());
+            }
+            if *blocking_contexts != authenticate_page_writer_focus(store, &manifest.contract, focus).await? {
+                return Err(invalid());
+            }
+        }
         DiagnosticReport::CompilationAdmission { .. } => {
             let observations = rows
                 .iter()
@@ -598,7 +617,7 @@ async fn authenticate_owned_report(
     {
         return Err(invalid());
     }
-    authenticate_shared_intent(store, &intent, authenticated).await?;
+    authenticate_investigation_intent(store, &manifest.contract, &intent, authenticated).await?;
     Ok(intent)
 }
 
@@ -612,12 +631,23 @@ fn authorize_shared_owner(
     Ok(())
 }
 
-async fn authenticate_shared_intent(
+async fn authenticate_investigation_intent(
     store: &dyn RecoveryStore,
+    contract: &crate::delivery::contract::Contract,
     intent: &DiagnosticInvestigationIntent,
     authenticated: &mut BTreeSet<String>,
 ) -> Result<()> {
-    let DiagnosticExecutionBinding::Shared { owner } = &intent.execution else { return Ok(()) };
+    let writer = match &intent.focus {
+        DiagnosticFocus::PageWaitWriters { focus } => Some(focus.as_ref()),
+        _ => None,
+    };
+    let shared = match &intent.execution {
+        DiagnosticExecutionBinding::Shared { owner } => Some(owner.as_ref()),
+        _ => None,
+    };
+    if writer.is_none() && shared.is_none() {
+        return Ok(());
+    }
     let key = intent.key()?;
     if authenticated.contains(&key) {
         return Ok(());
@@ -625,19 +655,60 @@ async fn authenticate_shared_intent(
     if authenticated.len() >= MAX_DIAGNOSTIC_EPISODES {
         return Err(DeliveryProblem::Capacity.error());
     }
-    let parent = load_diagnostic_evidence(store, &intent.focus.participant().parent).await?;
-    let TelemetryRecord::Activity(original) = &parent.record().record else {
-        return Err(invalid());
-    };
-    if !intent.focus.matches_parent(parent.source(), original, &intent.focus.participant().parent) {
-        return Err(invalid());
+    if let Some(focus) = writer {
+        authenticate_page_writer_focus(store, contract, focus).await?;
     }
-    let recovered_owner = load_diagnostic_evidence(store, owner).await?;
-    if !intent.matches_shared_owner(recovered_owner.source(), recovered_owner.record()) {
-        return Err(invalid());
+    if let Some(owner) = shared {
+        let parent = load_diagnostic_evidence(store, &intent.focus.participant().parent).await?;
+        let TelemetryRecord::Activity(original) = &parent.record().record else {
+            return Err(invalid());
+        };
+        if !intent.focus.matches_parent(parent.source(), original, &intent.focus.participant().parent) {
+            return Err(invalid());
+        }
+        let recovered_owner = load_diagnostic_evidence(store, owner).await?;
+        if !intent.matches_shared_owner(recovered_owner.source(), recovered_owner.record()) {
+            return Err(invalid());
+        }
     }
     authenticated.insert(key);
     Ok(())
+}
+
+async fn authenticate_page_writer_focus(
+    store: &dyn RecoveryStore,
+    contract: &crate::delivery::contract::Contract,
+    focus: &PageWaitWriterFocus,
+) -> Result<Vec<DiagnosticEvidenceRef>> {
+    let original = focus.waiter.participant();
+    let parent = load_diagnostic_input(store, &range_id_for(contract, &original.parent.capture)?).await?;
+    verify_reference(parent.range().manifest(), &original.parent)?;
+    let rows = input_rows(&parent)?;
+    let activity = activity_rows(&rows)?;
+    let frame = ActivityFrameEvidence::new(&parent.range().manifest().source, &activity, true)?;
+    if !focus.matches_activity_frame(&frame) {
+        return Err(invalid());
+    }
+    let page = load_diagnostic_evidence(store, &focus.page).await?;
+    let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(observation), .. }) =
+        &page.record().record
+    else {
+        return Err(invalid());
+    };
+    if !focus.matches_page(page.source(), observation, &focus.page) {
+        return Err(invalid());
+    }
+    let participation = culprit_core::page_wait_blocking_participation(page.source(), observation, original, &frame)?;
+    Ok(participation.references().cloned().collect())
+}
+
+fn activity_rows<'a>(rows: &'a [(DiagnosticEvidenceRef, &'a ExportedRecord)]) -> Result<Vec<ActivityFrameRow<'a>>> {
+    rows.iter()
+        .map(|(reference, row)| match &row.record {
+            TelemetryRecord::Activity(observation) => Ok(ActivityFrameRow { observation, reference: Some(reference) }),
+            _ => Err(invalid()),
+        })
+        .collect()
 }
 /// Checks the original committed manifest attestation and exact row position without opening raw payloads.
 pub fn verify_reference(manifest: &RangeManifest, reference: &DiagnosticEvidenceRef) -> Result<()> {

@@ -58,10 +58,12 @@ impl DiagnosticRevision {
                 }
             }
         }
-        if let Some(event) = &investigation
-            && !inputs.contains(&event.intent.focus.participant().parent)
-        {
-            inputs.push(event.intent.focus.participant().parent.clone());
+        if let Some(event) = &investigation {
+            for reference in event.intent.focus.references() {
+                if !inputs.contains(reference) {
+                    inputs.push(reference.clone());
+                }
+            }
         }
         if let Some(event) = &investigation
             && let DiagnosticExecutionBinding::Shared { owner } = &event.intent.execution

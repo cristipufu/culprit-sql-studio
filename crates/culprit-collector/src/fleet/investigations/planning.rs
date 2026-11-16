@@ -11,6 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
+mod writers;
 
 const MAX_CHECKPOINTS_PER_PASS: usize = 8;
 const MAX_EPISODES_PER_PASS: usize = 128;
@@ -124,27 +125,38 @@ async fn bounded(
                     }) else {
                         continue;
                     };
-                    let Some(budget) = binding.budget(target) else {
+                    if binding.budget(target).is_none() {
                         continue;
-                    };
+                    }
                     if !selected_resources.insert(binding.source.target.telemetry_id()?) {
                         continue;
                     }
-                    let selector = match episode.signal {
-                        DiagnosticSignal::RequestMemory { .. } => RecipeSelector::FocusedRequestMemory,
-                        DiagnosticSignal::CompilationAdmission { .. } => RecipeSelector::FocusedCompilationAdmission,
-                        _ => RecipeSelector::FocusedPageWait,
-                    };
-                    let route_key = (
-                        target.id.clone(),
-                        serde_json::to_vec(&selector).map_err(|_| CollectionStop::InvalidPage.error())?,
-                    );
-                    if !routes.contains_key(&route_key) {
-                        routes.insert(route_key.clone(), select_route(backend, target, &binding.revision, selector)?);
-                    }
-                    let Some(route) = routes.get(&route_key).and_then(Option::as_ref) else { continue };
+                    // Charge attempts before metadata or archive work, including withheld/absent questions.
                     questions += 1;
-                    if let Some(candidate) = evidence.question(outbox, target, budget, route, episode, binding).await?
+                    let mut available = Vec::new();
+                    for selector in possible_questions(episode) {
+                        let route_key = (
+                            target.id.clone(),
+                            serde_json::to_vec(&selector).map_err(|_| CollectionStop::InvalidPage.error())?,
+                        );
+                        if !routes.contains_key(&route_key) {
+                            routes
+                                .insert(route_key.clone(), select_route(backend, target, &binding.revision, selector)?);
+                        }
+                        if routes.get(&route_key).is_some_and(Option::is_some) {
+                            available.push((selector, route_key));
+                        }
+                    }
+                    if available.is_empty() {
+                        continue;
+                    }
+                    let Some(focus) = evidence.focus(outbox, target, episode).await? else { continue };
+                    let Some((_, route_key)) = available.iter().find(|(selector, _)| *selector == focus.selector())
+                    else {
+                        continue;
+                    };
+                    let Some(route) = routes.get(route_key).and_then(Option::as_ref) else { continue };
+                    if let Some(candidate) = evidence.question(outbox, target, route, episode, binding, *focus).await?
                         && seen.insert(candidate.intent.episode_stage_key()?)
                     {
                         prepared.push(candidate);
@@ -169,6 +181,18 @@ async fn bounded(
         }
     }
     Ok(prepared)
+}
+
+fn possible_questions(episode: &DiagnosticEpisode) -> Vec<RecipeSelector> {
+    match &episode.signal {
+        DiagnosticSignal::RequestMemory { .. } => vec![RecipeSelector::FocusedRequestMemory],
+        DiagnosticSignal::CompilationAdmission { .. } => vec![RecipeSelector::FocusedCompilationAdmission],
+        DiagnosticSignal::PageWait { .. } if matches!(episode.report, Some(DiagnosticReport::PageWait { .. })) => {
+            vec![RecipeSelector::FocusedPageWaitWriters, RecipeSelector::FocusedPageWait]
+        }
+        DiagnosticSignal::PageWait { .. } => vec![RecipeSelector::FocusedPageWait],
+        _ => vec![],
+    }
 }
 
 fn select_route(
@@ -206,19 +230,12 @@ impl EvidencePlanner<'_> {
         &self,
         outbox: &mut Outbox,
         target: &FleetTarget,
-        budget: &CollectionBudget,
         route: &SelectedRoute,
         episode: &DiagnosticEpisode,
         binding: &RouteBinding,
+        focus: DiagnosticFocus,
     ) -> Result<Option<PreparedInvestigation>> {
-        let Some((source, row)) =
-            resolve_optional_evidence(outbox, &target.connection, &episode.latest, self.recovery, self.cancellation)
-                .await?
-        else {
-            return Ok(None);
-        };
-        let TelemetryRecord::Activity(original) = &row.record else { return Err(DeliveryProblem::Integrity.error()) };
-        let DiagnosticFocusPlan::Ready(focus) = episode.plan_focus(&source, original, &episode.latest)? else {
+        let Some(budget) = binding.budget(target) else {
             return Ok(None);
         };
         let proposed = if let Some(owner) = &binding.shared_owner {
@@ -233,13 +250,13 @@ impl EvidencePlanner<'_> {
             DiagnosticInvestigationIntent::new_shared(
                 episode,
                 &route.recipe,
-                *focus,
+                focus,
                 &route.component,
                 budget,
                 DiagnosticSharedOwner { source: &owner_source, row: &owner_row, reference: owner },
             )
         } else {
-            DiagnosticInvestigationIntent::new(episode, &route.recipe, *focus, &route.component, budget)
+            DiagnosticInvestigationIntent::new(episode, &route.recipe, focus, &route.component, budget)
         };
         let Ok(intent) = proposed else {
             return Ok(None);

@@ -4,6 +4,7 @@ use crate::fleet::scheduler::{FocusEnrollment, Scheduler};
 use culprit_core::ErrorDetail;
 use std::sync::atomic::Ordering;
 mod optional_evidence;
+mod writers;
 
 #[tokio::test]
 async fn sealed_original_and_cost_evidence_prepare_one_verified_candidate_without_native_work() {
@@ -88,10 +89,10 @@ async fn cancellation_discards_prepared_candidates_without_enrollment_or_native_
 
 #[tokio::test]
 async fn bounded_scans_resume_after_a_withheld_prefix_instead_of_starving_later_episodes() {
-    let mut harness = Harness::new(MAX_EPISODES_PER_PASS + 2).await;
+    let mut harness = Harness::new(MAX_QUESTIONS_PER_PASS + 2).await;
     harness.backend.recipe.cost = RecipeCostQualification::Unqualified;
     assert!(harness.prepare(&CollectionCancellation::default()).await.unwrap().is_empty());
-    assert_eq!(harness.bindings.planning_position().1, MAX_EPISODES_PER_PASS);
+    assert_eq!(harness.bindings.planning_position().1, MAX_QUESTIONS_PER_PASS);
     assert!(harness.prepare(&CollectionCancellation::default()).await.unwrap().is_empty());
     assert_eq!(harness.bindings.planning_position(), (None, 0));
     assert_eq!(harness.backend.verified.load(Ordering::SeqCst), 0);

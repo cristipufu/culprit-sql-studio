@@ -1,4 +1,5 @@
 use super::*;
+mod writers;
 
 fn recipe() -> RecipeDescriptor {
     RecipeDescriptor {

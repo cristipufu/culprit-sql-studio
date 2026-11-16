@@ -38,6 +38,11 @@ enum PublicObservation<'a> {
         snapshot: &'a StateSnapshotDescription,
         focus_key: String,
     },
+    PageWaitWritersContext {
+        snapshot: &'a StateSnapshotDescription,
+        focus_key: String,
+        database_writable: Option<bool>,
+    },
     DiagnosticContext(Value),
 }
 #[derive(Serialize)]
@@ -69,6 +74,13 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::Snapshot(value) => PublicObservation::Snapshot(value),
         SourceObservation::CacheEntryMemory { snapshot, focus } => {
             PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }
+        }
+        SourceObservation::PageWaitWriters { snapshot, focus, database_writable } => {
+            PublicObservation::PageWaitWritersContext {
+                snapshot,
+                focus_key: focus.key()?,
+                database_writable: *database_writable,
+            }
         }
         SourceObservation::FocusedRequestMemory { snapshot, result } => {
             PublicObservation::FocusedRequestMemoryContext {

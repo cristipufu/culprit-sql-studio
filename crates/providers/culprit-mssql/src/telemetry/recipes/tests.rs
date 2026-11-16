@@ -34,6 +34,9 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
                 &crate::activity::page_targets::tests::page_wait(42, "PAGELATCH_EX", "7:1:4144"),
             )),
         },
+        RecipeSelector::FocusedPageWaitWriters => CollectionSelection::PageWaitWriters {
+            focus: Box::new(crate::activity::page_targets::writers::test_focus().await),
+        },
         RecipeSelector::FocusedRequestMemory => CollectionSelection::FocusedRequestMemory {
             focus: Box::new(crate::activity::memory::focus::tests::original_focus()),
         },
@@ -151,6 +154,21 @@ fn unregistered_datasets_or_subjects_return_unsupported_without_a_native_connect
             .unwrap();
         assert_eq!(error.code, culprit_core::ErrorCode::Unsupported);
     }
+}
+
+#[test]
+fn an_ordinary_writer_snapshot_without_original_selectors_is_rejected_before_a_factory_can_open() {
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitWriters },
+        budget: CollectionBudget::default(),
+    };
+    assert_eq!(CollectionStop::from_error(&request.validate().unwrap_err()), CollectionStop::InvalidPage);
+    assert!(REGISTRATIONS.iter().all(|recipe| !recipe.accepts(&request)));
+    let error = open(Arc::new(Pool::new(tiberius::Config::new(), None)), &request, "fixture.invalid".into(), 1433)
+        .err()
+        .unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
 }
 
 #[test]

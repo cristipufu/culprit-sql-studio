@@ -19,6 +19,7 @@ mod maintenance_progress;
 mod memory_feedback;
 mod object_definitions;
 mod observations;
+mod page_writers;
 mod populations;
 mod queries;
 mod source_partitions;

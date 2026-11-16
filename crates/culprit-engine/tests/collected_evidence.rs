@@ -15,6 +15,7 @@ mod maintenance_progress;
 mod memory_failures;
 mod native_failures;
 mod page_waits;
+mod page_writers;
 mod plan_groups;
 mod populations;
 mod request_memory;

@@ -7,7 +7,7 @@ mod plan;
 mod question;
 mod request_memory;
 pub use compiler_admission::{ActivityCompilationAdmissionFocusResult, CompilationAdmissionMembership};
-pub use plan::{DiagnosticFocusPlan, PageWaitFocusPlan};
+pub use plan::{DiagnosticFocusPlan, PageWaitFocusPlan, plan_page_wait_writer_focus, supports_page_wait_writers};
 pub use question::DiagnosticFocus;
 pub use request_memory::{ActivityRequestMemoryFocusResult, RequestMemoryMembership};
 

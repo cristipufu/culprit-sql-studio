@@ -130,6 +130,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         }
         SourceObservation::Snapshot(snapshot)
         | SourceObservation::FocusedPageWait { snapshot, .. }
+        | SourceObservation::PageWaitWriters { snapshot, .. }
         | SourceObservation::FocusedRequestMemory { snapshot, .. }
         | SourceObservation::FocusedCompilationAdmission { snapshot, .. }
         | SourceObservation::MaintenanceProgress { snapshot, .. }

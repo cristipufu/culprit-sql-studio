@@ -3,6 +3,7 @@ use crate::Engine;
 mod index_operations;
 mod shared;
 mod tasks;
+mod writers;
 
 const SOURCE: &str = crate::source_id::PAGE_WAIT_TARGETS;
 

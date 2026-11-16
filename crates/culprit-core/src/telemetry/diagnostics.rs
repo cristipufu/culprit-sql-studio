@@ -6,7 +6,7 @@ mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 4;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 5;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -415,6 +415,7 @@ impl DiagnosticEpisode {
                     && matches!(
                         (&self.signal, report),
                         (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWait { .. })
+                            | (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWaitWriters { .. })
                             | (DiagnosticSignal::RequestMemory { .. }, DiagnosticReport::RequestMemory { .. })
                             | (
                                 DiagnosticSignal::CompilationAdmission { .. },
@@ -484,9 +485,22 @@ impl DiagnosticEpisode {
     pub fn matches_focus(&self, focus: &DiagnosticFocus) -> bool {
         match focus {
             DiagnosticFocus::PageWait { focus } => self.matches_page_wait_focus(focus),
+            DiagnosticFocus::PageWaitWriters { focus } => self.matches_page_wait_writer_focus(focus),
             DiagnosticFocus::RequestMemory { focus } => self.matches_request_memory_focus(focus),
             DiagnosticFocus::CompilationAdmission { focus } => self.matches_compilation_admission_focus(focus),
         }
+    }
+    pub fn matches_page_wait_writer_focus(&self, focus: &PageWaitWriterFocus) -> bool {
+        self.matches_page_wait_focus(&focus.waiter)
+            && focus.is_valid()
+            && match &self.report {
+                Some(DiagnosticReport::PageWait { observation, .. }) => *observation == focus.page,
+                Some(DiagnosticReport::PageWaitWriters { page, candidates, .. }) => {
+                    page.as_ref() == &focus.page
+                        && candidates.iter().eq(focus.candidates.iter().map(|candidate| &candidate.parent))
+                }
+                _ => false,
+            }
     }
     pub fn matches_request_memory_focus(&self, focus: &ActivityRequestFocus) -> bool {
         self.is_valid()
@@ -524,9 +538,24 @@ impl DiagnosticEpisode {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticReport {
-    PageWait { observation: DiagnosticEvidenceRef, blocking_contexts: Vec<DiagnosticEvidenceRef> },
-    RequestMemory { observation: DiagnosticEvidenceRef, peers: Vec<DiagnosticEvidenceRef> },
-    CompilationAdmission { observation: DiagnosticEvidenceRef, gateways: Vec<DiagnosticEvidenceRef> },
+    PageWait {
+        observation: DiagnosticEvidenceRef,
+        blocking_contexts: Vec<DiagnosticEvidenceRef>,
+    },
+    PageWaitWriters {
+        observation: DiagnosticEvidenceRef,
+        page: Box<DiagnosticEvidenceRef>,
+        candidates: Vec<DiagnosticEvidenceRef>,
+        blocking_contexts: Vec<DiagnosticEvidenceRef>,
+    },
+    RequestMemory {
+        observation: DiagnosticEvidenceRef,
+        peers: Vec<DiagnosticEvidenceRef>,
+    },
+    CompilationAdmission {
+        observation: DiagnosticEvidenceRef,
+        gateways: Vec<DiagnosticEvidenceRef>,
+    },
 }
 impl DiagnosticReport {
     pub fn matches_observation(
@@ -536,6 +565,20 @@ impl DiagnosticReport {
         row: &ExportedRecord,
     ) -> bool {
         match (self, &source.observation, &row.record) {
+            (
+                Self::PageWaitWriters { page, candidates, .. },
+                SourceObservation::PageWaitWriters { focus, .. },
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::PageWaitWriters(point),
+                    ..
+                }),
+            ) => {
+                episode.matches_page_wait_writer_focus(focus)
+                    && page.as_ref() == &focus.page
+                    && candidates.iter().eq(focus.candidates.iter().map(|candidate| &candidate.parent))
+                    && NativeReadContext::from_snapshot(source)
+                        .is_ok_and(|context| focus.accepts_observation(&context, point))
+            }
             (
                 Self::CompilationAdmission { .. },
                 SourceObservation::FocusedCompilationAdmission { result, .. },
@@ -573,43 +616,102 @@ impl DiagnosticReport {
     pub fn evidence(&self) -> &DiagnosticEvidenceRef {
         match self {
             Self::PageWait { observation, .. }
+            | Self::PageWaitWriters { observation, .. }
             | Self::RequestMemory { observation, .. }
             | Self::CompilationAdmission { observation, .. } => observation,
         }
     }
     /// Every raw row used by this explanation participates in pinning, validation and immutable history.
     pub fn references(&self) -> impl Iterator<Item = &DiagnosticEvidenceRef> {
-        let secondary = match self {
-            Self::PageWait { blocking_contexts, .. } => blocking_contexts,
-            Self::RequestMemory { peers, .. } => peers,
-            Self::CompilationAdmission { gateways, .. } => gateways,
+        let (page, secondary, contexts) = match self {
+            Self::PageWait { blocking_contexts, .. } => (None, blocking_contexts.as_slice(), &[][..]),
+            Self::PageWaitWriters { page, candidates, blocking_contexts, .. } => {
+                (Some(page.as_ref()), candidates.as_slice(), blocking_contexts.as_slice())
+            }
+            Self::RequestMemory { peers, .. } => (None, peers.as_slice(), &[][..]),
+            Self::CompilationAdmission { gateways, .. } => (None, gateways.as_slice(), &[][..]),
         };
-        std::iter::once(self.evidence()).chain(secondary)
+        let mut seen = Vec::new();
+        std::iter::once(self.evidence()).chain(page).chain(secondary).chain(contexts).filter(move |reference| {
+            if seen.contains(reference) {
+                false
+            } else {
+                seen.push(*reference);
+                true
+            }
+        })
     }
     pub fn is_valid(&self) -> bool {
         let mut unique = BTreeSet::new();
-        self.references().count() <= MAX_DIAGNOSTIC_INPUTS
+        self.reference_roles_are_valid()
+            && self.references().count() <= MAX_DIAGNOSTIC_INPUTS
             && self.references().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
             && matches!(self.evidence().native_key, NativeRecordIdentity::Operational { .. })
-            && match self {
-                Self::PageWait { blocking_contexts, .. } => {
-                    blocking_contexts.len() <= crate::page_wait_report::MAX_PAGE_WAIT_BLOCKING_CONTEXTS
-                        && blocking_contexts
-                            .iter()
-                            .all(|reference| reference.stream == TelemetryStream::ActivityObservations)
-                }
-                Self::CompilationAdmission { gateways, .. } => {
-                    gateways.len() <= MAX_FOCUSED_COMPILER_GATEWAYS
-                        && gateways.iter().all(|reference| {
-                            reference.capture_ref() == self.evidence().capture_ref()
-                                && matches!(reference.native_key, NativeRecordIdentity::Operational { .. })
-                        })
-                }
-                Self::RequestMemory { peers, .. } => peers.iter().all(|reference| {
-                    reference.capture_ref() == self.evidence().capture_ref()
-                        && matches!(reference.native_key, NativeRecordIdentity::Operational { .. })
-                }),
+    }
+
+    fn reference_roles_are_valid(&self) -> bool {
+        match self {
+            Self::PageWait { blocking_contexts, .. } => {
+                blocking_contexts.len() <= crate::page_wait_report::MAX_PAGE_WAIT_BLOCKING_CONTEXTS
+                    && unique_references(blocking_contexts)
+                    && blocking_contexts
+                        .iter()
+                        .all(|reference| reference.stream == TelemetryStream::ActivityObservations)
             }
+            Self::PageWaitWriters { page, candidates, blocking_contexts, .. } => {
+                page.stream == TelemetryStream::OperationalSamples
+                    && matches!(page.native_key, NativeRecordIdentity::Operational { .. })
+                    && page.as_ref() != self.evidence()
+                    && (1..=MAX_PAGE_WAIT_WRITER_CANDIDATES).contains(&candidates.len())
+                    && unique_references(candidates)
+                    && blocking_contexts.len() <= crate::page_wait_report::MAX_PAGE_WAIT_BLOCKING_CONTEXTS
+                    && unique_references(blocking_contexts)
+                    && candidates.iter().chain(blocking_contexts).all(|reference| {
+                        reference.stream == TelemetryStream::ActivityObservations
+                            && reference.capture_ref() == candidates[0].capture_ref()
+                    })
+            }
+            Self::CompilationAdmission { gateways, .. } => {
+                gateways.len() <= MAX_FOCUSED_COMPILER_GATEWAYS
+                    && unique_references(gateways)
+                    && !gateways.contains(self.evidence())
+                    && gateways.iter().all(|reference| {
+                        reference.capture_ref() == self.evidence().capture_ref()
+                            && matches!(reference.native_key, NativeRecordIdentity::Operational { .. })
+                    })
+            }
+            Self::RequestMemory { peers, .. } => {
+                peers.len() < MAX_DIAGNOSTIC_INPUTS
+                    && unique_references(peers)
+                    && !peers.contains(self.evidence())
+                    && peers.iter().all(|reference| {
+                        reference.capture_ref() == self.evidence().capture_ref()
+                            && matches!(reference.native_key, NativeRecordIdentity::Operational { .. })
+                    })
+            }
+        }
+    }
+
+    /// The writer point contains one complete admitted roster. Original page and Activity receipts are separate
+    /// immutable prerequisites and must also be authenticated by the writer/recovery owner.
+    pub fn matches_writer_input<'a>(
+        &self,
+        source: &CollectionDescription,
+        rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a OperationalObservation)>,
+    ) -> bool {
+        let Self::PageWaitWriters { observation, page, candidates, .. } = self else { return false };
+        let SourceObservation::PageWaitWriters { snapshot, focus, .. } = &source.observation else { return false };
+        let Ok(context) = NativeReadContext::from_snapshot(source) else { return false };
+        let mut rows = rows.into_iter();
+        let Some((reference, row)) = rows.next() else { return false };
+        self.is_valid()
+            && source.observation.covers_request()
+            && snapshot.records == 1
+            && rows.next().is_none()
+            && reference == observation
+            && page.as_ref() == &focus.page
+            && candidates.iter().eq(focus.candidates.iter().map(|candidate| &candidate.parent))
+            && matches!(&row.fact, OperationalFact::PageWaitWriters(point) if focus.accepts_observation(&context, point))
     }
 
     pub fn matches_compiler_admission_input<'a>(
@@ -654,6 +756,11 @@ impl DiagnosticReport {
     }
 }
 
+fn unique_references(references: &[DiagnosticEvidenceRef]) -> bool {
+    let mut unique = BTreeSet::new();
+    references.iter().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
@@ -689,7 +796,7 @@ impl DiagnosticRevision {
             && self.investigation.as_ref().is_none_or(|event| {
                 event.matches_episode(&self.episode)
                     && event.key().ok().as_deref() == self.episode.investigation_event.as_deref()
-                    && self.inputs.contains(&event.intent.focus.participant().parent)
+                    && event.intent.focus.references().all(|reference| self.inputs.contains(reference))
                     && match &event.intent.execution {
                         DiagnosticExecutionBinding::Database => true,
                         DiagnosticExecutionBinding::Shared { owner } => self.inputs.contains(owner),

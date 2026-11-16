@@ -29,6 +29,8 @@ mod session_memory;
 pub use session_memory::session_memory;
 mod page_waits;
 pub use page_waits::page_waits;
+mod page_wait_writers;
+pub use page_wait_writers::page_wait_writers;
 mod statement_work;
 pub use statement_work::statement_work;
 mod statement_grants;

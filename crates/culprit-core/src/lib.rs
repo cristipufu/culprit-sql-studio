@@ -135,7 +135,7 @@ pub use operations::{
 pub use page_wait_report::{
     PageWaitActivityEvidence, PageWaitActivityReference, PageWaitBlockingBasis, PageWaitBlockingContext,
     PageWaitBlockingIssue, PageWaitBlockingParticipation, PageWaitExplanation, PageWaitReport, PageWaitTaskReference,
-    page_wait_blocking_participation,
+    PageWaitWriterExplanation, PageWaitWriterReport, page_wait_blocking_participation,
 };
 pub use plan::*;
 pub use plan_compare::{CompareContext, Scenario, ScenarioKind};

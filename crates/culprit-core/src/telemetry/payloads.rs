@@ -144,6 +144,22 @@ impl OperationalFact {
             Self::PageWait(value) => {
                 Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
             }
+            Self::PageWaitWriters(value) => {
+                let mut fields = Vec::new();
+                if let Some(page) = &value.page {
+                    fields.push(reference("/record/data/fact/data/page/request/statement", &page.request.statement));
+                }
+                for (index, candidate) in value.candidates.iter().enumerate() {
+                    fields.push(reference(format!("/record/data/fact/data/candidates/{index}/plan"), &candidate.plan));
+                    if let Some(request) = &candidate.request {
+                        fields.push(reference(
+                            format!("/record/data/fact/data/candidates/{index}/request/statement"),
+                            &request.statement,
+                        ));
+                    }
+                }
+                return fields;
+            }
             Self::CompilerWaiter(value) => {
                 Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
             }

@@ -6,7 +6,7 @@ use crate::{
 };
 use culprit_core::{
     Result,
-    telemetry::{NativeIdentity, canonical_time},
+    telemetry::{ActivityKey, NativeIdentity, canonical_time},
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -90,13 +90,26 @@ impl Check {
         original: &culprit_core::telemetry::ActivityObservation,
         locator: Option<&RequestLocator>,
     ) -> RequestState {
+        self.matches_selector(&original.key, locator, original.query_hash.as_deref())
+    }
+
+    /// Compact original selectors use the same native generations and SQL locator as full activity rows.
+    pub(super) fn selector_state(&self, key: &ActivityKey, statement: &NativeIdentity) -> RequestState {
+        self.matches_selector(key, RequestLocator::from_identity(statement).as_ref(), None)
+    }
+
+    fn matches_selector(
+        &self,
+        key: &ActivityKey,
+        locator: Option<&RequestLocator>,
+        hash: Option<&str>,
+    ) -> RequestState {
         if self.session.is_none() || self.request.is_none() {
             return RequestState::Missing;
         }
-        let key = &original.key;
         let Some(request) = &key.request else { return RequestState::Missing };
         let Some(locator) = locator else { return RequestState::Unverified };
-        let expected_hash = original.query_hash.as_deref().filter(|value| !value.bytes().all(|value| value == b'0'));
+        let expected_hash = hash.filter(|value| !value.bytes().all(|value| value == b'0'));
         let Some(current) = self.statement_locator() else { return RequestState::Unverified };
         if self.login.is_none() || self.started.is_none() || expected_hash.is_some() && self.query_hash.is_none() {
             return RequestState::Unverified;
@@ -146,19 +159,18 @@ impl Check {
 }
 
 pub(super) fn selectors(frame: &ActivityFrame, indices: &[usize]) -> Result<String> {
+    let selected = indices
+        .iter()
+        .map(|&index| frame.records.get(index).map(|record| (index, &record.facts.key)).ok_or_else(invalid_data))
+        .collect::<Result<Vec<_>>>()?;
+    selector_keys(&selected)
+}
+
+pub(super) fn selector_keys(selected: &[(usize, &ActivityKey)]) -> Result<String> {
     let mut xml = String::from("<activity>");
-    for &index in indices {
-        let record = frame.records.get(index).ok_or_else(invalid_data)?;
-        let session = record.facts.key.session.id.parse::<i32>().map_err(|_| invalid_data())?;
-        let request = record
-            .facts
-            .key
-            .request
-            .as_ref()
-            .ok_or_else(invalid_data)?
-            .id
-            .parse::<i32>()
-            .map_err(|_| invalid_data())?;
+    for &(index, key) in selected {
+        let session = key.session.id.parse::<i32>().map_err(|_| invalid_data())?;
+        let request = key.request.as_ref().ok_or_else(invalid_data)?.id.parse::<i32>().map_err(|_| invalid_data())?;
         xml.push_str(&format!("<row ordinal=\"{index}\" session=\"{session}\" request=\"{request}\"/>"));
     }
     xml.push_str("</activity>");
@@ -190,15 +202,20 @@ pub(super) const CHECK_COLUMNS: &str = r#"a.ordinal,CONVERT(varchar(40),@at,126)
  CONVERT(varchar(16),r.query_plan_hash,2) AS checked_plan_hash"#;
 
 fn participants_sql() -> String {
+    participant_query("", "")
+}
+
+pub(super) fn participant_query(extra_columns: &str, extra_joins: &str) -> String {
     format!(
         r#"
 DECLARE /* culprit */ @targets xml=CAST(@P1 AS xml),@at datetime2=SYSUTCDATETIME();
-SELECT /* culprit */ {CHECK_COLUMNS}
+SELECT /* culprit */ {CHECK_COLUMNS}{extra_columns}
 FROM @targets.nodes('/activity/row') t(n)
 CROSS APPLY(SELECT t.n.value('@ordinal[1]','int') AS ordinal,t.n.value('@session[1]','int') AS session_id,
  t.n.value('@request[1]','int') AS request_id) a
 LEFT JOIN sys.dm_exec_sessions s ON s.session_id=a.session_id
 LEFT JOIN sys.dm_exec_requests r ON r.session_id=a.session_id AND r.request_id=a.request_id
+{extra_joins}
 OPTION(MAXDOP 1,LOOP JOIN)"#
     )
 }

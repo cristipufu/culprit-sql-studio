@@ -200,7 +200,18 @@ impl FleetBackend for Backend {
                         admission.investigation.as_ref().expect("automatic focus must retain its admitted intent");
                     assert_eq!(intent.selection(), request.selection);
                     assert_eq!(intent.budget, request.budget);
-                    focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution)
+                    if self.focus_resolution == Some(PageWaitResolution::ObservedAtBothBounds) {
+                        super::page_writers::mapped_frame(focus)
+                    } else {
+                        focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution)
+                    }
+                }
+                CollectionSelection::PageWaitWriters { focus } => {
+                    let intent =
+                        admission.investigation.as_ref().expect("writer work retains its exact admitted roster");
+                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.budget, request.budget);
+                    super::page_writers::focused_frame(focus, &self.activity)
                 }
                 CollectionSelection::FocusedCompilationAdmission { focus } => {
                     let intent =
@@ -281,18 +292,22 @@ impl Harness {
     }
 
     pub(in crate::fleet::investigations) async fn with_recovery_store(rows: usize, fence: Option<&Fence>) -> Self {
-        Self::build(rows, fence, FixtureRoutes::Database).await
+        Self::build(rows, fence, FixtureRoutes::Database, None).await
+    }
+
+    pub(in crate::fleet::investigations) async fn with_activity(activity: Frame) -> Self {
+        Self::build(0, None, FixtureRoutes::Database, Some(activity)).await
     }
 
     pub(in crate::fleet::investigations) async fn shared() -> Self {
-        Self::build(1, None, FixtureRoutes::Shared).await
+        Self::build(1, None, FixtureRoutes::Shared, None).await
     }
 
     pub(in crate::fleet::investigations) async fn progressive() -> Self {
-        Self::build(1, None, FixtureRoutes::Progressive).await
+        Self::build(1, None, FixtureRoutes::Progressive, None).await
     }
 
-    async fn build(rows: usize, fence: Option<&Fence>, routes: FixtureRoutes) -> Self {
+    async fn build(rows: usize, fence: Option<&Fence>, routes: FixtureRoutes, supplied: Option<Frame>) -> Self {
         let fixture = investigation_fixture();
         let directory = tempfile::tempdir().unwrap();
         let mut inventory = FleetInventory {
@@ -356,9 +371,11 @@ impl Harness {
         frame.native_rows = rows as u32;
         frame.observations = rows as u32;
         frame.coverage.records = rows as u32;
-        let activity = Frame { source: source.clone(), records };
+        let activity = supplied.unwrap_or_else(|| Frame { source: source.clone(), records });
+        source = activity.source.clone();
         seal(&mut outbox, activity.clone()).await;
         let mut cost_frame = Frame { source: fixture.source.clone(), records: vec![fixture.record.record.clone()] };
+        cost_frame.source.target = source.target.clone();
         if let Some(shared) = &shared {
             cost_frame.source.target = shared.source.target.clone();
             let TelemetryRecord::Operational(row) = &mut cost_frame.records[0] else { panic!() };
@@ -375,6 +392,7 @@ impl Harness {
         let mut recipe = fixture.recipe;
         let RecipeCostQualification::Measured(receipt) = &mut recipe.cost else { panic!() };
         receipt.evidence = cost;
+        receipt.scope = RecipeCostScope::Activity(DiagnosticScope::from_source(&source).unwrap());
         if let Some(shared) = &shared {
             let CollectionTarget::Shared(resource) = &shared.source.target else { panic!() };
             receipt.scope = RecipeCostScope::SharedResource {

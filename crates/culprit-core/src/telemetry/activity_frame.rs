@@ -57,6 +57,11 @@ impl<'a> ActivityFrameEvidence<'a> {
         self.index.by_key.get(key).map(|observation| self.wrap(observation))
     }
 
+    /// Every returned row belongs to this one validated read and keeps its own optional original receipt.
+    pub fn rows(&self) -> impl Iterator<Item = ActivityFrameRow<'a>> + '_ {
+        self.index.by_key.values().map(|observation| self.wrap(observation))
+    }
+
     pub fn session_rows(&self, session: &NativeActivityIdentity) -> impl Iterator<Item = ActivityFrameRow<'a>> + '_ {
         self.index.by_session.get(session).into_iter().flatten().map(|observation| self.wrap(observation))
     }

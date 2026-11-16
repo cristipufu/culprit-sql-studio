@@ -22,6 +22,7 @@ pub enum SnapshotDataset {
     CurrentRequestMemory,
     SessionMemory,
     PageWaitTargets,
+    PageWaitWriters,
     TaskSpace,
     MemoryFailures,
     NativeFailures,
@@ -60,6 +61,7 @@ impl SnapshotDataset {
             | Self::CurrentRequestMemory
             | Self::SessionMemory
             | Self::PageWaitTargets
+            | Self::PageWaitWriters
             | Self::TaskSpace
             | Self::MemoryFailures
             | Self::NativeFailures
@@ -442,6 +444,7 @@ pub enum OperationalFact {
     ExecutionGrant(Box<ExecutionGrantObservation>),
     SessionMemory(Box<SessionMemoryObservation>),
     PageWait(Box<PageWaitObservation>),
+    PageWaitWriters(Box<PageWaitWriterObservation>),
     TaskSpace(Box<TaskSpaceObservation>),
     MssqlOutOfMemory(Box<MssqlOutOfMemoryObservation>),
     MysqlErrorLog(Box<MysqlErrorLogObservation>),
@@ -480,6 +483,7 @@ impl OperationalFact {
             Self::ExecutionGrant(grant) => grant.key(),
             Self::SessionMemory(observation) => observation.key(),
             Self::PageWait(observation) => observation.key(),
+            Self::PageWaitWriters(observation) => observation.key(),
             Self::TaskSpace(observation) => observation.key(),
             Self::MssqlOutOfMemory(observation) => observation.key(),
             Self::MysqlErrorLog(observation) => observation.key(),
@@ -520,6 +524,7 @@ impl OperationalFact {
             Self::PostgresLog(observation) => observation.redact(),
             Self::SessionMemory(_) => {}
             Self::PageWait(observation) => observation.redact(engine),
+            Self::PageWaitWriters(observation) => observation.redact(engine),
             Self::MssqlCacheEntryMemory(entry) => entry.redact(engine),
             Self::TaskSpace(observation) => observation.redact(engine),
             Self::MssqlStatementGrants(grants) => {
@@ -591,6 +596,7 @@ impl OperationalFact {
             Self::ExecutionGrant(grant) => grant.is_valid(),
             Self::SessionMemory(observation) => observation.is_valid(),
             Self::PageWait(observation) => observation.is_valid(),
+            Self::PageWaitWriters(observation) => observation.is_valid(),
             Self::TaskSpace(observation) => observation.is_valid(),
             Self::MssqlOutOfMemory(observation) => observation.is_valid(),
             Self::MysqlErrorLog(observation) => observation.is_valid(),
@@ -641,6 +647,9 @@ impl OperationalObservation {
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,
                 OperationalFact::SessionMemory(observation) => observation.source == self.source,
                 OperationalFact::PageWait(observation) => observation.source == self.source,
+                OperationalFact::PageWaitWriters(point) => {
+                    point.page.as_ref().is_none_or(|page| page.source == self.source)
+                }
                 OperationalFact::TaskSpace(observation) => observation.source == self.source,
                 OperationalFact::RuntimeDistribution(observation) => observation.distribution.source == self.source,
                 _ => true,

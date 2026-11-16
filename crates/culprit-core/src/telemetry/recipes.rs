@@ -44,6 +44,7 @@ pub enum RecipeSelector {
     Collection(TelemetryCollection),
     CacheEntryMemory,
     FocusedPageWait,
+    FocusedPageWaitWriters,
     FocusedRequestMemory,
     MaintenanceProgress,
     FocusedCompilationAdmission,
@@ -55,6 +56,8 @@ mod tests;
 impl RecipeSelector {
     pub fn matches(&self, request: &CollectionRequest) -> bool {
         match (self, &request.selection) {
+            (Self::FocusedPageWaitWriters, CollectionSelection::PageWaitWriters { .. }) => true,
+            (Self::Collection(_), CollectionSelection::PageWaitWriters { .. }) => false,
             (Self::MaintenanceProgress, CollectionSelection::MaintenanceProgress { .. }) => true,
             (Self::Collection(_), CollectionSelection::MaintenanceProgress { .. }) => false,
             (

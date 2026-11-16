@@ -1,8 +1,10 @@
 //! A later lookup can explain retained evidence without rewriting its original native observation.
 use super::*;
 mod compiler_admission;
+mod page_writers;
 mod request_memory;
 pub use compiler_admission::{DiagnosticCompilerRow, analyze_diagnostic_compilation_admission};
+pub use page_writers::{DiagnosticPageWriterRow, analyze_diagnostic_page_writers};
 pub use request_memory::{DiagnosticMemoryRow, analyze_diagnostic_memory};
 
 pub struct DiagnosticFocusRow<'a> {
@@ -91,7 +93,7 @@ fn analyze_focus(
             && before.matches_page_wait_focus(&result.focus)
             && intent.is_none_or(|intent| intent.matches_episode(before))
         {
-            apply_result(&mut next, result, input, rows.first())?;
+            apply_result(&mut next, source, result, input, rows.first())?;
             if let Some(mut revision) = DiagnosticRevision::between(Some(before), next.clone(), analyzed_at)? {
                 if !revision.inputs.contains(&result.focus.participant().parent) {
                     revision.inputs.push(result.focus.participant().parent.clone());
@@ -130,6 +132,7 @@ fn analyze_focus(
 
 fn apply_result(
     episode: &mut DiagnosticEpisode,
+    source: &CollectionDescription,
     result: &ActivityWaitFocusResult,
     input: &DiagnosticCaptureRef,
     row: Option<&DiagnosticFocusRow<'_>>,
@@ -137,13 +140,16 @@ fn apply_result(
     if let Some(row) = row {
         episode.report =
             Some(DiagnosticReport::PageWait { observation: row.reference.clone(), blocking_contexts: vec![] });
-        episode.analysis = if row.observation.target.is_some() {
+        let writer_question = supports_page_wait_writers(source, row.observation, &result.focus);
+        episode.analysis = if row.observation.target.is_some() && !writer_question {
             DiagnosticAnalysisStatus::Analyzed
         } else {
             DiagnosticAnalysisStatus::Partial
         };
         episode.issue = match row.observation.resolution {
-            PageWaitResolution::ObservedAtBothBounds => None,
+            PageWaitResolution::ObservedAtBothBounds => {
+                writer_question.then_some(DiagnosticAnalysisIssue::EvidenceUnavailable)
+            }
             PageWaitResolution::Limit => Some(DiagnosticAnalysisIssue::BudgetExhausted),
             PageWaitResolution::Unsupported | PageWaitResolution::OutsideDatabase => {
                 Some(DiagnosticAnalysisIssue::Unsupported)

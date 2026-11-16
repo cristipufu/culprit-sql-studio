@@ -5,6 +5,8 @@ use ts_rs::TS;
 
 mod participation;
 pub use participation::*;
+mod writers;
+pub use writers::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]

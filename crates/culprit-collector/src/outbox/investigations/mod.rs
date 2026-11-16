@@ -56,6 +56,21 @@ impl DiagnosticInput {
     pub fn investigation_intent(&self) -> Result<Option<DiagnosticInvestigationIntent>> {
         investigation_intent(&self.source, self.investigation.as_ref())
     }
+
+    /// Reuse the original frame validator after the outbox has authenticated every immutable row receipt.
+    pub fn activity_frame(&self) -> Result<ActivityFrameEvidence<'_>> {
+        let rows = self
+            .rows
+            .iter()
+            .map(|row| match &row.row.record {
+                TelemetryRecord::Activity(observation) => {
+                    Ok(ActivityFrameRow { observation, reference: Some(&row.reference) })
+                }
+                _ => Err(integrity()),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        ActivityFrameEvidence::new(&self.source, &rows, true).map_err(|_| integrity())
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -105,6 +120,7 @@ pub(crate) fn eligible_source(
         (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
         (
             SourceObservation::FocusedPageWait { .. }
+            | SourceObservation::PageWaitWriters { .. }
             | SourceObservation::FocusedRequestMemory { .. }
             | SourceObservation::FocusedCompilationAdmission { .. },
             CollectionTarget::Database(_),
@@ -115,6 +131,17 @@ pub(crate) fn eligible_source(
         ) => intent.is_some(),
         _ => false,
     })
+}
+
+/// Cached prerequisites retain immutable evidence only. They never recreate pending analysis obligations.
+pub(crate) fn evidence_cache_source(
+    source: &CollectionDescription,
+    investigation: Option<&DiagnosticInvestigationLineage>,
+) -> Result<bool> {
+    if shared_owner_source(source) {
+        return Ok(investigation.is_none());
+    }
+    eligible_source(source, investigation)
 }
 
 fn investigation_intent(
@@ -139,6 +166,7 @@ fn controller_target<'a>(
     }
     Ok(match &source.observation {
         SourceObservation::FocusedPageWait { result, .. } => &result.focus.participant.target,
+        SourceObservation::PageWaitWriters { focus, .. } => &focus.waiter.participant.target,
         SourceObservation::FocusedRequestMemory { result, .. } => &result.focus.target,
         SourceObservation::FocusedCompilationAdmission { result, .. } => &result.focus.target,
         _ => &source.target,

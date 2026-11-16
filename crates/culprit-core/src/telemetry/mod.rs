@@ -274,11 +274,20 @@ impl CollectionRequest {
         self.budget.validate()?;
         match &self.selection {
             CollectionSelection::Snapshot {
-                dataset: SnapshotDataset::CacheEntryMemory | SnapshotDataset::MaintenanceProgress,
+                dataset:
+                    SnapshotDataset::CacheEntryMemory
+                    | SnapshotDataset::MaintenanceProgress
+                    | SnapshotDataset::PageWaitWriters,
             } => {
                 return Err(CollectionStop::InvalidPage.error());
             }
             CollectionSelection::CacheEntryMemory { focus } => {
+                self.subject.require_database()?;
+                if !focus.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::PageWaitWriters { focus } => {
                 self.subject.require_database()?;
                 if !focus.is_valid() {
                     return Err(CollectionStop::InvalidPage.error());
@@ -563,6 +572,10 @@ impl TelemetryRecord {
                 row.fact.redact(source.target.engine());
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
+                    (SourceObservation::PageWaitWriters { focus, .. }, OperationalFact::PageWaitWriters(point)) => {
+                        accepted && focus.accepts_observation(&NativeReadContext::from_snapshot(source)?, point)
+                    }
+                    (SourceObservation::PageWaitWriters { .. }, _) | (_, OperationalFact::PageWaitWriters(_)) => false,
                     (SourceObservation::MaintenanceProgress { .. }, OperationalFact::MaintenanceProgress(point)) => {
                         accepted && point.fits_source_scope(source)
                     }

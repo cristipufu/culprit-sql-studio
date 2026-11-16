@@ -1,6 +1,7 @@
 use super::*;
 use crate::ComponentVersion;
 
+mod page_writers;
 mod request_memory;
 
 struct Scenario {

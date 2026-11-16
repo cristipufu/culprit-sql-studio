@@ -3,6 +3,7 @@ use culprit_core::{Engine, ObservedWaitResource, telemetry::*};
 use serde_json::json;
 mod index_operations;
 mod participation;
+mod writers;
 
 pub(crate) fn observation(session: &str, kind: WaitResourceKind) -> PageWaitObservation {
     let resource = ObservedWaitResource {

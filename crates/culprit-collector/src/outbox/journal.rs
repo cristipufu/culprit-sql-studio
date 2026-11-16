@@ -8,7 +8,7 @@ use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 13;
+const JOURNAL_VERSION: i64 = 14;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
 
@@ -189,6 +189,13 @@ impl Journal {
             tx.execute(
                 "INSERT INTO diagnostic_pins VALUES(?1,?2)",
                 params![format!("focus:{}", identity.observation_id), focus.parent.capture.observation_id],
+            )
+            .map_err(storage)?;
+        }
+        if let CollectionSelection::PageWaitWriters { focus } = &request.selection {
+            tx.execute(
+                "INSERT OR IGNORE INTO diagnostic_pins VALUES(?1,?2)",
+                params![format!("focus:{}", identity.observation_id), focus.page.capture.observation_id],
             )
             .map_err(storage)?;
         }

@@ -26,6 +26,9 @@ pub(super) fn qualify_questions(
 ) -> Result<()> {
     let Some(assignment) = assignment else { return Ok(()) };
     let Some(recipes) = &assignment.recipes else { return Ok(()) };
+    if matches!(input.source.observation, SourceObservation::FocusedPageWait { .. }) {
+        return qualify_writer_question(input, assignment, recipes, update);
+    }
     if !matches!(input.source.observation, SourceObservation::Activity(_)) {
         return Ok(());
     }
@@ -83,25 +86,57 @@ fn qualification_issue(
 ) -> DiagnosticAnalysisIssue {
     let request = CollectionRequest {
         subject: subject.clone(),
-        selection: match focus {
-            DiagnosticFocus::PageWait { focus } => CollectionSelection::FocusedPageWait { focus: focus.clone() },
-            DiagnosticFocus::CompilationAdmission { focus } => {
-                CollectionSelection::FocusedCompilationAdmission { focus: focus.clone() }
-            }
-            DiagnosticFocus::RequestMemory { focus } => {
-                CollectionSelection::FocusedRequestMemory { focus: focus.clone() }
-            }
-        },
+        selection: focus.database_selection(),
         budget: CollectionBudget::default(),
     };
     let recipe =
         recipes.iter().find(|recipe| recipe.purpose == RecipePurpose::Investigation && recipe.accepts(&request));
+    declared_issue(recipe)
+}
+
+fn declared_issue(recipe: Option<&RecipeDescriptor>) -> DiagnosticAnalysisIssue {
     match recipe.map(|recipe| &recipe.cost) {
         Some(RecipeCostQualification::Unqualified) => DiagnosticAnalysisIssue::CostUnqualified,
         // A source-issued receipt still needs independent artifact authentication and the selected authority.
         Some(RecipeCostQualification::Measured(_)) => DiagnosticAnalysisIssue::EvidenceUnavailable,
         None => DiagnosticAnalysisIssue::Unsupported,
     }
+}
+
+fn qualify_writer_question(
+    input: &DiagnosticInput,
+    assignment: &DiagnosticAssignment,
+    recipes: &[RecipeDescriptor],
+    update: &mut DiagnosticUpdate,
+) -> Result<()> {
+    let SourceObservation::FocusedPageWait { result, .. } = &input.source.observation else {
+        return Ok(());
+    };
+    if !input.rows.iter().any(|row| {
+        matches!(&row.row.record, TelemetryRecord::Operational(OperationalObservation {
+            fact: OperationalFact::PageWait(page), ..
+        }) if supports_page_wait_writers(&input.source, page, &result.focus))
+    }) {
+        return Ok(());
+    }
+    let recipe = recipes.iter().find(|recipe| {
+        recipe.purpose == RecipePurpose::Investigation
+            && recipe.selector == RecipeSelector::FocusedPageWaitWriters
+            && recipe.subjects.iter().any(|subject| subject.accepts(&assignment.subject))
+    });
+    for episode in &mut update.checkpoint.episodes {
+        if episode.analysis.needs_work()
+            && matches!(&episode.report, Some(DiagnosticReport::PageWait { observation, .. }) if observation.capture_ref() == input.parent)
+        {
+            episode.analysis = DiagnosticAnalysisStatus::Deferred;
+            episode.issue = Some(declared_issue(recipe));
+        }
+    }
+    update.step_id = digest(
+        &serde_json::to_vec(&("diagnostic-writer-recipe-policy-v1", &update.step_id, recipes))
+            .map_err(|_| CollectionStop::InvalidPage.error())?,
+    );
+    rebuild_revisions(input, update)
 }
 
 fn rebuild_revisions(input: &DiagnosticInput, update: &mut DiagnosticUpdate) -> Result<()> {

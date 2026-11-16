@@ -19,6 +19,7 @@ pub(super) use sql::focused_observation;
 mod task_waits;
 #[cfg(test)]
 pub(crate) mod tests;
+pub(crate) mod writers;
 
 use super::{ActivityContext, ActivityFrame, ActivityReader, ActivityScope};
 use crate::read::{NativeRead, Parameter, ReadError, invalid_data, stops_remaining_reads};

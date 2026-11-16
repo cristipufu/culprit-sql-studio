@@ -1,5 +1,6 @@
 mod events;
 mod focus;
+mod page_writers;
 mod request_memory;
 mod retirement;
 mod shared;

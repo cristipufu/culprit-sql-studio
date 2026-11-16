@@ -222,7 +222,8 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::NativeFailures
                     | SnapshotDataset::SessionMemory
                     | SnapshotDataset::PageWaitTargets
-                    | SnapshotDataset::TaskSpace => return Err(invalid_data()),
+                    | SnapshotDataset::TaskSpace
+                    | SnapshotDataset::PageWaitWriters => return Err(invalid_data()),
                 }
             }
             .into(),

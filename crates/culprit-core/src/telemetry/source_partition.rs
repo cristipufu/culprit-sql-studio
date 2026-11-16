@@ -72,6 +72,13 @@ impl CollectionDescription {
         if let SourceObservation::MaintenanceProgress { snapshot, result } = &self.observation {
             return result.is_valid_source(self, snapshot);
         }
+        if let SourceObservation::PageWaitWriters { focus, .. } = &self.observation {
+            let original = &focus.waiter.participant;
+            return self.observation.covers_request()
+                && self.target == original.target
+                && self.partition == original.partition
+                && matches!(self.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) });
+        }
         if let SourceObservation::CacheEntryMemory { snapshot, focus } = &self.observation
             && (!focus.is_valid()
                 || focus.context.target != self.target

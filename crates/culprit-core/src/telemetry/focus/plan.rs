@@ -1,5 +1,7 @@
 //! Reconstruct one bounded question from retained native evidence, independently of episode lifecycle.
 use super::*;
+mod writers;
+pub use writers::{plan_page_wait_writer_focus, supports_page_wait_writers};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PageWaitFocusPlan {

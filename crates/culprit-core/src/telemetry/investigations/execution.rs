@@ -45,17 +45,11 @@ impl DiagnosticInvestigationIntent {
 
     pub fn selection(&self) -> CollectionSelection {
         match (&self.focus, &self.execution) {
-            (DiagnosticFocus::PageWait { focus }, DiagnosticExecutionBinding::Database) => {
-                CollectionSelection::FocusedPageWait { focus: focus.clone() }
-            }
             (DiagnosticFocus::PageWait { focus }, DiagnosticExecutionBinding::Shared { .. }) => {
                 CollectionSelection::SharedPageWaitFocus {
                     focus: focus.clone(),
                     partition: self.qualification.scope.partition().clone(),
                 }
-            }
-            (DiagnosticFocus::CompilationAdmission { focus }, DiagnosticExecutionBinding::Database) => {
-                CollectionSelection::FocusedCompilationAdmission { focus: focus.clone() }
             }
             (DiagnosticFocus::CompilationAdmission { focus }, DiagnosticExecutionBinding::Shared { .. }) => {
                 CollectionSelection::SharedCompilationAdmissionFocus {
@@ -63,9 +57,7 @@ impl DiagnosticInvestigationIntent {
                     partition: self.qualification.scope.partition().clone(),
                 }
             }
-            (DiagnosticFocus::RequestMemory { focus }, _) => {
-                CollectionSelection::FocusedRequestMemory { focus: focus.clone() }
-            }
+            _ => self.focus.database_selection(),
         }
     }
 

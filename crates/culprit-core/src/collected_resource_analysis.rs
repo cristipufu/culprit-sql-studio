@@ -40,6 +40,13 @@ pub struct CollectedPageWaitAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedPageWaitWriterAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::PageWaitWriterReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedStatementWorkAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: StatementWorkReport,

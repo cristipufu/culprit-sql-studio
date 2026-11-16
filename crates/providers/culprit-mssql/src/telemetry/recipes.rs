@@ -139,6 +139,12 @@ const REGISTRATIONS: &[Registration] = &[
     })
     .bounded(page_waits::focused_budget),
     Registration::database(
+        "mssql.focused-page-wait-writers",
+        RecipeSelector::FocusedPageWaitWriters,
+        |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
+    )
+    .bounded(page_waits::writer_budget),
+    Registration::database(
         "mssql.focused-shared-tempdb-page-wait",
         RecipeSelector::FocusedPageWait,
         |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),

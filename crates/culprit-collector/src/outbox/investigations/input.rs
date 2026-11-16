@@ -250,6 +250,33 @@ impl Files {
         }
         Ok(())
     }
+
+    pub(in crate::outbox) fn verify_page_writer_focus(&mut self, focus: &PageWaitWriterFocus) -> Result<()> {
+        self.page_writer_contexts(focus).map(|_| ())
+    }
+
+    pub(super) fn page_writer_contexts(&mut self, focus: &PageWaitWriterFocus) -> Result<Vec<DiagnosticEvidenceRef>> {
+        if !focus.is_valid() {
+            return Err(integrity());
+        }
+        let original = &focus.waiter.participant;
+        let parent = self.diagnostic_input(&original.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
+        let frame = parent.activity_frame()?;
+        if !focus.matches_activity_frame(&frame) {
+            return Err(integrity());
+        }
+        let (source, row) = self.diagnostic_reference(&focus.page)?;
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =
+            &row.record
+        else {
+            return Err(integrity());
+        };
+        if !focus.matches_page(&source, page, &focus.page) {
+            return Err(integrity());
+        }
+        let participation = culprit_core::page_wait_blocking_participation(&source, page, original, &frame)?;
+        Ok(participation.references().cloned().collect())
+    }
     pub(in crate::outbox) fn verify_investigation_intent(
         &mut self,
         intent: &DiagnosticInvestigationIntent,
@@ -257,7 +284,10 @@ impl Files {
         if !intent.is_valid() {
             return Err(integrity());
         }
-        self.verify_focus_parent(intent.focus.participant())?;
+        match &intent.focus {
+            DiagnosticFocus::PageWaitWriters { focus } => self.verify_page_writer_focus(focus)?,
+            _ => self.verify_focus_parent(intent.focus.participant())?,
+        }
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
             let (source, row) = self.diagnostic_reference(owner)?;
             if !intent.matches_shared_owner(&source, &row) {
@@ -330,8 +360,11 @@ impl Files {
             return Err(DeliveryProblem::Conflict.error());
         }
         let investigation = encode_investigation(input.investigation.as_ref())?;
-        if installation == InputInstallation::Pending && !eligible_source(&input.source, input.investigation.as_ref())?
-        {
+        let accepted = match installation {
+            InputInstallation::Pending => eligible_source(&input.source, input.investigation.as_ref())?,
+            InputInstallation::EvidenceOnly => evidence_cache_source(&input.source, input.investigation.as_ref())?,
+        };
+        if !accepted {
             return Err(integrity());
         }
         let rows = row_references(&input.parent, &input.source, input.rows.clone())?;
@@ -466,11 +499,14 @@ impl Files {
 }
 
 fn pin_restored_focus(tx: &Transaction<'_>, input: &RestoredInput) -> Result<()> {
-    if let Some(focus) = input.source.observation.focus() {
-        tx.execute(
-            "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM diagnostic_inputs WHERE observation_id=?3 AND acknowledged=0)",
-            params![format!("focus:{}",input.parent.capture.observation_id),focus.parent.capture.observation_id,input.parent.capture.observation_id],
-        ).map_err(storage)?;
+    if let Some(focus) = input.source.observation.diagnostic_focus() {
+        let captures = focus.references().map(|reference| &reference.capture.observation_id).collect::<BTreeSet<_>>();
+        for capture in captures {
+            tx.execute(
+                "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM diagnostic_inputs WHERE observation_id=?3 AND acknowledged=0)",
+                params![format!("focus:{}",input.parent.capture.observation_id),capture,input.parent.capture.observation_id],
+            ).map_err(storage)?;
+        }
         if let Some(intent) = investigation_intent(&input.source, input.investigation.as_ref())?
             && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
         {

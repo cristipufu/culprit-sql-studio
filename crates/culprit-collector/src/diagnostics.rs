@@ -1,6 +1,7 @@
 //! Offline analysis runs on sealed evidence. This module has no provider, credential or native query dependency.
 mod planning;
 mod transition;
+mod writers;
 pub(crate) use transition::{record_investigation, set_analysis};
 #[cfg(test)]
 mod tests;
@@ -111,6 +112,11 @@ pub async fn analyze_pending(
         {
             break;
         }
+        if let SourceObservation::PageWaitWriters { focus, .. } = &input.source.observation
+            && !writers::verify_parents(outbox, &input.connection, focus, recovery, cancellation).await?
+        {
+            break;
+        }
         if let Some(intent) = input.investigation_intent()?
             && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
         {
@@ -142,17 +148,7 @@ async fn attach_page_contexts(
     let original = outbox
         .diagnostic_input(&result.focus.participant.parent.capture.observation_id, input.controller_version)
         .await?;
-    let rows = original
-        .rows
-        .iter()
-        .map(|row| match &row.row.record {
-            TelemetryRecord::Activity(observation) => {
-                Ok(ActivityFrameRow { observation, reference: Some(&row.reference) })
-            }
-            _ => Err(CollectionStop::InvalidPage.error()),
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let frame = ActivityFrameEvidence::new(&original.source, &rows, true)?;
+    let frame = original.activity_frame()?;
     for revision in &mut update.revisions {
         let Some(DiagnosticReport::PageWait { observation, blocking_contexts }) = &mut revision.episode.report else {
             continue;
@@ -370,6 +366,29 @@ fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) 
             let previous = input.checkpoint.as_ref().ok_or_else(|| DeliveryProblem::Conflict.error())?;
             let intent = input.investigation_intent()?;
             let update = analyze_diagnostic_compilation_admission(
+                &input.source,
+                &input.parent,
+                &rows,
+                previous,
+                analyzed_at,
+                intent.as_ref(),
+            )?;
+            (update.revisions, update.checkpoint)
+        }
+        SourceObservation::PageWaitWriters { .. } => {
+            let rows = input
+                .rows
+                .iter()
+                .map(|row| match &row.row.record {
+                    TelemetryRecord::Operational(observation) => {
+                        Ok(DiagnosticPageWriterRow { reference: &row.reference, observation })
+                    }
+                    _ => Err(CollectionStop::InvalidPage.error()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let previous = input.checkpoint.as_ref().ok_or_else(|| DeliveryProblem::Conflict.error())?;
+            let intent = input.investigation_intent()?;
+            let update = analyze_diagnostic_page_writers(
                 &input.source,
                 &input.parent,
                 &rows,

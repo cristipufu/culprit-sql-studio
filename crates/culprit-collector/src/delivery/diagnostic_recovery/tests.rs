@@ -11,6 +11,8 @@ use crate::{
 };
 use std::path::Path;
 
+mod page_writers;
+
 struct CapturedInvestigation {
     root: tempfile::TempDir,
     store: FileRecoveryStore,

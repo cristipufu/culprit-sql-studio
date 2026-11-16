@@ -57,6 +57,7 @@ fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_sel
         "request-memory",
         "session-memory",
         "page-waits",
+        "page-wait-writers",
         "task-space",
         "statement-work",
         "statement-grants",
@@ -464,7 +465,7 @@ fn original_activity_selection_is_an_independent_exact_archive_range() {
 #[tokio::test]
 async fn unrelated_or_invalid_activity_ranges_fail_before_configuration_and_credentials() {
     let parent = culprit_core::telemetry::digest(b"original-activity-capture");
-    for analysis in ["queries", "maintenance", "request-memory"] {
+    for analysis in ["queries", "maintenance", "request-memory", "page-wait-writers"] {
         let args = analyze_args(analysis, &["--activity-range", &parent]);
         let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
         assert_eq!(error.message, t!("evidence.cli.activity_page_waits_only"));

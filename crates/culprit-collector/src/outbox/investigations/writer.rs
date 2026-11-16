@@ -257,7 +257,9 @@ impl Files {
                         return Err(integrity());
                     }
                     let focus = source.observation.focus().ok_or_else(integrity)?;
-                    self.verify_focus_parent(focus)?;
+                    if !matches!(source.observation, SourceObservation::PageWaitWriters { .. }) {
+                        self.verify_focus_parent(focus)?;
+                    }
                     let report_input =
                         self.diagnostic_input(&report.evidence().capture.observation_id, input.controller_version)?;
                     let report_intent = report_input.investigation_intent()?;
@@ -328,6 +330,25 @@ impl Files {
         input: &DiagnosticInput,
     ) -> Result<()> {
         match report {
+            DiagnosticReport::PageWaitWriters { blocking_contexts, .. } => {
+                let SourceObservation::PageWaitWriters { focus, .. } = &source.observation else {
+                    return Err(integrity());
+                };
+                let rows = input
+                    .rows
+                    .iter()
+                    .map(|row| match &row.row.record {
+                        TelemetryRecord::Operational(observation) => Ok((&row.reference, observation)),
+                        _ => Err(integrity()),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if !report.matches_writer_input(source, rows) {
+                    return Err(integrity());
+                }
+                if *blocking_contexts != self.page_writer_contexts(focus)? {
+                    return Err(integrity());
+                }
+            }
             DiagnosticReport::CompilationAdmission { .. } => {
                 let rows = input
                     .rows

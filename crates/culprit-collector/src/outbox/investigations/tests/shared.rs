@@ -167,7 +167,7 @@ impl SharedInvestigation {
     }
 }
 
-fn seal(
+pub(super) fn seal(
     files: &mut Files,
     request: CollectionRequest,
     source: CollectionDescription,

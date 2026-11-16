@@ -6,6 +6,8 @@ use std::collections::BTreeSet;
 
 mod tasks;
 pub use tasks::MssqlPageTaskWait;
+mod writers;
+pub use writers::*;
 
 pub const MAX_PAGE_WAIT_OBSERVATIONS: usize = 64;
 

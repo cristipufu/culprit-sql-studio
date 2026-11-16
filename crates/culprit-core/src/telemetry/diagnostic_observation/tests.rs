@@ -3,6 +3,7 @@ use crate::{DatabaseIdentity, Engine, MeasurementScope, ObservedWaitResource};
 
 mod compiler_admission;
 mod investigations;
+mod page_writers;
 mod partitions;
 mod planning;
 mod request_memory;
@@ -339,6 +340,8 @@ fn focus_frame(
     pages: Vec<PageWaitObservation>,
 ) -> (CollectionDescription, DiagnosticCaptureRef, Vec<(DiagnosticEvidenceRef, PageWaitObservation)>) {
     let (mut source, mut input, _) = frame(2, vec![], true);
+    source.target = focus.participant().target.clone();
+    source.partition = focus.participant().partition.clone();
     source.source = "page-wait-targets".into();
     source.observation = SourceObservation::FocusedPageWait {
         snapshot: StateSnapshotDescription {

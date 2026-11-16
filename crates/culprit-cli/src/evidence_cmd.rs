@@ -159,6 +159,7 @@ enum Analysis {
     RequestMemory,
     SessionMemory,
     PageWaits,
+    PageWaitWriters,
     TaskSpace,
     StatementWork,
     StatementGrants,
@@ -189,6 +190,7 @@ impl Analysis {
             | Self::RequestMemory
             | Self::SessionMemory
             | Self::PageWaits
+            | Self::PageWaitWriters
             | Self::TaskSpace
             | Self::StatementWork
             | Self::StatementGrants
@@ -262,6 +264,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::PageWaits) => {
             let analysis = culprit_engine::collected_resources::page_waits(&capture, activity.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::page_waits(&analysis.report))?;
+        }
+        Some(Analysis::PageWaitWriters) => {
+            let analysis = culprit_engine::collected_resources::page_wait_writers(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::page_wait_writers(&analysis.report))?;
         }
         Some(Analysis::TaskSpace) => {
             let analysis = culprit_engine::collected_resources::task_space(&capture)?;

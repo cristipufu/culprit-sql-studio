@@ -10,6 +10,8 @@ use culprit_core::{
     },
 };
 use std::collections::BTreeSet;
+mod writers;
+pub use writers::explain_writers;
 
 /// Native scans and authenticated readback call the same pure explanation over their original bounded rows.
 /// Source availability is independent from the ability to retrieve those rows, including an empty population.

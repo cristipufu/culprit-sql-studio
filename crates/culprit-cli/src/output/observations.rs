@@ -156,6 +156,18 @@ pub(crate) fn compiler_admission(report: &culprit_core::CompilerAdmissionReport)
     )
 }
 
+pub(crate) fn page_wait_writers(report: &culprit_core::PageWaitWriterReport) -> String {
+    render_explanations(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
+            limitations: &report.limitations,
+        },
+        report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
+    )
+}
+
 pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
     render_explanations(
         Summary {

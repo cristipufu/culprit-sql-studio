@@ -26,6 +26,7 @@ impl NativeReadContext {
             observed_until: snapshot.observed_until.clone(),
             database_writable: match &source.observation {
                 SourceObservation::MaintenanceProgress { result, .. } => result.database_writable,
+                SourceObservation::PageWaitWriters { database_writable, .. } => *database_writable,
                 _ => None,
             },
         };
