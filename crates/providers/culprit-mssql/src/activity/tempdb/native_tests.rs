@@ -1,4 +1,5 @@
 //! App writes run only in a nonce database on the disposable loopback fixture. The observer reads metadata.
+mod qualification;
 use super::*;
 use crate::{
     activity::{IdentityDetail, ReadOptions},

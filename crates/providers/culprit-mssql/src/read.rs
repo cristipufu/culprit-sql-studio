@@ -1,4 +1,6 @@
 #[cfg(test)]
+pub(crate) mod measurement;
+#[cfg(test)]
 mod native_tests;
 mod output;
 use output::Output;

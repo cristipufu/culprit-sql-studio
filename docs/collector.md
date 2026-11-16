@@ -1129,6 +1129,20 @@ Source read metrics retain bounded template references, decoded rows/values, cli
 cancellation outcomes. Client time is **not database CPU, logical reads or network bytes**. Native cost must be
 measured independently in an owned representative workload before production collection is cleared.
 
+The owned SQL Server task-space experiment exercises 1, 16 and 64 allocating sessions, idle/load comparisons,
+caller row limits and cancellation. It records per-template native CPU/read/write deltas and sampled grants,
+alongside preparation, observer and cleanup costs. Run it only through the disposable fixture:
+
+```sh
+export CULPRIT_NATIVE_COST_RECEIPT_DIR="$(mktemp -d)"
+python3 dev/smoke-providers.py mssql --test culprit-mssql \
+  activity::tempdb::native_tests::qualification::owned_task_space_cost_matrix_preserves_native_work_and_settlement
+```
+
+The receipt directory must be absolute and already exist. Missing grant samples do not prove zero grants or a peak;
+failed or changed-owner measurements remain invalid. Warm samples, uncontrolled caches and emulated hardware do
+not establish a production envelope. This experiment does not issue a qualification receipt or enable a recipe.
+
 ## Offline packaging checks
 
 ```sh
