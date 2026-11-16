@@ -34,7 +34,7 @@ async fn one_show_response_supplies_raw_channels_and_the_same_legacy_projection_
     let reading = read(&mut reader, Flavor::Mysql, "8.4.11").await.unwrap();
     assert!(reading.error.is_none());
     assert!(reading.snapshot.is_valid());
-    assert!(matches!(reading.snapshot.context, ReplicationReadContext::Collector { .. }));
+    assert!(matches!(reading.snapshot.context, ObservationReadContext::Collector { .. }));
     assert!(reading.snapshot.context.native().is_none());
     assert_eq!(reading.snapshot.sources[0].records, 2);
     assert_eq!(reader.queries.len(), 1);

@@ -315,7 +315,7 @@ pub(crate) async fn collect(
 }
 
 async fn collect_from<R: NativeRead>(reader: &mut R, edition: i64, grant_hint: &str, snapshot: &mut Snapshot) {
-    use culprit_core::telemetry::{ReplicationReadContext, ReplicationSnapshot, SourceShutdown};
+    use culprit_core::telemetry::{ObservationReadContext, ReplicationSnapshot, SourceShutdown};
     let from = std::time::SystemTime::now();
     let result = read_selected(reader, edition, MAX_REPLICAS).await;
     let shutdown = reader.close().await;
@@ -342,7 +342,7 @@ async fn collect_from<R: NativeRead>(reader: &mut R, edition: i64, grant_hint: &
         return;
     }
     let completed = result.and_then(|read| {
-        let context = ReplicationReadContext::collector(from, until)?;
+        let context = ObservationReadContext::collector(from, until)?;
         let (observations, sources) = read.into_scan_observations();
         let raw = ReplicationSnapshot { context, sources, observations };
         if !raw.is_valid() {

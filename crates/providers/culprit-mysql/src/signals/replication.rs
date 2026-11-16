@@ -11,7 +11,7 @@ pub(crate) struct Reading {
 pub(super) async fn read(reader: &mut impl QueryRead, flavor: Flavor, version: &str) -> Result<Reading> {
     let observed_from = SystemTime::now();
     let result = native::replication::read(reader, flavor, version).await;
-    let context = ReplicationReadContext::collector(observed_from, SystemTime::now())?;
+    let context = ObservationReadContext::collector(observed_from, SystemTime::now())?;
     let (observations, coverage, error) = match result {
         Ok(observations) => {
             let coverage =

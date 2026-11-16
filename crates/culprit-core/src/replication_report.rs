@@ -78,7 +78,7 @@ pub struct ReplicationEntry {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct ReplicationReport {
-    pub context: ReplicationReadContext,
+    pub context: ObservationReadContext,
     pub sources: Vec<SourceOutcome>,
     pub read_complete: bool,
     pub native_rows: u32,

@@ -1,52 +1,13 @@
 //! A completed replication read preserves native facts, source visibility and the authority of its clocks.
 use super::*;
-use std::{collections::BTreeMap, time::SystemTime};
+use std::collections::BTreeMap;
 
 pub const MAX_REPLICATION_OBSERVATIONS: usize = CollectionBudget::upper_limits().max_snapshot_rows as usize;
-
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-#[ts(export)]
-pub enum ReplicationReadContext {
-    /// The original source descriptor supplies these native read bounds and its independent scope proof.
-    Native { context: Box<NativeReadContext> },
-    /// Collector-clock read bounds do not establish native event time, member continuity or connection shutdown.
-    Collector { observed_from: String, observed_until: String },
-}
-
-impl ReplicationReadContext {
-    pub fn collector(from: SystemTime, until: SystemTime) -> Result<Self> {
-        let context = Self::Collector { observed_from: collector_time(from)?, observed_until: collector_time(until)? };
-        context.is_valid().then_some(context).ok_or_else(invalid)
-    }
-
-    pub fn bounds(&self) -> (&str, &str) {
-        match self {
-            Self::Native { context } => (&context.observed_from, &context.observed_until),
-            Self::Collector { observed_from, observed_until } => (observed_from, observed_until),
-        }
-    }
-
-    pub fn native(&self) -> Option<&NativeReadContext> {
-        match self {
-            Self::Native { context } => Some(context),
-            Self::Collector { .. } => None,
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        let (from, until) = self.bounds();
-        from.len() <= 64
-            && until.len() <= 64
-            && ObservationBounds::new(from, until).is_some()
-            && self.native().is_none_or(NativeReadContext::is_valid)
-    }
-}
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ReplicationSnapshot {
-    pub context: ReplicationReadContext,
+    pub context: ObservationReadContext,
     pub sources: Vec<StateSourceCoverage>,
     pub observations: Vec<ReplicationObservation>,
 }
@@ -58,7 +19,7 @@ impl ReplicationSnapshot {
             return Err(invalid());
         }
         let snapshot = Self {
-            context: ReplicationReadContext::Native { context: Box::new(NativeReadContext::from_snapshot(source)?) },
+            context: ObservationReadContext::Native { context: Box::new(NativeReadContext::from_snapshot(source)?) },
             sources: native.sources.clone(),
             observations,
         };
@@ -107,13 +68,6 @@ impl ReplicationSnapshot {
             *observed <= source.records as usize && (!read_complete || *observed == source.records as usize)
         })
     }
-}
-
-fn collector_time(value: SystemTime) -> Result<String> {
-    let elapsed = value.duration_since(SystemTime::UNIX_EPOCH).map_err(|_| invalid())?;
-    let seconds = i64::try_from(elapsed.as_secs()).map_err(|_| invalid())?;
-    let value = chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, elapsed.subsec_nanos()).ok_or_else(invalid)?;
-    Ok(value.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
 }
 
 fn invalid() -> Error {

@@ -19,10 +19,10 @@ fn snapshot(engine: Engine, read: ReplicationSnapshot) -> Snapshot {
     snapshot
 }
 
-fn native_context(engine: Engine) -> ReplicationReadContext {
+fn native_context(engine: Engine) -> ObservationReadContext {
     let mut target = DatabaseIdentity::server(engine, "shop", "REPLICATION-PRIVATE-read.example", 15433, None);
     target.incarnation = Some("REPLICATION-PRIVATE-database-generation".into());
-    ReplicationReadContext::Native {
+    ObservationReadContext::Native {
         context: Box::new(NativeReadContext {
             target: target.into(),
             partition: SourcePartition::InstanceLocal {
@@ -42,7 +42,7 @@ fn native_context(engine: Engine) -> ReplicationReadContext {
     }
 }
 
-fn carrier(context: ReplicationReadContext, observations: Vec<ReplicationObservation>) -> ReplicationSnapshot {
+fn carrier(context: ObservationReadContext, observations: Vec<ReplicationObservation>) -> ReplicationSnapshot {
     let mut counts = BTreeMap::<String, u32>::new();
     for row in &observations {
         *counts.entry(row.source.clone()).or_default() += 1;
@@ -412,7 +412,7 @@ fn mysql_channel_files_and_filters_are_private_while_native_codes_clocks_and_cou
     sample.measurements.counters[2].reset = ResetMarker::Unknown;
     let default =
         native_row("replication-channels", "\"\"", &[("channel", ""), ("io_running", "Yes"), ("sql_running", "Yes")]);
-    let context = ReplicationReadContext::Collector { observed_from: FROM.into(), observed_until: UNTIL.into() };
+    let context = ObservationReadContext::Collector { observed_from: FROM.into(), observed_until: UNTIL.into() };
     let read = carrier(context, vec![row, default]);
     assert!(read.is_valid());
     let original = snapshot(Engine::Mysql, read);
@@ -491,7 +491,7 @@ fn unknown_properties_and_counter_owner_labels_cannot_smuggle_endpoints_through_
 #[test]
 fn unavailable_sources_and_missing_archive_rows_keep_their_original_counts_and_unknown_scope() {
     let mut read = carrier(
-        ReplicationReadContext::Collector { observed_from: FROM.into(), observed_until: UNTIL.into() },
+        ObservationReadContext::Collector { observed_from: FROM.into(), observed_until: UNTIL.into() },
         vec![native_row(
             "pg_replication_slots",
             "REPLICATION-PRIVATE-slot",
@@ -515,7 +515,7 @@ fn unavailable_sources_and_missing_archive_rows_keep_their_original_counts_and_u
 #[test]
 fn an_unavailable_native_source_cannot_gain_a_member_generation_or_positive_points_during_sharing() {
     let mut context = native_context(Engine::Mssql);
-    let ReplicationReadContext::Native { context: native } = &mut context else { panic!() };
+    let ObservationReadContext::Native { context: native } = &mut context else { panic!() };
     native.partition = SourcePartition::InstanceLocal { member: None, epoch: None };
     native.database_writable = None;
     let read = ReplicationSnapshot {

@@ -60,7 +60,7 @@ pub(crate) async fn acquire<R: QueryRead>(reader: &mut R, platform: Option<Platf
         })
         .collect();
     let snapshot = ReplicationSnapshot {
-        context: ReplicationReadContext::collector(from, SystemTime::now())?,
+        context: ObservationReadContext::collector(from, SystemTime::now())?,
         sources,
         observations,
     };

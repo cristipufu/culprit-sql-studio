@@ -75,7 +75,7 @@ async fn one_existing_acquisition_retains_raw_facts_source_counts_and_legacy_pro
     assert!(io.replies.is_empty());
     assert_eq!(acquired.replicas.len(), 2);
     assert_eq!(acquired.snapshot.observations.len(), 2);
-    assert!(matches!(acquired.snapshot.context, ReplicationReadContext::Collector { .. }));
+    assert!(matches!(acquired.snapshot.context, ObservationReadContext::Collector { .. }));
     assert!(
         acquired.snapshot.context.native().is_none(),
         "drained acquisition does not create native member/epoch proof"

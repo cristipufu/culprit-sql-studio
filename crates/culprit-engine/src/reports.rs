@@ -975,7 +975,7 @@ mod tests {
         use std::time::SystemTime;
         let mut snapshot = fixture_report("20261021T100000.000Z", 60).snapshot;
         snapshot.pressure.get_or_insert_default().replication = Some(Box::new(ReplicationSnapshot {
-            context: ReplicationReadContext::collector(SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH).unwrap(),
+            context: ObservationReadContext::collector(SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH).unwrap(),
             sources: vec![StateSourceCoverage::unavailable(
                 "replication-channels".into(),
                 culprit_core::ErrorCode::PermissionDenied,

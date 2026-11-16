@@ -184,7 +184,7 @@ async fn scan_retains_the_same_raw_read_with_actual_family_visibility_but_no_bor
     let pressure = snapshot.pressure.as_ref().unwrap();
     let raw = pressure.replication.as_ref().unwrap();
     assert!(raw.is_valid());
-    assert!(matches!(raw.context, culprit_core::telemetry::ReplicationReadContext::Collector { .. }));
+    assert!(matches!(raw.context, culprit_core::telemetry::ObservationReadContext::Collector { .. }));
     assert!(raw.context.native().is_none());
     assert_eq!(raw.sources[0].state, culprit_core::SourceState::Collected);
     assert!(raw.sources[0].complete_scope, "native query visibility is independent of process identity authority");

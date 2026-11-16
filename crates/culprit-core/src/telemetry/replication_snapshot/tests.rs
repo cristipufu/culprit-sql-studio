@@ -1,6 +1,7 @@
 use super::*;
 use crate::{Engine, MeasurementScope, SourceState};
 use std::time::Duration;
+use std::time::SystemTime;
 
 fn point(source: &str) -> ReplicationObservation {
     let set = NativeCounterSet {
@@ -27,7 +28,7 @@ fn point(source: &str) -> ReplicationObservation {
 
 fn snapshot() -> ReplicationSnapshot {
     ReplicationSnapshot {
-        context: ReplicationReadContext::collector(
+        context: ObservationReadContext::collector(
             SystemTime::UNIX_EPOCH,
             SystemTime::UNIX_EPOCH + Duration::from_secs(1),
         )
@@ -65,7 +66,7 @@ fn client_acquisition_clocks_never_supply_native_origin_or_bound_native_property
     assert_eq!(point.measurements.properties["inactive_since"], "2026-11-16T12:00:00Z");
     assert_eq!(point.measurements.counters[0].value, MeasurementValue::Integer("9007199254740993".into()));
     assert!(
-        ReplicationReadContext::collector(SystemTime::UNIX_EPOCH + Duration::from_secs(1), SystemTime::UNIX_EPOCH)
+        ObservationReadContext::collector(SystemTime::UNIX_EPOCH + Duration::from_secs(1), SystemTime::UNIX_EPOCH)
             .is_err()
     );
 }

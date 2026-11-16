@@ -38,7 +38,7 @@ fn data(rows: Vec<ReplicationObservation>) -> Box<Report> {
     let mut data: Box<Report> =
         serde_json::from_str(include_str!("../../../../fixtures/mysql-demo.report.json")).unwrap();
     data.snapshot.pressure.as_mut().unwrap().replication = Some(Box::new(ReplicationSnapshot {
-        context: ReplicationReadContext::collector(
+        context: ObservationReadContext::collector(
             SystemTime::UNIX_EPOCH,
             SystemTime::UNIX_EPOCH + Duration::from_secs(1),
         )
@@ -117,7 +117,7 @@ fn empty_partial_denied_and_unsupported_replication_reads_preserve_source_flags_
 #[test]
 fn native_read_bounds_do_not_serialize_private_database_routes_or_invent_qualified_member_coverage() {
     let mut data = data(vec![channel(0, false)]);
-    native(&mut data).context = ReplicationReadContext::Native {
+    native(&mut data).context = ObservationReadContext::Native {
         context: Box::new(NativeReadContext {
             target: culprit_core::DatabaseIdentity::server(
                 culprit_core::Engine::Mysql,

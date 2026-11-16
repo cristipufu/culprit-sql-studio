@@ -32,7 +32,7 @@ fn slot(name: &str, status: &str) -> ReplicationObservation {
 
 fn snapshot(rows: Vec<ReplicationObservation>) -> ReplicationSnapshot {
     ReplicationSnapshot {
-        context: ReplicationReadContext::collector(
+        context: ObservationReadContext::collector(
             SystemTime::UNIX_EPOCH,
             SystemTime::UNIX_EPOCH + Duration::from_secs(1),
         )

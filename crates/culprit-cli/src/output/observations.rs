@@ -649,7 +649,7 @@ mod tests {
             ReplicationEntry, ReplicationField, ReplicationFieldGroup, ReplicationReference, telemetry::*,
         };
         culprit_core::ReplicationReport {
-            context: ReplicationReadContext::Native {
+            context: ObservationReadContext::Native {
                 context: Box::new(NativeReadContext {
                     target: culprit_core::DatabaseIdentity::server(
                         culprit_core::Engine::Mysql,

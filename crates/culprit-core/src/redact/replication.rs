@@ -7,7 +7,7 @@ pub(super) fn redact(mut read: Box<ReplicationSnapshot>) -> Result<Box<Replicati
     if !read.is_valid_read(false) {
         return Err(CollectionStop::InvalidPage.error());
     }
-    if let ReplicationReadContext::Native { context } = &mut read.context {
+    if let ObservationReadContext::Native { context } = &mut read.context {
         redact_read_context(context);
     }
     for row in &mut read.observations {
