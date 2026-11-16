@@ -351,7 +351,7 @@ impl Provider for PostgresProvider {
     async fn query_progress(&self, session: &str, with_plan: bool) -> Result<culprit_core::QueryProgress> {
         let mut progress = progress::query_progress(&self.connector, session).await?;
         if with_plan
-            && progress.running
+            && progress.running == Some(true)
             && let Some(statement) = progress.statement.clone()
         {
             // EXPLAIN without ANALYZE: plans the statement's text again, never runs it. Another session's statement,

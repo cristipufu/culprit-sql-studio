@@ -8,6 +8,7 @@ enum Acquisition {
     RuntimeDistributions,
     NativeFailures,
     SessionMemory,
+    CurrentRequestWork,
     Snapshot(Recipe),
 }
 impl Acquisition {
@@ -18,6 +19,7 @@ impl Acquisition {
             Self::RuntimeDistributions => TelemetryCollection::Snapshot(SnapshotDataset::RuntimeDistributions),
             Self::NativeFailures => TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures),
             Self::SessionMemory => TelemetryCollection::Snapshot(SnapshotDataset::SessionMemory),
+            Self::CurrentRequestWork => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Snapshot(recipe) => TelemetryCollection::Snapshot(recipe.dataset()),
         }
     }
@@ -34,6 +36,7 @@ impl Acquisition {
             Self::RuntimeDistributions => runtime_distributions::bounded_budget(&budget),
             Self::NativeFailures => crate::native_failures::bounded_budget(&budget),
             Self::SessionMemory => crate::session_memory::bounded_budget(&budget),
+            Self::CurrentRequestWork => crate::progress::bounded_budget(&budget),
             Self::Deadlocks | Self::Snapshot(_) => budget,
         }
     }
@@ -44,6 +47,7 @@ impl Acquisition {
             Self::RuntimeDistributions => runtime_distributions::source(connector, request),
             Self::NativeFailures => native_failures::source(connector, request),
             Self::SessionMemory => session_memory::source(connector, request),
+            Self::CurrentRequestWork => crate::progress::source(connector, request),
             Self::Snapshot(recipe) => snapshot_source(connector, request, recipe),
         }
     }
@@ -79,15 +83,20 @@ impl Registration {
             id: self.id.into(),
             version: 1,
             purpose: self.purpose,
-            selector: RecipeSelector::Collection(self.acquisition.collection()),
+            selector: self.selector(),
             subjects: vec![self.acquisition.subject()],
             budget: self.acquisition.budget(),
             cost: RecipeCostQualification::Unqualified,
         }
     }
     fn accepts(&self, request: &CollectionRequest) -> bool {
-        RecipeSelector::Collection(self.acquisition.collection()).matches(request)
-            && self.acquisition.subject().accepts(&request.subject)
+        self.selector().matches(request) && self.acquisition.subject().accepts(&request.subject)
+    }
+    fn selector(&self) -> RecipeSelector {
+        match self.acquisition {
+            Acquisition::CurrentRequestWork => RecipeSelector::CurrentRequestWork,
+            _ => RecipeSelector::Collection(self.acquisition.collection()),
+        }
     }
     fn bounded_request(&self, request: &CollectionRequest) -> CollectionRequest {
         let mut request = request.clone();
@@ -109,6 +118,7 @@ const REGISTRATIONS: &[Registration] = &[
     Registration::baseline("mysql.native-failures", Acquisition::NativeFailures),
     Registration::investigation("mysql.runtime-distributions", Acquisition::RuntimeDistributions),
     Registration::investigation("mysql.session-memory", Acquisition::SessionMemory),
+    Registration::investigation("mysql.current-request-work", Acquisition::CurrentRequestWork),
     Registration::investigation("mysql.statement-definitions", Acquisition::Snapshot(Recipe::Definitions)),
     Registration::investigation(
         "mysql.cleanup",

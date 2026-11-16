@@ -69,7 +69,9 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
-        if let SourceObservation::MaintenanceProgress { snapshot, result } = &self.observation {
+        if let SourceObservation::MaintenanceProgress { snapshot, result }
+        | SourceObservation::CurrentRequestWork { snapshot, result } = &self.observation
+        {
             return result.is_valid_source(self, snapshot);
         }
         if let SourceObservation::PageWaitWriters { focus, .. } = &self.observation {

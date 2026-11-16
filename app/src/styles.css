@@ -11817,6 +11817,39 @@ button.as-callout:hover {
   padding: 10px 14px 0;
 }
 
+.qp-meter + .qp-meter {
+  margin-top: 12px;
+}
+
+.qp-session-context {
+  overflow-wrap: anywhere;
+}
+
+.qp-current-work {
+  margin: 12px 14px 0;
+  font-size: var(--fs-ui-sm);
+}
+
+.qp-current-work > summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.qp-current-work .observation-list {
+  margin: 0;
+  padding: 10px 0 0;
+  border: 0;
+}
+
+.qp-current-work .observation-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.qp-current-work .operational-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .qp-phase {
   margin-bottom: 6px;
   font-size: var(--fs-ui);

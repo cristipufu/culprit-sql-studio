@@ -225,11 +225,11 @@ pub(crate) async fn query_progress(pool: &Arc<Pool>, session: &str) -> Result<Qu
     let id = session_number(session)?;
     let taken_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     let (request, profiles) = pool.observe(|reader| Box::pin(async move { progress_rows(reader, id).await })).await?;
-    let mut progress = QueryProgress::idle(session, Engine::Mssql, taken_at);
+    let mut progress = QueryProgress::unobserved(session, Engine::Mssql, taken_at);
     let Some(r) = request.into_iter().next() else {
         return Ok(progress);
     };
-    progress.running = true;
+    progress.running = Some(true);
     progress.state = r.str("status");
     progress.wait = r.str("wait_type");
     progress.wait_ms = r.f64("wait_time").filter(|w| *w > 0.0);

@@ -179,7 +179,7 @@ async fn live_copy_progress_keeps_native_counters_and_rejects_retained_results_a
             serde_json::to_string(&last).unwrap()
         )
     });
-    assert!(progress.running && progress.statement.as_deref().unwrap().starts_with("/* leading"));
+    assert!(progress.running == Some(true) && progress.statement.as_deref().unwrap().starts_with("/* leading"));
     assert!(progress.phase.as_deref().unwrap().contains("rows reported processed"));
     assert!(progress.note.as_deref().unwrap().contains("completed transactions"));
     assert!(progress.percent.is_none() && progress.phase_percent.is_none() && progress.nodes.is_empty());
@@ -199,7 +199,7 @@ async fn live_copy_progress_keeps_native_counters_and_rejects_retained_results_a
     );
     let stale = id.rsplit_once('/').map(|(head, _)| format!("{head}/2000-01-01T00:00:00Z")).unwrap();
     let stale = provider.query_progress(&stale, false).await.unwrap();
-    assert!(!stale.running && stale.phase.is_none());
+    assert!(stale.running.is_none() && stale.phase.is_none());
     let foreign = format!("00000000000000000000000000000000/{pid}/{}", identity.string("started"));
     assert!(provider.query_progress(&foreign, false).await.unwrap().phase.is_none());
     assert_eq!(copy.as_mut().finish().await.unwrap(), 16);
@@ -213,7 +213,7 @@ async fn live_copy_progress_keeps_native_counters_and_rejects_retained_results_a
     assert_eq!(retained.string("yb_status"), "SUCCESS");
     assert_eq!(retained.string("rows"), "16");
     let idle = provider.query_progress(&id, false).await.unwrap();
-    assert!(!idle.running && idle.phase.is_none());
+    assert!(idle.running == Some(false) && idle.phase.is_none());
     // A failed COPY is retained too; it cannot become progress for a later statement on this backend.
     let copy = active.copy_in::<_, &'static [u8]>(&tagged(&format!("COPY {table} FROM STDIN"))).await.unwrap();
     tokio::pin!(copy);
@@ -227,7 +227,7 @@ async fn live_copy_progress_keeps_native_counters_and_rejects_retained_results_a
     let sleeping = async {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let progress = provider.query_progress(&id, false).await.unwrap();
-        assert!(progress.running && progress.statement.as_deref().unwrap().contains("pg_sleep"));
+        assert!(progress.running == Some(true) && progress.statement.as_deref().unwrap().contains("pg_sleep"));
         assert!(progress.phase.is_none(), "retained COPY must not describe a later SELECT");
     };
     let sleep_sql = tagged("SELECT pg_sleep(2)");
@@ -264,7 +264,7 @@ async fn live_index_progress_reports_backfill_rows_without_a_guessed_percentage(
         let deadline = tokio::time::Instant::now() + OBSERVATION_BUDGET;
         while tokio::time::Instant::now() < deadline {
             let progress = provider.query_progress(&id, false).await.unwrap();
-            let running = progress.running;
+            let running = progress.running == Some(true);
             if progress.phase.is_some() {
                 assert!(progress.percent.is_none() && progress.phase_percent.is_none() && progress.nodes.is_empty());
                 let backfilling = progress.phase.as_deref().unwrap().contains("table rows processed");
@@ -890,7 +890,7 @@ async fn live_native_catalog_workload_sessions_and_stale_identity_guards() {
         })
         .unwrap();
     let progress = provider.query_progress(&running.id, true).await.unwrap();
-    assert!(progress.running && progress.elapsed_ms.is_some());
+    assert!(progress.running == Some(true) && progress.elapsed_ms.is_some());
     assert!(
         progress
             .plan

@@ -209,6 +209,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::QueryCompilation
                     | SnapshotDataset::CompilerAdmission
                     | SnapshotDataset::MaintenanceProgress
+                    | SnapshotDataset::CurrentRequestWork
                     | SnapshotDataset::CachedRuntime
                     | SnapshotDataset::Objects
                     | SnapshotDataset::Triggers

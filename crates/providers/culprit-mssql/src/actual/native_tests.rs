@@ -16,7 +16,7 @@ async fn available_profile_metadata_is_detected_before_an_idle_session_read() {
     let mut application = pool.connect(SessionKind::User).await.unwrap();
     let session = test_support::session_id(&mut application).await;
     let progress = query_progress(&pool, &session).await.unwrap();
-    assert!(!progress.running);
+    assert_eq!(progress.running, None, "missing native activity is not an observed idle point");
     assert!(progress.plan.is_none());
     assert!(progress.nodes.is_empty());
     assert_eq!(pool.source_shutdown(), culprit_core::telemetry::SourceShutdown::Quiescent);

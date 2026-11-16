@@ -1,5 +1,5 @@
 //! One bounded owner brackets actor, native progress and metadata. Missing rows never prove completion.
-use super::{index, read_other_phase};
+use super::{maintenance, read_copy_phase};
 use crate::{
     native::{self, local_context::Context, metadata},
     read::QueryRead,
@@ -8,7 +8,7 @@ use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 
 #[derive(Clone, Copy)]
 pub(super) enum Mode {
-    IndexOnly,
+    Retained,
     Live,
 }
 
@@ -38,6 +38,10 @@ pub(super) async fn capture<R: QueryRead>(
         return Err(native::invalid());
     }
     let before = metadata::activity(reader, host, port).await?;
+    // backend_type is the native evidence separating this manual/client profile from autovacuum workers.
+    if before.version < 100_000 {
+        return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
+    }
     let owner = Context::observe(reader, &before).await?;
     let initial = match &owner {
         Some(owner) => owner.read_context()?,
@@ -49,31 +53,23 @@ pub(super) async fn capture<R: QueryRead>(
     let may_read = first.as_ref().is_some_and(|actor| actor.facts.key.request.is_some())
         && original.is_none_or(|expected| actor_matches(first.as_ref(), expected));
     let mut observations = Vec::new();
-    let mut membership = MaintenanceProgressMembership::NotObserved;
+    let mut membership = FocusedRequestMembership::NotObserved;
     let mut unavailable = None;
     let mut other_phase = None;
+    let mut source = maintenance::SOURCE;
     if may_read {
         let current = first.as_ref().ok_or_else(native::invalid)?;
-        let read = if before.version >= 120_000 {
-            index::read(reader, &before.database_oid, &current.facts.key).await
-        } else {
-            Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")))
-        };
-        match read {
-            Ok(Some(row)) => {
-                observations.push(row);
-                membership = MaintenanceProgressMembership::Observed;
-            }
-            Ok(None) => {}
-            Err(error) if optional(&error) => {
-                unavailable = Some(error.code);
-                membership = MaintenanceProgressMembership::Unavailable;
-            }
-            Err(error) => return Err(error),
+        let read = maintenance::read(reader, &before.database_oid, &current.facts.key, before.version).await?;
+        source = read.source;
+        unavailable = read.unavailable;
+        if let Some(row) = read.observation {
+            observations.push(row);
+            membership = FocusedRequestMembership::Observed;
+        } else if unavailable.is_some() {
+            membership = FocusedRequestMembership::Unavailable;
         }
         if matches!(mode, Mode::Live) && observations.is_empty() {
-            other_phase =
-                read_other_phase(reader, pid, &before.database_oid, &current.facts.key, before.version).await?;
+            other_phase = read_copy_phase(reader, &before.database_oid, &current.facts.key, before.version).await?;
         }
     }
     let last = actor(reader, &before, pid, budget, mode).await?;
@@ -82,13 +78,12 @@ pub(super) async fn capture<R: QueryRead>(
     }
     let context = finish_context(reader, host, port, &before, owner.as_ref()).await?;
     let coverage = match unavailable {
-        Some(ErrorCode::Unsupported) => StateSourceCoverage::not_applicable(index::SOURCE.into()),
-        Some(code) => StateSourceCoverage::unavailable(index::SOURCE.into(), code, None),
-        None => StateSourceCoverage::observed(index::SOURCE.into(), observations.len() as u32, false),
+        Some(code) => StateSourceCoverage::unavailable(source.into(), code, None),
+        None => StateSourceCoverage::observed(source.into(), observations.len() as u32, false),
     };
     let snapshot = MaintenanceProgressSnapshot {
-        source: index::SOURCE.into(),
-        result: MaintenanceProgressResult {
+        source: source.into(),
+        result: FocusedRequestResult {
             focus: original.cloned().map(Box::new),
             database_writable: context.database_writable,
             binding,
@@ -127,7 +122,7 @@ fn validate_original_source(original: Option<&ActivityRequestFocus>, current: &N
         if qualified && !current.has_qualified_local_owner() {
             return Err(CollectionStop::SourceUnavailable.error());
         }
-        if qualified && !maintenance_progress_original_scope_matches(focus, current) {
+        if qualified && !focused_request_original_scope_matches(focus, current) {
             return Err(CollectionStop::SourceChanged.error());
         }
     }
@@ -142,7 +137,7 @@ async fn actor<R: QueryRead>(
     mode: Mode,
 ) -> Result<Option<Actor>> {
     let extra = match mode {
-        Mode::IndexOnly => String::new(),
+        Mode::Retained => String::new(),
         Mode::Live => format!(
             ",CASE WHEN pg_catalog.octet_length(a.query)<={} THEN a.query END AS current_sql",
             budget.max_sql_bytes
@@ -189,15 +184,15 @@ fn binding(
     original: Option<&ActivityRequestFocus>,
     context: &NativeReadContext,
     actor: Option<&Actor>,
-) -> MaintenanceProgressBinding {
-    let Some(focus) = original else { return MaintenanceProgressBinding::Independent };
-    if !maintenance_progress_original_scope_matches(focus, context) {
-        return MaintenanceProgressBinding::UnverifiedOriginalScope;
+) -> FocusedRequestBinding {
+    let Some(focus) = original else { return FocusedRequestBinding::Independent };
+    if !focused_request_original_scope_matches(focus, context) {
+        return FocusedRequestBinding::UnverifiedOriginalScope;
     }
     match actor {
-        None => MaintenanceProgressBinding::ParticipantMissing,
-        Some(_) if actor_matches(actor, focus) => MaintenanceProgressBinding::Matched,
-        Some(_) => MaintenanceProgressBinding::ParticipantChanged,
+        None => FocusedRequestBinding::ParticipantMissing,
+        Some(_) if actor_matches(actor, focus) => FocusedRequestBinding::Matched,
+        Some(_) => FocusedRequestBinding::ParticipantChanged,
     }
 }
 
@@ -237,6 +232,6 @@ fn unknown_context(metadata: &metadata::Metadata, until: &str) -> Result<NativeR
     Ok(context)
 }
 
-fn optional(error: &Error) -> bool {
+pub(super) fn optional(error: &Error) -> bool {
     error.detail.is_none() && matches!(error.code, ErrorCode::PermissionDenied | ErrorCode::Unsupported)
 }

@@ -82,7 +82,7 @@ impl Runtime {
         policies.unwrap().with_recipes("saved-source", recipes).unwrap()
     }
 
-    async fn complete_empty_baseline(&mut self) {
+    pub(super) async fn complete_empty_baseline(&mut self) {
         let activity = &mut self.fixture.backend.activity;
         let SourceObservation::Activity(frame) = &mut activity.source.observation else { panic!() };
         let at = chrono::DateTime::parse_from_rfc3339(&frame.at).unwrap() + chrono::Duration::seconds(1);

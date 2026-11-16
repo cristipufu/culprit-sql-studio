@@ -5,11 +5,12 @@ use culprit_collector::analytical::{
 };
 use culprit_core::{SourceState, telemetry::*};
 use culprit_engine::collected_resources;
+mod non_index;
 
 #[tokio::test]
 async fn native_maintenance_points_reuse_the_pure_report_and_keep_original_context_once_without_payload_reads() {
     let cases = maintenance_progress_evidence_cases();
-    assert_eq!(cases.len(), 8);
+    assert_eq!(cases.len(), 16);
     for (source, records) in cases {
         let SourceObservation::MaintenanceProgress { snapshot, result } = &source.observation else { panic!() };
         let raw = MaintenanceProgressSnapshot {
@@ -61,7 +62,7 @@ async fn missing_native_row_preserves_original_membership_and_count_without_fabr
     assert!(!capture.is_read_complete());
     let analysis = collected_resources::maintenance_progress(&capture).unwrap();
     assert!(analysis.report.entries.is_empty());
-    assert_eq!(analysis.report.membership, MaintenanceProgressMembership::Observed);
+    assert_eq!(analysis.report.membership, FocusedRequestMembership::Observed);
     assert_eq!(analysis.report.native_rows, 1);
     assert_eq!(analysis.report.observed_rows, 0);
     assert_eq!(analysis.report.source_state, SourceState::Partial);

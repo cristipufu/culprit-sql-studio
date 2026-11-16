@@ -1,361 +1,429 @@
-//! A running statement on another connection. MySQL: performance_schema's current statement and stage events (time so
-//! far, rows examined, stage work done) and the plan it is executing (EXPLAIN FOR CONNECTION, which reads the running
-//! statement's plan and never runs anything). MariaDB: the process list (time, rows examined, its own progress report)
-//! and SHOW ANALYZE, which reads the running statement's plan with every operator's counters so far.
+//! One bounded current-request acquisition feeds interactive progress and retained native evidence.
+use crate::{
+    connect::{Connector, Flavor, Scope},
+    native::{self as source_native, local_context::Context},
+    read::{OwnedRead, QueryRead, ReadSession, confirmed_result},
+};
+use culprit_core::{Engine, QueryProgress, Result, session_number, telemetry::*};
+use culprit_read::{FrozenObservation, FrozenSource, ObservationReader};
+use std::sync::Arc;
 
-use culprit_core::{Engine, PlanKind, QueryProgress, Result, format, session_number, t};
+#[cfg(test)]
+mod fallback_tests;
+mod live;
+mod native;
+mod session;
+#[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
+mod tests;
 
-use crate::connect::{Connector, Flavor, Scope};
-use crate::rows::{explain_one, query_one};
-use crate::{plan_json, plan_maria};
+pub(crate) const SOURCE: &str = culprit_core::source_id::CURRENT_REQUEST_WORK;
+const MAX_SOURCE_QUERIES: u32 = 24;
+const MAX_LIVE_QUERIES: u32 = 25;
+const MAX_STATEMENT_MS: u32 = 1_000;
+const MAX_TOTAL_MS: u32 = 5_000;
 
-/// What MySQL can say about a running statement, where it says no more.
-fn no_operator_progress() -> String {
-    t!("provider.mysql.progress.no_operator_progress")
+pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
+    bounded(requested, MAX_SOURCE_QUERIES)
+}
+fn bounded(requested: &CollectionBudget, queries: u32) -> CollectionBudget {
+    let mut budget = requested.clone();
+    budget.max_queries = budget.max_queries.min(queries);
+    budget.max_snapshot_rows = budget.max_snapshot_rows.min(1);
+    budget.page_rows = budget.page_rows.min(1);
+    budget.max_sql_bytes = budget.max_sql_bytes.min(MAX_CURRENT_REQUEST_WORK_SQL_BYTES as u32);
+    budget.statement_timeout_ms = budget.statement_timeout_ms.min(MAX_STATEMENT_MS);
+    budget.total_timeout_ms = budget.total_timeout_ms.min(MAX_TOTAL_MS);
+    budget
 }
 
-/// [`no_operator_progress`], when the plan it is executing couldn't be read either (the server's `error`).
-fn plan_unavailable(error: &str) -> String {
-    [no_operator_progress(), t!("provider.mysql.progress.plan_unavailable", error = error)].join(" ")
+pub(crate) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
+    request.validate()?;
+    request.subject.require_database()?;
+    let CollectionSelection::CurrentRequestWork { focus } = &request.selection else {
+        return Err(source_native::invalid());
+    };
+    validate_selector(focus)?;
+    let mut request = request.clone();
+    request.budget = bounded_budget(&request.budget);
+    Ok(Box::new(FrozenSource::new(
+        Reader {
+            io: ReadSession::new(connector.clone(), request.budget.clone(), Scope::Server),
+            connector,
+            verified: None,
+        },
+        &request,
+    )?))
 }
 
-fn stage_progress_basis() -> String {
-    t!("provider.mysql.progress.basis.stages")
+struct Reader<R = ReadSession> {
+    io: R,
+    connector: Arc<Connector>,
+    verified: Option<CollectionDescription>,
 }
-
-fn mariadb_progress_basis() -> String {
-    t!("provider.mysql.progress.basis.mariadb")
-}
-
-/// The phase a MariaDB statement that reports its progress is in: its `state` and its stage of `stages`.
-fn mariadb_phase(state: Option<&str>, stage: f64, stages: f64) -> String {
-    let staged = stages > 1.0;
-    let (stage, stages) = (format::digits(format!("{stage:.0}")), format::digits(format!("{stages:.0}")));
-    match (state, staged) {
-        (Some(state), true) => t!("provider.mysql.progress.state_stage", state = state, stage = stage, stages = stages),
-        (Some(state), false) => state.to_string(),
-        (None, _) => t!("provider.mysql.progress.stage", stage = stage, stages = stages),
+#[async_trait::async_trait]
+impl<R: OwnedRead> ObservationReader for Reader<R> {
+    async fn observe(&mut self, request: &CollectionRequest) -> Result<FrozenObservation> {
+        let CollectionSelection::CurrentRequestWork { focus } = &request.selection else {
+            return Err(source_native::invalid());
+        };
+        let captured = capture_from(
+            &mut self.io,
+            &self.connector,
+            session_number(&focus.original.key.session.id)?,
+            Some(focus),
+            &request.budget,
+            PlanRead::None,
+        )
+        .await?;
+        let snapshot = captured.snapshot;
+        let description = description(&snapshot);
+        let records = snapshot
+            .observations
+            .into_iter()
+            .map(|row| {
+                Ok(TelemetryRecord::Operational(OperationalObservation {
+                    source: SOURCE.into(),
+                    key: row.key()?,
+                    fact: OperationalFact::CurrentRequestWork(Box::new(row)),
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.verified = Some(description.clone());
+        Ok(FrozenObservation { description, records })
+    }
+    async fn verify(&mut self, source: &CollectionDescription) -> Result<bool> {
+        Ok(self.verified.as_ref() == Some(source))
+    }
+    fn query_count(&self) -> u32 {
+        self.io.query_count()
+    }
+    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+        self.io.read_metrics()
+    }
+    async fn close(&mut self) -> SourceShutdown {
+        self.io.close().await
     }
 }
 
-/// TIMER_* columns are picoseconds; for a statement still running, TIMER_WAIT is the time so far.
-const STATEMENT_SQL: &str = r#"
-SELECT t.PROCESSLIST_STATE AS state, t.PROCESSLIST_COMMAND AS command, t.PROCESSLIST_DB AS db,
-       s.SQL_TEXT AS sql_text, s.TIMER_WAIT / 1000000000 AS elapsed_ms,
-       s.ROWS_EXAMINED AS rows_examined, s.ROWS_SENT AS rows_sent, s.CREATED_TMP_DISK_TABLES AS tmp_disk,
-       g.EVENT_NAME AS stage, g.WORK_COMPLETED AS work_completed, g.WORK_ESTIMATED AS work_estimated
-  FROM performance_schema.threads t
-  LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = t.THREAD_ID AND s.END_EVENT_ID IS NULL
-  LEFT JOIN performance_schema.events_stages_current g ON g.THREAD_ID = t.THREAD_ID AND g.END_EVENT_ID IS NULL
- WHERE t.PROCESSLIST_ID = {id}
-"#;
+fn description(snapshot: &CurrentRequestWorkSnapshot) -> CollectionDescription {
+    CollectionDescription {
+        target: snapshot.context.target.clone(),
+        partition: snapshot.context.partition.clone(),
+        source: SOURCE.into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::CurrentRequestWork {
+            snapshot: StateSnapshotDescription {
+                dataset: SnapshotDataset::CurrentRequestWork,
+                observed_from: snapshot.context.observed_from.clone(),
+                observed_until: snapshot.context.observed_until.clone(),
+                records: snapshot.coverage.records,
+                sources: vec![snapshot.coverage.clone()],
+            },
+            result: Box::new(snapshot.result.clone()),
+        },
+    }
+}
 
-/// The same from the process list, for servers where performance_schema is off or hidden from this login.
-const PROCESSLIST_SQL: &str = "SELECT STATE AS state, COMMAND AS command, DB AS db, INFO AS sql_text, TIME * 1000 AS elapsed_ms FROM information_schema.PROCESSLIST WHERE ID = {id}";
-
-/// MariaDB's process list: milliseconds, rows examined so far, and progress for statements that report it.
-const MARIADB_SQL: &str =
-    "SELECT STATE AS state, COMMAND AS command, DB AS db, INFO AS sql_text, TIME_MS AS elapsed_ms,
-       EXAMINED_ROWS AS rows_examined, PROGRESS AS progress, STAGE AS stage, MAX_STAGE AS max_stage
-  FROM information_schema.PROCESSLIST WHERE ID = {id}";
-
-async fn current_statement(conn: &mut impl crate::read::QueryRead, id: u64) -> Result<Option<crate::rows::Rec>> {
-    match query_one(conn, &STATEMENT_SQL.replace("{id}", &id.to_string())).await {
-        // Without the current-statement consumer the thread is there but its statement isn't.
-        Ok(Some(row)) if row.text("command").is_some() && row.text("sql_text").is_some() => Ok(Some(row)),
-        Ok(Some(row)) if row.text("command").is_some_and(|c| c != "Query") => Ok(Some(row)),
-        Ok(_) => query_one(conn, &PROCESSLIST_SQL.replace("{id}", &id.to_string())).await,
-        Err(error)
-            if error.detail.is_none()
-                && matches!(
-                    error.code,
-                    culprit_core::ErrorCode::PermissionDenied | culprit_core::ErrorCode::Unsupported
-                ) =>
-        {
-            query_one(conn, &PROCESSLIST_SQL.replace("{id}", &id.to_string())).await
+#[derive(Clone, Copy)]
+enum PlanRead {
+    None,
+    Live { with_plan: bool },
+}
+impl PlanRead {
+    async fn context<R: QueryRead>(self, reader: &mut R, connector: &Connector) -> Result<Context> {
+        match self {
+            Self::None => Context::capture(reader, connector).await,
+            Self::Live { .. } => Context::capture_live(reader, connector).await,
         }
-        Err(error) => Err(error),
+    }
+    fn is_live(self) -> bool {
+        matches!(self, Self::Live { .. })
     }
 }
-
-/// What a MariaDB before 10.9 can say about a running statement.
-fn mariadb_no_analyze() -> String {
-    t!("provider.mysql.progress.no_show_analyze")
+struct Captured {
+    snapshot: CurrentRequestWorkSnapshot,
+    point: Option<Box<native::StatementPoint>>,
+    plan: live::PlanEvidence,
+    flavor: Flavor,
+    running: Option<bool>,
+    session: Option<session::Capture>,
 }
 
 pub(crate) async fn query_progress(
-    connector: &std::sync::Arc<Connector>,
+    connector: &Arc<Connector>,
     session: &str,
     with_plan: bool,
 ) -> Result<QueryProgress> {
-    let id = session_number(session)?;
-    let mut conn = crate::read::ReadSession::application(connector.clone(), Scope::Server);
-    let taken_at = query_one(&mut conn, "SELECT DATE_FORMAT(UTC_TIMESTAMP(3), '%Y-%m-%dT%H:%i:%s.%fZ') AS now")
-        .await?
-        .map(|r| r.string("now"))
-        .unwrap_or_default();
-    let mut progress = QueryProgress::idle(session, Engine::Mysql, taken_at);
-    if connector.flavor() == Flavor::Mariadb {
-        let result = mariadb(&mut conn, id, with_plan, progress).await;
-        conn.close().await;
-        return result;
+    let session_id = session_number(session)?;
+    if session_id == 0 || session_id.to_string() != session {
+        return Err(source_native::invalid());
     }
-    let row = match current_statement(&mut conn, id).await {
-        Ok(row) => row,
-        Err(error) => {
-            conn.close().await;
-            return Err(error);
-        }
-    };
-    let Some(row) = row else {
-        conn.close().await;
-        return Ok(progress);
-    };
-    apply_mysql_statement(&mut progress, &row);
-    if !progress.running {
-        conn.close().await;
-        return Ok(progress);
-    }
-    if with_plan {
-        // The session id is digits only (session_number), so splicing it in is safe.
-        match explain_one(&mut conn, &format!("EXPLAIN FORMAT=JSON FOR CONNECTION {id}")).await {
-            Ok(Some(rec)) => {
-                if let Some(json) = rec.text("EXPLAIN").or_else(|| rec.text("explain"))
-                    && let Ok(mut plan) = plan_json::parse(
-                        &json,
-                        PlanKind::Estimated,
-                        progress.statement.as_deref(),
-                        row.text("db").as_deref(),
-                    )
-                {
-                    plan.raw = None;
-                    progress.plan = Some(plan);
-                }
-            }
-            Ok(None) => {}
-            Err(e) => progress.note = Some(plan_unavailable(&e.message)),
-        }
-    }
-    if progress.note.is_none() && progress.percent.is_none() {
-        progress.note = Some(no_operator_progress());
-    }
-    conn.close().await;
-    Ok(progress)
+    let budget = bounded(&culprit_read::application_budget(std::time::Duration::ZERO), MAX_LIVE_QUERIES);
+    let mut reader = ReadSession::new(connector.clone(), budget.clone(), Scope::Server);
+    query_progress_from(&mut reader, connector, session_id, &budget, with_plan).await
 }
-
-fn apply_mysql_statement(progress: &mut QueryProgress, row: &crate::rows::Rec) {
-    progress.statement = row.text("sql_text").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    progress.running = progress.statement.is_some() && row.text("command").as_deref() == Some("Query");
-    progress.state = row.text("state").filter(|s| !s.is_empty()).or_else(|| row.text("command"));
-    if !progress.running {
-        return;
-    }
-    progress.elapsed_ms = row.number("elapsed_ms");
-    // Some plans fill this counter only on completion; zero does not prove that no rows were examined.
-    progress.rows_examined = row.number("rows_examined").filter(|r| *r > 0.0);
-    progress.wait = progress.state.as_ref().filter(|state| state.to_ascii_lowercase().contains("lock")).cloned();
-    // Statement LOCK_TIME is a cumulative native subtotal, not the duration of this current wait.
-    progress.wait_ms = None;
-    if let Some(stage) = row.text("stage") {
-        progress.phase = Some(stage.trim_start_matches("stage/").replace('/', ": "));
-        if let (Some(done), Some(total)) = (row.number("work_completed"), row.number("work_estimated"))
-            && total > 0.0
-        {
-            let fraction = (done / total).clamp(0.0, 1.0);
-            progress.phase_percent = Some(fraction);
-            progress.percent = Some(fraction);
-            progress.percent_basis = Some(stage_progress_basis());
-        }
-    }
-}
-
-async fn mariadb(
-    conn: &mut impl crate::read::QueryRead,
-    id: u64,
+async fn query_progress_from<R: OwnedRead>(
+    reader: &mut R,
+    connector: &Connector,
+    session: u64,
+    budget: &CollectionBudget,
     with_plan: bool,
-    mut progress: QueryProgress,
 ) -> Result<QueryProgress> {
-    let Some(row) = query_one(conn, &MARIADB_SQL.replace("{id}", &id.to_string())).await? else {
-        return Ok(progress);
-    };
-    let statement = row.text("sql_text").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    progress.running = statement.is_some() && row.text("command").as_deref() == Some("Query");
-    progress.state = row.text("state").filter(|s| !s.is_empty()).or_else(|| row.text("command"));
-    progress.statement = statement;
-    if !progress.running {
-        return Ok(progress);
-    }
-    progress.elapsed_ms = row.number("elapsed_ms");
-    progress.rows_examined = row.number("rows_examined").filter(|r| *r > 0.0);
-    // ALTER TABLE, LOAD DATA, CHECK TABLE and friends report their own progress, per stage.
-    if let Some(percent) = row.number("progress").filter(|p| *p > 0.0) {
-        let fraction = (percent / 100.0).clamp(0.0, 1.0);
-        let (stage, stages) = (row.number("stage").unwrap_or(1.0).max(1.0), row.number("max_stage").unwrap_or(1.0));
-        progress.phase = Some(mariadb_phase(progress.state.as_deref(), stage, stages));
-        progress.phase_percent = Some(fraction);
-        progress.percent = Some((((stage - 1.0) + fraction) / stages.max(1.0)).clamp(0.0, 1.0));
-        progress.percent_basis = Some(mariadb_progress_basis());
-    }
-    // The session id is digits only (session_number), so splicing it in is safe. SHOW ANALYZE never runs anything.
-    match explain_one(conn, &format!("SHOW ANALYZE FORMAT=JSON FOR {id}")).await {
-        Ok(Some(rec)) => {
-            if let Some(json) = rec.first_text()
-                && let Ok(mut plan) =
-                    plan_json::parse(&json, PlanKind::Actual, progress.statement.as_deref(), row.text("db").as_deref())
-            {
-                plan.raw = None;
-                progress.nodes = plan_maria::progress(&plan);
-                progress.plan = Some(plan);
-                if progress.percent.is_none() {
-                    progress.summarize_nodes();
-                } else {
-                    let percent = progress.percent;
-                    progress.summarize_nodes();
-                    progress.percent = percent;
-                    progress.percent_basis = Some(mariadb_progress_basis());
-                }
-                if !with_plan {
-                    // Node ids come from the plan's shape, so they match the plan sent with the first reading.
-                    progress.plan = None;
-                }
-            }
-        }
-        Ok(None) => {}
-        // The statement finished between the two reads, or the server is older than 10.9.
-        Err(e) if e.message.to_ascii_lowercase().contains("syntax") => progress.note = Some(mariadb_no_analyze()),
-        Err(_) => {}
-    }
-    Ok(progress)
+    let result = capture_from(reader, connector, session, None, budget, PlanRead::Live { with_plan })
+        .await
+        .map(|captured| live::project(&session.to_string(), captured, with_plan));
+    confirmed_result(reader, result).await
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use culprit_core::{Error, ErrorCode, telemetry::CollectionStop};
-    use mysql_async::Value;
-    use std::collections::VecDeque;
-
-    fn running_row(sql: Value) -> crate::rows::Rec {
-        crate::rows::Rec::from_values(vec![
-            ("command", Value::from("Query")),
-            ("state", Value::from("Waiting for table metadata lock")),
-            ("sql_text", sql),
-            ("elapsed_ms", Value::UInt(1500)),
-            ("lock_ms", Value::UInt(900)),
-        ])
+async fn capture_from<R: QueryRead>(
+    reader: &mut R,
+    connector: &Connector,
+    session: u64,
+    focus: Option<&ActivityRequestFocus>,
+    budget: &CollectionBudget,
+    plan_read: PlanRead,
+) -> Result<Captured> {
+    if session == 0 {
+        return Err(source_native::invalid());
     }
-
-    struct ProgressRead {
-        responses: VecDeque<Result<Vec<crate::rows::Rec>>>,
-        calls: usize,
-    }
-    #[async_trait::async_trait]
-    impl crate::read::QueryRead for ProgressRead {
-        async fn read(&mut self, _: &str, _: Vec<Value>, limit: usize) -> Result<Vec<crate::rows::Rec>> {
-            assert_eq!(limit, 1);
-            self.calls += 1;
-            self.responses.pop_front().expect("no unplanned query after an error")
-        }
-        async fn explain(&mut self, _: &str) -> Result<Option<crate::rows::Rec>> {
-            panic!("statement observations cannot execute or plan SQL")
+    if let Some(focus) = focus {
+        validate_selector(focus)?;
+        if focus.original.key.session.id != session.to_string() {
+            return Err(source_native::invalid());
         }
     }
-
-    #[test]
-    fn accumulated_statement_lock_time_is_not_the_current_wait_duration() {
-        let row = running_row(Value::from("SELECT value FROM t WHERE id=1"));
-        let mut progress = QueryProgress::idle("42", Engine::Mysql, "2026-11-13T08:00:00Z".into());
-        apply_mysql_statement(&mut progress, &row);
-        assert!(progress.running);
-        assert_eq!(progress.elapsed_ms, Some(1500.0));
-        assert_eq!(progress.wait.as_deref(), Some("Waiting for table metadata lock"));
-        assert_eq!(progress.wait_ms, None);
-    }
-
-    #[tokio::test]
-    async fn only_known_source_unavailability_can_fall_back_to_processlist() {
-        for code in [ErrorCode::PermissionDenied, ErrorCode::Unsupported] {
-            let mut reader = ProgressRead {
-                responses: VecDeque::from([
-                    Err(Error::new(code, "native source unavailable")),
-                    Ok(vec![running_row(Value::from("SELECT 1"))]),
-                ]),
-                calls: 0,
-            };
-            assert!(current_statement(&mut reader, 42).await.unwrap().is_some());
-            assert_eq!(reader.calls, 2);
+    let before = plan_read.context(reader, connector).await?;
+    let initial = before.current_context().ok_or_else(|| CollectionStop::SourceChanged.error())?;
+    let initial_binding = bind_original(focus, &initial)?;
+    let statement = if before.instrumented {
+        match native::statement(
+            reader,
+            session,
+            &before.connection.database_name,
+            before.instrumented,
+            budget.max_sql_bytes as usize,
+        )
+        .await
+        {
+            Ok(statement) => statement,
+            Err(error) if plan_read.is_live() && source_native::local_context::unavailable(&error) => {
+                native::StatementRead::Unavailable
+            }
+            Err(error) => return Err(error),
         }
-        let mut reader = ProgressRead {
-            responses: VecDeque::from([
-                Ok(vec![running_row(Value::NULL)]),
-                Ok(vec![running_row(Value::from("SELECT 1"))]),
-            ]),
-            calls: 0,
-        };
-        assert!(current_statement(&mut reader, 42).await.unwrap().is_some());
-        assert_eq!(reader.calls, 2, "an unreadable current-statement consumer may use the independent process list");
+    } else {
+        native::StatementRead::Unavailable
+    };
+    let mut running = match &statement {
+        native::StatementRead::Observed(_) => Some(true),
+        native::StatementRead::Idle => Some(false),
+        _ => None,
+    };
+    let independent_session = if plan_read.is_live()
+        && matches!(statement, native::StatementRead::Unavailable | native::StatementRead::NotObserved)
+    {
+        Some(session::read(reader, session, &before, budget.max_sql_bytes as usize).await?)
+    } else {
+        None
+    };
+    let (mut point, mut membership) = match statement {
+        native::StatementRead::Observed(point) => (Some(point), FocusedRequestMembership::Observed),
+        native::StatementRead::NotObserved | native::StatementRead::Idle => {
+            (None, FocusedRequestMembership::NotObserved)
+        }
+        native::StatementRead::Unavailable | native::StatementRead::Foreign => {
+            (None, FocusedRequestMembership::Unavailable)
+        }
+    };
+    let mut binding = initial_binding;
+    if let Some(current) = &point {
+        if focus.is_some_and(|focus| {
+            current.observation.actor != focus.original.key
+                || current.observation.statement_identity != focus.statement_identity
+        }) {
+            point = None;
+            running = None;
+            membership = FocusedRequestMembership::NotObserved;
+            binding = changed_binding(initial_binding, false);
+        } else {
+            membership = FocusedRequestMembership::Observed;
+        }
+    } else if membership == FocusedRequestMembership::NotObserved {
+        binding = changed_binding(initial_binding, true);
     }
-
-    #[tokio::test]
-    async fn terminal_or_ambiguous_source_errors_never_issue_a_fallback_read() {
-        let mut errors = [
-            CollectionStop::TimedOut,
-            CollectionStop::Cancelled,
-            CollectionStop::CancellationUnconfirmed,
-            CollectionStop::QueryLimit,
-            CollectionStop::RowLimit,
-            CollectionStop::ByteLimit,
-            CollectionStop::Pressure,
-            CollectionStop::SourceChanged,
-        ]
-        .into_iter()
-        .map(CollectionStop::error)
-        .collect::<Vec<_>>();
-        errors.extend(
-            [
-                ErrorCode::Timeout,
-                ErrorCode::AuthFailed,
-                ErrorCode::ConnectionFailed,
-                ErrorCode::Internal,
-                ErrorCode::QueryFailed,
-            ]
-            .into_iter()
-            .map(|code| Error::new(code, "native read failed")),
-        );
-        errors.push(
-            Error::new(ErrorCode::PermissionDenied, "typed terminal failure")
-                .with_detail(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::Cancelled)),
-        );
-        for expected in errors {
-            let mut reader = ProgressRead { responses: VecDeque::from([Err(expected.clone())]), calls: 0 };
-            let actual = current_statement(&mut reader, 42).await.err().expect("the original error must be retained");
-            assert_eq!((actual.code, actual.detail), (expected.code, expected.detail));
-            assert_eq!(reader.calls, 1);
+    let mut plan = live::PlanEvidence::default();
+    if let Some(current) = &mut point {
+        current.observation.native.stage = read_stage(reader, &before, &current.observation.native).await?;
+        if let PlanRead::Live { with_plan } = plan_read
+            && initial.has_qualified_local_owner()
+        {
+            plan = live::plan(
+                reader,
+                before.connection.flavor,
+                &before.connection.version,
+                session,
+                current,
+                with_plan,
+                budget.max_plan_bytes as usize,
+            )
+            .await?;
+        }
+        let rechecked = native::statement(
+            reader,
+            session,
+            &before.connection.database_name,
+            before.instrumented,
+            budget.max_sql_bytes as usize,
+        )
+        .await?;
+        match rechecked {
+            native::StatementRead::Observed(after) if same_statement(&current.observation, &after.observation) => {}
+            native::StatementRead::Unavailable => {
+                point = None;
+                running = None;
+                plan = live::PlanEvidence::default();
+                membership = FocusedRequestMembership::Unavailable;
+                binding = initial_binding;
+            }
+            rechecked => {
+                point = None;
+                running = None;
+                plan = live::PlanEvidence::default();
+                membership = FocusedRequestMembership::NotObserved;
+                binding = changed_binding(initial_binding, matches!(rechecked, native::StatementRead::NotObserved));
+            }
         }
     }
-
-    // What a running statement's progress says, word for word: its messages come from locales/en.json.
-    #[test]
-    fn progress_says_what_it_can_in_english() {
-        let mysql = "MySQL doesn't report how far a running query has got, operator by operator. Culprit shows the plan \
-                     MySQL is executing, how long it has run and, for plans MySQL counts as it goes, how many rows it \
-                     has examined so far. ALTER TABLE and other long statements report stage progress when \
-                     performance_schema stage events are on.";
-        assert_eq!(no_operator_progress(), mysql);
-        assert_eq!(
-            plan_unavailable("Unknown thread id: 42"),
-            format!("{mysql} Its plan couldn't be shown: Unknown thread id: 42")
-        );
-        assert_eq!(
-            mariadb_no_analyze(),
-            "MariaDB reports a running statement's operators through SHOW ANALYZE, which needs MariaDB 10.9 or newer. \
-             Culprit shows how long it has run and, for plans MariaDB counts as it goes, how many rows it has examined \
-             so far."
-        );
-        assert_eq!(stage_progress_basis(), "MySQL's own stage progress (WORK_COMPLETED of WORK_ESTIMATED)");
-        assert_eq!(mariadb_progress_basis(), "MariaDB's own progress report for this statement");
-        assert_eq!(mariadb_phase(Some("altering table"), 2.0, 3.0), "altering table (stage 2 of 3)");
-        assert_eq!(mariadb_phase(Some("copy to tmp table"), 1.0, 1.0), "copy to tmp table");
-        assert_eq!(mariadb_phase(None, 1.0, 2.0), "stage 1 of 2");
+    let after = plan_read.context(reader, connector).await?;
+    let context = before.checked_context(&after).ok_or_else(|| CollectionStop::SourceChanged.error())?;
+    if let Some(session) = &independent_session {
+        session.validate(&context)?;
     }
+    if !after.instrumented {
+        point = None;
+        running = None;
+        plan = live::PlanEvidence::default();
+        membership = FocusedRequestMembership::Unavailable;
+        binding = initial_binding;
+    } else if let Some(reason) = unavailable_stage(&after)
+        && let Some(point) = &mut point
+    {
+        point.observation.native.stage = MysqlStageObservation::Unavailable { reason };
+    }
+    let complete = context.has_qualified_local_owner()
+        && membership == FocusedRequestMembership::Observed
+        && point.as_ref().is_some_and(|point| {
+            !matches!(
+                point.observation.native.stage,
+                MysqlStageObservation::Unavailable { .. } | MysqlStageObservation::Unlinked
+            ) && point.observation.scope == ActivityScopeBasis::RequestDatabase
+        });
+    let mut coverage = StateSourceCoverage::observed(SOURCE.into(), u32::from(point.is_some()), complete);
+    if !complete {
+        coverage.stopped = Some(CollectionStop::SourceUnavailable);
+    }
+    let snapshot = CurrentRequestWorkSnapshot {
+        source: SOURCE.into(),
+        context,
+        result: FocusedRequestResult {
+            focus: focus.cloned().map(Box::new),
+            database_writable: Some(!before.connection.read_only),
+            binding,
+            membership,
+        },
+        coverage,
+        observations: point.iter().map(|point| point.observation.clone()).collect(),
+    };
+    if !snapshot.is_valid() {
+        return Err(source_native::invalid());
+    }
+    Ok(Captured { snapshot, point, plan, flavor: before.connection.flavor, running, session: independent_session })
+}
+
+fn same_statement(before: &CurrentRequestWorkObservation, after: &CurrentRequestWorkObservation) -> bool {
+    before.actor == after.actor
+        && before.statement_identity == after.statement_identity
+        && before.database == after.database
+        && before.scope == after.scope
+}
+fn bind_original(focus: Option<&ActivityRequestFocus>, context: &NativeReadContext) -> Result<FocusedRequestBinding> {
+    let Some(focus) = focus else { return Ok(FocusedRequestBinding::Independent) };
+    if focused_request_scope_changed(focus, context) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    if focused_request_original_scope_matches(focus, context) {
+        return Ok(FocusedRequestBinding::Matched);
+    }
+    if matches!(&focus.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) }) {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    Ok(FocusedRequestBinding::UnverifiedOriginalScope)
+}
+fn changed_binding(original: FocusedRequestBinding, missing: bool) -> FocusedRequestBinding {
+    if original != FocusedRequestBinding::Matched {
+        original
+    } else if missing {
+        FocusedRequestBinding::ParticipantMissing
+    } else {
+        FocusedRequestBinding::ParticipantChanged
+    }
+}
+fn validate_selector(focus: &ActivityRequestFocus) -> Result<()> {
+    let session = session_number(&focus.original.key.session.id)?;
+    if !focus.is_valid()
+        || focus.target.engine() != Engine::Mysql
+        || session == 0
+        || session.to_string() != focus.original.key.session.id
+        || focus
+            .original
+            .key
+            .request
+            .as_ref()
+            .and_then(|request| {
+                culprit_core::engines::mysql_activity_statement_identity(&focus.original.key.session, request)
+            })
+            .as_ref()
+            != Some(&focus.statement_identity)
+    {
+        return Err(source_native::invalid());
+    }
+    Ok(())
+}
+async fn read_stage<R: QueryRead>(
+    reader: &mut R,
+    context: &Context,
+    request: &MysqlCurrentRequestWork,
+) -> Result<MysqlStageObservation> {
+    if let Some(reason) = unavailable_stage(context) {
+        return Ok(MysqlStageObservation::Unavailable { reason });
+    }
+    match native::stage(reader, request, context.connection.flavor, &context.connection.version).await {
+        Ok(stage) => Ok(stage),
+        Err(error) if optional(&error) => Ok(MysqlStageObservation::Unavailable {
+            reason: if error.code == culprit_core::ErrorCode::PermissionDenied {
+                MysqlStageUnavailable::PermissionDenied
+            } else {
+                MysqlStageUnavailable::Unsupported
+            },
+        }),
+        Err(error) => Err(error),
+    }
+}
+fn unavailable_stage(context: &Context) -> Option<MysqlStageUnavailable> {
+    match context.stages_instrumented {
+        Some(true) => None,
+        Some(false) => Some(MysqlStageUnavailable::InstrumentationDisabled),
+        None => Some(MysqlStageUnavailable::NotCollected),
+    }
+}
+fn optional(error: &culprit_core::Error) -> bool {
+    error.detail.is_none()
+        && matches!(
+            error.code,
+            culprit_core::ErrorCode::PermissionDenied
+                | culprit_core::ErrorCode::Unsupported
+                | culprit_core::ErrorCode::NotFound
+        )
 }

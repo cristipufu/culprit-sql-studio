@@ -118,6 +118,9 @@ pub(crate) fn eligible_source(
     let intent = investigation_intent(source, investigation)?;
     Ok(match (&source.observation, &source.target) {
         (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
+        (SourceObservation::CurrentRequestWork { result, .. }, CollectionTarget::Database(_)) => {
+            result.focus.as_deref().is_some_and(ActivityRequestFocus::is_current_request_work_focus)
+        }
         (
             SourceObservation::FocusedPageWait { .. }
             | SourceObservation::PageWaitWriters { .. }

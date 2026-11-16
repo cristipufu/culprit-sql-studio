@@ -47,6 +47,7 @@ pub(super) fn qualify_questions(
             DiagnosticSignal::PageWait { .. }
                 | DiagnosticSignal::RequestMemory { .. }
                 | DiagnosticSignal::CompilationAdmission { .. }
+                | DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. }
         ) || !episode.analysis.needs_work()
             || episode.latest.capture_ref() != input.parent
         {

@@ -170,6 +170,7 @@ enum Analysis {
     CompilerAdmission,
     Maintenance,
     MaintenanceProgress,
+    CurrentRequestWork,
     Cleanup,
     Tuning,
 }
@@ -199,6 +200,7 @@ impl Analysis {
             | Self::Compilation
             | Self::CompilerAdmission
             | Self::MaintenanceProgress
+            | Self::CurrentRequestWork
             | Self::Cleanup => {
                 vec![EvidenceFamily::OperationalSamples]
             }
@@ -308,6 +310,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::MaintenanceProgress) => {
             let analysis = culprit_engine::collected_resources::maintenance_progress(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::maintenance_progress(&analysis.report))?;
+        }
+        Some(Analysis::CurrentRequestWork) => {
+            let analysis = culprit_engine::collected_resources::current_request_work(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::current_request_work(&analysis.report))?;
         }
         Some(Analysis::Tuning) => {
             let analysis = culprit_engine::collected_resources::tuning(&capture)?;

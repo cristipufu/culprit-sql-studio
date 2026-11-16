@@ -379,12 +379,26 @@ the report carries references, explanations and explicit gaps. Full text outside
 the same bounded recovery option. This mode does not establish operation-specific resource consumption, an object
 target or completed/paused/failed maintenance history from a current statement alone.
 
-`maintenance-progress` reads retained PostgreSQL or YugabyteDB index-build points through the same native readers
-as live progress. A `maintenance-progress` selection names the original Activity participant. The capture retains
-its native object IDs, command, phase and exact work counters, with PostgreSQL heap/phase work separate from YSQL
-backfill estimates. Missing original compute identity prevents a matched historical attribution; the current read
-cannot fill it retroactively. An absent progress row never establishes completion. This investigation adds no
-ordinary scan query and remains cost-unqualified.
+`maintenance-progress` reuses live readers for PostgreSQL index builds, client VACUUM, ANALYZE, CLUSTER and VACUUM FULL,
+and YugabyteDB index builds. A focused selection names the original Activity participant. Captures preserve native
+object IDs, commands, phases and exact work counters. PostgreSQL blocks, tuples, bytes and phase fractions remain
+separate from YSQL backfill estimates; a phase fraction is not whole-statement completion. Version-specific fields
+remain unknown when unavailable. Missing original compute identity prevents matched historical attribution, and an
+absent progress row never establishes completion. This investigation adds no ordinary scan query and remains
+cost-unqualified.
+
+`current-request-work` explains MySQL/MariaDB current-statement counters and linked native stages using the same
+reader as live progress. The focused capture rechecks the original member, process generation, session, statement
+event and timer. Exact temporary-table, sorting, row and picosecond counters retain their native units; they do not
+establish spill duration, memory pressure or the incident's cause. Stage absence, missing instrumentation, permission
+refusal and unlinked stages remain distinct. The existing long-running incident can retain this evidence and its
+history without treating a later missing request as a resolved explanation. Both warehouses, the SDK and CLI
+`--analyze current-request-work` use the same pure report. The native investigation remains cost-unqualified.
+
+Live progress preserves unavailable request evidence as unknown and continues polling. Only directly observed idle
+state supplies `running: false`. Its bounded process-list fallback carries independent session context, without a
+request-owned plan. The UI caches a plan only under an opaque native request key; equal SQL text does not establish
+the same execution.
 
 `cleanup` explains retained cleanup horizons and version-store observations through the scan's pure view.
 PostgreSQL `cleanup` captures retain sessions, prepared transactions and replication slots, their separate data

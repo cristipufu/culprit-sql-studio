@@ -20,6 +20,7 @@ mod columns;
 mod compilation;
 mod compiler_admission;
 mod counters;
+mod current_request_work;
 mod definitions;
 mod delivery;
 mod diagnostic_focus;
@@ -29,6 +30,7 @@ mod discovery;
 mod events;
 mod fleet;
 mod focus;
+mod focused_request;
 mod foreign_keys;
 mod grants;
 mod identity;
@@ -93,6 +95,7 @@ pub use columns::*;
 pub use compilation::*;
 pub use compiler_admission::*;
 pub use counters::*;
+pub use current_request_work::*;
 pub use definitions::*;
 pub use delivery::*;
 pub use diagnostic_focus::*;
@@ -102,6 +105,7 @@ pub use discovery::*;
 pub use events::*;
 pub use fleet::*;
 pub use focus::*;
+pub use focused_request::*;
 pub use foreign_keys::*;
 pub use grants::*;
 pub use identity::*;
@@ -277,6 +281,7 @@ impl CollectionRequest {
                 dataset:
                     SnapshotDataset::CacheEntryMemory
                     | SnapshotDataset::MaintenanceProgress
+                    | SnapshotDataset::CurrentRequestWork
                     | SnapshotDataset::PageWaitWriters,
             } => {
                 return Err(CollectionStop::InvalidPage.error());
@@ -296,6 +301,12 @@ impl CollectionRequest {
             CollectionSelection::MaintenanceProgress { focus } => {
                 self.subject.require_database()?;
                 if !focus.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::CurrentRequestWork { focus } => {
+                self.subject.require_database()?;
+                if !focus.is_current_request_work_focus() {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
@@ -572,6 +583,12 @@ impl TelemetryRecord {
                 row.fact.redact(source.target.engine());
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
+                    (SourceObservation::CurrentRequestWork { .. }, OperationalFact::CurrentRequestWork(point)) => {
+                        accepted && point.fits_source_scope(source)
+                    }
+                    (SourceObservation::CurrentRequestWork { .. }, _) | (_, OperationalFact::CurrentRequestWork(_)) => {
+                        false
+                    }
                     (SourceObservation::PageWaitWriters { focus, .. }, OperationalFact::PageWaitWriters(point)) => {
                         accepted && focus.accepts_observation(&NativeReadContext::from_snapshot(source)?, point)
                     }

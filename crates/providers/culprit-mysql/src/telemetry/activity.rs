@@ -82,23 +82,21 @@ async fn capture<R: crate::read::QueryRead>(
         coverage.error_code = Some(ErrorCode::PermissionDenied);
         coverage.stopped.get_or_insert(CollectionStop::SourceUnavailable);
     }
+    let epoch = crate::native::local_context::process_epoch(before.started_second.ok_or_else(native::invalid)?);
+    let partition = SourcePartition::InstanceLocal { member: before.member.clone(), epoch: Some(epoch.clone()) };
+    if !partition.is_qualified() {
+        coverage.state = culprit_core::SourceState::Partial;
+        coverage.complete_scope = false;
+        coverage.stopped.get_or_insert(CollectionStop::SourceUnavailable);
+    }
     let description = CollectionDescription {
-        partition: culprit_core::telemetry::SourcePartition::Target,
+        partition,
         target: before.connection.database.clone().into(),
         source: native::activity::SOURCE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
-            database_writable: None,
-            epoch: Some(digest(
-                format!(
-                    "{}|{}|{}|{}",
-                    before.connection.server_id,
-                    before.connection.server_name,
-                    before.connection.version,
-                    before.started_second.ok_or_else(native::invalid)?
-                )
-                .as_bytes(),
-            )),
+            database_writable: Some(!before.connection.read_only),
+            epoch: Some(epoch),
             observed_from: canonical_time(&before.connection.at)?,
             observed_until: canonical_time(&after.connection.at)?,
             at: frame.at,

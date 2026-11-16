@@ -6,7 +6,7 @@ mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 5;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 6;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -421,6 +421,10 @@ impl DiagnosticEpisode {
                                 DiagnosticSignal::CompilationAdmission { .. },
                                 DiagnosticReport::CompilationAdmission { .. }
                             )
+                            | (
+                                DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. },
+                                DiagnosticReport::CurrentRequestWork { .. }
+                            )
                     )
             })
             && match (&self.lifecycle, &self.recovery) {
@@ -488,6 +492,7 @@ impl DiagnosticEpisode {
             DiagnosticFocus::PageWaitWriters { focus } => self.matches_page_wait_writer_focus(focus),
             DiagnosticFocus::RequestMemory { focus } => self.matches_request_memory_focus(focus),
             DiagnosticFocus::CompilationAdmission { focus } => self.matches_compilation_admission_focus(focus),
+            DiagnosticFocus::CurrentRequestWork { focus } => self.matches_current_request_work_focus(focus),
         }
     }
     pub fn matches_page_wait_writer_focus(&self, focus: &PageWaitWriterFocus) -> bool {
@@ -503,23 +508,21 @@ impl DiagnosticEpisode {
             }
     }
     pub fn matches_request_memory_focus(&self, focus: &ActivityRequestFocus) -> bool {
-        self.is_valid()
+        self.matches_request_origin(focus)
             && focus.is_request_memory_focus()
             && matches!(&self.signal, DiagnosticSignal::RequestMemory { key, statement_identity }
                 if *key == focus.original.key && statement_identity.as_ref() == Some(&focus.statement_identity))
-            && self.scope.source == focus.source
-            && self.scope.native_epoch.as_deref() == Some(focus.epoch.as_str())
-            && self.scope.partition == focus.partition
-            && self.scope.target.telemetry_id().ok() == focus.target.telemetry_id().ok()
-            && self.first.source_scope_id == focus.parent.source_scope_id
-            && ObservationBounds::new(&self.first_seen_at, &self.last_seen_at)
-                .is_some_and(|bounds| bounds.contains(&focus.original_observed_at))
     }
     pub fn matches_compilation_admission_focus(&self, focus: &ActivityRequestFocus) -> bool {
-        self.is_valid()
+        self.matches_request_origin(focus)
             && focus.is_compilation_admission_focus()
             && matches!(&self.signal, DiagnosticSignal::CompilationAdmission { key, statement_identity }
                 if *key == focus.original.key && statement_identity.as_ref() == Some(&focus.statement_identity))
+    }
+    pub(super) fn matches_request_origin(&self, focus: &ActivityRequestFocus) -> bool {
+        self.is_valid()
+            && focus.is_valid()
+            && self.signal.activity_key() == &focus.original.key
             && self.scope.source == focus.source
             && self.scope.native_epoch.as_deref() == Some(focus.epoch.as_str())
             && self.scope.partition == focus.partition
@@ -556,6 +559,9 @@ pub enum DiagnosticReport {
         observation: DiagnosticEvidenceRef,
         gateways: Vec<DiagnosticEvidenceRef>,
     },
+    CurrentRequestWork {
+        observation: DiagnosticEvidenceRef,
+    },
 }
 impl DiagnosticReport {
     pub fn matches_observation(
@@ -565,6 +571,20 @@ impl DiagnosticReport {
         row: &ExportedRecord,
     ) -> bool {
         match (self, &source.observation, &row.record) {
+            (
+                Self::CurrentRequestWork { .. },
+                SourceObservation::CurrentRequestWork { snapshot, result },
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::CurrentRequestWork(point),
+                    ..
+                }),
+            ) => {
+                result.focus.as_deref().is_some_and(|focus| episode.matches_current_request_work_focus(focus))
+                    && result.binding == FocusedRequestBinding::Matched
+                    && point.fits_source_scope(source)
+                    && (episode.analysis != DiagnosticAnalysisStatus::Analyzed
+                        || snapshot.coverage_state().is_ok_and(|state| state == crate::SourceState::Collected))
+            }
             (
                 Self::PageWaitWriters { page, candidates, .. },
                 SourceObservation::PageWaitWriters { focus, .. },
@@ -618,7 +638,8 @@ impl DiagnosticReport {
             Self::PageWait { observation, .. }
             | Self::PageWaitWriters { observation, .. }
             | Self::RequestMemory { observation, .. }
-            | Self::CompilationAdmission { observation, .. } => observation,
+            | Self::CompilationAdmission { observation, .. }
+            | Self::CurrentRequestWork { observation } => observation,
         }
     }
     /// Every raw row used by this explanation participates in pinning, validation and immutable history.
@@ -630,6 +651,7 @@ impl DiagnosticReport {
             }
             Self::RequestMemory { peers, .. } => (None, peers.as_slice(), &[][..]),
             Self::CompilationAdmission { gateways, .. } => (None, gateways.as_slice(), &[][..]),
+            Self::CurrentRequestWork { .. } => (None, &[][..], &[][..]),
         };
         let mut seen = Vec::new();
         std::iter::once(self.evidence()).chain(page).chain(secondary).chain(contexts).filter(move |reference| {
@@ -651,6 +673,7 @@ impl DiagnosticReport {
 
     fn reference_roles_are_valid(&self) -> bool {
         match self {
+            Self::CurrentRequestWork { .. } => true,
             Self::PageWait { blocking_contexts, .. } => {
                 blocking_contexts.len() <= crate::page_wait_report::MAX_PAGE_WAIT_BLOCKING_CONTEXTS
                     && unique_references(blocking_contexts)
@@ -753,6 +776,27 @@ impl DiagnosticReport {
                 reference.key().is_ok_and(|key| references.insert(key))
                     && if result.is_subject(row) { *reference == observation } else { peers.contains(reference) }
             })
+    }
+
+    pub fn matches_current_request_work_input<'a>(
+        &self,
+        source: &CollectionDescription,
+        rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a OperationalObservation)>,
+    ) -> bool {
+        let Self::CurrentRequestWork { observation } = self else { return false };
+        let SourceObservation::CurrentRequestWork { snapshot, result } = &source.observation else { return false };
+        let mut rows = rows.into_iter();
+        let Some((reference, row)) = rows.next() else { return false };
+        self.is_valid()
+            && source.observation.covers_request()
+            && snapshot.records == 1
+            && result.binding == FocusedRequestBinding::Matched
+            && snapshot.accepts(TelemetryStream::OperationalSamples, &row.source)
+            && result.focus.as_deref().is_some_and(ActivityRequestFocus::is_current_request_work_focus)
+            && rows.next().is_none()
+            && reference == observation
+            && row.is_valid()
+            && matches!(&row.fact, OperationalFact::CurrentRequestWork(point) if point.fits_source_scope(source))
     }
 }
 

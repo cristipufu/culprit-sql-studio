@@ -206,8 +206,16 @@ impl Out {
             }
             return self.json(&value);
         }
-        if !progress.running {
-            println!("{}", self.paint(DIM, &t!("cli.progress.idle", session = &progress.session)));
+        if progress.running != Some(true) {
+            let message = if progress.running == Some(false) {
+                t!("cli.progress.idle", session = &progress.session)
+            } else {
+                t!("cli.progress.unavailable", session = &progress.session)
+            };
+            println!("{}", self.paint(DIM, &message));
+            if let Some(note) = &progress.note {
+                println!("{}", self.paint(DIM, note));
+            }
             return;
         }
         let mut head = vec![t!("cli.progress.session", session = &progress.session)];
@@ -234,6 +242,9 @@ impl Out {
         if let Some(pct) = progress.percent {
             let basis = progress.percent_basis.as_deref().unwrap_or("");
             println!("{} {}  {}", bar(pct, 24), format::percent(pct), self.paint(DIM, basis));
+        }
+        if let Some(report) = &progress.current_work_report {
+            println!("{}", super::observations::current_request_work(report));
         }
         let Some(plan) = &progress.plan else {
             if let Some(note) = &progress.note {

@@ -26,7 +26,7 @@ pub(super) async fn run(ws: &Workspace, args: LiveArgs, out: &Out) -> Result<u8>
         loop {
             let progress = ws.query_progress(&args.connection, session, first || !args.watch).await?;
             out.query_progress(&progress, !first);
-            if !args.watch || !progress.running {
+            if !args.watch || progress.running == Some(false) {
                 return Ok(0);
             }
             first = false;

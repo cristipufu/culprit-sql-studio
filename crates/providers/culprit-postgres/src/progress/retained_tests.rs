@@ -14,11 +14,11 @@ async fn one_existing_progress_read_retains_exact_phase_counts_without_promoting
         reader.calls.iter().filter(|sql| sql.contains("FROM pg_catalog.pg_stat_progress_create_index")).count(),
         1
     );
-    assert_eq!(snapshot.result.binding, MaintenanceProgressBinding::UnverifiedOriginalScope);
-    assert_eq!(snapshot.result.membership, MaintenanceProgressMembership::Observed);
+    assert_eq!(snapshot.result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+    assert_eq!(snapshot.result.membership, FocusedRequestMembership::Observed);
     assert!(!reader.calls[2].contains("current_sql"), "retained progress does not reread SQL bodies");
     let point = &snapshot.observations[0];
-    let IndexBuildProgressWork::PostgreSql { progress } = &point.work else { panic!() };
+    let MaintenanceProgressWork::PostgreSqlIndexBuild { progress } = &point.work else { panic!() };
     assert_eq!(progress.blocks_total.as_deref(), Some("9007199254740993"));
     assert_eq!(progress.blocks_done.as_deref(), Some("0"));
     assert!(point.index_reference().is_none());
@@ -37,7 +37,7 @@ async fn exact_qualified_original_and_current_owner_can_match_without_borrowing_
     let source_focus = focus_from(&source, original_focus().original);
     let mut next = scripted_reader();
     let snapshot = capture(&mut next, &source_focus).await.unwrap();
-    assert_eq!(snapshot.result.binding, MaintenanceProgressBinding::Matched);
+    assert_eq!(snapshot.result.binding, FocusedRequestBinding::Matched);
     assert!(snapshot.is_valid());
 }
 
@@ -79,18 +79,18 @@ async fn missing_or_recycled_original_skips_the_progress_view_and_never_reports_
         }
         let snapshot = capture(&mut reader, &original_focus()).await.unwrap();
         assert!(snapshot.observations.is_empty());
-        assert_eq!(snapshot.result.membership, MaintenanceProgressMembership::NotObserved);
+        assert_eq!(snapshot.result.membership, FocusedRequestMembership::NotObserved);
         assert!(!reader.calls.iter().any(|sql| sql.contains("pg_stat_progress_create_index")));
     }
 }
 
 #[tokio::test]
 async fn permission_denial_is_unavailable_while_native_null_and_ambiguous_rows_are_not_zero() {
-    let mut reader = scripted_reader();
+    let mut reader = progress_reader(180_000, 4, None);
     reader.replies[3] = Err(Error::new(culprit_core::ErrorCode::PermissionDenied, "fixture denied"));
     let snapshot = capture(&mut reader, &original_focus()).await.unwrap();
     assert_eq!(snapshot.coverage.state, culprit_core::SourceState::Unavailable);
-    assert_eq!(snapshot.result.membership, MaintenanceProgressMembership::Unavailable);
+    assert_eq!(snapshot.result.membership, FocusedRequestMembership::Unavailable);
     let mut reader = scripted_reader();
     reader.replies[3] = Ok(vec![progress(), progress()]);
     assert_eq!(
@@ -122,18 +122,18 @@ async fn malformed_or_different_session_selector_is_refused_before_any_source_wo
 #[tokio::test]
 async fn legacy_progress_skips_views_not_present_in_that_native_version_and_preserves_terminal_errors() {
     let actor = original_focus().original.key;
-    for (version, views) in [(110_000, 1), (120_000, 2), (130_000, 3), (140_000, 4)] {
+    for (version, views) in [(110_000, 1), (120_000, 3), (130_000, 4), (140_000, 4)] {
         let mut io = Reader { replies: (0..views).map(|_| Ok(vec![])).collect(), ..Default::default() };
-        assert!(read_other_phase(&mut io, 42, "16384", &actor, version).await.unwrap().is_none());
+        assert!(maintenance::read(&mut io, "16384", &actor, version).await.unwrap().observation.is_none());
         assert_eq!(io.calls.len(), views);
         assert_eq!(io.calls.iter().any(|sql| sql.contains("pg_stat_progress_analyze")), version >= 130_000);
         assert_eq!(io.calls.iter().any(|sql| sql.contains("pg_stat_progress_cluster")), version >= 120_000);
-        assert_eq!(io.calls.iter().any(|sql| sql.contains("pg_stat_progress_copy")), version >= 140_000);
+        assert!(!io.calls.iter().any(|sql| sql.contains("pg_stat_progress_copy")));
     }
     for stopped in [CollectionStop::Cancelled, CollectionStop::TimedOut, CollectionStop::QueryLimit] {
         let mut io = Reader { replies: [Err(stopped.error())].into(), ..Default::default() };
         assert_eq!(
-            CollectionStop::from_error(&read_other_phase(&mut io, 42, "16384", &actor, 180_000).await.unwrap_err()),
+            CollectionStop::from_error(&maintenance::read(&mut io, "16384", &actor, 180_000).await.err().unwrap()),
             stopped
         );
         assert_eq!(io.calls.len(), 1);
@@ -144,11 +144,7 @@ async fn legacy_progress_skips_views_not_present_in_that_native_version_and_pres
 async fn postgres_11_live_capture_uses_one_compatible_clock_projection_and_only_available_progress_views() {
     let mut io = scripted_reader();
     io.replies[0] = Ok(vec![metadata_on_version(110_000, "f", "2026-11-14T00:00:00Z")]);
-    io.replies[3] = Ok(vec![row(&[
-        ("phase", Some("scanning heap")),
-        ("heap_blks_scanned", Some("2")),
-        ("heap_blks_total", Some("10")),
-    ])]);
+    io.replies[3] = Ok(vec![vacuum_progress(110_000, &[("heap_blks_total", Some("10"))])]);
     io.replies[5] = Ok(vec![metadata_on_version(110_000, "f", "2026-11-14T00:00:00Z")]);
     let captured =
         reader::capture(&mut io, "fixture.invalid", 9, 42, None, &CollectionBudget::default(), reader::Mode::Live)
@@ -177,10 +173,14 @@ async fn postgres_11_live_capture_uses_one_compatible_clock_projection_and_only_
     }
     assert_eq!(captured.actor.as_ref().unwrap().key, original_focus().original.key);
     assert!(captured.snapshot.context.has_qualified_local_owner());
-    assert_eq!(captured.other_phase.as_ref().unwrap().2, "pg_stat_progress_vacuum");
-    assert_eq!(captured.other_phase.as_ref().unwrap().1, Some(0.2));
-    assert_eq!(captured.snapshot.result.membership, MaintenanceProgressMembership::Unavailable);
-    assert_eq!(captured.snapshot.coverage.state, culprit_core::SourceState::NotApplicable);
-    assert!(captured.snapshot.observations.is_empty());
+    assert!(captured.other_phase.is_none());
+    assert_eq!(captured.snapshot.source, vacuum::SOURCE);
+    assert_eq!(phase_fraction(&captured.snapshot.observations[0]), Some(0.2));
+    assert_eq!(captured.snapshot.result.membership, FocusedRequestMembership::Observed);
+    assert_eq!(captured.snapshot.coverage.state, culprit_core::SourceState::Partial);
     assert!(captured.snapshot.is_valid());
+    let progress = project("42", captured);
+    assert_eq!(progress.phase.as_deref(), Some("VACUUM: scanning heap"));
+    assert_eq!(progress.phase_percent, Some(0.2));
+    assert_eq!(progress.percent, None, "one phase never establishes whole-command completion");
 }

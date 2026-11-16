@@ -1,7 +1,6 @@
 import { Check, Flame, Pause, Play, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NodeProgress } from "../gen/NodeProgress";
-import type { Plan } from "../gen/Plan";
 import type { PlanNode } from "../gen/PlanNode";
 import type { QueryProgress } from "../gen/QueryProgress";
 import { api, errorMessage, type ApiError } from "../lib/api";
@@ -9,6 +8,9 @@ import { count, duration, percent, rowCount } from "../lib/format";
 import { t } from "../lib/i18n";
 import { PlanDiagram } from "./PlanDiagram";
 import { slot, withElements } from "../lib/message-parts";
+import { ProgressPlanCache } from "../lib/query-progress";
+import { QueryProgressMeters } from "./QueryProgressMeters";
+import { CurrentRequestWork } from "./CurrentRequestWork";
 
 const REFRESH_MS = 1000;
 
@@ -78,12 +80,16 @@ type Load = { status: "loading" } | { status: "ready"; progress: QueryProgress }
  * plan and the engine's own progress reports for the commands that have them, and say plainly what they can't show.
  */
 export function QueryProgressPanel({ connection, session, onClose }: { connection: string; session: string; onClose: () => void }) {
+  return <SessionProgress key={JSON.stringify([connection, session])} connection={connection} session={session} onClose={onClose} />;
+}
+
+function SessionProgress({ connection, session, onClose }: { connection: string; session: string; onClose: () => void }) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
   const [paused, setPaused] = useState(false);
   const [visible, setVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible");
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [, tick] = useState(0);
-  const plan = useRef<{ statement: string | null; plan: Plan | null }>({ statement: null, plan: null });
+  const plans = useRef(new ProgressPlanCache());
 
   useEffect(() => {
     const onVisibility = () => setVisible(document.visibilityState === "visible");
@@ -96,27 +102,25 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
   }, []);
 
   useEffect(() => {
-    plan.current = { statement: null, plan: null };
-    setLoad({ status: "loading" });
-  }, [connection, session]);
-
-  useEffect(() => {
     if (paused || !visible) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        // PostgreSQL and MySQL send their (estimated) plan once per statement; ask again when the statement changes.
-        const known = plan.current;
-        const next = await (await api()).queryProgress(connection, session, known.plan == null);
+        const client = await api();
         if (cancelled) return;
-        if (next.plan) plan.current = { statement: next.statement, plan: next.plan };
-        else if (next.statement && known.statement && next.statement !== known.statement) plan.current = { statement: null, plan: null };
-        setLoad({ status: "ready", progress: { ...next, plan: next.plan ?? (next.running ? plan.current.plan : null) } });
+        const read = plans.current.beginRead();
+        const next = await client.queryProgress(connection, session, read.withPlan);
+        if (cancelled) return;
+        if (next.session !== session) throw { code: "integrity", message: t("ui.query_progress.unavailable"), hint: null };
+        setLoad({ status: "ready", progress: plans.current.accept(next, read) });
         setUpdatedAt(Date.now());
-        if (!next.running) return;
+        if (next.running === false) return;
       } catch (e) {
-        if (!cancelled) setLoad({ status: "error", error: errorMessage(e) });
+        if (!cancelled) {
+          plans.current.unavailable();
+          setLoad({ status: "error", error: errorMessage(e) });
+        }
       }
       if (!cancelled) timer = setTimeout(poll, REFRESH_MS);
     };
@@ -165,12 +169,14 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
       <header className="qp-head">
         <span className="qp-title">
           {withElements(t("ui.query_progress.session", { session: slot(0) }), [<b key="session" className="mono">{session}</b>])}
-          {progress && <span className={`qp-state ${progress.running ? "running" : "finished"}`}>{progress.running ? progress.state ?? t("ui.query_progress.running") : t("ui.query_progress.not_running")}</span>}
+          {progress && <span className={`qp-state ${progress.running === true && !progress.session_context ? "running" : progress.running === false ? "finished" : "unverified"}`}>
+            {progress.session_context ? t("ui.query_progress.session_only") : progress.running === true ? progress.state ?? t("ui.query_progress.running") : progress.running === false ? t("ui.query_progress.not_running") : t("ui.query_progress.unverified")}
+          </span>}
         </span>
         <span className="spacer" />
         <span className={`freshness ${live ? "live" : ""}`} title={t("ui.query_progress.refresh_title")}>
           <span className="dot" />
-          {paused ? t("ui.query_progress.paused") : !visible ? t("ui.common.paused_while_hidden") : load.status === "error" ? t("ui.query_progress.cant_refresh") : progress && !progress.running ? t("ui.query_progress.stopped") : age != null ? age < 1 ? t("ui.query_progress.live_now") : t("ui.query_progress.live_ago", { seconds: age.toFixed(0) }) : t("ui.query_progress.connecting")}
+          {paused ? t("ui.query_progress.paused") : !visible ? t("ui.common.paused_while_hidden") : load.status === "error" ? t("ui.query_progress.cant_refresh") : progress?.running === false ? t("ui.query_progress.stopped") : age != null ? age < 1 ? t("ui.query_progress.live_now") : t("ui.query_progress.live_ago", { seconds: age.toFixed(0) }) : t("ui.query_progress.connecting")}
         </span>
         <button type="button" className="btn ghost small" onClick={() => setPaused((p) => !p)} title={paused ? t("ui.query_progress.resume") : t("ui.query_progress.pause")}>
           {paused ? <Play size={12} /> : <Pause size={12} />}
@@ -197,14 +203,19 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
           {load.error.hint && <div className="muted">{load.error.hint}</div>}
         </div>
       )}
-      {progress && !progress.running && (
+      {progress?.running === false && (
         <div className="qp-note calm">
           <Check size={13} /> {t("ui.query_progress.idle", { session })}
         </div>
       )}
-      {progress?.running && (
+      {progress && progress.running !== false && (
         <div className="qp-body">
           <div className="qp-side">
+            {progress.session_context ? <p className="qp-note subtle">{t("ui.query_progress.independent")}</p>
+              : progress.running == null && <p className="qp-note subtle">{t("ui.query_progress.unavailable")}</p>}
+            {progress.session_context && <p className="qp-note subtle qp-session-context">
+              {progress.session_context.source} · {progress.session_context.observed_at}{progress.state && <> · {progress.state}</>}
+            </p>}
             {progress.statement && (
               <div className="qp-sql mono" title={progress.statement}>
                 {progress.statement}
@@ -239,24 +250,7 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
                 {progress.wait_ms != null && progress.wait_ms >= 1000 ? ` · ${duration(progress.wait_ms)}` : ""}
               </div>
             )}
-            {(progress.percent != null || progress.phase) && (
-              <div className="qp-progress">
-                {progress.phase && <div className="qp-phase">{progress.phase}</div>}
-                {progress.percent != null && (
-                  <div className="qp-bar-row">
-                    <span className="qp-bar">
-                      <span style={{ width: `${Math.round(progress.percent * 100)}%` }} />
-                    </span>
-                    <b>{percent(progress.percent)}</b>
-                  </div>
-                )}
-                {progress.percent != null && (
-                  <div className="qp-basis" title={progress.percent_basis ?? undefined}>
-                    {progress.nodes.length > 0 ? t("ui.query_progress.basis_rows") : t("ui.query_progress.basis_engine")}
-                  </div>
-                )}
-              </div>
-            )}
+            <QueryProgressMeters progress={progress} />
             {hotNode && (
               <div className="qp-hot">
                 <Flame size={13} />
@@ -273,6 +267,7 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
               </div>
             )}
             {progress.note && <div className="qp-note subtle">{progress.note}</div>}
+            {progress.current_work_report && <CurrentRequestWork report={progress.current_work_report} />}
           </div>
           <div className="qp-plan">
             {livePlan ? (

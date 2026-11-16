@@ -49,52 +49,13 @@ pub(crate) async fn platform<R: QueryRead>(reader: &mut R) -> Result<Platform> {
 }
 
 impl Platform {
-    pub(crate) fn from_connection(context: &super::metadata::ConnectionContext) -> Self {
-        Self {
-            version: context.version.clone(),
-            flavor: context.flavor,
-            performance_schema: context.performance_schema,
-            observed_at: context.at.clone(),
-            connection_id: context.connection_id,
-            login: context.login.clone(),
-            server_id: context.server_id,
-            server_name: context.server_name.clone(),
-        }
-    }
     /// Only call after the owning source has qualified the native product and UUID availability.
     pub(crate) async fn identify<R: QueryRead>(&self, reader: &mut R, configuration: &Rec) -> Result<Identity> {
-        let resource = match self.flavor {
-            Flavor::Mysql => {
-                let uuid = text(configuration, "server_uuid")?.to_ascii_lowercase();
-                if !valid_uuid(&uuid) {
-                    return Err(invalid());
-                }
-                SharedResourceIdentity {
-                    engine: Engine::Mysql,
-                    kind: SharedResourceKind::Instance,
-                    namespace: NativeIdentity::new("mysql-server").qualified("server_uuid", &uuid),
-                    native: NativeIdentity::new(uuid),
-                }
-            }
-            Flavor::Mariadb => {
-                let uid = text(configuration, "server_uid")?;
-                if uid.len() != 28
-                    || !uid.ends_with('=')
-                    || !uid[..27].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
-                {
-                    return Err(invalid());
-                }
-                SharedResourceIdentity {
-                    engine: Engine::Mysql,
-                    kind: SharedResourceKind::Instance,
-                    namespace: NativeIdentity::new("mariadb-server-uid"),
-                    native: NativeIdentity::new(uid),
-                }
-            }
+        let field = match self.flavor {
+            Flavor::Mysql => "server_uuid",
+            Flavor::Mariadb => "server_uid",
         };
-        if !resource.is_valid() {
-            return Err(invalid());
-        }
+        let resource = resource(self.flavor, &text(configuration, field)?)?;
         Ok(Identity {
             resource,
             connection_id: self.connection_id,
@@ -105,6 +66,42 @@ impl Platform {
             server_name: self.server_name.clone(),
         })
     }
+}
+
+/// Decode the native member independently of a process/read; callers must retain their own native bounds.
+pub(crate) fn resource(flavor: Flavor, value: &str) -> Result<SharedResourceIdentity> {
+    let resource = match flavor {
+        Flavor::Mysql => {
+            let uuid = value.to_ascii_lowercase();
+            if !valid_uuid(&uuid) {
+                return Err(invalid());
+            }
+            SharedResourceIdentity {
+                engine: Engine::Mysql,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("mysql-server").qualified("server_uuid", &uuid),
+                native: NativeIdentity::new(uuid),
+            }
+        }
+        Flavor::Mariadb => {
+            if value.len() != 28
+                || !value.ends_with('=')
+                || !value[..27].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
+            {
+                return Err(invalid());
+            }
+            SharedResourceIdentity {
+                engine: Engine::Mysql,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("mariadb-server-uid"),
+                native: NativeIdentity::new(value),
+            }
+        }
+    };
+    if !resource.is_valid() {
+        return Err(invalid());
+    }
+    Ok(resource)
 }
 
 fn valid_uuid(uuid: &str) -> bool {

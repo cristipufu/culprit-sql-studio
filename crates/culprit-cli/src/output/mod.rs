@@ -652,7 +652,7 @@ impl Out {
             for s in *sources {
                 let delivers: Vec<String> = s.delivers.iter().map(|c| c.label_for(*engine)).collect();
                 println!(
-                    "  {:<26}{}",
+                    "  {:<25} {}",
                     s.name,
                     self.paint(
                         DIM,

@@ -608,15 +608,6 @@ impl CulpritMcp {
                 let a: ProgressArgs = args(value)?;
                 self.allowed(&a.connection)?;
                 let progress = self.ws.query_progress(&a.connection, &a.session, true).await?;
-                // Nothing at all about the session: it doesn't exist (or ended), rather than "not running".
-                if !progress.running
-                    && progress.state.is_none()
-                    && progress.statement.is_none()
-                    && progress.elapsed_ms.is_none()
-                {
-                    return Err(Error::not_found(format!("No session '{}' is connected right now", a.session))
-                        .with_hint("Call live for the sessions running now and their ids"));
-                }
                 Ok(view::progress(&progress))
             }),
             "what_changed" => tool_task(|| async move {

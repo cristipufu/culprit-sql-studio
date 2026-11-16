@@ -233,6 +233,7 @@ YugabyteDB
   settings                  YSQL and DocDB supported configuration · adds detail
   docdb-index-usage         complete cluster-wide index usage and its reset epochs · Index usage statistics
 MySQL
+  mysql-current-request-work Selected current statement events and their native parent-linked stage: exact temporary-table, row and sort counters, picosecond timers and stage work where recorded. · adds detail
   session memory            instrumented session allocations and native statement-event context from Performance Schema · adds detail
   native failures           retained native error-log metadata · adds detail
   redo_pressure             shared InnoDB redo buffer wait counter · adds detail

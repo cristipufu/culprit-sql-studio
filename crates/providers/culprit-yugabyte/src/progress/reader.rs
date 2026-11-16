@@ -25,28 +25,28 @@ pub(super) async fn capture(
     let initial = before.completed_action_context(&before).ok_or_else(native::invalid)?;
     validate_source(focus, &initial)?;
     let first = actor(reader, &before, pid, budget).await?;
-    let binding = if !maintenance_progress_original_scope_matches(focus, &initial) {
-        MaintenanceProgressBinding::UnverifiedOriginalScope
+    let binding = if !focused_request_original_scope_matches(focus, &initial) {
+        FocusedRequestBinding::UnverifiedOriginalScope
     } else {
         match &first {
-            None => MaintenanceProgressBinding::ParticipantMissing,
-            Some(row) if matches_actor(row, focus) => MaintenanceProgressBinding::Matched,
-            Some(_) => MaintenanceProgressBinding::ParticipantChanged,
+            None => FocusedRequestBinding::ParticipantMissing,
+            Some(row) if matches_actor(row, focus) => FocusedRequestBinding::Matched,
+            Some(_) => FocusedRequestBinding::ParticipantChanged,
         }
     };
     let mut observations = Vec::new();
-    let mut membership = MaintenanceProgressMembership::NotObserved;
+    let mut membership = FocusedRequestMembership::NotObserved;
     let mut unavailable = None;
     if first.as_ref().is_some_and(|row| matches_actor(row, focus)) {
         match index::read(reader, before.probe.oid, node, &focus.original.key).await {
             Ok(Some(point)) => {
                 observations.push(point);
-                membership = MaintenanceProgressMembership::Observed;
+                membership = FocusedRequestMembership::Observed;
             }
             Ok(None) => {}
             Err(error) if optional(&error) => {
                 unavailable = Some(error.code);
-                membership = MaintenanceProgressMembership::Unavailable;
+                membership = FocusedRequestMembership::Unavailable;
             }
             Err(error) => return Err(error),
         }
@@ -67,7 +67,7 @@ pub(super) async fn capture(
     let snapshot = MaintenanceProgressSnapshot {
         source: index::SOURCE.into(),
         coverage,
-        result: MaintenanceProgressResult {
+        result: FocusedRequestResult {
             focus: Some(Box::new(focus.clone())),
             database_writable: context.database_writable,
             binding,
@@ -84,7 +84,7 @@ pub(super) async fn capture(
 
 fn validate_source(focus: &ActivityRequestFocus, context: &NativeReadContext) -> Result<()> {
     if focus.target.telemetry_id()? != context.target.telemetry_id()?
-        || focus.partition != SourcePartition::Target && !maintenance_progress_original_scope_matches(focus, context)
+        || focus.partition != SourcePartition::Target && !focused_request_original_scope_matches(focus, context)
     {
         return Err(CollectionStop::SourceChanged.error());
     }

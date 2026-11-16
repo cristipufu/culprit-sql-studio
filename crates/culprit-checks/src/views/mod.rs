@@ -8,6 +8,7 @@ pub mod cache_entry_memory;
 pub mod cleanup;
 pub mod compilation;
 pub mod compiler_admission;
+pub mod current_request_work;
 pub mod dashboard;
 pub(crate) mod digest;
 pub mod drift;

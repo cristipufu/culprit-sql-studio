@@ -12,8 +12,8 @@ async fn local_ysql_progress_retains_exact_backfill_work_and_unknown_original_sc
     assert_eq!(io.calls.iter().filter(|sql| sql.contains("FROM pg_catalog.pg_stat_progress_create_index")).count(), 1);
     assert!(!io.calls[4].contains("gv$"));
     assert!(!io.calls[4].contains("blocks_done"));
-    assert_eq!(point.result.binding, MaintenanceProgressBinding::UnverifiedOriginalScope);
-    let IndexBuildProgressWork::Ysql { progress } = &point.observations[0].work else { panic!() };
+    assert_eq!(point.result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+    let MaintenanceProgressWork::YsqlIndexBuild { progress } = &point.observations[0].work else { panic!() };
     assert_eq!(progress.tuples_done.as_deref(), Some("9007199254740993"));
     assert_eq!(progress.tuples_total_estimate.as_deref(), Some("42"));
     assert!(point.is_valid(), "native estimate may be lower than work already observed");
@@ -29,7 +29,7 @@ async fn exact_original_local_member_and_generation_can_match_but_remote_activit
     frame.epoch = captured.context.partition.native_epoch().map(str::to_owned);
     let focus = focus_from(&source, original_focus().original);
     let mut io = scripted_reader();
-    assert_eq!(capture(&mut io, &focus).await.unwrap().result.binding, MaintenanceProgressBinding::Matched);
+    assert_eq!(capture(&mut io, &focus).await.unwrap().result.binding, FocusedRequestBinding::Matched);
     let mut io = scripted_reader();
     io.replies[1] = Ok(vec![node("1123456789abcdef0123456789abcdef")]);
     assert_eq!(
@@ -64,7 +64,7 @@ async fn progress_permission_and_native_nulls_remain_unknown_not_completed_or_ze
     let mut io = scripted_reader();
     io.replies[4] = Err(culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "fixture denied"));
     let snapshot = capture(&mut io, &original_focus()).await.unwrap();
-    assert_eq!(snapshot.result.membership, MaintenanceProgressMembership::Unavailable);
+    assert_eq!(snapshot.result.membership, FocusedRequestMembership::Unavailable);
     assert_eq!(snapshot.coverage.state, culprit_core::SourceState::Unavailable);
     let native = row(&[("tuples_done", None), ("tuples_total", None)]);
     assert_eq!(index::work(&native).unwrap(), YsqlIndexBuildProgress::default());
@@ -85,7 +85,7 @@ async fn changed_or_missing_original_skips_native_progress_without_an_outcome_ve
         io.replies[3] = Ok(vec![actor.clone()]);
         io.replies[4] = Ok(vec![actor]);
         let snapshot = capture(&mut io, &original_focus()).await.unwrap();
-        assert_eq!(snapshot.result.membership, MaintenanceProgressMembership::NotObserved);
+        assert_eq!(snapshot.result.membership, FocusedRequestMembership::NotObserved);
         assert!(snapshot.observations.is_empty());
         assert!(!io.calls.iter().any(|sql| sql.contains("pg_stat_progress_create_index")));
     }

@@ -330,6 +330,19 @@ impl Files {
         input: &DiagnosticInput,
     ) -> Result<()> {
         match report {
+            DiagnosticReport::CurrentRequestWork { .. } => {
+                let rows = input
+                    .rows
+                    .iter()
+                    .map(|row| match &row.row.record {
+                        TelemetryRecord::Operational(observation) => Ok((&row.reference, observation)),
+                        _ => Err(integrity()),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if !report.matches_current_request_work_input(source, rows) {
+                    return Err(integrity());
+                }
+            }
             DiagnosticReport::PageWaitWriters { blocking_contexts, .. } => {
                 let SourceObservation::PageWaitWriters { focus, .. } = &source.observation else {
                     return Err(integrity());

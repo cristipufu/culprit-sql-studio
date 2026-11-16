@@ -44,6 +44,7 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
             focus: Box::new(crate::activity::compiler_admission::tests::focus()),
         },
         RecipeSelector::MaintenanceProgress => panic!("the SQL Server catalog does not declare maintenance progress"),
+        RecipeSelector::CurrentRequestWork => panic!("the SQL Server catalog does not declare current request work"),
         RecipeSelector::CacheEntryMemory => {
             CollectionSelection::CacheEntryMemory { focus: Box::new(crate::cache_entry_memory::tests::focus().await) }
         }

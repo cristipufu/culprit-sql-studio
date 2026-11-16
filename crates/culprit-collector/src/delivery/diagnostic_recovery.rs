@@ -523,6 +523,18 @@ async fn authenticate_report_participants(
         return Err(invalid());
     }
     match report {
+        DiagnosticReport::CurrentRequestWork { .. } => {
+            let observations = rows
+                .iter()
+                .map(|(reference, row)| match &row.record {
+                    TelemetryRecord::Operational(observation) => Ok((reference, observation)),
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !report.matches_current_request_work_input(&manifest.source, observations) {
+                return Err(invalid());
+            }
+        }
         DiagnosticReport::PageWaitWriters { blocking_contexts, .. } => {
             let SourceObservation::PageWaitWriters { focus, .. } = &manifest.source.observation else {
                 return Err(invalid());

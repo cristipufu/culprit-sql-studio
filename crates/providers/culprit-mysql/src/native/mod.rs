@@ -3,6 +3,7 @@ pub(crate) mod activity;
 pub(crate) mod catalog;
 pub(crate) mod error_log;
 pub(crate) mod instance;
+pub(crate) mod local_context;
 pub(crate) mod locks;
 pub(crate) mod metadata;
 pub(crate) mod operational;

@@ -20,6 +20,7 @@ pub enum SnapshotDataset {
     Tuning,
     StatementGrants,
     CurrentRequestMemory,
+    CurrentRequestWork,
     SessionMemory,
     PageWaitTargets,
     PageWaitWriters,
@@ -59,6 +60,7 @@ impl SnapshotDataset {
             | Self::CacheEntryMemory
             | Self::StatementGrants
             | Self::CurrentRequestMemory
+            | Self::CurrentRequestWork
             | Self::SessionMemory
             | Self::PageWaitTargets
             | Self::PageWaitWriters
@@ -438,6 +440,7 @@ pub enum OperationalFact {
     CounterSet(Box<NativeCounterSet>),
     CompilerWaiter(Box<CompilerWaiterObservation>),
     MaintenanceProgress(Box<MaintenanceProgressObservation>),
+    CurrentRequestWork(Box<CurrentRequestWorkObservation>),
     CatalogCounters(Box<NativeCatalogCounters>),
     Retention(Box<RetentionObservation>),
     RetentionCoverage(RetentionCoverage),
@@ -477,6 +480,7 @@ impl OperationalFact {
             Self::CounterSet(counters) => counters.key(),
             Self::CompilerWaiter(waiter) => waiter.key(),
             Self::MaintenanceProgress(point) => point.key(),
+            Self::CurrentRequestWork(point) => point.key(),
             Self::CatalogCounters(counters) => counters.catalog.key(),
             Self::Retention(retainer) => retainer.key(),
             Self::RetentionCoverage(coverage) => coverage.key(),
@@ -527,6 +531,7 @@ impl OperationalFact {
             Self::PageWaitWriters(observation) => observation.redact(engine),
             Self::MssqlCacheEntryMemory(entry) => entry.redact(engine),
             Self::TaskSpace(observation) => observation.redact(engine),
+            Self::CurrentRequestWork(observation) => observation.redact(),
             Self::MssqlStatementGrants(grants) => {
                 if let DefinitionPayload::Available { text, .. } = &grants.statement {
                     grants.statement = DefinitionPayload::sql(text, engine);
@@ -590,6 +595,7 @@ impl OperationalFact {
             Self::CounterSet(counters) => counters.is_valid(),
             Self::CompilerWaiter(waiter) => waiter.is_valid(),
             Self::MaintenanceProgress(point) => point.is_valid(),
+            Self::CurrentRequestWork(point) => point.is_valid(),
             Self::CatalogCounters(counters) => counters.is_valid(),
             Self::Retention(retainer) => retainer.is_valid(),
             Self::RetentionCoverage(coverage) => coverage.is_valid(),

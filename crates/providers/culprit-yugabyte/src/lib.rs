@@ -206,7 +206,7 @@ impl Provider for YugabyteProvider {
                         }
                     }
                 }
-            } else if with_plan && progress.running && progress.phase.is_none() {
+            } else if with_plan && progress.running == Some(true) && progress.phase.is_none() {
                 let unauthorized = t!("provider.yugabyte.progress.not_authorized");
                 progress.note = Some(format!("{} {unauthorized}", progress.note.as_deref().unwrap_or_default()));
             }

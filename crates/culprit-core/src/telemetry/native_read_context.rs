@@ -25,7 +25,8 @@ impl NativeReadContext {
             observed_from: snapshot.observed_from.clone(),
             observed_until: snapshot.observed_until.clone(),
             database_writable: match &source.observation {
-                SourceObservation::MaintenanceProgress { result, .. } => result.database_writable,
+                SourceObservation::MaintenanceProgress { result, .. }
+                | SourceObservation::CurrentRequestWork { result, .. } => result.database_writable,
                 SourceObservation::PageWaitWriters { database_writable, .. } => *database_writable,
                 _ => None,
             },
@@ -48,6 +49,22 @@ impl NativeReadContext {
         self.is_valid()
             && matches!(self.partition, SourcePartition::InstanceLocal { .. })
             && self.partition.is_qualified()
+    }
+
+    /// Cache identity for one observed native request; it grants neither admission nor incident attribution.
+    pub fn request_key(&self, actor: &ActivityKey, statement: &NativeIdentity) -> Option<String> {
+        if !self.has_qualified_local_owner() || !actor.is_valid() || actor.request.is_none() || !statement.is_valid() {
+            return None;
+        }
+        serde_json::to_vec(&(
+            self.target.telemetry_id().ok()?,
+            &self.partition,
+            self.database_writable,
+            actor,
+            statement,
+        ))
+        .ok()
+        .map(|bytes| digest(&bytes))
     }
 }
 

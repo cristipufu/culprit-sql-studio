@@ -191,16 +191,20 @@ pub(crate) async fn read_from(
         ),
     )
     .await?;
-    let mut progress = QueryProgress::idle(id, Engine::Yugabyte, p.now);
+    let mut progress = QueryProgress::unobserved(id, Engine::Yugabyte, p.now);
     progress.note = Some(t!("provider.yugabyte.progress.note"));
     let Some(row) = activity else {
         progress.note = Some(t!("provider.yugabyte.progress.backend_gone"));
         return Ok((progress, false));
     };
     progress.state = row.text("state");
-    progress.running = row.text("state").as_deref() == Some("active");
+    progress.running = match row.text("state").as_deref() {
+        Some("active") => Some(true),
+        Some("idle" | "idle in transaction" | "idle in transaction (aborted)") => Some(false),
+        _ => None,
+    };
     progress.statement = row.text("query").filter(|s| s != "<insufficient privilege>");
-    progress.elapsed_ms = row.number("elapsed_ms").filter(|n| *n >= 0.0 && progress.running);
+    progress.elapsed_ms = row.number("elapsed_ms").filter(|n| *n >= 0.0 && progress.running == Some(true));
     progress.wait = match (row.text("wait_event_type"), row.text("wait_event")) {
         (Some(kind), Some(event)) => Some(format!("{kind}: {event}")),
         (kind, event) => event.or(kind),
@@ -215,7 +219,7 @@ pub(crate) async fn read_from(
     // Native YSQL progress views can also return retained COPY counters for an unrelated command. Select the view
     // with the shared SQL lexer (including comments), then require its own native command/status metadata.
     // Pin query_start as well as backend_start: one backend can start a different command between these reads.
-    if progress.running
+    if progress.running == Some(true)
         && !worker
         && !partial
         && let (Some(query_start), Some(command)) =
@@ -275,7 +279,7 @@ pub(crate) async fn read_from(
         }
     }
     let allowed = with_plan
-        && progress.running
+        && progress.running == Some(true)
         && !worker
         && !partial
         && progress.statement.is_some()

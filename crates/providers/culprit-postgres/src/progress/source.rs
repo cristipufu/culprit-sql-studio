@@ -1,4 +1,4 @@
-//! Focused capture uses the same explicit index-progress reader as Live, with one native owner and budget.
+//! Focused capture uses the same selected maintenance reader as Live, with one native owner and budget.
 use super::*;
 use culprit_read::{FrozenObservation, FrozenSource, ObservationReader};
 
@@ -57,7 +57,7 @@ impl<R: NativeRead> ObservationReader for Reader<R> {
         let description = CollectionDescription {
             target: captured.context.target,
             partition: captured.context.partition,
-            source: "postgres-maintenance-progress".into(),
+            source: maintenance::SOURCE.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::MaintenanceProgress {
                 snapshot: StateSnapshotDescription {
@@ -133,5 +133,41 @@ mod tests {
         let mut source = frozen(io);
         source.describe().await.unwrap();
         assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
+    }
+
+    #[tokio::test]
+    async fn non_index_native_rows_keep_their_source_and_exact_identity_through_frozen_export() {
+        for (empty, row, native_source) in [
+            (1, test_support::vacuum_progress(180_000, &[]), vacuum::SOURCE),
+            (2, test_support::analyze_progress(&[]), analyze::SOURCE),
+            (3, test_support::cluster_progress("VACUUM FULL", &[]), cluster::SOURCE),
+        ] {
+            let mut source = frozen(test_support::progress_reader(180_000, empty, Some(row)));
+            assert_eq!(source.query_count(), 0);
+            let description = source.describe().await.unwrap();
+            let SourceObservation::MaintenanceProgress { snapshot, result } = &description.observation else {
+                panic!()
+            };
+            assert_eq!(snapshot.sources[0].source, native_source);
+            assert_eq!(snapshot.sources[0].state, culprit_core::SourceState::Partial);
+            assert_eq!(result.membership, FocusedRequestMembership::Observed);
+            let CollectionRead::Page { records, next_cursor: None, .. } =
+                source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(records.len(), 1);
+            let capture = CaptureIdentity { observation_id: "manual-progress".into(), revision: None };
+            let exported = ExportedRecord::new(&description, &capture, records[0].clone()).unwrap();
+            let TelemetryRecord::Operational(row) = &exported.record else { panic!() };
+            assert_eq!(row.source, native_source);
+            let OperationalFact::MaintenanceProgress(point) = &row.fact else { panic!() };
+            assert_eq!(point.actor, test_support::original_focus().original.key);
+            assert_eq!(point.statement.as_ref(), Some(&test_support::original_focus().statement_identity));
+            let queries = source.query_count();
+            assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+            assert_eq!(source.query_count(), queries);
+            assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        }
     }
 }

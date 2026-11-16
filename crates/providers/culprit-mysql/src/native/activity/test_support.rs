@@ -23,6 +23,7 @@ pub(crate) fn metadata() -> Metadata {
         database_wide: true,
         process_wide: true,
         started_second: Some(1),
+        member: None,
     }
 }
 pub(crate) fn consumers(enabled: bool) -> Vec<Rec> {

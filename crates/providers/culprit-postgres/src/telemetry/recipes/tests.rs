@@ -112,7 +112,7 @@ fn activity_uses_its_existing_native_profile_while_generic_recipes_keep_larger_v
             assert_eq!(bounded.budget.total_timeout_ms, 5_000);
         } else if matches!(registration.route, Route::MaintenanceProgress) {
             assert_eq!(bounded.budget, crate::progress::bounded_budget(&maximum));
-            assert_eq!(bounded.budget.max_queries, 8);
+            assert_eq!(bounded.budget.max_queries, 11);
             assert_eq!(bounded.budget.max_snapshot_rows, 1);
             assert_eq!(bounded.budget.page_rows, 1);
             assert_eq!(bounded.budget.statement_timeout_ms, 1_000);

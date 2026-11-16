@@ -46,6 +46,7 @@ pub enum CollectionSelection {
     PageWaitWriters { focus: Box<PageWaitWriterFocus> },
     FocusedRequestMemory { focus: Box<ActivityRequestFocus> },
     MaintenanceProgress { focus: Box<ActivityRequestFocus> },
+    CurrentRequestWork { focus: Box<ActivityRequestFocus> },
     FocusedCompilationAdmission { focus: Box<ActivityRequestFocus> },
     SharedCompilationAdmissionFocus { focus: Box<ActivityRequestFocus>, partition: SourcePartition },
     SharedPageWaitFocus { focus: Box<ActivityWaitFocus>, partition: SourcePartition },
@@ -61,6 +62,7 @@ impl CollectionSelection {
             Self::Activity => TelemetryCollection::Activity,
             Self::FocusedRequestMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestMemory),
             Self::MaintenanceProgress { .. } => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
+            Self::CurrentRequestWork { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::FocusedCompilationAdmission { .. } | Self::SharedCompilationAdmissionFocus { .. } => {
                 TelemetryCollection::Snapshot(SnapshotDataset::CompilerAdmission)
             }
@@ -80,6 +82,7 @@ impl CollectionSelection {
             Self::PageWaitWriters { focus } => Some(&focus.waiter.participant),
             Self::FocusedRequestMemory { focus }
             | Self::MaintenanceProgress { focus }
+            | Self::CurrentRequestWork { focus }
             | Self::FocusedCompilationAdmission { focus }
             | Self::SharedCompilationAdmissionFocus { focus, .. } => Some(focus),
             _ => None,
@@ -342,7 +345,11 @@ pub enum SourceObservation {
     },
     MaintenanceProgress {
         snapshot: StateSnapshotDescription,
-        result: Box<MaintenanceProgressResult>,
+        result: Box<FocusedRequestResult>,
+    },
+    CurrentRequestWork {
+        snapshot: StateSnapshotDescription,
+        result: Box<FocusedRequestResult>,
     },
     FocusedCompilationAdmission {
         snapshot: StateSnapshotDescription,
@@ -358,13 +365,19 @@ impl SourceObservation {
             Self::FocusedPageWait { result, .. } => Some(&result.focus.participant),
             Self::PageWaitWriters { focus, .. } => Some(&focus.waiter.participant),
             Self::FocusedRequestMemory { result, .. } => Some(&result.focus),
-            Self::MaintenanceProgress { result, .. } => result.focus.as_deref(),
+            Self::MaintenanceProgress { result, .. } | Self::CurrentRequestWork { result, .. } => {
+                result.focus.as_deref()
+            }
             Self::FocusedCompilationAdmission { result, .. } => Some(&result.focus),
             _ => None,
         }
     }
     pub fn diagnostic_focus(&self) -> Option<DiagnosticFocus> {
         match self {
+            Self::CurrentRequestWork { result, .. } => result
+                .focus
+                .as_deref()
+                .map(|focus| DiagnosticFocus::CurrentRequestWork { focus: Box::new(focus.clone()) }),
             Self::FocusedCompilationAdmission { result, .. } => {
                 Some(DiagnosticFocus::CompilationAdmission { focus: Box::new(result.focus.clone()) })
             }
@@ -390,6 +403,7 @@ impl SourceObservation {
             Self::PageWaitWriters { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitWriters),
             Self::FocusedRequestMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestMemory),
             Self::MaintenanceProgress { .. } => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
+            Self::CurrentRequestWork { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Diagnostics(_) => TelemetryCollection::Diagnostics,
             Self::Snapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
             Self::PagedSnapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
@@ -409,13 +423,15 @@ impl SourceObservation {
             Self::FocusedPageWait { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::PageWaitWriters { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
             Self::FocusedRequestMemory { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
-            Self::MaintenanceProgress { snapshot, result } => match &result.focus {
-                Some(focus) => TelemetryRange::Focused { key: focus.key()? },
-                None => TelemetryRange::TimeWindow {
-                    from: snapshot.observed_from.clone(),
-                    until: snapshot.observed_until.clone(),
-                },
-            },
+            Self::MaintenanceProgress { snapshot, result } | Self::CurrentRequestWork { snapshot, result } => {
+                match &result.focus {
+                    Some(focus) => TelemetryRange::Focused { key: focus.key()? },
+                    None => TelemetryRange::TimeWindow {
+                        from: snapshot.observed_from.clone(),
+                        until: snapshot.observed_until.clone(),
+                    },
+                }
+            }
             Self::FocusedCompilationAdmission { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::Diagnostics(description) => TelemetryRange::Focused { key: description.work_key()? },
             Self::Snapshot(_) | Self::PagedSnapshot(_) => TelemetryRange::Current,
@@ -447,7 +463,12 @@ impl SourceObservation {
                     && database_writable.is_some()
                     && *database_writable == focus.waiter.participant.database_writable
             }
-            Self::MaintenanceProgress { snapshot, result } => result.is_valid_header(snapshot),
+            Self::MaintenanceProgress { snapshot, result } => {
+                snapshot.dataset == SnapshotDataset::MaintenanceProgress && result.is_valid_header(snapshot)
+            }
+            Self::CurrentRequestWork { snapshot, result } => {
+                snapshot.dataset == SnapshotDataset::CurrentRequestWork && result.is_valid_header(snapshot)
+            }
             Self::FocusedRequestMemory { snapshot, result } => {
                 snapshot.is_valid()
                     && result.is_valid()
@@ -473,6 +494,7 @@ impl SourceObservation {
                     snapshot.dataset,
                     SnapshotDataset::CacheEntryMemory
                         | SnapshotDataset::MaintenanceProgress
+                        | SnapshotDataset::CurrentRequestWork
                         | SnapshotDataset::PageWaitWriters
                 ) && snapshot.is_valid()
             }
@@ -499,6 +521,7 @@ impl SourceObservation {
             | Self::FocusedRequestMemory { snapshot, .. }
             | Self::FocusedCompilationAdmission { snapshot, .. }
             | Self::MaintenanceProgress { snapshot, .. }
+            | Self::CurrentRequestWork { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => Some(snapshot),
             _ => None,
         }
@@ -511,6 +534,7 @@ impl SourceObservation {
             | Self::FocusedRequestMemory { snapshot, .. }
             | Self::FocusedCompilationAdmission { snapshot, .. }
             | Self::MaintenanceProgress { snapshot, .. }
+            | Self::CurrentRequestWork { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => snapshot.accepts(stream, source),
             Self::Diagnostics(_) => stream == TelemetryStream::OperationalSamples && source == DIAGNOSTICS_SOURCE,
             Self::PagedSnapshot(snapshot) => snapshot.accepts(stream, source),
@@ -534,7 +558,7 @@ impl SourceObservation {
             | Self::FocusedCompilationAdmission { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
-            Self::MaintenanceProgress { snapshot, .. } => {
+            Self::MaintenanceProgress { snapshot, .. } | Self::CurrentRequestWork { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
             Self::CacheEntryMemory { snapshot, .. } => {
@@ -675,6 +699,10 @@ impl CollectionDescription {
         if let (
             SourceObservation::MaintenanceProgress { snapshot, result },
             CollectionSelection::MaintenanceProgress { focus },
+        )
+        | (
+            SourceObservation::CurrentRequestWork { snapshot, result },
+            CollectionSelection::CurrentRequestWork { focus },
         ) = (&self.observation, &request.selection)
         {
             return result.is_valid_source(self, snapshot)

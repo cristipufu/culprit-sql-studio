@@ -20,11 +20,11 @@ fn snapshot() -> MaintenanceProgressSnapshot {
             database_writable: Some(true),
         },
         coverage: StateSourceCoverage::observed("pg_stat_progress_create_index".into(), 1, false),
-        result: MaintenanceProgressResult {
+        result: FocusedRequestResult {
             focus: None,
             database_writable: Some(true),
-            binding: MaintenanceProgressBinding::Independent,
-            membership: MaintenanceProgressMembership::Observed,
+            binding: FocusedRequestBinding::Independent,
+            membership: FocusedRequestMembership::Observed,
         },
         observations: vec![MaintenanceProgressObservation {
             observed_at: "2026-11-15T10:00:00.5Z".into(),
@@ -36,10 +36,10 @@ fn snapshot() -> MaintenanceProgressSnapshot {
             statement: Some(NativeIdentity::new("native-statement")),
             database_oid: "16384".into(),
             relation_oid: "16420".into(),
-            index_oid: "0".into(),
-            command: IndexBuildCommand::CreateIndex,
+            index_oid: Some("0".into()),
+            command: MaintenanceCommand::CreateIndex,
             phase: "building index: scanning table".into(),
-            work: IndexBuildProgressWork::PostgreSql {
+            work: MaintenanceProgressWork::PostgreSqlIndexBuild {
                 progress: Box::new(PostgresIndexBuildProgress {
                     blocks_done: Some("9007199254740993".into()),
                     blocks_total: None,
@@ -74,7 +74,7 @@ fn ysql_table_backfill_estimate_is_not_a_postgresql_heap_fraction() {
     member.kind = SharedResourceKind::Node;
     input.context.database_writable = None;
     input.result.database_writable = None;
-    input.observations[0].work = IndexBuildProgressWork::Ysql {
+    input.observations[0].work = MaintenanceProgressWork::YsqlIndexBuild {
         progress: Box::new(YsqlIndexBuildProgress {
             tuples_done: Some("9007199254740993".into()),
             tuples_total_estimate: Some("42".into()),
@@ -94,7 +94,7 @@ fn warehouse_gaps_preserve_native_roster_and_positive_membership_without_a_fabri
     let report = explain(&input, false).unwrap();
     assert_eq!(report.native_rows, 1);
     assert_eq!(report.observed_rows, 0);
-    assert_eq!(report.membership, MaintenanceProgressMembership::Observed);
+    assert_eq!(report.membership, FocusedRequestMembership::Observed);
     assert!(report.entries.is_empty());
     assert!(report.limitations.iter().any(|text| text.contains("readback")));
     assert!(explain(&input, true).is_err());
@@ -105,12 +105,12 @@ fn missing_progress_and_unavailable_source_are_distinct_from_completion() {
     let mut input = snapshot();
     input.observations.clear();
     input.coverage = StateSourceCoverage::observed(input.source.clone(), 0, false);
-    input.result.membership = MaintenanceProgressMembership::NotObserved;
+    input.result.membership = FocusedRequestMembership::NotObserved;
     let absent = explain(&input, true).unwrap();
     assert!(absent.summary.contains("does not establish completion"));
     input.coverage =
         StateSourceCoverage::unavailable(input.source.clone(), culprit_core::ErrorCode::PermissionDenied, None);
-    input.result.membership = MaintenanceProgressMembership::Unavailable;
+    input.result.membership = FocusedRequestMembership::Unavailable;
     let unavailable = explain(&input, true).unwrap();
     assert_eq!(unavailable.source_state, SourceState::Unavailable);
     assert_ne!(absent.summary, unavailable.summary);
@@ -119,7 +119,7 @@ fn missing_progress_and_unavailable_source_are_distinct_from_completion() {
 #[test]
 fn native_null_counters_are_omitted_and_zero_remains_a_recorded_value() {
     let mut input = snapshot();
-    let IndexBuildProgressWork::PostgreSql { progress } = &mut input.observations[0].work else { panic!() };
+    let MaintenanceProgressWork::PostgreSqlIndexBuild { progress } = &mut input.observations[0].work else { panic!() };
     **progress = PostgresIndexBuildProgress { blocks_done: Some("0".into()), ..Default::default() };
     let report = explain(&input, true).unwrap();
     assert_eq!(report.entries[0].metrics.len(), 1);

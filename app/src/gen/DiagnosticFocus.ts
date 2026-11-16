@@ -3,4 +3,4 @@ import type { ActivityRequestFocus } from "./ActivityRequestFocus";
 import type { ActivityWaitFocus } from "./ActivityWaitFocus";
 import type { PageWaitWriterFocus } from "./PageWaitWriterFocus";
 
-export type DiagnosticFocus = { "kind": "page-wait", focus: ActivityWaitFocus, } | { "kind": "page-wait-writers", focus: PageWaitWriterFocus, } | { "kind": "request-memory", focus: ActivityRequestFocus, } | { "kind": "compilation-admission", focus: ActivityRequestFocus, };
+export type DiagnosticFocus = { "kind": "page-wait", focus: ActivityWaitFocus, } | { "kind": "page-wait-writers", focus: PageWaitWriterFocus, } | { "kind": "request-memory", focus: ActivityRequestFocus, } | { "kind": "compilation-admission", focus: ActivityRequestFocus, } | { "kind": "current-request-work", focus: ActivityRequestFocus, };

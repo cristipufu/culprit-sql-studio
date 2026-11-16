@@ -66,7 +66,7 @@ async fn live_native_workspace_session_progress_and_cancel() {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
         let progress = loop {
             let progress = ws.query_progress("native-session-test", &id, false).await?;
-            if progress.running || tokio::time::Instant::now() >= deadline {
+            if progress.running == Some(true) || tokio::time::Instant::now() >= deadline {
                 break progress;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -83,7 +83,7 @@ async fn live_native_workspace_session_progress_and_cancel() {
     let progress = observed.unwrap();
     assert_eq!(progress.session, id);
     assert_eq!(progress.engine, Engine::Yugabyte);
-    assert!(progress.running && progress.statement.as_deref().is_some_and(|s| s.contains("pg_sleep")));
+    assert!(progress.running == Some(true) && progress.statement.as_deref().is_some_and(|s| s.contains("pg_sleep")));
     assert!(
         stopped.is_err_and(|e| e.code().is_some_and(|code| code.code() == "57014")),
         "only the verified test backend should be canceled"

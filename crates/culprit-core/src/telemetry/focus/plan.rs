@@ -30,6 +30,9 @@ impl DiagnosticEpisode {
         if !self.analysis.needs_work() {
             return Ok(DiagnosticFocusPlan::NotRequired);
         }
+        if matches!(self.signal, DiagnosticSignal::Activity { .. }) {
+            return self.plan_current_request_work_focus(source, original, reference);
+        }
         if matches!(self.signal, DiagnosticSignal::PageWait { .. }) {
             return Ok(match self.plan_page_wait_focus(source, original, reference)? {
                 PageWaitFocusPlan::Ready(focus) => {
@@ -39,30 +42,54 @@ impl DiagnosticEpisode {
                 PageWaitFocusPlan::NotRequired => DiagnosticFocusPlan::NotRequired,
             });
         }
-        let (key, statement_identity, compilation) = match &self.signal {
-            DiagnosticSignal::RequestMemory { key, statement_identity } => (key, statement_identity, false),
-            DiagnosticSignal::CompilationAdmission { key, statement_identity } => (key, statement_identity, true),
+        let (statement_identity, compilation) = match &self.signal {
+            DiagnosticSignal::RequestMemory { statement_identity, .. } => (statement_identity, false),
+            DiagnosticSignal::CompilationAdmission { statement_identity, .. } => (statement_identity, true),
             _ => return Ok(DiagnosticFocusPlan::NotRequired),
         };
+        let Some(focus) = self.original_request_focus(source, original, reference)? else {
+            return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
+        };
+        if statement_identity.is_none()
+            || focus.partition.native_epoch().is_none()
+            || original.scope != ActivityScopeBasis::RequestDatabase
+        {
+            return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
+        }
+        let question = if compilation {
+            DiagnosticFocus::CompilationAdmission { focus: Box::new(focus) }
+        } else {
+            DiagnosticFocus::RequestMemory { focus: Box::new(focus) }
+        };
+        if !question.matches_parent(source, original, reference) || !self.matches_focus(&question) {
+            return Err(invalid());
+        }
+        Ok(DiagnosticFocusPlan::Ready(Box::new(question)))
+    }
+
+    /// One authenticated original row supplies the common request envelope; each native question adds its own
+    /// supported identity/scope conditions. A current reader cannot fill a missing original generation or token.
+    pub(super) fn original_request_focus(
+        &self,
+        source: &CollectionDescription,
+        original: &ActivityObservation,
+        reference: &DiagnosticEvidenceRef,
+    ) -> Result<Option<ActivityRequestFocus>> {
         let native = source.observation.activity().filter(|snapshot| snapshot.is_valid()).ok_or_else(invalid)?;
         DiagnosticActivityRow { reference, observation: original }.verify(source, &reference.capture_ref())?;
         let scope = DiagnosticScope::from_source(source)?;
-        if *key != original.key
+        if self.signal.activity_key() != &original.key
             || scope.key()? != self.scope.key()?
             || !ObservationBounds::new(&self.first_seen_at, &self.last_seen_at)
                 .is_some_and(|bounds| bounds.contains(&native.at))
         {
             return Err(invalid());
         }
-        let (Some(epoch), Some(statement)) = (&native.epoch, &original.statement_identity) else {
-            return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
-        };
-        if statement_identity.is_none()
-            || !scope.partition.is_qualified()
-            || scope.partition.native_epoch().is_none()
-            || original.scope != ActivityScopeBasis::RequestDatabase
+        let (Some(epoch), Some(statement)) = (&native.epoch, &original.statement_identity) else { return Ok(None) };
+        if !scope.partition.is_qualified()
+            || !matches!(original.scope, ActivityScopeBasis::RequestDatabase | ActivityScopeBasis::SessionDatabase)
         {
-            return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
+            return Ok(None);
         }
         let focus = ActivityRequestFocus {
             parent: reference.clone(),
@@ -75,15 +102,10 @@ impl DiagnosticEpisode {
             original: original.clone(),
             statement_identity: statement.clone(),
         };
-        let question = if compilation {
-            DiagnosticFocus::CompilationAdmission { focus: Box::new(focus) }
-        } else {
-            DiagnosticFocus::RequestMemory { focus: Box::new(focus) }
-        };
-        if !question.matches_parent(source, original, reference) || !self.matches_focus(&question) {
+        if !focus.matches_parent(source, original, reference) {
             return Err(invalid());
         }
-        Ok(DiagnosticFocusPlan::Ready(Box::new(question)))
+        Ok(Some(focus))
     }
 
     /// Reconstruct a question from an original baseline row authenticated by the caller's outbox/recovery owner.

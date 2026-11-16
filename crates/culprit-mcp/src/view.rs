@@ -443,6 +443,12 @@ pub fn progress(progress: &culprit_core::QueryProgress) -> Value {
         "percent": progress.percent.map(|p| round(p * 100.0, 1)),
         "percent_basis": progress.percent_basis,
         "phase": progress.phase,
+        "phase_percent": progress.phase_percent.map(|p| round(p * 100.0, 1)),
+        "phase_percent_basis": progress.phase_percent_basis,
+        "request_key": progress.request_key,
+        "session_context": progress.session_context,
+        "current_work": progress.current_work,
+        "current_work_report": progress.current_work_report,
         "busiest_operator": progress.hot_node.and_then(label),
         "operators": progress.nodes.iter().map(|n| json!({
             "id": n.node_id,

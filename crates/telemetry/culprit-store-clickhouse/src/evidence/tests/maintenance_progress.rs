@@ -1,10 +1,12 @@
 use super::*;
 use std::sync::atomic::Ordering;
 
+mod non_index;
+
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 
 #[tokio::test]
-async fn native_index_progress_preserves_original_actor_scope_role_phase_and_unknown_completion() {
+async fn native_maintenance_progress_preserves_original_actor_scope_role_phase_and_unknown_completion() {
     for (source, records) in test_support::maintenance_progress_evidence_cases() {
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let before = fixture.recovery.object_reads.load(Ordering::SeqCst);
@@ -27,7 +29,11 @@ async fn native_index_progress_preserves_original_actor_scope_role_phase_and_unk
                 panic!("native maintenance point")
             };
             assert_eq!(&point.actor, result.expected_actor().unwrap());
-            assert!(point.index_reference().is_none(), "native index OID zero is unavailable");
+            if point.command == MaintenanceCommand::Cluster {
+                assert_eq!(point.index_reference().unwrap().id, "16422");
+            } else {
+                assert!(point.index_reference().is_none(), "native zero or missing index remains unresolved");
+            }
             assert!(!serde_json::to_string(point).unwrap().contains("completed_at"));
         }
     }
@@ -50,7 +56,7 @@ async fn an_archive_gap_keeps_the_original_positive_progress_and_native_membersh
         panic!("native maintenance source");
     };
     assert_eq!(snapshot.records, 1);
-    assert_eq!(result.membership, MaintenanceProgressMembership::Observed);
+    assert_eq!(result.membership, FocusedRequestMembership::Observed);
     assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), before);
 }
 

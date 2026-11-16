@@ -21,6 +21,8 @@ mod compiler_admission;
 pub use compiler_admission::compiler_admission;
 mod maintenance_progress;
 pub use maintenance_progress::maintenance_progress;
+mod current_request_work;
+pub use current_request_work::current_request_work;
 mod maintenance;
 pub use maintenance::maintenance;
 mod request_memory;

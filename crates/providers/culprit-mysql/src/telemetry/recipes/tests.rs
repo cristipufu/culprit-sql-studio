@@ -30,6 +30,9 @@ fn request(registration: &Registration) -> CollectionRequest {
             from: "2020-01-01T00:00:00Z".into(),
             until: "2020-01-01T01:00:00Z".into(),
         },
+        TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork) => {
+            CollectionSelection::CurrentRequestWork { focus: Box::new(crate::progress::test_support::original_focus()) }
+        }
         TelemetryCollection::Snapshot(dataset) => CollectionSelection::Snapshot { dataset },
         _ => panic!("the catalog contains an unimplemented acquisition"),
     };
@@ -50,6 +53,7 @@ async fn every_static_declaration_selects_one_real_native_constructor_without_op
     assert!(recipe_catalog_is_valid(&declarations));
     for (registration, descriptor) in REGISTRATIONS.iter().zip(&declarations) {
         let request = request(registration);
+        request.validate().unwrap_or_else(|error| panic!("{}: {error}", descriptor.id));
         assert!(descriptor.accepts(&request));
         assert_eq!(descriptor.cost, RecipeCostQualification::Unqualified);
         assert_eq!(REGISTRATIONS.iter().filter(|candidate| candidate.accepts(&request)).count(), 1);
@@ -67,7 +71,13 @@ fn baseline_and_investigation_meaning_is_explicit_without_qualifying_native_cost
     for id in ["mysql.activity", "mysql.statement-counters", "mysql.operational", "mysql.native-failures"] {
         assert_eq!(declarations.iter().find(|recipe| recipe.id == id).unwrap().purpose, RecipePurpose::Baseline);
     }
-    for id in ["mysql.session-memory", "mysql.runtime-distributions", "mysql.tables", "mysql.statement-definitions"] {
+    for id in [
+        "mysql.session-memory",
+        "mysql.runtime-distributions",
+        "mysql.tables",
+        "mysql.statement-definitions",
+        "mysql.current-request-work",
+    ] {
         assert_eq!(declarations.iter().find(|recipe| recipe.id == id).unwrap().purpose, RecipePurpose::Investigation);
     }
     assert!(declarations.iter().all(|recipe| recipe.cost == RecipeCostQualification::Unqualified));
@@ -104,6 +114,10 @@ fn profiles_reuse_native_caps_and_preserve_every_stricter_caller_dimension() {
     assert_eq!((activity.budget.statement_timeout_ms, activity.budget.total_timeout_ms), (1000, 5000));
     let distribution = declarations().into_iter().find(|recipe| recipe.id == "mysql.runtime-distributions").unwrap();
     assert_eq!((distribution.budget.max_queries, distribution.budget.total_timeout_ms), (24, 10_000));
+    let current = declarations().into_iter().find(|recipe| recipe.id == "mysql.current-request-work").unwrap();
+    assert_eq!(current.selector, RecipeSelector::CurrentRequestWork);
+    assert_eq!((current.budget.max_queries, current.budget.max_snapshot_rows), (24, 1));
+    assert_eq!((current.budget.statement_timeout_ms, current.budget.total_timeout_ms), (1000, 5000));
 }
 
 #[test]
@@ -164,5 +178,53 @@ fn unsupported_native_selections_are_explicit_and_never_construct_a_fallback() {
         assert!(REGISTRATIONS.iter().all(|recipe| !recipe.accepts(&request)));
         let error = crate::telemetry::source(connector(), &request).err().unwrap();
         assert_eq!(error.code, ErrorCode::Unsupported);
+    }
+}
+
+#[test]
+fn current_request_work_is_never_admitted_as_an_unfocused_periodic_snapshot() {
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::CurrentRequestWork },
+        budget: CollectionBudget::default(),
+    };
+    assert!(request.validate().is_err());
+    assert!(REGISTRATIONS.iter().all(|recipe| !recipe.accepts(&request)));
+    assert!(crate::telemetry::source(connector(), &request).is_err());
+}
+
+#[test]
+fn current_request_work_requires_its_database_subject_and_exact_source_statement_token() {
+    let registration = REGISTRATIONS.iter().find(|recipe| recipe.id == "mysql.current-request-work").unwrap();
+    let valid = request(registration);
+    valid.validate().unwrap();
+    for wrong in [
+        {
+            let mut request = valid.clone();
+            request.subject =
+                CollectionSubject::Shared { resource: resource(SharedResourceKind::Instance, Engine::Mysql) };
+            request
+        },
+        {
+            let mut request = valid.clone();
+            let CollectionSelection::CurrentRequestWork { focus } = &mut request.selection else { panic!() };
+            focus.statement_identity = NativeIdentity::new("same-query-hash");
+            request
+        },
+        {
+            let mut request = valid.clone();
+            let CollectionSelection::CurrentRequestWork { focus } = &mut request.selection else { panic!() };
+            **focus = crate::progress::test_support::original_focus_in(SourcePartition::Target);
+            focus.target =
+                culprit_core::DatabaseIdentity::server(Engine::Postgres, "shop", "fixture.invalid", 5432, None).into();
+            assert!(focus.is_valid(), "a structurally valid other-engine focus is not a MySQL event selector");
+            request
+        },
+    ] {
+        assert!(wrong.validate().is_err());
+        assert!(
+            crate::telemetry::source(connector(), &wrong).is_err(),
+            "invalid selection cannot construct a native reader"
+        );
     }
 }

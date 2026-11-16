@@ -3,6 +3,11 @@
 //! detail some checks use; without it those checks say less, never something wrong.
 
 use culprit_core::{Capability, Source, source_id};
+pub const CURRENT_REQUEST_WORK: Source = Source {
+    name: crate::progress::SOURCE,
+    reads: culprit_core::key!("provider.mysql.source.current_request_work"),
+    delivers: &[],
+};
 pub const SESSION_MEMORY: Source = Source {
     name: source_id::SESSION_MEMORY,
     reads: culprit_core::key!("provider.mysql.source.session_memory"),
@@ -138,6 +143,7 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    CURRENT_REQUEST_WORK,
     SESSION_MEMORY,
     NATIVE_FAILURES,
     REDO_PRESSURE,

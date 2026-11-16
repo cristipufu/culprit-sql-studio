@@ -1,5 +1,6 @@
 use super::*;
-use std::collections::VecDeque;
+use crate::rows::Row;
+use std::collections::{BTreeMap, VecDeque};
 
 pub(crate) const BACKEND: &str = "2026-11-15T08:00:00.000001Z";
 pub(crate) const REQUEST: &str = "2026-11-15T09:00:00.000002Z";
@@ -7,9 +8,6 @@ pub(crate) const AT: &str = "2026-11-15T10:00:00.000003Z";
 
 pub(crate) fn row(fields: &[(&str, Option<&str>)]) -> Row {
     Row::from_fields(fields.iter().map(|(key, value)| ((*key).into(), value.map(str::to_owned))))
-}
-pub(crate) fn metadata() -> Row {
-    metadata_with("f", "2026-11-14T00:00:00Z")
 }
 pub(crate) fn metadata_with(standby: &str, started: &str) -> Row {
     metadata_on_version(180_000, standby, started)
@@ -54,13 +52,7 @@ pub(crate) fn actor(backend: &str, query: &str) -> Row {
     ])
 }
 pub(crate) fn progress() -> Row {
-    row(&[
-        ("pid", Some("42")),
-        ("backend_start", Some(BACKEND)),
-        ("query_start", Some(REQUEST)),
-        ("observed_at", Some(AT)),
-        ("database_oid", Some("16384")),
-        ("relation_oid", Some("16420")),
+    native_progress(&[
         ("index_oid", Some("0")),
         ("command", Some("CREATE INDEX")),
         ("phase", Some("building index: scanning table")),
@@ -74,17 +66,87 @@ pub(crate) fn progress() -> Row {
     ])
 }
 
+pub(crate) fn native_progress(fields: &[(&str, Option<&str>)]) -> Row {
+    let mut values = [
+        ("pid", Some("42")),
+        ("backend_start", Some(BACKEND)),
+        ("query_start", Some(REQUEST)),
+        ("observed_at", Some(AT)),
+        ("database_oid", Some("16384")),
+        ("relation_oid", Some("16420")),
+    ]
+    .into_iter()
+    .collect::<BTreeMap<_, _>>();
+    values.extend(fields.iter().copied());
+    row(&values.into_iter().collect::<Vec<_>>())
+}
+
+pub(crate) fn vacuum_progress(version: u32, changes: &[(&str, Option<&str>)]) -> Row {
+    let mut fields = vec![
+        ("phase", Some("scanning heap")),
+        ("heap_blks_total", Some("9007199254740993")),
+        ("heap_blks_scanned", Some("2")),
+        ("heap_blks_vacuumed", Some("0")),
+        ("index_vacuum_count", Some("0")),
+        ("max_dead_tuples", (version < 170_000).then_some("291")),
+        ("num_dead_tuples", (version < 170_000).then_some("0")),
+        ("max_dead_tuple_bytes", (version >= 170_000).then_some("9007199254740993")),
+        ("dead_tuple_bytes", (version >= 170_000).then_some("0")),
+        ("num_dead_item_ids", (version >= 170_000).then_some("1")),
+        ("indexes_total", (version >= 170_000).then_some("2")),
+        ("indexes_processed", (version >= 170_000).then_some("0")),
+        ("cost_delay_ms", (version >= 180_000).then_some("0.125")),
+    ];
+    fields.extend_from_slice(changes);
+    native_progress(&fields)
+}
+
+pub(crate) fn analyze_progress(changes: &[(&str, Option<&str>)]) -> Row {
+    let mut fields = vec![
+        ("phase", Some("acquiring inherited sample rows")),
+        ("sample_blks_total", Some("9007199254740993")),
+        ("sample_blks_scanned", Some("0")),
+        ("ext_stats_total", Some("2")),
+        ("ext_stats_computed", None),
+        ("child_tables_total", Some("4")),
+        ("child_tables_done", Some("1")),
+        ("current_child_table_relid", Some("16421")),
+        ("cost_delay_ms", Some("0")),
+    ];
+    fields.extend_from_slice(changes);
+    native_progress(&fields)
+}
+
+pub(crate) fn cluster_progress(command: &str, changes: &[(&str, Option<&str>)]) -> Row {
+    let mut fields = vec![
+        ("phase", Some("rebuilding index")),
+        ("command", Some(command)),
+        ("index_oid", Some("0")),
+        ("heap_tuples_scanned", Some("9007199254740993")),
+        ("heap_tuples_written", Some("0")),
+        ("heap_blks_total", None),
+        ("heap_blks_scanned", None),
+        ("index_rebuild_count", Some("1")),
+    ];
+    fields.extend_from_slice(changes);
+    native_progress(&fields)
+}
+
 #[derive(Default)]
 pub(crate) struct Reader {
     pub replies: VecDeque<Result<Vec<Row>>>,
     pub calls: Vec<String>,
     pub closed: bool,
     pub unconfirmed: bool,
+    pub query_limit: Option<usize>,
 }
 #[async_trait::async_trait]
 impl QueryRead for Reader {
     async fn query(&mut self, sql: &str, _: usize) -> Result<Vec<Row>> {
         assert!(!self.closed);
+        if self.query_limit.is_some_and(|limit| self.calls.len() >= limit) {
+            return Err(CollectionStop::QueryLimit.error());
+        }
         self.calls.push(sql.into());
         self.replies.pop_front().expect("unexpected native maintenance read")
     }
@@ -104,19 +166,25 @@ impl NativeRead for Reader {
 }
 
 pub(crate) fn scripted_reader() -> Reader {
-    Reader {
-        replies: [
-            Ok(vec![metadata()]),
-            Ok(vec![member("127.0.0.1")]),
-            Ok(vec![actor(BACKEND, REQUEST)]),
-            Ok(vec![progress()]),
-            Ok(vec![actor(BACKEND, REQUEST)]),
-            Ok(vec![metadata()]),
-            Ok(vec![member("127.0.0.1")]),
-        ]
-        .into(),
-        ..Default::default()
+    progress_reader(180_000, 0, Some(progress()))
+}
+
+pub(crate) fn progress_reader(version: u32, empty_views: usize, point: Option<Row>) -> Reader {
+    let mut replies = VecDeque::from([
+        Ok(vec![metadata_on_version(version, "f", "2026-11-14T00:00:00Z")]),
+        Ok(vec![member("127.0.0.1")]),
+        Ok(vec![actor(BACKEND, REQUEST)]),
+    ]);
+    replies.extend((0..empty_views).map(|_| Ok(vec![])));
+    if let Some(point) = point {
+        replies.push_back(Ok(vec![point]));
     }
+    replies.extend([
+        Ok(vec![actor(BACKEND, REQUEST)]),
+        Ok(vec![metadata_on_version(version, "f", "2026-11-14T00:00:00Z")]),
+        Ok(vec![member("127.0.0.1")]),
+    ]);
+    Reader { replies, ..Default::default() }
 }
 
 pub(crate) fn original_source() -> CollectionDescription {

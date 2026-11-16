@@ -1,31 +1,34 @@
-//! Controlled native index-build points exercise archive semantics, never production work authority.
+//! Controlled native maintenance points exercise archive semantics, never production work authority.
 use super::*;
 use culprit_core::{Engine, MeasurementScope};
+mod non_index;
 
 pub fn maintenance_progress_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
-    [Engine::Postgres, Engine::Yugabyte]
+    let mut cases = [Engine::Postgres, Engine::Yugabyte]
         .into_iter()
         .flat_map(|engine| {
             [
-                (MaintenanceProgressBinding::Matched, MaintenanceProgressMembership::Observed),
-                (MaintenanceProgressBinding::UnverifiedOriginalScope, MaintenanceProgressMembership::Observed),
-                (MaintenanceProgressBinding::ParticipantMissing, MaintenanceProgressMembership::NotObserved),
-                (MaintenanceProgressBinding::Matched, MaintenanceProgressMembership::Unavailable),
+                (FocusedRequestBinding::Matched, FocusedRequestMembership::Observed),
+                (FocusedRequestBinding::UnverifiedOriginalScope, FocusedRequestMembership::Observed),
+                (FocusedRequestBinding::ParticipantMissing, FocusedRequestMembership::NotObserved),
+                (FocusedRequestBinding::Matched, FocusedRequestMembership::Unavailable),
             ]
             .into_iter()
             .map(move |(binding, membership)| evidence(engine, binding, membership))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    cases.extend(non_index::evidence_cases());
+    cases
 }
 
 fn evidence(
     engine: Engine,
-    binding: MaintenanceProgressBinding,
-    membership: MaintenanceProgressMembership,
+    binding: FocusedRequestBinding,
+    membership: FocusedRequestMembership,
 ) -> (CollectionDescription, Vec<TelemetryRecord>) {
     let original = original_source(engine);
     let mut focus = original_focus(&original);
-    if binding == MaintenanceProgressBinding::UnverifiedOriginalScope {
+    if binding == FocusedRequestBinding::UnverifiedOriginalScope {
         // The original Activity reader did not establish a compute member. This read cannot supply it retroactively.
         let mut unqualified = original.clone();
         unqualified.partition = SourcePartition::Target;
@@ -33,15 +36,15 @@ fn evidence(
     }
     let at = "2020-01-01T12:00:01Z";
     let mut records = Vec::new();
-    if membership == MaintenanceProgressMembership::Observed {
+    if membership == FocusedRequestMembership::Observed {
         let point = MaintenanceProgressObservation {
             observed_at: at.into(),
             actor: focus.original.key.clone(),
             statement: Some(focus.statement_identity.clone()),
             database_oid: "16384".into(),
             relation_oid: "16420".into(),
-            index_oid: "0".into(),
-            command: IndexBuildCommand::CreateIndexConcurrently,
+            index_oid: Some("0".into()),
+            command: MaintenanceCommand::CreateIndexConcurrently,
             phase: match engine {
                 Engine::Postgres => "building index: scanning table",
                 Engine::Yugabyte => "backfilling",
@@ -49,7 +52,7 @@ fn evidence(
             }
             .into(),
             work: match engine {
-                Engine::Postgres => IndexBuildProgressWork::PostgreSql {
+                Engine::Postgres => MaintenanceProgressWork::PostgreSqlIndexBuild {
                     progress: Box::new(PostgresIndexBuildProgress {
                         blocks_total: Some("9007199254740993".into()),
                         blocks_done: Some("0".into()),
@@ -57,7 +60,7 @@ fn evidence(
                         ..Default::default()
                     }),
                 },
-                Engine::Yugabyte => IndexBuildProgressWork::Ysql {
+                Engine::Yugabyte => MaintenanceProgressWork::YsqlIndexBuild {
                     progress: Box::new(YsqlIndexBuildProgress {
                         tuples_done: Some("9007199254740993".into()),
                         tuples_total_estimate: Some("42".into()),
@@ -72,7 +75,7 @@ fn evidence(
             fact: OperationalFact::MaintenanceProgress(Box::new(point)),
         }));
     }
-    let coverage = if membership == MaintenanceProgressMembership::Unavailable {
+    let coverage = if membership == FocusedRequestMembership::Unavailable {
         StateSourceCoverage::unavailable(
             "pg_stat_progress_create_index".into(),
             culprit_core::ErrorCode::PermissionDenied,
@@ -94,7 +97,7 @@ fn evidence(
                 records: records.len() as u32,
                 sources: vec![coverage],
             },
-            result: Box::new(MaintenanceProgressResult {
+            result: Box::new(FocusedRequestResult {
                 focus: Some(Box::new(focus.clone())),
                 database_writable: role(engine),
                 binding,

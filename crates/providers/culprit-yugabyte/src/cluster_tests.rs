@@ -234,8 +234,8 @@ async fn live_cluster_aggregation_resets_resources_and_pooled_session_guards() {
     let copied = tokio::time::timeout(POOLED_OBSERVATION_BUDGET, copy.as_mut().finish()).await;
     let progress = observed.expect("pooled worker observation exceeded its budget").unwrap();
     assert!(
-        progress.running && progress.plan.is_none() && progress.phase.is_none(),
-        "running={}, state={:?}, phase={:?}, note={:?}",
+        progress.running == Some(true) && progress.plan.is_none() && progress.phase.is_none(),
+        "running={:?}, state={:?}, phase={:?}, note={:?}",
         progress.running,
         progress.state,
         progress.phase,
@@ -316,7 +316,7 @@ async fn live_cluster_single_session_progress_does_not_contact_an_unrelated_fail
     let observe = async {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let (progress, _) = crate::progress::read_session(&monitor, &id, false).await.unwrap();
-        assert!(progress.running);
+        assert_eq!(progress.running, Some(true));
         assert_eq!(
             monitor.notices(),
             before,

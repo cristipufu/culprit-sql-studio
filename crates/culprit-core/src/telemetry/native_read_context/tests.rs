@@ -20,6 +20,49 @@ pub(in crate::telemetry) fn read_context() -> NativeReadContext {
 }
 
 #[test]
+fn request_plan_cache_ownership_ignores_poll_clocks_but_never_native_lifetime_or_scope() {
+    let context = read_context();
+    let actor = ActivityKey {
+        session: NativeActivityIdentity { id: "42".into(), generation: "login-generation".into() },
+        request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-start".into() }),
+        transaction: None,
+    };
+    let statement = NativeIdentity::new("native-statement");
+    let original = context.request_key(&actor, &statement).unwrap();
+    let mut later = context.clone();
+    later.observed_from = "2020-01-01T12:00:02Z".into();
+    later.observed_until = "2020-01-01T12:00:03Z".into();
+    assert_eq!(later.request_key(&actor, &statement).as_deref(), Some(original.as_str()));
+    for change in ["member", "epoch", "role", "session", "request", "statement"] {
+        let mut changed = context.clone();
+        let mut current = actor.clone();
+        let mut sql = statement.clone();
+        match change {
+            "member" => {
+                let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut changed.partition else {
+                    panic!()
+                };
+                member.native.id = "other-member".into();
+            }
+            "epoch" => {
+                let SourcePartition::InstanceLocal { epoch, .. } = &mut changed.partition else { panic!() };
+                *epoch = Some("new-process".into());
+            }
+            "role" => changed.database_writable = Some(false),
+            "session" => current.session.generation = "new-login".into(),
+            "request" => current.request.as_mut().unwrap().generation = "new-request".into(),
+            _ => sql.id = "other-statement".into(),
+        }
+        assert_ne!(changed.request_key(&current, &sql).as_deref(), Some(original.as_str()), "{change}");
+    }
+    later.partition = SourcePartition::Target;
+    assert_eq!(later.request_key(&actor, &statement), None, "a logical route cannot own a cached native plan");
+    let mut idle = actor;
+    idle.request = None;
+    assert_eq!(context.request_key(&idle, &statement), None);
+}
+
+#[test]
 fn known_local_owner_and_canonical_bounds_round_trip_without_changing_native_facts() {
     let original = read_context();
     assert!(original.is_valid());

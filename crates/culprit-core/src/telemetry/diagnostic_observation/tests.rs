@@ -2,6 +2,7 @@ use super::*;
 use crate::{DatabaseIdentity, Engine, MeasurementScope, ObservedWaitResource};
 
 mod compiler_admission;
+mod current_request_work;
 mod investigations;
 mod page_writers;
 mod partitions;

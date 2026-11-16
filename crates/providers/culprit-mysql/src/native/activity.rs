@@ -77,19 +77,41 @@ pub(crate) async fn observe<R: QueryRead>(
 }
 
 pub(crate) async fn instrumentation_enabled<R: QueryRead>(reader: &mut R) -> Result<bool> {
-    let consumers = reader.read(
-        "SELECT NAME AS name, ENABLED AS enabled FROM performance_schema.setup_consumers WHERE NAME IN ('global_instrumentation','thread_instrumentation','events_statements_current')",
-        vec![], 4,
-    ).await?;
-    let enabled: std::collections::BTreeSet<_> = consumers
+    Ok(consumers(reader, false).await?.statements)
+}
+
+pub(crate) struct Consumers {
+    pub statements: bool,
+    pub stages: Option<bool>,
+}
+
+pub(crate) async fn consumers<R: QueryRead>(reader: &mut R, stages: bool) -> Result<Consumers> {
+    let names = if stages {
+        "'global_instrumentation','thread_instrumentation','events_statements_current','events_stages_current'"
+    } else {
+        "'global_instrumentation','thread_instrumentation','events_statements_current'"
+    };
+    let limit = if stages { 5 } else { 4 };
+    let rows = reader.read(&format!("SELECT NAME AS name, ENABLED AS enabled FROM performance_schema.setup_consumers WHERE NAME IN ({names})"), vec![], limit).await?;
+    let mut values = std::collections::BTreeMap::new();
+    for row in rows {
+        let name = text(&row, "name")?;
+        let value = match text(&row, "enabled")?.as_str() {
+            "YES" => true,
+            "NO" => false,
+            _ => return Err(invalid()),
+        };
+        if !matches!(name.as_str(), "global_instrumentation" | "thread_instrumentation" | "events_statements_current")
+            && !(stages && name == "events_stages_current")
+            || values.insert(name, value).is_some()
+        {
+            return Err(invalid());
+        }
+    }
+    let statements = ["global_instrumentation", "thread_instrumentation", "events_statements_current"]
         .iter()
-        .filter(|row| row.text("enabled").as_deref() == Some("YES"))
-        .filter_map(|row| row.text("name"))
-        .collect();
-    Ok(consumers.len() == 3
-        && ["global_instrumentation", "thread_instrumentation", "events_statements_current"]
-            .iter()
-            .all(|name| enabled.contains(*name)))
+        .all(|name| values.get(*name) == Some(&true));
+    Ok(Consumers { statements, stages: stages.then(|| values.get("events_stages_current").copied()).flatten() })
 }
 
 pub(crate) const GENERATION_COLUMNS: &str = "t.THREAD_ID AS thread_id, t.INSTRUMENTED AS instrumented,
@@ -98,13 +120,19 @@ pub(crate) const GENERATION_COLUMNS: &str = "t.THREAD_ID AS thread_id, t.INSTRUM
         DATE_FORMAT(UTC_TIMESTAMP(6), '%Y-%m-%dT%H:%i:%s.%fZ') AS observed_at";
 
 pub(crate) fn target_query() -> String {
+    selected_request_query("t.PROCESSLIST_INFO AS info", 1)
+}
+
+/// Both exact live controls and explicit current-work reads retain the same native actor/statement projection.
+pub(crate) fn selected_request_query(projection: &str, limit: usize) -> String {
     format!("SELECT t.PROCESSLIST_ID AS id, t.PROCESSLIST_DB AS db,
         t.PROCESSLIST_USER AS user_name, t.PROCESSLIST_HOST AS host, t.PROCESSLIST_COMMAND AS command,
-        t.PROCESSLIST_STATE AS state, t.PROCESSLIST_TIME AS seconds, t.PROCESSLIST_INFO AS info, {GENERATION_COLUMNS}
+        t.PROCESSLIST_STATE AS state, t.PROCESSLIST_TIME AS seconds, {GENERATION_COLUMNS}, {projection}
         FROM performance_schema.threads t LEFT JOIN performance_schema.events_statements_current e ON e.THREAD_ID=t.THREAD_ID
         WHERE t.TYPE='FOREGROUND' AND t.PROCESSLIST_ID=? AND t.PROCESSLIST_ID<>CONNECTION_ID()
           AND t.PROCESSLIST_DB=? AND t.PROCESSLIST_COMMAND NOT IN ('Daemon','Binlog Dump','Binlog Dump GTID')
-          AND t.PROCESSLIST_USER<>'system user' LIMIT 1")
+          AND t.PROCESSLIST_USER<>'system user'
+          AND (e.SQL_TEXT IS NULL OR (e.SQL_TEXT NOT LIKE '%/* culprit */%' AND e.SQL_TEXT NOT LIKE '%/* culprit:%')) LIMIT {limit}")
 }
 
 async fn sessions<R: QueryRead>(reader: &mut R, database: &str, limit: usize) -> Result<Vec<Rec>> {
@@ -131,7 +159,6 @@ pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -
         && instrumentation_enabled
         && row.native_text("instrumented")?.as_deref() == Some("YES")
         && row.unsigned("end_event_id")?.is_none()
-        && elapsed.is_some()
     {
         event
             .zip(started)
@@ -139,13 +166,10 @@ pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -
     } else {
         None
     };
-    let statement_identity = request.as_ref().map(|request| {
-        NativeIdentity::new(digest(
-            format!("{session_id}|{thread_id}|{}|{}", request.id, request.generation).as_bytes(),
-        ))
-        .qualified("source", "performance_schema.events_statements_current")
-        .qualified("basis", "thread-event-start")
-    });
+    let session = NativeActivityIdentity { id: session_id.to_string(), generation: thread_id.to_string() };
+    let statement_identity = request
+        .as_ref()
+        .and_then(|request| culprit_core::engines::mysql_activity_statement_identity(&session, request));
     let state = row.native_text("state")?.filter(|value| !value.is_empty()).unwrap_or_else(|| command.clone());
     let lock_wait = waiting_on_lock(Some(&state), false);
     let wait_elapsed = if lock_wait.is_some() {
@@ -157,11 +181,7 @@ pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -
     let observation = ActivityObservation {
         waiting_on_lock: request.as_ref().and(lock_wait),
         blocking_status: ActivityBlockingStatus::Unknown,
-        key: ActivityKey {
-            session: NativeActivityIdentity { id: session_id.to_string(), generation: thread_id.to_string() },
-            request: request.clone(),
-            transaction: None,
-        },
+        key: ActivityKey { session, request: request.clone(), transaction: None },
         idle,
         scope: if request.is_some() && request_db.as_deref() == Some(database) {
             ActivityScopeBasis::RequestDatabase

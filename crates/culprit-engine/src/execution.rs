@@ -270,7 +270,7 @@ impl Execution<'_> {
     }
 
     /// How far along a session's running statement is: per-operator progress on SQL Server, the estimated plan with
-    /// elapsed time and command/stage progress on Postgres and MySQL. Reads only; works on production too.
+    /// elapsed time and command/stage progress on Postgres and MySQL, with native read limits and scope qualifications.
     pub(crate) async fn query_progress(
         &self,
         name: &str,
@@ -281,12 +281,8 @@ impl Execution<'_> {
         let observed = self.connections.observed_provider(name).await?;
         let provider = observed.provider();
         let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
-            let mut progress =
-                self.connections.forget_rejected(name, provider.query_progress(session, with_plan).await)?;
-            if let Some(plan) = &mut progress.plan {
-                culprit_checks::present_progress_plan(plan);
-            }
-            Ok(progress)
+            let progress = self.connections.forget_rejected(name, provider.query_progress(session, with_plan).await)?;
+            crate::progress_presentation::present(progress)
         })
         .await;
         observed.finish(result).await

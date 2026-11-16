@@ -10,11 +10,11 @@ fn snapshot() -> MaintenanceProgressSnapshot {
         source: "pg_stat_progress_create_index".into(),
         context,
         coverage: StateSourceCoverage::observed("pg_stat_progress_create_index".into(), 1, false),
-        result: MaintenanceProgressResult {
+        result: FocusedRequestResult {
             focus: None,
             database_writable: Some(true),
-            binding: MaintenanceProgressBinding::Independent,
-            membership: MaintenanceProgressMembership::Observed,
+            binding: FocusedRequestBinding::Independent,
+            membership: FocusedRequestMembership::Observed,
         },
         observations: vec![MaintenanceProgressObservation {
             observed_at: "2020-01-01T12:00:00.5Z".into(),
@@ -26,10 +26,10 @@ fn snapshot() -> MaintenanceProgressSnapshot {
             statement: Some(NativeIdentity::new("native-statement")),
             database_oid: "16384".into(),
             relation_oid: "16420".into(),
-            index_oid: "0".into(),
-            command: IndexBuildCommand::CreateIndex,
+            index_oid: Some("0".into()),
+            command: MaintenanceCommand::CreateIndex,
             phase: "building index: scanning table".into(),
-            work: IndexBuildProgressWork::PostgreSql {
+            work: MaintenanceProgressWork::PostgreSqlIndexBuild {
                 progress: Box::new(PostgresIndexBuildProgress {
                     blocks_total: Some("9007199254740993".into()),
                     blocks_done: Some("0".into()),
@@ -39,6 +39,92 @@ fn snapshot() -> MaintenanceProgressSnapshot {
             },
         }],
     }
+}
+
+#[test]
+fn non_index_work_preserves_command_specific_units_and_native_index_availability() {
+    let variants = [
+        (
+            MaintenanceCommand::Vacuum,
+            None,
+            MaintenanceProgressWork::PostgreSqlVacuum {
+                progress: Box::new(PostgresVacuumProgress {
+                    heap_blks_scanned: Some("9007199254740993".into()),
+                    max_dead_tuples: None,
+                    max_dead_tuple_bytes: Some("18446744073709551615".into()),
+                    dead_tuple_bytes: Some("0".into()),
+                    cost_delay_ms: Some("0".into()),
+                    ..Default::default()
+                }),
+            },
+        ),
+        (
+            MaintenanceCommand::Analyze,
+            None,
+            MaintenanceProgressWork::PostgreSqlAnalyze {
+                progress: Box::new(PostgresAnalyzeProgress {
+                    sample_blks_scanned: Some("0".into()),
+                    current_child_table_relid: Some("0".into()),
+                    cost_delay_ms: Some("0.25".into()),
+                    ..Default::default()
+                }),
+            },
+        ),
+        (
+            MaintenanceCommand::Cluster,
+            Some("0".into()),
+            MaintenanceProgressWork::PostgreSqlCluster {
+                progress: Box::new(PostgresClusterProgress {
+                    heap_tuples_written: Some("9007199254740993".into()),
+                    ..Default::default()
+                }),
+            },
+        ),
+    ];
+    let mut keys = Vec::new();
+    for (command, index_oid, work) in variants {
+        let mut input = snapshot();
+        let point = &mut input.observations[0];
+        point.command = command;
+        point.index_oid = index_oid;
+        point.work = work;
+        assert!(point.is_valid());
+        keys.push(point.key().unwrap());
+        let encoded = serde_json::to_vec(point).unwrap();
+        let decoded: MaintenanceProgressObservation = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(*point, decoded);
+        assert!(input.is_valid());
+        input.observations[0].command = MaintenanceCommand::CreateIndex;
+        assert!(!input.is_valid(), "an index command cannot relabel a vacuum/analyze/rewrite population");
+    }
+    keys.sort();
+    keys.dedup();
+    assert_eq!(keys.len(), 3, "one request's VACUUM/ANALYZE phases do not collide");
+}
+
+#[test]
+fn nonfinite_native_delay_and_non_oid_child_references_are_not_valid_progress_evidence() {
+    for delay in ["NaN", "inf", "-1", "1e999", ""] {
+        let mut input = snapshot();
+        let point = &mut input.observations[0];
+        point.command = MaintenanceCommand::Vacuum;
+        point.index_oid = None;
+        point.work = MaintenanceProgressWork::PostgreSqlVacuum {
+            progress: Box::new(PostgresVacuumProgress { cost_delay_ms: Some(delay.into()), ..Default::default() }),
+        };
+        assert!(!input.is_valid(), "{delay}");
+    }
+    let mut input = snapshot();
+    let point = &mut input.observations[0];
+    point.command = MaintenanceCommand::Analyze;
+    point.index_oid = None;
+    point.work = MaintenanceProgressWork::PostgreSqlAnalyze {
+        progress: Box::new(PostgresAnalyzeProgress {
+            current_child_table_relid: Some("9007199254740993".into()),
+            ..Default::default()
+        }),
+    };
+    assert!(!input.is_valid(), "a large exact counter is not a PostgreSQL OID");
 }
 
 fn focus(snapshot: &MaintenanceProgressSnapshot) -> ActivityRequestFocus {
@@ -116,7 +202,7 @@ fn actor_generation_and_native_objects_change_the_key_while_phase_work_does_not(
     changed.actor.request.as_mut().unwrap().generation = "later-statement".into();
     assert_ne!(changed.key().unwrap(), key);
     changed = point;
-    changed.index_oid = "16500".into();
+    changed.index_oid = Some("16500".into());
     assert_ne!(changed.key().unwrap(), key);
 }
 
@@ -126,9 +212,9 @@ fn missing_original_member_never_borrows_the_current_qualified_member() {
     let mut original = focus(&snapshot);
     original.partition = SourcePartition::Target;
     snapshot.result.focus = Some(Box::new(original));
-    snapshot.result.binding = MaintenanceProgressBinding::Matched;
+    snapshot.result.binding = FocusedRequestBinding::Matched;
     assert!(!snapshot.is_valid());
-    snapshot.result.binding = MaintenanceProgressBinding::UnverifiedOriginalScope;
+    snapshot.result.binding = FocusedRequestBinding::UnverifiedOriginalScope;
     assert!(snapshot.is_valid());
     assert_eq!(snapshot.result.original_reference(), snapshot.result.focus.as_ref().map(|focus| &focus.parent));
 }
@@ -137,7 +223,7 @@ fn missing_original_member_never_borrows_the_current_qualified_member() {
 fn exact_original_member_epoch_role_actor_and_statement_are_needed_for_a_matched_point() {
     let mut original = snapshot();
     original.result.focus = Some(Box::new(focus(&original)));
-    original.result.binding = MaintenanceProgressBinding::Matched;
+    original.result.binding = FocusedRequestBinding::Matched;
     assert!(original.is_valid());
     for field in ["member", "epoch", "role", "actor", "statement", "future"] {
         let mut changed = original.clone();
@@ -168,11 +254,11 @@ fn disappearance_and_unavailable_progress_never_become_a_completion_verdict() {
     let mut snapshot = snapshot();
     snapshot.observations.clear();
     snapshot.coverage = StateSourceCoverage::observed(snapshot.source.clone(), 0, false);
-    snapshot.result.membership = MaintenanceProgressMembership::NotObserved;
+    snapshot.result.membership = FocusedRequestMembership::NotObserved;
     assert!(snapshot.is_valid());
-    snapshot.result.membership = MaintenanceProgressMembership::Observed;
+    snapshot.result.membership = FocusedRequestMembership::Observed;
     assert!(!snapshot.is_valid());
-    snapshot.result.membership = MaintenanceProgressMembership::Unavailable;
+    snapshot.result.membership = FocusedRequestMembership::Unavailable;
     snapshot.coverage =
         StateSourceCoverage::unavailable(snapshot.source.clone(), crate::ErrorCode::PermissionDenied, None);
     assert!(snapshot.is_valid());
@@ -182,7 +268,7 @@ fn disappearance_and_unavailable_progress_never_become_a_completion_verdict() {
 #[test]
 fn ysql_backfill_estimates_are_distinct_from_postgresql_phase_heap_work() {
     let mut snapshot = snapshot();
-    snapshot.observations[0].work = IndexBuildProgressWork::Ysql {
+    snapshot.observations[0].work = MaintenanceProgressWork::YsqlIndexBuild {
         progress: Box::new(YsqlIndexBuildProgress {
             tuples_done: Some("9007199254740993".into()),
             tuples_total_estimate: Some("42".into()),
@@ -227,7 +313,7 @@ fn source_and_raw_carrier_require_the_same_local_owner_for_complete_positive_or_
         point.context.partition = SourcePartition::Target;
         if records == 0 {
             point.observations.clear();
-            point.result.membership = MaintenanceProgressMembership::NotObserved;
+            point.result.membership = FocusedRequestMembership::NotObserved;
         }
         point.coverage = StateSourceCoverage::collected(point.source.clone(), records);
         assert!(!point.is_valid());
@@ -242,7 +328,7 @@ fn source_and_raw_carrier_require_the_same_local_owner_for_complete_positive_or_
 fn unverified_original_scope_never_bypasses_a_known_target_member_or_role_conflict() {
     let mut point = snapshot();
     point.result.focus = Some(Box::new(focus(&point)));
-    point.result.binding = MaintenanceProgressBinding::UnverifiedOriginalScope;
+    point.result.binding = FocusedRequestBinding::UnverifiedOriginalScope;
     assert!(!point.is_valid(), "qualified original cannot be relabeled unverified");
     let original = point.result.focus.as_mut().unwrap();
     original.partition = SourcePartition::Target;
@@ -254,7 +340,7 @@ fn unverified_original_scope_never_bypasses_a_known_target_member_or_role_confli
         crate::DatabaseIdentity::server(crate::Engine::Postgres, "other", "owned.invalid", 5432, None).into();
     assert!(!point.is_valid());
     point.result.focus = None;
-    point.result.binding = MaintenanceProgressBinding::Independent;
+    point.result.binding = FocusedRequestBinding::Independent;
     let SourcePartition::InstanceLocal { member: Some(member), .. } = &point.context.partition else { unreachable!() };
     point.context.target = CollectionTarget::Shared(member.clone());
     assert!(!point.is_valid(), "native index progress is database scoped");
@@ -264,7 +350,7 @@ fn unverified_original_scope_never_bypasses_a_known_target_member_or_role_confli
 fn snapshot_sharing_redacts_native_owner_and_original_sql_without_breaking_binding_or_clocks() {
     let mut point = snapshot();
     point.result.focus = Some(Box::new(focus(&point)));
-    point.result.binding = MaintenanceProgressBinding::Matched;
+    point.result.binding = FocusedRequestBinding::Matched;
     let original = point.result.focus.as_mut().unwrap();
     original.original.statement = DefinitionPayload::Available {
         text: "CREATE INDEX ix ON sample(value) WHERE value = 'private-canary'".into(),

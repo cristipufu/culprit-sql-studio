@@ -15,6 +15,7 @@ pub mod compiler_admission_report;
 pub mod connection;
 pub mod connection_security;
 pub mod coverage;
+pub mod current_request_work_report;
 pub mod dashboard;
 pub mod deadlock;
 pub mod dialect;
@@ -73,7 +74,10 @@ pub mod waits;
 pub mod window;
 pub mod xml;
 
-pub use actual::{ActualSummary, NodeProgress, NodeRuntime, NodeState, QueryProgress, actual_summary, self_times};
+pub use actual::{
+    ActualSummary, NodeProgress, NodeRuntime, NodeState, QueryProgress, SessionProgressContext, actual_summary,
+    self_times,
+};
 pub use advice::*;
 pub use blocking::{BlockNode, Blocking, BlockingChain, HeadKind, LockWait};
 pub use cache_entry_memory_report::{CacheEntryContextDifference, CacheEntryMemoryExplanation, CacheEntryMemoryReport};
@@ -99,6 +103,7 @@ pub use connection_security::{
     apply_connection_security, connection_security,
 };
 pub use coverage::{Coverage, Source, SourceOutcome, SourceState, same_source, source_id};
+pub use current_request_work_report::{CurrentRequestWorkEntry, CurrentRequestWorkReport};
 pub use dashboard::{Dashboard, DashboardLive, ItemKind, Tile, TileItem, TileKey, TileMetric, TileStatus};
 pub use deadlock::{
     Deadlock, DeadlockFix, DeadlockFixKind, DeadlockPattern, DeadlockProcess, DeadlockReport, DeadlockResource,

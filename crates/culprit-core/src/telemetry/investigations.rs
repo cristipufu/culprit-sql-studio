@@ -37,6 +37,7 @@ impl RecipeCostReceipt {
                     | RecipeSelector::FocusedPageWaitWriters
                     | RecipeSelector::FocusedRequestMemory
                     | RecipeSelector::FocusedCompilationAdmission
+                    | RecipeSelector::CurrentRequestWork
             )
             && self.scope.is_valid()
             && self.scope.native_epoch().is_some()

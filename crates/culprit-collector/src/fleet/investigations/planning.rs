@@ -113,6 +113,7 @@ async fn bounded(
                     DiagnosticSignal::PageWait { .. }
                         | DiagnosticSignal::RequestMemory { .. }
                         | DiagnosticSignal::CompilationAdmission { .. }
+                        | DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. }
                 )
             {
                 let mut selected_resources = BTreeSet::new();
@@ -185,6 +186,9 @@ async fn bounded(
 
 fn possible_questions(episode: &DiagnosticEpisode) -> Vec<RecipeSelector> {
     match &episode.signal {
+        DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. } => {
+            vec![RecipeSelector::CurrentRequestWork]
+        }
         DiagnosticSignal::RequestMemory { .. } => vec![RecipeSelector::FocusedRequestMemory],
         DiagnosticSignal::CompilationAdmission { .. } => vec![RecipeSelector::FocusedCompilationAdmission],
         DiagnosticSignal::PageWait { .. } if matches!(episode.report, Some(DiagnosticReport::PageWait { .. })) => {

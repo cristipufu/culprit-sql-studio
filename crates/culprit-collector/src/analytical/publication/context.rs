@@ -27,13 +27,8 @@ enum PublicObservation<'a> {
         source: FocusSourceState,
         membership: CompilationAdmissionMembership,
     },
-    MaintenanceProgressContext {
-        snapshot: &'a StateSnapshotDescription,
-        focus_key: Option<String>,
-        database_writable: Option<bool>,
-        binding: MaintenanceProgressBinding,
-        membership: MaintenanceProgressMembership,
-    },
+    MaintenanceProgressContext(FocusedRequestContext<'a>),
+    CurrentRequestWorkContext(FocusedRequestContext<'a>),
     CacheEntryMemoryContext {
         snapshot: &'a StateSnapshotDescription,
         focus_key: String,
@@ -45,6 +40,26 @@ enum PublicObservation<'a> {
     },
     DiagnosticContext(Value),
 }
+#[derive(Serialize)]
+struct FocusedRequestContext<'a> {
+    snapshot: &'a StateSnapshotDescription,
+    focus_key: Option<String>,
+    database_writable: Option<bool>,
+    binding: FocusedRequestBinding,
+    membership: FocusedRequestMembership,
+}
+impl<'a> FocusedRequestContext<'a> {
+    fn new(snapshot: &'a StateSnapshotDescription, result: &FocusedRequestResult) -> Result<Self> {
+        Ok(Self {
+            snapshot,
+            focus_key: result.focus.as_ref().map(|focus| focus.key()).transpose()?,
+            database_writable: result.database_writable,
+            binding: result.binding,
+            membership: result.membership,
+        })
+    }
+}
+
 #[derive(Serialize)]
 struct FocusResult<'a> {
     focus: Focus<'a>,
@@ -98,13 +113,12 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
                 membership: result.membership,
             }
         }
-        SourceObservation::MaintenanceProgress { snapshot, result } => PublicObservation::MaintenanceProgressContext {
-            snapshot,
-            focus_key: result.focus.as_ref().map(|focus| focus.key()).transpose()?,
-            database_writable: result.database_writable,
-            binding: result.binding,
-            membership: result.membership,
-        },
+        SourceObservation::MaintenanceProgress { snapshot, result } => {
+            PublicObservation::MaintenanceProgressContext(FocusedRequestContext::new(snapshot, result)?)
+        }
+        SourceObservation::CurrentRequestWork { snapshot, result } => {
+            PublicObservation::CurrentRequestWorkContext(FocusedRequestContext::new(snapshot, result)?)
+        }
         SourceObservation::FocusedPageWait { snapshot, result } => PublicObservation::FocusedPageWaitContext {
             snapshot,
             result: Box::new(FocusResult {

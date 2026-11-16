@@ -9,6 +9,7 @@ pub enum DiagnosticFocus {
     PageWaitWriters { focus: Box<PageWaitWriterFocus> },
     RequestMemory { focus: Box<ActivityRequestFocus> },
     CompilationAdmission { focus: Box<ActivityRequestFocus> },
+    CurrentRequestWork { focus: Box<ActivityRequestFocus> },
 }
 
 impl DiagnosticFocus {
@@ -16,14 +17,18 @@ impl DiagnosticFocus {
         match self {
             Self::PageWait { focus } => &focus.participant,
             Self::PageWaitWriters { focus } => &focus.waiter.participant,
-            Self::RequestMemory { focus } | Self::CompilationAdmission { focus } => focus,
+            Self::RequestMemory { focus }
+            | Self::CompilationAdmission { focus }
+            | Self::CurrentRequestWork { focus } => focus,
         }
     }
     pub fn participant_mut(&mut self) -> &mut ActivityRequestFocus {
         match self {
             Self::PageWait { focus } => &mut focus.participant,
             Self::PageWaitWriters { focus } => &mut focus.waiter.participant,
-            Self::RequestMemory { focus } | Self::CompilationAdmission { focus } => focus,
+            Self::RequestMemory { focus }
+            | Self::CompilationAdmission { focus }
+            | Self::CurrentRequestWork { focus } => focus,
         }
     }
     pub fn page_wait(&self) -> Option<&ActivityWaitFocus> {
@@ -46,6 +51,7 @@ impl DiagnosticFocus {
             Self::PageWaitWriters { .. } => RecipeSelector::FocusedPageWaitWriters,
             Self::RequestMemory { .. } => RecipeSelector::FocusedRequestMemory,
             Self::CompilationAdmission { .. } => RecipeSelector::FocusedCompilationAdmission,
+            Self::CurrentRequestWork { .. } => RecipeSelector::CurrentRequestWork,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -54,6 +60,7 @@ impl DiagnosticFocus {
             Self::PageWaitWriters { focus } => focus.is_valid(),
             Self::RequestMemory { focus } => focus.is_request_memory_focus(),
             Self::CompilationAdmission { focus } => focus.is_compilation_admission_focus(),
+            Self::CurrentRequestWork { focus } => focus.is_current_request_work_focus(),
         }
     }
     pub fn from_selection(selection: &CollectionSelection) -> Option<Self> {
@@ -63,6 +70,9 @@ impl DiagnosticFocus {
             }
             CollectionSelection::PageWaitWriters { focus } => Some(Self::PageWaitWriters { focus: focus.clone() }),
             CollectionSelection::FocusedRequestMemory { focus } => Some(Self::RequestMemory { focus: focus.clone() }),
+            CollectionSelection::CurrentRequestWork { focus } => {
+                Some(Self::CurrentRequestWork { focus: focus.clone() })
+            }
             CollectionSelection::FocusedCompilationAdmission { focus }
             | CollectionSelection::SharedCompilationAdmissionFocus { focus, .. } => {
                 Some(Self::CompilationAdmission { focus: focus.clone() })
@@ -109,6 +119,7 @@ impl DiagnosticFocus {
             Self::CompilationAdmission { focus } => {
                 CollectionSelection::FocusedCompilationAdmission { focus: focus.clone() }
             }
+            Self::CurrentRequestWork { focus } => CollectionSelection::CurrentRequestWork { focus: focus.clone() },
         }
     }
 }

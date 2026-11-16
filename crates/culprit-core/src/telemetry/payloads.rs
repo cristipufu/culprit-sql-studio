@@ -164,6 +164,7 @@ impl OperationalFact {
                 Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
             }
             Self::PostgresLog(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
+            Self::CurrentRequestWork(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::MssqlStatementGrants(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::MssqlQueryCompilation(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::Space(_)

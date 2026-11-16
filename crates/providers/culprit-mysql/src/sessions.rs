@@ -1,15 +1,14 @@
 //! Source-qualified live targets and bounded administrative signals. KILL still has a check-to-signal race.
-mod context;
 #[cfg(test)]
 mod tests;
 
+use crate::native::local_context::{self as context, Context};
 use crate::{
     connect::{Connector, Scope, TAG},
     native,
     read::{OwnedRead, QueryRead, ReadSession, confirmed_result},
     rows::Rec,
 };
-use context::Context;
 use culprit_core::telemetry::*;
 use culprit_core::{Error, Result, SessionAction, SessionActionOutcome, SessionActionTarget, session_number, t};
 use mysql_async::Value;

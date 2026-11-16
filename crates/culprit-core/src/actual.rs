@@ -73,8 +73,8 @@ pub struct QueryProgress {
     pub session: String,
     pub engine: Engine,
     pub taken_at: String,
-    /// False once the session has no statement running (it finished, failed or was cancelled).
-    pub running: bool,
+    /// `None` means the current request was not established; only an observed idle point supplies `Some(false)`.
+    pub running: Option<bool>,
     pub state: Option<String>,
     pub wait: Option<String>,
     pub wait_ms: Option<f64>,
@@ -97,17 +97,46 @@ pub struct QueryProgress {
     /// A maintenance step the engine reports progress for (Postgres CREATE INDEX/VACUUM/COPY…, MySQL stages).
     pub phase: Option<String>,
     pub phase_percent: Option<f64>,
+    pub phase_percent_basis: Option<String>,
     /// Why the view is coarser than full per-operator progress on this engine or server, in plain language.
     pub note: Option<String>,
+    pub current_work: Option<Box<crate::telemetry::CurrentRequestWorkSnapshot>>,
+    pub current_work_report: Option<Box<crate::CurrentRequestWorkReport>>,
+    /// Independent session observations carry no request-generation or cached-plan ownership.
+    pub session_context: Option<Box<SessionProgressContext>>,
+    /// An opaque cache key from native request ownership, not SQL text or a session number alone.
+    pub request_key: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct SessionProgressContext {
+    pub source: String,
+    pub context: crate::telemetry::NativeReadContext,
+    pub observed_at: String,
+    pub session: String,
+    pub database: String,
+}
+
+impl SessionProgressContext {
+    pub fn is_valid(&self) -> bool {
+        use crate::telemetry::{NativeIdentity, ObservationBounds};
+        NativeIdentity::new(&self.source).is_valid()
+            && NativeIdentity::new(&self.session).is_valid()
+            && self.context.is_valid()
+            && self.context.target.database().is_some_and(|target| target.database == self.database)
+            && ObservationBounds::new(&self.context.observed_from, &self.context.observed_until)
+                .is_some_and(|bounds| bounds.contains(&self.observed_at))
+    }
 }
 
 impl QueryProgress {
-    pub fn idle(session: &str, engine: Engine, taken_at: String) -> QueryProgress {
+    pub fn unobserved(session: &str, engine: Engine, taken_at: String) -> QueryProgress {
         QueryProgress {
             session: session.to_string(),
             engine,
             taken_at,
-            running: false,
+            running: None,
             state: None,
             wait: None,
             wait_ms: None,
@@ -123,7 +152,12 @@ impl QueryProgress {
             hot_node: None,
             phase: None,
             phase_percent: None,
+            phase_percent_basis: None,
             note: None,
+            current_work: None,
+            current_work_report: None,
+            session_context: None,
+            request_key: None,
         }
     }
 
@@ -464,8 +498,8 @@ mod tests {
     #[test]
     fn progress_weights_operators_by_cost() {
         let p = plan(node(0, 0.0, 1.0, 0.0, 1.0, vec![node(1, 0.0, 1000.0, 0.0, 9.0, vec![])]));
-        let mut progress = QueryProgress::idle("52", Engine::Mssql, String::new());
-        progress.running = true;
+        let mut progress = QueryProgress::unobserved("52", Engine::Mssql, String::new());
+        progress.running = Some(true);
         progress.plan = Some(p);
         progress.nodes = vec![
             NodeProgress {

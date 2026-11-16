@@ -11,6 +11,18 @@ pub struct Rec {
 
 impl Rec {
     #[cfg(test)]
+    pub(crate) fn with_fields(mut self, fields: &[(&str, Value)]) -> Self {
+        for (name, value) in fields {
+            if let Some(index) = self.columns.iter().position(|column| column == name) {
+                self.values[index] = value.clone();
+            } else {
+                self.columns.push((*name).into());
+                self.values.push(value.clone());
+            }
+        }
+        self
+    }
+    #[cfg(test)]
     pub(crate) fn from_values(values: Vec<(&str, Value)>) -> Self {
         Self {
             columns: values.iter().map(|(name, _)| name.to_ascii_lowercase()).collect(),

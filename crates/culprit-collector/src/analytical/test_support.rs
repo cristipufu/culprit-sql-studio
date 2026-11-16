@@ -64,6 +64,8 @@ mod page_writers;
 pub use page_writers::{
     PageWriterCase, PageWriterFixture, page_writer_evidence, page_writer_evidence_cases, page_writer_fixture,
 };
+mod current_request_work;
+pub use current_request_work::{assert_current_request_work_capture, current_request_work_evidence_cases};
 mod statement_work;
 pub use statement_work::{node_statement_work_evidence_cases, statement_work_evidence_cases};
 mod statement_grants;

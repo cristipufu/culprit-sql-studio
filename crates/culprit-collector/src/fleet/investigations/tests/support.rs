@@ -117,6 +117,7 @@ pub(in crate::fleet::investigations) struct Backend {
     pub(in crate::fleet::investigations) route_error: Option<culprit_core::Error>,
     pub(in crate::fleet::investigations) activity: Frame,
     pub(in crate::fleet::investigations) shared: Option<Frame>,
+    pub(in crate::fleet::investigations) current_work: Option<Frame>,
     pub(in crate::fleet::investigations) focus_request: PageWaitRequestState,
     pub(in crate::fleet::investigations) focus_resolution: Option<PageWaitResolution>,
     pub(in crate::fleet::investigations) focus_failure: Option<CollectionStop>,
@@ -228,6 +229,13 @@ impl FleetBackend for Backend {
                     assert_eq!(intent.selection(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     super::request_memory::focused_frame(focus)
+                }
+                CollectionSelection::CurrentRequestWork { focus } => {
+                    let intent =
+                        admission.investigation.as_ref().expect("current work retains its admitted native request");
+                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.budget, request.budget);
+                    self.current_work.clone().unwrap_or_else(|| super::current_request_work::focused_frame(focus))
                 }
                 CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational } => {
                     assert!(admission.investigation.is_none());
@@ -444,6 +452,7 @@ impl Harness {
                 route_error: None,
                 activity,
                 shared,
+                current_work: None,
                 focus_request: PageWaitRequestState::Missing,
                 focus_resolution: None,
                 focus_failure: None,

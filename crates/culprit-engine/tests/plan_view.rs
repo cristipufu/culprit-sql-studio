@@ -48,8 +48,9 @@ impl Provider for PlanReader {
     }
 
     async fn query_progress(&self, session: &str, _: bool) -> Result<culprit_core::QueryProgress> {
-        let mut progress = culprit_core::QueryProgress::idle(session, Engine::Mssql, "2026-10-10T00:00:00Z".into());
-        progress.running = true;
+        let mut progress =
+            culprit_core::QueryProgress::unobserved(session, Engine::Mssql, "2026-10-10T00:00:00Z".into());
+        progress.running = Some(true);
         progress.plan = Some(self.plan.clone());
         Ok(progress)
     }

@@ -456,18 +456,21 @@ export async function demoApi(): Promise<Api> {
       const samples = await liveSample();
       const live = (samples?.[reportName(name)] ?? samples?.[engine])?.sessions.find((s) => s.id === session);
       // The captured progress frames replay for the session running a statement without waiting on another.
-      if (live?.state !== "idle" && !live?.blocked_by && frames.length) {
+      if (live && live.state !== "idle" && !live.blocked_by && frames.length) {
         const frame = frames[Math.floor(Date.now() / 1500) % frames.length]!;
         // Live per-step counters come every time on an engine that sends them; elsewhere the plan only when asked.
-        return { ...frame, session, taken_at: now, plan: withPlan || can(engine, "operator_progress") ? frame.plan : null };
+        return { ...frame, session, taken_at: now, plan: withPlan || can(engine, "operator_progress") ? frame.plan : null,
+          current_work: frame.current_work ?? null, current_work_report: frame.current_work_report ?? null,
+          session_context: frame.session_context ?? null, request_key: frame.request_key ?? null };
       }
       const idle: QueryProgress = {
-        session, engine, taken_at: now, running: false, state: live?.state ?? null, wait: null, wait_ms: null, elapsed_ms: null, cpu_ms: null,
-        logical_reads: null, rows_examined: null, statement: live?.sql ?? null, plan: null, nodes: [], percent: null, percent_basis: null,
-        hot_node: null, phase: null, phase_percent: null, note: null,
+        session, engine, taken_at: now, running: live?.state === "idle" ? false : null, state: live?.state ?? null, wait: null, wait_ms: null, elapsed_ms: null, cpu_ms: null,
+        logical_reads: null, rows_examined: null, statement: null, plan: null, nodes: [], percent: null, percent_basis: null,
+        hot_node: null, phase: null, phase_percent: null, phase_percent_basis: null, note: null, current_work: null, current_work_report: null,
+        session_context: null, request_key: null,
       };
       if (live?.state === "active") {
-        return { ...idle, running: true, state: waitingState(engine), wait: live.wait, wait_ms: live.wait_ms, elapsed_ms: live.elapsed_ms, note: live.blocked_by ? t("ui.demo_api.waiting_for_lock", { session: live.blocked_by }) : null };
+        return { ...idle, running: true, state: waitingState(engine), statement: live.sql, wait: live.wait, wait_ms: live.wait_ms, elapsed_ms: live.elapsed_ms, note: live.blocked_by ? t("ui.demo_api.waiting_for_lock", { session: live.blocked_by }) : null };
       }
       return idle;
     },

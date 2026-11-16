@@ -41,6 +41,7 @@ pub mod plans;
 mod private_fs;
 mod process;
 mod program;
+mod progress_presentation;
 mod provider_registration;
 mod query_log;
 pub mod reading;

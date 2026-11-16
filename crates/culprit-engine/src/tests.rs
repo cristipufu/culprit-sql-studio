@@ -219,7 +219,7 @@ impl Provider for Sessions {
         Ok(culprit_core::SessionActionOutcome::SignalSent)
     }
     async fn query_progress(&self, session: &str, _: bool) -> Result<culprit_core::QueryProgress> {
-        Ok(culprit_core::QueryProgress::idle(session, self.0, "2026-10-24T00:00:00Z".into()))
+        Ok(culprit_core::QueryProgress::unobserved(session, self.0, "2026-10-24T00:00:00Z".into()))
     }
 }
 

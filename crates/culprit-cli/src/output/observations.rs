@@ -184,22 +184,7 @@ pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
 }
 
 pub(crate) fn maintenance_progress(report: &culprit_core::MaintenanceProgressReport) -> String {
-    let entries = report
-        .entries
-        .iter()
-        .take(super::BRIEF_FINDING_LIMIT)
-        .map(|entry| {
-            let mut details = vec![entry.phase.clone()];
-            details.extend(
-                entry
-                    .metrics
-                    .iter()
-                    .filter_map(|metric| metric.text.as_ref().map(|value| format!("{}: {value}", metric.label))),
-            );
-            t!("evidence.cli.observation_entry", title = &entry.title, explanation = details.join("\n"))
-        })
-        .collect::<Vec<_>>();
-    render_summary(
+    native_work_summary(
         Summary {
             title: &report.title,
             summary: &report.summary,
@@ -209,8 +194,45 @@ pub(crate) fn maintenance_progress(report: &culprit_core::MaintenanceProgressRep
             },
             limitations: &report.limitations,
         },
-        |text| super::append_brief_details(text, entries.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS),
+        report.entries.iter().map(|entry| {
+            let mut details = vec![entry.phase.clone()];
+            details.extend(native_metrics(&entry.metrics));
+            (entry.title.as_str(), details)
+        }),
     )
+}
+
+pub(crate) fn current_request_work(report: &culprit_core::CurrentRequestWorkReport) -> String {
+    native_work_summary(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Single {
+                state: Some(report.source_state),
+                reason: report.source_reason.as_deref(),
+            },
+            limitations: &report.limitations,
+        },
+        report.entries.iter().map(|entry| {
+            let mut details = vec![entry.explanation.clone()];
+            details.extend(native_metrics(&entry.metrics));
+            (entry.title.as_str(), details)
+        }),
+    )
+}
+
+fn native_metrics(metrics: &[culprit_core::Metric]) -> impl Iterator<Item = String> + '_ {
+    metrics.iter().filter_map(|metric| metric.text.as_ref().map(|value| format!("{}: {value}", metric.label)))
+}
+
+fn native_work_summary<'a>(summary: Summary<'a>, entries: impl Iterator<Item = (&'a str, Vec<String>)>) -> String {
+    let details = entries
+        .take(super::BRIEF_FINDING_LIMIT)
+        .map(|(title, details)| t!("evidence.cli.observation_entry", title = title, explanation = details.join("\n")))
+        .collect::<Vec<_>>();
+    render_summary(summary, |text| {
+        super::append_brief_details(text, details.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS)
+    })
 }
 
 pub(crate) fn cache_entry_memory(report: &culprit_core::CacheEntryMemoryReport) -> String {

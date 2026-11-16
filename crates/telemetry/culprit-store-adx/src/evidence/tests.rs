@@ -13,6 +13,7 @@ mod cached_runtime;
 mod cleanup;
 mod compilation;
 mod compiler_admission;
+mod current_request_work;
 mod diagnostics;
 mod file_io;
 mod focused_memory;

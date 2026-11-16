@@ -2,6 +2,6 @@
 
 export type YsqlIndexBuildProgress = { tuples_done: string | null, 
 /**
- * DocDB's native backfill estimate is independent from PostgreSQL heap-block work and measured completion.
+ * DocDB's backfill estimate is separate from PostgreSQL heap work and whole-command completion.
  */
 tuples_total_estimate: string | null, };

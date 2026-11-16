@@ -1,6 +1,6 @@
 use super::*;
 use crate::connect::{Connector, Flavor};
-use culprit_core::{DatabaseIdentity, Engine};
+use culprit_core::{DatabaseIdentity, Engine, telemetry::SharedResourceIdentity};
 use mysql_async::Value;
 
 #[derive(Clone, Debug)]
@@ -39,16 +39,20 @@ pub(crate) struct Metadata {
     pub process_wide: bool,
     /// Server process lifetime only. Never a reset marker for independently reset digest/table/status counters.
     pub started_second: Option<u64>,
+    pub member: Option<SharedResourceIdentity>,
 }
 impl Metadata {
     pub(crate) fn same_activity_source(&self, other: &Self) -> bool {
-        self.connection.same_source(&other.connection) && self.started_second == other.started_second
+        self.connection.same_source(&other.connection)
+            && self.started_second == other.started_second
+            && self.member == other.member
     }
     pub(crate) fn same_source(&self, other: &Self) -> bool {
         self.connection.same_source(&other.connection)
             && self.database_wide == other.database_wide
             && self.process_wide == other.process_wide
             && self.started_second == other.started_second
+            && self.member == other.member
     }
 }
 pub(crate) async fn read<R: QueryRead>(reader: &mut R, connector: &Connector) -> Result<Metadata> {
@@ -69,17 +73,39 @@ async fn read_identity<R: QueryRead>(reader: &mut R, connector: &Connector, proc
     let grantee = format!("'{}'@'{}'", user.replace('\'', "''"), host.replace('\'', "''"));
     // Direct global/schema privileges are sufficient proof. Role-only grants remain unverified rather than
     // interpreting server-specific role expansion or silently claiming an inventory is database-wide.
-    let visibility = one(reader, "SELECT
+    let member = member_projection(&connection, process_epoch);
+    let visibility = one(reader, &format!("SELECT
         (EXISTS(SELECT 1 FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=? AND PRIVILEGE_TYPE='SELECT')
           OR EXISTS(SELECT 1 FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE=? AND TABLE_SCHEMA=? AND PRIVILEGE_TYPE='SELECT')) AS database_wide,
-        EXISTS(SELECT 1 FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=? AND PRIVILEGE_TYPE='PROCESS') AS process_wide",
+        EXISTS(SELECT 1 FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=? AND PRIVILEGE_TYPE='PROCESS') AS process_wide,
+        {member} AS native_member"),
         vec![Value::from(grantee.clone()),Value::from(grantee.clone()),Value::from(connection.database_name.clone()),Value::from(grantee)]).await?;
+    let member = if process_epoch {
+        visibility
+            .native_text("native_member")?
+            .map(|value| super::instance::resource(connection.flavor, &value))
+            .transpose()?
+    } else {
+        None
+    };
     Ok(Metadata {
         connection,
         database_wide: flag(&visibility, "database_wide")?,
         process_wide: flag(&visibility, "process_wide")?,
         started_second,
+        member,
     })
+}
+
+fn member_projection(connection: &ConnectionContext, process_epoch: bool) -> &'static str {
+    if !process_epoch || !connection.performance_schema {
+        return "NULL";
+    }
+    match connection.flavor {
+        Flavor::Mysql => "@@GLOBAL.server_uuid",
+        Flavor::Mariadb if super::local_context::has_mariadb_uid(&connection.version) => "@@GLOBAL.server_uid",
+        Flavor::Mariadb => "NULL",
+    }
 }
 
 /// Native connection/database identity and its own UTC clock, without inventing unqueried visibility facts.
@@ -118,8 +144,10 @@ pub(crate) async fn connection_context<R: QueryRead>(
     })
 }
 
-/// A native server-process marker, independently of any selected database or resettable statement counters.
-/// Native Uptime is query-start seconds minus server start; reading both in one statement avoids clock skew.
+/// The fixed native server startup time in whole Unix seconds, recovered within one statement: both Uptime
+/// and UNIX_TIMESTAMP() use the same query-start second. This timestamp generation retains one-second
+/// resolution, including when hashed; it is neither a globally unique boot nonce nor proof of an independent
+/// digest/table/status counter reset.
 /// https://github.com/mysql/mysql-server/blob/8.4/sql/mysqld.cc (show_starttime)
 /// https://github.com/MariaDB/server/blob/11.8/sql/mysqld.cc (show_starttime)
 pub(crate) async fn process_started_second<R: QueryRead>(reader: &mut R, flavor: Flavor) -> Result<u64> {

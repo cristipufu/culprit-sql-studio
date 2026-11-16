@@ -61,10 +61,10 @@ fn decode(row: &Row, database: u32, node: &str, expected: &ActivityKey) -> Resul
         statement: Some(activity::statement_identity(&pid, &backend, &request).qualified("node", node)),
         database_oid: database.to_string(),
         relation_oid: native::text(row, "relation_oid")?,
-        index_oid: native::text(row, "index_oid")?,
-        command: IndexBuildCommand::from_native(&native::text(row, "command")?).ok_or_else(native::invalid)?,
+        index_oid: Some(native::text(row, "index_oid")?),
+        command: MaintenanceCommand::from_native(&native::text(row, "command")?).ok_or_else(native::invalid)?,
         phase: native::text(row, "phase")?,
-        work: IndexBuildProgressWork::Ysql { progress: Box::new(work(row)?) },
+        work: MaintenanceProgressWork::YsqlIndexBuild { progress: Box::new(work(row)?) },
     };
     if !point.is_valid() {
         return Err(native::invalid());

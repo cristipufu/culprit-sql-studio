@@ -6,6 +6,30 @@ use crate::model::Capability;
 
 pub(super) struct Mysql;
 
+/// One Performance Schema event belongs to a physical thread and its native timer generation.
+pub fn activity_statement_identity(
+    session: &crate::telemetry::NativeActivityIdentity,
+    request: &crate::telemetry::NativeActivityIdentity,
+) -> Option<crate::telemetry::NativeIdentity> {
+    fn canonical(value: &str, nonzero: bool) -> bool {
+        value.parse::<u64>().is_ok_and(|number| (!nonzero || number > 0) && number.to_string() == value)
+    }
+    if !canonical(&session.id, true)
+        || !canonical(&session.generation, true)
+        || !canonical(&request.id, true)
+        || !canonical(&request.generation, false)
+    {
+        return None;
+    }
+    Some(
+        crate::telemetry::NativeIdentity::new(crate::telemetry::digest(
+            format!("{}|{}|{}|{}", session.id, session.generation, request.id, request.generation).as_bytes(),
+        ))
+        .qualified("source", "performance_schema.events_statements_current")
+        .qualified("basis", "thread-event-start"),
+    )
+}
+
 fn version_pair(server: &ServerInfo) -> Option<(u32, u32)> {
     let mut parts = server.version.split(['.', '-']);
     Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))

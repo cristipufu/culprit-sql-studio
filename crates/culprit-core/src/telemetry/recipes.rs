@@ -47,6 +47,7 @@ pub enum RecipeSelector {
     FocusedPageWaitWriters,
     FocusedRequestMemory,
     MaintenanceProgress,
+    CurrentRequestWork,
     FocusedCompilationAdmission,
 }
 
@@ -58,6 +59,8 @@ impl RecipeSelector {
         match (self, &request.selection) {
             (Self::FocusedPageWaitWriters, CollectionSelection::PageWaitWriters { .. }) => true,
             (Self::Collection(_), CollectionSelection::PageWaitWriters { .. }) => false,
+            (Self::CurrentRequestWork, CollectionSelection::CurrentRequestWork { .. }) => true,
+            (Self::Collection(_), CollectionSelection::CurrentRequestWork { .. }) => false,
             (Self::MaintenanceProgress, CollectionSelection::MaintenanceProgress { .. }) => true,
             (Self::Collection(_), CollectionSelection::MaintenanceProgress { .. }) => false,
             (
