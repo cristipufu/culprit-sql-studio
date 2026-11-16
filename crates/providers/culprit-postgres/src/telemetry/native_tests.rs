@@ -4,6 +4,8 @@ use culprit_collector::capture::{CollectionCancellation, SourceFactory, collect_
 use culprit_core::{ConnectionSpec, Engine, Provider};
 use culprit_read::admission::SourceGate;
 
+mod replication;
+
 #[test]
 fn task_space_is_explicitly_unsupported_without_connecting_or_starting_a_runtime() {
     let provider = crate::PostgresProvider::new(&ConnectionSpec {

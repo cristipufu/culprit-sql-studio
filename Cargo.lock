@@ -1199,12 +1199,14 @@ name = "culprit-mysql"
 version = "0.5.6"
 dependencies = [
  "async-trait",
+ "culprit-collector",
  "culprit-core",
  "culprit-read",
  "mysql_async",
  "rustls",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

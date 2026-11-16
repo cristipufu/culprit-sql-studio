@@ -10,7 +10,23 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_PHASES: usize = 32;
 const MAX_OBSERVER_QUERIES: u32 = 512;
 mod lifecycle;
-pub(crate) use lifecycle::lifecycle_cases;
+pub(crate) use lifecycle::{assert_no_followup, lifecycle_cases};
+
+#[derive(Clone)]
+pub(crate) struct TemplateObservation {
+    id: String,
+    observed: Arc<AtomicBool>,
+}
+impl TemplateObservation {
+    pub(crate) fn was_active(&self) -> bool {
+        self.observed.load(Ordering::Acquire)
+    }
+    fn observe(&self, sql: &str, active: bool) {
+        if active && digest(sql.as_bytes()) == self.id {
+            self.observed.store(true, Ordering::Release);
+        }
+    }
+}
 
 #[derive(Clone)]
 struct SessionIdentity {
@@ -65,6 +81,7 @@ pub(crate) struct MeasuredRead {
     phase: Option<Phase>,
     phases: Vec<Value>,
     active_seen: Arc<AtomicBool>,
+    template_watch: Option<TemplateObservation>,
     errors: Vec<String>,
 }
 
@@ -123,6 +140,7 @@ impl MeasuredRead {
             phase: None,
             phases: vec![],
             active_seen: Arc::new(AtomicBool::new(false)),
+            template_watch: None,
             errors: vec![],
         })
     }
@@ -132,6 +150,17 @@ impl MeasuredRead {
     }
     pub(crate) fn scope(&self) -> &NativeReadContext {
         &self.context
+    }
+    pub(crate) fn watch_template(&mut self, id: &str) -> culprit_core::Result<TemplateObservation> {
+        if self.owner.queries() != 0 || self.phase.is_some() || self.template_watch.is_some() || !valid_digest(id) {
+            return Err(invalid_data());
+        }
+        let observation = TemplateObservation { id: id.into(), observed: Arc::new(AtomicBool::new(false)) };
+        self.template_watch = Some(observation.clone());
+        Ok(observation)
+    }
+    pub(crate) async fn is_quiet(&mut self) -> culprit_core::Result<bool> {
+        self.observer.is_quiet().await
     }
     pub(crate) fn report(&self) -> Value {
         json!({
@@ -273,6 +302,9 @@ impl NativeRead for MeasuredRead {
                         match self.observer.sample().await {
                             Ok(sample) => {
                                 if sample.active { self.active_seen.store(true, Ordering::Release); }
+                                if let (Some(watch), Some(phase)) = (&self.template_watch, &self.phase) {
+                                    watch.observe(&phase.sql, sample.active);
+                                }
                                 if let Some(phase) = &mut self.phase { phase.observe(&sample); }
                             }
                             Err(error) => { observer_error = Some(error); break Err(ReadError::Stopped(CollectionStop::Cancelled)); }

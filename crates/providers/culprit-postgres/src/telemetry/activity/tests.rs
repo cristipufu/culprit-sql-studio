@@ -25,6 +25,8 @@ fn metadata(at: &str, started: &str, visible: bool) -> Row {
             ("started_at", Some(started.into())),
             ("observed_at", Some(at.into())),
             ("full_visibility", Some(if visible { "t" } else { "f" }.into())),
+            ("replay_pause_requested_access", Some("f".into())),
+            ("replay_pause_state_access", Some("f".into())),
             ("pgss_schema", None),
             ("pgss_columns", None),
             ("pgss_info", Some("f".into())),

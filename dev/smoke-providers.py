@@ -12,7 +12,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from replication_fixtures import MySqlReplication, PostgresReplication
+from mssql_replication_fixture import SqlServerReplication
+from mysql_replication_fixture import MySqlMovingReplication
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +56,21 @@ FIXTURES = (
             "yugabyte", 5433, "culprit_yugabyte", "yugabyte", "6g"),
 )
 
+REPLICATION_FIXTURES = (
+    Fixture("mysql-replication", "mysql:8.4", "mysql", 3306, "culprit_smoke", "root", "2g"),
+    Fixture("mysql-no-performance-schema", "mysql:8.4", "mysql", 3306, "culprit_smoke", "root", "2g",
+            options=("--performance-schema=OFF",)),
+    Fixture("mariadb-replication", "mariadb:11.8", "mysql", 3306, "culprit_smoke", "root"),
+    Fixture("mariadb-no-performance-schema", "mariadb:11.8", "mysql", 3306, "culprit_smoke", "root",
+            options=("--performance-schema=OFF",)),
+)
+POSTGRES_REPLICATION_IMAGES = {"postgres-replication": "postgres:18.6", "postgres-16-replication": "postgres:16"}
+OPTIONAL_NATIVE_MODULES = {
+    "culprit-postgres": ("telemetry::native_tests::replication::",),
+    "culprit-mysql": ("telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::"),
+    "culprit-mssql": ("telemetry::replication::native_tests::",),
+}
+
 
 class Commands:
     def __init__(self, passwords):
@@ -80,10 +99,12 @@ class Commands:
                 pass
             process.wait()
 
-    def run(self, args, *, input=None, env=None, timeout=COMMAND_BUDGET, check=True, echo=False):
+    def run(self, args, *, input=None, env=None, timeout=COMMAND_BUDGET, check=True, echo=False,
+            separate_stderr=False):
         process = subprocess.Popen(args, cwd=ROOT, env={**os.environ, **(env or {})},
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, start_new_session=True)
+                                   stderr=subprocess.PIPE if separate_stderr else subprocess.STDOUT,
+                                   text=True, start_new_session=True)
         started = time.monotonic()
         pending_input = input
         try:
@@ -92,7 +113,7 @@ class Commands:
                 if remaining <= 0:
                     raise TimeoutError(f"{args[0]} exceeded its {timeout}s budget")
                 try:
-                    output, _ = process.communicate(pending_input, timeout=min(HEARTBEAT, remaining))
+                    output, diagnostics = process.communicate(pending_input, timeout=min(HEARTBEAT, remaining))
                     break
                 except subprocess.TimeoutExpired as progress:
                     pending_input = None
@@ -105,10 +126,16 @@ class Commands:
                         print(f"  {args[0]} is still running ({int(time.monotonic() - started)}s{current})", flush=True)
         finally:
             self.stop(process)
-            for stream in (process.stdin, process.stdout):
+            for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()
         output = self.sanitized(output)
+        diagnostics = self.sanitized(diagnostics or "")
+        if diagnostics:
+            if process.returncode:
+                output += diagnostics
+            else:
+                print(diagnostics, file=sys.stderr, end="" if diagnostics.endswith("\n") else "\n", flush=True)
         if echo or (check and process.returncode):
             print(output, end="" if output.endswith("\n") else "\n", flush=True)
         if check and process.returncode:
@@ -119,7 +146,8 @@ class Commands:
 def run_tests(commands, crate, selection, environment, *, library=True, skip=None):
     target = ["--lib"] if library else ["--test", "all"]
     print(f"  Testing {crate} {selection}", flush=True)
-    filters = ["--skip", skip] if skip else []
+    skips = [skip] if isinstance(skip, str) else (skip or [])
+    filters = [argument for selection in skips for argument in ("--skip", selection)]
     features = ["--features", "collector"] if crate == "culprit-engine" else []
     _, output = commands.run(["cargo", "test", "--locked", "-p", crate, *features, *target, selection,
                              "--", "--ignored", "--test-threads=1", *filters],
@@ -130,7 +158,7 @@ def run_tests(commands, crate, selection, environment, *, library=True, skip=Non
 
 
 class Database:
-    def __init__(self, fixture):
+    def __init__(self, fixture, *, launch_configuration=None):
         self.fixture = fixture
         self.owner = secrets.token_hex(12)
         self.name = f"culprit-smoke-{fixture.name}-{self.owner}"
@@ -138,6 +166,9 @@ class Database:
         self.limited_password = f"Reader!{secrets.token_hex(16)}Aa9"
         self.commands = Commands([self.password, self.limited_password])
         self.port = None
+        self.options = list(fixture.options)
+        self.container_options = []
+        self.launch_configuration = launch_configuration
 
     def __enter__(self):
         try:
@@ -160,16 +191,18 @@ class Database:
         if found:
             self.commands.run(["docker", "pull", fixture.image], timeout=600, echo=True)
         args = ["docker", "create", "--pull=never", "--name", self.name,
-                "--hostname", self.name, "--label", f"{OWNER_LABEL}={self.owner}",
+                "--hostname", f"culprit-smoke-{fixture.engine}-{self.owner}",
+                "--label", f"{OWNER_LABEL}={self.owner}",
                 "--cpus", "3" if fixture.engine == "yugabyte" else "2", "--memory", fixture.memory]
         for port in self.published_ports():
             args += ["-p", f"127.0.0.1::{port}"]
         if fixture.platform:
             args += ["--platform", fixture.platform]
+        args += self.container_options
         environment, command = self.configuration()
         for name in environment:
             args += ["-e", name]
-        self.commands.run([*args, fixture.image, *command, *fixture.options], env=environment)
+        self.commands.run([*args, fixture.image, *command, *self.options], env=environment)
         self.commands.run(["docker", "start", self.name])
         self.wait_until_ready()
 
@@ -198,14 +231,19 @@ class Database:
         self.wait_until_ready()
 
     def configuration(self):
+        if self.launch_configuration is not None:
+            return self.launch_configuration
         fixture = self.fixture
         if fixture.engine == "postgres":
             preload = "timescaledb,pg_stat_statements" if fixture.name == "timescale" else "pg_stat_statements"
             return ({"POSTGRES_PASSWORD": self.password, "POSTGRES_DB": fixture.database},
                     ["-c", f"shared_preload_libraries={preload}", "-c", "track_io_timing=on"])
         if fixture.engine == "mysql":
+            explicit_options = {option.partition("=")[0] for option in self.options}
+            defaults = [option for option in ("--performance-schema=ON", "--server-id=1")
+                        if option.partition("=")[0] not in explicit_options]
             return ({"MYSQL_ROOT_PASSWORD": self.password, "MYSQL_ROOT_HOST": "%", "MYSQL_DATABASE": fixture.database},
-                    ["--performance-schema=ON", "--server-id=1"])
+                    defaults)
         if fixture.engine == "mssql":
             return ({"ACCEPT_EULA": "Y", "MSSQL_PID": "Developer", "MSSQL_SA_PASSWORD": self.password}, [])
         return ({}, ["bin/yugabyted", "start", "--background=false", "--callhome=false", "--ui=false",
@@ -216,7 +254,7 @@ class Database:
     def admin_database(self):
         return {"postgres": "postgres", "yugabyte": "yugabyte", "mysql": "mysql", "mssql": "master"}[self.fixture.engine]
 
-    def sql(self, sql, *, database=None, check=True, timeout=COMMAND_BUDGET):
+    def sql(self, sql, *, database=None, check=True, timeout=COMMAND_BUDGET, tuples=False):
         fixture = self.fixture
         database = database or fixture.database
         env = {}
@@ -229,16 +267,20 @@ class Database:
             host = self.name if fixture.engine == "yugabyte" else "127.0.0.1"
             args += [self.name, binary, "-X", "-v", "ON_ERROR_STOP=1", "-U", fixture.user,
                      "-d", database, "-h", host]
+            if tuples:
+                args += ["-A", "-t"]
         elif fixture.engine == "mysql":
             env = {"MYSQL_PWD": self.password}
             binary = "mariadb" if fixture.name.startswith("mariadb") else "mysql"
             args += ["-e", "MYSQL_PWD", self.name, binary, "--protocol=TCP", "-h", "127.0.0.1",
                      f"--connect-timeout={CONNECT_BUDGET}", "-u", fixture.user, database]
+            if tuples:
+                args += ["--batch", "--skip-column-names"]
         else:
             env = {"SQLCMDPASSWORD": self.password}
             args += ["-e", "SQLCMDPASSWORD", self.name, "/opt/mssql-tools18/bin/sqlcmd",
                      "-C", "-S", "localhost", "-U", fixture.user, "-d", database, "-b", "-l", str(CONNECT_BUDGET)]
-        return self.commands.run(args, input=sql, env=env, check=check, timeout=timeout)
+        return self.commands.run(args, input=sql, env=env, check=check, timeout=timeout, separate_stderr=True)
 
     def seed(self):
         fixture = self.fixture
@@ -254,7 +296,7 @@ class Database:
             self.sql(f"ALTER DATABASE {fixture.database} SET QUERY_STORE=ON (OPERATION_MODE=READ_WRITE, QUERY_CAPTURE_MODE=ALL);")
         schema = "dbo" if fixture.engine == "mssql" else (fixture.database if fixture.engine == "mysql" else "public")
         table = f"{schema}.smoke_rows"
-        if fixture.engine == "mysql":
+        if fixture.engine == "mysql" and "--performance-schema=OFF" not in self.options:
             # Explicit setup on this owned fixture, never collector behavior. MariaDB leaves the current-statement
             # consumer off by default; provider tests separately verify that disabled instrumentation stays unknown.
             self.sql("UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME IN "
@@ -297,7 +339,7 @@ class Database:
 
     def test_environment(self):
         fixture = self.fixture
-        return {"CULPRIT_KEYCHAIN": "off", "CULPRIT_LANG": "en",
+        return {"CULPRIT_KEYCHAIN": "off", "CULPRIT_LANG": "en", "CULPRIT_SMOKE_OWNER": self.owner,
                 "CULPRIT_SMOKE_ENGINE": fixture.engine, "CULPRIT_SMOKE_PORT": self.port,
                 "CULPRIT_SMOKE_DATABASE": fixture.database, "CULPRIT_SMOKE_USER": fixture.user,
                 "CULPRIT_SMOKE_PASSWORD": self.password, "CULPRIT_SMOKE_LIMITED_USER": "smoke_reader",
@@ -311,10 +353,15 @@ class Database:
                 "CULPRIT_YSQL_TEST_PORT": self.port, "CULPRIT_MYSQL_TEST_PORT": self.port,
                 "CULPRIT_MYSQL_TEST_PASSWORD": self.password,
                 "CULPRIT_PREVIEW_MSSQL_PORT": self.port, "CULPRIT_PREVIEW_MSSQL_PASSWORD": self.password,
-                "CULPRIT_MSSQL_SOURCE_TEST_PORT": self.port, "CULPRIT_MSSQL_SOURCE_TEST_PASSWORD": self.password}
+                "CULPRIT_MSSQL_SOURCE_TEST_PORT": self.port, "CULPRIT_MSSQL_SOURCE_TEST_PASSWORD": self.password,
+                "CULPRIT_MSSQL_REPLICATION_EXPECT_EXPANDED_AG":
+                    self.configuration()[0].get("MSSQL_ENABLE_HADR", "0")}
 
-    def test(self, crate, selection, *, library=True, skip=None):
-        run_tests(self.commands, crate, selection, self.test_environment(), library=library, skip=skip)
+    def test(self, crate, selection, *, library=True, skip=None, environment=None):
+        skips = [skip] if isinstance(skip, str) else list(skip or [])
+        skips += [module for module in OPTIONAL_NATIVE_MODULES.get(crate, ()) if module not in selection]
+        run_tests(self.commands, crate, selection, self.test_environment() | (environment or {}),
+                  library=library, skip=list(dict.fromkeys(skips)))
 
     def verify(self, selected_tests=None):
         if selected_tests:
@@ -370,6 +417,13 @@ class Database:
         self.commands.run(["docker", "unpause", self.name], check=False)
         self.commands.run(["docker", "rm", "--force", "--volumes", self.name])
         print(f"Removed owned {self.fixture.name} container and anonymous volumes", flush=True)
+
+
+class HadrDatabase(Database):
+    def configuration(self):
+        environment, command = super().configuration()
+        environment["MSSQL_ENABLE_HADR"] = "1"
+        return environment, command
 
 
 class SshDatabase(Database):
@@ -566,7 +620,9 @@ def interrupted(*_):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("fixtures", nargs="+", choices=[f.name for f in FIXTURES] + ["yugabyte-cluster", "ssh", "all"])
+    parser.add_argument("fixtures", nargs="+", choices=[f.name for f in FIXTURES + REPLICATION_FIXTURES]
+                        + list(POSTGRES_REPLICATION_IMAGES)
+                        + ["mssql-hadr", "mssql-replication", "mysql-moving-replication", "yugabyte-cluster", "ssh", "all"])
     parser.add_argument("--test", nargs=2, action="append", metavar=("CRATE", "FILTER"),
                         help="run only this live test selection; repeat for multiple commands in the same fixture")
     args = parser.parse_args()
@@ -577,6 +633,38 @@ def main():
             database.seed()
             database.verify(args.test)
     count = len(selected)
+    for fixture in REPLICATION_FIXTURES:
+        if fixture.name in args.fixtures:
+            with MySqlReplication(Database(fixture)) as database:
+                database.verify(args.test)
+            count += 1
+    for name, image in POSTGRES_REPLICATION_IMAGES.items():
+        if name in args.fixtures:
+            primary = Database(Fixture("pg-repl-primary", image, "postgres", 5432, "culprit_replication", "postgres"))
+            standby = Database(Fixture("pg-repl-standby", image, "postgres", 5432, "culprit_replication", "postgres"))
+            with PostgresReplication(primary, standby, OWNER_LABEL) as database:
+                database.verify(args.test)
+            count += 1
+    if "mssql-hadr" in args.fixtures:
+        fixture = replace(next(fixture for fixture in FIXTURES if fixture.name == "mssql"), name="mssql-hadr")
+        with HadrDatabase(fixture) as database:
+            database.seed()
+            database.verify(args.test or [("culprit-mssql", "telemetry::replication::native_tests::")])
+        count += 1
+    if "mssql-replication" in args.fixtures:
+        fixture = next(fixture for fixture in FIXTURES if fixture.name == "mssql")
+        primary = Database(replace(fixture, name="mssql-ag-primary"))
+        secondary = Database(replace(fixture, name="mssql-ag-secondary"))
+        with SqlServerReplication(primary, secondary, OWNER_LABEL) as database:
+            database.verify(args.test)
+        count += 1
+    if "mysql-moving-replication" in args.fixtures:
+        fixture = next(fixture for fixture in FIXTURES if fixture.name == "mysql")
+        source = Database(replace(fixture, name="mysql-source"))
+        replica = Database(replace(fixture, name="mysql-replica"))
+        with MySqlMovingReplication(source, replica, OWNER_LABEL) as database:
+            database.verify(args.test)
+        count += 1
     if "yugabyte-cluster" in args.fixtures or "all" in args.fixtures:
         with YugabyteCluster() as cluster:
             cluster.verify(args.test)

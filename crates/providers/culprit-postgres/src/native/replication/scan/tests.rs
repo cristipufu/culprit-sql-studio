@@ -15,12 +15,50 @@ impl QueryRead for Reader {
     }
 }
 fn context(standby: bool, full_visibility: bool) -> Row {
+    context_with_pause(standby, full_visibility, ReplayPauseAccess { requested: true, state: true })
+}
+fn context_with_pause(standby: bool, full_visibility: bool, pause: ReplayPauseAccess) -> Row {
     Row::from_fields([
         ("standby".into(), Some(if standby { "t" } else { "f" }.into())),
         ("database_oid".into(), Some("16384".into())),
         ("version".into(), Some("170000".into())),
         ("full_visibility".into(), Some(if full_visibility { "t" } else { "f" }.into())),
+        ("replay_pause_requested_access".into(), Some(if pause.requested { "t" } else { "f" }.into())),
+        ("replay_pause_state_access".into(), Some(if pause.state { "t" } else { "f" }.into())),
     ])
+}
+
+#[tokio::test]
+async fn denied_optional_calls_keep_the_real_receiver_and_unknown_values_with_the_same_two_native_queries() {
+    let access = ReplayPauseAccess { requested: false, state: false };
+    let receiver = native_row(
+        "pg_recovery",
+        "local",
+        serde_json::json!({
+            "kind":"standby","name":"this server","active_pid":"73","receiver":"streaming",
+            "receive_lsn":"1/10","replay_lsn":"1/10","behind":"0","streaming_configured":true,
+            "replay_pause_requested":null,"replay_pause_state":null,
+            "replay_pause_access":{"requested":false,"state":false},
+            "server_version_num":"170000","read_database_oid":"16384","read_standby":true,
+            "observed_at":"2026-11-13T06:00:01.123456Z","full_visibility":true
+        }),
+    );
+    let mut io = Reader {
+        replies: [Ok(vec![context_with_pause(true, true, access)]), Ok(vec![receiver])].into(),
+        ..Default::default()
+    };
+    let acquired = acquire(&mut io, None).await.unwrap();
+    assert_eq!(io.calls.len(), 2);
+    assert!(io.replies.is_empty());
+    assert!(io.calls[0].contains(ReplayPauseAccess::PROJECTION));
+    assert!(!io.calls[1].contains("pg_is_wal_replay_paused"));
+    assert!(!io.calls[1].contains("pg_get_wal_replay_pause_state"));
+    assert_eq!(acquired.replicas[0].state.as_deref(), Some("streaming"));
+    let ReplicationFact::Native(sample) = &acquired.snapshot.observations[0].fact else { panic!() };
+    assert_eq!(sample.measurements.properties["replay_pause_access"], "{\"requested\":false,\"state\":false}");
+    assert!(!sample.measurements.properties.contains_key("replay_pause_requested"));
+    assert!(!sample.measurements.properties.contains_key("replay_pause_state"));
+    assert!(acquired.snapshot.is_valid());
 }
 fn reader(rows: Vec<Row>, visible: bool) -> Reader {
     Reader { replies: [Ok(vec![context(false, visible)]), Ok(rows)].into(), ..Default::default() }

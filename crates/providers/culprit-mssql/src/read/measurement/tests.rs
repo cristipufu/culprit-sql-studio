@@ -2,6 +2,17 @@ use super::*;
 use crate::value::Val;
 
 #[test]
+fn only_an_active_sample_of_the_exact_template_establishes_cancellation_observation() {
+    let sql = "SELECT /* culprit */ database_id FROM sys.databases";
+    let watch = TemplateObservation { id: digest(sql.as_bytes()), observed: Arc::new(AtomicBool::new(false)) };
+    watch.observe(sql, false);
+    watch.observe("SELECT /* culprit */ name FROM sys.databases", true);
+    assert!(!watch.was_active());
+    watch.observe(sql, true);
+    assert!(watch.was_active());
+}
+
+#[test]
 fn native_deltas_keep_integer_precision_and_refuse_regressing_lifetimes() {
     let before = Counters { cpu: 2, logical: 9_007_199_254_740_993, physical: 3, writes: 4 };
     let after = Counters { cpu: 2, logical: 9_007_199_254_740_994, physical: 4, writes: 4 };

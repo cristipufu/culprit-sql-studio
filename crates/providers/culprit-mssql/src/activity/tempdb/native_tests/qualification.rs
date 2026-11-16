@@ -1,12 +1,11 @@
 //! Empirical owned-environment costs. This does not issue a production qualification receipt.
 use super::*;
-use crate::read::measurement::{MeasuredRead, lifecycle_cases, shutdown_state};
-use serde_json::{Value, json};
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-    time::Instant,
+use crate::{
+    read::measurement::{MeasuredRead, lifecycle_cases, shutdown_state},
+    test_support::{receipt_directory, save_cost_receipt},
 };
+use serde_json::{Value, json};
+use std::{collections::BTreeSet, time::Instant};
 
 mod fixture;
 mod matrix;
@@ -31,7 +30,7 @@ async fn owned_task_space_cost_matrix_preserves_native_work_and_settlement() {
             fixture.initialize().await?;
             let actor_started=Instant::now();
             fixture.start_actors(actors).await?;
-            save(&directory,&format!("actors-{actors}-setup"),&json!({
+            save_cost_receipt(&directory,&format!("actors-{actors}-setup"),&json!({
                 "actors":actors,
                 "schema_setup_client_elapsed_ms":fixture.setup_elapsed_ms,
                 "schema_setup_batches":2,
@@ -47,9 +46,9 @@ async fn owned_task_space_cost_matrix_preserves_native_work_and_settlement() {
             }))?;
             for load in [false, true] {
                 let warmup = capture(&fixture).await?;
-                save(&directory, &format!("actors-{actors}-load-{load}-warmup"), &json!({"schema_version":RECEIPT_SCHEMA_VERSION,"case":"unchanged-source-warmup","source_work":warmup}))?;
+                save_cost_receipt(&directory, &format!("actors-{actors}-load-{load}-warmup"), &json!({"schema_version":RECEIPT_SCHEMA_VERSION,"case":"unchanged-source-warmup","source_work":warmup}))?;
                 let rounds = matrix::abba(&fixture, load).await?;
-                save(&directory, &format!("actors-{actors}-load-{load}"), &json!({
+                save_cost_receipt(&directory, &format!("actors-{actors}-load-{load}"), &json!({
                     "schema_version":RECEIPT_SCHEMA_VERSION,
                     "recipe":recipe(),
                     "actors":actors,
@@ -64,16 +63,16 @@ async fn owned_task_space_cost_matrix_preserves_native_work_and_settlement() {
                 }))?;
             }
             let limited = capture_with_budget(&fixture, CollectionBudget { max_snapshot_rows:1,page_rows:1,..crate::task_space::bounded_budget(&CollectionBudget::default()) }).await?;
-            save(&directory, &format!("actors-{actors}-row-cap"), &json!({"case":"strict-caller-row-cap","source_work":limited,"native_cpu_io_cost_qualified":false}))?;
+            save_cost_receipt(&directory, &format!("actors-{actors}-row-cap"), &json!({"case":"strict-caller-row-cap","source_work":limited,"native_cpu_io_cost_qualified":false}))?;
             if actors == *ACTOR_COUNTS.last().unwrap() {
                 let lifecycle = lifecycle_cases(fixture.pool.clone(), fixture.port, &fixture.password, &fixture.database).await?;
-                save(&directory, "lifecycle", &json!({"schema_version":RECEIPT_SCHEMA_VERSION,"cases":lifecycle,"production_admission":"unqualified"}))?;
+                save_cost_receipt(&directory, "lifecycle", &json!({"schema_version":RECEIPT_SCHEMA_VERSION,"cases":lifecycle,"production_admission":"unqualified"}))?;
             }
             Ok::<_, culprit_core::Error>(())
         }).catch_unwind()).await;
         let cleanup_started = Instant::now();
         let cleanup = tokio::time::timeout(Duration::from_secs(8), fixture.close()).await;
-        save(
+        save_cost_receipt(
             &directory,
             &format!("actors-{actors}-cleanup"),
             &json!({
@@ -141,7 +140,7 @@ async fn capture_with_budget(fixture: &CostFixture, budget: CollectionBudget) ->
     });
     let serial = SOURCE_RECEIPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     assert!(serial < 32);
-    save(&receipt_directory(), &format!("source-work-{serial:02}"), &outcome)?;
+    save_cost_receipt(&receipt_directory(), &format!("source-work-{serial:02}"), &outcome)?;
     match &captured {
         Err(error) => return Err(error.clone()),
         Ok(captured) => {
@@ -189,27 +188,4 @@ fn recipe() -> RecipeDescriptor {
         .into_iter()
         .find(|recipe| recipe.id == "mssql.task-space")
         .expect("the source-owned recipe")
-}
-fn receipt_directory() -> PathBuf {
-    let path =
-        PathBuf::from(std::env::var("CULPRIT_NATIVE_COST_RECEIPT_DIR").expect("explicit private receipt directory"));
-    assert!(path.is_absolute() && path.is_dir() && !path.symlink_metadata().unwrap().file_type().is_symlink());
-    path
-}
-fn save(directory: &Path, name: &str, value: &Value) -> culprit_core::Result<()> {
-    use std::io::Write;
-    let path = directory.join(format!("{name}.json"));
-    let mut options = std::fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut output = options.open(path).map_err(|_| crate::read::invalid_data())?;
-    let bytes = serde_json::to_vec_pretty(value).map_err(|_| crate::read::invalid_data())?;
-    if bytes.len() > 4 * 1024 * 1024 {
-        return Err(crate::read::invalid_data());
-    }
-    output.write_all(&bytes).and_then(|_| output.sync_all()).map_err(|_| crate::read::invalid_data())
 }

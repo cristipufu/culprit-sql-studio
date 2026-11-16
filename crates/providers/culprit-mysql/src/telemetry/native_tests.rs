@@ -1,6 +1,9 @@
 use super::*;
 use culprit_core::{ConnectionSpec, Engine, Provider};
 
+mod replication;
+mod replication_movement;
+
 fn fixture() -> crate::MysqlProvider {
     crate::MysqlProvider::new(&ConnectionSpec {
         engine: Some(Engine::Mysql),

@@ -1,7 +1,13 @@
 //! Versioned columns from the existing sender/recovery/slot reads; no connection options are projected.
 use super::*;
 
-pub(crate) fn query(version: u32, standby: bool, database_oid: &str, limit: usize) -> Result<String> {
+pub(crate) fn query(
+    version: u32,
+    standby: bool,
+    database_oid: &str,
+    pause_access: ReplayPauseAccess,
+    limit: usize,
+) -> Result<String> {
     if version < 100_000 {
         return Err(culprit_core::Error::new(
             culprit_core::ErrorCode::Unsupported,
@@ -15,7 +21,7 @@ pub(crate) fn query(version: u32, standby: bool, database_oid: &str, limit: usiz
              OR pg_catalog.pg_has_role(current_user,'pg_read_all_stats','USAGE')",
         iso("pg_catalog.clock_timestamp()")
     );
-    let endpoint = if standby { recovery(version, &common) } else { senders(&common) };
+    let endpoint = if standby { recovery(version, &common, pause_access) } else { senders(&common) };
     let slots = slots(standby, database, &common);
     Ok(format!("SELECT * FROM ({endpoint} UNION ALL {slots}) native_replication LIMIT {limit}"))
 }
@@ -70,7 +76,7 @@ fn slots(standby: bool, database: u32, common: &str) -> String {
     )
 }
 
-fn recovery(version: u32, common: &str) -> String {
+fn recovery(version: u32, common: &str, pause_access: ReplayPauseAccess) -> String {
     // PG10-12 report received_lsn (received and flushed); PG13+ expose separate written/flushed locations.
     // https://www.postgresql.org/docs/13/monitoring-stats.html#MONITORING-PG-STAT-WAL-RECEIVER-VIEW
     let locations = if version >= 130_000 {
@@ -80,18 +86,7 @@ fn recovery(version: u32, common: &str) -> String {
     };
     // In PG14+ the older boolean reports a pause request, not necessarily an already paused replay process.
     // https://www.postgresql.org/docs/14/functions-admin.html#FUNCTIONS-RECOVERY-CONTROL
-    let pause = if version >= 140_000 {
-        "'replay_pause_requested',CASE WHEN pg_catalog.has_function_privilege(current_user,'pg_catalog.pg_is_wal_replay_paused()','EXECUTE') THEN pg_catalog.pg_is_wal_replay_paused() END,\
-         'replay_pause_state',CASE WHEN pg_catalog.has_function_privilege(current_user,'pg_catalog.pg_get_wal_replay_pause_state()','EXECUTE') THEN pg_catalog.pg_get_wal_replay_pause_state() END,\
-         'replay_pause_access',pg_catalog.jsonb_build_object(\
-             'requested',pg_catalog.has_function_privilege(current_user,'pg_catalog.pg_is_wal_replay_paused()','EXECUTE'),\
-             'state',pg_catalog.has_function_privilege(current_user,'pg_catalog.pg_get_wal_replay_pause_state()','EXECUTE'))"
-    } else {
-        "'replay_paused',CASE WHEN pg_catalog.has_function_privilege(current_user,'pg_catalog.pg_is_wal_replay_paused()','EXECUTE') THEN pg_catalog.pg_is_wal_replay_paused() END,\
-         'replay_pause_state',NULL::text,\
-         'replay_pause_access',pg_catalog.jsonb_build_object(\
-             'paused',pg_catalog.has_function_privilege(current_user,'pg_catalog.pg_is_wal_replay_paused()','EXECUTE'),'state',NULL::boolean)"
-    };
+    let pause = pause_access.projection(version);
     format!(
         "SELECT 'pg_recovery'::text AS native_source,'local'::text AS native_id,\
          pg_catalog.jsonb_build_object('kind','standby','name','this server',\

@@ -15,6 +15,7 @@ struct Context {
     standby: bool,
     database_oid: String,
     full_visibility: bool,
+    replay_pause_access: ReplayPauseAccess,
 }
 
 pub(crate) async fn acquire<R: QueryRead>(reader: &mut R, platform: Option<Platform>) -> Result<Acquired> {
@@ -27,7 +28,13 @@ pub(crate) async fn acquire<R: QueryRead>(reader: &mut R, platform: Option<Platf
     } else {
         let rows = reader
             .query(
-                &query(before.version, before.standby, &before.database_oid, MAX_REPLICATION_OBSERVATIONS + 1)?,
+                &query(
+                    before.version,
+                    before.standby,
+                    &before.database_oid,
+                    before.replay_pause_access,
+                    MAX_REPLICATION_OBSERVATIONS + 1,
+                )?,
                 MAX_REPLICATION_OBSERVATIONS + 1,
             )
             .await?;
@@ -92,11 +99,14 @@ fn belongs_to_legacy_projection(row: &ReplicationObservation, database_oid: &str
 async fn context<R: QueryRead>(reader: &mut R) -> Result<Context> {
     let row = one(
         reader,
-        "SELECT pg_catalog.pg_is_in_recovery() AS standby,\
+        &format!(
+            "SELECT pg_catalog.pg_is_in_recovery() AS standby,\
          (SELECT oid::text FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()) AS database_oid,\
          pg_catalog.current_setting('server_version_num') AS version,\
          (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)\
-             OR pg_catalog.pg_has_role(current_user,'pg_read_all_stats','USAGE') AS full_visibility",
+             OR pg_catalog.pg_has_role(current_user,'pg_read_all_stats','USAGE') AS full_visibility,{}",
+            ReplayPauseAccess::PROJECTION
+        ),
     )
     .await?;
     let version = u32::try_from(integer(&row, "version")?).map_err(|_| invalid())?;
@@ -110,6 +120,7 @@ async fn context<R: QueryRead>(reader: &mut R) -> Result<Context> {
         standby: flag(&row, "standby")?,
         database_oid,
         full_visibility: flag(&row, "full_visibility")?,
+        replay_pause_access: ReplayPauseAccess::from_row(&row)?,
     })
 }
 

@@ -1235,6 +1235,28 @@ The receipt directory must be absolute and already exist. Missing grant samples 
 failed or changed-owner measurements remain invalid. Warm samples, uncontrolled caches and emulated hardware do
 not establish a production envelope. This experiment does not issue a qualification receipt or enable a recipe.
 
+Optional replication fixtures exercise the same native readers used by scans and retained collection:
+
+```sh
+python3 -B dev/smoke-providers.py postgres-replication postgres-16-replication
+python3 -B dev/smoke-providers.py mysql-replication mysql-no-performance-schema \
+  mariadb-replication mariadb-no-performance-schema mysql-moving-replication
+export CULPRIT_NATIVE_COST_RECEIPT_DIR="$(mktemp -d)"
+python3 -B dev/smoke-providers.py mssql-replication
+```
+
+PostgreSQL uses physical streaming, a native slot and a restricted monitor, including revoked replay-function
+permissions. MySQL and MariaDB exercise native channel status with Performance Schema on and off; the separate
+MySQL moving pair verifies actual source-to-replica position movement. SQL Server uses a populated availability
+group and records native work, complete/partial member visibility, query/row limits and confirmed reader shutdown.
+Each topology owns its generated credentials, loopback ports, labelled containers and network, and removes them on
+exit. These tests never select saved connection profiles or cloud resources.
+
+These small disposable topologies prove native semantics and lifecycle behavior, not representative production
+cost. A cancellation attempt is verified only when the exact active template was observed and its cancellation
+confirmed; a quiet connection after a fast query does not establish that. Unverified cancellation remains explicit,
+and these experiments do not enable automatic production recipes.
+
 ## Offline packaging checks
 
 ```sh

@@ -2,6 +2,10 @@
 use crate::conn::MsClient;
 use std::time::Duration;
 use tiberius::{AuthMethod, Config, EncryptionLevel};
+mod cost_receipts;
+mod owned_source;
+pub(crate) use cost_receipts::{receipt_directory, save_cost_receipt};
+pub(crate) use owned_source::{OwnedSourceFixture, verify_owned_source};
 
 pub(crate) fn config(port: u16, database: &str, password: &str, application: &str) -> Config {
     let mut config = Config::new();

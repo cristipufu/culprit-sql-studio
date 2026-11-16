@@ -66,7 +66,7 @@ async fn cancelled(pool: Arc<Pool>, port: u16, password: &str, database: &str) -
     assert!(quiet, "the exact original native request survived close");
     // A quiet observer never overwrites a missing driver acknowledgement.
     if shutdown == SourceShutdown::Unconfirmed {
-        assert_fenced(&mut reader).await;
+        assert_no_followup(&mut reader).await;
     }
     Ok(json!({
         "case":"caller-cancellation",
@@ -94,7 +94,7 @@ async fn timed_out(pool: Arc<Pool>, port: u16, password: &str, database: &str) -
     let quiet = reader.observer.is_quiet().await?;
     assert!(quiet);
     if shutdown == SourceShutdown::Unconfirmed {
-        assert_fenced(&mut reader).await;
+        assert_no_followup(&mut reader).await;
     }
     Ok(json!({
         "case":if active_observed {"statement-timeout"}else{"deadline-with-unverified-native-start"},
@@ -130,7 +130,7 @@ async fn backpressured(pool: Arc<Pool>, port: u16, password: &str, database: &st
     let quiet = reader.observer.is_quiet().await?;
     assert!(quiet);
     if shutdown == SourceShutdown::Unconfirmed {
-        assert_fenced(&mut reader).await;
+        assert_no_followup(&mut reader).await;
     }
     Ok(json!({
         "case":"bounded-output-backpressure",
@@ -180,7 +180,7 @@ async fn uncertain_refuses_rearm(
     );
     let shutdown = reader.close().await;
     assert_eq!(shutdown, SourceShutdown::Unconfirmed);
-    assert_fenced(&mut reader).await;
+    assert_no_followup(&mut reader).await;
     Ok(json!({
         "case":"injected-prior-uncertainty-refuses-rearm",
         "source_template":false,
@@ -190,8 +190,8 @@ async fn uncertain_refuses_rearm(
     }))
 }
 
-async fn assert_fenced(reader: &mut MeasuredRead) {
+pub(crate) async fn assert_no_followup(reader: &mut MeasuredRead) {
     let queries = reader.queries();
     assert!(reader.owner.query("SELECT /* culprit fixture forbidden followup */ 1", vec![], 1).await.is_err());
-    assert_eq!(reader.queries(), queries, "uncertainty cannot admit follow-up native SQL");
+    assert_eq!(reader.queries(), queries, "a retired or uncertain owner cannot admit follow-up native SQL");
 }

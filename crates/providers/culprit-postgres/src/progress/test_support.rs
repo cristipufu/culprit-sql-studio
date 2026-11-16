@@ -25,6 +25,8 @@ pub(crate) fn metadata_on_version(version: u32, standby: &str, started: &str) ->
         ("started_at", Some(started)),
         ("observed_at", Some(AT)),
         ("full_visibility", Some("t")),
+        ("replay_pause_requested_access", Some("f")),
+        ("replay_pause_state_access", Some("f")),
         ("pgss_schema", None),
         ("pgss_columns", None),
         ("pgss_info", Some("f")),

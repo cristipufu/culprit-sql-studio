@@ -6,10 +6,12 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import Mock, patch
 
 
+sys.path.insert(0, str(Path(__file__).parent))
+from replication_fixtures import OwnedNetwork
 spec = importlib.util.spec_from_file_location("smoke_providers", Path(__file__).with_name("smoke-providers.py"))
 smoke = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = smoke
@@ -106,7 +108,96 @@ class DisposableOwnership(unittest.TestCase):
         self.assertEqual(database.commands.run.call_args_list[-1].args[0], ["docker", "logs", "--tail", "60", database.name])
 
 
+class ReplicationOwnership(unittest.TestCase):
+    def test_interrupted_network_creation_cleans_only_the_attested_network(self):
+        commands = Mock()
+        owner = "a" * 24
+        commands.run.side_effect = [KeyboardInterrupt, (0, owner + "\n"), (0, "")]
+        network = OwnedNetwork(commands, owner, smoke.OWNER_LABEL)
+        with self.assertRaises(KeyboardInterrupt):
+            with network:
+                self.fail("interrupted creation cannot enter the context")
+        self.assertEqual(commands.run.call_args_list[-1].args[0], ["docker", "network", "rm", network.name])
+
+    def test_a_foreign_network_is_never_removed(self):
+        commands = Mock()
+        commands.run.return_value = (0, "another-owner\n")
+        network = OwnedNetwork(commands, "a" * 24, smoke.OWNER_LABEL)
+        with self.assertRaisesRegex(RuntimeError, "ownership label"):
+            network.close()
+        self.assertEqual(commands.run.call_count, 1)
+
+    def test_cancelled_standby_start_releases_standby_primary_then_network(self):
+        fixture = smoke.Fixture("pair", "postgres:18.6", "postgres", 5432, "culprit_replication", "postgres")
+        primary, standby = smoke.Database(fixture), smoke.Database(fixture)
+        events = []
+
+        def command(args, **_):
+            if args[:3] == ["docker", "network", "rm"]:
+                events.append("network")
+            return (0, primary.owner)
+
+        primary.commands = Mock()
+        primary.commands.run.side_effect = command
+        primary.sql = Mock()
+        primary.start = Mock()
+        primary.close = Mock(side_effect=lambda: events.append("primary"))
+        primary.owns_container = Mock(return_value=True)
+        standby.start = Mock(side_effect=KeyboardInterrupt)
+        standby.close = Mock(side_effect=lambda: events.append("standby"))
+        topology = smoke.PostgresReplication(primary, standby, smoke.OWNER_LABEL)
+        with self.assertRaises(KeyboardInterrupt):
+            with topology:
+                self.fail("a failed standby cannot expose a ready topology")
+        self.assertEqual(events, ["standby", "primary", "network"])
+
+
+class NativeSelection(unittest.TestCase):
+    def test_broad_selection_excludes_optional_topologies_without_their_environment(self):
+        database = smoke.Database(smoke.FIXTURES[1])
+        database.test_environment = Mock(return_value={})
+        for selection in ("telemetry::native_tests::", "native_tests::"):
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-mysql", selection)
+                self.assertEqual(run_tests.call_args.kwargs["skip"], [
+                    "telemetry::native_tests::replication::",
+                    "telemetry::native_tests::replication_movement::",
+                ])
+
+    def test_explicit_topology_selection_runs_only_that_topology(self):
+        database = smoke.Database(smoke.FIXTURES[1])
+        database.test_environment = Mock(return_value={})
+        with patch.object(smoke, "run_tests") as run_tests:
+            database.test("culprit-mysql", "telemetry::native_tests::replication_movement::")
+        self.assertEqual(run_tests.call_args.kwargs["skip"], ["telemetry::native_tests::replication::"])
+
+
 class ChildProcesses(unittest.TestCase):
+    def test_sql_diagnostics_remain_visible_without_corrupting_native_rows(self):
+        diagnostics = io.StringIO()
+        with redirect_stderr(diagnostics):
+            status, output = smoke.Commands([]).run(
+                [sys.executable, "-c", "import sys; print('11.8.9-MariaDB'); print('client warning', file=sys.stderr)"],
+                separate_stderr=True)
+        self.assertEqual(status, 0)
+        self.assertEqual(output, "11.8.9-MariaDB\n")
+        self.assertIn("client warning", diagnostics.getvalue())
+
+    def test_separate_failure_diagnostics_are_preserved_and_redacted(self):
+        password = "simulated-test-password"
+        with redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            status, output = smoke.Commands([password]).run(
+                [sys.executable, "-c", f"import sys; print({password!r}, file=sys.stderr); raise SystemExit(7)"],
+                separate_stderr=True)
+        diagnostics = io.StringIO()
+        with redirect_stdout(diagnostics):
+            status, output = smoke.Commands([password]).run(
+                [sys.executable, "-c", f"import sys; print({password!r}, file=sys.stderr); raise SystemExit(7)"],
+                separate_stderr=True, check=False)
+        self.assertEqual(status, 7)
+        self.assertEqual(output, "[redacted]\n")
+        self.assertNotIn(password, diagnostics.getvalue())
+
     def test_failures_never_print_disposable_passwords(self):
         password = "simulated-test-password"
         output = io.StringIO()

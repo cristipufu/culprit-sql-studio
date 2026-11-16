@@ -39,6 +39,7 @@ fn metadata(version: u32) -> Metadata {
         block_bytes: 16384,
         full_visibility: true,
         standby: false,
+        replay_pause_access: super::super::replication::ReplayPauseAccess { requested: false, state: false },
         statements: Some(StatementCatalog { schema: "public".into(), columns, info: true }),
     }
 }

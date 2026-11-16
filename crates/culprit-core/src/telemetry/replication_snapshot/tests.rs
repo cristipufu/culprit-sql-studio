@@ -89,6 +89,20 @@ fn original_native_scope_and_counts_survive_readback_without_manufacturing_a_mem
 }
 
 #[test]
+fn complete_native_view_visibility_does_not_require_or_create_a_physical_owner_generation() {
+    let mut source = source();
+    let SourceObservation::Snapshot(frame) = &mut source.observation else { panic!() };
+    frame.sources[0] = StateSourceCoverage::collected("pg_replication_slots".into(), 1);
+    assert!(source.partition_is_consistent());
+    let read = ReplicationSnapshot::from_source(&source, snapshot().observations)
+        .expect("a complete native view remains readable without physical member continuity");
+    assert!(read.is_valid());
+    assert_eq!(read.sources, source.observation.snapshot().unwrap().sources);
+    assert!(read.sources[0].complete_scope);
+    assert!(!read.context.native().unwrap().has_qualified_local_owner());
+}
+
+#[test]
 fn positive_rows_cannot_borrow_another_source_empty_header_or_duplicate_identity() {
     let mut input = snapshot();
     input.observations.push(input.observations[0].clone());

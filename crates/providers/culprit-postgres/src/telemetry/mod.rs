@@ -108,7 +108,13 @@ impl Recipe {
             Self::Catalog(kind) => Ok(native::catalog::query(kind, meta.version, false, limit)),
             Self::Sequences => Ok(native::sequences::query(Some(limit))),
             Self::Cleanup => native::cleanup::capture_query(meta.version, meta.standby, limit),
-            Self::Replication => native::replication::query(meta.version, meta.standby, &meta.database_oid, limit),
+            Self::Replication => native::replication::query(
+                meta.version,
+                meta.standby,
+                &meta.database_oid,
+                meta.replay_pause_access,
+                limit,
+            ),
             Self::Indexes => Ok(native::indexes::query(meta.version, false, false, Some(limit))),
             Self::Tables => Ok(native::relations::table_query(
                 meta.version,
@@ -386,7 +392,11 @@ impl SnapshotReader for PostgresSnapshotReader {
             native::memory::Access::Unsupported
         };
         Ok(SnapshotRecheck {
-            unchanged: before.same_source(&after) && same_instance,
+            unchanged: (if matches!(self.recipe, Recipe::Replication) {
+                before.same_replication_source(&after)
+            } else {
+                before.same_source(&after)
+            }) && same_instance,
             observed_until: after.at,
             scopes: self
                 .recipe

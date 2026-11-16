@@ -17,6 +17,7 @@ fn metadata(version: u32, extension_info: bool) -> Metadata {
         block_bytes: 8192,
         full_visibility: true,
         standby: false,
+        replay_pause_access: super::super::replication::ReplayPauseAccess { requested: false, state: false },
         statements: extension_info.then(|| StatementCatalog {
             schema: "diagnostic".into(),
             columns: Default::default(),

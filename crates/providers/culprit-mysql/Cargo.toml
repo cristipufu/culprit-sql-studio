@@ -21,4 +21,6 @@ serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+culprit-collector.workspace = true
+tempfile = "3.27.0"
 tokio = { workspace = true, features = ["test-util"] }

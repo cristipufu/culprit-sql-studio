@@ -32,6 +32,8 @@ fn metadata() -> Row {
         ("started_at", Some("2026-11-14T00:00:00Z")),
         ("observed_at", Some(AT)),
         ("full_visibility", Some("t")),
+        ("replay_pause_requested_access", Some("f")),
+        ("replay_pause_state_access", Some("f")),
         ("pgss_schema", None),
         ("pgss_columns", None),
         ("pgss_info", Some("f")),

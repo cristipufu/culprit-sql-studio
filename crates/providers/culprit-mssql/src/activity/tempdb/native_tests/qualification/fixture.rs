@@ -1,9 +1,5 @@
 use super::*;
-use crate::{
-    conn::MsClient,
-    read::{integer, text},
-    value::Rec,
-};
+use crate::{conn::MsClient, read::integer, test_support::verify_owned_source, value::Rec};
 
 const ACTOR_WORK: &str = "SET NOCOUNT ON; CREATE TABLE #culprit_cost_task(payload varchar(2000) NOT NULL); WITH n AS(SELECT v FROM(VALUES(0),(1),(2),(3),(4),(5),(6),(7))d(v)) INSERT #culprit_cost_task SELECT REPLICATE('x',2000) FROM n a CROSS JOIN n b; WAITFOR DELAY '00:02:00'; DROP TABLE #culprit_cost_task;";
 
@@ -29,23 +25,7 @@ impl CostFixture {
         let mut admin =
             crate::test_support::connect(&config(port, "master", &password, "cost-fixture-admin"), SessionKind::User)
                 .await?;
-        let rows = admin
-            .simple_query(
-                "SELECT /* culprit fixture guard */ CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) AS machine",
-            )
-            .await
-            .map_err(map_error)?
-            .into_first_result()
-            .await
-            .map_err(map_error)?;
-        let machine = rows.first().map(Rec::from_row).ok_or_else(crate::read::invalid_data)?;
-        let machine = text(&machine, "machine")?;
-        assert!(
-            machine
-                .strip_prefix("culprit-smoke-mssql-")
-                .is_some_and(|nonce| nonce.len() == 24 && nonce.bytes().all(|byte| byte.is_ascii_hexdigit())),
-            "native cost workloads require the actual owned smoke hostname"
-        );
+        verify_owned_source(&mut admin).await?;
         Ok(Self {
             pool: Arc::new(Pool::new(config(port, &database, &password, "culprit-cost-source"), None)),
             port,

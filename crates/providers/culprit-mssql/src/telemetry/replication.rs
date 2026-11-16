@@ -126,4 +126,6 @@ impl<R: NativeRead> TelemetrySource for ReplicationSource<R> {
 }
 
 #[cfg(test)]
+mod native_tests;
+#[cfg(test)]
 mod tests;

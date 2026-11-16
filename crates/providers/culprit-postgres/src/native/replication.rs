@@ -4,10 +4,12 @@ use culprit_core::{MeasurementScope, Replica, ReplicaCondition, ReplicaRole, tel
 use serde_json::Value;
 use std::collections::BTreeMap;
 mod decode;
+mod pause;
 mod project;
 mod scan;
 mod sql;
 pub(crate) use decode::decode;
+pub(crate) use pause::ReplayPauseAccess;
 pub(crate) use project::project;
 pub(crate) use scan::acquire;
 pub(crate) use sql::query;

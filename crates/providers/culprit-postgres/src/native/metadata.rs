@@ -8,6 +8,7 @@ pub(crate) struct StatementCatalog {
     pub columns: BTreeSet<String>,
     pub info: bool,
 }
+
 #[derive(Clone, Debug)]
 pub(crate) struct Metadata {
     pub database: DatabaseIdentity,
@@ -18,6 +19,7 @@ pub(crate) struct Metadata {
     pub block_bytes: u32,
     pub full_visibility: bool,
     pub standby: bool,
+    pub replay_pause_access: super::replication::ReplayPauseAccess,
     pub statements: Option<StatementCatalog>,
 }
 impl Metadata {
@@ -43,6 +45,10 @@ impl Metadata {
             && self.full_visibility == other.full_visibility
             && self.standby == other.standby
             && self.statements == other.statements
+    }
+
+    pub fn same_replication_source(&self, other: &Self) -> bool {
+        self.same_source(other) && (!self.standby || self.replay_pause_access == other.replay_pause_access)
     }
 }
 pub(crate) async fn read<R: QueryRead>(reader: &mut R, host: &str, port: u16) -> Result<Metadata> {
@@ -71,8 +77,8 @@ async fn read_context<R: QueryRead>(reader: &mut R, host: &str, port: u16, state
       pg_catalog.current_setting('block_size') AS block_bytes, pg_catalog.pg_is_in_recovery() AS standby, {} AS started_at, {} AS observed_at,
       (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)
         OR pg_catalog.pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') AS full_visibility,
-      {statement_catalog}
-      FROM pg_catalog.pg_database d WHERE d.datname=pg_catalog.current_database()", iso("pg_catalog.pg_postmaster_start_time()"), iso("pg_catalog.clock_timestamp()"));
+      {statement_catalog},{}
+      FROM pg_catalog.pg_database d WHERE d.datname=pg_catalog.current_database()", iso("pg_catalog.pg_postmaster_start_time()"), iso("pg_catalog.clock_timestamp()"), super::replication::ReplayPauseAccess::PROJECTION);
     let row = one(reader, &sql).await?;
     crate::probe::ensure_postgres(&text(&row, "build")?)?;
     let database = DatabaseIdentity::server(Engine::Postgres, &text(&row, "database")?, host, port, None);
@@ -98,6 +104,10 @@ async fn read_context<R: QueryRead>(reader: &mut R, host: &str, port: u16, state
         block_bytes,
         full_visibility: flag(&row, "full_visibility")?,
         standby: flag(&row, "standby")?,
+        replay_pause_access: super::replication::ReplayPauseAccess::from_row(&row)?,
         statements,
     })
 }
+
+#[cfg(test)]
+mod tests;

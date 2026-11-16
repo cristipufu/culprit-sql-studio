@@ -316,8 +316,9 @@ fn negative_distances_remain_context_and_unknown_active_or_logical_flags_are_not
 
 #[test]
 fn native_sql_uses_supported_receiver_columns_and_only_bounded_existing_views() {
+    let pause_access = ReplayPauseAccess { requested: true, state: true };
     for version in [100_000, 120_000, 130_000, 140_000, 170_000, 180_000] {
-        let sql = query(version, true, "16384", 17).unwrap();
+        let sql = query(version, true, "16384", pause_access, 17).unwrap();
         assert!(sql.ends_with("LIMIT 17"));
         assert_eq!(sql.contains("w.written_lsn"), version >= 130_000);
         assert_eq!(sql.contains("w.received_lsn"), version < 130_000);
@@ -338,9 +339,9 @@ fn native_sql_uses_supported_receiver_columns_and_only_bounded_existing_views() 
         assert!(sql.contains("'streaming_configured',(SELECT setting<>''"), "only a boolean leaves the server");
         assert!(sql.contains("s.datoid IS NULL OR s.datoid=16384"));
     }
-    assert!(query(90_600, false, "16384", 17).is_err());
-    assert!(query(170_000, false, "16384; SELECT", 17).is_err());
-    let sql = query(170_000, false, "16384", 17).unwrap();
+    assert!(query(90_600, false, "16384", pause_access, 17).is_err());
+    assert!(query(170_000, false, "16384; SELECT", pause_access, 17).is_err());
+    let sql = query(170_000, false, "16384", pause_access, 17).unwrap();
     for name in [
         "reply_time",
         "temporary",
