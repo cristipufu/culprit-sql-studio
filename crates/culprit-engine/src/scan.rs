@@ -32,8 +32,10 @@ pub(crate) struct Scan<'a> {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct PopulationReports {
-    pub requested: Report,
-    pub populations: Vec<Report>,
+    /// Completed reports are allocated by the analysis worker and stay owned on the heap across async boundaries.
+    pub requested: Box<Report>,
+    #[allow(clippy::vec_box, reason = "moving completed reports between nested async frames must stay pointer-sized")]
+    pub populations: Vec<Box<Report>>,
     pub catalog: Option<RuntimePopulationCatalog>,
 }
 
@@ -256,7 +258,7 @@ pub(crate) struct CollectedScan {
     collection: culprit_core::CollectionProvenance,
 }
 impl CollectedScan {
-    pub async fn finish(self) -> Result<Report> {
+    pub async fn finish(self) -> Result<Box<Report>> {
         let Self { dir, checks, mut snapshot, recorded, previous, collection } = self;
         crate::run_blocking(move || {
             let collected = snapshot.clone();
@@ -296,7 +298,8 @@ impl CollectedScan {
             });
             // How big each table was a day or more ago tells how fast it grows.
             snapshot.sizes_before = history::growth_baseline(&dir, &snapshot);
-            let report = analysis::collected(snapshot, collected, collection, recorded_evidence, age_inputs, &checks);
+            let report =
+                Box::new(analysis::collected(snapshot, collected, collection, recorded_evidence, age_inputs, &checks));
             reports::save(&dir, &report)?;
             history::keep_scan(&dir, &report.snapshot, previous.as_ref(), &changes);
             Ok(report)
@@ -402,6 +405,7 @@ mod tests {
 
     #[test]
     fn public_scan_futures_leave_stack_space_for_native_decoding_and_nested_consumers() {
+        const MAX_INLINE_SCAN_BYTES: usize = 4096;
         let root = tempfile::tempdir().unwrap();
         let workspace = crate::Workspace::open_in(root.path());
         let options = SnapshotOptions::default();
@@ -417,8 +421,14 @@ mod tests {
             std::mem::size_of_val(&verify),
             std::mem::size_of_val(&verify_at),
         ] {
-            assert!(bytes <= 4096, "scan retains {bytes} inline bytes; observation state belongs on the heap");
+            assert!(
+                bytes <= MAX_INLINE_SCAN_BYTES,
+                "scan retains {bytes} inline bytes; observation state belongs on the heap"
+            );
         }
+        // A boxed future can still create large poll frames when its completed output moves inline through awaits.
+        let batch_bytes = std::mem::size_of::<PopulationReports>();
+        assert!(batch_bytes <= MAX_INLINE_SCAN_BYTES, "completed report batch transports {batch_bytes} inline bytes");
         assert!(!root.path().join("source-admission").exists());
     }
 }

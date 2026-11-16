@@ -109,7 +109,7 @@ impl Workspace {
         let report_id = report_id.map(str::to_owned);
         let before = self
             .report_service()
-            .background(move |reports| reports.plan_report(&report_name, report_id.as_deref()))
+            .background(move |reports| Ok(reports.plan_report(&report_name, report_id.as_deref())?.map(Box::new)))
             .await?
             .ok_or_else(|| {
                 Error::not_found(t!("engine.share.verify_unscanned", name = name))
@@ -119,9 +119,9 @@ impl Workspace {
         if let Some(population) = before.snapshot.workload.as_ref().and_then(|workload| workload.population.clone()) {
             options.workload_population = Some(population);
         }
-        let after = self.scan(name, &options).await?;
+        let after = self.scan_populations(name, &options).await?.requested;
         let ids = ids.to_vec();
-        crate::run_blocking(move || Ok(compare_reports(&before, &after, &ids))).await
+        crate::run_blocking(move || Ok(compare_reports(before.as_ref(), after.as_ref(), &ids))).await
     }
 }
 

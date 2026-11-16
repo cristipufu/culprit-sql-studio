@@ -287,7 +287,7 @@ async fn scan(
     let defaults = SnapshotOptions::default();
     let window = requested_window(window_minutes).unwrap_or(defaults.window_in_minutes());
     let options = SnapshotOptions { workload_population: population, ..defaults.with_window_minutes(window) };
-    ws.scan_populations(&name, &options).await.map(|reports| for_ui(reports.requested))
+    ws.scan_populations(&name, &options).await.map(|reports| for_ui(*reports.requested))
 }
 
 /// Word what the app reads from now on (findings, notes, plan insights) in `code`, the language the app is shown in.

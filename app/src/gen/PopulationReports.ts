@@ -5,4 +5,8 @@ import type { RuntimePopulationCatalog } from "./RuntimePopulationCatalog";
 /**
  * Independent reports from one bounded acquisition. Catalog membership is not a combined runtime denominator.
  */
-export type PopulationReports = { requested: Report, populations: Array<Report>, catalog: RuntimePopulationCatalog | null, };
+export type PopulationReports = { 
+/**
+ * Completed reports are allocated by the analysis worker and stay owned on the heap across async boundaries.
+ */
+requested: Report, populations: Array<Report>, catalog: RuntimePopulationCatalog | null, };

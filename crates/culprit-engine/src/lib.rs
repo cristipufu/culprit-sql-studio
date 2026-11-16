@@ -429,7 +429,7 @@ impl Workspace {
     ) -> Result<Report> {
         // The owned observation retains provider, snapshot and analysis state. Keep that state off callers'
         // async frames so nested consumers (verification, MCP and desktop tasks) retain decoding stack space.
-        Box::pin(self.scan_observation(name, options, query_log)).await.map(|reports| reports.requested)
+        Box::pin(self.scan_observation(name, options, query_log)).await.map(|reports| *reports.requested)
     }
 
     /// Analyze each native execution population from one provider acquisition and save its own exact report.
