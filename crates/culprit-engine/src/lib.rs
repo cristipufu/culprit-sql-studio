@@ -772,6 +772,16 @@ pub fn explain_replication(
     culprit_checks::replication::explain_bounded(snapshot, read_complete, max_entries)
 }
 
+/// Explain a supplied focused Activity frame without I/O. Receipt consistency is checked here; the caller owns
+/// archive authentication. This base API introduces no collector, credential or warehouse dependency.
+pub fn explain_blocking(
+    source: &culprit_core::telemetry::CollectionDescription,
+    rows: &[culprit_core::telemetry::ActivityFrameRow<'_>],
+    read_complete: bool,
+) -> Result<culprit_core::BlockingReport> {
+    culprit_checks::focused_blocking::explain(source, rows, read_complete)
+}
+
 /// Lint migration or DDL SQL offline against a saved snapshot's catalog, table sizes and indexes.
 pub fn lint_sql(snapshot: &culprit_core::Snapshot, sql: &str) -> Vec<culprit_core::Finding> {
     culprit_checks::lint_sql(snapshot, sql)

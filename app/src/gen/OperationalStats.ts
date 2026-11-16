@@ -17,10 +17,11 @@ import type { SequenceCapacity } from "./SequenceCapacity";
 import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
 import type { SqliteFileHealth } from "./SqliteFileHealth";
+import type { StatementCounterSnapshot } from "./StatementCounterSnapshot";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { 
+export type OperationalStats = { statement_work?: StatementCounterSnapshot, 
 /**
  * None means that the native usage population was not established.
  */

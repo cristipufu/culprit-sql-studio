@@ -2,10 +2,15 @@
 import type { MeasurementScope } from "./MeasurementScope";
 import type { NativeQueryIdentity } from "./NativeQueryIdentity";
 import type { ResetMarker } from "./ResetMarker";
+import type { SharedResourceIdentity } from "./SharedResourceIdentity";
 import type { StatementCounter } from "./StatementCounter";
 import type { StatementDistribution } from "./StatementDistribution";
 
-export type StatementCounterSample = { identity: NativeQueryIdentity, 
+export type StatementCounterSample = { 
+/**
+ * Source-owned point membership. Native producers establish this before publication; labels never do.
+ */
+member?: SharedResourceIdentity, identity: NativeQueryIdentity, 
 /**
  * A database observed on one distributed node is not a database-wide or cluster-wide total.
  */

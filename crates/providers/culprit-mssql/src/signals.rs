@@ -180,6 +180,7 @@ impl PendingCompilationRead {
         window_minutes: u32,
         participants: &mut [QueryParticipant<'_>],
         shutdown: culprit_core::telemetry::SourceShutdown,
+        context: Option<culprit_core::telemetry::NativeReadContext>,
     ) -> CompilationRead {
         let mut coverage = Coverage::default();
         clear_compilations(participants);
@@ -193,8 +194,9 @@ impl PendingCompilationRead {
         let mut compilations = coverage.read(&sources::QUERY_COMPILATION, self.compilations);
         let definitions_consistent =
             compilations.as_mut().is_none_or(|rows| bind_compilation_statements(rows, participants));
-        let captured =
-            compilations.as_ref().map(|rows| compilation_snapshot(rows, self.observed_from, self.observed_until));
+        let captured = compilations
+            .as_ref()
+            .map(|rows| compilation_snapshot(rows, self.observed_from, self.observed_until, context));
         let snapshot = captured.and_then(|result| coverage.read(&sources::QUERY_COMPILATION, result));
         let complete =
             compilations.is_none_or(|compilations| attach_compilations(participants, compilations, window_minutes));
@@ -218,7 +220,7 @@ async fn collect_query_compilations<R: NativeRead>(
 ) -> CompilationRead {
     let pending = read_compilations(&mut reader, participants).await;
     let shutdown = reader.close().await;
-    let mut read = pending.finish(window_minutes, participants, shutdown);
+    let mut read = pending.finish(window_minutes, participants, shutdown, None);
     coverage.merge(std::mem::take(&mut read.coverage));
     read
 }
@@ -242,9 +244,11 @@ fn compilation_snapshot(
     compilations: &[Compilation],
     observed_from: String,
     observed_until: String,
+    context: Option<culprit_core::telemetry::NativeReadContext>,
 ) -> culprit_core::Result<culprit_core::telemetry::CompilationSnapshot> {
     let snapshot = culprit_core::telemetry::CompilationSnapshot {
         source: sources::QUERY_COMPILATION.name.into(),
+        context,
         observed_from,
         observed_until,
         observations: compilations.iter().map(Compilation::record).collect::<culprit_core::Result<_>>()?,

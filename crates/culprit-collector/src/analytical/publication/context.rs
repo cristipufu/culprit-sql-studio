@@ -10,6 +10,14 @@ enum PublicObservation<'a> {
     RetainedSamples(&'a SampleHistoryDescription),
     RetainedEvents(&'a EventHistoryDescription),
     Activity(&'a ActivitySnapshotDescription),
+    FocusedBlockingContext {
+        snapshot: &'a ActivitySnapshotDescription,
+        focus_key: String,
+        binding: FocusedRequestBinding,
+        membership: FocusedRequestMembership,
+        request_end: BlockingRequestState,
+        closure: &'a BlockingClosureDescription,
+    },
     Snapshot(&'a StateSnapshotDescription),
     FocusedPageWaitContext {
         snapshot: &'a StateSnapshotDescription,
@@ -86,6 +94,14 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::RetainedSamples(value) => PublicObservation::RetainedSamples(value),
         SourceObservation::RetainedEvents(value) => PublicObservation::RetainedEvents(value),
         SourceObservation::Activity(value) => PublicObservation::Activity(value),
+        SourceObservation::FocusedBlocking { snapshot, result } => PublicObservation::FocusedBlockingContext {
+            snapshot,
+            focus_key: result.focus.key()?,
+            binding: result.binding,
+            membership: result.membership,
+            request_end: result.request_end,
+            closure: &result.closure,
+        },
         SourceObservation::Snapshot(value) => PublicObservation::Snapshot(value),
         SourceObservation::CacheEntryMemory { snapshot, focus } => {
             PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }

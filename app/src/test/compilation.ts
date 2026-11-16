@@ -45,3 +45,37 @@ export function compilationReport(observations = [compilationObservation()]): Co
     }),
   };
 }
+
+export function compilationComparisonReport(rows = [compilationObservation()]): CompilationReport {
+  const report = compilationReport(rows);
+  report.comparison = {
+    baseline: { id: "original-private-report-reference", taken_at: "2026-11-13T09:59:00Z",
+      database: { engine: "mssql", database: "db", incarnation: "private-native-incarnation",
+        location: { kind: "server", host: "private-original-native-host", port: 1433, instance: null } } },
+    observed_from: "2026-11-13T09:59:00.000000001Z", observed_until: "2026-11-13T10:00:01.000000002Z",
+    missing_before: 0, missing_after: 1, issues: ["partial-read", "unmatched-entries"],
+    title: "Recorded compilation changes", summary: "One native entry compared; the read is partial.",
+    limitations: ["A missing entry supplies no zero or recovery claim."],
+    entries: report.entries.map((entry) => ({
+      observation_key: entry.observation_key, baseline_observation_key: entry.observation_key,
+      identity: { ...entry.identity, qualifiers: { ...entry.identity.qualifiers } },
+      compilations: "18446744073709551615", last_compile_at: "2026-11-13T10:00:00.000000001Z",
+      explanation: "Recorded compilation count increase: 18446744073709551615.",
+      investigation: "Inspect the two original native query entries.",
+      verify: "Re-read this native entry without replaying application SQL.",
+    })),
+  };
+  return report;
+}
+
+export function unavailableCompilationComparisonReport(observations = [compilationObservation()]): CompilationReport {
+  const report = compilationComparisonReport(observations);
+  if (!report.comparison) throw new Error("Comparison fixture required");
+  report.comparison.observed_from = null;
+  report.comparison.observed_until = null;
+  report.comparison.summary = "Compilation counts could not be compared between these reads.";
+  report.comparison.issues = ["native-namespace-unavailable"];
+  report.comparison.limitations = ["A native logical database incarnation was not recorded."];
+  report.comparison.entries = [];
+  return report;
+}

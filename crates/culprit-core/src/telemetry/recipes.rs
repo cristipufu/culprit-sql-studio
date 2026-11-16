@@ -42,6 +42,7 @@ impl CollectionBudget {
 #[ts(export)]
 pub enum RecipeSelector {
     Collection(TelemetryCollection),
+    FocusedBlocking,
     CacheEntryMemory,
     FocusedPageWait,
     FocusedPageWaitWriters,
@@ -57,6 +58,8 @@ mod tests;
 impl RecipeSelector {
     pub fn matches(&self, request: &CollectionRequest) -> bool {
         match (self, &request.selection) {
+            (Self::FocusedBlocking, CollectionSelection::FocusedBlocking { .. }) => true,
+            (Self::Collection(_), CollectionSelection::FocusedBlocking { .. }) => false,
             (Self::FocusedPageWaitWriters, CollectionSelection::PageWaitWriters { .. }) => true,
             (Self::Collection(_), CollectionSelection::PageWaitWriters { .. }) => false,
             (Self::CurrentRequestWork, CollectionSelection::CurrentRequestWork { .. }) => true,

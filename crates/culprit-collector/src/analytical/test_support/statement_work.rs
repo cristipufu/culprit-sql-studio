@@ -64,6 +64,66 @@ pub fn statement_work_evidence_cases() -> Vec<(CollectionDescription, Vec<Teleme
         )
     })
     .chain(node_statement_work_evidence_cases())
+    .chain(statement_outcome_evidence_cases())
+    .collect()
+}
+
+/// Source-declared outcome counts use exactly the MySQL/MariaDB native schema/digest identity and unknown reset.
+pub fn statement_outcome_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
+    [
+        ("app", Some("9007199254740993"), Some("0"), true),
+        ("other", Some("18446744073709551615"), Some("7"), false),
+        ("app", None, Some("18446744073709551615"), true),
+        ("app", None, None, false),
+    ]
+    .into_iter()
+    .map(|(database, errors, warnings, complete)| {
+        let source = "performance_schema.events_statements_summary_by_digest";
+        let mut totals = vec![metric(RuntimeMetricKey::Executions, RuntimeMetricUnit::Count, "17")];
+        for (key, value) in [(RuntimeMetricKey::Errors, errors), (RuntimeMetricKey::Warnings, warnings)] {
+            if let Some(value) = value {
+                totals.push(metric(key, RuntimeMetricUnit::Count, value));
+            }
+        }
+        let sample = StatementCounterSample {
+            member: None,
+            identity: NativeQueryIdentity {
+                query_id: "0123456789abcdef0123456789abcdef".into(),
+                qualifiers: [("schema".into(), database.into())].into(),
+            },
+            scope: culprit_core::MeasurementScope::Database,
+            observed_at: "2020-01-01T12:00:00.123456Z".into(),
+            reset: culprit_core::ResetMarker::Unknown,
+            totals,
+            distributions: vec![],
+        };
+        let records = vec![TelemetryRecord::Operational(OperationalObservation {
+            source: source.into(),
+            key: sample.key().unwrap(),
+            fact: OperationalFact::StatementCounters(Box::new(sample)),
+        })];
+        let description = CollectionDescription {
+            target: culprit_core::DatabaseIdentity::server(
+                culprit_core::Engine::Mysql,
+                database,
+                "fixture.invalid",
+                3306,
+                None,
+            )
+            .into(),
+            source: "mysql-statement-counters".into(),
+            partition: SourcePartition::Target,
+            continuity: SourceContinuity::Unverified,
+            observation: SourceObservation::Snapshot(StateSnapshotDescription {
+                dataset: SnapshotDataset::StatementCounters,
+                observed_from: "2020-01-01T12:00:00Z".into(),
+                observed_until: "2020-01-01T12:00:01Z".into(),
+                records: 1,
+                sources: vec![StateSourceCoverage::observed(source.into(), 1, complete)],
+            }),
+        };
+        (description, records)
+    })
     .collect()
 }
 
@@ -107,6 +167,7 @@ pub fn node_statement_work_evidence_cases() -> Vec<(CollectionDescription, Vec<T
                     });
                 }
                 let sample = StatementCounterSample {
+                    member: culprit_core::engines::ysql_node_member(node),
                     identity: NativeQueryIdentity {
                         query_id: "-42".into(),
                         qualifiers: [
@@ -166,6 +227,7 @@ fn metric(key: RuntimeMetricKey, unit: RuntimeMetricUnit, value: &str) -> Statem
 
 fn record(index: usize, totals: Vec<StatementCounter>) -> TelemetryRecord {
     let sample = StatementCounterSample {
+        member: None,
         identity: NativeQueryIdentity {
             query_id: format!("native-query-{index}"),
             qualifiers: [("opaque-context".into(), "native-qualified-identity".into())].into(),

@@ -54,8 +54,16 @@ pub async fn snapshot(
     }
 
     let mut source_waits = Vec::new();
+    let mut statement_work = Box::new(culprit_core::telemetry::StatementCounterSnapshot::unavailable(
+        crate::native::statements::SOURCE,
+        culprit_core::ErrorCode::Unsupported,
+        None,
+    ));
     let workload = match workload {
         Ok(Some(collected)) => {
+            if let Some(counters) = collected.statement_work {
+                statement_work = counters;
+            }
             coverage.completed(&sources::STATEMENTS, collected.workload.queries.len());
             source_waits = collected.waits;
             for (collector, message) in collected.notes {
@@ -87,8 +95,13 @@ pub async fn snapshot(
             None
         }
         Err(e) => {
-            let error = statement_error(e, probe.performance_schema, &probe.grant_target());
-            coverage.source_failed(&sources::STATEMENTS, &error);
+            record_statement_failure(
+                &mut coverage,
+                &mut statement_work,
+                e,
+                probe.performance_schema,
+                &probe.grant_target(),
+            );
             None
         }
     };
@@ -155,10 +168,12 @@ pub async fn snapshot(
         constraints: Vec::new(),
         histograms: None,
         escalations_before: None,
+        compilations_before: None,
         contention_before: None,
         evictions_before: None,
         sizes_before: None,
         operations: culprit_core::operations::OperationalStats {
+            statement_work: Some(statement_work),
             index_usage_scope: Some(culprit_core::operations::IndexUsageScope::ConnectedMember),
             ..Default::default()
         },
@@ -172,6 +187,14 @@ pub async fn snapshot(
     ));
     let replication = crate::signals::collect(&mut reader, &probe, &mut snapshot).await;
     let ordinary_shutdown = reader.close().await;
+    if ordinary_shutdown != culprit_core::telemetry::SourceShutdown::Quiescent {
+        snapshot.operations.statement_work =
+            Some(Box::new(culprit_core::telemetry::StatementCounterSnapshot::unavailable(
+                crate::native::statements::SOURCE,
+                culprit_core::ErrorCode::QueryFailed,
+                Some(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed),
+            )));
+    }
     crate::signals::settle_replication(&mut snapshot, replication, ordinary_shutdown);
     // The optional source has its own observation bounds and ownership. Never start a new native operation
     // after the ordinary scan left uncertain work on this connector.
@@ -201,6 +224,29 @@ pub async fn snapshot(
     Ok(snapshot)
 }
 
+/// A slow-log failure belongs to that source, not the disabled Performance Schema counter source.
+fn record_statement_failure(
+    coverage: &mut Coverage,
+    counters: &mut culprit_core::telemetry::StatementCounterSnapshot,
+    error: culprit_core::Error,
+    performance_schema: bool,
+    grant_target: &str,
+) {
+    if performance_schema {
+        let stopped = match &error.detail {
+            Some(culprit_core::ErrorDetail::CollectionStopped(stop)) => Some(*stop),
+            _ => None,
+        };
+        *counters = culprit_core::telemetry::StatementCounterSnapshot::unavailable(
+            crate::native::statements::SOURCE,
+            error.code,
+            stopped,
+        );
+    }
+    let error = statement_error(error, performance_schema, grant_target);
+    coverage.source_failed(&sources::STATEMENTS, &error);
+}
+
 fn statement_error(error: culprit_core::Error, performance_schema: bool, grant_target: &str) -> culprit_core::Error {
     if error.code != culprit_core::ErrorCode::PermissionDenied
         || matches!(error.detail, Some(culprit_core::ErrorDetail::CollectionStopped(_)))
@@ -219,17 +265,29 @@ mod tests {
     #[test]
     fn workload_permission_guidance_names_the_source_that_actually_failed() {
         for (instrumented, source) in [(true, "performance_schema.*"), (false, "mysql.slow_log")] {
-            let error = statement_error(
+            let mut coverage = Coverage::with(vec![Capability::PerformanceSchema], vec![]);
+            let mut counters = culprit_core::telemetry::StatementCounterSnapshot::unavailable(
+                crate::native::statements::SOURCE,
+                ErrorCode::Unsupported,
+                None,
+            );
+            record_statement_failure(
+                &mut coverage,
+                &mut counters,
                 Error::new(ErrorCode::PermissionDenied, "native permission denied"),
                 instrumented,
                 "'monitor'@'%'",
             );
-            let mut coverage = Coverage::with(vec![Capability::PerformanceSchema], vec![]);
-            coverage.source_failed(&sources::STATEMENTS, &error);
             let outcome =
                 coverage.outcomes().into_iter().find(|outcome| outcome.source == sources::STATEMENTS.name).unwrap();
             assert_eq!(outcome.state, SourceState::Unavailable);
             assert_eq!(outcome.reason.as_deref(), Some("native permission denied"));
+            assert_eq!(counters.coverage.source, crate::native::statements::SOURCE);
+            assert_eq!(
+                counters.coverage.error_code,
+                Some(if instrumented { ErrorCode::PermissionDenied } else { ErrorCode::Unsupported })
+            );
+            assert!(counters.is_valid() && counters.context.is_none() && counters.observations.is_empty());
             let (_, missing, _) = coverage.finish();
             assert_eq!(missing[0].fix.as_deref(), Some(format!("GRANT SELECT ON {source} TO 'monitor'@'%';").as_str()));
         }
@@ -258,18 +316,35 @@ mod tests {
         );
         for original in errors {
             let original = original.with_hint("native recovery guidance");
-            let error = statement_error(original.clone(), true, "'monitor'@'%'");
-            assert_eq!(
-                (error.code, error.detail, &error.message, &error.hint),
-                (original.code, original.detail, &original.message, &original.hint)
-            );
-            let mut coverage = Coverage::with(vec![Capability::PerformanceSchema], vec![]);
-            coverage.source_failed(&sources::STATEMENTS, &error);
-            let outcome =
-                coverage.outcomes().into_iter().find(|outcome| outcome.source == sources::STATEMENTS.name).unwrap();
-            assert_eq!(outcome.state, SourceState::Unavailable);
-            let (_, missing, _) = coverage.finish();
-            assert_eq!(missing[0].fix.as_deref(), Some("native recovery guidance"));
+            for instrumented in [false, true] {
+                let error = statement_error(original.clone(), instrumented, "'monitor'@'%'");
+                assert_eq!(
+                    (error.code, error.detail, &error.message, &error.hint),
+                    (original.code, original.detail, &original.message, &original.hint)
+                );
+                let mut coverage = Coverage::with(vec![Capability::PerformanceSchema], vec![]);
+                let mut counters = culprit_core::telemetry::StatementCounterSnapshot::unavailable(
+                    crate::native::statements::SOURCE,
+                    ErrorCode::Unsupported,
+                    None,
+                );
+                record_statement_failure(&mut coverage, &mut counters, original.clone(), instrumented, "'monitor'@'%'");
+                let outcome =
+                    coverage.outcomes().into_iter().find(|outcome| outcome.source == sources::STATEMENTS.name).unwrap();
+                assert_eq!(outcome.state, SourceState::Unavailable);
+                assert_eq!(
+                    counters.coverage.error_code,
+                    Some(if instrumented { original.code } else { ErrorCode::Unsupported })
+                );
+                let stopped = match &original.detail {
+                    Some(culprit_core::ErrorDetail::CollectionStopped(stop)) if instrumented => Some(*stop),
+                    _ => None,
+                };
+                assert_eq!(counters.coverage.stopped, stopped);
+                assert!(counters.is_valid() && counters.context.is_none() && counters.observations.is_empty());
+                let (_, missing, _) = coverage.finish();
+                assert_eq!(missing[0].fix.as_deref(), Some("native recovery guidance"));
+            }
         }
     }
 }

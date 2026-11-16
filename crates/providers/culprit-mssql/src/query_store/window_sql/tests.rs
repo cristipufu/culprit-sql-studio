@@ -56,6 +56,30 @@ pub(crate) fn open_row(clock: &str, elapsed_seconds: f64) -> Rec {
 }
 
 #[test]
+fn compiler_native_context_uses_original_and_final_window_clocks_without_compute_or_extra_reads() {
+    let original = azure_row();
+    let mut window = FrozenWindow::decode(&original, 60, true).unwrap();
+    let final_row = replace(&original, &[("window_clock", Val::Text("2020-01-01T07:00:01.000000001Z".into()))]);
+    assert_eq!(window.verify(&final_row).unwrap(), WindowVerification::Unchanged);
+    let context = window.compilation_context("native-reader-alias", 1433).unwrap();
+    assert_eq!(context.observed_from, "2020-01-01T07:00:00Z");
+    assert_eq!(context.observed_until, "2020-01-01T07:00:01.000000001Z");
+    assert_eq!(context.target.database().unwrap().incarnation.as_deref(), Some("logical-database-guid"));
+    assert_eq!(context.partition, culprit_core::telemetry::SourcePartition::Target);
+    assert!(!context.has_qualified_local_owner(), "query-global counts never become current compiler ownership");
+    window.invalidate_endpoint();
+    assert!(window.compilation_context("native-reader-alias", 1433).is_none());
+}
+
+#[test]
+fn boxed_native_clocks_do_not_invent_the_database_incarnation_missing_from_the_existing_read() {
+    let window = FrozenWindow::decode(&row(), 60, true).unwrap();
+    let context = window.compilation_context("saved-endpoint", 1433).unwrap();
+    assert!(context.is_valid());
+    assert!(context.target.database().unwrap().incarnation.is_none());
+}
+
+#[test]
 fn native_population_is_frozen_while_capture_changes_only_withdraw_wait_qualification() {
     let original = row();
     let mut window = FrozenWindow::decode(&original, 60, true).unwrap();

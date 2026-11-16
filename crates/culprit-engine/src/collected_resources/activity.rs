@@ -10,7 +10,7 @@ pub(super) struct CapturedActivity<'a> {
 impl<'a> CapturedActivity<'a> {
     pub(super) fn new(capture: &'a EvidenceCapture) -> Result<Self> {
         if !capture.families().contains(&EvidenceFamily::ActivityObservations)
-            || !matches!(capture.source().observation, SourceObservation::Activity(_))
+            || capture.source().observation.activity().is_none()
         {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }

@@ -23,6 +23,37 @@ async fn sealed_original_and_cost_evidence_prepare_one_verified_candidate_withou
 }
 
 #[tokio::test]
+async fn a_native_lock_wait_without_duration_selects_its_question_but_unqualified_cost_cannot_open_or_enroll_it() {
+    let fixture = crate::analytical::test_support::investigation_fixture();
+    let mut record = fixture.baseline_record.record;
+    let TelemetryRecord::Activity(row) = &mut record else { panic!("original native Activity point") };
+    row.waiting_on_lock = Some(true);
+    row.blocking_status = ActivityBlockingStatus::Unknown;
+    row.elapsed_ms = Some("40000".into());
+    let wait = row.wait.as_mut().unwrap();
+    wait.class = None;
+    wait.identified_resources.clear();
+    wait.native_type = Some("native-lock-wait".into());
+    wait.elapsed_ms = None;
+    wait.owners.clear();
+    let mut harness = Harness::with_activity(Frame { source: fixture.baseline_source, records: vec![record] }).await;
+    harness.backend.recipe.id = "fixture.focused-blocking".into();
+    harness.backend.recipe.selector = RecipeSelector::FocusedBlocking;
+    harness.backend.recipe.cost = RecipeCostQualification::Unqualified;
+    let page = harness.outbox.diagnostic_checkpoints(DIAGNOSTIC_CONTROLLER_VERSION, None, 10).await.unwrap();
+    let episodes = &page.checkpoints[0].episodes;
+    let [episode] = episodes.as_slice() else { panic!("one native lock question, without invented timed symptoms") };
+    assert!(matches!(episode.signal, DiagnosticSignal::LockWait { .. }));
+    assert_eq!(possible_questions(episode), [RecipeSelector::FocusedBlocking]);
+    assert!(harness.prepare(&CollectionCancellation::default()).await.unwrap().is_empty());
+    assert_eq!(harness.backend.components.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.backend.verified.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.backend.calls.opened.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.backend.calls.captured.load(Ordering::SeqCst), 0);
+    assert!(harness.journal.focused_intents().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn unqualified_unknown_activation_changed_routes_and_stricter_caller_caps_never_verify_cost() {
     for withheld in ["unqualified", "activation", "clock", "route", "budget"] {
         let mut harness = Harness::new(1).await;

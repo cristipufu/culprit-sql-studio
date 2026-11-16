@@ -313,6 +313,11 @@ qualified member, process generation and observation bounds. Scan summaries atta
 local native row supplies those dimensions; global or mixed-context groups do not inherit a representative row's
 temporary counters. A process generation does not establish a counter-reset time.
 
+MySQL and MariaDB scans retain statement-counter evidence from the same digest read, including exact error and
+warning totals. A warning total counts warnings, not statements with warnings; an absent total remains unknown.
+The Health panel starts folded and pages ten native points at a time. A disabled counter source stays unavailable
+even when an independent slow-log source supplies workload evidence.
+
 Operational file I/O rows also retain exact recorded governance stalls, logical catalog size, physical disk
 allocation and the file's configured maximum as separate facts. Zero, unknown, not applicable and no fixed maximum
 remain distinct. These observations establish neither free capacity, enabled autogrowth nor current pressure.
@@ -355,6 +360,13 @@ clocks. These records do not establish a current compiler, a memory owner or a s
 Partial, unavailable and complete-empty evidence stay distinct; an empty
 per-query selection cannot erase separately collected database-wide compilation totals.
 
+Use `--compilation-baseline RANGE_SHA256` with `evidence analyze --analysis compilation` to compare two original
+captures. Scans reuse an eligible saved baseline through the same pure comparison. Comparisons require matching
+native database incarnations and full query identities, ordered native read bounds and compatible counters.
+Missing entries, partial reads, changed counters and unknown native identity remain explicit gaps. A count increase
+does not measure current compiler memory or compilation cost. SQL Server deployments without an acquired native
+database incarnation cannot produce a qualified interval; a connection address is insufficient.
+
 When a scan already holds a complete statement definition with the exact native query incarnation, its explicit
 `OPTION (RECOMPILE)` policy can explain repeated expensive recorded compilation independently of runtime-window
 comparability. The binding reuses acquired definitions and adds no source query. The same pure explanation accepts
@@ -378,6 +390,15 @@ locks, especially when several requests share that session. Raw statement text s
 the report carries references, explanations and explicit gaps. Full text outside the warehouse preview requires
 the same bounded recovery option. This mode does not establish operation-specific resource consumption, an object
 target or completed/paused/failed maintenance history from a current statement alone.
+
+`blocking` reads a focused native blocking capture with `--analysis blocking`. It selects only original Activity
+observations and uses the same pure graph and explanation as the SDK. Native session/request generations, every
+reported owner, original evidence references and read boundaries remain separate. Prepared-transaction placeholder
+0 is unresolved transaction ownership, not a session or a particular GID; a same-session relationship does not
+identify an owning request. Missing archived rows, changed requests and unqualified original scope remain explicit
+gaps. This analysis opens no source database and never replaces the original incident with a later baseline. Text
+output limits displayed relationships and chains; JSON retains the full analysis within the caller's output cap.
+The existing MCP `blocking` tool reads Live; it does not read an archive range.
 
 `maintenance-progress` reuses live readers for PostgreSQL index builds, client VACUUM, ANALYZE, CLUSTER and VACUUM FULL,
 and YugabyteDB index builds. A focused selection names the original Activity participant. Captures preserve native

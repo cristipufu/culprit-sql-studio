@@ -31,6 +31,9 @@ tokio = { workspace = true, features = ["signal"] }
 ring.workspace = true
 ureq.workspace = true
 
+[dev-dependencies]
+culprit-collector = { workspace = true, features = ["test-support"] }
+
 [target.'cfg(windows)'.dependencies]
 # Hides a typed password (console echo off), as `stty -echo` does on Unix.
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }

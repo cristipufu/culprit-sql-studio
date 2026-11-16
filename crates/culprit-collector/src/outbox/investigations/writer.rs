@@ -272,7 +272,7 @@ impl Files {
                     {
                         return Err(integrity());
                     }
-                    self.validate_report_participants(report, &source, &row, &report_input)?;
+                    self.validate_report_participants(report, &revision.episode, &source, &row, &report_input)?;
                     if let Some(intent) = &report_intent {
                         self.verify_investigation_intent(intent)?;
                         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
@@ -325,11 +325,25 @@ impl Files {
     fn validate_report_participants(
         &mut self,
         report: &DiagnosticReport,
+        episode: &DiagnosticEpisode,
         source: &CollectionDescription,
         row: &ExportedRecord,
         input: &DiagnosticInput,
     ) -> Result<()> {
         match report {
+            DiagnosticReport::Blocking { .. } => {
+                let rows = input
+                    .rows
+                    .iter()
+                    .map(|row| match &row.row.record {
+                        TelemetryRecord::Activity(observation) => Ok((&row.reference, observation.as_ref())),
+                        _ => Err(integrity()),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if !report.matches_blocking_input(episode, source, rows) {
+                    return Err(integrity());
+                }
+            }
             DiagnosticReport::CurrentRequestWork { .. } => {
                 let rows = input
                     .rows

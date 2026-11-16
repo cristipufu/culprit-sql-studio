@@ -5,9 +5,19 @@ use culprit_core::{Check, QueryCosts, SourceOutcome, SourceState, telemetry::*};
 fn recorded() -> Snapshot {
     let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
     snapshot.workload = None;
+    let mut database = snapshot.database_identity();
+    database.incarnation = Some("synthetic-query-store-namespace".into());
+    snapshot.identity = Some(database.clone());
     let mut row = measured_recompile();
     row.source = source_id::QUERY_COMPILATION.into();
     snapshot.operations.query_compilation = Some(CompilationSnapshot {
+        context: Some(NativeReadContext {
+            target: database.into(),
+            partition: SourcePartition::Target,
+            observed_from: "2026-11-15T12:00:00Z".into(),
+            observed_until: "2026-11-15T12:00:01Z".into(),
+            database_writable: Some(true),
+        }),
         source: row.source.clone(),
         observed_from: "2026-11-15T12:00:00Z".into(),
         observed_until: "2026-11-15T12:00:01Z".into(),
@@ -88,4 +98,28 @@ fn incomplete_optional_policy_and_conflicting_native_rows_do_not_become_a_findin
     let raw = snapshot.operations.query_compilation.as_mut().unwrap();
     raw.observations.push(raw.observations[0].clone());
     assert!(CompilationPolicyCheck.run(&snapshot).is_empty(), "duplicate native entry cannot choose a representative");
+}
+
+#[test]
+fn unknown_or_foreign_database_namespace_cannot_lend_a_query_link_or_comparable_cost_suppression() {
+    let mut snapshot = recorded();
+    let identity = match &snapshot.operations.query_compilation.as_ref().unwrap().observations[0].fact {
+        OperationalFact::MssqlQueryCompilation(row) => row.identity.clone(),
+        _ => panic!(),
+    };
+    let mut workload = crate::waits::snapshot_with(Engine::Mssql).workload.unwrap();
+    workload.queries.truncate(1);
+    let query = &mut workload.queries[0];
+    query.native_identity = Some(identity);
+    query.costs = Some(QueryCosts { plans: Some(12.0), plan_ms: Some(120_000.0), ..Default::default() });
+    snapshot.workload = Some(workload);
+    snapshot.operations.query_compilation.as_mut().unwrap().context = None;
+    let finding = CompilationPolicyCheck.run(&snapshot).remove(0);
+    assert!(finding.queries.is_empty());
+    let mut foreign = recorded();
+    let context = foreign.operations.query_compilation.as_mut().unwrap().context.as_mut().unwrap();
+    if let CollectionTarget::Database(database) = &mut context.target {
+        database.incarnation = Some("foreign-native-database".into());
+    }
+    assert!(CompilationPolicyCheck.run(&foreign).is_empty());
 }

@@ -8,6 +8,13 @@ use ts_rs::TS;
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedBlockingAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::BlockingReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedCleanupAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::CleanupReport,
@@ -84,6 +91,9 @@ pub struct CollectedRuntimeDistributionAnalysis {
 #[ts(export)]
 pub struct CollectedCompilationAnalysis {
     pub context: CollectedEvidenceContext,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub baseline_context: Option<CollectedEvidenceContext>,
     pub report: crate::CompilationReport,
 }
 

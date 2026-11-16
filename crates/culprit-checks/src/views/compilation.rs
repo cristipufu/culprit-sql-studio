@@ -8,6 +8,8 @@ use std::collections::BTreeSet;
 
 pub(crate) mod policy;
 pub(crate) use policy::{RepeatedRecompile, repeated_recompile};
+mod comparison;
+pub use comparison::compare;
 
 pub fn explain(observations: &[&OperationalObservation], source: Option<&SourceOutcome>) -> Result<CompilationReport> {
     let mut cases = cases(observations, source)?;
@@ -28,6 +30,7 @@ pub fn explain(observations: &[&OperationalObservation], source: Option<&SourceO
         },
         limitations,
         entries: cases.into_iter().map(render).collect(),
+        comparison: None,
     })
 }
 

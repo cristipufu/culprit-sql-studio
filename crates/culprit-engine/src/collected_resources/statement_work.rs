@@ -5,10 +5,13 @@ use culprit_core::collected_resource_analysis::CollectedStatementWorkAnalysis;
 pub fn statement_work(capture: &EvidenceCapture) -> Result<CollectedStatementWorkAnalysis> {
     let input = CapturedState::new(capture, SnapshotDataset::StatementCounters)?;
     input.database()?;
-    let context = NativeReadContext::from_snapshot(capture.source()).map_err(|_| invalid())?;
     let observations = input.rows()?;
-    let source = input.outcome(observations.len())?;
+    let snapshot = culprit_core::telemetry::StatementCounterSnapshot::from_source(
+        capture.source(),
+        observations.into_iter().cloned().collect(),
+    )
+    .map_err(|_| invalid())?;
     let report =
-        culprit_checks::statement_work::explain(&context, &observations, Some(&source)).map_err(|_| invalid())?;
+        culprit_checks::statement_work::explain(&snapshot, capture.is_read_complete()).map_err(|_| invalid())?;
     Ok(CollectedStatementWorkAnalysis { context: crate::collected_context::from_capture(capture), report })
 }

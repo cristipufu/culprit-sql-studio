@@ -32,6 +32,9 @@ pub enum IndexUsageScope {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default)]
 #[ts(export)]
 pub struct OperationalStats {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub statement_work: Option<Box<crate::telemetry::StatementCounterSnapshot>>,
     /// None means that the native usage population was not established.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -138,6 +141,7 @@ impl OperationalStats {
             cluster: &'a Option<ClusterHealth>,
         }
         let Self {
+            statement_work: _,
             index_usage_scope,
             log_failures,
             spaces,

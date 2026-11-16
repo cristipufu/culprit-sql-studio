@@ -2,6 +2,7 @@
 import type { CollectorNote } from "./CollectorNote";
 import type { ColumnHistogram } from "./ColumnHistogram";
 import type { ColumnInfo } from "./ColumnInfo";
+import type { CompilationBaseline } from "./CompilationBaseline";
 import type { ConstraintIssue } from "./ConstraintIssue";
 import type { ContentionBaseline } from "./ContentionBaseline";
 import type { CountBaseline } from "./CountBaseline";
@@ -72,6 +73,10 @@ histograms: Array<ColumnHistogram> | null,
  * digest: what tells escalations since then from old ones. `None` without an earlier scan to compare with.
  */
 escalations_before: EscalationBaseline | null, 
+/**
+ * Exact compiler counters from one earlier native read, independent of selected runtime populations.
+ */
+compilations_before?: CompilationBaseline, 
 /**
  * Per-index lock counters read by an earlier scan of this database; absent without comparable history.
  */

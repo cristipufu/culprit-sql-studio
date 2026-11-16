@@ -1,9 +1,11 @@
 use super::fixture::Fixture;
 use culprit_collector::analytical::{
     evidence::{EvidenceFamily, EvidenceGapReason},
-    test_support::{node_statement_work_evidence_cases, statement_work_evidence_cases},
+    test_support::{
+        node_statement_work_evidence_cases, statement_outcome_evidence_cases, statement_work_evidence_cases,
+    },
 };
-use culprit_core::{ErrorDetail, MeasurementScope, ResetMarker, SourceOutcome, SourceState, telemetry::*};
+use culprit_core::{ErrorDetail, MeasurementScope, ResetMarker, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
 
 fn observations(rows: &[TelemetryRecord]) -> Vec<&OperationalObservation> {
@@ -16,17 +18,46 @@ fn observations(rows: &[TelemetryRecord]) -> Vec<&OperationalObservation> {
 }
 
 #[tokio::test]
+async fn exact_outcomes_reuse_the_same_pure_view_and_keep_same_digest_schemas_separate() {
+    let mut keys = std::collections::BTreeMap::new();
+    for (source, rows) in statement_outcome_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), rows.clone()).await;
+        let opened = fixture.recovery_object_reads();
+        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let analysis = collected_resources::statement_work(&capture).unwrap();
+        let expected = match &observations(&rows)[0].fact {
+            OperationalFact::StatementCounters(sample) => sample.outcomes().unwrap(),
+            _ => panic!(),
+        };
+        assert_eq!(analysis.report.entries[0].outcomes, expected);
+        assert_eq!(
+            analysis.report.entries[0].identity.qualifiers["schema"],
+            source.target.database().unwrap().database
+        );
+        assert_eq!(analysis.report.entries[0].reset, ResetMarker::Unknown);
+        assert_eq!(analysis.context.records.len(), 1);
+        assert_eq!(fixture.recovery_object_reads(), opened);
+        keys.insert(
+            source.target.database().unwrap().database.clone(),
+            analysis.report.entries[0].observation_key.clone(),
+        );
+        fixture.remove_first_row(TelemetryStream::OperationalSamples);
+        let partial = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+        let report = collected_resources::statement_work(&partial).unwrap().report;
+        assert!(report.entries.is_empty());
+        assert_eq!(report.source_state, Some(SourceState::Partial));
+        assert_eq!(partial.source().observation.snapshot().unwrap().records, 1);
+        assert_eq!(fixture.recovery_object_reads(), opened);
+    }
+    assert_ne!(keys["app"], keys["other"]);
+}
+
+#[tokio::test]
 async fn authenticated_statement_work_reuses_pure_explanations_and_keeps_native_rows_once_without_query_definitions() {
     for (source, rows) in statement_work_evidence_cases() {
-        let native = source.observation.snapshot().unwrap();
-        let outcome = SourceOutcome {
-            source: native.sources[0].source.clone(),
-            state: native.sources[0].state,
-            reason: None,
-            reason_message: None,
-        };
-        let context = NativeReadContext::from_snapshot(&source).unwrap();
-        let expected = culprit_checks::statement_work::explain(&context, &observations(&rows), Some(&outcome)).unwrap();
+        let snapshot =
+            StatementCounterSnapshot::from_source(&source, observations(&rows).into_iter().cloned().collect()).unwrap();
+        let expected = culprit_checks::statement_work::explain(&snapshot, true).unwrap();
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete(), "{:?}", capture.gaps());
@@ -84,6 +115,8 @@ async fn archived_point_row_loss_remains_a_read_gap_without_upgrading_or_rewriti
 async fn conflicting_subject_scope_clock_family_or_dataset_is_rejected_before_explanation() {
     for shape in ["shared-target", "scope", "clock", "dataset", "wrong-family"] {
         let (mut source, mut rows) = statement_work_evidence_cases().remove(0);
+        let receipt = CaptureIdentity { observation_id: "original-statement-counter-read".into(), revision: None };
+        assert!(ExportedRecord::new(&source, &receipt, rows[0].clone()).is_ok());
         let TelemetryRecord::Operational(OperationalObservation {
             fact: OperationalFact::StatementCounters(sample),
             ..
@@ -109,17 +142,18 @@ async fn conflicting_subject_scope_clock_family_or_dataset_is_rejected_before_ex
             "wrong-family" => {}
             _ => unreachable!(),
         }
+        if matches!(shape, "shared-target" | "scope" | "clock") {
+            // Invalid native facts never receive a receipt and cannot become an authenticated SDK fixture.
+            let error = ExportedRecord::new(&source, &receipt, rows.remove(0)).unwrap_err();
+            assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::InvalidPage)), "{shape}");
+            continue;
+        }
         let fixture = Fixture::new(source, rows).await;
         let family =
             if shape == "wrong-family" { EvidenceFamily::ResourceSamples } else { EvidenceFamily::OperationalSamples };
         let capture = fixture.read_families(&[family]).await;
         let error = collected_resources::statement_work(&capture).unwrap_err();
-        let problem = if matches!(shape, "scope" | "clock") {
-            DeliveryProblem::Integrity
-        } else {
-            DeliveryProblem::UnsupportedSchema
-        };
-        assert_eq!(error.detail, Some(ErrorDetail::Delivery(problem)), "{shape}");
+        assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::UnsupportedSchema)), "{shape}");
     }
 }
 
@@ -145,12 +179,14 @@ async fn authenticated_node_points_keep_native_members_users_top_level_contexts_
     }
 }
 
-#[tokio::test]
-async fn node_scope_requires_the_original_qualified_member_epoch_and_canonical_native_statement_identity() {
+#[test]
+fn node_scope_and_native_source_identity_require_original_qualification_before_export() {
     for changed in
         ["target-only", "unknown-member", "unknown-epoch", "other-member", "user", "database", "top", "clock"]
     {
         let (mut source, mut rows) = node_statement_work_evidence_cases().remove(0);
+        let receipt = CaptureIdentity { observation_id: "original-native-node-counter-read".into(), revision: None };
+        assert!(ExportedRecord::new(&source, &receipt, rows[0].clone()).is_ok());
         match changed {
             "target-only" => source.partition = SourcePartition::Target,
             "unknown-member" => {
@@ -185,18 +221,25 @@ async fn node_scope_requires_the_original_qualified_member_epoch_and_canonical_n
                     _ => sample.observed_at = "2020-01-01T12:00:02Z".into(),
                 }
                 observation.key = sample.key().unwrap();
+                if matches!(changed, "user" | "database" | "top") {
+                    // The native producer uses this source-owned helper before signing. Generic replay keeps
+                    // opaque qualifiers; it does not reinterpret redacted identities as native OIDs/booleans.
+                    assert!(
+                        source.target.engine().spec().statement_counter_member(&sample.identity).is_none(),
+                        "{changed}"
+                    );
+                    continue;
+                }
             }
         }
-        // Unknown native ownership permits only raw partial points, never a complete native population.
+        // Unknown source ownership can describe an incomplete source, but cannot qualify a known-node point.
         if matches!(changed, "unknown-member" | "unknown-epoch") {
             let SourceObservation::Snapshot(snapshot) = &mut source.observation else { panic!() };
             snapshot.sources[0] =
                 StateSourceCoverage::observed(snapshot.sources[0].source.clone(), rows.len() as u32, false);
         }
-        let fixture = Fixture::new(source, rows).await;
-        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-        let error = collected_resources::statement_work(&capture).unwrap_err();
-        assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{changed}");
+        let error = ExportedRecord::new(&source, &receipt, rows.remove(0)).unwrap_err();
+        assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::InvalidPage)), "{changed}");
     }
 }
 

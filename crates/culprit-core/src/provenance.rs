@@ -98,6 +98,7 @@ impl ScanReference {
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum BaselinePurpose {
+    Compilation,
     WorkloadTrend,
     QueryActivity,
     WindowInference,
@@ -135,6 +136,11 @@ impl Snapshot {
         };
         if let Some(b) = &self.escalations_before {
             record(BaselinePurpose::Escalations, &b.taken_at, &b.reference, None);
+        }
+        if let Some(baseline) = &self.compilations_before
+            && let Some(reference) = &baseline.reference
+        {
+            record(BaselinePurpose::Compilation, &reference.taken_at, &baseline.reference, None);
         }
         if let Some(b) = &self.contention_before {
             record(BaselinePurpose::Contention, &b.taken_at, &b.reference, None);

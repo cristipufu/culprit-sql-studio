@@ -1,66 +1,43 @@
-//! Native statement counter points describe measured work without inventing a query runtime or a safe delta.
+//! Native statement points describe exact recorded work and outcomes, without an inferred interval or cause.
 use super::temporary_work;
 use culprit_core::{
-    Error, MeasurementScope, Result, SourceOutcome, SourceState, StatementWorkEntry, StatementWorkReport, format, t,
-    telemetry::{
-        NativeReadContext, OperationalFact, OperationalObservation, SourcePartition, statement_temporary_work,
-    },
+    Error, Metric, Result, SourceState, StatementWorkEntry, StatementWorkReport, format, key, t,
+    telemetry::{OperationalFact, StatementCounterSnapshot},
 };
-use std::collections::BTreeSet;
 
-pub fn explain(
-    context: &NativeReadContext,
-    observations: &[&OperationalObservation],
-    source: Option<&SourceOutcome>,
-) -> Result<StatementWorkReport> {
-    if !context.is_valid() || context.target.database().is_none() {
+pub fn explain(snapshot: &StatementCounterSnapshot, read_complete: bool) -> Result<StatementWorkReport> {
+    if !snapshot.is_valid_read(read_complete) {
         return Err(invalid());
     }
-    let bounds = culprit_core::telemetry::ObservationBounds::new(&context.observed_from, &context.observed_until)
-        .ok_or_else(invalid)?;
-    let expected =
-        source.map(|source| source.source.as_str()).or_else(|| observations.first().map(|row| row.source.as_str()));
-    if source.is_some_and(|source| match source.state {
-        SourceState::Empty | SourceState::Unavailable | SourceState::NotApplicable => !observations.is_empty(),
-        SourceState::Collected => observations.is_empty(),
-        SourceState::Partial => false,
-    }) {
-        return Err(invalid());
-    }
-    let mut keys = BTreeSet::new();
-    let mut entries = Vec::with_capacity(observations.len());
-    for observation in observations {
-        if !observation.is_valid() || expected != Some(observation.source.as_str()) || !keys.insert(&observation.key) {
-            return Err(invalid());
-        }
+    let mut entries = Vec::with_capacity(snapshot.observations.len());
+    for observation in &snapshot.observations {
         let OperationalFact::StatementCounters(sample) = &observation.fact else { return Err(invalid()) };
-        if !bounds.contains(&sample.observed_at)
-            || match sample.scope {
-                MeasurementScope::Database => false,
-                MeasurementScope::Node => !matches!(
-                    &context.partition,
-                    SourcePartition::InstanceLocal { member: Some(member), epoch: Some(_) }
-                        if context.has_qualified_local_owner()
-                            && context.target.engine().spec().statement_counter_member(&sample.identity).as_ref()
-                                == Some(member)
-                ),
-                _ => true,
-            }
-        {
-            return Err(invalid());
-        }
-        let work = statement_temporary_work(sample, &observation.source).map_err(|_| invalid())?;
+        let work =
+            culprit_core::telemetry::statement_temporary_work(sample, &observation.source).map_err(|_| invalid())?;
         let work = work
             .iter()
             .map(|work| temporary_work::evidence(work).map(temporary_work::explain).ok_or_else(invalid))
             .collect::<Result<Vec<_>>>()?;
+        let outcomes = sample.outcomes().map_err(|_| invalid())?;
+        let mut outcome_metrics = Vec::new();
+        for (label, value) in [
+            (key!("view.statement_work.outcome.errors"), &outcomes.errors),
+            (key!("view.statement_work.outcome.warnings"), &outcomes.warnings),
+        ] {
+            if let Some(value) = value {
+                outcome_metrics.push(Metric::said_text(label, format::digits(value.clone())));
+            }
+        }
         entries.push(StatementWorkEntry {
+            source: observation.source.clone(),
             observation_key: observation.key.clone(),
             identity: sample.identity.clone(),
             scope: sample.scope,
             observed_at: sample.observed_at.clone(),
             reset: sample.reset.clone(),
             work,
+            outcomes,
+            outcome_metrics,
         });
     }
     entries.sort_by(|left, right| left.observation_key.cmp(&right.observation_key));
@@ -69,25 +46,41 @@ pub fn explain(
         t!("view.statement_work.limit.reset"),
         t!("view.statement_work.limit.identity"),
     ];
-    if observations.iter().any(|observation| {
-        matches!(&observation.fact, OperationalFact::StatementCounters(sample) if sample.scope == MeasurementScope::Node)
-    }) {
+    if snapshot.context.is_none() {
+        limitations.push(t!("view.statement_work.limit.source_unknown"));
+    }
+    if entries.iter().any(|entry| entry.scope == culprit_core::MeasurementScope::Node) {
         limitations.push(t!("view.statement_work.limit.node"));
     }
     if entries.iter().any(|entry| entry.work.is_empty()) {
         limitations.push(t!("view.statement_work.limit.unmeasured"));
     }
-    match source.map(|source| source.state) {
-        None => limitations.push(t!("view.statement_work.limit.source_unknown")),
-        Some(SourceState::Partial) => limitations.push(t!("view.statement_work.limit.source_partial")),
-        Some(SourceState::Unavailable | SourceState::NotApplicable) => {
+    if entries.iter().any(|entry| entry.outcomes.is_recorded()) {
+        limitations.push(t!("view.statement_work.limit.outcomes"));
+    }
+    let missing = !read_complete || snapshot.observations.len() != snapshot.coverage.records as usize;
+    let state = if missing
+        && matches!(snapshot.coverage.state, SourceState::Collected | SourceState::Empty | SourceState::Partial)
+    {
+        SourceState::Partial
+    } else {
+        snapshot.coverage.state
+    };
+    if missing {
+        limitations.push(t!("view.statement_work.limit.read"));
+    }
+    match state {
+        SourceState::Partial => limitations.push(t!("view.statement_work.limit.source_partial")),
+        SourceState::Unavailable | SourceState::NotApplicable => {
             limitations.push(t!("view.statement_work.limit.source_unavailable"))
         }
-        Some(SourceState::Collected | SourceState::Empty) => {}
+        SourceState::Collected | SourceState::Empty => {}
     }
     Ok(StatementWorkReport {
-        source_state: source.map(|source| source.state),
-        source_reason: source.and_then(|source| source.reason.clone()),
+        source: snapshot.source.clone(),
+        context: snapshot.context.clone(),
+        source_state: Some(state),
+        source_reason: snapshot.coverage.error_code.map(|_| t!("view.statement_work.source_error")),
         title: t!("view.statement_work.title"),
         summary: if entries.is_empty() {
             t!("view.statement_work.summary.empty")

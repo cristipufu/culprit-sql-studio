@@ -4,7 +4,7 @@ use super::*;
 use culprit_core::{Engine, Session, telemetry::*};
 use std::collections::{BTreeMap, BTreeSet};
 mod blocking;
-pub(crate) use blocking::{BlockingReadOptions, blockers, unqualified_owner_ids};
+pub(crate) use blocking::{BlockingReadOptions, blockers, observe_blocking, unqualified_owner_ids};
 pub struct ActivityRecord {
     pub facts: Option<ActivityObservation>,
     row: Row,

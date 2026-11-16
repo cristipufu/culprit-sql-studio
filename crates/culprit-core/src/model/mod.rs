@@ -752,6 +752,10 @@ pub struct Snapshot {
     /// The lock escalations an earlier scan counted (SQL Server), set from the scans Culprit keeps or a previous
     /// digest: what tells escalations since then from old ones. `None` without an earlier scan to compare with.
     pub escalations_before: Option<crate::signals::EscalationBaseline>,
+    /// Exact compiler counters from one earlier native read, independent of selected runtime populations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub compilations_before: Option<crate::telemetry::CompilationBaseline>,
     /// Per-index lock counters read by an earlier scan of this database; absent without comparable history.
     pub contention_before: Option<crate::signals::ContentionBaseline>,
     /// pg_stat_statements' eviction rounds an earlier scan counted, set from the scans Culprit keeps: what tells rounds

@@ -288,6 +288,7 @@ impl CollectedScan {
             // Lock escalations, index contention and operational counters are counted since startup with no time for each:
             // compare against the earliest compatible scan covering the selected window.
             reports::apply_counter_baselines(&dir, &mut snapshot, previous.as_ref());
+            reports::apply_compilation_baseline(&dir, &mut snapshot, previous.as_ref());
             // pg_stat_statements' evictions are counted since its last reset: the oldest of Culprit's scans a day or more
             // back tells the rate they go at now, else the previous scan's count tells new ones.
             snapshot.evictions_before = reports::evictions_baseline(&dir, &snapshot).or_else(|| {

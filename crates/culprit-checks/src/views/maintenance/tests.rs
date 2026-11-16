@@ -1,7 +1,7 @@
 use super::*;
 use culprit_core::{Engine, MeasurementScope, SourceState};
 
-fn current(session: &str, sql: &str) -> ActivityObservation {
+pub(in crate::views) fn current(session: &str, sql: &str) -> ActivityObservation {
     ActivityObservation {
         blocking_status: ActivityBlockingStatus::Known,
         waiting_on_lock: Some(false),
@@ -29,7 +29,7 @@ fn current(session: &str, sql: &str) -> ActivityObservation {
     }
 }
 
-fn waiting(mut row: ActivityObservation, owner: &ActivityObservation) -> ActivityObservation {
+pub(in crate::views) fn waiting(mut row: ActivityObservation, owner: &ActivityObservation) -> ActivityObservation {
     row.waiting_on_lock = Some(true);
     row.wait = Some(ActivityWait {
         class: None,
@@ -45,7 +45,7 @@ fn waiting(mut row: ActivityObservation, owner: &ActivityObservation) -> Activit
     row
 }
 
-fn frame(rows: usize) -> CollectionDescription {
+pub(in crate::views) fn frame(rows: usize) -> CollectionDescription {
     CollectionDescription {
         target: culprit_core::DatabaseIdentity::server(Engine::Mssql, "db", "fixture.invalid", 1433, None).into(),
         partition: SourcePartition::Target,

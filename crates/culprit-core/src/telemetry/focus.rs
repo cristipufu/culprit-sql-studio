@@ -2,6 +2,7 @@
 use super::*;
 use crate::{ObservedWaitResource, WaitResourceKind};
 
+mod blocking;
 mod compiler_admission;
 mod current_request_work;
 mod plan;

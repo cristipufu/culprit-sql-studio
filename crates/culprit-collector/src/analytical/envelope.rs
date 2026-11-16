@@ -123,7 +123,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
     match &source.observation {
         SourceObservation::RetainedSamples(history) => context["observed_at"] = json!(history.observed_at),
         SourceObservation::RetainedEvents(history) => context["observed_at"] = json!(history.observed_at),
-        SourceObservation::Activity(snapshot) => {
+        SourceObservation::Activity(snapshot) | SourceObservation::FocusedBlocking { snapshot, .. } => {
             context["observed_at"] = json!(snapshot.at);
             context["observed_from"] = json!(snapshot.observed_from);
             context["observed_until"] = json!(snapshot.observed_until);

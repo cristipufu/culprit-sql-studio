@@ -326,6 +326,37 @@ fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) 
             )?;
             (update.revisions, update.checkpoint)
         }
+        SourceObservation::FocusedBlocking { .. } => {
+            let rows = input
+                .rows
+                .iter()
+                .map(|row| match &row.row.record {
+                    TelemetryRecord::Activity(observation) => {
+                        Ok(DiagnosticActivityRow { reference: &row.reference, observation })
+                    }
+                    _ => Err(CollectionStop::InvalidPage.error()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            // An explicit raw lookup can have an authenticated evidence-only parent but no scheduled incident.
+            // Consuming that point must neither stall the queue nor invent a retrospective baseline/episode.
+            let empty = DiagnosticCheckpoint {
+                controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
+                target: input.source.target.clone(),
+                input: input.parent.clone(),
+                episodes: vec![],
+            };
+            let previous = input.checkpoint.as_ref().unwrap_or(&empty);
+            let intent = input.investigation_intent()?;
+            let update = analyze_diagnostic_blocking(
+                &input.source,
+                &input.parent,
+                &rows,
+                previous,
+                analyzed_at,
+                intent.as_ref(),
+            )?;
+            (update.revisions, update.checkpoint)
+        }
         SourceObservation::FocusedPageWait { .. } => {
             let rows = input
                 .rows

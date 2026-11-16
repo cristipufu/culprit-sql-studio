@@ -12,6 +12,55 @@ pub struct CompilationReport {
     pub summary: String,
     pub limitations: Vec<String>,
     pub entries: Vec<CompilationExplanation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub comparison: Option<CompilationComparisonReport>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum CompilationComparisonIssue {
+    NativeContextUnavailable,
+    NativeNamespaceUnavailable,
+    DifferentSource,
+    InvalidObservationOrder,
+    SourceUnavailable,
+    PartialRead,
+    UnmatchedEntries,
+    CounterChanged,
+    NativeClockConflict,
+}
+
+/// Exact count changes have their own native observation bracket. They carry no duration, memory total or
+/// execution-population share. Original archived capture proofs are retained by the SDK's enclosing context.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct CompilationComparisonReport {
+    pub baseline: Option<crate::ScanReference>,
+    pub observed_from: Option<String>,
+    pub observed_until: Option<String>,
+    pub missing_before: u32,
+    pub missing_after: u32,
+    pub issues: Vec<CompilationComparisonIssue>,
+    pub title: String,
+    pub summary: String,
+    pub limitations: Vec<String>,
+    pub entries: Vec<CompilationChange>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct CompilationChange {
+    /// Each side's exact native observation key; they are equal only within the separately qualified read pair.
+    pub observation_key: String,
+    pub baseline_observation_key: String,
+    pub identity: NativeQueryIdentity,
+    pub compilations: String,
+    pub last_compile_at: String,
+    pub explanation: String,
+    pub investigation: String,
+    pub verify: String,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

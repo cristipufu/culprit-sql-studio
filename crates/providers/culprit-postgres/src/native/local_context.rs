@@ -74,6 +74,42 @@ impl Context {
     }
 }
 
+pub(crate) fn unknown(metadata: &native::metadata::Metadata, until: &str) -> Result<NativeReadContext> {
+    let context = NativeReadContext {
+        target: metadata.database.clone().into(),
+        partition: SourcePartition::InstanceLocal { member: None, epoch: Some(metadata.activity_epoch()) },
+        observed_from: canonical_time(&metadata.at)?,
+        observed_until: canonical_time(until)?,
+        database_writable: Some(!metadata.standby),
+    };
+    if !context.is_valid() {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    Ok(context)
+}
+
+/// Complete the same held read. A later permission grant cannot fill missing initial member authority.
+pub(crate) async fn complete<R: QueryRead>(
+    reader: &mut R,
+    host: &str,
+    port: u16,
+    before: &native::metadata::Metadata,
+    owner: Option<&Context>,
+) -> Result<NativeReadContext> {
+    if let Some(owner) = owner {
+        return owner.recheck(reader, host, port).await?.ok_or_else(|| CollectionStop::SourceChanged.error());
+    }
+    let after = native::metadata::activity(reader, host, port).await?;
+    if !before.same_activity_source(&after) || ObservationBounds::new(&before.at, &after.at).is_none() {
+        return Err(CollectionStop::SourceChanged.error());
+    }
+    let until = match Context::observe(reader, &after).await? {
+        Some(owner) => owner.read_context()?.observed_until,
+        None => after.at,
+    };
+    unknown(before, &until)
+}
+
 fn optional(error: &culprit_core::Error) -> bool {
     (error.detail.is_none() && matches!(error.code, ErrorCode::PermissionDenied | ErrorCode::Unsupported))
         || error.detail == Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::InvalidPage))

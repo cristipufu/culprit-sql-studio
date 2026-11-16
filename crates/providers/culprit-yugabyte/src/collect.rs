@@ -71,6 +71,7 @@ async fn observe(
         constraints,
         histograms: None,
         escalations_before: None,
+        compilations_before: None,
         contention_before: None,
         evictions_before: None,
         sizes_before: None,

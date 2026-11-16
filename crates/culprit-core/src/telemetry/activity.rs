@@ -352,6 +352,11 @@ pub struct BlockingObservation {
     pub owner_observed: bool,
 }
 impl BlockingObservation {
+    /// Equality of reported session tokens cannot establish which request owns a lock, even when both session
+    /// generations agree. Keep the native relationship without manufacturing a cross-request owner.
+    pub fn reports_waiter_session_id(&self) -> bool {
+        matches!(&self.owner, ActivityWaitOwner::Session { id, .. } if *id == self.waiter.session.id)
+    }
     pub fn is_valid(&self) -> bool {
         self.waiter.is_valid()
             && self.waiter.request.is_some()
@@ -426,6 +431,11 @@ pub struct ActivityEvidence {
     pub uncertain: BTreeSet<ActivityKey>,
 }
 impl ActivityEvidence {
+    /// All native owner relationships in one validated frame, without applying incident-age selection policy.
+    pub fn blocking_observations(rows: &[ActivityObservation]) -> Result<Vec<BlockingObservation>> {
+        Self::validate(rows)?;
+        Ok(blocking_observations(rows))
+    }
     pub fn validate(rows: &[ActivityObservation]) -> Result<()> {
         ActivityIndex::new(rows).map(|_| ())
     }
@@ -470,19 +480,25 @@ impl ActivityEvidence {
         let roots = conditions.keys().chain(uncertain.iter()).cloned().collect::<Vec<_>>();
         let selected = context(&roots, &by_key, &by_session);
         let observations: Vec<_> = selected.iter().map(|key| (*by_key[key]).clone()).collect();
-        let observed_sessions: BTreeSet<_> = observations.iter().map(|row| row.key.session.clone()).collect();
-        let mut blocking = BTreeSet::new();
-        for row in &observations {
-            if row.key.request.is_none() {
-                continue;
-            }
-            for owner in row.wait.iter().flat_map(|wait| &wait.owners).filter(|owner| owner.is_blocker()) {
-                let owner_observed = owner.session().is_some_and(|session| observed_sessions.contains(&session));
-                blocking.insert(BlockingObservation { waiter: row.key.clone(), owner: owner.clone(), owner_observed });
-            }
-        }
-        Ok(Self { observations, blocking: blocking.into_iter().collect(), conditions, uncertain })
+        let blocking = blocking_observations(&observations);
+        Ok(Self { observations, blocking, conditions, uncertain })
     }
+}
+
+fn blocking_observations(rows: &[ActivityObservation]) -> Vec<BlockingObservation> {
+    let sessions: BTreeSet<_> = rows.iter().map(|row| &row.key.session).collect();
+    let sessions = &sessions;
+    rows.iter()
+        .filter(|row| row.key.request.is_some())
+        .flat_map(|row| {
+            row.wait.iter().flat_map(|wait| &wait.owners).filter(|owner| owner.is_blocker()).map(move |owner| {
+                let owner_observed = owner.session().is_some_and(|session| sessions.contains(&session));
+                BlockingObservation { waiter: row.key.clone(), owner: owner.clone(), owner_observed }
+            })
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 pub(super) struct ActivityIndex<'a> {
     pub(super) by_key: BTreeMap<ActivityKey, &'a ActivityObservation>,

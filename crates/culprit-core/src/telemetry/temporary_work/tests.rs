@@ -6,6 +6,7 @@ fn metric(key: RuntimeMetricKey, unit: RuntimeMetricUnit, value: &str) -> Statem
 
 fn sample(totals: Vec<StatementCounter>) -> StatementCounterSample {
     StatementCounterSample {
+        member: None,
         identity: NativeQueryIdentity { query_id: "native-query".into(), qualifiers: Default::default() },
         scope: crate::MeasurementScope::Database,
         observed_at: "2020-01-01T12:00:00.123456789Z".into(),

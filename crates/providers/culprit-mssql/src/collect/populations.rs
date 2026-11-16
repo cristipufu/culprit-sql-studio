@@ -30,9 +30,14 @@ impl Workloads {
         std::mem::take(&mut self.compilation)
     }
 
-    fn finish_compilation(&mut self, minutes: u32, shutdown: SourceShutdown) {
+    fn finish_compilation(
+        &mut self,
+        minutes: u32,
+        shutdown: SourceShutdown,
+        context: Option<culprit_core::telemetry::NativeReadContext>,
+    ) {
         if let Some(pending) = self.pending_compilation.take() {
-            let compilation = pending.finish(minutes, &mut self.participants(), shutdown);
+            let compilation = pending.finish(minutes, &mut self.participants(), shutdown, context);
             self.compilation = compilation;
         }
     }
@@ -179,7 +184,11 @@ pub(super) async fn collect(
     if shutdown == SourceShutdown::Unconfirmed {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
-    workloads.finish_compilation(options.window_in_minutes(), shutdown);
+    workloads.finish_compilation(
+        options.window_in_minutes(),
+        shutdown,
+        reader.compilation_context(&provider.endpoint_host, provider.endpoint_port),
+    );
     if workloads.allows_cache_fallback() {
         workloads.requested = collect_plan_cache(provider, probe, options, workloads.requested).await?;
     }

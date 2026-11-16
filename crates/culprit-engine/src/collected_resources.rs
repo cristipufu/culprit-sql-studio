@@ -7,6 +7,8 @@ use culprit_core::{
 mod state;
 use state::CapturedState;
 mod activity;
+mod blocking;
+pub use blocking::blocking;
 mod cached_plans;
 pub use cached_plans::cached_plans;
 mod cache_entry_memory;

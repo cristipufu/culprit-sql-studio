@@ -10,6 +10,7 @@ use crate::model::{Engine, Snapshot};
 mod plan;
 mod replication;
 mod sql;
+mod statement_work;
 #[cfg(test)]
 mod tests;
 
@@ -171,6 +172,7 @@ fn redact_scoped_message(message: &mut crate::i18n::Message) {
 }
 
 fn redact_reference(reference: &mut crate::ScanReference) {
+    reference.id = reference.id.as_deref().map(opaque);
     if let Some(database) = &mut reference.database {
         redact_identity(database);
     }
@@ -244,6 +246,23 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
                 waiter.request.client = None;
             }
         }
+    }
+    s.operations.statement_work = s.operations.statement_work.take().map(|read| {
+        // Invalid original evidence remains an explicit gap; masking must not repair it into native proof.
+        let source = opaque(&read.source);
+        statement_work::redact(read).unwrap_or_else(|error| {
+            Box::new(crate::telemetry::StatementCounterSnapshot::unavailable(
+                &source,
+                error.code,
+                Some(crate::telemetry::CollectionStop::InvalidPage),
+            ))
+        })
+    });
+    if let Some(context) = s.operations.query_compilation.as_mut().and_then(|read| read.context.as_mut()) {
+        redact_read_context(context);
+    }
+    if let Some(context) = s.compilations_before.as_mut().and_then(|baseline| baseline.context.as_mut()) {
+        redact_read_context(context);
     }
     if let Some(evidence) = &mut s.operations.maintenance_progress {
         redact_read_context(&mut evidence.context);
@@ -425,6 +444,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         .chain(s.contention_before.iter_mut().filter_map(|b| b.reference.as_mut()))
         .chain(s.sizes_before.iter_mut().filter_map(|b| b.reference.as_mut()))
         .chain(s.evictions_before.iter_mut().filter_map(|b| b.reference.as_mut()))
+        .chain(s.compilations_before.iter_mut().filter_map(|b| b.reference.as_mut()))
         .chain(s.operations.counters.iter_mut().filter_map(|c| c.before.as_mut()).filter_map(|b| b.reference.as_mut()))
         .chain(s.operations.sqlite.iter_mut().filter_map(|c| c.before.as_mut()).filter_map(|b| b.reference.as_mut()))
     {

@@ -1,3 +1,4 @@
+mod blocking;
 mod compiler_admission;
 mod maintenance_progress;
 mod memory;

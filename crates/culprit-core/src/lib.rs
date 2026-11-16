@@ -1,6 +1,7 @@
 pub mod actual;
 pub mod advice;
 pub mod blocking;
+pub mod blocking_report;
 pub mod cache_entry_memory_report;
 pub mod cached_plan_report;
 pub mod changes;
@@ -81,6 +82,7 @@ pub use actual::{
 };
 pub use advice::*;
 pub use blocking::{BlockNode, Blocking, BlockingChain, HeadKind, LockWait};
+pub use blocking_report::BlockingReport;
 pub use cache_entry_memory_report::{CacheEntryContextDifference, CacheEntryMemoryExplanation, CacheEntryMemoryReport};
 pub use cached_plan_report::{
     CachedPlanEntry, CachedPlanIdentity, CachedPlanLimit, CachedPlanLimitation, CachedPlanPayload, CachedPlanReport,
@@ -93,7 +95,10 @@ pub use cloud::{
     CloudLimitKind, CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, ThrottleEpisode, ThrottleKind,
 };
 pub use compilation::CompilationMemory;
-pub use compilation_report::{CompilationExplanation, CompilationReport};
+pub use compilation_report::{
+    CompilationChange, CompilationComparisonIssue, CompilationComparisonReport, CompilationExplanation,
+    CompilationReport,
+};
 pub use compiler_admission_report::{CompilerAdmissionReport, CompilerGatewayExplanation, CompilerWaiterExplanation};
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
@@ -175,7 +180,7 @@ pub use signals::{
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_grant_report::{StatementGrantExplanation, StatementGrantRead, StatementGrantReport};
-pub use statement_work_report::{StatementWorkEntry, StatementWorkReport};
+pub use statement_work_report::{StatementOutcomeCounts, StatementWorkEntry, StatementWorkReport};
 pub use task_space_report::*;
 pub use telemetry::{FileSize, FileSizeLimit};
 pub use tuning_report::{TuningExplanation, TuningReport};

@@ -8,6 +8,7 @@ use culprit_collector::{
 };
 use culprit_core::{Engine, ErrorDetail, SourceOutcome, SourceState, telemetry::*};
 use culprit_engine::collected_resources;
+mod intervals;
 
 #[tokio::test]
 async fn scan_enriched_compilation_policy_requires_full_authenticated_statement_not_warehouse_preview() {
@@ -17,14 +18,14 @@ async fn scan_enriched_compilation_policy_requires_full_authenticated_statement_
     let before = fixture.recovery_object_reads();
     let preview = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(!preview.is_read_complete());
-    let limited = collected_resources::compilation(&preview).unwrap();
+    let limited = collected_resources::compilation(&preview, None).unwrap();
     assert!(limited.report.entries.is_empty(), "a truncated warehouse SQL preview cannot establish the policy");
     assert_eq!(fixture.recovery_object_reads(), before);
     let capture = fixture.read_families_with_recovery(&[EvidenceFamily::OperationalSamples], Default::default()).await;
     assert!(capture.is_read_complete());
     assert_eq!(capture.metrics().recovery_objects, 1);
     assert_eq!(fixture.recovery_object_reads(), before + 1);
-    let analysis = collected_resources::compilation(&capture).unwrap();
+    let analysis = collected_resources::compilation(&capture, None).unwrap();
     assert_eq!(analysis.context.source, source);
     assert_eq!(analysis.context.records[0].row.record, expected);
     let entry = &analysis.report.entries[0];
@@ -78,6 +79,7 @@ async fn archived_compilations_reuse_the_scan_explanation_and_retain_exact_nativ
         })
         .collect::<Vec<_>>();
     let snapshot = CompilationSnapshot {
+        context: None,
         source: point.sources[0].source.clone(),
         observed_from: point.observed_from.clone(),
         observed_until: point.observed_until.clone(),
@@ -97,7 +99,7 @@ async fn archived_compilations_reuse_the_scan_explanation_and_retain_exact_nativ
     let reads_before = fixture.recovery_object_reads();
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_resources::compilation(&capture).unwrap();
+    let analysis = collected_resources::compilation(&capture, None).unwrap();
     assert_eq!(serde_json::to_value(&analysis.report).unwrap(), serde_json::to_value(expected).unwrap());
     assert_eq!(analysis.context.source, source);
     assert_eq!(analysis.context.records.len(), records.len());
@@ -134,7 +136,7 @@ async fn reused_native_query_numbers_keep_distinct_compilation_incarnations_with
     point.sources[0] = StateSourceCoverage::collected(point.sources[0].source.clone(), 2);
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let analysis = collected_resources::compilation(&capture).unwrap();
+    let analysis = collected_resources::compilation(&capture, None).unwrap();
     assert_eq!(analysis.report.entries.len(), 2);
     assert!(analysis.report.entries.iter().all(|entry| entry.identity.query_id == "42"));
     let mut counts = analysis
@@ -179,7 +181,7 @@ async fn native_coverage_and_missing_warehouse_rows_remain_independent_compilati
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete());
-        let report = collected_resources::compilation(&capture).unwrap().report;
+        let report = collected_resources::compilation(&capture, None).unwrap().report;
         assert_eq!(report.source_state, Some(state));
         assert_eq!(report.entries.len(), rows.len());
     }
@@ -187,7 +189,7 @@ async fn native_coverage_and_missing_warehouse_rows_remain_independent_compilati
     let fixture = Fixture::new(source, rows).await;
     fixture.remove_first_row(TelemetryStream::OperationalSamples);
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let analysis = collected_resources::compilation(&capture).unwrap();
+    let analysis = collected_resources::compilation(&capture, None).unwrap();
     assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
     assert!(analysis.report.entries.is_empty());
     assert!(analysis.context.read_gaps.iter().any(|gap| gap.reason == EvidenceGapReason::MissingRows));
@@ -228,7 +230,7 @@ async fn compilation_admission_rejects_foreign_subjects_formats_datasets_and_ope
         let family =
             if shape == "family" { EvidenceFamily::ResourceSamples } else { EvidenceFamily::OperationalSamples };
         let capture = fixture.read_families(&[family]).await;
-        let error = collected_resources::compilation(&capture).unwrap_err();
+        let error = collected_resources::compilation(&capture, None).unwrap_err();
         let problem = if shape == "fact" { DeliveryProblem::Integrity } else { DeliveryProblem::UnsupportedSchema };
         assert_eq!(error.detail, Some(ErrorDetail::Delivery(problem)), "{shape}");
     }

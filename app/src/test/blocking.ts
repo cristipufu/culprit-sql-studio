@@ -26,7 +26,7 @@ function session(id: string, blockedBy: string | null): Session {
 }
 
 function node(context: Session, children: BlockNode[] = []): BlockNode {
-  return { session: context.id, context: structuredClone(context), lock: null, waits_for: null, children };
+  return { key: context.id, session: context.id, context: structuredClone(context), lock: null, waits_for: null, children };
 }
 
 /** A renderer fixture with separately owned raw sessions and already-qualified node contexts. */

@@ -11,7 +11,9 @@ use crate::trends::{self, Counters};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod compilation;
 mod storage;
+pub(crate) use compilation::apply as apply_compilation_baseline;
 
 /// The prepared report for clients. Retained replay/collection copies stay in the report store.
 pub fn display(report: &Report) -> impl Serialize + '_ {
@@ -47,6 +49,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         replication: &'a Option<Box<culprit_core::ReplicationReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        statement_work: &'a Option<Box<culprit_core::StatementWorkReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
@@ -67,6 +71,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         maintenance_progress,
         replication,
+        statement_work,
         evidence: _,
         cleanup,
     } = report;
@@ -88,6 +93,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         maintenance_progress,
         replication,
+        statement_work,
         cleanup,
     }
 }
@@ -309,6 +315,7 @@ pub fn counters_history(dir: &Path, now: &str) -> Vec<Counters> {
 /// scan-time baseline remains evidence when its original report was pruned; absence of that file does not erase
 /// the measurements stored in this scan. Writes nothing.
 pub fn rebase_on_scans(dir: &Path, snapshot: &mut culprit_core::Snapshot) {
+    apply_compilation_baseline(dir, snapshot, None);
     if let Some(baseline) = evictions_baseline(dir, snapshot) {
         snapshot.evictions_before = Some(baseline);
     }

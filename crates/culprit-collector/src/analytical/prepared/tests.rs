@@ -228,6 +228,7 @@ fn large_deadlock_graphs_keep_signal_fields_and_explicit_full_evidence_reference
 #[test]
 fn cumulative_query_facts_keep_exact_totals_units_and_resets_in_the_analytical_contract() {
     let sample = StatementCounterSample {
+        member: None,
         scope: culprit_core::MeasurementScope::Database,
         distributions: vec![],
         identity: NativeQueryIdentity {

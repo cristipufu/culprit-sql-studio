@@ -3,6 +3,8 @@ use super::*;
 use culprit_core::{Engine, Error, ErrorCode, ResetMarker, StatementTemporaryWork, telemetry::*};
 use mysql_async::Value;
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+mod outcome_tests;
 
 pub(crate) const SOURCE: &str = "performance_schema.events_statements_summary_by_digest";
 pub(crate) const LOCK_TIME_COLUMN: &str = "SUM_LOCK_TIME";
@@ -147,6 +149,9 @@ impl Layout {
                     .map(|spec| spec.column.to_owned()),
             );
             columns.extend(
+                outcome_metrics().into_iter().filter(|spec| self.has(spec.column)).map(|spec| spec.column.into()),
+            );
+            columns.extend(
                 TEMPORARY_COLUMNS.iter().filter(|spec| self.has(spec.column)).map(|spec| spec.column.to_owned()),
             );
         }
@@ -176,6 +181,46 @@ struct Metric {
     key: RuntimeMetricKey,
     unit: RuntimeMetricUnit,
 }
+
+fn outcome_metrics() -> [Metric; 2] {
+    use RuntimeMetricKey as Key;
+    [
+        Metric { column: "SUM_ERRORS", key: Key::Errors, unit: RuntimeMetricUnit::Count },
+        Metric { column: "SUM_WARNINGS", key: Key::Warnings, unit: RuntimeMetricUnit::Count },
+    ]
+}
+
+pub(crate) fn outcome_projection(columns: &BTreeSet<String>) -> String {
+    outcome_metrics()
+        .iter()
+        .map(
+            |metric| {
+                if columns.contains(metric.column) {
+                    metric.column.into()
+                } else {
+                    format!("NULL AS {}", metric.column)
+                }
+            },
+        )
+        .collect::<Vec<String>>()
+        .join(",")
+}
+
+fn outcome_counters(row: &Rec, columns: &BTreeSet<String>) -> Result<Vec<StatementCounter>> {
+    outcome_metrics()
+        .into_iter()
+        .filter(|metric| columns.contains(metric.column))
+        .filter_map(|metric| match row.unsigned(metric.column) {
+            Ok(None) => None,
+            Ok(Some(total)) => Some(Ok(StatementCounter {
+                key: metric.key,
+                unit: metric.unit,
+                total: MeasurementValue::Integer(total.to_string()),
+            })),
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
 fn metrics() -> Vec<Metric> {
     use RuntimeMetricKey as Key;
     use RuntimeMetricUnit as Unit;
@@ -189,8 +234,6 @@ fn metrics() -> Vec<Metric> {
     for (column, name, unit) in [
         ("SUM_ROWS_EXAMINED", "rows-examined", Unit::Count),
         ("SUM_ROWS_AFFECTED", "rows-affected", Unit::Count),
-        ("SUM_ERRORS", "errors", Unit::Count),
-        ("SUM_WARNINGS", "warnings", Unit::Count),
         ("SUM_SELECT_FULL_JOIN", "full-joins", Unit::Count),
         ("SUM_SELECT_SCAN", "table-scans", Unit::Count),
         ("SUM_SORT_ROWS", "sorted-rows", Unit::Count),
@@ -224,6 +267,7 @@ pub(crate) fn counters(row: &Rec, layout: &Layout, database: &str) -> Result<Sta
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    totals.extend(outcome_counters(row, &layout.columns)?);
     for spec in TEMPORARY_COLUMNS {
         if let Some(total) = spec.read(row, &layout.columns)? {
             totals.push(StatementCounter {
@@ -233,7 +277,12 @@ pub(crate) fn counters(row: &Rec, layout: &Layout, database: &str) -> Result<Sta
             });
         }
     }
+    counter_sample(row, database, totals)
+}
+
+fn counter_sample(row: &Rec, database: &str, totals: Vec<StatementCounter>) -> Result<StatementCounterSample> {
     let sample = StatementCounterSample {
+        member: None,
         scope: culprit_core::MeasurementScope::Database,
         identity: identity(row, database)?,
         observed_at: text(row, "observed_at")?,
@@ -242,6 +291,57 @@ pub(crate) fn counters(row: &Rec, layout: &Layout, database: &str) -> Result<Sta
         distributions: vec![],
     };
     if sample.is_valid() { Ok(sample) } else { Err(invalid()) }
+}
+
+/// Same native digest read as the scalar workload. This is an incomplete point population, never an epoch or rate.
+pub(crate) fn outcome_snapshot(
+    rows: &[&Rec],
+    columns: &BTreeSet<String>,
+    database: culprit_core::DatabaseIdentity,
+) -> Result<StatementCounterSnapshot> {
+    let mut observations = Vec::new();
+    for row in rows {
+        let mut totals = outcome_counters(row, columns)?;
+        // `calls` is this same digest SELECT's COUNT_STAR alias. Preserve a native point when outcomes are
+        // unrecorded instead of replacing unknown errors/warnings with zero or dropping the statement.
+        totals.push(StatementCounter {
+            key: RuntimeMetricKey::Executions,
+            unit: RuntimeMetricUnit::Count,
+            total: MeasurementValue::Integer(integer(row, "calls")?.to_string()),
+        });
+        let sample = counter_sample(row, &database.database, totals)?;
+        observations.push(OperationalObservation {
+            source: SOURCE.into(),
+            key: sample.key()?,
+            fact: OperationalFact::StatementCounters(Box::new(sample)),
+        });
+    }
+    let mut clocks = observations.iter().filter_map(|row| match &row.fact {
+        OperationalFact::StatementCounters(sample) => Some(sample.observed_at.as_str()),
+        _ => None,
+    });
+    let first = clocks.next();
+    let context = first.map(|first| {
+        let (mut from, mut until) = (first, first);
+        for clock in clocks {
+            from = from.min(clock);
+            until = until.max(clock);
+        }
+        Box::new(NativeReadContext {
+            target: database.into(),
+            partition: SourcePartition::Target,
+            observed_from: from.into(),
+            observed_until: until.into(),
+            database_writable: None,
+        })
+    });
+    let snapshot = StatementCounterSnapshot {
+        source: SOURCE.into(),
+        context,
+        coverage: StateSourceCoverage::observed(SOURCE.into(), observations.len() as u32, false),
+        observations,
+    };
+    if snapshot.is_valid() { Ok(snapshot) } else { Err(invalid()) }
 }
 pub(crate) fn definition(
     row: &Rec,

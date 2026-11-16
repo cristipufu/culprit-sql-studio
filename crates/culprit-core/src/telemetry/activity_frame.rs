@@ -76,9 +76,7 @@ fn validate_header(
     rows: usize,
     read_complete: bool,
 ) -> Result<&ActivitySnapshotDescription> {
-    let SourceObservation::Activity(native) = &source.observation else {
-        return Err(invalid());
-    };
+    let native = source.observation.activity().ok_or_else(invalid)?;
     if !source.target.is_valid()
         || !source.partition_is_consistent()
         || !native.is_valid()

@@ -29,6 +29,14 @@ fn request(registration: &Registration, budget: CollectionBudget) -> CollectionR
     CollectionRequest {
         subject: subject(registration.subject),
         selection: match registration.route {
+            Route::Blocking => {
+                let source = crate::progress::test_support::original_source();
+                let mut original = crate::progress::test_support::original_focus().original;
+                original.waiting_on_lock = Some(true);
+                CollectionSelection::FocusedBlocking {
+                    focus: Box::new(crate::progress::test_support::focus_from(&source, original)),
+                }
+            }
             Route::MaintenanceProgress => CollectionSelection::MaintenanceProgress {
                 focus: Box::new(crate::progress::test_support::original_focus()),
             },
@@ -97,7 +105,7 @@ fn unsupported_collections_and_subjects_cannot_construct_an_inherited_native_sou
 }
 
 #[test]
-fn activity_uses_its_existing_native_profile_while_generic_recipes_keep_larger_valid_caller_budgets() {
+fn focused_sources_preserve_native_profiles_while_generic_recipes_keep_larger_valid_caller_budgets() {
     let maximum = CollectionBudget::upper_limits();
     maximum.validate().unwrap();
     for registration in REGISTRATIONS {
@@ -110,6 +118,11 @@ fn activity_uses_its_existing_native_profile_while_generic_recipes_keep_larger_v
             assert_eq!(bounded.budget.max_snapshot_rows, 500);
             assert_eq!(bounded.budget.statement_timeout_ms, 1_000);
             assert_eq!(bounded.budget.total_timeout_ms, 5_000);
+        } else if matches!(registration.route, Route::Blocking) {
+            assert_eq!(bounded.budget, super::super::blocking::bounded_budget(&maximum));
+            assert!(bounded.budget.max_queries < maximum.max_queries);
+            assert!(bounded.budget.max_snapshot_rows < maximum.max_snapshot_rows);
+            assert_eq!(bounded.budget.page_bytes, bounded.budget.total_bytes);
         } else if matches!(registration.route, Route::MaintenanceProgress) {
             assert_eq!(bounded.budget, crate::progress::bounded_budget(&maximum));
             assert_eq!(bounded.budget.max_queries, 11);

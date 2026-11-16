@@ -205,6 +205,7 @@ pub async fn snapshot(
         constraints: Vec::new(),
         histograms: None,
         escalations_before: None,
+        compilations_before: None,
         contention_before: None,
         evictions_before: None,
         sizes_before: None,

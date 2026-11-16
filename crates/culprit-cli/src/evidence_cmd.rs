@@ -44,6 +44,8 @@ pub(crate) struct AnalyzeArgs {
     workload_population: Option<NativeIdentity>,
     #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.activity_range"))]
     activity_range: Option<String>,
+    #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.compilation_baseline"))]
+    compilation_baseline: Option<String>,
 }
 
 impl AnalyzeArgs {
@@ -59,6 +61,14 @@ impl AnalyzeArgs {
         if let Some(range) = &self.activity_range {
             if self.analysis != Analysis::PageWaits {
                 return Err(culprit_core::Error::invalid(t!("evidence.cli.activity_page_waits_only")));
+            }
+            if !valid_digest(range) || range == &self.common.range {
+                return Err(DeliveryProblem::InvalidContract.error());
+            }
+        }
+        if let Some(range) = &self.compilation_baseline {
+            if self.analysis != Analysis::Compilation {
+                return Err(culprit_core::Error::invalid(t!("evidence.cli.compilation_baseline_only")));
             }
             if !valid_digest(range) || range == &self.common.range {
                 return Err(DeliveryProblem::InvalidContract.error());
@@ -156,6 +166,7 @@ impl From<Family> for EvidenceFamily {
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Analysis {
     Queries,
+    Blocking,
     MemoryFailures,
     NativeFailures,
     RequestMemory,
@@ -180,7 +191,7 @@ enum Analysis {
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
         match self {
-            Self::Maintenance => vec![EvidenceFamily::ActivityObservations],
+            Self::Blocking | Self::Maintenance => vec![EvidenceFamily::ActivityObservations],
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
             Self::Replication => vec![EvidenceFamily::ReplicationSamples],
@@ -225,22 +236,32 @@ impl CommonArgs {
 }
 
 pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
-    let (common, families, analysis, requested_population, activity_range) = match command {
+    let (common, families, analysis, requested_population, activity_range, compilation_baseline) = match command {
         EvidenceCommand::Read(args) => {
-            (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None)
+            (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None, None)
         }
         EvidenceCommand::Analyze(args) => {
             args.validate_selection()?;
-            (args.common, args.analysis.families(), Some(args.analysis), args.workload_population, args.activity_range)
+            (
+                args.common,
+                args.analysis.families(),
+                Some(args.analysis),
+                args.workload_population,
+                args.activity_range,
+                args.compilation_baseline,
+            )
         }
     };
     let request = common.request(families, out.format())?;
     let config = EvidenceConfig::from_file(&common.config)?;
     let service = CollectorRuntime::default().evidence(&config)?;
     let cancellation = CollectionCancellation::default();
-    let reading = read_captures(&service, &request, activity_range.as_deref(), &cancellation);
-    let (capture, activity) = crate::collection_shutdown::run(&cancellation, reading).await?;
-    let complete = capture.is_read_complete() && activity.as_ref().is_none_or(|capture| capture.is_read_complete());
+    let reading =
+        read_captures(&service, &request, activity_range.as_deref(), compilation_baseline.as_deref(), &cancellation);
+    let (capture, activity, baseline) = crate::collection_shutdown::run(&cancellation, reading).await?;
+    let complete = capture.is_read_complete()
+        && activity.as_ref().is_none_or(|capture| capture.is_read_complete())
+        && baseline.as_ref().is_none_or(|capture| capture.is_read_complete());
     match analysis {
         None => emit(out, &capture, common.max_output_bytes, || {
             read_summary(capture.range_id(), capture.records().len(), capture.gaps().len())
@@ -254,6 +275,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::MemoryFailures) => {
             let analysis = culprit_engine::collected_resources::memory_failures(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::retained(&analysis.report))?;
+        }
+        Some(Analysis::Blocking) => {
+            let analysis = culprit_engine::collected_resources::blocking(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::blocking(&analysis.report))?;
         }
         Some(Analysis::NativeFailures) => {
             let analysis = culprit_engine::collected_resources::native_failures(&capture)?;
@@ -300,7 +325,7 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             emit(out, &analysis, common.max_output_bytes, || observations::cached_plans(&analysis.report))?;
         }
         Some(Analysis::Compilation) => {
-            let analysis = culprit_engine::collected_resources::compilation(&capture)?;
+            let analysis = culprit_engine::collected_resources::compilation(&capture, baseline.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::compilation(&analysis.report))?;
         }
         Some(Analysis::CompilerAdmission) => {
@@ -342,8 +367,9 @@ async fn read_captures(
     service: &EvidenceService,
     request: &EvidenceRequest,
     activity_range: Option<&str>,
+    compilation_baseline: Option<&str>,
     cancellation: &CollectionCancellation,
-) -> Result<(EvidenceCapture, Option<EvidenceCapture>)> {
+) -> Result<(EvidenceCapture, Option<EvidenceCapture>, Option<EvidenceCapture>)> {
     let mut session = service.session(request.budget, cancellation)?;
     let capture = session.read(&request.range_id, &request.families).await?;
     let activity = if let Some(range) = activity_range {
@@ -354,7 +380,20 @@ async fn read_captures(
     } else {
         None
     };
-    Ok((capture, activity))
+    let baseline = if let Some(range) = compilation_baseline {
+        if !capture
+            .source()
+            .observation
+            .snapshot()
+            .is_some_and(|snapshot| snapshot.dataset == culprit_core::telemetry::SnapshotDataset::QueryCompilation)
+        {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        Some(session.read(range, &[EvidenceFamily::OperationalSamples]).await?)
+    } else {
+        None
+    };
+    Ok((capture, activity, baseline))
 }
 
 /// CLI IDs select an exact captured identity only when its native ID is unambiguous; labels and native properties

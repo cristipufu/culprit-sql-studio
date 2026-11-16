@@ -111,6 +111,7 @@ async fn bounded(
                 && matches!(
                     episode.signal,
                     DiagnosticSignal::PageWait { .. }
+                        | DiagnosticSignal::LockWait { .. }
                         | DiagnosticSignal::RequestMemory { .. }
                         | DiagnosticSignal::CompilationAdmission { .. }
                         | DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. }
@@ -186,6 +187,7 @@ async fn bounded(
 
 fn possible_questions(episode: &DiagnosticEpisode) -> Vec<RecipeSelector> {
     match &episode.signal {
+        DiagnosticSignal::LockWait { .. } => vec![RecipeSelector::FocusedBlocking],
         DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. } => {
             vec![RecipeSelector::CurrentRequestWork]
         }

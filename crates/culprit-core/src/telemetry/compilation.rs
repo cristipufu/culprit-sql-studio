@@ -1,6 +1,8 @@
 //! Retained Query Store compilation totals have their own lifetime, independent of runtime intervals.
 use super::*;
 use std::collections::BTreeSet;
+mod comparison;
+pub use comparison::{CompilationBaseline, CompilationCounterPoint, MAX_COMPILATION_BASELINE_BYTES};
 
 pub const MAX_QUERY_COMPILATION_OBSERVATIONS: usize = 10_000;
 
@@ -9,15 +11,38 @@ pub const MAX_QUERY_COMPILATION_OBSERVATIONS: usize = 10_000;
 #[ts(export)]
 pub struct CompilationSnapshot {
     pub source: String,
+    /// Query Store's native logical database namespace and acquisition clocks, when the held reader acquired them.
+    /// Client acquisition bounds below never establish this authority or a physical compiler-memory owner.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub context: Option<NativeReadContext>,
     pub observed_from: String,
     pub observed_until: String,
     pub observations: Vec<OperationalObservation>,
 }
 
 impl CompilationSnapshot {
+    pub fn matches_database_namespace(&self, database: &crate::DatabaseIdentity) -> bool {
+        database.incarnation.is_some()
+            && self
+                .context
+                .as_ref()
+                .and_then(compilation_namespace)
+                .zip(database.telemetry_id().ok())
+                .is_some_and(|(observed, current)| observed == current)
+    }
+
+    pub fn fits_database(&self, database: &crate::DatabaseIdentity) -> bool {
+        self.context.as_ref().is_none_or(|context| native_context_fits_database(context, database))
+    }
     pub fn is_valid(&self) -> bool {
         let mut keys = BTreeSet::new();
         valid_key(&self.source)
+            && self.context.as_ref().is_none_or(|context| {
+                context.is_valid()
+                    && context.target.database().is_some_and(|database| database.engine == crate::Engine::Mssql)
+                    && context.partition == SourcePartition::Target
+            })
             && ObservationBounds::new(&self.observed_from, &self.observed_until).is_some()
             && self.observations.len() <= MAX_QUERY_COMPILATION_OBSERVATIONS
             && self.observations.iter().all(|row| {
@@ -27,6 +52,28 @@ impl CompilationSnapshot {
                     && keys.insert(&row.key)
             })
     }
+}
+
+fn native_context_fits_database(context: &NativeReadContext, database: &crate::DatabaseIdentity) -> bool {
+    context.target.database().is_some_and(|observed| {
+        if observed.incarnation.is_some() && database.incarnation.is_some() {
+            observed.telemetry_id().ok().zip(database.telemetry_id().ok()).is_some_and(|(left, right)| left == right)
+        } else {
+            observed.comparison(database) == crate::Comparison::Compatible
+        }
+    })
+}
+
+/// This source's durable namespace is Query Store's logical database. Neither a compute epoch, endpoint alias
+/// nor a selected runtime replica group can substitute for a missing native database incarnation.
+pub fn compilation_namespace(context: &NativeReadContext) -> Option<String> {
+    let database = context.target.database()?;
+    (context.is_valid()
+        && context.partition == SourcePartition::Target
+        && database.engine == crate::Engine::Mssql
+        && database.incarnation.as_ref().is_some_and(|id| !id.is_empty()))
+    .then(|| context.target.telemetry_id().ok())
+    .flatten()
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -62,22 +109,24 @@ impl MssqlQueryCompilation {
         if !self.is_valid() {
             return Err(CollectionStop::InvalidPage.error());
         }
-        let mut identity = self.identity.clone();
-        identity.qualifiers.insert("initial_compile_at".into(), self.first_compile_at()?);
+        Self::identity_key(&self.identity)
+    }
+
+    /// A compilation counter belongs to the complete native query incarnation, including its initial compile.
+    pub fn identity_key(identity: &NativeQueryIdentity) -> Result<String> {
+        if !valid_identity(identity) {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        let mut identity = identity.clone();
+        let first = canonical_time(
+            identity.qualifiers.get("initial_compile_at").ok_or_else(|| CollectionStop::InvalidPage.error())?,
+        )?;
+        identity.qualifiers.insert("initial_compile_at".into(), first);
         serde_json::to_vec(&identity).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
     }
     pub fn is_valid(&self) -> bool {
-        self.identity.is_valid()
+        valid_identity(&self.identity)
             && self.statement.is_valid()
-            && valid_counter(&self.identity.query_id)
-            && self.identity.qualifiers.get("context_settings_id").is_some_and(|value| valid_counter(value))
-            && self.identity.qualifiers.get("object_id").is_some_and(|value| value.parse::<i64>().is_ok())
-            && self
-                .identity
-                .qualifiers
-                .get("query_hash")
-                .is_some_and(|value| value.len() == 16 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            && self.first_compile_at().is_ok()
             && valid_counter(&self.compilations)
             && self.last_compile_at.len() <= 64
             && canonical_time(&self.last_compile_at).is_ok()
@@ -86,6 +135,21 @@ impl MssqlQueryCompilation {
             && self.memory.as_ref().is_none_or(|memory| memory.is_valid() && memory.is_measured())
             && valid_reset(&self.reset)
     }
+}
+
+fn valid_identity(identity: &NativeQueryIdentity) -> bool {
+    identity.is_valid()
+        && valid_counter(&identity.query_id)
+        && identity.qualifiers.get("context_settings_id").is_some_and(|value| valid_counter(value))
+        && identity.qualifiers.get("object_id").is_some_and(|value| value.parse::<i64>().is_ok())
+        && identity
+            .qualifiers
+            .get("query_hash")
+            .is_some_and(|value| value.len() == 16 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        && identity
+            .qualifiers
+            .get("initial_compile_at")
+            .is_some_and(|value| value.len() <= 64 && canonical_time(value).is_ok())
 }
 
 #[cfg(test)]
@@ -230,6 +294,7 @@ mod tests {
         let native = observation();
         let source = "query compilations";
         CompilationSnapshot {
+            context: None,
             source: source.into(),
             observed_from: "2020-01-01T12:00:00Z".into(),
             observed_until: "2020-01-01T12:00:01Z".into(),

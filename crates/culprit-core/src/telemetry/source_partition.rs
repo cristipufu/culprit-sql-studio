@@ -69,6 +69,10 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if let SourceObservation::FocusedBlocking { snapshot, result } = &self.observation {
+            return result.is_valid_source(self, snapshot)
+                && matches!(&self.partition, SourcePartition::InstanceLocal { epoch, .. } if epoch == &snapshot.epoch);
+        }
         if let SourceObservation::MaintenanceProgress { snapshot, result }
         | SourceObservation::CurrentRequestWork { snapshot, result } = &self.observation
         {

@@ -41,6 +41,7 @@ pub enum CollectionSelection {
     ResourceHistory { from: String, until: String },
     DeadlockHistory { from: String, until: String },
     Activity,
+    FocusedBlocking { focus: Box<ActivityRequestFocus> },
     CacheEntryMemory { focus: Box<CacheEntryMemoryFocus> },
     FocusedPageWait { focus: Box<ActivityWaitFocus> },
     PageWaitWriters { focus: Box<PageWaitWriterFocus> },
@@ -59,7 +60,7 @@ impl CollectionSelection {
             Self::QueryHistory { .. } => TelemetryCollection::QueryHistory,
             Self::ResourceHistory { .. } => TelemetryCollection::ResourceHistory,
             Self::DeadlockHistory { .. } => TelemetryCollection::DeadlockHistory,
-            Self::Activity => TelemetryCollection::Activity,
+            Self::Activity | Self::FocusedBlocking { .. } => TelemetryCollection::Activity,
             Self::FocusedRequestMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestMemory),
             Self::MaintenanceProgress { .. } => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
             Self::CurrentRequestWork { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
@@ -81,6 +82,7 @@ impl CollectionSelection {
             Self::FocusedPageWait { focus } | Self::SharedPageWaitFocus { focus, .. } => Some(&focus.participant),
             Self::PageWaitWriters { focus } => Some(&focus.waiter.participant),
             Self::FocusedRequestMemory { focus }
+            | Self::FocusedBlocking { focus }
             | Self::MaintenanceProgress { focus }
             | Self::CurrentRequestWork { focus }
             | Self::FocusedCompilationAdmission { focus }
@@ -326,6 +328,10 @@ pub enum SourceObservation {
     RetainedSamples(SampleHistoryDescription),
     RetainedEvents(EventHistoryDescription),
     Activity(ActivitySnapshotDescription),
+    FocusedBlocking {
+        snapshot: ActivitySnapshotDescription,
+        result: Box<ActivityBlockingFocusResult>,
+    },
     CacheEntryMemory {
         snapshot: StateSnapshotDescription,
         focus: Box<CacheEntryMemoryFocus>,
@@ -362,6 +368,7 @@ pub enum SourceObservation {
 impl SourceObservation {
     pub fn focus(&self) -> Option<&ActivityRequestFocus> {
         match self {
+            Self::FocusedBlocking { result, .. } => Some(&result.focus),
             Self::FocusedPageWait { result, .. } => Some(&result.focus.participant),
             Self::PageWaitWriters { focus, .. } => Some(&focus.waiter.participant),
             Self::FocusedRequestMemory { result, .. } => Some(&result.focus),
@@ -374,6 +381,9 @@ impl SourceObservation {
     }
     pub fn diagnostic_focus(&self) -> Option<DiagnosticFocus> {
         match self {
+            Self::FocusedBlocking { result, .. } => {
+                Some(DiagnosticFocus::Blocking { focus: Box::new(result.focus.clone()) })
+            }
             Self::CurrentRequestWork { result, .. } => result
                 .focus
                 .as_deref()
@@ -397,7 +407,7 @@ impl SourceObservation {
             Self::QueryHistory(_) => TelemetryCollection::QueryHistory,
             Self::RetainedSamples(_) => TelemetryCollection::ResourceHistory,
             Self::RetainedEvents(_) => TelemetryCollection::DeadlockHistory,
-            Self::Activity(_) => TelemetryCollection::Activity,
+            Self::Activity(_) | Self::FocusedBlocking { .. } => TelemetryCollection::Activity,
             Self::CacheEntryMemory { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CacheEntryMemory),
             Self::FocusedPageWait { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
             Self::PageWaitWriters { .. } => TelemetryCollection::Snapshot(SnapshotDataset::PageWaitWriters),
@@ -419,6 +429,7 @@ impl SourceObservation {
                 TelemetryRange::TimeWindow { from: history.from.clone(), until: history.until.clone() }
             }
             Self::Activity(_) => TelemetryRange::Current,
+            Self::FocusedBlocking { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::CacheEntryMemory { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
             Self::FocusedPageWait { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::PageWaitWriters { focus, .. } => TelemetryRange::Focused { key: focus.key()? },
@@ -451,6 +462,7 @@ impl SourceObservation {
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
             Self::Activity(snapshot) => snapshot.is_valid(),
+            Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
             Self::CacheEntryMemory { snapshot, focus } => {
                 snapshot.is_valid() && focus.is_valid() && snapshot.dataset == SnapshotDataset::CacheEntryMemory
             }
@@ -509,7 +521,7 @@ impl SourceObservation {
     }
     pub fn activity(&self) -> Option<&ActivitySnapshotDescription> {
         match self {
-            Self::Activity(snapshot) => Some(snapshot),
+            Self::Activity(snapshot) | Self::FocusedBlocking { snapshot, .. } => Some(snapshot),
             _ => None,
         }
     }
@@ -549,7 +561,7 @@ impl SourceObservation {
             Self::RetainedSamples(history) => {
                 count(TelemetryStream::ResourceSamples) == u64::from(history.expected_samples)
             }
-            Self::Activity(snapshot) => {
+            Self::Activity(snapshot) | Self::FocusedBlocking { snapshot, .. } => {
                 count(TelemetryStream::ActivityObservations) == u64::from(snapshot.observations)
             }
             Self::FocusedPageWait { snapshot, .. }
@@ -635,6 +647,17 @@ impl CollectionDescription {
             || !request.subject.accepts(&self.target)
         {
             return false;
+        }
+        if let (
+            SourceObservation::FocusedBlocking { snapshot, result },
+            CollectionSelection::FocusedBlocking { focus },
+        ) = (&self.observation, &request.selection)
+        {
+            return result.is_valid_source(self, snapshot)
+                && &result.focus == focus.as_ref()
+                && request.subject == CollectionSubject::Database
+                && snapshot.coverage.source == self.source
+                && snapshot.observations <= request.budget.max_snapshot_rows;
         }
         if let (SourceObservation::Activity(snapshot), CollectionSelection::Activity) =
             (&self.observation, &request.selection)

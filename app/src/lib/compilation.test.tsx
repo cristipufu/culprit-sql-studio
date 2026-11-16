@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryCompilation } from "../components/QueryCompilation";
 import { HealthTab } from "../components/Health";
 import type { Report } from "../gen/Report";
-import { compilationEvidence, compilationObservation, compilationReport } from "../test/compilation";
+import { compilationComparisonReport, compilationEvidence, compilationObservation, compilationReport, unavailableCompilationComparisonReport } from "../test/compilation";
 import { partial } from "../test/fixtures";
 import { t } from "./i18n";
 
@@ -44,4 +44,44 @@ test("native context stays text and a failed read remains visible without an adm
   expect(failed).toContain(t("view.compilation.title"));
   expect(failed).toContain("Native permission denied.");
   expect(failed).not.toContain(t("ui.health.empty"));
+});
+
+
+test("native comparisons keep exact supplied counts and clocks, folded limits, and no duplicated baseline payload", () => {
+  const rows = [compilationObservation()];
+  const report = compilationComparisonReport(rows);
+  const html = renderToStaticMarkup(<QueryCompilation evidence={compilationEvidence(rows)} report={report} />);
+  expect(html).toContain("Recorded compilation count increase: 18446744073709551615.");
+  expect(html).toContain("2026-11-13T09:59:00.000000001Z");
+  expect(html).toContain("2026-11-13T10:00:01.000000002Z");
+  expect(html).toContain(report.comparison?.summary ?? "missing comparison");
+  expect(html).toContain("A missing entry supplies no zero or recovery claim.");
+  expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+  for (const privateField of ["original-private-report-reference", "private-native-incarnation", "private-original-native-host"]) {
+    expect(html).not.toContain(privateField);
+  }
+});
+
+test("a changed native entry or missing raw observation cannot lend an interval explanation by numeric query ID", () => {
+  for (const rows of [[compilationObservation()], []]) {
+    const report = compilationComparisonReport();
+    const change = report.comparison?.entries[0];
+    if (!change) throw new Error("Comparison fixture required");
+    change.identity.qualifiers.context_settings_id = "another-native-context";
+    const html = renderToStaticMarkup(<QueryCompilation evidence={compilationEvidence(rows)} report={report} />);
+    expect(html).not.toContain(change.explanation);
+    expect(html).not.toContain(change.investigation);
+    if (rows.length === 0) expect(html).toContain(t("ui.memory_failures.missing_row"));
+    else expect(html).toContain(report.entries[0]?.explanation ?? "missing entry");
+  }
+});
+
+test("an unavailable comparison remains explicit without inventing a counter row or observation interval", () => {
+  const report = unavailableCompilationComparisonReport([]);
+  if (!report.comparison) throw new Error("Comparison fixture required");
+  const html = renderToStaticMarkup(<QueryCompilation evidence={compilationEvidence([])} report={report} />);
+  expect(html).toContain(report.comparison.summary);
+  expect(html).toContain(report.comparison.limitations[0] ?? "missing limitation");
+  expect(html).not.toContain("18446744073709551615");
+  expect(html).not.toContain("2026-11-13T09:59:00.000000001Z");
 });

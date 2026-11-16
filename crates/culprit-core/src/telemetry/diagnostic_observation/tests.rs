@@ -137,14 +137,21 @@ fn lock_wait_actor() -> ActivityObservation {
 
 #[test]
 fn a_native_lock_point_does_not_require_an_owner_or_borrow_the_requests_age_as_wait_duration() {
-    let first = observe(&frame(1, vec![lock_wait_actor()], true), None);
+    let original = frame(1, vec![lock_wait_actor()], true);
+    let first = observe(&original, None);
     assert_eq!(first.checkpoint.episodes.len(), 1);
     let episode = &first.checkpoint.episodes[0];
     assert!(matches!(episode.signal, DiagnosticSignal::LockWait { .. }));
     assert_eq!(episode.lifecycle, DiagnosticLifecycle::Active);
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Pending);
     assert!(episode.report.is_none() && episode.peak.is_none());
-    assert!(first.focuses.is_empty());
+    let [(episode_id, DiagnosticFocus::Blocking { focus })] = first.focuses.as_slice() else {
+        panic!("one question about the exact native lock-wait request")
+    };
+    assert_eq!(episode_id, &episode.id);
+    assert!(focus.matches_parent(&original.0, &original.2[0].1, &original.2[0].0));
+    assert_eq!(focus.partition, SourcePartition::Target, "a question cannot add original native member authority");
+    assert_eq!(focus.original.wait.as_ref().unwrap().elapsed_ms, None);
 }
 
 #[test]

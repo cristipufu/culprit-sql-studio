@@ -137,6 +137,7 @@ fn query_only_records_get_stable_native_ids_but_unresolved_queries_do_not() {
 #[test]
 fn cumulative_statement_counters_preserve_exact_values_and_reset_uncertainty() {
     let sample = StatementCounterSample {
+        member: None,
         scope: crate::MeasurementScope::Database,
         distributions: vec![],
         identity: NativeQueryIdentity {
@@ -173,6 +174,7 @@ fn cumulative_statement_counters_preserve_exact_values_and_reset_uncertainty() {
 #[test]
 fn native_picosecond_totals_keep_exact_precision_and_node_scope() {
     let sample = StatementCounterSample {
+        member: crate::engines::ysql_node_member("0123456789abcdef0123456789abcdef"),
         identity: NativeQueryIdentity { query_id: "digest".into(), qualifiers: Default::default() },
         scope: crate::MeasurementScope::Node,
         observed_at: "2026-11-11T00:00:00Z".into(),

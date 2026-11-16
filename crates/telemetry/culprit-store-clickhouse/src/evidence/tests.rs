@@ -1,5 +1,6 @@
 use super::*;
 mod activity;
+mod blocking;
 mod cache_entry_memory;
 mod cleanup;
 mod compilation;
@@ -17,6 +18,7 @@ mod queries;
 mod replication;
 mod source_partitions;
 mod statement_grants;
+mod statement_outcomes;
 mod statement_work;
 mod tuning;
 use crate::{catalog::SchemaCatalog, client::QueryRequest, response::QueryTable, schema::Schema};

@@ -1707,6 +1707,7 @@ fn operational_rows(scenario: Scenario) -> Vec<TelemetryRecord> {
     use culprit_core::telemetry::*;
     if matches!(scenario, Scenario::CumulativeStatements) {
         let sample = StatementCounterSample {
+            member: None,
             scope: culprit_core::MeasurementScope::Database,
             distributions: vec![],
             identity: NativeQueryIdentity {

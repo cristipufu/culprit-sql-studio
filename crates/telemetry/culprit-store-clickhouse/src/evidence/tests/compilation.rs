@@ -4,6 +4,30 @@ use std::sync::atomic::Ordering;
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 
 #[tokio::test]
+async fn separate_compilation_reads_preserve_exact_counters_native_namespaces_and_receipts() {
+    for (source, records) in test_support::compilation_interval_evidence() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        let reads = fixture.recovery.object_reads.load(Ordering::SeqCst);
+        let options = EvidenceReadBudget { timeout_ms: 1000, ..Default::default() };
+        fixture.replies(vec![fixture.rows.clone()]);
+        let capture = fixture.reader.read_capture(&fixture.range, FAMILY, options, None).await.unwrap();
+        test_support::assert_operational_capture(&capture, &source, &records);
+        assert!(capture.is_read_complete());
+        assert_eq!(capture.records()[0].row().record, records[0]);
+        assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), reads);
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+        let mut rows = fixture.rows.clone();
+        let mut details: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+        details["compilations"] = json!("9007199254740995");
+        rows[0][column] = json!(details.to_string());
+        fixture.replies(vec![rows]);
+        let error = fixture.reader.read_capture(&fixture.range, FAMILY, options, None).await.unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    }
+}
+
+#[tokio::test]
 async fn compilation_policy_requires_complete_authenticated_sql_and_rejects_changed_payload_proof() {
     let (source, records) = test_support::query_compilation_policy_evidence();
     let fixture = Fixture::new(source.clone(), records.clone()).await;

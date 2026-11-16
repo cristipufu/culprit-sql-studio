@@ -12,6 +12,7 @@ pub mod current_request_work;
 pub mod dashboard;
 pub(crate) mod digest;
 pub mod drift;
+pub mod focused_blocking;
 pub mod maintenance;
 pub mod maintenance_progress;
 pub mod memory_failures;

@@ -13,6 +13,7 @@ use mysql_async::Value;
 use std::collections::{BTreeSet, HashMap};
 
 pub(crate) struct CollectedWorkload {
+    pub(crate) statement_work: Option<Box<culprit_core::telemetry::StatementCounterSnapshot>>,
     pub(crate) workload: Workload,
     /// Waits the workload source measured itself (the slow query log's lock time), for servers without wait totals.
     pub(crate) waits: Vec<WaitStat>,
@@ -54,12 +55,13 @@ pub(crate) async fn collect_workload(
     // Rows examined stands in for "logical reads": MySQL counts rows the storage engine handed to the server, not pages.
     // EXPLAINs and ANALYZEs are Culprit's own planning; `SELECT @@…` digests are driver handshakes, never actionable.
     let sql = format!(
-        "SELECT DIGEST AS digest, DIGEST_TEXT AS digest_text, COUNT_STAR AS calls, SUM_TIMER_WAIT AS total_ps,
+        "SELECT DIGEST AS digest, SCHEMA_NAME AS schema_name, DIGEST_TEXT AS digest_text, COUNT_STAR AS calls, SUM_TIMER_WAIT AS total_ps,
                 MAX_TIMER_WAIT AS max_ps, MIN_TIMER_WAIT AS min_ps, SUM_ROWS_SENT AS rows_sent, SUM_ROWS_EXAMINED AS rows_examined,
-                {temporary}, SUM_NO_INDEX_USED AS no_index, {lock},
+                {temporary}, SUM_NO_INDEX_USED AS no_index, {lock}, {outcomes},
                 {cpu}, {sample}, {p95}, {p99}, {affected},
                 DATE_FORMAT(FIRST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS first_seen,
-                DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS last_seen
+                DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS last_seen,
+                DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ') AS observed_at
            FROM performance_schema.events_statements_summary_by_digest
           WHERE SCHEMA_NAME = ? AND DIGEST IS NOT NULL AND DIGEST_TEXT NOT LIKE 'EXPLAIN %'
             AND DIGEST_TEXT NOT LIKE 'ANALYZE FORMAT%' AND DIGEST_TEXT NOT LIKE 'SHOW ANALYZE%'
@@ -71,17 +73,25 @@ pub(crate) async fn collect_workload(
         affected = optional("SUM_ROWS_AFFECTED"),
         lock = optional(crate::native::statements::LOCK_TIME_COLUMN),
         temporary = crate::native::statements::temporary_projection(&available),
+        outcomes = crate::native::statements::outcome_projection(&available),
     );
-    let rows = query_with(conn, &sql, vec![Value::from(probe.database.clone())]).await?;
-    let all: Vec<Digest> = rows
+    let native_rows = query_with(conn, &sql, vec![Value::from(probe.database.clone())]).await?;
+    let rows = native_rows
         .iter()
         .filter(|r| {
             !r.text("query_sample_text").is_some_and(|s| {
                 culprit_core::telemetry::StatementOrigin::from_sql(Some(&s), Engine::Mysql).0.is_culprit()
             })
         })
-        .map(|r| digest(r, has("SUM_CPU_TIME"), &available))
-        .collect::<Result<_>>()?;
+        .collect::<Vec<_>>();
+    let statement_work = crate::native::statements::outcome_snapshot(
+        &rows,
+        &available,
+        culprit_core::DatabaseIdentity::server(Engine::Mysql, &probe.database, &connector.host, connector.port, None),
+    )?;
+    let all: Vec<Digest> = rows.iter().map(|r| digest(r, has("SUM_CPU_TIME"), &available)).collect::<Result<_>>()?;
+    drop(rows);
+    drop(native_rows);
     let total_time_ms: f64 = all.iter().map(|d| d.stat.total_time_ms).sum();
     // SUM_CPU_TIME stays 0 unless CPU instrumentation is on; all zeros means unknown, not free.
     let total_cpu_ms: Option<f64> = has("SUM_CPU_TIME")
@@ -127,6 +137,7 @@ pub(crate) async fn collect_workload(
         notes.push(("workload", digests_full(ms)));
     }
     Ok(Some(CollectedWorkload {
+        statement_work: Some(Box::new(statement_work)),
         waits: Vec::new(),
         workload: Workload {
             population: None,
@@ -220,7 +231,7 @@ async fn slow_log_workload(
     let mut workload = collected.workload;
     workload.queries = kept.into_iter().map(|d| d.stat).collect();
     let waits = slowlog::lock_waits(collected.lock_ms);
-    Ok(Some(CollectedWorkload { workload, waits, notes, no_plans }))
+    Ok(Some(CollectedWorkload { statement_work: None, workload, waits, notes, no_plans }))
 }
 
 fn digest(r: &Rec, has_cpu: bool, columns: &BTreeSet<String>) -> Result<Digest> {

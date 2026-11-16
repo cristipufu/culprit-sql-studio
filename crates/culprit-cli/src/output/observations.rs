@@ -6,6 +6,8 @@ use culprit_core::{
 };
 
 const OBSERVATION_DETAIL_CHARS: usize = 1024;
+mod blocking;
+pub(crate) use blocking::blocking;
 
 struct Summary<'a> {
     title: &'a str,
@@ -195,7 +197,7 @@ pub(crate) fn statement_grants(report: &culprit_core::StatementGrantReport) -> S
 }
 
 pub(crate) fn compilation(report: &CompilationReport) -> String {
-    render_explanations(
+    let mut text = render_explanations(
         Summary {
             title: &report.title,
             summary: &report.summary,
@@ -203,7 +205,34 @@ pub(crate) fn compilation(report: &CompilationReport) -> String {
             limitations: &report.limitations,
         },
         report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
-    )
+    );
+    if let Some(comparison) = &report.comparison {
+        text.push('\n');
+        let summary = match (&comparison.observed_from, &comparison.observed_until) {
+            (Some(from), Some(until)) => format!(
+                "{}\n{}",
+                comparison.summary,
+                t!("view.compilation.comparison.bounds", from = from, until = until)
+            ),
+            _ => comparison.summary.clone(),
+        };
+        let entries =
+            comparison.entries.iter().map(|entry| (entry.identity.query_id.as_str(), entry.explanation.as_str()));
+        text.push_str(&render_explanations(
+            Summary {
+                title: &comparison.title,
+                summary: &summary,
+                source: SourceQualification::Single { state: report.source_state, reason: None },
+                limitations: &comparison.limitations,
+            },
+            entries,
+        ));
+        for limitation in comparison.limitations.iter().skip(1) {
+            text.push('\n');
+            text.push_str(limitation);
+        }
+    }
+    text
 }
 
 pub(crate) fn compiler_admission(report: &culprit_core::CompilerAdmissionReport) -> String {
@@ -420,28 +449,60 @@ pub(crate) fn statement_work(report: &StatementWorkReport) -> String {
         .iter()
         .take(super::BRIEF_FINDING_LIMIT)
         .map(|entry| {
-            let work = if entry.work.is_empty() {
+            let mut details = if entry.work.is_empty() {
                 t!("evidence.cli.statement_work_unmeasured")
             } else {
                 format::list(&entry.work.iter().map(|work| work.title.clone()).collect::<Vec<_>>())
             };
+            for metric in &entry.outcome_metrics {
+                if let Some(value) = &metric.text {
+                    details.push_str(&format!("\n{}: {value}", metric.label));
+                }
+            }
+            details.push('\n');
+            details.push_str(&t!(
+                "evidence.cli.statement_work_context",
+                source = &entry.source,
+                scope = culprit_core::wire_name(&entry.scope),
+                reset = serde_json::to_string(&entry.reset).expect("native reset markers serialize")
+            ));
+            if !entry.identity.qualifiers.is_empty() {
+                let qualifiers = entry
+                    .identity
+                    .qualifiers
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value:?}"))
+                    .collect::<Vec<_>>();
+                details.push('\n');
+                details
+                    .push_str(&t!("evidence.cli.query_population_qualifiers", qualifiers = format::list(&qualifiers)));
+            }
             t!(
                 "evidence.cli.statement_work_entry",
                 query = entry.identity.query_id.as_str(),
                 observed = entry.observed_at.as_str(),
-                work = work
+                work = details
             )
         })
         .collect::<Vec<_>>();
-    render(
+    let mut text = render_summary(
         Summary {
             title: &report.title,
             summary: &report.summary,
             source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
-        titles.iter().map(String::as_str),
-    )
+        |text| super::append_brief_details(text, titles.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS),
+    );
+    if let Some(context) = &report.context {
+        text.push('\n');
+        text.push_str(&t!(
+            "evidence.cli.statement_work_bounds",
+            from = &context.observed_from,
+            until = &context.observed_until
+        ));
+    }
+    text
 }
 
 fn render<'a>(report: Summary<'_>, titles: impl Iterator<Item = &'a str>) -> String {
@@ -522,6 +583,66 @@ fn append_native_sources(text: &mut String, sources: &[SourceOutcome]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compilation_changes_show_exact_native_bounds_and_all_coverage_qualifications_without_implied_cost() {
+        use culprit_core::{
+            CompilationChange, CompilationComparisonIssue, CompilationComparisonReport, telemetry::NativeQueryIdentity,
+        };
+        let identity = NativeQueryIdentity {
+            query_id: "42".into(),
+            qualifiers: [
+                ("context_settings_id".into(), "5".into()),
+                ("object_id".into(), "1999".into()),
+                ("query_hash".into(), "0123456789ABCDEF".into()),
+                ("initial_compile_at".into(), "2026-11-13T06:00:00Z".into()),
+            ]
+            .into(),
+        };
+        let key = culprit_core::telemetry::MssqlQueryCompilation::identity_key(&identity).unwrap();
+        let report = CompilationReport {
+            source_state: Some(SourceState::Collected),
+            source_reason: None,
+            title: "Retained compilations".into(),
+            summary: "Native lifetime entries.".into(),
+            limitations: vec![],
+            entries: vec![],
+            comparison: Some(CompilationComparisonReport {
+                baseline: None,
+                observed_from: Some("2026-11-13T09:59:00.000000001Z".into()),
+                observed_until: Some("2026-11-13T10:00:01.000000002Z".into()),
+                missing_before: 0,
+                missing_after: 1,
+                issues: vec![CompilationComparisonIssue::PartialRead, CompilationComparisonIssue::UnmatchedEntries],
+                title: t!("view.compilation.comparison.title"),
+                summary: t!("view.compilation.comparison.summary", n = 1, count = "1"),
+                limitations: vec![
+                    t!("view.compilation.comparison.limit.interval"),
+                    t!("view.compilation.comparison.limit.cost"),
+                    t!("view.compilation.comparison.issue.partial"),
+                    t!("view.compilation.comparison.issue.entries"),
+                ],
+                entries: vec![CompilationChange {
+                    observation_key: key.clone(),
+                    baseline_observation_key: key,
+                    identity,
+                    compilations: "18446744073709551615".into(),
+                    last_compile_at: "2026-11-13T10:00:00Z".into(),
+                    explanation: t!("view.compilation.comparison.entry.changed", count = "18446744073709551615"),
+                    investigation: String::new(),
+                    verify: String::new(),
+                }],
+            }),
+        };
+        let text = compilation(&report);
+        assert!(text.contains("18446744073709551615"));
+        assert!(text.contains("2026-11-13T09:59:00.000000001Z"));
+        assert!(text.contains("2026-11-13T10:00:01.000000002Z"));
+        for limitation in &report.comparison.as_ref().unwrap().limitations {
+            assert!(text.contains(limitation), "{limitation}");
+        }
+        assert!(!text.contains("duration_delta") && !text.contains("memory_total"));
+    }
 
     fn replication_report() -> culprit_core::ReplicationReport {
         use culprit_core::{
@@ -975,7 +1096,9 @@ mod tests {
 
     #[test]
     fn statement_work_summary_retains_point_identity_and_source_qualification_without_repeating_native_rows() {
-        let report = StatementWorkReport {
+        let mut report = StatementWorkReport {
+            source: "native-counters".into(),
+            context: None,
             source_state: Some(SourceState::Partial),
             source_reason: Some("native source is incomplete".into()),
             title: "native statement work".into(),
@@ -983,6 +1106,9 @@ mod tests {
             limitations: vec!["native reset remains unknown".into()],
             entries: (0..8)
                 .map(|index| culprit_core::StatementWorkEntry {
+                    source: "native-counters".into(),
+                    outcomes: Default::default(),
+                    outcome_metrics: vec![],
                     observation_key: "proof-reference".into(),
                     identity: culprit_core::telemetry::NativeQueryIdentity {
                         query_id: format!("query-{index}"),
@@ -995,12 +1121,46 @@ mod tests {
                 })
                 .collect(),
         };
+        report.context = Some(Box::new(culprit_core::telemetry::NativeReadContext {
+            target: culprit_core::DatabaseIdentity::server(
+                culprit_core::Engine::Mysql,
+                "app",
+                "fixture.invalid",
+                3306,
+                None,
+            )
+            .into(),
+            partition: culprit_core::telemetry::SourcePartition::Target,
+            observed_from: "2020-01-01T12:00:00Z".into(),
+            observed_until: "2020-01-01T12:00:01Z".into(),
+            database_writable: None,
+        }));
+        report.entries[0].identity.qualifiers.insert("schema".into(), "app".into());
+        report.entries[1].identity.query_id = report.entries[0].identity.query_id.clone();
+        report.entries[1].identity.qualifiers.insert("schema".into(), "another_schema".into());
+        report.entries[0].outcomes = culprit_core::StatementOutcomeCounts {
+            errors: Some("9007199254740993".into()),
+            warnings: Some("0".into()),
+        };
+        report.entries[0].outcome_metrics = vec![
+            culprit_core::Metric::said_text("view.statement_work.outcome.errors", "9007199254740993"),
+            culprit_core::Metric::said_text("view.statement_work.outcome.warnings", "0"),
+        ];
         let text = statement_work(&report);
         assert!(text.contains("query-0") && text.contains("2020-01-01T12:00:00.123456789Z"));
         assert!(text.contains(&t!("evidence.cli.statement_work_unmeasured")));
         assert!(text.contains(&t!("evidence.cli.source_partial")));
         assert!(text.contains("native reset remains unknown"));
+        assert!(text.contains("native-counters") && text.contains("another_schema"));
+        assert!(text.contains("9007199254740993") && !text.contains("9,007,199,254,740,993"));
+        assert!(text.contains(&format!("{}: 0", t!("view.statement_work.outcome.warnings"))));
+        assert!(text.contains("2020-01-01T12:00:00Z") && text.contains("2020-01-01T12:00:01Z"));
         assert_eq!(text.matches('•').count(), super::super::BRIEF_FINDING_LIMIT);
         assert!(!text.contains("proof-reference") && !text.contains("query-7"));
+        let long_context = "x".repeat(OBSERVATION_DETAIL_CHARS * 2);
+        report.entries[0].identity.qualifiers.insert("long-native-context".into(), long_context.clone());
+        let bounded = statement_work(&report);
+        assert!(bounded.contains('…') && !bounded.contains(&long_context));
+        assert!(bounded.contains("9007199254740993"), "exact outcomes precede bounded context details");
     }
 }

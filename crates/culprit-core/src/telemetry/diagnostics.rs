@@ -6,7 +6,7 @@ mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 6;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 7;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -414,7 +414,8 @@ impl DiagnosticEpisode {
                 report.is_valid()
                     && matches!(
                         (&self.signal, report),
-                        (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWait { .. })
+                        (DiagnosticSignal::LockWait { .. }, DiagnosticReport::Blocking { .. })
+                            | (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWait { .. })
                             | (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWaitWriters { .. })
                             | (DiagnosticSignal::RequestMemory { .. }, DiagnosticReport::RequestMemory { .. })
                             | (
@@ -488,6 +489,7 @@ impl DiagnosticEpisode {
     }
     pub fn matches_focus(&self, focus: &DiagnosticFocus) -> bool {
         match focus {
+            DiagnosticFocus::Blocking { focus } => self.matches_blocking_focus(focus),
             DiagnosticFocus::PageWait { focus } => self.matches_page_wait_focus(focus),
             DiagnosticFocus::PageWaitWriters { focus } => self.matches_page_wait_writer_focus(focus),
             DiagnosticFocus::RequestMemory { focus } => self.matches_request_memory_focus(focus),
@@ -541,6 +543,10 @@ impl DiagnosticEpisode {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticReport {
+    Blocking {
+        observation: DiagnosticEvidenceRef,
+        participants: Vec<DiagnosticEvidenceRef>,
+    },
     PageWait {
         observation: DiagnosticEvidenceRef,
         blocking_contexts: Vec<DiagnosticEvidenceRef>,
@@ -571,6 +577,16 @@ impl DiagnosticReport {
         row: &ExportedRecord,
     ) -> bool {
         match (self, &source.observation, &row.record) {
+            (
+                Self::Blocking { .. },
+                SourceObservation::FocusedBlocking { result, .. },
+                TelemetryRecord::Activity(point),
+            ) => {
+                episode.matches_blocking_focus(&result.focus)
+                    && result.binding == FocusedRequestBinding::Matched
+                    && point.key == result.focus.original.key
+                    && result.accepts_row(point)
+            }
             (
                 Self::CurrentRequestWork { .. },
                 SourceObservation::CurrentRequestWork { snapshot, result },
@@ -635,7 +651,8 @@ impl DiagnosticReport {
     }
     pub fn evidence(&self) -> &DiagnosticEvidenceRef {
         match self {
-            Self::PageWait { observation, .. }
+            Self::Blocking { observation, .. }
+            | Self::PageWait { observation, .. }
             | Self::PageWaitWriters { observation, .. }
             | Self::RequestMemory { observation, .. }
             | Self::CompilationAdmission { observation, .. }
@@ -645,6 +662,7 @@ impl DiagnosticReport {
     /// Every raw row used by this explanation participates in pinning, validation and immutable history.
     pub fn references(&self) -> impl Iterator<Item = &DiagnosticEvidenceRef> {
         let (page, secondary, contexts) = match self {
+            Self::Blocking { participants, .. } => (None, participants.as_slice(), &[][..]),
             Self::PageWait { blocking_contexts, .. } => (None, blocking_contexts.as_slice(), &[][..]),
             Self::PageWaitWriters { page, candidates, blocking_contexts, .. } => {
                 (Some(page.as_ref()), candidates.as_slice(), blocking_contexts.as_slice())
@@ -668,11 +686,25 @@ impl DiagnosticReport {
         self.reference_roles_are_valid()
             && self.references().count() <= MAX_DIAGNOSTIC_INPUTS
             && self.references().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
-            && matches!(self.evidence().native_key, NativeRecordIdentity::Operational { .. })
+            && match self {
+                Self::Blocking { .. } => matches!(self.evidence().native_key, NativeRecordIdentity::Activity(_)),
+                _ => matches!(self.evidence().native_key, NativeRecordIdentity::Operational { .. }),
+            }
     }
 
     fn reference_roles_are_valid(&self) -> bool {
         match self {
+            Self::Blocking { participants, .. } => {
+                self.evidence().stream == TelemetryStream::ActivityObservations
+                    && participants.len() < MAX_BLOCKING_PARTICIPANTS as usize
+                    && unique_references(participants)
+                    && participants.iter().all(|reference| {
+                        reference.stream == TelemetryStream::ActivityObservations
+                            && matches!(reference.native_key, NativeRecordIdentity::Activity(_))
+                            && reference.capture_ref() == self.evidence().capture_ref()
+                            && reference != self.evidence()
+                    })
+            }
             Self::CurrentRequestWork { .. } => true,
             Self::PageWait { blocking_contexts, .. } => {
                 blocking_contexts.len() <= crate::page_wait_report::MAX_PAGE_WAIT_BLOCKING_CONTEXTS

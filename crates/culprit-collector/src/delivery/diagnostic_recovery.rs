@@ -523,6 +523,18 @@ async fn authenticate_report_participants(
         return Err(invalid());
     }
     match report {
+        DiagnosticReport::Blocking { .. } => {
+            let activity = rows
+                .iter()
+                .map(|(reference, row)| match &row.record {
+                    TelemetryRecord::Activity(observation) => Ok((reference, observation.as_ref())),
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !report.matches_blocking_input(episode, &manifest.source, activity) {
+                return Err(invalid());
+            }
+        }
         DiagnosticReport::CurrentRequestWork { .. } => {
             let observations = rows
                 .iter()

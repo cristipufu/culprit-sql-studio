@@ -31,6 +31,7 @@ pub(crate) struct FrozenWindow {
     pub database: crate::database_identity::Context,
     minutes: u32,
     clock: String,
+    initial_clock: String,
     native_xml: String,
     intervals: BTreeMap<i64, Interval>,
     pub start: Option<String>,
@@ -118,6 +119,7 @@ impl FrozenWindow {
         Ok(Self {
             database,
             minutes,
+            initial_clock: clock.clone(),
             clock,
             native_xml,
             intervals,
@@ -131,6 +133,23 @@ impl FrozenWindow {
     }
     pub(crate) fn matches_request(&self, minutes: u32) -> bool {
         self.minutes == minutes
+    }
+    pub(crate) fn compilation_context(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Option<culprit_core::telemetry::NativeReadContext> {
+        if !self.retained {
+            return None;
+        }
+        let context = culprit_core::telemetry::NativeReadContext {
+            target: self.database.identity(host, port).into(),
+            partition: culprit_core::telemetry::SourcePartition::Target,
+            observed_from: self.initial_clock.clone(),
+            observed_until: self.clock.clone(),
+            database_writable: self.database.writable,
+        };
+        context.is_valid().then_some(context)
     }
     pub(crate) fn parameter(&self) -> Parameter {
         Parameter::Text(self.native_xml.clone())

@@ -1,4 +1,5 @@
 use super::*;
+mod blocking;
 mod partitions;
 mod planning;
 mod recovery;
@@ -127,6 +128,9 @@ impl Harness {
     async fn capture(&mut self, frame: Frame) -> CaptureIdentity {
         let selection = match &frame.source.observation {
             SourceObservation::Activity(_) => CollectionSelection::Activity,
+            SourceObservation::FocusedBlocking { result, .. } => {
+                CollectionSelection::FocusedBlocking { focus: Box::new(result.focus.clone()) }
+            }
             SourceObservation::FocusedPageWait { result, .. } => {
                 CollectionSelection::FocusedPageWait { focus: Box::new(result.focus.clone()) }
             }

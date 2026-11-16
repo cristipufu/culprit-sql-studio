@@ -14,13 +14,14 @@ import type { ReplicationReport } from "./ReplicationReport";
 import type { ReportEvidence } from "./ReportEvidence";
 import type { RetainedFailureReport } from "./RetainedFailureReport";
 import type { Snapshot } from "./Snapshot";
+import type { StatementWorkReport } from "./StatementWorkReport";
 import type { Summary } from "./Summary";
 import type { TaskSpaceReport } from "./TaskSpaceReport";
 
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { 
+export type Report = { statement_work?: StatementWorkReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */

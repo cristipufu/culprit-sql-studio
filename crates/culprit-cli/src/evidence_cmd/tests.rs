@@ -45,6 +45,43 @@ fn replication_analysis_and_explicit_reads_select_only_the_replication_stream() 
 }
 
 #[test]
+fn blocking_analysis_selects_only_original_activity_rows_and_keeps_payload_reads_explicit() {
+    for (options, format) in [
+        (&["--json"][..], Format::Json),
+        (&[][..], Format::Text),
+        (&["--json", "--with-recovery-payloads"][..], Format::Json),
+    ] {
+        let args = analyze_args("blocking", options);
+        assert!(args.analysis == Analysis::Blocking);
+        args.validate_selection().unwrap();
+        let request = args.common.request(args.analysis.families(), format).unwrap();
+        assert_eq!(request.families, [EvidenceFamily::ActivityObservations]);
+        assert_eq!(request.budget.recovery_payloads.is_some(), options.contains(&"--with-recovery-payloads"));
+    }
+}
+
+#[tokio::test]
+async fn blocking_rejects_unrelated_population_and_activity_range_selectors_before_configuration_or_credentials() {
+    for (options, key) in [
+        (vec!["--workload-population", "17"], "evidence.cli.population_queries_only"),
+        (
+            vec!["--activity-range", "019abc019abc019abc019abc019abc019abc019abc019abc019abc019abc019abc0"],
+            "evidence.cli.activity_page_waits_only",
+        ),
+    ] {
+        let mut args = analyze_args("blocking", &options);
+        args.common.config = std::env::temp_dir().join("culprit-blocking-configuration-must-not-be-read.json");
+        let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+        assert_eq!(error.code, culprit_core::ErrorCode::InvalidInput);
+        assert_eq!(error.message, culprit_core::i18n::t(key, &[]));
+    }
+    let mut args = analyze_args("blocking", &[]);
+    args.common.range = "../capture".into();
+    let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::InvalidContract)));
+}
+
+#[test]
 fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_selection() {
     let range = culprit_core::telemetry::digest(b"capture");
     let base = ["culprit", "collect", "evidence", "read", "--config", "archive.json", "--range", &range];
@@ -484,6 +521,18 @@ fn analyze_args(analysis: &str, options: &[&str]) -> AnalyzeArgs {
         panic!("archive query analysis")
     };
     args
+}
+
+#[test]
+fn compiler_baseline_selects_one_distinct_authenticated_range_and_rejects_other_analysis_kinds() {
+    let baseline = culprit_core::telemetry::digest(b"earlier-native-compilation-read");
+    let args = analyze_args("compilation", &["--compilation-baseline", &baseline]);
+    assert!(args.validate_selection().is_ok());
+    assert_eq!(args.compilation_baseline.as_deref(), Some(baseline.as_str()));
+    assert!(analyze_args("queries", &["--compilation-baseline", &baseline]).validate_selection().is_err());
+    assert!(analyze_args("compilation", &["--compilation-baseline", "not-a-capture"]).validate_selection().is_err());
+    let current = culprit_core::telemetry::digest(b"archive-population-capture");
+    assert!(analyze_args("compilation", &["--compilation-baseline", &current]).validate_selection().is_err());
 }
 
 #[test]

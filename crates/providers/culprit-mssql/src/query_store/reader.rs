@@ -122,6 +122,14 @@ impl<R: NativeRead> Reader<R> {
     pub(crate) fn is_population_batch(&self) -> bool {
         self.batch.is_some()
     }
+    /// Original native window metadata remains query-global; a selected runtime group supplies no compiler owner.
+    pub(crate) fn compilation_context(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Option<culprit_core::telemetry::NativeReadContext> {
+        self.window.as_ref()?.compilation_context(host, port)
+    }
     /// An owned whole-read stop is distinct from a source-local result cap such as one oversized dataset.
     pub(crate) fn retirement_reason(&self) -> Option<&culprit_core::Error> {
         self.stopped.as_ref()

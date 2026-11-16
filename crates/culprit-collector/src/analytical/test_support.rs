@@ -6,7 +6,11 @@ use crate::delivery::{
 use culprit_core::telemetry::*;
 
 mod activity;
+mod compilation_intervals;
 pub use activity::{activity_evidence_cases, activity_observation, assert_activity_capture};
+mod blocking;
+pub use blocking::{BlockingCase, assert_blocking_capture, blocking_evidence, blocking_evidence_cases};
+pub use compilation_intervals::compilation_interval_evidence;
 mod diagnostics;
 pub use diagnostics::{assert_diagnostic_capture, diagnostic_evidence_cases};
 mod source_partitions;
@@ -67,7 +71,9 @@ pub use page_writers::{
 mod current_request_work;
 pub use current_request_work::{assert_current_request_work_capture, current_request_work_evidence_cases};
 mod statement_work;
-pub use statement_work::{node_statement_work_evidence_cases, statement_work_evidence_cases};
+pub use statement_work::{
+    node_statement_work_evidence_cases, statement_outcome_evidence_cases, statement_work_evidence_cases,
+};
 mod statement_grants;
 pub use statement_grants::{
     StatementGrantCase, assert_statement_grant_capture, statement_grant_evidence, statement_grant_evidence_cases,
@@ -151,6 +157,15 @@ pub fn assert_statement_work_capture(
     assert_operational_capture(capture, source, records);
     assert!(source.target.database().is_some());
     assert_eq!(source.observation.snapshot().unwrap().dataset, SnapshotDataset::StatementCounters);
+    let rows = capture
+        .records()
+        .iter()
+        .map(|row| match &row.row().record {
+            TelemetryRecord::Operational(observation) => observation.clone(),
+            _ => panic!("native counter point"),
+        })
+        .collect();
+    assert!(StatementCounterSnapshot::from_source(source, rows).unwrap().is_valid());
 }
 
 pub fn assert_runtime_distribution_capture(
@@ -585,6 +600,7 @@ pub fn cumulative_queries(destination: &str, schema: &str) -> Recovery {
         sources: vec![StateSourceCoverage::collected("native-query-counters".into(), 1)],
     });
     let sample = StatementCounterSample {
+        member: None,
         scope: culprit_core::MeasurementScope::Database,
         distributions: vec![],
         identity: NativeQueryIdentity {

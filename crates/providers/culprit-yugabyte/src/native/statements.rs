@@ -156,6 +156,7 @@ pub(crate) fn counters(row: &Row, layout: &Layout, meta: &Metadata) -> Result<St
         .collect::<Result<Vec<_>>>()?;
     totals.extend(temporary::counters(row)?);
     let sample = StatementCounterSample {
+        member: Some(culprit_core::engines::ysql_node_member(&meta.node).ok_or_else(invalid)?),
         identity: identity(row, meta)?,
         scope: MeasurementScope::Node,
         observed_at: text(row, "observed_at")?,

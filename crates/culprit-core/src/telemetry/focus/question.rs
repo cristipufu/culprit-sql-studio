@@ -5,6 +5,7 @@ use super::*;
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticFocus {
+    Blocking { focus: Box<ActivityRequestFocus> },
     PageWait { focus: Box<ActivityWaitFocus> },
     PageWaitWriters { focus: Box<PageWaitWriterFocus> },
     RequestMemory { focus: Box<ActivityRequestFocus> },
@@ -17,7 +18,8 @@ impl DiagnosticFocus {
         match self {
             Self::PageWait { focus } => &focus.participant,
             Self::PageWaitWriters { focus } => &focus.waiter.participant,
-            Self::RequestMemory { focus }
+            Self::Blocking { focus }
+            | Self::RequestMemory { focus }
             | Self::CompilationAdmission { focus }
             | Self::CurrentRequestWork { focus } => focus,
         }
@@ -26,7 +28,8 @@ impl DiagnosticFocus {
         match self {
             Self::PageWait { focus } => &mut focus.participant,
             Self::PageWaitWriters { focus } => &mut focus.waiter.participant,
-            Self::RequestMemory { focus }
+            Self::Blocking { focus }
+            | Self::RequestMemory { focus }
             | Self::CompilationAdmission { focus }
             | Self::CurrentRequestWork { focus } => focus,
         }
@@ -47,6 +50,7 @@ impl DiagnosticFocus {
     }
     pub fn selector(&self) -> RecipeSelector {
         match self {
+            Self::Blocking { .. } => RecipeSelector::FocusedBlocking,
             Self::PageWait { .. } => RecipeSelector::FocusedPageWait,
             Self::PageWaitWriters { .. } => RecipeSelector::FocusedPageWaitWriters,
             Self::RequestMemory { .. } => RecipeSelector::FocusedRequestMemory,
@@ -56,6 +60,7 @@ impl DiagnosticFocus {
     }
     pub fn is_valid(&self) -> bool {
         match self {
+            Self::Blocking { focus } => focus.is_blocking_focus(),
             Self::PageWait { focus } => focus.is_valid(),
             Self::PageWaitWriters { focus } => focus.is_valid(),
             Self::RequestMemory { focus } => focus.is_request_memory_focus(),
@@ -65,6 +70,7 @@ impl DiagnosticFocus {
     }
     pub fn from_selection(selection: &CollectionSelection) -> Option<Self> {
         match selection {
+            CollectionSelection::FocusedBlocking { focus } => Some(Self::Blocking { focus: focus.clone() }),
             CollectionSelection::FocusedPageWait { focus } | CollectionSelection::SharedPageWaitFocus { focus, .. } => {
                 Some(Self::PageWait { focus: focus.clone() })
             }
@@ -113,6 +119,7 @@ impl DiagnosticFocus {
     /// Shapes an unadmitted database question. Authentication, cost qualification and native guards remain mandatory.
     pub fn database_selection(&self) -> CollectionSelection {
         match self {
+            Self::Blocking { focus } => CollectionSelection::FocusedBlocking { focus: focus.clone() },
             Self::PageWait { focus } => CollectionSelection::FocusedPageWait { focus: focus.clone() },
             Self::PageWaitWriters { focus } => CollectionSelection::PageWaitWriters { focus: focus.clone() },
             Self::RequestMemory { focus } => CollectionSelection::FocusedRequestMemory { focus: focus.clone() },

@@ -106,7 +106,8 @@ async fn compiler_policy_is_read_once_on_workload_owner_then_published_only_afte
         let mut reader = Reader::new(&mut native);
         let mut workloads = acquire(&mut reader, &options()).await;
         let shutdown = reader.close().await;
-        workloads.finish_compilation(60, shutdown);
+        let context = reader.compilation_context("captured-alias.invalid", 1433);
+        workloads.finish_compilation(60, shutdown, context);
         let mut snapshot: Snapshot =
             serde_json::from_str(include_str!("../../../../../../fixtures/mssql-demo.json")).unwrap();
         let mut coverage = Coverage::default();
@@ -124,6 +125,15 @@ async fn compiler_policy_is_read_once_on_workload_owner_then_published_only_afte
         );
         if outcome == "quiet" {
             let raw = snapshot.operations.query_compilation.unwrap();
+            let native_context = raw.context.as_ref().unwrap();
+            assert_eq!(native_context.partition, culprit_core::telemetry::SourcePartition::Target);
+            assert_eq!(native_context.observed_from, crate::read::text(&window(), "window_clock").unwrap());
+            assert_eq!(native_context.observed_until, native_context.observed_from);
+            assert!(
+                native_context.target.database().unwrap().incarnation.is_none(),
+                "boxed endpoint metadata cannot invent a logical incarnation"
+            );
+            assert_ne!(native_context.observed_from, raw.observed_from, "client acquisition clocks remain independent");
             let culprit_core::telemetry::OperationalFact::MssqlQueryCompilation(fact) = &raw.observations[0].fact
             else {
                 panic!()
@@ -144,9 +154,13 @@ async fn compiler_policy_is_read_once_on_workload_owner_then_published_only_afte
 
 #[tokio::test]
 async fn completed_query_store_identity_replaces_endpoint_only_snapshot_identity_for_every_exact_group() {
-    let mut reader = Reader::new(FakeRead::new(azure_replies(azure_window())));
-    let workloads = acquire(&mut reader, &options()).await;
-    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    let final_window = replace(&azure_window(), &[("window_clock", Val::Text("2020-01-01T07:01:00.0000002Z".into()))]);
+    let mut reader = Reader::new(FakeRead::new(azure_replies(final_window)));
+    let mut workloads = acquire(&mut reader, &options()).await;
+    let shutdown = reader.close().await;
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    let context = reader.compilation_context("saved-alias.invalid", 1433);
+    workloads.finish_compilation(60, shutdown, context.clone());
     let mut snapshot: Box<Snapshot> =
         serde_json::from_str(include_str!("../../../../../../fixtures/mssql-demo.json")).unwrap();
     snapshot.options = Some(options());
@@ -161,6 +175,15 @@ async fn completed_query_store_identity_replaces_endpoint_only_snapshot_identity
     assert_eq!(identity.telemetry_id().unwrap(), alias.telemetry_id().unwrap());
     assert!(workloads.database_identity("another-database", "saved-alias.invalid", 1433).is_err());
     snapshot.bind_identity(identity.clone());
+    let mut coverage = Coverage::default();
+    workloads.take_compilation().apply(&mut snapshot, &mut coverage);
+    let raw = snapshot.operations.query_compilation.as_ref().unwrap();
+    assert_eq!(raw.context, context);
+    let context = raw.context.clone().unwrap();
+    assert_eq!(context.observed_from, crate::read::text(&azure_window(), "window_clock").unwrap());
+    assert_eq!(context.observed_until, "2020-01-01T07:01:00.0000002Z");
+    assert_eq!(context.target.database().unwrap().incarnation.as_deref(), Some("logical-database-guid"));
+    assert_eq!(context.partition, culprit_core::telemetry::SourcePartition::Target);
     let batch = workloads.project(*snapshot, &options()).unwrap();
     assert_eq!(batch.requested.identity.as_ref(), Some(&identity));
     assert!(batch.requested.workload.is_none(), "the unselected overview does not fabricate pooled history");
@@ -172,6 +195,7 @@ async fn completed_query_store_identity_replaces_endpoint_only_snapshot_identity
             query.native_identity.as_ref(),
             Some(&crate::query_store::decode::query_identity(&summary_row()).unwrap())
         );
+        assert_eq!(snapshot.operations.query_compilation.as_ref().unwrap().context.as_ref(), Some(&context));
     }
     assert_eq!(reader.queries(), 14, "logical identity brackets the same two compiler reads within the held owner");
 }

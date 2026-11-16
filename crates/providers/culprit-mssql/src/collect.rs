@@ -221,6 +221,7 @@ async fn collect_workload(
                 options.window_in_minutes(),
                 &mut part.participants(),
                 culprit_core::telemetry::SourceShutdown::Quiescent,
+                reader.compilation_context(&provider.endpoint_host, provider.endpoint_port),
             );
             return Ok((part, compilation));
         }
@@ -559,6 +560,7 @@ async fn acquire(
         constraints: schema_part.constraints,
         histograms: None,
         escalations_before: None,
+        compilations_before: None,
         contention_before: None,
         evictions_before: None,
         sizes_before: None,

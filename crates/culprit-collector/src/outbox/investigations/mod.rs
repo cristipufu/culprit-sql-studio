@@ -123,6 +123,7 @@ pub(crate) fn eligible_source(
         }
         (
             SourceObservation::FocusedPageWait { .. }
+            | SourceObservation::FocusedBlocking { .. }
             | SourceObservation::PageWaitWriters { .. }
             | SourceObservation::FocusedRequestMemory { .. }
             | SourceObservation::FocusedCompilationAdmission { .. },
@@ -168,6 +169,7 @@ fn controller_target<'a>(
         return Err(integrity());
     }
     Ok(match &source.observation {
+        SourceObservation::FocusedBlocking { result, .. } => &result.focus.target,
         SourceObservation::FocusedPageWait { result, .. } => &result.focus.participant.target,
         SourceObservation::PageWaitWriters { focus, .. } => &focus.waiter.participant.target,
         SourceObservation::FocusedRequestMemory { result, .. } => &result.focus.target,

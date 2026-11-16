@@ -2,4 +2,4 @@
 import type { CollectedEvidenceContext } from "./CollectedEvidenceContext";
 import type { CompilationReport } from "./CompilationReport";
 
-export type CollectedCompilationAnalysis = { context: CollectedEvidenceContext, report: CompilationReport, };
+export type CollectedCompilationAnalysis = { context: CollectedEvidenceContext, baseline_context?: CollectedEvidenceContext, report: CompilationReport, };

@@ -348,12 +348,12 @@ async fn cancellation_and_native_limits_do_not_issue_followup_or_claim_complete_
     assert_eq!(reader.calls.len(), 1);
 
     let mut frame = activity_frame(vec![metadata(10, "42", true)]);
-    let mut reader = Reader::new(vec![Ok(vec![edges(10, &[20])]), Ok(vec![context(metadata(20, "43", false), &[10])])]);
+    let mut reader = Reader::new(vec![Ok(vec![edges(10, &[20])])]);
     let mut options = options();
     options.max_snapshot_rows = 1;
     let error = blockers(&mut reader, &mut frame, options).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::RowLimit);
-    assert_eq!(reader.calls.len(), 2);
+    assert_eq!(reader.calls.len(), 1, "no native owner-context read can fit the caller's participant allowance");
     assert_eq!(frame.records.len(), 1);
 }
 

@@ -15,11 +15,18 @@ pub(crate) struct RepeatedRecompile<'a> {
 }
 
 pub(crate) fn repeated_recompile(native: &MssqlQueryCompilation) -> Option<RepeatedRecompile<'_>> {
-    if !native.is_valid() || native.origin != StatementOrigin::Application {
-        return None;
-    }
+    let statement = recompile_statement(native)?;
     let count = native.compilations.parse::<u64>().ok()?;
     if count < MIN_RECORDED_COMPILATIONS || native.average_duration_us < MIN_AVERAGE_COMPILE_MICROSECONDS {
+        return None;
+    }
+    let total_milliseconds = native.average_duration_us / 1_000.0 * count as f64;
+    (total_milliseconds.is_finite() && total_milliseconds >= MIN_TOTAL_COMPILE_MILLISECONDS)
+        .then_some(RepeatedRecompile { total_milliseconds, statement })
+}
+
+pub(super) fn recompile_statement(native: &MssqlQueryCompilation) -> Option<&str> {
+    if !native.is_valid() || native.origin != StatementOrigin::Application {
         return None;
     }
     let DefinitionPayload::Available { text, .. } = &native.statement else { return None };
@@ -28,9 +35,7 @@ pub(crate) fn repeated_recompile(native: &MssqlQueryCompilation) -> Option<Repea
     {
         return None;
     }
-    let total_milliseconds = native.average_duration_us / 1_000.0 * count as f64;
-    (total_milliseconds.is_finite() && total_milliseconds >= MIN_TOTAL_COMPILE_MILLISECONDS)
-        .then_some(RepeatedRecompile { total_milliseconds, statement: text })
+    Some(text)
 }
 
 #[cfg(test)]

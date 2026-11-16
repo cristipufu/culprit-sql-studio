@@ -45,6 +45,7 @@ pub(super) fn qualify_questions(
         if !matches!(
             episode.signal,
             DiagnosticSignal::PageWait { .. }
+                | DiagnosticSignal::LockWait { .. }
                 | DiagnosticSignal::RequestMemory { .. }
                 | DiagnosticSignal::CompilationAdmission { .. }
                 | DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. }

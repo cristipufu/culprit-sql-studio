@@ -24,6 +24,7 @@ mod cleanup;
 mod compiler_admission;
 mod maintenance_progress;
 mod replication;
+mod statement_work;
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
 /// contradicts itself or the database (a plan older than the table it describes), never to hide a problem.
@@ -265,6 +266,7 @@ impl Pipeline {
         let compiler_admission = compiler_admission::explain(&mut snapshot);
         let maintenance_progress = maintenance_progress::explain(&mut snapshot);
         let replication = replication::explain(&mut snapshot);
+        let statement_work = statement_work::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
@@ -378,6 +380,7 @@ impl Pipeline {
             compiler_admission,
             maintenance_progress,
             replication,
+            statement_work,
             cleanup,
         }
     }
@@ -470,9 +473,15 @@ fn explained_compilation(snapshot: &mut Snapshot) -> Option<culprit_core::Compil
     {
         source.state = culprit_core::SourceState::Empty;
     }
-    let result = if captured.is_valid() {
+    let result = if captured.is_valid() && captured.fits_database(&snapshot.database_identity()) {
         let rows: Vec<_> = captured.observations.iter().collect();
-        crate::compilation::explain(&rows, source.as_ref())
+        crate::compilation::explain(&rows, source.as_ref()).and_then(|mut report| {
+            if let Some(baseline) = &snapshot.compilations_before {
+                report.comparison =
+                    Some(crate::compilation::compare(captured.context.as_ref(), &rows, source.as_ref(), baseline)?);
+            }
+            Ok(report)
+        })
     } else {
         Err(culprit_core::Error::invalid(culprit_core::t!("view.compilation.invalid")))
     };
@@ -555,6 +564,7 @@ mod tests {
             reset: ResetMarker::Unknown,
         };
         snapshot.operations.query_compilation = Some(CompilationSnapshot {
+            context: None,
             source: source.into(),
             observed_from: "2026-11-13T10:00:00Z".into(),
             observed_until: "2026-11-13T10:00:01Z".into(),

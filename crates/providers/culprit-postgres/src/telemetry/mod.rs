@@ -1,5 +1,6 @@
 //! Provider-owned recipes over the common capture contract and bounded native reader.
 mod activity;
+mod blocking;
 #[cfg(test)]
 mod native_tests;
 mod recipes;

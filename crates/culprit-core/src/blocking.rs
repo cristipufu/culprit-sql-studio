@@ -8,6 +8,8 @@ use ts_rs::TS;
 
 use crate::model::{Engine, Session};
 use crate::{format, t};
+mod activity;
+pub use activity::analyze_activity;
 
 /// The lock a waiting session asked for and didn't get.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, Default)]
@@ -42,7 +44,14 @@ pub enum HeadKind {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct BlockNode {
+    /// Stable graph identity for algorithms and consumer keys. `session` is display data and is not unique across
+    /// unresolved/known generations or session/transaction owner roles in one retained frame.
+    pub key: String,
     pub session: String,
+    /// Native session/transaction relationship when this graph comes from a typed retained Activity frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub owner: Option<crate::telemetry::ActivityWaitOwner>,
     /// The captured session context qualified for this node. Hidden, repeated or known-unqualified identities
     /// retain their topology without borrowing SQL, client details or action eligibility from an independent row.
     pub context: Option<Session>,
@@ -98,13 +107,21 @@ pub fn analyze(
     let contexts = qualified_contexts(sessions, unqualified_owner_ids);
     let lock_of: HashMap<&str, &LockWait> = locks.iter().map(|l| (l.session.as_str(), l)).collect();
     let mut children: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    let mut has_parent = BTreeSet::new();
     for s in sessions {
         if let Some(blocker) = s.blocked_by.as_deref().filter(|b| *b != s.id) {
             children.entry(blocker).or_default().insert(&s.id);
-            has_parent.insert(s.id.as_str());
         }
     }
+    graph(engine, &children, &contexts, &lock_of)
+}
+
+fn graph<'a>(
+    engine: Engine,
+    children: &BTreeMap<&'a str, BTreeSet<&'a str>>,
+    contexts: &HashMap<&str, &Session>,
+    lock_of: &HashMap<&str, &LockWait>,
+) -> Option<Blocking> {
+    let has_parent = children.values().flat_map(|children| children.iter().copied()).collect::<BTreeSet<_>>();
     if children.is_empty() {
         return None;
     }
@@ -114,12 +131,12 @@ pub fn analyze(
     let mut heads: Vec<&str> = children.keys().copied().filter(|id| !has_parent.contains(id)).collect();
     let mut placed: BTreeSet<&str> = BTreeSet::new();
     for head in &heads {
-        collect(head, &children, &mut placed);
+        collect(head, children, &mut placed);
     }
     for id in children.keys() {
         if !placed.contains(id) {
             heads.push(id);
-            collect(id, &children, &mut placed);
+            collect(id, children, &mut placed);
         }
     }
 
@@ -128,16 +145,16 @@ pub fn analyze(
         .map(|head| {
             let mut seen = BTreeSet::new();
             let mut ancestors = BTreeSet::new();
-            let tree = node(head, &children, &lock_of, &contexts, &mut seen, &mut ancestors, true);
+            let tree = node(head, children, lock_of, contexts, &mut seen, &mut ancestors, true);
             chain(engine, head, tree)
         })
         .filter(|c| c.waiters > 0)
         .collect();
-    chains.sort_by(|a, b| b.waiters.cmp(&a.waiters).then_with(|| a.head.cmp(&b.head)));
+    chains.sort_by(|a, b| b.waiters.cmp(&a.waiters).then_with(|| a.tree.key.cmp(&b.tree.key)));
     let waiting = chains
         .iter()
         .flat_map(|chain| descendants(&chain.tree))
-        .map(|node| node.session.as_str())
+        .map(|node| node.key.as_str())
         .collect::<BTreeSet<_>>()
         .len() as u32;
     Some(Blocking { chains, waiting })
@@ -187,7 +204,15 @@ fn node<'a>(
     let lock = if head { None } else { lock_of.get(id).map(|l| (*l).clone()) };
     let waits_for =
         if head { None } else { lock_phrase(context.as_ref().and_then(|s| s.wait.as_deref()), lock.as_ref()) };
-    BlockNode { session: id.to_string(), context, lock, waits_for, children: children_nodes }
+    BlockNode {
+        key: id.to_string(),
+        session: id.to_string(),
+        owner: None,
+        context,
+        lock,
+        waits_for,
+        children: children_nodes,
+    }
 }
 
 fn descendants(node: &BlockNode) -> Vec<&BlockNode> {
@@ -317,7 +342,7 @@ fn chain(engine: Engine, head: &str, tree: BlockNode) -> BlockingChain {
     let session = tree.context.as_ref();
     let kind = head_kind(session);
     let all = descendants(&tree);
-    let waiters = all.iter().map(|node| node.session.as_str()).collect::<BTreeSet<_>>().len() as u32;
+    let waiters = all.iter().map(|node| node.key.as_str()).collect::<BTreeSet<_>>().len() as u32;
     let longest_wait_ms = all
         .iter()
         .filter_map(|n| n.context.as_ref().and_then(|s| s.wait_ms.or(s.elapsed_ms)))

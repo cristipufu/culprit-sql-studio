@@ -10,6 +10,8 @@ const CLEANUP_BOUNDARY_REFERENCES: usize = 5;
 const PARTICIPANT_ENTRIES: usize = 5;
 const REPLICATION_ENTRIES: usize = 16;
 
+mod statement_work;
+
 #[cfg(test)]
 mod compiler_admission_tests;
 #[cfg(test)]
@@ -98,6 +100,7 @@ pub fn report(report: &Report) -> Value {
             "session": t.session, "open_for": format::duration(t.seconds * 1000.0), "state": t.state_words(), "program": t.program,
         })),
     });
+    statement_work::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
         match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {
             Ok(evidence) => {
@@ -130,6 +133,15 @@ pub fn report(report: &Report) -> Value {
             "entries_retained": compilation.entries.len(),
             "entries": compilation.entries.iter().take(COMPILATION_ENTRIES).collect::<Vec<_>>(),
             "limitations": compilation.limitations,
+            "comparison": compilation.comparison.as_ref().map(|comparison| json!({
+                "title":comparison.title,"summary":comparison.summary,
+                "observed_from":comparison.observed_from,"observed_until":comparison.observed_until,
+                "baseline":comparison.baseline.as_ref().map(|reference|json!({"id":reference.id,"taken_at":reference.taken_at})),
+                "missing_before":comparison.missing_before,"missing_after":comparison.missing_after,
+                "issues":comparison.issues,"entries_retained":comparison.entries.len(),
+                "entries":comparison.entries.iter().take(COMPILATION_ENTRIES).collect::<Vec<_>>(),
+                "limitations":comparison.limitations,
+            })),
         });
     }
     if let Some(activity) = activity {
@@ -424,6 +436,7 @@ mod tests {
             })
             .collect();
         let raw = CompilationSnapshot {
+            context: None,
             source: source.into(),
             observed_from: "2026-11-13T10:00:00Z".into(),
             observed_until: "2026-11-13T10:00:01Z".into(),
@@ -434,6 +447,7 @@ mod tests {
         data.snapshot.workload.as_mut().unwrap().queries[0].text =
             "SELECT private_value FROM compilation_sql_body_canary".into();
         data.query_compilation = Some(CompilationReport {
+            comparison: None,
             source_state: None,
             source_reason: Some("native visibility was not qualified".into()),
             title: t!("view.compilation.title"),
@@ -498,6 +512,67 @@ mod tests {
             assert_eq!(compilation["entries"], json!([]));
             assert!(response["operations"].get("query_compilation").is_none());
         }
+    }
+
+    #[test]
+    fn compilation_comparisons_are_bounded_exact_and_do_not_repeat_the_original_native_namespace() {
+        use culprit_core::{
+            CompilationChange, CompilationComparisonIssue, CompilationComparisonReport, DatabaseIdentity, Engine,
+            ScanReference,
+        };
+        let mut data = compilation_report_data(COMPILATION_ENTRIES + 3);
+        let mut database = DatabaseIdentity::server(Engine::Mssql, "db", "private-prior-native-host", 1433, None);
+        database.incarnation = Some("private-prior-native-incarnation".into());
+        let compilation = data.query_compilation.as_mut().unwrap();
+        compilation.comparison = Some(CompilationComparisonReport {
+            baseline: Some(ScanReference {
+                id: Some("original-scan-id".into()),
+                taken_at: "2026-11-13T09:59:00Z".into(),
+                database: Some(database),
+            }),
+            observed_from: Some("2026-11-13T09:59:00.000000001Z".into()),
+            observed_until: Some("2026-11-13T10:00:01.000000002Z".into()),
+            missing_before: 2,
+            missing_after: 3,
+            issues: vec![CompilationComparisonIssue::PartialRead, CompilationComparisonIssue::UnmatchedEntries],
+            title: "Recorded compilation changes".into(),
+            summary: "Present native entries compared; missing entries remain unknown.".into(),
+            limitations: vec!["Counter changes do not measure interval duration or memory ownership.".into()],
+            entries: compilation
+                .entries
+                .iter()
+                .map(|entry| CompilationChange {
+                    observation_key: entry.observation_key.clone(),
+                    baseline_observation_key: entry.observation_key.clone(),
+                    identity: entry.identity.clone(),
+                    compilations: "18446744073709551615".into(),
+                    last_compile_at: "2026-11-13T10:00:00.000000001Z".into(),
+                    explanation: "A native count change was recorded.".into(),
+                    investigation: "Inspect the original native entries.".into(),
+                    verify: "Compare naturally collected observations.".into(),
+                })
+                .collect(),
+        });
+        let response = report(&data);
+        let output = &response["query_compilation"]["comparison"];
+        assert_eq!(output["entries_retained"], COMPILATION_ENTRIES + 3);
+        assert_eq!(output["entries"].as_array().unwrap().len(), COMPILATION_ENTRIES);
+        assert_eq!(output["entries"][0]["compilations"], "18446744073709551615");
+        assert_eq!(output["observed_until"], "2026-11-13T10:00:01.000000002Z");
+        assert_eq!(output["missing_before"], 2);
+        assert_eq!(output["missing_after"], 3);
+        assert_eq!(output["issues"], json!(["partial-read", "unmatched-entries"]));
+        assert_eq!(output["baseline"], json!({"id":"original-scan-id","taken_at":"2026-11-13T09:59:00Z"}));
+        let body = serde_json::to_string(output).unwrap();
+        for private in [
+            "private-prior-native-host",
+            "private-prior-native-incarnation",
+            "private-raw-compilation-source-canary",
+            "compilation_sql_body_canary",
+        ] {
+            assert!(!body.contains(private), "{private}");
+        }
+        assert!(body.len() < 20_000);
     }
 
     #[test]

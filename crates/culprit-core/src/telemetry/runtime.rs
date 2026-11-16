@@ -34,6 +34,10 @@ impl MeasurementValue {
 #[ts(export)]
 pub enum RuntimeMetricKey {
     Executions,
+    /// The source's exact cumulative statement error count, without an inferred reason or failing request.
+    Errors,
+    /// The source's exact cumulative warning count; warnings are not failed executions.
+    Warnings,
     Duration,
     CpuTime,
     LogicalReads,
@@ -84,6 +88,8 @@ impl RuntimeMetricKey {
             && match self {
                 Self::Duration | Self::CpuTime | Self::TemporaryReadTime | Self::TemporaryWriteTime => unit.is_time(),
                 Self::Executions
+                | Self::Errors
+                | Self::Warnings
                 | Self::Rows
                 | Self::TemporaryTables
                 | Self::TemporaryDiskTables

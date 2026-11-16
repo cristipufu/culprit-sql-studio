@@ -30,6 +30,9 @@ impl DiagnosticEpisode {
         if !self.analysis.needs_work() {
             return Ok(DiagnosticFocusPlan::NotRequired);
         }
+        if matches!(self.signal, DiagnosticSignal::LockWait { .. }) {
+            return self.plan_blocking_focus(source, original, reference);
+        }
         if matches!(self.signal, DiagnosticSignal::Activity { .. }) {
             return self.plan_current_request_work_focus(source, original, reference);
         }

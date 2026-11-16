@@ -329,6 +329,7 @@ pub(crate) fn counters(row: &Row, meta: &Metadata) -> Result<StatementCounterSam
         }
     }
     let sample = StatementCounterSample {
+        member: None,
         scope: culprit_core::MeasurementScope::Database,
         identity: identity(row, meta)?,
         observed_at: text(row, "observed_at")?,

@@ -1,7 +1,11 @@
 //! One bounded owner brackets actor, native progress and metadata. Missing rows never prove completion.
 use super::{maintenance, read_copy_phase};
 use crate::{
-    native::{self, local_context::Context, metadata},
+    native::{
+        self,
+        local_context::{self, Context},
+        metadata,
+    },
     read::QueryRead,
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
@@ -45,7 +49,7 @@ pub(super) async fn capture<R: QueryRead>(
     let owner = Context::observe(reader, &before).await?;
     let initial = match &owner {
         Some(owner) => owner.read_context()?,
-        None => unknown_context(&before, &before.at)?,
+        None => local_context::unknown(&before, &before.at)?,
     };
     validate_original_source(original, &initial)?;
     let first = actor(reader, &before, pid, budget, mode).await?;
@@ -76,7 +80,7 @@ pub(super) async fn capture<R: QueryRead>(
     if !same_actor(first.as_ref(), last.as_ref()) {
         return Err(CollectionStop::SourceChanged.error());
     }
-    let context = finish_context(reader, host, port, &before, owner.as_ref()).await?;
+    let context = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
     let coverage = match unavailable {
         Some(code) => StateSourceCoverage::unavailable(source.into(), code, None),
         None => StateSourceCoverage::observed(source.into(), observations.len() as u32, false),
@@ -194,42 +198,6 @@ fn binding(
         Some(_) if actor_matches(actor, focus) => FocusedRequestBinding::Matched,
         Some(_) => FocusedRequestBinding::ParticipantChanged,
     }
-}
-
-async fn finish_context<R: QueryRead>(
-    reader: &mut R,
-    host: &str,
-    port: u16,
-    before: &metadata::Metadata,
-    owner: Option<&Context>,
-) -> Result<NativeReadContext> {
-    if let Some(owner) = owner {
-        return owner.recheck(reader, host, port).await?.ok_or_else(|| CollectionStop::SourceChanged.error());
-    }
-    let after = metadata::activity(reader, host, port).await?;
-    if !before.same_activity_source(&after) || ObservationBounds::new(&before.at, &after.at).is_none() {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    // A later permission grant cannot fill the missing initial member or qualify the original read retrospectively.
-    let observed_until = match Context::observe(reader, &after).await? {
-        Some(owner) => owner.read_context()?.observed_until,
-        None => after.at,
-    };
-    unknown_context(before, &observed_until)
-}
-
-fn unknown_context(metadata: &metadata::Metadata, until: &str) -> Result<NativeReadContext> {
-    let context = NativeReadContext {
-        target: metadata.database.clone().into(),
-        partition: SourcePartition::InstanceLocal { member: None, epoch: Some(metadata.activity_epoch()) },
-        observed_from: canonical_time(&metadata.at)?,
-        observed_until: canonical_time(until)?,
-        database_writable: Some(!metadata.standby),
-    };
-    if !context.is_valid() {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    Ok(context)
 }
 
 pub(super) fn optional(error: &Error) -> bool {

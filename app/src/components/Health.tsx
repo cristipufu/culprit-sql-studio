@@ -23,6 +23,7 @@ import { TaskSpace } from "./TaskSpace";
 import { QueryCompilation } from "./QueryCompilation";
 import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
+import { StatementWork } from "./StatementWork";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -111,6 +112,9 @@ export function HealthTab({
   const compilerAdmission = report.snapshot.operations.compiler_admission;
   const compilerAdmissionReport = report.compiler_admission;
   const compilerAdmissionIssue = observationReadIssue(compilerAdmission?.source ?? "compilation gateways", report.snapshot.sources ?? []);
+  const statementWork = report.snapshot.operations.statement_work;
+  const statementWorkReport = report.statement_work;
+  const statementWorkUnexplained = Boolean(statementWork && !statementWorkReport);
   const cleanup = report.cleanup;
   const cleanupReads = report.snapshot.operations.cleanup ?? [];
   const retention = pressure?.retention ?? null;
@@ -118,7 +122,7 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, compilerAdmission && compilerAdmissionReport, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, compilerAdmission && compilerAdmissionReport, statementWork, cleanup, cleanupUnexplained, report.replication].some(Boolean);
   const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, compilerAdmissionIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
@@ -176,6 +180,9 @@ export function HealthTab({
       {!(compilation && compilationReport) && compilationIssue && <ObservationSourceIssue source={compilationIssue} title={t("view.compilation.title")} />}
       {compilerAdmission && compilerAdmissionReport && <CompilerAdmission key={report.snapshot.id} evidence={compilerAdmission} report={compilerAdmissionReport} />}
       {!(compilerAdmission && compilerAdmissionReport) && compilerAdmissionIssue && <ObservationSourceIssue source={compilerAdmissionIssue} title={t("view.compiler_admission.title")} />}
+      {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
+      {statementWorkUnexplained && statementWork && <ObservationSourceIssue
+        source={{ source: statementWork.source, state: "unavailable", reason: t("view.statement_work.invalid") }} title={t("view.statement_work.title")} />}
       {cleanup && <CleanupEvidence key={report.snapshot.id} reads={cleanupReads} retention={retention} report={cleanup} />}
       {!cleanup && cleanupIssues.length > 0 && <ObservationSourceIssue sources={cleanupIssues} title={t("view.cleanup.title")} />}
       {cleanupUnexplained && cleanupIssues.length === 0 && <section className="operational-health observation-list" aria-label={t("view.cleanup.title")}>

@@ -10,6 +10,7 @@ use crate::{DatabaseIdentity, Error, ErrorCode, Result, t};
 mod activity;
 pub(crate) mod activity_frame;
 mod admission;
+mod blocking;
 mod cache_entry_memory;
 mod cached_definitions;
 mod cached_statements;
@@ -86,6 +87,7 @@ mod wait_semantics;
 pub use activity::*;
 pub use activity_frame::*;
 pub use admission::*;
+pub use blocking::*;
 pub use cache_entry_memory::*;
 pub use cached_definitions::*;
 pub use cached_statements::*;
@@ -279,6 +281,12 @@ impl CollectionRequest {
         self.subject.validate()?;
         self.budget.validate()?;
         match &self.selection {
+            CollectionSelection::FocusedBlocking { focus } => {
+                self.subject.require_database()?;
+                if !focus.is_blocking_focus() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
             CollectionSelection::Snapshot {
                 dataset:
                     SnapshotDataset::CacheEntryMemory
@@ -561,6 +569,10 @@ impl TelemetryRecord {
             Self::Activity(row) => {
                 row.redact(source.target.engine());
                 source.observation.activity().is_some()
+                    && match &source.observation {
+                        SourceObservation::FocusedBlocking { result, .. } => result.accepts_row(row),
+                        _ => true,
+                    }
                     && source
                         .target
                         .database()
@@ -636,6 +648,7 @@ impl TelemetryRecord {
                             && description.accepts_scope(&revision.episode.scope)
                     }
                     (SourceObservation::Diagnostics(_), _) | (_, OperationalFact::DiagnosticRevision(_)) => false,
+                    (_, OperationalFact::StatementCounters(point)) => accepted && point.fits_source_scope(source),
                     _ => accepted,
                 }
             }

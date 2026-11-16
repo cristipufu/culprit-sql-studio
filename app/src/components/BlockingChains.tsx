@@ -39,7 +39,7 @@ export function BlockingChains({ blocking, connection, route, actions, actionsNo
   return (
     <div className="block-chains" role="group" aria-label={t("ui.blocking_chains.label", { count: blocking.waiting })}>
       {blocking.chains.map((chain, i) => (
-        <ChainCard key={chain.head} chain={chain} connection={connection} route={route} actions={actions} actionsNote={actionsNote} onInterrupt={onInterrupt} onLocate={onLocate} defaultOpen={i < 2} />
+        <ChainCard key={chain.tree.key} chain={chain} connection={connection} route={route} actions={actions} actionsNote={actionsNote} onInterrupt={onInterrupt} onLocate={onLocate} defaultOpen={i < 2} />
       ))}
     </div>
   );
@@ -154,7 +154,7 @@ function TreeRow({ node, depth, onLocate, isHead = false }: { node: BlockNode; d
         </span>
       </div>
       {node.children.map((c) => (
-        <TreeRow key={c.session} node={c} depth={depth + 1} onLocate={onLocate} />
+        <TreeRow key={c.key} node={c} depth={depth + 1} onLocate={onLocate} />
       ))}
     </>
   );

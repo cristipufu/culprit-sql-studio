@@ -1,9 +1,6 @@
 //! Follow only native blocker identities reached from this database's observed waiters.
 use super::*;
 
-const MAX_BLOCKING_LOOKUPS: usize = 64;
-const MAX_BLOCKING_DEPTH: usize = 8;
-
 pub(crate) struct BlockingReadOptions<'a> {
     pub minimum_request_age_ms: u32,
     pub version: u32,
@@ -68,8 +65,9 @@ impl Closure {
         edges: Edges,
         contexts: BTreeMap<u32, OwnerContext>,
         max_rows: usize,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.visited.append(&mut self.pending);
+        let mut limited = false;
         for (waiter, owners) in edges {
             let index = *self.by_pid.get(&waiter).ok_or_else(invalid)?;
             let mut waits = Vec::new();
@@ -92,16 +90,17 @@ impl Closure {
                         }
                     } else if let Some(current) = observed {
                         if frame.records.len() >= max_rows {
-                            return Err(CollectionStop::RowLimit.error());
+                            limited = true;
+                        } else {
+                            generation = Some(current.key.session.generation.clone());
+                            let next = frame.records.len();
+                            frame.records.push(ActivityRecord {
+                                facts: context.record.facts.clone(),
+                                row: context.record.row.clone(),
+                                sql: None,
+                            });
+                            self.by_pid.insert(owner, next);
                         }
-                        generation = Some(current.key.session.generation.clone());
-                        let next = frame.records.len();
-                        frame.records.push(ActivityRecord {
-                            facts: context.record.facts.clone(),
-                            row: context.record.row.clone(),
-                            sql: None,
-                        });
-                        self.by_pid.insert(owner, next);
                     }
                 }
                 if generation.is_some()
@@ -117,7 +116,7 @@ impl Closure {
                 facts.wait.as_mut().ok_or_else(invalid)?.owners = waits;
             }
         }
-        Ok(())
+        Ok(limited)
     }
 }
 
@@ -126,13 +125,25 @@ pub(crate) async fn blockers<R: QueryRead>(
     frame: &mut ActivityFrame,
     options: BlockingReadOptions<'_>,
 ) -> Result<()> {
+    let closure = observe_blocking(reader, frame, options).await?;
+    if closure.is_limited() { Err(CollectionStop::RowLimit.error()) } else { Ok(()) }
+}
+
+/// The same native traversal can retain a bounded positive prefix; native read failures still abort it.
+pub(crate) async fn observe_blocking<R: QueryRead>(
+    reader: &mut R,
+    frame: &mut ActivityFrame,
+    options: BlockingReadOptions<'_>,
+) -> Result<BlockingClosureStatus> {
     let mut closure = Closure::new(frame, &options)?;
+    let mut status = BlockingClosureStatus::Observed;
     for _ in 0..MAX_BLOCKING_DEPTH {
         if closure.pending.is_empty() {
             break;
         }
-        if closure.pending.len() + closure.visited.len() > MAX_BLOCKING_LOOKUPS {
-            return Err(CollectionStop::RowLimit.error());
+        if closure.pending.len() + closure.visited.len() > MAX_BLOCKING_LOOKUPS as usize {
+            status = BlockingClosureStatus::LookupLimit;
+            break;
         }
         let targets = selectors(frame, &closure.pending)?;
         let expected =
@@ -148,20 +159,41 @@ pub(crate) async fn blockers<R: QueryRead>(
         let edges = decode_edges(reader.query(&sql, expected.len()).await?, &expected)?;
         let owners = edges.values().flatten().copied().filter(|id| *id != 0).collect::<BTreeSet<_>>();
         closure.looked_up.extend(&owners);
-        if closure.looked_up.len() > MAX_BLOCKING_LOOKUPS {
-            return Err(CollectionStop::RowLimit.error());
+        if closure.looked_up.len() > MAX_BLOCKING_LOOKUPS as usize {
+            closure.attach(frame, edges, BTreeMap::new(), options.max_snapshot_rows)?;
+            status = BlockingClosureStatus::LookupLimit;
+            break;
         }
-        let contexts = owner_context(reader, frame, &targets, &edges, &owners, &options).await?;
-        closure.attach(frame, edges, contexts, options.max_snapshot_rows)?;
+        let remaining = options.max_snapshot_rows.saturating_sub(frame.records.len());
+        let mut newly_selected = 0usize;
+        let selected = owners
+            .iter()
+            .copied()
+            .filter(|owner| {
+                if closure.by_pid.contains_key(owner) {
+                    return true;
+                }
+                if newly_selected >= remaining {
+                    return false;
+                }
+                newly_selected += 1;
+                true
+            })
+            .collect::<BTreeSet<_>>();
+        let contexts = owner_context(reader, frame, &targets, &edges, &selected, &options).await?;
+        if closure.attach(frame, edges, contexts, options.max_snapshot_rows)? || selected.len() != owners.len() {
+            status = BlockingClosureStatus::ParticipantLimit;
+            break;
+        }
     }
-    if !closure.pending.is_empty() {
-        return Err(CollectionStop::RowLimit.error());
+    if !closure.pending.is_empty() && status == BlockingClosureStatus::Observed {
+        status = BlockingClosureStatus::DepthLimit;
     }
     ActivityEvidence::validate(&frame.observations())?;
-    if !closure.visited.is_empty() && options.version >= 140_000 {
+    if status == BlockingClosureStatus::Observed && !closure.visited.is_empty() && options.version >= 140_000 {
         lock_resources(reader, frame, &closure.by_pid, &closure.visited).await?;
     }
-    Ok(())
+    Ok(status)
 }
 
 fn pid(row: &Row) -> Result<u32> {
@@ -175,7 +207,7 @@ fn decode_edges(rows: Vec<Row>, expected: &BTreeSet<u32>) -> Result<Edges> {
     for row in rows {
         let waiter = pid(&row)?;
         let owners: Vec<u32> = serde_json::from_str(&text(&row, "owners")?).map_err(|_| invalid())?;
-        if owners.len() > MAX_BLOCKING_LOOKUPS {
+        if owners.len() > MAX_BLOCKING_LOOKUPS as usize {
             return Err(CollectionStop::RowLimit.error());
         }
         if !expected.contains(&waiter) || edges.insert(waiter, owners.into_iter().collect()).is_some() {
@@ -223,7 +255,7 @@ async fn owner_context<R: QueryRead>(
         let waiters: Vec<u32> = serde_json::from_str(&text(&record.row, "blocking_waiters")?).map_err(|_| invalid())?;
         if !owners.contains(&id)
             || waiters.is_empty()
-            || waiters.len() > MAX_BLOCKING_LOOKUPS
+            || waiters.len() > MAX_BLOCKING_LOOKUPS as usize
             || waiters.iter().any(|waiter| !edges.get(waiter).is_some_and(|owners| owners.contains(&id)))
             || result.insert(id, OwnerContext { record, waiters: waiters.into_iter().collect() }).is_some()
         {

@@ -87,11 +87,13 @@
      "headline": "Session 71 has been idle in an open transaction for 22.4 s; 2 sessions wait behind it (an update lock on shop.orders).",
      "advice": "The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 71 rolls its transaction back and frees everyone behind it. SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.",
      "tree": {
+      "key": "71",
       "session": "71",
       "lock": null,
       "waits_for": null,
       "children": [
        {
+        "key": "76",
         "session": "76",
         "lock": {
          "session": "76",
@@ -103,6 +105,7 @@
         "waits_for": "an update lock on shop.orders",
         "children": [
          {
+          "key": "75",
           "session": "75",
           "lock": {
            "session": "75",
@@ -263,11 +266,13 @@
      "headline": "Session 656 has been idle in an open transaction for 23.0 s; 2 sessions wait behind it (an exclusive row lock on shop.orders).",
      "advice": "The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 656 rolls its transaction back and frees everyone behind it. Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).",
      "tree": {
+      "key": "656",
       "session": "656",
       "lock": null,
       "waits_for": null,
       "children": [
        {
+        "key": "658",
         "session": "658",
         "lock": {
          "session": "658",
@@ -279,6 +284,7 @@
         "waits_for": "an exclusive row lock on shop.orders",
         "children": [
          {
+          "key": "657",
           "session": "657",
           "lock": {
            "session": "657",
@@ -445,11 +451,13 @@
      "headline": "Session 3427 has been idle in an open transaction for 22.5 s; 2 sessions wait behind it (a row lock on public.orders).",
      "advice": "The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 3427 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.",
      "tree": {
+      "key": "3427",
       "session": "3427",
       "lock": null,
       "waits_for": null,
       "children": [
        {
+        "key": "3439",
         "session": "3439",
         "lock": {
          "session": "3439",
@@ -461,6 +469,7 @@
         "waits_for": "a row lock on public.orders",
         "children": [
          {
+          "key": "3440",
           "session": "3440",
           "lock": {
            "session": "3440",
