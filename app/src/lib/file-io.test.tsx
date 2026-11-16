@@ -5,7 +5,7 @@ import type { FileIo } from "../gen/FileIo";
 import type { Report } from "../gen/Report";
 import { StorageLatency } from "../components/BeyondTime";
 import { partial } from "../test/fixtures";
-import { fileIoKey, ioContext, storageAverage } from "./file-io";
+import { fileIoKey, ioContext, recordedIoDetails, storageAverage } from "./file-io";
 import { t } from "./i18n";
 
 function file(name: string, extra: Partial<FileIo> = {}): FileIo {
@@ -66,4 +66,36 @@ test("The storage UI retains cache, remote, simulated and replica evidence witho
   expect(mixed).toContain(t("view.dashboard.storage.mixed"));
   expect(mixed).toContain(writes.name);
   expect(mixed).toContain(flushes.name);
+});
+
+test("Native file facts preserve exact integers and remain separate from storage averages and missing metadata", () => {
+  const original = file("data");
+  const native = file("data", {
+    queued_read_ms: "9007199254740993", queued_write_ms: "0",
+    logical_size: { kind: "bytes", bytes: "0" }, maximum_size: { kind: "unlimited" },
+  });
+  const details = recordedIoDetails(native);
+  expect(details).toContain(t("core.io.recorded.governance", { direction: "read", milliseconds: "9007199254740993" }));
+  expect(details).toContain(t("core.io.recorded.governance", { direction: "write", milliseconds: "0" }));
+  expect(details).toContain(t("core.io.recorded.logical_bytes", { bytes: "0" }));
+  expect(details).toContain(t("core.io.recorded.maximum_unlimited"));
+  expect(recordedIoDetails(original)).toEqual([]);
+  expect(storageAverage([native], false)).toEqual(storageAverage([original], false));
+  expect(fileIoKey(native)).toEqual(fileIoKey(original));
+  expect(recordedIoDetails(file("data", { logical_size: { kind: "not-applicable" }, maximum_size: { kind: "no-growth" } })))
+    .toEqual([t("core.io.recorded.logical_not_applicable"), t("core.io.recorded.maximum_no_growth")]);
+});
+
+test("Storage keeps recorded file facts inside a collapsed list and omits a disclosure for unavailable facts", () => {
+  const report = partial<Report>({ findings: [] });
+  const native = file("data", { queued_read_ms: "9007199254740993", maximum_size: { kind: "bytes", bytes: "67108864" } });
+  const markup = renderToStaticMarkup(createElement(StorageLatency, { files: [native], engine: "mssql", report }));
+  expect(markup).toContain('class="io-facts"');
+  expect(markup).toContain(`<summary>${t("ui.beyond_time.storage.native_facts")}</summary>`);
+  expect(markup).toContain("<ul><li>");
+  expect(markup).toContain("9007199254740993");
+  expect(markup).toContain("67108864");
+  expect(markup).not.toMatch(/<details\b[^>]*\bopen(?:[ =>])/);
+  const unavailable = renderToStaticMarkup(createElement(StorageLatency, { files: [file("unknown")], engine: "mssql", report }));
+  expect(unavailable).not.toContain('class="io-facts"');
 });

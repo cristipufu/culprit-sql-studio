@@ -15,6 +15,10 @@ fn file(name: &str) -> FileIo {
         write_bytes: Some(4_000.0 * 8_192.0),
         scope: Some(FileScope::Database),
         stats_reset: Some("2026-11-12T10:00:00Z".into()),
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: Some(FileWriteOperation::Write),
     }
 }
@@ -229,4 +233,52 @@ fn native_file_source_failure_partial_and_missing_outcome_prevent_complete_stora
     }
     snapshot.sources.retain(|source| source.source != culprit_core::source_id::FILE_LATENCY);
     assert!(matches!(SlowStorageCheck.evidence(&snapshot), CheckEvidence::Insufficient(_)));
+}
+
+#[test]
+fn governance_stalls_and_file_limits_are_exact_context_without_subtracting_latency_or_assigning_a_cause() {
+    use culprit_core::telemetry::{FileSize, FileSizeLimit};
+    let original = snapshot(vec![file("data")]);
+    let original_case = slow_files(&original).pop().unwrap();
+    let original_finding = slow_storage_finding(&original, original_case);
+    let mut observed = original.clone();
+    let native = &mut observed.pressure.as_mut().unwrap().files[0];
+    native.queued_read_ms = Some("9007199254740993".into());
+    native.queued_write_ms = Some("0".into());
+    native.logical_size = Some(FileSize::Bytes { bytes: "9007199254740993".into() });
+    native.maximum_size = Some(FileSizeLimit::Unlimited);
+    let case = slow_files(&observed).pop().unwrap();
+    assert_eq!(case.avg_ms, 30.0, "native governance totals do not turn the cumulative average into disk service time");
+    let finding = slow_storage_finding(&observed, case);
+    assert_eq!(finding.severity, original_finding.severity);
+    assert_eq!(finding.id, original_finding.id);
+    assert_eq!(finding.summary, original_finding.summary);
+    assert_eq!(finding.fix, original_finding.fix);
+    assert_eq!(finding.facts.storage_files, original_finding.facts.storage_files);
+    let context = finding.metrics.last().unwrap();
+    assert_eq!(context.unit, Unit::Text);
+    let exact = culprit_core::format::digits("9007199254740993".into());
+    assert!(context.text.as_deref().unwrap().matches(&exact).count() >= 2);
+    assert!(context.text.as_deref().unwrap().contains("0 ms"), "measured zero is retained independently");
+    assert!(context.text.as_deref().unwrap().contains("storage, database and platform limits"));
+    assert!(finding.caveats.contains(&t!("check.slow_storage.caveat.governance")));
+}
+
+#[test]
+fn native_gauge_or_governance_context_alone_never_authorizes_a_storage_finding() {
+    use culprit_core::telemetry::{FileSize, FileSizeLimit};
+    let mut raw = file("native");
+    raw.reads = 0.0;
+    raw.read_ms = None;
+    raw.queued_read_ms = Some("9007199254740993".into());
+    raw.logical_size = Some(FileSize::NotApplicable);
+    raw.maximum_size = Some(FileSizeLimit::NoGrowth);
+    assert!(slow_files(&snapshot(vec![raw.clone()])).is_empty());
+    raw.reads = 4000.0;
+    raw.read_ms = Some(120_000.0);
+    raw.context.read = IoAccounting::PageServerResponse;
+    assert!(
+        slow_files(&snapshot(vec![raw])).is_empty(),
+        "native facts do not change remote accounting into disk timing"
+    );
 }

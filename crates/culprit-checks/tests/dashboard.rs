@@ -407,6 +407,10 @@ fn storage_connections_replication_and_failures_say_what_they_saw() {
             // PostgreSQL 16 and later read pg_stat_io: the whole server's.
             scope: Some(culprit_core::FileScope::Server),
             stats_reset: None,
+            queued_read_ms: None,
+            queued_write_ms: None,
+            logical_size: None,
+            maximum_size: None,
             write_operation: None,
         },
         FileIo {
@@ -422,6 +426,10 @@ fn storage_connections_replication_and_failures_say_what_they_saw() {
             write_bytes: None,
             scope: Some(culprit_core::FileScope::Server),
             stats_reset: None,
+            queued_read_ms: None,
+            queued_write_ms: None,
+            logical_size: None,
+            maximum_size: None,
             write_operation: Some(culprit_core::FileWriteOperation::Flush),
         },
     ];
@@ -580,6 +588,10 @@ fn postgres_storage_waits_and_plan_counts_keep_their_own_meaning() {
         // As PostgreSQL 15's collector reads them: data from pg_stat_database (this database), WAL from pg_stat_wal.
         scope: Some(if kind == FileKind::Data { FileScope::Database } else { FileScope::Server }),
         stats_reset: Some(reset.into()),
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: (kind == FileKind::Log).then_some(FileWriteOperation::Flush),
     };
     r.snapshot.pressure.get_or_insert_with(Default::default).files = vec![

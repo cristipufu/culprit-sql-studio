@@ -432,6 +432,10 @@ fn sharing_file_evidence_keeps_finding_links_without_the_path() {
         write_bytes: Some(0.0),
         scope: Some(culprit_core::FileScope::Database),
         stats_reset: None,
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: None,
     }];
     let original = culprit_checks::analyze(s.clone());

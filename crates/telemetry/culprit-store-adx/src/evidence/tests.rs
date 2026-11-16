@@ -14,6 +14,7 @@ mod cleanup;
 mod compilation;
 mod compiler_admission;
 mod diagnostics;
+mod file_io;
 mod focused_memory;
 mod maintenance_progress;
 mod memory_feedback;

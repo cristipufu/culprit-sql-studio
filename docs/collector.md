@@ -313,6 +313,13 @@ qualified member, process generation and observation bounds. Scan summaries atta
 local native row supplies those dimensions; global or mixed-context groups do not inherit a representative row's
 temporary counters. A process generation does not establish a counter-reset time.
 
+Operational file I/O rows also retain exact recorded governance stalls, logical catalog size, physical disk
+allocation and the file's configured maximum as separate facts. Zero, unknown, not applicable and no fixed maximum
+remain distinct. These observations establish neither free capacity, enabled autogrowth nor current pressure.
+Governance stalls are not subtracted to manufacture physical storage service time. SQL Server collects the extra
+columns through the same targeted read, with native version/platform guards; its changed query shape still needs
+work-cost qualification. The app shows these facts in collapsed file details, keeping dashboard summaries concise.
+
 `statement-grants` reads database-target `statement-grants` captures from `operational-samples` through the same
 pure explanation used by scans. Each original cache entry retains its handles, offsets, generation, exact integer
 counters and available statement text, separately from the native member, process generation and observation bounds

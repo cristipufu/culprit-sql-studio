@@ -11,7 +11,7 @@ import { evidencePresentation, constraintLabel, serverName, statementMetrics } f
 import { bytes, count, duration, percent, rowCount, storageLatency, when } from "../lib/format";
 import { key, t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
-import { fileIoKey, ioContext, storageAverage } from "../lib/file-io";
+import { fileIoKey, ioContext, recordedIoDetails, storageAverage } from "../lib/file-io";
 import { querySignalStatus, replicaState, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
 import { SignalTile } from "./Health";
 
@@ -275,6 +275,17 @@ function Latency({ ms, n, kind }: { ms: number | null; n: number; kind: "reads" 
   );
 }
 
+function NativeFileFacts({ file }: { file: FileIo }) {
+  const details = recordedIoDetails(file);
+  if (details.length === 0) return null;
+  return (
+    <details className="io-facts" data-own-click>
+      <summary>{t("ui.beyond_time.storage.native_facts")}</summary>
+      <ul>{details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+    </details>
+  );
+}
+
 /** Average read and write time per file since startup, slowest first, under one sentence. */
 export function StorageLatency({ files, engine, report, compact }: { files: FileIo[]; engine: Engine; report: Report; compact?: boolean }) {
   if (files.length === 0) return null;
@@ -301,7 +312,7 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
         </IoRow>
         {files.slice(0, compact ? 8 : 12).map((f) => (
           <IoRow key={fileIoKey(f)}>
-            <span className="io-source" role="cell">
+            <div className="io-source" role="cell">
               <span className="io-name">
                 <i className={`sig-dot ${storageStatus(report, f)}`} aria-hidden />
                 <span className="io-file" title={f.stats_reset ? t("ui.beyond_time.stats_since", { file: fileName(f), reset: f.stats_reset }) : t("ui.beyond_time.stats_unrecorded", { file: fileName(f) })}>
@@ -310,7 +321,8 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
                 <span className={`io-kind ${f.kind}`}>{kindLabel(f.kind)}</span>
               </span>
               <span className="io-context muted">{ioContext(f)}</span>
-            </span>
+              <NativeFileFacts file={f} />
+            </div>
             <Latency ms={f.read_ms} n={f.reads} kind="reads" />
             <Latency ms={f.write_ms} n={f.writes} kind={f.write_operation === "flush" ? "flushes" : "writes"} />
           </IoRow>

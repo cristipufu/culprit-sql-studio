@@ -9,6 +9,7 @@ mod cleanup;
 mod cohorts;
 mod compilation;
 mod compiler_admission;
+mod file_io;
 mod fixture;
 mod maintenance;
 mod maintenance_progress;

@@ -15,6 +15,10 @@ fn file(name: &str, kind: FileKind) -> FileIo {
         write_bytes: None,
         scope: Some(FileScope::Database),
         stats_reset: Some("2026-11-12T10:00:00Z".into()),
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: Some(FileWriteOperation::Write),
     }
 }
@@ -117,4 +121,33 @@ fn coherent_quiet_log_files_use_native_total_time_and_zero_operation_rows_do_not
     assert_eq!(tile.metrics[0].value, Some(3.5));
     assert_eq!(tile.metrics[0].label, t!("view.dashboard.storage.metric.log_write"));
     assert_eq!(tile.items.len(), 2, "raw positive native files retain their identities");
+}
+
+#[test]
+fn governance_and_file_gauges_keep_the_dashboard_summary_concise_and_native_accounting_unchanged() {
+    use culprit_core::telemetry::{FileSize, FileSizeLimit};
+    let native = file("native-data", FileKind::Data);
+    let before = storage(&report(vec![native.clone()]));
+    let mut with_context = native;
+    with_context.queued_read_ms = Some("9007199254740993".into());
+    with_context.queued_write_ms = Some("0".into());
+    with_context.logical_size = Some(FileSize::Bytes { bytes: "0".into() });
+    with_context.maximum_size = Some(FileSizeLimit::Unlimited);
+    let after = storage(&report(vec![with_context.clone()]));
+    assert_eq!(after.metrics[0].value, before.metrics[0].value);
+    assert_eq!(after.items[0].id, before.items[0].id);
+    assert_eq!(after.items[0].value, before.items[0].value);
+    assert_eq!(after.status, before.status);
+    assert_eq!(after.detail, before.detail, "independent file facts belong in the file's expanded details");
+    let details = with_context.recorded_details();
+    assert!(details.iter().any(|detail| detail.contains(&culprit_core::format::digits("9007199254740993".into()))));
+    assert!(details.iter().any(|detail| detail.contains("0 ms")));
+    assert!(details.iter().any(|detail| detail.contains("0 bytes")));
+    assert!(details.iter().any(|detail| detail.contains("storage, database and platform limits")));
+    with_context.context.read = IoAccounting::PageServerResponse;
+    with_context.context.write = IoAccounting::Simulated;
+    let remote = storage(&report(vec![with_context]));
+    assert!(remote.metrics.is_empty());
+    assert_eq!(remote.items[0].status, Some(TileStatus::Info));
+    assert_eq!(remote.takeaway, t!("view.dashboard.storage.native"));
 }

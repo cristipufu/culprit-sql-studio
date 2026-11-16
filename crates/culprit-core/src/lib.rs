@@ -170,6 +170,7 @@ pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_grant_report::{StatementGrantExplanation, StatementGrantRead, StatementGrantReport};
 pub use statement_work_report::{StatementWorkEntry, StatementWorkReport};
 pub use task_space_report::*;
+pub use telemetry::{FileSize, FileSizeLimit};
 pub use tuning_report::{TuningExplanation, TuningReport};
 pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_reports};
 pub use wait_resources::{ObservedWaitResource, WaitResourceKind};

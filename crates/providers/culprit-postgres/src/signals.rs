@@ -410,6 +410,10 @@ async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<Fi
                 write_bytes: r.number("write_bytes"),
                 scope: Some(culprit_core::FileScope::Server),
                 stats_reset: r.text("stats_reset"),
+                queued_read_ms: None,
+                queued_write_ms: None,
+                logical_size: None,
+                maximum_size: None,
                 write_operation: (kind == FileKind::Log).then_some(culprit_core::FileWriteOperation::Flush),
             });
         }
@@ -435,6 +439,10 @@ async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<Fi
                 write_bytes: None,
                 scope: Some(culprit_core::FileScope::Database),
                 stats_reset: r.text("stats_reset"),
+                queued_read_ms: None,
+                queued_write_ms: None,
+                logical_size: None,
+                maximum_size: None,
                 write_operation: None,
             });
         }
@@ -464,6 +472,10 @@ async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<Fi
             write_bytes: r.number("wal_bytes"),
             scope: Some(culprit_core::FileScope::Server),
             stats_reset: r.text("stats_reset"),
+            queued_read_ms: None,
+            queued_write_ms: None,
+            logical_size: None,
+            maximum_size: None,
             write_operation: Some(culprit_core::FileWriteOperation::Flush),
         });
     }

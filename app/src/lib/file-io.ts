@@ -1,5 +1,23 @@
 import type { FileIo } from "../gen/FileIo";
+import { digits } from "./format";
 import { t } from "./i18n";
+
+/** Render the recorded facts with the backend's catalog messages; preserve exact integer text. */
+export function recordedIoDetails(file: FileIo): string[] {
+  const details: string[] = [];
+  for (const [direction, value] of [["read", file.queued_read_ms], ["write", file.queued_write_ms]] as const) {
+    if (value != null) details.push(t("core.io.recorded.governance", { direction, milliseconds: digits(value) }));
+  }
+  const size = file.logical_size;
+  if (size?.kind === "not-applicable") details.push(t("core.io.recorded.logical_not_applicable"));
+  else if (size?.kind === "bytes") details.push(t("core.io.recorded.logical_bytes", { bytes: digits(size.bytes) }));
+  switch (file.maximum_size?.kind) {
+    case "no-growth": details.push(t("core.io.recorded.maximum_no_growth")); break;
+    case "unlimited": details.push(t("core.io.recorded.maximum_unlimited")); break;
+    case "bytes": details.push(t("core.io.recorded.maximum_bytes", { bytes: digits(file.maximum_size.bytes) })); break;
+  }
+  return details;
+}
 
 export function sameIoContext(left: FileIo["context"], right: FileIo["context"]): boolean {
   return left.read === right.read && left.write === right.write && left.replica_id === right.replica_id;

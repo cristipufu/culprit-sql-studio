@@ -12162,6 +12162,8 @@ button.as-callout:hover {
   border-top: none;
 }
 
+.io-row:has(.io-facts[open]) { align-items: start; }
+
 .io-row.io-th {
   padding-top: 6px;
   padding-bottom: 6px;
@@ -12197,6 +12199,25 @@ button.as-callout:hover {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+
+.io-facts {
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+.io-facts > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.io-facts > ul {
+  margin: 8px 0 0;
+  padding-inline-start: 16px;
+  overflow-wrap: anywhere;
+}
+
+.io-facts li + li { margin-top: 6px; }
 
 .io-name {
   display: flex;

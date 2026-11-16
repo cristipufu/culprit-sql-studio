@@ -20,11 +20,15 @@ pub(crate) fn row() -> Rec {
         ("updateability", Val::Text("READ_WRITE".into())),
         ("reads", Val::Int(10)),
         ("read_ms", Val::Int(40)),
+        ("queued_read_ms", Val::Int(9_007_199_254_740_993)),
         ("read_bytes", Val::Int(9_007_199_254_740_993)),
         ("writes", Val::Int(900)),
         ("write_ms", Val::Int(1800)),
+        ("queued_write_ms", Val::Int(0)),
         ("write_bytes", Val::Int(900)),
         ("size_on_disk_bytes", Val::Int(8192)),
+        ("logical_pages", Val::Int(16)),
+        ("maximum_pages", Val::Int(-1)),
         ("sample_ms", Val::Int(1000)),
     ])
 }
@@ -36,11 +40,21 @@ async fn native_file_identity_and_integer_costs_survive_export_and_application_p
     assert_eq!(counters[0].kind, FileKind::Data, "database id 2 does not identify tempdb in Azure SQL");
     assert_eq!(counters[0].context, culprit_core::FileIoContext::STORAGE);
     assert_eq!(counters[0].read_bytes.as_deref(), Some("9007199254740993"));
+    assert_eq!(counters[0].queued_read_ms.as_deref(), Some("9007199254740993"));
+    assert_eq!(counters[0].queued_write_ms.as_deref(), Some("0"));
+    assert_eq!(counters[0].logical_size, Some(FileSize::Bytes { bytes: "131072".into() }));
+    assert_eq!(counters[0].maximum_size, Some(FileSizeLimit::Unlimited));
+    assert_eq!(counters[0].size_on_disk_bytes.as_deref(), Some("8192"));
     assert_eq!(counters[0].reset, ResetMarker::Unknown);
     let app = display(&counters);
     assert_eq!((app[0].scope, app[0].database.as_deref()), (Some(FileScope::Database), Some("shop")));
     assert_eq!((app[0].reads, app[0].write_ms), (10.0, Some(1800.0)));
     assert_eq!(app[0].stats_reset, None);
+    assert_eq!(app[0].queued_read_ms, counters[0].queued_read_ms);
+    assert_eq!(app[0].queued_write_ms, counters[0].queued_write_ms);
+    assert_eq!(app[0].logical_size, counters[0].logical_size);
+    assert_eq!(app[0].maximum_size, counters[0].maximum_size);
+    assert_eq!(app[0].avg_read_ms(), Some(4.0), "governance time is not subtracted or turned into physical disk time");
     let raw = observations(counters);
     assert_eq!(raw[0].key, "2:1");
     assert!(raw[0].is_valid());
@@ -77,15 +91,98 @@ async fn database_and_tempdb_reads_never_enumerate_other_databases_or_retry_a_fa
 
 #[tokio::test]
 async fn missing_catalog_metadata_preserves_the_native_counter_identity_without_guessing_a_file_kind() {
-    let missing =
-        replace(&row(), &[("file_name", Val::Null), ("native_type", Val::Null), ("database_name", Val::Null)]);
+    let missing = replace(
+        &row(),
+        &[
+            ("file_name", Val::Null),
+            ("native_type", Val::Null),
+            ("database_name", Val::Null),
+            ("logical_pages", Val::Null),
+            ("maximum_pages", Val::Null),
+        ],
+    );
     let mut reader = FakeRead::new(vec![Ok(vec![missing])]);
     let counters = read(&mut reader, Selection::Database, 500).await.unwrap();
     assert_eq!(counters[0].kind, FileKind::Other);
     assert_eq!(counters[0].native_name, None);
+    assert_eq!(counters[0].logical_size, None);
+    assert_eq!(counters[0].maximum_size, None);
     let app = display(&counters);
     assert_eq!(app[0].scope, Some(FileScope::Database), "native scope does not depend on a visible database name");
     assert_eq!(app[0].name, "1");
+}
+
+#[tokio::test]
+async fn native_file_page_units_and_catalog_sentinels_remain_distinct_from_unknown_or_disk_allocation() {
+    for (size, maximum, expected_size, expected_maximum) in [
+        (Val::Int(0), Val::Int(0), Some(FileSize::NotApplicable), Some(FileSizeLimit::NoGrowth)),
+        (Val::Null, Val::Null, None, None),
+        (
+            Val::Int(1),
+            Val::Int(268_435_456),
+            Some(FileSize::Bytes { bytes: "8192".into() }),
+            Some(FileSizeLimit::Bytes { bytes: "2199023255552".into() }),
+        ),
+        (
+            Val::Int(i32::MAX.into()),
+            Val::Int(-1),
+            Some(FileSize::Bytes { bytes: "17592186036224".into() }),
+            Some(FileSizeLimit::Unlimited),
+        ),
+    ] {
+        let native = replace(&row(), &[("logical_pages", size), ("maximum_pages", maximum)]);
+        let mut reader = FakeRead::new(vec![Ok(vec![native])]).with_query_limit(1);
+        let counters = read(&mut reader, Selection::Database, 500).await.unwrap();
+        assert_eq!(counters[0].logical_size, expected_size);
+        assert_eq!(counters[0].maximum_size, expected_maximum);
+        assert_eq!(counters[0].size_on_disk_bytes.as_deref(), Some("8192"));
+        let app = display(&counters);
+        assert_eq!(app[0].logical_size, counters[0].logical_size);
+        assert_eq!(app[0].maximum_size, counters[0].maximum_size);
+        assert_eq!(reader.calls.len(), 1);
+        assert!(observations(counters).iter().all(OperationalObservation::is_valid));
+    }
+}
+
+#[tokio::test]
+async fn unavailable_governance_fields_remain_unknown_and_native_zero_is_preserved_on_every_accounting_path() {
+    for (native, selection) in [
+        (row(), Selection::Database),
+        (hyperscale("0", Val::Text("READ_WRITE".into())), Selection::Database),
+        (replace(&row(), &[("shared", Val::Int(1)), ("temporary", Val::Int(1))]), Selection::DatabaseAndSharedTempdb),
+    ] {
+        for (read_value, expected) in [(Val::Null, None), (Val::Int(0), Some("0"))] {
+            let native = replace(&native, &[("queued_read_ms", read_value)]);
+            let mut reader = FakeRead::new(vec![Ok(vec![native])]).with_query_limit(1);
+            let counters = read(&mut reader, selection, 500).await.unwrap();
+            assert_eq!(counters[0].queued_read_ms.as_deref(), expected);
+            assert_eq!(counters[0].queued_write_ms.as_deref(), Some("0"));
+            assert_eq!(display(&counters)[0].queued_read_ms, counters[0].queued_read_ms);
+            assert_eq!(display(&counters)[0].read_ms, Some(40.0));
+            assert_eq!(reader.calls.len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn malformed_native_governance_and_catalog_values_fail_without_retry_or_larger_row_admission() {
+    for (field, value) in [
+        ("queued_read_ms", Val::Int(-1)),
+        ("queued_write_ms", Val::Float(0.0)),
+        ("logical_pages", Val::Int(-1)),
+        ("logical_pages", Val::Int(i64::MAX)),
+        ("maximum_pages", Val::Int(-2)),
+        ("maximum_pages", Val::Int(i64::MAX)),
+        ("maximum_pages", Val::Text("0".into())),
+    ] {
+        let mut reader = FakeRead::new(vec![Ok(vec![replace(&row(), &[(field, value)])])]);
+        assert!(read(&mut reader, Selection::DatabaseAndSharedTempdb, 500).await.is_err(), "{field}");
+        assert_eq!(reader.calls.len(), 1);
+    }
+    let mut reader = FakeRead::new(vec![Ok(vec![])]).with_query_limit(1);
+    assert!(read(&mut reader, Selection::Database, usize::MAX).await.unwrap().is_empty());
+    assert_eq!(reader.calls[0].limit, MAX_NATIVE_FILES + 1, "the existing overflow witness is unchanged");
+    assert_eq!(reader.calls.len(), 1);
 }
 
 #[tokio::test]
@@ -164,6 +261,8 @@ async fn local_cache_is_shared_page_accounting_and_never_assigned_to_the_selecte
             ("native_type", Val::Null),
             ("database_name", Val::Null),
             ("file_name", Val::Null),
+            ("logical_pages", Val::Null),
+            ("maximum_pages", Val::Null),
         ],
     );
     let mut reader = FakeRead::new(vec![Ok(vec![cache])]);
@@ -171,6 +270,8 @@ async fn local_cache_is_shared_page_accounting_and_never_assigned_to_the_selecte
     assert_eq!(counters[0].kind, FileKind::Other);
     assert_eq!(counters[0].scope, FileScope::Server);
     assert_eq!(counters[0].database, None);
+    assert_eq!(counters[0].logical_size, None, "RBPEX has no selected-database file catalog gauge");
+    assert_eq!(counters[0].maximum_size, None);
     assert_eq!(counters[0].context.read, IoAccounting::CachePage);
     assert_eq!(counters[0].context.write, IoAccounting::Unknown);
     assert_eq!(counters[0].context.replica_id, None, "a pool cache is not a selected-database replica counter");

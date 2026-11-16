@@ -1917,6 +1917,10 @@ fn file(name: &str, db: &str, kind: FileKind, reads: (f64, f64, f64), writes: (f
         write_bytes: None,
         scope: None,
         stats_reset: None,
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: None,
     }
 }
@@ -1948,6 +1952,14 @@ fn slow_storage_on_sql_server() {
         "mssql-demo",
         None,
         vec![culprit_core::FileIo {
+            queued_read_ms: None,
+
+            queued_write_ms: None,
+
+            logical_size: None,
+
+            maximum_size: None,
+
             write_operation: Some(culprit_core::FileWriteOperation::Flush),
             ..file("shop_log", db, FileKind::Log, (0.0, 0.0, 0.0), (20_000.0, 400_000.0))
         }],
@@ -2164,6 +2176,14 @@ fn slow_storage_of_several_files_on_mysql() {
             file("./shop/orders.ibd", "shop", FileKind::Data, (5_000.0, 150_000.0, 5_000.0 * 16_384.0), (0.0, 0.0)),
             file("./shop/items.ibd", "shop", FileKind::Data, (5_000.0, 150_000.0, 5_000.0 * 16_384.0), (0.0, 0.0)),
             culprit_core::FileIo {
+                queued_read_ms: None,
+
+                queued_write_ms: None,
+
+                logical_size: None,
+
+                maximum_size: None,
+
                 write_operation: Some(culprit_core::FileWriteOperation::Flush),
                 ..file("./binlog.000001", "shop", FileKind::Log, (0.0, 0.0, 0.0), (5_000.0, 150_000.0))
             },

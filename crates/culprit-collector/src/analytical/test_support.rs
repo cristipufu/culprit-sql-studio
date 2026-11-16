@@ -38,6 +38,8 @@ pub use tuning::{
 };
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
+mod file_io;
+pub use file_io::file_io_evidence_cases;
 mod cache_entry_memory;
 pub use cache_entry_memory::{
     CacheEntryMemoryCase, assert_cache_entry_memory_capture, cache_entry_memory_evidence,

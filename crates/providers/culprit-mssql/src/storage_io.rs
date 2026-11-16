@@ -1,86 +1,32 @@
 //! Targeted file statistics shared by interactive storage analysis and raw collection.
-use crate::read::{NativeRead, ReadError, integer, invalid_data, optional_text};
+use crate::read::{
+    NativeRead, ReadError, integer, invalid_data, optional_counter, optional_signed_integer, optional_text,
+};
 use crate::value::Rec;
 use culprit_core::{
     FileIo, FileKind, FileScope, ResetMarker, Result,
-    telemetry::{CollectionStop, FileIoCounters, OperationalFact, OperationalObservation},
+    telemetry::{CollectionStop, FileIoCounters, FileSize, FileSizeLimit, OperationalFact, OperationalObservation},
 };
 use std::collections::BTreeSet;
 
 mod context;
+mod sql;
 
 const MAX_NATIVE_FILES: usize = 10_000;
 const MAX_DISPLAY_FILES: usize = 24;
+const BYTES_PER_FILE_PAGE: u64 = 8192;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Selection {
     Database,
     DatabaseAndSharedTempdb,
 }
-const COUNTERS: &str = "vfs.database_id, vfs.file_id, vfs.num_of_reads AS reads,
-vfs.io_stall_read_ms AS read_ms, vfs.num_of_bytes_read AS read_bytes,
-vfs.num_of_writes AS writes, vfs.io_stall_write_ms AS write_ms, vfs.num_of_bytes_written AS write_bytes,
-vfs.size_on_disk_bytes, vfs.sample_ms";
-
-fn sql(selection: Selection) -> String {
-    // Filter the native function itself: enumerating every database and filtering afterwards needlessly visits them.
-    let current = format!(
-        "SELECT {COUNTERS}, DB_NAME() AS database_name, df.name AS file_name,
-CAST(df.type AS varchar(16)) AS native_type, CAST(0 AS int) AS shared, CAST(0 AS int) AS cache,
-CASE WHEN @engine_edition IN (2,3,4,8) AND DB_ID() = 2 THEN 1 ELSE 0 END AS temporary,
-@engine_edition AS engine_edition, @database_edition AS database_edition,
-@replica_id AS replica_id, @updateability AS updateability
-FROM sys.dm_io_virtual_file_stats(DB_ID(), NULL) vfs
-LEFT JOIN sys.database_files df ON df.file_id = vfs.file_id
-WHERE vfs.database_id = DB_ID()"
-    );
-    let tempdb = if selection == Selection::DatabaseAndSharedTempdb {
-        format!(
-            " UNION ALL SELECT {COUNTERS}, N'tempdb' AS database_name, mf.name AS file_name,
-CAST(mf.type AS varchar(16)) AS native_type, CAST(1 AS int) AS shared, CAST(0 AS int) AS cache,
-CAST(1 AS int) AS temporary, @engine_edition AS engine_edition, @database_edition AS database_edition,
-@replica_id AS replica_id, @updateability AS updateability
-FROM sys.dm_io_virtual_file_stats(2, NULL) vfs
-LEFT JOIN sys.master_files mf ON mf.database_id = 2 AND mf.file_id = vfs.file_id
-WHERE vfs.database_id = 2 AND DB_ID() <> 2"
-        )
-    } else {
-        String::new()
-    };
-    // database_id=0 is a Hyperscale-specific interface. On conventional SQL Server it must never be called on the
-    // assumption that a WHERE predicate will prevent execution. Use a control-flow branch qualified by native
-    // properties; unknown editions retain only the explicitly targeted database counters.
-    let cache = format!(
-        "SELECT {COUNTERS}, CAST(NULL AS nvarchar(128)) AS database_name,
-CAST(NULL AS nvarchar(128)) AS file_name, CAST(NULL AS varchar(16)) AS native_type,
-CAST(0 AS int) AS shared, CAST(1 AS int) AS cache, CAST(0 AS int) AS temporary,
-@engine_edition AS engine_edition, @database_edition AS database_edition,
-@replica_id AS replica_id, @updateability AS updateability
-FROM sys.dm_io_virtual_file_stats(0, NULL) vfs WHERE vfs.database_id = 0"
-    );
-    format!(
-        "DECLARE @engine_edition int = CONVERT(int, SERVERPROPERTY('EngineEdition'));
-DECLARE @database_edition nvarchar(64) = CONVERT(nvarchar(64), DATABASEPROPERTYEX(DB_NAME(), 'Edition'));
-DECLARE @replica_id nvarchar(36) = {replica_id};
-DECLARE @updateability nvarchar(60) = CONVERT(nvarchar(60), DATABASEPROPERTYEX(DB_NAME(), 'Updateability'));
-IF @engine_edition = 5 AND (@database_edition = N'Hyperscale' OR @replica_id IS NOT NULL)
-BEGIN
-{current} UNION ALL {cache} OPTION(MAXDOP 1);
-END
-ELSE
-BEGIN
-{current}{tempdb} OPTION(MAXDOP 1);
-END",
-        replica_id = crate::replica::ID_EXPRESSION,
-    )
-}
-
 pub(crate) async fn read<R: NativeRead>(
     reader: &mut R,
     selection: Selection,
     limit: usize,
 ) -> Result<Vec<FileIoCounters>> {
     let limit = limit.min(MAX_NATIVE_FILES);
-    let rows = reader.query(&sql(selection), vec![], limit + 1).await.map_err(ReadError::into_error)?;
+    let rows = reader.query(&sql::statement(selection), vec![], limit + 1).await.map_err(ReadError::into_error)?;
     if rows.len() > limit {
         return Err(CollectionStop::RowLimit.error());
     }
@@ -131,10 +77,14 @@ fn decode(row: &Rec, context: &context::NativeContext) -> Result<FileIoCounters>
         reset: ResetMarker::Unknown,
         reads: integer(row, "reads")?.to_string(),
         read_ms: Some(integer(row, "read_ms")?.to_string()),
+        queued_read_ms: optional_counter(row, "queued_read_ms")?,
         read_bytes: Some(integer(row, "read_bytes")?.to_string()),
         writes: integer(row, "writes")?.to_string(),
         write_ms: Some(integer(row, "write_ms")?.to_string()),
+        queued_write_ms: optional_counter(row, "queued_write_ms")?,
         write_bytes: Some(integer(row, "write_bytes")?.to_string()),
+        logical_size: logical_size(row)?,
+        maximum_size: maximum_size(row)?,
         size_on_disk_bytes: Some(integer(row, "size_on_disk_bytes")?.to_string()),
         sample_uptime_ms: Some(integer(row, "sample_ms")?.to_string()),
     };
@@ -143,12 +93,37 @@ fn decode(row: &Rec, context: &context::NativeContext) -> Result<FileIoCounters>
     }
     Ok(counters)
 }
+
+fn logical_size(row: &Rec) -> Result<Option<FileSize>> {
+    // This sentinel belongs specifically to sys.database_files.size. A generic measured zero remains bytes=0.
+    // https://learn.microsoft.com/sql/relational-databases/system-catalog-views/sys-database-files-transact-sql
+    match optional_signed_integer(row, "logical_pages")? {
+        None => Ok(None),
+        Some(0) => Ok(Some(FileSize::NotApplicable)),
+        Some(pages) => Ok(Some(FileSize::Bytes { bytes: file_bytes(pages)? })),
+    }
+}
+
+fn maximum_size(row: &Rec) -> Result<Option<FileSizeLimit>> {
+    match optional_signed_integer(row, "maximum_pages")? {
+        None => Ok(None),
+        Some(-1) => Ok(Some(FileSizeLimit::Unlimited)),
+        Some(0) => Ok(Some(FileSizeLimit::NoGrowth)),
+        Some(pages) => Ok(Some(FileSizeLimit::Bytes { bytes: file_bytes(pages)? })),
+    }
+}
+
+fn file_bytes(pages: i64) -> Result<String> {
+    // The catalog exposes int pages, not bigint bytes. Reject malformed native values before multiplication.
+    let pages = u64::try_from(i32::try_from(pages).map_err(|_| invalid_data())?).map_err(|_| invalid_data())?;
+    pages.checked_mul(BYTES_PER_FILE_PAGE).map(|bytes| bytes.to_string()).ok_or_else(invalid_data)
+}
 pub(crate) fn observations(rows: Vec<FileIoCounters>) -> Vec<OperationalObservation> {
     rows.into_iter()
         .map(|row| OperationalObservation {
             source: culprit_core::source_id::FILE_LATENCY.into(),
             key: format!("{}:{}", row.native_database_id, row.file_id),
-            fact: OperationalFact::FileIo(row),
+            fact: OperationalFact::FileIo(Box::new(row)),
         })
         .collect()
 }
@@ -164,10 +139,14 @@ pub(crate) fn display(rows: &[FileIoCounters]) -> Vec<FileIo> {
             database: row.database.clone(),
             reads: number(&row.reads),
             read_ms: row.read_ms.as_deref().map(number),
+            queued_read_ms: row.queued_read_ms.clone(),
             read_bytes: row.read_bytes.as_deref().map(number),
             writes: number(&row.writes),
             write_ms: row.write_ms.as_deref().map(number),
+            queued_write_ms: row.queued_write_ms.clone(),
             write_bytes: row.write_bytes.as_deref().map(number),
+            logical_size: row.logical_size.clone(),
+            maximum_size: row.maximum_size.clone(),
             scope: Some(row.scope),
             stats_reset: None,
             write_operation: None,

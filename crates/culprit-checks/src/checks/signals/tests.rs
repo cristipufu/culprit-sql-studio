@@ -238,6 +238,10 @@ fn slow_tempdb_and_log() {
         write_bytes: None,
         scope: None,
         stats_reset: None,
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: None,
     };
     let s = with_pressure(Engine::Mssql, |p| {

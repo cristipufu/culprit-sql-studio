@@ -2,6 +2,8 @@
 import type { FileIoContext } from "./FileIoContext";
 import type { FileKind } from "./FileKind";
 import type { FileScope } from "./FileScope";
+import type { FileSize } from "./FileSize";
+import type { FileSizeLimit } from "./FileSizeLimit";
 import type { FileWriteOperation } from "./FileWriteOperation";
 
 /**
@@ -20,7 +22,15 @@ database: string | null, reads: number,
 /**
  * Total time reads took; `None` when the engine doesn't time them (PostgreSQL without track_io_timing).
  */
-read_ms: number | null, read_bytes: number | null, writes: number, write_ms: number | null, write_bytes: number | null, scope?: FileScope, 
+read_ms: number | null, 
+/**
+ * Exact cumulative milliseconds introduced by native read I/O resource governance, when recorded.
+ */
+queued_read_ms?: string, read_bytes: number | null, writes: number, write_ms: number | null, queued_write_ms?: string, write_bytes: number | null, 
+/**
+ * Independent catalog gauges. They do not enter I/O deltas or establish available capacity.
+ */
+logical_size?: FileSize, maximum_size?: FileSizeLimit, scope?: FileScope, 
 /**
  * This source's own reset timestamp; another source's reset is not its measurement period.
  */

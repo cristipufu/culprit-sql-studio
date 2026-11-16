@@ -433,7 +433,7 @@ pub struct OperationalSpace {
 pub enum OperationalFact {
     Space(OperationalSpace),
     Sequence(SequenceCapacity),
-    FileIo(FileIoCounters),
+    FileIo(Box<FileIoCounters>),
     Counter(NativeCounterSample),
     CounterSet(Box<NativeCounterSet>),
     CompilerWaiter(Box<CompilerWaiterObservation>),

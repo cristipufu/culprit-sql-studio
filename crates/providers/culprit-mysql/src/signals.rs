@@ -236,6 +236,10 @@ async fn files(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<V
                 // performance_schema's file I/O is the whole server's.
                 scope: Some(culprit_core::FileScope::Server),
                 stats_reset: None,
+                queued_read_ms: None,
+                queued_write_ms: None,
+                logical_size: None,
+                maximum_size: None,
                 write_operation: None,
             }
         })

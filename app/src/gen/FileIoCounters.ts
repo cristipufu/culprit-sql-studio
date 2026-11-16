@@ -2,9 +2,23 @@
 import type { FileIoContext } from "./FileIoContext";
 import type { FileKind } from "./FileKind";
 import type { FileScope } from "./FileScope";
+import type { FileSize } from "./FileSize";
+import type { FileSizeLimit } from "./FileSizeLimit";
 import type { ResetMarker } from "./ResetMarker";
 
-export type FileIoCounters = { native_database_id: string, database: string | null, file_id: string, native_name: string | null, native_type: string | null, kind: FileKind, context: FileIoContext, scope: FileScope, reset: ResetMarker, reads: string, read_ms: string | null, read_bytes: string | null, writes: string, write_ms: string | null, write_bytes: string | null, size_on_disk_bytes: string | null, 
+export type FileIoCounters = { native_database_id: string, database: string | null, file_id: string, native_name: string | null, native_type: string | null, kind: FileKind, context: FileIoContext, scope: FileScope, reset: ResetMarker, reads: string, read_ms: string | null, 
+/**
+ * Cumulative read latency introduced by native I/O resource governance, in milliseconds.
+ */
+queued_read_ms: string | null, read_bytes: string | null, writes: string, write_ms: string | null, 
+/**
+ * Cumulative write latency introduced by native I/O resource governance, in milliseconds.
+ */
+queued_write_ms: string | null, write_bytes: string | null, 
+/**
+ * Catalog gauge, independent of cumulative I/O and physical disk allocation.
+ */
+logical_size: FileSize | null, maximum_size: FileSizeLimit | null, size_on_disk_bytes: string | null, 
 /**
  * Native uptime ticks, when available. These are neither a UTC timestamp nor a reset generation.
  */

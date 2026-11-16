@@ -410,6 +410,10 @@ fn file(name: &str, db: &str, kind: FileKind, reads: (f64, f64, f64), writes: (f
         write_bytes: None,
         scope: Some(culprit_core::FileScope::Database),
         stats_reset: None,
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: None,
     }
 }

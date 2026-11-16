@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Plan, QueryStat, Snapshot, t};
+use crate::{Plan, QueryStat, Snapshot, format, t};
 
 /// Exact compile totals for one retained Query Store entry. Query Store does not timestamp every compilation, so
 /// totals can be compared with windowed runs only when the entry's first compile falls inside that window and the
@@ -137,10 +137,24 @@ pub struct FileIo {
     pub reads: f64,
     /// Total time reads took; `None` when the engine doesn't time them (PostgreSQL without track_io_timing).
     pub read_ms: Option<f64>,
+    /// Exact cumulative milliseconds introduced by native read I/O resource governance, when recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub queued_read_ms: Option<String>,
     pub read_bytes: Option<f64>,
     pub writes: f64,
     pub write_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub queued_write_ms: Option<String>,
     pub write_bytes: Option<f64>,
+    /// Independent catalog gauges. They do not enter I/O deltas or establish available capacity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub logical_size: Option<crate::telemetry::FileSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub maximum_size: Option<crate::telemetry::FileSizeLimit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub scope: Option<FileScope>,
@@ -228,8 +242,13 @@ pub fn merge_logs(files: &[FileIo]) -> Vec<FileIo> {
                 log.writes += f.writes;
                 log.read_ms = sum(log.read_ms, f.read_ms);
                 log.write_ms = sum(log.write_ms, f.write_ms);
+                log.queued_read_ms = sum_exact(log.queued_read_ms.as_deref(), f.queued_read_ms.as_deref());
+                log.queued_write_ms = sum_exact(log.queued_write_ms.as_deref(), f.queued_write_ms.as_deref());
                 log.read_bytes = sum(log.read_bytes, f.read_bytes);
                 log.write_bytes = sum(log.write_bytes, f.write_bytes);
+                // Per-file settings cannot describe an aggregate of independently configured log files.
+                log.logical_size = None;
+                log.maximum_size = None;
                 if log.name.contains("ib_redo") || log.name.contains("ib_logfile") {
                     log.name = "redo log".into();
                 }
@@ -240,7 +259,44 @@ pub fn merge_logs(files: &[FileIo]) -> Vec<FileIo> {
     out
 }
 
+fn sum_exact(left: Option<&str>, right: Option<&str>) -> Option<String> {
+    left?.parse::<u64>().ok()?.checked_add(right?.parse().ok()?).map(|value| value.to_string())
+}
+
 impl FileIo {
+    /// Independent native facts for this exact file; none are a current bottleneck or a derived capacity verdict.
+    pub fn recorded_details(&self) -> Vec<String> {
+        use crate::telemetry::{FileSize, FileSizeLimit};
+        let mut details = Vec::new();
+        for (direction, value) in [("read", &self.queued_read_ms), ("write", &self.queued_write_ms)] {
+            if let Some(value) = value {
+                details.push(t!(
+                    "core.io.recorded.governance",
+                    direction = direction,
+                    milliseconds = format::digits(value.clone())
+                ));
+            }
+        }
+        if let Some(size) = &self.logical_size {
+            details.push(match size {
+                FileSize::NotApplicable => t!("core.io.recorded.logical_not_applicable"),
+                FileSize::Bytes { bytes } => {
+                    t!("core.io.recorded.logical_bytes", bytes = format::digits(bytes.clone()))
+                }
+            });
+        }
+        if let Some(limit) = &self.maximum_size {
+            details.push(match limit {
+                FileSizeLimit::NoGrowth => t!("core.io.recorded.maximum_no_growth"),
+                FileSizeLimit::Unlimited => t!("core.io.recorded.maximum_unlimited"),
+                FileSizeLimit::Bytes { bytes } => {
+                    t!("core.io.recorded.maximum_bytes", bytes = format::digits(bytes.clone()))
+                }
+            });
+        }
+        details
+    }
+
     pub fn coverage(&self, snapshot: &Snapshot) -> String {
         let database = self.database.as_deref().unwrap_or_default();
         let scope = match self.scope {
@@ -1162,6 +1218,10 @@ mod merge_tests {
             write_bytes: None,
             scope: None,
             stats_reset: None,
+            queued_read_ms: None,
+            queued_write_ms: None,
+            logical_size: None,
+            maximum_size: None,
             write_operation: None,
         }
     }
@@ -1190,6 +1250,44 @@ mod merge_tests {
         let merged = merge_logs(&[timed, untimed]);
         assert_eq!(merged[0].writes, 10_000.0);
         assert_eq!(merged[0].avg_write_ms(), None, "the missing timings are unknown, not zero");
+    }
+
+    #[test]
+    fn merged_logs_keep_exact_governance_totals_and_withhold_independent_file_capacities() {
+        use crate::telemetry::{FileSize, FileSizeLimit};
+        let mut first = file("log-a", FileKind::Log, 1000.0, 50_000.0);
+        first.queued_read_ms = Some("9007199254740993".into());
+        first.queued_write_ms = Some("0".into());
+        first.logical_size = Some(FileSize::Bytes { bytes: "8192".into() });
+        first.maximum_size = Some(FileSizeLimit::NoGrowth);
+        assert_eq!(merge_logs(&[first.clone()]), [first.clone()], "one file retains its own settings");
+        let mut second = first.clone();
+        second.name = "log-b".into();
+        second.queued_read_ms = Some("2".into());
+        second.maximum_size = Some(FileSizeLimit::Unlimited);
+        let merged = merge_logs(&[first.clone(), second.clone()]);
+        assert_eq!(merged[0].queued_read_ms.as_deref(), Some("9007199254740995"));
+        assert_eq!(merged[0].queued_write_ms.as_deref(), Some("0"));
+        assert_eq!(merged[0].logical_size, None);
+        assert_eq!(merged[0].maximum_size, None, "one file's maximum cannot describe the log aggregate");
+        assert_eq!(merged[0].avg_write_ms(), Some(50.0), "governance counters do not alter measured latency");
+        for (left, right) in [(Some("1"), None), (Some("18446744073709551615"), Some("1"))] {
+            first.queued_read_ms = left.map(str::to_owned);
+            second.queued_read_ms = right.map(str::to_owned);
+            assert_eq!(merge_logs(&[first.clone(), second.clone()])[0].queued_read_ms, None);
+        }
+    }
+
+    #[test]
+    fn native_file_gauges_and_queued_stalls_do_not_change_source_identity() {
+        use crate::telemetry::{FileSize, FileSizeLimit};
+        let file = file("native-data", FileKind::Data, 1000.0, 50_000.0);
+        let mut changed = file.clone();
+        changed.queued_read_ms = Some("9007199254740993".into());
+        changed.queued_write_ms = Some("0".into());
+        changed.logical_size = Some(FileSize::Bytes { bytes: "0".into() });
+        changed.maximum_size = Some(FileSizeLimit::Unlimited);
+        assert_eq!(changed.reference().key().unwrap(), file.reference().key().unwrap());
     }
 
     #[test]

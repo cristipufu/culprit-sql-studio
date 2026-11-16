@@ -359,6 +359,15 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     if let Some(b) = slow.avg_bytes.filter(|_| slow.operation == Operation::Read) {
         f.metrics.push(Metric::said(culprit_core::key!("check.slow_storage.metric.read_size"), b, Unit::Bytes));
     }
+    for file in &slow.files {
+        let details = file.recorded_details();
+        if !details.is_empty() {
+            f.metrics.push(
+                Metric::text(t!("check.slow_storage.metric.native_file", file = &file.name), details.join(" "))
+                    .keyed(culprit_core::key!("check.slow_storage.metric.native_file")),
+            );
+        }
+    }
     f.fix = Some(Fix {
         summary: match slow.host {
             StorageHost::AzureSqlDatabase => t!(
@@ -382,6 +391,9 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     });
     f.verify = vec![t!("check.slow_storage.verify", operation = op)];
     f.caveats.push(t!("check.slow_storage.caveat.historical"));
+    if slow.files.iter().any(|file| file.queued_read_ms.is_some() || file.queued_write_ms.is_some()) {
+        f.caveats.push(t!("check.slow_storage.caveat.governance"));
+    }
     if slow.shared {
         f.caveats.push(t!("check.slow_storage.caveat.shared"));
     }

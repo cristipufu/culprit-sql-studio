@@ -15,6 +15,10 @@ fn log(context: FileIoContext) -> FileIo {
         write_bytes: Some(8192000.0),
         scope: Some(FileScope::Database),
         stats_reset: Some("2026-11-13T00:00:00Z".into()),
+        queued_read_ms: None,
+        queued_write_ms: None,
+        logical_size: None,
+        maximum_size: None,
         write_operation: None,
     }
 }
