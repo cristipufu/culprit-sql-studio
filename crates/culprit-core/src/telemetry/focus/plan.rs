@@ -198,11 +198,5 @@ fn verify_page_reference(
         key: page.key()?,
         fact: OperationalFact::PageWait(Box::new(page.clone())),
     };
-    let exported = ExportedRecord::new(source, &reference.capture, TelemetryRecord::Operational(row))?;
-    if DiagnosticEvidenceRef::from_export(source, &reference.manifest_sha256, &exported, reference.row_ordinal)?
-        != *reference
-    {
-        return Err(invalid());
-    }
-    Ok(())
+    reference.validate_canonical_record(source, &TelemetryRecord::Operational(row))
 }

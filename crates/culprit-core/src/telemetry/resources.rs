@@ -126,6 +126,37 @@ mod tests {
         }
     }
     #[test]
+    fn canonical_receipt_matching_preserves_exact_payload_bytes_and_native_scope() {
+        let source = source();
+        let capture = CaptureIdentity {
+            observation_id: "canonical-resource-read".into(),
+            revision: Some(CaptureRevision {
+                outbox_id: "canonical-resource-owner".into(),
+                owner_epoch: "1".into(),
+                sequence: "1".into(),
+            }),
+        };
+        let original = ExportedRecord::new(&source, &capture, TelemetryRecord::ResourceSample(sample())).unwrap();
+        let reference =
+            DiagnosticEvidenceRef::from_export(&source, &digest(b"original manifest"), &original, 0).unwrap();
+        reference.validate_canonical_record(&source, &original.record).unwrap();
+
+        for value in [1.0, -0.0] {
+            let mut changed = original.record.clone();
+            let TelemetryRecord::ResourceSample(sample) = &mut changed else { panic!() };
+            sample.metrics[0].value = Some(value);
+            assert!(changed.is_valid());
+            if value.is_sign_negative() {
+                assert_eq!(changed, original.record, "float equality does not establish byte identity");
+            }
+            assert!(reference.validate_canonical_record(&source, &changed).is_err());
+        }
+        let mut changed = source.clone();
+        changed.source = "another-native-resource-read".into();
+        assert!(reference.validate_canonical_record(&changed, &original.record).is_err());
+    }
+
+    #[test]
     fn overlapping_windows_and_timestamp_offsets_preserve_resource_measurement_identity() {
         let source = source();
         let capture = CaptureIdentity { observation_id: "first".into(), revision: None };

@@ -214,7 +214,7 @@ fn exact_positive_owner_row_is_required_and_tampered_receipts_descriptors_or_emp
             &CollectionBudget::default(),
             DiagnosticSharedOwner { source: &source, row: &row, reference: &reference },
         );
-        if matches!(mutation, "ordinal" | "hash") {
+        if mutation == "hash" {
             let changed = changed.unwrap();
             assert_ne!(
                 changed.key().unwrap(),

@@ -61,21 +61,7 @@ impl PageWaitActivityEvidence<'_> {
         }
         // Only check that the supplied copy is consistent with its declared receipt. It does not become a native
         // observation, authenticate an unread position, or permit owner context when the original row is absent.
-        let declared = ExportedRecord::new(
-            self.frame.source(),
-            &reference.capture,
-            TelemetryRecord::from(self.original.original.clone()),
-        )?;
-        let expected = DiagnosticEvidenceRef::from_export(
-            self.frame.source(),
-            &reference.manifest_sha256,
-            &declared,
-            reference.row_ordinal,
-        )?;
-        if expected != *reference {
-            return Err(CollectionStop::InvalidPage.error());
-        }
-        Ok(())
+        reference.validate_canonical_record(self.frame.source(), &TelemetryRecord::from(self.original.original.clone()))
     }
 }
 

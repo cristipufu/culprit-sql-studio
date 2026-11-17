@@ -76,20 +76,14 @@ fn analyze_focus(
         if row.reference.capture_ref() != *input || !result.accepts_observation(row.observation) {
             return Err(invalid());
         }
-        let exported = ExportedRecord::new(
+        row.reference.validate_canonical_record(
             source,
-            &input.capture,
-            TelemetryRecord::Operational(OperationalObservation {
+            &TelemetryRecord::Operational(OperationalObservation {
                 source: row.observation.source.clone(),
                 key: row.observation.key()?,
                 fact: OperationalFact::PageWait(Box::new(row.observation.clone())),
             }),
         )?;
-        if DiagnosticEvidenceRef::from_export(source, &input.manifest_sha256, &exported, row.reference.row_ordinal)?
-            != *row.reference
-        {
-            return Err(invalid());
-        }
     }
     let mut revisions = Vec::new();
     let mut episodes = Vec::new();

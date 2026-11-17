@@ -70,6 +70,14 @@ impl DiagnosticEvidenceRef {
         row: &ExportedRecord,
         row_ordinal: u32,
     ) -> Result<Self> {
+        let declared_rows = source
+            .observation
+            .activity()
+            .map(|activity| activity.observations)
+            .or_else(|| source.observation.snapshot().map(|snapshot| snapshot.records));
+        if declared_rows.is_some_and(|count| row_ordinal >= count) {
+            return Err(invalid());
+        }
         let expected = ExportedRecord::new(source, &row.capture, row.record.clone())?;
         if &expected != row || !row.record.is_valid() {
             return Err(invalid());
@@ -90,6 +98,20 @@ impl DiagnosticEvidenceRef {
             return Err(invalid());
         }
         Ok(value)
+    }
+    /// Match the supplied canonical record and receipt without repairing the record that a caller will use.
+    /// This checks structural binding only; the caller must independently authenticate the capture and manifest.
+    pub fn validate_canonical_record(&self, source: &CollectionDescription, record: &TelemetryRecord) -> Result<()> {
+        if !self.is_valid() || !record.is_valid() {
+            return Err(invalid());
+        }
+        let exported = ExportedRecord::new(source, &self.capture, record.clone())?;
+        if digest_value(record)? != digest_value(&exported.record)?
+            || Self::from_export(source, &self.manifest_sha256, &exported, self.row_ordinal)? != *self
+        {
+            return Err(invalid());
+        }
+        Ok(())
     }
     pub fn key(&self) -> Result<String> {
         if !self.is_valid() {

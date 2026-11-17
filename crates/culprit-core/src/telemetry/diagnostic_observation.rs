@@ -15,15 +15,7 @@ impl DiagnosticActivityRow<'_> {
         if self.reference.capture_ref() != *input {
             return Err(invalid());
         }
-        let exported = ExportedRecord::new(source, &input.capture, TelemetryRecord::from(self.observation.clone()))?;
-        let expected =
-            DiagnosticEvidenceRef::from_export(source, &input.manifest_sha256, &exported, self.reference.row_ordinal)?;
-        if expected != *self.reference
-            || !matches!(&exported.record, TelemetryRecord::Activity(original) if original.as_ref() == self.observation)
-        {
-            return Err(invalid());
-        }
-        Ok(())
+        self.reference.validate_canonical_record(source, &TelemetryRecord::from(self.observation.clone()))
     }
 }
 

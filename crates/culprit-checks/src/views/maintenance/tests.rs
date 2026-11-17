@@ -308,7 +308,8 @@ fn original_source_capture_and_payload_receipts_cannot_be_reassigned_to_differen
     let original = receipt(&source, &row, 0);
     let result = explain(&source, &[with_receipt(&row, &original)], true).unwrap();
     assert_eq!(result.entries[0].reference.evidence.as_ref(), Some(&original));
-    let outside_frame = receipt(&source, &row, 1);
+    let mut outside_frame = original.clone();
+    outside_frame.row_ordinal = 1;
     assert!(explain(&source, &[with_receipt(&row, &outside_frame)], true).is_err());
     for field in ["source", "capture", "payload", "native-key"] {
         let mut changed = original.clone();

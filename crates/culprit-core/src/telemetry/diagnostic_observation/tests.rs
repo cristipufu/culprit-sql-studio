@@ -1,6 +1,7 @@
 use super::*;
 use crate::{DatabaseIdentity, Engine, MeasurementScope, ObservedWaitResource};
 
+mod canonical_positions;
 mod compiler_admission;
 mod current_request_work;
 mod investigations;

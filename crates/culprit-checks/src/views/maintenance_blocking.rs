@@ -63,24 +63,14 @@ fn validate_progress(progress: &MaintenanceProgressEvidence<'_>) -> Result<()> {
             if !point.fits_source_scope(progress.source) || reference.row_ordinal != 0 {
                 return Err(invalid());
             }
-            let exported = ExportedRecord::new(
+            reference.validate_canonical_record(
                 progress.source,
-                &reference.capture,
-                TelemetryRecord::Operational(OperationalObservation {
+                &TelemetryRecord::Operational(OperationalObservation {
                     source: progress.snapshot.source.clone(),
                     key: point.key()?,
                     fact: OperationalFact::MaintenanceProgress(Box::new(point.clone())),
                 }),
             )?;
-            let expected = DiagnosticEvidenceRef::from_export(
-                progress.source,
-                &reference.manifest_sha256,
-                &exported,
-                reference.row_ordinal,
-            )?;
-            if &expected != reference {
-                return Err(invalid());
-            }
             Ok(())
         }
         _ => Err(invalid()),

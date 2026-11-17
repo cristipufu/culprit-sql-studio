@@ -20,18 +20,8 @@ pub(super) fn capture(input: &CompletedSpillEvidence<'_>, dataset: SnapshotDatas
         {
             return Err(invalid());
         }
-        let exported =
-            ExportedRecord::new(input.source, &row.reference.capture, row.record.clone()).map_err(|_| invalid())?;
-        if DiagnosticEvidenceRef::from_export(
-            input.source,
-            &row.reference.manifest_sha256,
-            &exported,
-            row.reference.row_ordinal,
-        )
-        .map_err(|_| invalid())?
-            != row.reference
-            || !keys.insert(row.reference.record_id.clone())
-        {
+        row.reference.validate_canonical_record(input.source, row.record).map_err(|_| invalid())?;
+        if !keys.insert(row.reference.record_id.clone()) {
             return Err(invalid());
         }
         let source = match row.record {

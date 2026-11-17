@@ -125,6 +125,38 @@ fn a_changed_body_receipt_or_invalid_native_clock_is_integrity_failure() {
 }
 
 #[test]
+fn a_valid_unredacted_definition_cannot_borrow_its_redacted_receipt_and_expose_original_literals() {
+    let runtime = Evidence::runtime(Some("64"));
+    let mut definition = Evidence::definition();
+    let raw = "SELECT amount FROM dbo.orders WHERE id=9264 AND note='credential-canary/private/path'";
+    definition.change_definition(|row| {
+        row.statement = MssqlCachedPayload {
+            source_utf16_bytes: Some((raw.encode_utf16().count() * 2).to_string()),
+            native_sha256: Some(digest(raw.as_bytes())),
+            payload: DefinitionPayload::sql(raw, Engine::Mssql),
+        };
+    });
+    let canonical_references = definition.references.clone();
+    let control = report(&runtime, Some(&definition));
+    let preview = control.entries[0].statement_preview.as_ref().unwrap();
+    assert!(!preview.contains("9264") && !preview.contains("credential-canary/private/path"));
+    definition.change_definition(|row| {
+        let DefinitionPayload::Available { redaction_version, .. } = row.statement.payload else { panic!() };
+        row.statement.payload =
+            DefinitionPayload::Available { text: raw.into(), sha256: digest(raw.as_bytes()), redaction_version };
+    });
+    assert_eq!(definition.references, canonical_references, "canonicalization retains the original receipt");
+    assert!(definition.records[0].is_valid(), "the supplied body has a valid SHA and native shape");
+    let reference = &definition.references[0];
+    let canonical = ExportedRecord::new(&definition.source, &reference.capture, definition.records[0].clone()).unwrap();
+    assert_ne!(canonical.record, definition.records[0]);
+    let runtime_rows = runtime.rows();
+    let definition_rows = definition.rows();
+    let result = explain(runtime.view(&runtime_rows), Some(definition.view(&definition_rows)));
+    assert_eq!(result.unwrap_err().detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+}
+
+#[test]
 fn missing_archive_rows_keep_the_original_population_and_never_become_measured_zero() {
     let mut input = Evidence::runtime(Some("64"));
     input.records.clear();

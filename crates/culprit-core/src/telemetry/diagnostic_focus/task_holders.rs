@@ -36,12 +36,7 @@ pub fn analyze_diagnostic_page_task_holders(
     {
         return Err(invalid());
     }
-    let exported = ExportedRecord::new(source, &input.capture, TelemetryRecord::Operational(row.observation.clone()))?;
-    if DiagnosticEvidenceRef::from_export(source, &input.manifest_sha256, &exported, row.reference.row_ordinal)?
-        != *row.reference
-    {
-        return Err(invalid());
-    }
+    row.reference.validate_canonical_record(source, &TelemetryRecord::Operational(row.observation.clone()))?;
     let mut revisions = Vec::new();
     let mut episodes = Vec::new();
     for before in &previous.episodes {

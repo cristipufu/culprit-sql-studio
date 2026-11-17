@@ -36,14 +36,10 @@ pub fn analyze_diagnostic_page_writers(
         return Err(invalid());
     }
     for row in rows {
-        let exported =
-            ExportedRecord::new(source, &input.capture, TelemetryRecord::Operational(row.observation.clone()))?;
-        if row.reference.capture_ref() != *input
-            || DiagnosticEvidenceRef::from_export(source, &input.manifest_sha256, &exported, row.reference.row_ordinal)?
-                != *row.reference
-        {
+        if row.reference.capture_ref() != *input {
             return Err(invalid());
         }
+        row.reference.validate_canonical_record(source, &TelemetryRecord::Operational(row.observation.clone()))?;
     }
     let mut revisions = Vec::new();
     let mut episodes = Vec::new();

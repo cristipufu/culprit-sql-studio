@@ -114,12 +114,7 @@ fn validate_references<'a>(
         {
             return Err(invalid());
         }
-        let exported = ExportedRecord::new(source, &reference.capture, TelemetryRecord::from(row.observation.clone()))?;
-        if DiagnosticEvidenceRef::from_export(source, &reference.manifest_sha256, &exported, reference.row_ordinal)?
-            != *reference
-        {
-            return Err(invalid());
-        }
+        reference.validate_canonical_record(source, &TelemetryRecord::from(row.observation.clone()))?;
         capture = Some(reference.capture_ref());
         references.insert(row.observation.key.clone(), reference);
     }
