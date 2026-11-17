@@ -359,6 +359,7 @@ fn maintenance_text_retains_native_phase_and_exact_counters_without_private_read
             index: None,
             command: MaintenanceCommand::CreateIndex,
             phase: phase.into(),
+            wait: None,
             title: t!("view.maintenance_progress.entry.title", session = "61"),
             explanation: t!("view.maintenance_progress.entry.postgres"),
             metrics: vec![Metric::said_text(

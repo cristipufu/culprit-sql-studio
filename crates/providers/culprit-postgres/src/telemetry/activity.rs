@@ -22,6 +22,16 @@ struct ActivityReader<R = ReadSession> {
     port: u16,
     verified: Option<CollectionDescription>,
 }
+#[cfg(test)]
+pub(crate) fn fixture_source(
+    io: crate::progress::test_support::Reader,
+    request: &CollectionRequest,
+) -> Box<dyn TelemetrySource> {
+    Box::new(
+        FrozenSource::new(ActivityReader { io, host: "fixture.invalid".into(), port: 9, verified: None }, request)
+            .unwrap(),
+    )
+}
 pub(super) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
     request.subject.require_database()?;

@@ -187,12 +187,12 @@ class TimescaleJobsOwnership(unittest.TestCase):
         database.sql = Mock(return_value=(0, ""))
         return database
 
-    def test_only_dedicated_timescale_and_plain_postgres_start_with_the_exact_jobs_nonce(self):
+    def test_only_dedicated_timescale_and_plain_postgres_start_with_the_exact_owned_nonce(self):
         for fixture in smoke.FIXTURES:
             database = smoke.Database(fixture)
             environment, command = database.configuration()
             markers = [argument for argument in command if argument.startswith("cluster_name=")]
-            expected = [f"cluster_name=culprit_jobs_{database.owner}"] if fixture.name in ("timescale", "postgres") else []
+            expected = [f"cluster_name=culprit_owned_{database.owner}"] if fixture.name in ("timescale", "postgres") else []
             with self.subTest(fixture=fixture.name):
                 self.assertEqual(markers, expected)
                 if fixture.engine == "postgres":
@@ -287,7 +287,7 @@ class NativeSelection(unittest.TestCase):
             database.test("culprit-mysql", "telemetry::native_tests::replication_movement::")
         self.assertEqual(run_tests.call_args.kwargs["skip"], ["telemetry::native_tests::replication::"])
 
-    def test_generic_postgres_selections_skip_jobs_even_on_a_timescale_fixture(self):
+    def test_generic_postgres_selections_skip_optional_native_fixtures(self):
         for name in ("postgres", "timescale"):
             database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == name))
             database.test_environment = Mock(return_value={})
@@ -295,7 +295,7 @@ class NativeSelection(unittest.TestCase):
                 with self.subTest(fixture=name, selection=selection), patch.object(smoke, "run_tests") as run_tests:
                     database.test("culprit-postgres", selection)
                     self.assertEqual(run_tests.call_args.kwargs["skip"], [
-                        "telemetry::native_tests::replication::", "jobs::",
+                        "telemetry::native_tests::replication::", "jobs::", "maintenance_waits::",
                     ])
 
     def test_explicit_short_and_qualified_jobs_filters_run_without_unrelated_optional_fixtures(self):
@@ -304,7 +304,19 @@ class NativeSelection(unittest.TestCase):
         for selection in ("jobs::compatibility::", "telemetry::native_tests::jobs::limits::"):
             with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
                 database.test("culprit-postgres", selection)
-                self.assertEqual(run_tests.call_args.kwargs["skip"], ["telemetry::native_tests::replication::"])
+                self.assertEqual(run_tests.call_args.kwargs["skip"], [
+                    "telemetry::native_tests::replication::", "maintenance_waits::",
+                ])
+
+    def test_explicit_maintenance_filters_do_not_start_unrelated_optional_fixtures(self):
+        database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == "postgres"))
+        database.test_environment = Mock(return_value={})
+        for selection in ("maintenance_waits::", "telemetry::native_tests::maintenance_waits::"):
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-postgres", selection)
+                self.assertEqual(run_tests.call_args.kwargs["skip"], [
+                    "telemetry::native_tests::replication::", "jobs::",
+                ])
 
     def test_default_verification_keeps_installed_and_absent_job_cases_on_their_own_fixtures(self):
         for fixture in smoke.FIXTURES:

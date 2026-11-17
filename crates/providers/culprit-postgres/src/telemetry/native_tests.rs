@@ -5,6 +5,8 @@ use culprit_core::{ConnectionSpec, Engine, Provider};
 use culprit_read::admission::SourceGate;
 
 mod jobs;
+mod maintenance_waits;
+mod owned_fixture;
 mod replication;
 
 #[test]

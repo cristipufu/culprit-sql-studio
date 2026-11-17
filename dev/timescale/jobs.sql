@@ -5,7 +5,7 @@
 /* culprit:fixture */ DO $$
 BEGIN
     IF current_database() <> 'culprit_timescale'
-       OR pg_catalog.current_setting('cluster_name') !~ '^culprit_jobs_[0-9a-f]{24}$'
+       OR pg_catalog.current_setting('cluster_name') !~ '^culprit_owned_[0-9a-f]{24}$'
        OR (SELECT extversion FROM pg_catalog.pg_extension WHERE extname='timescaledb') IS DISTINCT FROM '2.31.0'
        OR NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname='smoke_reader' AND NOT rolsuper)
        OR pg_catalog.to_regnamespace('culprit_jobs_test') IS NOT NULL THEN

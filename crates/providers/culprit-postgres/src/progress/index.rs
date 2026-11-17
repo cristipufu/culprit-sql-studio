@@ -46,3 +46,6 @@ pub(super) fn decode(row: &Row, database_oid: &str, expected: &ActivityKey) -> R
         },
     )
 }
+
+#[cfg(test)]
+mod tests;

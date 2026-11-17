@@ -1,5 +1,7 @@
 use super::*;
 
+mod waits;
+
 fn snapshot() -> MaintenanceProgressSnapshot {
     let mut context = super::super::native_read_context::tests::read_context();
     context.target =

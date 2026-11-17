@@ -11,7 +11,7 @@ the supervisor's generated passwords, loopback port, nonce label and `finally` c
 connection, an existing database service, or the ordinary development database.
 
 Before starting this disposable instance, supply the PostgreSQL startup option
-`-c cluster_name=culprit_jobs_<Database.owner>`. `Database.owner` is the supervisor's 24-character lowercase hex
+`-c cluster_name=culprit_owned_<Database.owner>`. `Database.owner` is the supervisor's 24-character lowercase hex
 nonce. Run the normal fixture setup first so `smoke_reader` exists, then run `dev/timescale/jobs.sql` through that
 same supervisor-owned container's SQL control path. Keep the container cleanup owner alive before starting setup;
 on cancellation or setup failure remove the owned container rather than declaring the jobs settled.

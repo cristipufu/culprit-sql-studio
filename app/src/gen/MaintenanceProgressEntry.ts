@@ -3,5 +3,6 @@ import type { ActivityKey } from "./ActivityKey";
 import type { MaintenanceCommand } from "./MaintenanceCommand";
 import type { Metric } from "./Metric";
 import type { NativeIdentity } from "./NativeIdentity";
+import type { PostgresIndexBuildWait } from "./PostgresIndexBuildWait";
 
-export type MaintenanceProgressEntry = { observation_key: string, actor: ActivityKey, database_oid: string, relation: NativeIdentity | null, index: NativeIdentity | null, command: MaintenanceCommand, phase: string, title: string, explanation: string, metrics: Array<Metric>, investigation: string, verify: string, };
+export type MaintenanceProgressEntry = { observation_key: string, actor: ActivityKey, database_oid: string, relation: NativeIdentity | null, index: NativeIdentity | null, command: MaintenanceCommand, phase: string, wait: PostgresIndexBuildWait | null, title: string, explanation: string, metrics: Array<Metric>, investigation: string, verify: string, };

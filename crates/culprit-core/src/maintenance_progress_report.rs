@@ -13,6 +13,7 @@ pub struct MaintenanceProgressEntry {
     pub index: Option<NativeIdentity>,
     pub command: MaintenanceCommand,
     pub phase: String,
+    pub wait: Option<PostgresIndexBuildWait>,
     pub title: String,
     pub explanation: String,
     pub metrics: Vec<Metric>,

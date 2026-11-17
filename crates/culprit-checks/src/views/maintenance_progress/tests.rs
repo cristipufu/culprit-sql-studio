@@ -1,6 +1,8 @@
 use super::*;
 use culprit_core::{DatabaseIdentity, Engine, SourceState};
 
+mod waits;
+
 fn snapshot() -> MaintenanceProgressSnapshot {
     MaintenanceProgressSnapshot {
         source: "pg_stat_progress_create_index".into(),

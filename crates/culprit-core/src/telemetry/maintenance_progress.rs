@@ -5,6 +5,8 @@ pub const MAX_MAINTENANCE_PROGRESS_PHASE_BYTES: usize = 512;
 
 mod work;
 pub use work::*;
+mod wait;
+pub use wait::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

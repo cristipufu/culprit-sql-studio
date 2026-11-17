@@ -74,7 +74,14 @@ fn summary(snapshot: &MaintenanceProgressSnapshot) -> String {
 }
 
 fn entry(row: &MaintenanceProgressObservation) -> Result<MaintenanceProgressEntry> {
-    let (explanation, metrics) = explain_work(&row.work);
+    let (native_explanation, metrics) = explain_work(&row.work);
+    let wait = row.postgres_index_wait();
+    let (explanation, investigation, verify) = match &wait {
+        Some(wait) => explain_wait(wait.phase),
+        None => {
+            (native_explanation, t!("view.maintenance_progress.investigate"), t!("view.maintenance_progress.verify"))
+        }
+    };
     Ok(MaintenanceProgressEntry {
         observation_key: row.key()?,
         actor: row.actor.clone(),
@@ -83,12 +90,39 @@ fn entry(row: &MaintenanceProgressObservation) -> Result<MaintenanceProgressEntr
         index: row.index_reference(),
         command: row.command,
         phase: row.phase.clone(),
+        wait,
         title: t!("view.maintenance_progress.entry.title", session = &row.actor.session.id),
         explanation,
         metrics,
-        investigation: t!("view.maintenance_progress.investigate"),
-        verify: t!("view.maintenance_progress.verify"),
+        investigation,
+        verify,
     })
+}
+
+fn explain_wait(phase: PostgresIndexWaitPhase) -> (String, String, String) {
+    let (explanation, investigation) = match phase {
+        PostgresIndexWaitPhase::WritersBeforeBuild => (
+            t!("view.maintenance_progress.wait.writers_before_build"),
+            t!("view.maintenance_progress.wait.investigate_writers"),
+        ),
+        PostgresIndexWaitPhase::WritersBeforeValidation => (
+            t!("view.maintenance_progress.wait.writers_before_validation"),
+            t!("view.maintenance_progress.wait.investigate_writers"),
+        ),
+        PostgresIndexWaitPhase::OldSnapshots => (
+            t!("view.maintenance_progress.wait.old_snapshots"),
+            t!("view.maintenance_progress.wait.investigate_snapshots"),
+        ),
+        PostgresIndexWaitPhase::ReadersBeforeMarkingDead => (
+            t!("view.maintenance_progress.wait.readers_before_marking_dead"),
+            t!("view.maintenance_progress.wait.investigate_readers"),
+        ),
+        PostgresIndexWaitPhase::ReadersBeforeDropping => (
+            t!("view.maintenance_progress.wait.readers_before_dropping"),
+            t!("view.maintenance_progress.wait.investigate_readers"),
+        ),
+    };
+    (explanation, investigation, t!("view.maintenance_progress.wait.verify"))
 }
 
 fn phase_metrics<'a>(fields: impl IntoIterator<Item = (&'a str, &'a Option<String>)>) -> Vec<Metric> {

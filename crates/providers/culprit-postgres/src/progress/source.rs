@@ -91,16 +91,23 @@ impl<R: NativeRead> ObservationReader for Reader<R> {
 }
 
 #[cfg(test)]
+pub(crate) fn fixture_source(io: super::test_support::Reader, request: &CollectionRequest) -> Box<dyn TelemetrySource> {
+    Box::new(
+        FrozenSource::new(Reader { io, host: "fixture.invalid".into(), port: 9, verified: None }, request).unwrap(),
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::progress::test_support::{self, Reader as NativeReader};
-    fn frozen(io: NativeReader) -> FrozenSource<Reader<NativeReader>> {
+    fn frozen(io: NativeReader) -> Box<dyn TelemetrySource> {
         let request = CollectionRequest {
             subject: CollectionSubject::Database,
             selection: CollectionSelection::MaintenanceProgress { focus: Box::new(test_support::original_focus()) },
             budget: bounded_budget(&CollectionBudget::default()),
         };
-        FrozenSource::new(Reader { io, host: "fixture.invalid".into(), port: 9, verified: None }, &request).unwrap()
+        fixture_source(io, &request)
     }
     #[tokio::test]
     async fn native_owner_is_held_through_frozen_paging_and_closed_without_a_second_reader() {

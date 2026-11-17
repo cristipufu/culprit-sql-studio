@@ -66,7 +66,7 @@ REPLICATION_FIXTURES = (
 )
 POSTGRES_REPLICATION_IMAGES = {"postgres-replication": "postgres:18.6", "postgres-16-replication": "postgres:16"}
 OPTIONAL_NATIVE_MODULES = {
-    "culprit-postgres": ("telemetry::native_tests::replication::", "jobs::"),
+    "culprit-postgres": ("telemetry::native_tests::replication::", "jobs::", "maintenance_waits::"),
     "culprit-mysql": ("telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::"),
     "culprit-mssql": ("telemetry::replication::native_tests::",),
 }
@@ -239,7 +239,7 @@ class Database:
             preload = "timescaledb,pg_stat_statements" if fixture.name == "timescale" else "pg_stat_statements"
             command = ["-c", f"shared_preload_libraries={preload}", "-c", "track_io_timing=on"]
             if fixture.name in ("timescale", "postgres"):
-                command += ["-c", f"cluster_name=culprit_jobs_{self.owner}"]
+                command += ["-c", f"cluster_name=culprit_owned_{self.owner}"]
             return ({"POSTGRES_PASSWORD": self.password, "POSTGRES_DB": fixture.database}, command)
         if fixture.engine == "mysql":
             explicit_options = {option.partition("=")[0] for option in self.options}

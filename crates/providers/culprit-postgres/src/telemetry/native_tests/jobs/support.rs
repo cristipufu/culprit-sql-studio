@@ -1,11 +1,9 @@
-use super::super::{Factory, spec};
+use super::super::owned_fixture;
 use crate::{
     connect::Connector,
     read::{NativeRead, QueryRead, ReadSession},
 };
-use culprit_collector::capture::{CollectionCancellation, collect_once};
-use culprit_core::{ConnectionSpec, Provider, SourceState, telemetry::*};
-use culprit_read::admission::SourceGate;
+use culprit_core::{ConnectionSpec, SourceState, telemetry::*};
 use std::{collections::BTreeMap, time::Duration};
 
 pub(super) const CASE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -27,22 +25,7 @@ pub(super) fn request() -> CollectionRequest {
 }
 
 pub(super) async fn owned_spec(database: &str) -> ConnectionSpec {
-    let specification = spec();
-    assert_eq!(specification.database.as_deref(), Some(database));
-    assert!(specification.port.is_some_and(|port| port >= 1024 && port != 5432));
-    let owner = std::env::var("CULPRIT_SMOKE_OWNER").expect("explicit owned fixture nonce");
-    assert!(owner.len() == 24 && owner.bytes().all(|value| value.is_ascii_hexdigit() && !value.is_ascii_uppercase()));
-    let mut reader = ReadSession::new(Connector::new(&specification).unwrap(), request().budget);
-    let result = reader
-        .query("SELECT current_database() AS database,pg_catalog.current_setting('cluster_name') AS marker", 1)
-        .await;
-    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
-    let rows = result.expect("bounded owned fixture admission");
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].text("database").as_deref(), Some(database));
-    assert_eq!(rows[0].text("marker"), Some(format!("culprit_jobs_{owner}")));
-    assert_settled(&reader.metrics().unwrap(), reader.queries());
-    specification
+    owned_fixture::specification(database, request().budget).await
 }
 
 impl Fixture {
@@ -74,31 +57,17 @@ pub(super) struct Captured {
 }
 
 pub(super) async fn capture(specification: &ConnectionSpec, request: CollectionRequest) -> Captured {
-    let factory = Factory(crate::PostgresProvider::new(specification).unwrap());
-    let directory = tempfile::tempdir().unwrap();
-    let output = directory.path().join("jobs");
-    let result =
-        collect_once(&SourceGate::default(), &factory, request, &output, &CollectionCancellation::default()).await;
-    assert_eq!(factory.0.source_shutdown(), SourceShutdown::Quiescent);
-    let manifest = result.expect("native jobs capture");
-    assert_eq!(
-        manifest.status,
-        CollectionStatus::Complete,
-        "jobs description admitted: {}; native statements: {}",
-        manifest.description.is_some(),
-        manifest.source_queries
-    );
-    let source = manifest.description.as_ref().expect("original jobs source");
-    let mut observations = Vec::new();
-    for file in &manifest.files {
-        assert_eq!(file.stream, TelemetryStream::OperationalSamples);
-        for line in std::fs::read_to_string(output.join(&file.file)).unwrap().lines() {
-            let exported: ExportedRecord = serde_json::from_str(line).unwrap();
-            assert_eq!(exported, ExportedRecord::new(source, &manifest.capture, exported.record.clone()).unwrap());
-            let TelemetryRecord::Operational(row) = exported.record else { panic!("native job point") };
-            observations.push(row);
-        }
-    }
+    let captured = owned_fixture::capture(specification, request).await;
+    let source = captured.source();
+    let observations = captured
+        .records
+        .iter()
+        .map(|exported| {
+            assert_eq!(exported.record.stream(), TelemetryStream::OperationalSamples);
+            let TelemetryRecord::Operational(row) = &exported.record else { panic!("native job point") };
+            row.clone()
+        })
+        .collect();
     let snapshot = TimescaleJobsSnapshot::from_source(source, observations).unwrap();
     assert!(snapshot.is_valid());
     assert_eq!(snapshot.context.target, source.target);
@@ -106,16 +75,11 @@ pub(super) async fn capture(specification: &ConnectionSpec, request: CollectionR
     assert!(!snapshot.context.has_qualified_local_owner());
     assert_eq!(source.continuity, SourceContinuity::Unverified);
     assert_eq!(snapshot.sources, source.observation.snapshot().unwrap().sources);
-    assert_settled(manifest.read_metrics.as_ref().unwrap(), manifest.source_queries);
-    Captured { manifest, snapshot }
+    Captured { manifest: captured.manifest, snapshot }
 }
 
 pub(super) fn assert_settled(metrics: &ReadWorkMetrics, queries: u32) {
-    assert!(metrics.is_valid());
-    assert!(!metrics.has_unconfirmed_work());
-    assert_eq!(metrics.active_tasks, 0);
-    assert_eq!(metrics.untracked_tasks, 0);
-    assert_eq!(metrics.templates.iter().map(|template| template.completed_tasks).sum::<u32>(), queries);
+    owned_fixture::assert_settled(metrics, queries);
 }
 
 pub(super) fn state<'a>(snapshot: &'a TimescaleJobsSnapshot, id: &str) -> &'a TimescaleJobState {

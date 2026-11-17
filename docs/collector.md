@@ -415,6 +415,12 @@ remain unknown when unavailable. Missing original compute identity prevents matc
 absent progress row never establishes completion. This investigation adds no ordinary scan query and remains
 cost-unqualified.
 
+Documented PostgreSQL concurrent-index waiting phases identify maintenance as the affected request: waiting for
+writers, older snapshots or readers. The reported locker PID remains unresolved until independent blocking
+evidence establishes its current generation and relationship. Existing lock-wait investigation handles that
+question; phase text alone cannot authorize a new owner lookup. [Owned native cases](../dev/postgres/maintenance-waits.md)
+exercise a held writer and a separately acknowledged completion through the same readers.
+
 `current-request-work` explains MySQL/MariaDB current-statement counters and linked native stages using the same
 reader as live progress. The focused capture rechecks the original member, process generation, session, statement
 event and timer. Exact temporary-table, sorting, row and picosecond counters retain their native units; they do not

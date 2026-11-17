@@ -4,6 +4,8 @@ use crate::rows::Row;
 use culprit_core::Provider;
 use std::collections::VecDeque;
 
+mod maintenance;
+
 const PROCESS: &str = "2026-11-14T00:00:00Z";
 
 fn actor_row(pid: &str, state: &str, database_oid: &str, database: &str, waiters: Option<&str>) -> Row {
