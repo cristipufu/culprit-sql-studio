@@ -96,6 +96,23 @@ impl EngineSpec for Mssql {
         })
     }
 
+    fn native_wait_mechanism(&self, native_type: &str) -> Option<crate::telemetry::WaitMechanism> {
+        use crate::telemetry::{LogRateGovernanceReason as Reason, WaitMechanism};
+        // Native role mapping, not translated role_desc. Keep DESTAGE (long-term log storage) separate from
+        // LOCALDESTAGE (log service). https://learn.microsoft.com/sql/relational-databases/system-functions/sys-dm-hs-database-log-rate
+        let reason = match native_type {
+            "RBIO_RG_STORAGE" => Reason::PageServerLogApply,
+            "RBIO_RG_REPLICA" => Reason::ReplicaLogApply,
+            "RBIO_RG_LOCALDESTAGE" => Reason::LogServiceDestage,
+            "RBIO_RG_DESTAGE" => Reason::LogStorageDestage,
+            "RBIO_RG_GEOREPLICA" => Reason::GeoReplicaLogApply,
+            "RBIO_RG_STORAGE_CHECKPOINT" => Reason::PageServerCheckpoint,
+            "RBIO_RG_MIGRATION_TARGET" => Reason::MigrationTargetLogApply,
+            _ => return None,
+        };
+        Some(WaitMechanism::LogRateGovernance(reason))
+    }
+
     fn wait_sampling(&self) -> Option<WaitSampling> {
         Some(WaitSampling::Counters)
     }

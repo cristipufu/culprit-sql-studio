@@ -139,6 +139,20 @@ impl Outbox {
             })
             .await
     }
+    /// Locate an exact consumed SourceRead control association. This metadata is not a substitute for the
+    /// canonical result/source/lineage authentication required by Fleet reconciliation.
+    pub(crate) async fn consumed_source_read_result(
+        &self,
+        intent: &DiagnosticInvestigationIntent,
+    ) -> Result<Option<DiagnosticCaptureRef>> {
+        self.files
+            .run(|| {
+                let intent = intent.clone();
+                move |files| files.consumed_source_read_result(&intent)
+            })
+            .await
+    }
+
     /// Authenticate local queue knowledge without interpreting absent metadata or cached evidence as consumption.
     pub async fn diagnostic_input_state(
         &self,

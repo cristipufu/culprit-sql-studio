@@ -86,6 +86,7 @@ impl SnapshotReader for OperationalReader {
     async fn recheck(&mut self, _: &CollectionDescription) -> Result<SnapshotRecheck> {
         let after = metadata::read(&mut self.io, &self.host, self.port).await?;
         Ok(SnapshotRecheck {
+            execution: None,
             unchanged: self.metadata.as_ref().is_some_and(|before| before.same_source(&after)),
             observed_until: after.probe.now,
             scopes: std::mem::take(&mut self.scopes),

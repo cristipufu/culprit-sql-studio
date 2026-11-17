@@ -8,6 +8,107 @@ use culprit_core::telemetry::SourceShutdown;
 
 const XML: &str = r#"<ShowPlanXML><BatchSequence><Batch><Statements><StmtSimple StatementText="SELECT id FROM orders" QueryHash="0x0123456789ABCDEF" StatementSubTreeCost="1"><QueryPlan><RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="100" EstimatedTotalSubtreeCost="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="10" ActualExecutions="1" /></RunTimeInformation><TableScan><Object Table="[orders]"/></TableScan></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#;
 
+fn page_counter(row: &Rec, capability: i64, value: Val) -> Rec {
+    let mut fields = row
+        .columns()
+        .filter(|(name, _)| {
+            !matches!(
+                *name,
+                "request_page_server_read_capability"
+                    | "request_page_server_read_availability"
+                    | "request_page_server_reads"
+            )
+        })
+        .map(|(name, value)| (name, value.clone()))
+        .collect::<Vec<_>>();
+    fields.extend([
+        ("request_page_server_read_capability", Val::Int(capability)),
+        ("request_page_server_read_availability", Val::Int(capability)),
+        ("request_page_server_reads", value),
+    ]);
+    Rec::of(&fields)
+}
+
+#[tokio::test]
+async fn current_request_page_counts_remain_exact_through_the_existing_layout_request_and_final_guard() {
+    for value in [Val::Null, Val::Int(0), Val::Int(9007199254740993), Val::Int(i64::MAX)] {
+        let expected = match &value {
+            Val::Int(value) => Some(value.to_string()),
+            _ => None,
+        };
+        let mut io = FakeRead::new(vec![
+            Ok(vec![page_counter(&layout(true, true), 1, Val::Null)]),
+            Ok(vec![page_counter(&request(), 1, value)]),
+            Ok(vec![profile(0), page_counter(&guard(&[]), 1, Val::Null)]),
+        ]);
+        let progress = observe(&mut io).await.unwrap();
+        assert_eq!(progress.running, Some(true));
+        assert_eq!(progress.page_server_reads, expected);
+        assert!(progress.page_server_reads_report.is_none(), "providers supply raw facts; Engine owns prose");
+        assert_eq!(io.calls.len(), 3);
+        assert!(io.calls[0].sql.contains("sys.all_columns"));
+        assert!(io.calls[1].sql.contains("r.page_server_reads ELSE CAST(NULL AS bigint)"));
+        assert!(io.calls[2].sql.contains("request_page_server_read_capability"));
+    }
+}
+
+#[tokio::test]
+async fn unavailable_or_changed_request_layout_never_becomes_a_zero_or_retry() {
+    for capability in [0, 2, 3] {
+        let mut io = FakeRead::new(vec![
+            Ok(vec![page_counter(&layout(true, true), capability, Val::Null)]),
+            Ok(vec![page_counter(&request(), capability, Val::Null)]),
+            Ok(vec![profile(0), page_counter(&guard(&[]), capability, Val::Null)]),
+        ]);
+        assert!(observe(&mut io).await.unwrap().page_server_reads.is_none());
+        assert!(io.calls[1].sql.contains("r.percent_complete,CAST(NULL AS bigint)"));
+        assert_eq!(io.calls.len(), 3);
+    }
+    for changed in [0, 2, 3] {
+        let mut io = FakeRead::new(vec![
+            Ok(vec![page_counter(&layout(true, true), 1, Val::Null)]),
+            Ok(vec![page_counter(&request(), 1, Val::Int(9371))]),
+            Ok(vec![profile(0), page_counter(&guard(&[]), changed, Val::Null)]),
+        ]);
+        let progress = observe(&mut io).await.unwrap();
+        assert_eq!(progress.running, None);
+        assert!(progress.page_server_reads.is_none());
+        assert_eq!(io.calls.len(), 3);
+    }
+}
+
+#[tokio::test]
+async fn request_profile_denial_or_unverified_role_cannot_publish_optional_counts() {
+    let denied = culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "controlled metadata denial");
+    let mut io = FakeRead::new(vec![Err(ReadError::Source(denied))]);
+    assert!(observe(&mut io).await.is_err());
+    assert_eq!(io.calls.len(), 1);
+    let request = replace(&page_counter(&request(), 1, Val::Int(9371)), &[("database_updateability", Val::Null)]);
+    let mut io = FakeRead::new(vec![Ok(vec![page_counter(&layout(true, true), 1, Val::Null)]), Ok(vec![request])]);
+    let progress = observe(&mut io).await.unwrap();
+    assert!(progress.page_server_reads.is_none());
+    assert_eq!(io.calls.len(), 2);
+}
+
+#[tokio::test]
+async fn a_recycled_request_or_changed_native_role_cannot_keep_the_first_requests_page_counter() {
+    for changes in [
+        vec![("checked_request_generation", Val::Text("2020-01-01T11:00:00.500".into()))],
+        vec![("database_updateability", Val::Text("READ_ONLY".into()))],
+        vec![("selected_database_id", Val::Int(8))],
+    ] {
+        let mut io = FakeRead::new(vec![
+            Ok(vec![page_counter(&layout(true, true), 1, Val::Null)]),
+            Ok(vec![page_counter(&request(), 1, Val::Int(9007199254740993))]),
+            Ok(vec![profile(0), page_counter(&guard(&changes), 1, Val::Null)]),
+        ]);
+        let progress = observe(&mut io).await.unwrap();
+        assert_eq!(progress.running, None);
+        assert!(progress.page_server_reads.is_none() && progress.page_server_reads_report.is_none());
+        assert_eq!(io.calls.len(), 3);
+    }
+}
+
 fn layout(live: bool, profiles: bool) -> Rec {
     Rec::of(&[
         ("metadata_visibility", Val::Int(1)),

@@ -10,6 +10,7 @@ fn capture(recorded_ms: f64) -> Snapshot {
     query.mean_time_ms = 5_000.0;
     query.max_time_ms = Some(9_000.0);
     query.waits = vec![WaitStat {
+        mechanism: None,
         category: WaitClass::Lock.category().into(),
         wait_type: Some("Native.SchemaLock".into()),
         wait_ms: recorded_ms,

@@ -32,6 +32,7 @@ impl RecoveryPayloadBudget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EvidenceFamily {
+    WaitCounterSamples,
     ResourceSamples,
     OperationalSamples,
     ReplicationSamples,
@@ -45,6 +46,7 @@ pub enum EvidenceFamily {
 }
 impl EvidenceFamily {
     pub const ALL: &[Self] = &[
+        Self::WaitCounterSamples,
         Self::ResourceSamples,
         Self::OperationalSamples,
         Self::ReplicationSamples,
@@ -59,6 +61,7 @@ impl EvidenceFamily {
 
     pub fn stream(self) -> TelemetryStream {
         match self {
+            Self::WaitCounterSamples => TelemetryStream::WaitCounterSamples,
             Self::ResourceSamples => TelemetryStream::ResourceSamples,
             Self::OperationalSamples => TelemetryStream::OperationalSamples,
             Self::ReplicationSamples => TelemetryStream::ReplicationSamples,

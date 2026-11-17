@@ -47,7 +47,11 @@ impl<R: NativeRead> ActivityReader<R> {
         let limit = (self.options.budget.max_snapshot_rows as usize).min(MAX_NATIVE_ROWS);
         let native = self
             .io
-            .query(&sql::observation(self.options.identity), vec![Parameter::Integer((limit + 1) as i64)], limit + 1)
+            .query(
+                &sql::observation(self.options.identity, initial.request_page_server_read_capability),
+                vec![Parameter::Integer((limit + 1) as i64)],
+                limit + 1,
+            )
             .await
             .map_err(ReadError::into_error)?;
         let context = ActivityContext::decode(

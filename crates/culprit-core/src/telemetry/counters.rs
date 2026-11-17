@@ -1,5 +1,7 @@
 //! A native scalar counter carries its meaning separately from its name and current value.
 use super::*;
+mod ratios;
+pub use ratios::{CounterRatioGap, CounterRatioIssue, CounterRatioKind, CounterRatioSupport, NativeCounterRatio};
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -7,6 +9,9 @@ use super::*;
 pub enum CounterNature {
     Cumulative,
     Gauge,
+    /// The documented 64-bit native raw-fraction format, never a cooked ratio or independent rate.
+    FractionNumerator,
+    FractionBase,
     Unknown,
 }
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +75,20 @@ impl NativeCounterSample {
                 .into_iter()
                 .all(|value| value.as_deref().is_none_or(valid_key))
             && (self.nature != CounterNature::Unknown || self.unit == CounterUnit::Unknown)
+            && match self.nature {
+                // These codes are the native Windows raw-fraction/base format, independent of engine identity.
+                CounterNature::FractionNumerator => {
+                    self.unit == CounterUnit::Count
+                        && self.value.integer().is_some()
+                        && self.native_type.as_deref() == Some("537003264")
+                }
+                CounterNature::FractionBase => {
+                    self.unit == CounterUnit::Count
+                        && self.value.integer().is_some()
+                        && self.native_type.as_deref() == Some("1073939712")
+                }
+                _ => true,
+            }
     }
 }
 
@@ -80,6 +99,10 @@ pub struct NativeCounterSet {
     pub identity: NativeIdentity,
     pub scope: crate::MeasurementScope,
     pub counters: Vec<NativeCounterSample>,
+    /// Source-declared pairs from this one native read, never joined across objects or captures.
+    pub ratios: Vec<NativeCounterRatio>,
+    /// Exact rejected native fraction values remain evidence without becoming valid measurements.
+    pub ratio_gaps: Vec<CounterRatioGap>,
     /// Bounded native labels and state codes, never SQL text or connection secrets.
     pub properties: std::collections::BTreeMap<String, String>,
 }
@@ -97,6 +120,7 @@ impl NativeCounterSet {
                 .all(|counter| counter.is_valid() && counter.scope == self.scope && keys.insert(&counter.key))
             && self.properties.len() <= MAX_NATIVE_QUALIFIERS
             && self.properties.iter().all(|(name, value)| valid_key(name) && value.len() <= 2048)
-            && (!self.counters.is_empty() || !self.properties.is_empty())
+            && ratios::valid(self)
+            && (!self.counters.is_empty() || !self.properties.is_empty() || !self.ratio_gaps.is_empty())
     }
 }

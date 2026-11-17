@@ -442,7 +442,9 @@ impl Provider for PostgresProvider {
                 let wait_type = session.wait.as_deref().and_then(|w| w.split_once(": ")).map(|(_, e)| e.to_string());
                 match waits.iter_mut().find(|w| w.category == category && w.wait_type == wait_type) {
                     Some(existing) => existing.tasks = Some(existing.tasks.unwrap_or(0.0) + 1.0),
-                    None => waits.push(WaitStat { category, wait_type, wait_ms: 0.0, tasks: Some(1.0) }),
+                    None => {
+                        waits.push(WaitStat { mechanism: None, category, wait_type, wait_ms: 0.0, tasks: Some(1.0) })
+                    }
                 }
             }
             waits.sort_by(|a, b| b.tasks.unwrap_or(0.0).total_cmp(&a.tasks.unwrap_or(0.0)));

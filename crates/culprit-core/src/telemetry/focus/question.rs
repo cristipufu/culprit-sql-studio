@@ -1,10 +1,13 @@
-//! A finite set of implemented native questions over one exact authenticated original request.
+//! Implemented questions retain an exact original receipt; only request questions carry an Activity participant.
 use super::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticFocus {
+    SourceRead {
+        focus: Box<SourceReadFocus>,
+    },
     Blocking {
         focus: Box<ActivityRequestFocus>,
     },
@@ -36,28 +39,56 @@ pub enum DiagnosticFocus {
 }
 
 impl DiagnosticFocus {
-    pub fn participant(&self) -> &ActivityRequestFocus {
+    pub fn activity_participant(&self) -> Option<&ActivityRequestFocus> {
         match self {
-            Self::PageWait { focus } => &focus.participant,
-            Self::PageWaitWriters { focus } => &focus.waiter.participant,
-            Self::PageTaskHolders { focus } => &focus.participant,
+            Self::SourceRead { .. } => None,
+            Self::PageWait { focus } => Some(&focus.participant),
+            Self::PageWaitWriters { focus } => Some(&focus.waiter.participant),
+            Self::PageTaskHolders { focus } => Some(&focus.participant),
             Self::Blocking { focus }
             | Self::RequestMemory { focus }
             | Self::CompilationAdmission { focus }
             | Self::CurrentRequestWork { focus }
-            | Self::PageWaitTasks { focus, .. } => focus,
+            | Self::PageWaitTasks { focus, .. } => Some(focus),
         }
     }
-    pub fn participant_mut(&mut self) -> &mut ActivityRequestFocus {
+    pub fn activity_participant_mut(&mut self) -> Option<&mut ActivityRequestFocus> {
         match self {
-            Self::PageWait { focus } => &mut focus.participant,
-            Self::PageWaitWriters { focus } => &mut focus.waiter.participant,
-            Self::PageTaskHolders { focus } => &mut focus.participant,
+            Self::SourceRead { .. } => None,
+            Self::PageWait { focus } => Some(&mut focus.participant),
+            Self::PageWaitWriters { focus } => Some(&mut focus.waiter.participant),
+            Self::PageTaskHolders { focus } => Some(&mut focus.participant),
             Self::Blocking { focus }
             | Self::RequestMemory { focus }
             | Self::CompilationAdmission { focus }
             | Self::CurrentRequestWork { focus }
-            | Self::PageWaitTasks { focus, .. } => focus,
+            | Self::PageWaitTasks { focus, .. } => Some(focus),
+        }
+    }
+    pub fn parent(&self) -> &DiagnosticEvidenceRef {
+        match self {
+            Self::SourceRead { focus } => &focus.basis,
+            Self::PageWait { focus } => &focus.participant.parent,
+            Self::PageWaitWriters { focus } => &focus.waiter.participant.parent,
+            Self::PageTaskHolders { focus } => &focus.participant.parent,
+            Self::Blocking { focus }
+            | Self::RequestMemory { focus }
+            | Self::CompilationAdmission { focus }
+            | Self::CurrentRequestWork { focus }
+            | Self::PageWaitTasks { focus, .. } => &focus.parent,
+        }
+    }
+    pub fn target(&self) -> &CollectionTarget {
+        match self {
+            Self::SourceRead { focus } => &focus.target,
+            Self::PageWait { focus } => &focus.participant.target,
+            Self::PageWaitWriters { focus } => &focus.waiter.participant.target,
+            Self::PageTaskHolders { focus } => &focus.participant.target,
+            Self::Blocking { focus }
+            | Self::RequestMemory { focus }
+            | Self::CompilationAdmission { focus }
+            | Self::CurrentRequestWork { focus }
+            | Self::PageWaitTasks { focus, .. } => &focus.target,
         }
     }
     pub fn page_wait(&self) -> Option<&ActivityWaitFocus> {
@@ -76,6 +107,7 @@ impl DiagnosticFocus {
     }
     pub fn selector(&self) -> RecipeSelector {
         match self {
+            Self::SourceRead { focus } => focus.question.selector(),
             Self::Blocking { .. } => RecipeSelector::FocusedBlocking,
             Self::PageWait { .. } => RecipeSelector::FocusedPageWait,
             Self::PageWaitWriters { .. } => RecipeSelector::FocusedPageWaitWriters,
@@ -88,6 +120,7 @@ impl DiagnosticFocus {
     }
     pub fn is_valid(&self) -> bool {
         match self {
+            Self::SourceRead { focus } => focus.is_valid(),
             Self::Blocking { focus } => focus.is_blocking_focus(),
             Self::PageWait { focus } => focus.is_valid(),
             Self::PageWaitWriters { focus } => focus.is_valid(),
@@ -106,6 +139,7 @@ impl DiagnosticFocus {
     }
     pub fn from_selection(selection: &CollectionSelection) -> Option<Self> {
         match selection {
+            CollectionSelection::SourceRead { focus, .. } => Some(Self::SourceRead { focus: focus.clone() }),
             CollectionSelection::FocusedBlocking { focus } => Some(Self::Blocking { focus: focus.clone() }),
             CollectionSelection::FocusedPageWait { focus } | CollectionSelection::SharedPageWaitFocus { focus, .. } => {
                 Some(Self::PageWait { focus: focus.clone() })
@@ -130,7 +164,9 @@ impl DiagnosticFocus {
         reference: &DiagnosticEvidenceRef,
     ) -> bool {
         self.is_valid()
-            && self.participant().matches_parent(source, original, reference)
+            && self
+                .activity_participant()
+                .is_some_and(|participant| participant.matches_parent(source, original, reference))
             && match self {
                 Self::PageWaitTasks { original_context, .. } => {
                     NativeReadContext::from_activity(source).is_ok_and(|context| context == **original_context)
@@ -148,7 +184,12 @@ impl DiagnosticFocus {
             _ => (None, &[][..]),
         };
         let mut seen = Vec::new();
-        std::iter::once(&self.participant().parent)
+        let prerequisite = match self {
+            Self::SourceRead { focus } => Some(focus.prerequisite.as_ref()),
+            _ => None,
+        };
+        std::iter::once(self.parent())
+            .chain(prerequisite.into_iter().flat_map(CompilationAdmissionReport::references))
             .chain(page)
             .chain(candidates.iter().map(|candidate| &candidate.parent))
             .filter(move |reference| {
@@ -162,8 +203,9 @@ impl DiagnosticFocus {
     }
 
     /// Shapes an unadmitted database question. Authentication, cost qualification and native guards remain mandatory.
-    pub fn database_selection(&self) -> CollectionSelection {
-        match self {
+    pub fn activity_selection(&self) -> Option<CollectionSelection> {
+        Some(match self {
+            Self::SourceRead { .. } => return None,
             Self::Blocking { focus } => CollectionSelection::FocusedBlocking { focus: focus.clone() },
             Self::PageWait { focus } => CollectionSelection::FocusedPageWait { focus: focus.clone() },
             Self::PageWaitWriters { focus } => CollectionSelection::PageWaitWriters { focus: focus.clone() },
@@ -178,7 +220,7 @@ impl DiagnosticFocus {
                 original_context: original_context.clone(),
                 original_requests: original_requests.clone(),
             },
-        }
+        })
     }
 }
 

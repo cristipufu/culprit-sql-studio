@@ -11,6 +11,7 @@ import { slot, withElements } from "../lib/message-parts";
 import { ProgressPlanCache } from "../lib/query-progress";
 import { QueryProgressMeters } from "./QueryProgressMeters";
 import { CurrentRequestWork } from "./CurrentRequestWork";
+import { RequestPageServerReads } from "./RequestPageServerReads";
 
 const REFRESH_MS = 1000;
 
@@ -268,6 +269,7 @@ function SessionProgress({ connection, session, onClose }: { connection: string;
             )}
             {progress.note && <div className="qp-note subtle">{progress.note}</div>}
             {progress.current_work_report && <CurrentRequestWork report={progress.current_work_report} />}
+            {progress.page_server_reads_report && <RequestPageServerReads report={progress.page_server_reads_report} />}
           </div>
           <div className="qp-plan">
             {livePlan ? (

@@ -350,7 +350,13 @@ fn query_lock_evidence_does_not_inherit_lifetime_wait_totals() {
     q.total_time_ms = 25_000.0;
     q.mean_time_ms = 2500.0;
     q.rows = Some(10.0);
-    q.waits = vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 20_000.0, tasks: None }];
+    q.waits = vec![culprit_core::WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: None,
+        wait_ms: 20_000.0,
+        tasks: None,
+    }];
     w.total_time_ms = q.total_time_ms;
     w.total_executions = q.executions;
     let r = culprit_checks::analyze(s);

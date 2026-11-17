@@ -70,6 +70,9 @@ pub(crate) fn replace(row: &Rec, values: &[(&str, Val)]) -> Rec {
 pub(crate) fn row(at: &str) -> Rec {
     Rec::of(&[
         ("sample_at", Val::Text(at.into())),
+        ("engine_edition", Val::Int(5)),
+        ("database_edition", Val::Text("General Purpose".into())),
+        ("replica_id", Val::Null),
         ("replica_role", Val::Int(0)),
         ("avg_cpu_percent", Val::Float(0.0)),
         ("avg_data_io_percent", Val::Float(20.0)),

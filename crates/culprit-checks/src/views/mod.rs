@@ -10,6 +10,7 @@ pub mod compilation;
 pub mod compiler_admission;
 pub mod completed_spills;
 pub mod connection_outcomes;
+pub mod counter_ratios;
 pub mod current_request_work;
 pub mod dashboard;
 pub(crate) mod digest;

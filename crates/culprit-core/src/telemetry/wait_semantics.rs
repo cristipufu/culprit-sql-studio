@@ -20,6 +20,7 @@ pub enum WaitClass {
     Lock,
     Latch,
     Log,
+    LogGovernance,
     Network,
     Parallelism,
     Memory,
@@ -37,6 +38,7 @@ impl WaitClass {
         Self::Lock,
         Self::Latch,
         Self::Log,
+        Self::LogGovernance,
         Self::Network,
         Self::Parallelism,
         Self::Memory,
@@ -55,6 +57,7 @@ impl WaitClass {
             Self::Lock => "lock",
             Self::Latch => "latch",
             Self::Log => "log",
+            Self::LogGovernance => "log-governance",
             Self::Network => "network",
             Self::Parallelism => "parallelism",
             Self::Memory => "memory",
@@ -75,11 +78,70 @@ impl WaitClass {
             Self::Lock => "Lock",
             Self::Latch => "Latch",
             Self::Log => "Log",
+            Self::LogGovernance => "Log Governance",
             Self::Network => "Network",
             Self::Parallelism => "Parallelism",
             Self::Memory => "Memory",
             Self::Compilation => "Compilation",
             Self::Other => "Other",
+        }
+    }
+}
+
+/// A source-native reason for log-rate governance. These historical waits do not identify a current component,
+/// its pending bytes, a particular request, or the cause of an application's current delay.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum LogRateGovernanceReason {
+    PageServerLogApply,
+    ReplicaLogApply,
+    LogServiceDestage,
+    LogStorageDestage,
+    GeoReplicaLogApply,
+    PageServerCheckpoint,
+    MigrationTargetLogApply,
+}
+impl LogRateGovernanceReason {
+    pub const ALL: &[Self] = &[
+        Self::PageServerLogApply,
+        Self::ReplicaLogApply,
+        Self::LogServiceDestage,
+        Self::LogStorageDestage,
+        Self::GeoReplicaLogApply,
+        Self::PageServerCheckpoint,
+        Self::MigrationTargetLogApply,
+    ];
+
+    pub fn label(self) -> String {
+        match self {
+            Self::PageServerLogApply => crate::t!("core.waits.log_governance.page_server_apply"),
+            Self::ReplicaLogApply => crate::t!("core.waits.log_governance.replica_apply"),
+            Self::LogServiceDestage => crate::t!("core.waits.log_governance.log_service_destage"),
+            Self::LogStorageDestage => crate::t!("core.waits.log_governance.log_storage_destage"),
+            Self::GeoReplicaLogApply => crate::t!("core.waits.log_governance.geo_replica_apply"),
+            Self::PageServerCheckpoint => crate::t!("core.waits.log_governance.page_server_checkpoint"),
+            Self::MigrationTargetLogApply => crate::t!("core.waits.log_governance.migration_target_apply"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(tag = "kind", content = "reason", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum WaitMechanism {
+    LogRateGovernance(LogRateGovernanceReason),
+}
+impl WaitMechanism {
+    pub fn class(self) -> WaitClass {
+        match self {
+            Self::LogRateGovernance(_) => WaitClass::LogGovernance,
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::LogRateGovernance(reason) => reason.label(),
         }
     }
 }

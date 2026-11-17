@@ -3456,7 +3456,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 10,
+    "format": 11,
     "histograms": null,
     "id": "20261011T121347.162Z",
     "identity": {
@@ -5417,30 +5417,35 @@
     "waits": [
       {
         "category": "Latch",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 82441.0,
         "wait_type": "Latch"
       },
       {
         "category": "Parallelism",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 17665.0,
         "wait_type": "Parallelism"
       },
       {
         "category": "Memory",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 5947.0,
         "wait_type": "Memory"
       },
       {
         "category": "CPU",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 423.0,
         "wait_type": "CPU"
       },
       {
         "category": "Lock",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 15.0,
         "wait_type": "Lock"
@@ -5947,6 +5952,7 @@
           "waits": [
             {
               "category": "CPU",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 11.0,
               "wait_type": "CPU"
@@ -6366,24 +6372,28 @@
           "waits": [
             {
               "category": "Latch",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 47061.0,
               "wait_type": "Latch"
             },
             {
               "category": "Parallelism",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 8565.0,
               "wait_type": "Parallelism"
             },
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 1630.0,
               "wait_type": "Memory"
             },
             {
               "category": "CPU",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 5.0,
               "wait_type": "CPU"
@@ -6827,12 +6837,14 @@
           "waits": [
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 20.0,
               "wait_type": "Memory"
             },
             {
               "category": "CPU",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 2.0,
               "wait_type": "CPU"
@@ -7289,24 +7301,28 @@
           "waits": [
             {
               "category": "Latch",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 35198.0,
               "wait_type": "Latch"
             },
             {
               "category": "Parallelism",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 5776.0,
               "wait_type": "Parallelism"
             },
             {
               "category": "CPU",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 35.0,
               "wait_type": "CPU"
             },
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 14.0,
               "wait_type": "Memory"
@@ -8106,6 +8122,7 @@
           "waits": [
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 22.0,
               "wait_type": "Memory"
@@ -8459,12 +8476,14 @@
           "waits": [
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 14.0,
               "wait_type": "Memory"
             },
             {
               "category": "CPU",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 13.0,
               "wait_type": "CPU"
@@ -9000,6 +9019,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 114966.0,
               "wait_type": "Lock"
@@ -9241,6 +9261,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 71692.0,
               "wait_type": "Lock"
@@ -9468,6 +9489,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 2400.0,
               "wait_type": "Lock"
@@ -10978,24 +11000,28 @@
           "waits": [
             {
               "category": "Parallelism",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 136233.0,
               "wait_type": "Parallelism"
             },
             {
               "category": "Latch",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 66944.0,
               "wait_type": "Latch"
             },
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 539.0,
               "wait_type": "Memory"
             },
             {
               "category": "CPU",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 190.0,
               "wait_type": "CPU"
@@ -11372,12 +11398,14 @@
           "waits": [
             {
               "category": "Other",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 49.0,
               "wait_type": "Preemptive"
             },
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 4.0,
               "wait_type": "Memory"
@@ -12214,12 +12242,14 @@
           "waits": [
             {
               "category": "CPU",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 15189.0,
               "wait_type": "CPU"
             },
             {
               "category": "Memory",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 3.0,
               "wait_type": "Memory"
@@ -12296,6 +12326,7 @@
           "waits": [
             {
               "category": "Network",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 202.0,
               "wait_type": "Network IO"

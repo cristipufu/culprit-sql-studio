@@ -181,3 +181,10 @@ pub struct CollectedCompletedSpillAnalysis {
     pub definition_context: Option<CollectedEvidenceContext>,
     pub report: crate::CompletedSpillReport,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedCounterRatioAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::CounterRatioReport,
+}

@@ -13,6 +13,8 @@ pub(crate) fn snapshot(version: u32) -> ConnectionOutcomeSnapshot {
         observations: vec![ConnectionOutcomeObservation {
             source: "pg_stat_database".into(),
             counters: NativeCounterSet {
+                ratios: Vec::new(),
+                ratio_gaps: Vec::new(),
                 identity: NativeIdentity::new("pg_stat_database").qualified("dbid", "42"),
                 scope: MeasurementScope::Database,
                 properties: BTreeMap::from([

@@ -60,6 +60,8 @@ fn scenario() -> Scenario {
         }),
     };
     let cost = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("owned-native-observer"),
         scope: MeasurementScope::Database,
         counters: vec![NativeCounterSample::gauge(
@@ -143,7 +145,7 @@ fn an_immutable_question_preserves_its_parent_tested_budget_and_independent_nati
         &CollectionBudget::default()
     ));
     assert_eq!(intent.focus, DiagnosticFocus::from(scenario.focus.clone()));
-    assert_ne!(intent.qualification.evidence.capture, intent.focus.participant().parent.capture);
+    assert_ne!(intent.qualification.evidence.capture, intent.focus.parent().capture);
     assert_eq!(intent.budget, intent.qualification.tested_budget);
     assert_eq!(intent.episode_revision, scenario.episode.revision);
     assert_eq!(
@@ -328,7 +330,7 @@ fn full_intent_identity_binds_receipt_revision_and_budget_while_stage_identity_d
         let mut other = first.clone();
         match changed {
             "revision" => other.episode_revision = "2".into(),
-            "parent" => other.focus.participant_mut().parent.row_ordinal += 1,
+            "parent" => other.focus.activity_participant_mut().unwrap().parent.row_ordinal += 1,
             "recipe" => {
                 other.recipe_version += 1;
                 other.qualification.recipe_version = other.recipe_version;
@@ -494,7 +496,7 @@ fn initial_owner_lineage_reconstructs_the_exact_intent_without_a_native_source_d
     assert!(serde_json::from_value::<CollectionManifest>(missing_focus).is_err());
 
     let mut replaced_focus = manifest;
-    replaced_focus.investigation.as_mut().unwrap().focus.participant_mut().parent.row_ordinal += 1;
+    replaced_focus.investigation.as_mut().unwrap().focus.activity_participant_mut().unwrap().parent.row_ordinal += 1;
     assert!(replaced_focus.investigation_intent().is_err());
 }
 

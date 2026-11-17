@@ -112,13 +112,19 @@ async fn completed_population_skips_evicted_original_before_any_archive_cost_or_
         let head = store.checkpoint_head().await.unwrap();
         let committed = stage_and_commit(&store, owner.fence(), head.as_deref(), &prepared).await.unwrap();
         runtime.fixture.outbox.delivery().mark_archived(&committed).await.unwrap();
-        if entry.capture == admitted.focus.participant().parent.capture {
+        if entry.capture == admitted.focus.activity_participant().unwrap().parent.capture {
             original = Some(committed);
         }
     }
     assert!(runtime.fixture.outbox.delivery().evict(&original.unwrap()).await.unwrap());
     assert_eq!(
-        runtime.fixture.outbox.diagnostic_evidence(&admitted.focus.participant().parent).await.unwrap_err().detail,
+        runtime
+            .fixture
+            .outbox
+            .diagnostic_evidence(&admitted.focus.activity_participant().unwrap().parent)
+            .await
+            .unwrap_err()
+            .detail,
         Some(ErrorDetail::Outbox(OutboxProblem::MissingCapture))
     );
     let probe = ReadProbe { store: &store, manifests: AtomicUsize::new(0), objects: AtomicUsize::new(0) };
@@ -173,7 +179,10 @@ async fn a_new_incident_first_capture_can_progress_after_the_earlier_population_
     let cost_checks = runtime.fixture.backend.verified.load(Ordering::SeqCst);
     assert!(runtime.enroll().await);
     let next = intent(&runtime).await;
-    assert_ne!(next.focus.participant().parent.capture_ref(), original.focus.participant().parent.capture_ref());
+    assert_ne!(
+        next.focus.activity_participant().unwrap().parent.capture_ref(),
+        original.focus.activity_participant().unwrap().parent.capture_ref()
+    );
     assert_ne!(next.episode_stage_key().unwrap(), original.episode_stage_key().unwrap());
     assert_eq!(runtime.fixture.backend.verified.load(Ordering::SeqCst), cost_checks + 1);
     assert_eq!(runtime.native_calls(), calls, "enrolling the independent question does not dispatch it");

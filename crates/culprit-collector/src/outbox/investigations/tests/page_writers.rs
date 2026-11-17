@@ -180,7 +180,7 @@ impl WriterInvestigation {
     pub(super) fn native(&mut self) -> CaptureIdentity {
         let request = CollectionRequest {
             subject: self.intent.subject(),
-            selection: self.intent.selection(),
+            selection: self.intent.selection().unwrap(),
             budget: self.intent.budget.clone(),
         };
         seal(
@@ -405,7 +405,7 @@ fn missing_original_frame_or_page_cannot_allocate_a_writer_capture_or_new_source
         let missing = if missing_page { &fixture.page } else { &fixture.original };
         std::fs::remove_dir_all(fixture.files.directory(&missing.observation_id)).unwrap();
         let before = fixture.files.journal.status(20, None).unwrap().captures;
-        assert!(fixture.files.reserve("fixture", &request(fixture.intent.selection())).is_err());
+        assert!(fixture.files.reserve("fixture", &request(fixture.intent.selection().unwrap())).is_err());
         assert_eq!(fixture.files.journal.status(20, None).unwrap().captures, before);
         assert_eq!(fixture.files.journal.debts().unwrap(), 0);
         assert!(fixture.files.investigation_parent_keys().unwrap().is_empty());
@@ -425,7 +425,7 @@ fn failed_pre_authentication_writer_attempt_retains_full_question_and_both_paren
     fixture.event(admitted.clone(), true, "2020-01-01T12:00:01.100000000Z");
     let request = CollectionRequest {
         subject: fixture.intent.subject(),
-        selection: fixture.intent.selection(),
+        selection: fixture.intent.selection().unwrap(),
         budget: fixture.intent.budget.clone(),
     };
     let owner = DiagnosticInvestigationLineage::from_intent(&fixture.intent).unwrap();

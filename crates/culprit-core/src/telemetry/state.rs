@@ -687,6 +687,7 @@ impl OperationalObservation {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct WaitCounterObservation {
+    pub mechanism: Option<WaitMechanism>,
     pub source: String,
     pub wait_type: String,
     pub scope: crate::MeasurementScope,
@@ -697,6 +698,10 @@ pub struct WaitCounterObservation {
     pub max_wait_time_ms: String,
 }
 impl WaitCounterObservation {
+    pub fn is_valid_for(&self, engine: crate::Engine) -> bool {
+        self.is_valid() && self.mechanism == engine.spec().native_wait_mechanism(&self.wait_type)
+    }
+
     pub fn is_valid(&self) -> bool {
         valid_key(&self.source)
             && valid_key(&self.wait_type)

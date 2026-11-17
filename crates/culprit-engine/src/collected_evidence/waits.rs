@@ -85,6 +85,7 @@ impl<'a> Projection<'a> {
             .filter_map(|(class, total)| {
                 let wait_ms = total.milliseconds()?;
                 (wait_ms > 0.0).then(|| WaitStat {
+                    mechanism: None,
                     category: class.category().into(),
                     // A category is not an individual wait type. Exact native IDs and names remain in context.
                     wait_type: None,

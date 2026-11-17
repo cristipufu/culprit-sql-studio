@@ -1,42 +1,24 @@
 //! Resolve native accounting before counters cross the provider boundary. An Azure edition not recognized here
 //! stays unknown; neither a file name nor a missing Hyperscale property establishes conventional storage.
 use super::*;
-use crate::read::{boolean, optional_integer};
+use crate::{deployment::NativeDeployment, read::boolean};
 use culprit_core::{FileIoContext, IoAccounting};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct NativeContext {
-    engine_edition: Option<i64>,
-    database_edition: Option<String>,
-    replica_id: Option<String>,
+    deployment: NativeDeployment,
     updateability: Option<String>,
 }
 
 impl NativeContext {
     pub(super) fn decode(row: &Rec) -> Result<Self> {
-        let context = Self {
-            engine_edition: optional_integer(row, "engine_edition")?,
-            database_edition: optional_text(row, "database_edition")?,
-            replica_id: crate::replica::id(row, "replica_id")?,
-            updateability: optional_text(row, "updateability")?,
-        };
+        let context =
+            Self { deployment: NativeDeployment::decode(row)?, updateability: optional_text(row, "updateability")? };
         Ok(context)
     }
 
     pub(super) fn hyperscale(&self) -> bool {
-        self.engine_edition == Some(crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE)
-            && (self.database_edition.as_deref() == Some("Hyperscale") || self.replica_id.is_some())
-    }
-
-    fn conventional(&self) -> bool {
-        match self.engine_edition {
-            Some(2 | 3 | 4 | crate::probe::ENGINE_EDITION_MANAGED_INSTANCE) => true,
-            Some(crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE) if !self.hyperscale() => matches!(
-                self.database_edition.as_deref(),
-                Some("Basic" | "Standard" | "Premium" | "General Purpose" | "Business Critical")
-            ),
-            _ => false,
-        }
+        self.deployment.hyperscale()
     }
 
     pub(super) fn accounting(&self, row: &Rec, kind: FileKind) -> Result<FileIoContext> {
@@ -64,10 +46,10 @@ impl NativeContext {
                 },
                 _ => (IoAccounting::Unknown, IoAccounting::Unknown),
             };
-            return Ok(FileIoContext { read, write, replica_id: self.replica_id.clone() });
+            return Ok(FileIoContext { read, write, replica_id: self.deployment.replica_id().map(String::from) });
         }
-        let mut context = if self.conventional() { FileIoContext::STORAGE } else { FileIoContext::UNKNOWN };
-        if temporary && kind == FileKind::Log && self.conventional() {
+        let mut context = if self.deployment.conventional() { FileIoContext::STORAGE } else { FileIoContext::UNKNOWN };
+        if temporary && kind == FileKind::Log && self.deployment.conventional() {
             context.write = IoAccounting::NonDurableLog;
         }
         Ok(context)

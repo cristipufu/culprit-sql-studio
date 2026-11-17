@@ -79,6 +79,8 @@ pub fn investigation_fixture() -> InvestigationFixture {
         }),
     };
     let cost = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("owned-native-observer"),
         scope: MeasurementScope::Database,
         counters: vec![NativeCounterSample::gauge(

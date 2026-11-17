@@ -115,6 +115,7 @@ async fn collect_with_base(
                     .filter(|ms| *ms > 0.0)
                     .map(|ms| {
                         vec![WaitStat {
+                            mechanism: None,
                             category: "IO".into(),
                             wait_type: Some(t!("provider.postgres.wait.data_files")),
                             wait_ms: ms,

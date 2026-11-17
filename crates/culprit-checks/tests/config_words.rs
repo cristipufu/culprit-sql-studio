@@ -374,7 +374,7 @@ verify: Re-scan once the change has taken effect: this finding is gone."#,
 fn lock_wait(s: &mut Snapshot, id: &str, ms: f64) {
     let w = s.workload.as_mut().unwrap();
     let q = w.queries.iter_mut().find(|q| q.id == id).unwrap();
-    q.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: ms, tasks: None });
+    q.waits.push(WaitStat { mechanism: None, category: "Lock".into(), wait_type: None, wait_ms: ms, tasks: None });
     w.total_time_ms += ms;
 }
 
@@ -439,7 +439,13 @@ fn read_committed_snapshot_says_what_reads_waited() {
     let w = s.workload.as_mut().unwrap();
     w.window_hours = 146.66;
     let read = w.queries.iter_mut().find(|q| q.text.starts_with("SELECT")).unwrap();
-    read.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 71_692.0, tasks: None });
+    read.waits.push(WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: None,
+        wait_ms: 71_692.0,
+        tasks: None,
+    });
     (read.first_seen, read.last_seen, read.trend) = (None, None, None);
     w.total_time_ms = 335_668.0;
     all.extend(rcsi(&s));
@@ -714,7 +720,7 @@ fn postgres_memory_settings_say_what_they_hold() {
     set(&mut s, "shared_buffers", "128MB");
     all.extend(only(&s, "config:shared_buffers"));
     let io = s.workload.as_ref().unwrap().total_time_ms * 0.5;
-    s.waits.push(WaitStat { category: "IO".into(), wait_type: None, wait_ms: io, tasks: None });
+    s.waits.push(WaitStat { mechanism: None, category: "IO".into(), wait_type: None, wait_ms: io, tasks: None });
     s.workload.as_mut().unwrap().total_time_ms += io;
     all.extend(only(&s, "config:shared_buffers"));
     set(&mut s, "shared_buffers", "64MB");

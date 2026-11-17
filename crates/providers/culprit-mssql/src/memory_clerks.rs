@@ -155,6 +155,8 @@ fn decode(row: &Rec) -> Result<NativeCounterSet> {
         })
         .collect::<Result<Vec<_>>>()?;
     let sample = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity,
         scope: MeasurementScope::Server,
         counters,

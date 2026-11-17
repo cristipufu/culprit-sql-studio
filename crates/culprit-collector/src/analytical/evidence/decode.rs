@@ -29,6 +29,7 @@ pub(super) fn record(
     let payloads = payloads::references(values)?;
     let native = match stream {
         TelemetryStream::ResourceSamples => Decoded::Record(Box::new(resources(values)?)),
+        TelemetryStream::WaitCounterSamples => Decoded::Record(Box::new(wait_counter(values)?)),
         TelemetryStream::ActivityObservations => activity(values, &payloads)?,
         TelemetryStream::OperationalSamples
         | TelemetryStream::ObjectDefinitions
@@ -128,7 +129,32 @@ fn resources(values: &Map<String, Value>) -> Result<TelemetryRecord> {
     };
     let metrics: Vec<ResourceMetricSample> =
         serde_json::from_value(values.get("Metrics").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
-    Ok(TelemetryRecord::ResourceSample(ResourceMeasurement { at, replica_id, metrics }))
+    let data_io_accounting =
+        serde_json::from_value(values.get("DataIoAccounting").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
+    Ok(TelemetryRecord::ResourceSample(ResourceMeasurement { data_io_accounting, at, replica_id, metrics }))
+}
+
+fn wait_counter(values: &Map<String, Value>) -> Result<TelemetryRecord> {
+    let mechanism =
+        serde_json::from_value(values.get("WaitMechanism").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
+    let scope =
+        serde_json::from_value(values.get("MeasurementScope").ok_or_else(invalid)?.clone()).map_err(|_| invalid())?;
+    let mut reset = json!({"kind":text(values,"ResetKind")?});
+    if let Some(value) = optional_text(values, "ResetValue")? {
+        reset["value"] = json!(value);
+    }
+    let reset = serde_json::from_value(reset).map_err(|_| invalid())?;
+    Ok(TelemetryRecord::WaitCounter(WaitCounterObservation {
+        mechanism,
+        source: text(values, "NativeSource")?.into(),
+        wait_type: text(values, "WaitType")?.into(),
+        scope,
+        reset,
+        waiting_tasks_count: text(values, "WaitingTasks")?.into(),
+        wait_time_ms: text(values, "WaitTimeMs")?.into(),
+        signal_wait_time_ms: text(values, "SignalWaitTimeMs")?.into(),
+        max_wait_time_ms: text(values, "MaxWaitTimeMs")?.into(),
+    }))
 }
 
 fn activity(values: &Map<String, Value>, references: &payloads::References<'_>) -> Result<Decoded<TelemetryRecord>> {

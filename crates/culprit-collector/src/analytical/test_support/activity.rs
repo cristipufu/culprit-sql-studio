@@ -60,6 +60,7 @@ pub fn activity_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRec
         "SELECT payload FROM dbo.orders WHERE tenant_id=9264 AND token='private-activity-canary'",
         Engine::Mssql,
     ));
+    first.request_counters.as_mut().unwrap().page_server_reads = Some("9007199254740993".into());
     first.waiting_on_lock = Some(true);
     let mut page = first.clone();
     page.key.session.id = "63".into();

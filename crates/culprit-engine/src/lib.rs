@@ -35,6 +35,10 @@ mod fleet;
 pub mod history;
 mod http;
 pub mod import;
+mod local_captures;
+#[cfg(feature = "collector")]
+pub use local_captures::OutboxCaptureReader;
+pub use local_captures::{LocalCaptureReader, LocalCaptureRequest, LocalCaptureTask, LocalPageServerReads};
 pub mod marks;
 #[cfg(feature = "postgres")]
 pub mod native_logs;

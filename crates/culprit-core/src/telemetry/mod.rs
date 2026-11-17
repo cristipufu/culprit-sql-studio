@@ -82,6 +82,11 @@ mod runtime;
 mod runtime_distributions;
 mod session_memory;
 mod settings;
+mod source_read;
+use source_read::same_time;
+pub use source_read::{
+    NativeSourceReadScope, SourceReadFocus, SourceReadQuestion, SourceReadStage, SourceReadStageState,
+};
 mod source_partition;
 mod state;
 mod statement_counters;
@@ -294,6 +299,12 @@ impl CollectionRequest {
         self.subject.validate()?;
         self.budget.validate()?;
         match &self.selection {
+            CollectionSelection::SourceRead { focus, execution } => {
+                self.subject.require_database()?;
+                if !focus.is_valid() || !execution.matches_target(&focus.target) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
             CollectionSelection::FocusedBlocking { focus } => {
                 self.subject.require_database()?;
                 if !focus.is_blocking_focus() {
@@ -698,7 +709,8 @@ impl TelemetryRecord {
                     && row.fact.native_plan_proofs_match(source)
             }
             Self::WaitCounter(row) => {
-                source.observation.accepts_snapshot_record(TelemetryStream::WaitCounterSamples, &row.source)
+                row.is_valid_for(source.target.engine())
+                    && source.observation.accepts_snapshot_record(TelemetryStream::WaitCounterSamples, &row.source)
             }
             Self::Replication(row) => {
                 source.observation.accepts_snapshot_record(TelemetryStream::ReplicationSamples, &row.source)
@@ -870,6 +882,7 @@ pub enum SourceShutdown {
 pub enum SourceCompletion {
     Verified,
     Snapshot(StateSnapshotDescription),
+    SourceRead { snapshot: StateSnapshotDescription, execution: Box<NativeReadContext> },
     Changed,
 }
 impl SourceCompletion {

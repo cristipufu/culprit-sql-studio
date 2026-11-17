@@ -53,8 +53,11 @@ fn the_measured_question_selector_cannot_be_reinterpreted_under_the_same_recipe_
 fn request_memory_lineage_reconstructs_only_its_exact_original_request_and_tested_budget() {
     let (intent, _, _, _) = memory_intent();
     let owner = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
-    let mut request =
-        CollectionRequest { subject: intent.subject(), selection: intent.selection(), budget: intent.budget.clone() };
+    let mut request = CollectionRequest {
+        subject: intent.subject(),
+        selection: intent.selection().unwrap(),
+        budget: intent.budget.clone(),
+    };
     let mut manifest = CollectionManifest {
         investigation: Some(owner.clone()),
         request: request.clone(),
@@ -67,7 +70,8 @@ fn request_memory_lineage_reconstructs_only_its_exact_original_request_and_teste
     manifest.request = request;
     assert!(manifest.investigation_intent().is_err());
     let mut changed = intent.focus.clone();
-    changed.participant_mut().original.key.request.as_mut().unwrap().generation = "replaced-request".into();
+    changed.activity_participant_mut().unwrap().original.key.request.as_mut().unwrap().generation =
+        "replaced-request".into();
     assert!(owner.reconstruct(&changed).is_err());
 }
 

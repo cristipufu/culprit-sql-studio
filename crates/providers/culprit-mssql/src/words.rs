@@ -449,8 +449,13 @@ Page life expectancy (whole server): {shared}"
         )
     );
     assert_eq!(
-        signals(&resource_signals(&crate::resources::Summary {data_io:Some(40.0),data_io_peak:Some(86.43),memory:Some(70.0)})),
-        "Storage I/O of its limit: Average use of this database's I/O limit; peak 86.4%. The individual resource samples establish whether pressure was sustained.
+        signals(&resource_signals(&crate::resources::Summary {
+            data_io_accounting: culprit_core::telemetry::DataIoAccounting::DataFiles,
+            data_io: Some(40.0),
+            data_io_peak: Some(86.43),
+            memory: Some(70.0),
+        })),
+        "Data-file I/O: The native percentage covers reads and writes against data files relative to the data-I/O limit. Average use of this database's I/O limit; peak 86.4%. The individual resource samples establish whether pressure was sustained.
 Memory in use: of its memory limit; a full cache is normal, so it isn't graded"
     );
     let totals: HashMap<String, (f64, f64, f64)> =

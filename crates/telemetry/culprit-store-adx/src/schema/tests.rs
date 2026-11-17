@@ -291,6 +291,7 @@ fn resource_metrics_preserve_scope_units_aggregation_and_unknown_values() {
         value: None,
     };
     let native = ResourceMeasurement {
+        data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
         at: "2026-11-11T06:00:00Z".into(),
         replica_id: Some("primary".into()),
         metrics: vec![metric],
@@ -348,6 +349,7 @@ fn pool_history_keeps_absent_replica_storage_units_and_broader_host_context_in_e
 fn wait_counter_projection_preserves_unknown_reset_and_exact_cumulative_totals() {
     use culprit_core::telemetry::*;
     let native = WaitCounterObservation {
+        mechanism: None,
         source: "database_waits".into(),
         wait_type: "LCK_M_X".into(),
         scope: culprit_core::MeasurementScope::Database,

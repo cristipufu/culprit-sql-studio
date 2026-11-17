@@ -11,10 +11,8 @@ use crate::read::{NativeRead, ReadError, ReadSession};
 use crate::sources;
 use crate::waits::{self, WaitTotals};
 
-async fn counters<R: NativeRead>(reader: &mut R) -> culprit_core::Result<HashMap<String, f64>> {
-    crate::performance::read(reader, crate::performance::MAX_COUNTERS)
-        .await
-        .map(|rows| crate::performance::application(&rows))
+async fn counters<R: NativeRead>(reader: &mut R) -> culprit_core::Result<crate::performance::PerformanceRead> {
+    crate::performance::read(reader, crate::performance::MAX_COUNTERS).await
 }
 
 /// What the server's performance counters say. On Azure SQL Database they describe the server process behind the
@@ -81,13 +79,14 @@ pub(crate) fn resource_signals(summary: &crate::resources::Summary) -> Vec<Signa
     let mut signals = Vec::new();
     if let (Some(data_io), Some(peak)) = (summary.data_io, summary.data_io_peak) {
         signals.push(Signal {
-            healthy: Some(t!(
-                "provider.mssql.signal.data_io.healthy",
-                peak = format::digits(std::format!("{peak:.1}"))
+            healthy: Some(format!(
+                "{} {}",
+                summary.data_io_accounting.meaning(),
+                t!("provider.mssql.signal.data_io.healthy", peak = format::digits(std::format!("{peak:.1}")))
             )),
             ..Signal::new(
                 culprit_core::signal_id::DATA_IO,
-                culprit_core::message!("provider.mssql.signal.data_io"),
+                summary.data_io_accounting.label_message(),
                 data_io,
                 SignalUnit::Percent,
                 SignalScope::LastHour,
@@ -151,7 +150,7 @@ pub(crate) async fn collect(pool: std::sync::Arc<crate::conn::Pool>, probe: &Pro
 fn project_history(
     probe: &Probe,
     native_waits: culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
-    native_counters: culprit_core::Result<HashMap<String, f64>>,
+    native_counters: culprit_core::Result<crate::performance::PerformanceRead>,
 ) -> CollectedPressure {
     let azure = probe.is_azure_sql_database();
     // Probe uses another pooled owner. Neither it nor these native rows establishes the counter lifetime.
@@ -167,15 +166,17 @@ fn project_history(
     let native_waits = native_waits.map_err(permission);
     let native_counters = native_counters.map_err(permission);
     if let Some(counters) = coverage.read(&sources::LOGINS, native_counters.clone()) {
+        let values = crate::performance::application(&counters.sample.counters);
         p.signals.extend(crate::signals::connection_reuse_signals(
-            counters.get("Logins/sec").copied(),
-            counters.get("Connection Reset/sec").copied(),
+            values.get("Logins/sec").copied(),
+            values.get("Connection Reset/sec").copied(),
             azure,
         ));
     }
     if let Some(counters) = coverage.read(&sources::PERFORMANCE_COUNTERS, native_counters) {
-        coverage.completed(&sources::PERFORMANCE_COUNTERS, counters.len());
-        p.signals.extend(counter_signals(&counters, azure));
+        coverage.completed(&sources::PERFORMANCE_COUNTERS, counters.native_rows);
+        p.signals.extend(counter_signals(&crate::performance::application(&counters.sample.counters), azure));
+        p.resource_counters = Some(vec![counters.sample]);
     }
     let categories = if let Some(rows) = coverage.read_rows(&sources::WAITS, native_waits.clone()) {
         coverage.delivered(culprit_core::Capability::WaitStats);
@@ -195,7 +196,7 @@ async fn history(
     azure: bool,
 ) -> (
     culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
-    culprit_core::Result<HashMap<String, f64>>,
+    culprit_core::Result<crate::performance::PerformanceRead>,
 ) {
     let mut reader = ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
     history_from(&mut reader, azure).await
@@ -206,7 +207,7 @@ async fn history_from<R: NativeRead>(
     azure: bool,
 ) -> (
     culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
-    culprit_core::Result<HashMap<String, f64>>,
+    culprit_core::Result<crate::performance::PerformanceRead>,
 ) {
     let waits = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
     let counters = counters(reader).await;
@@ -348,7 +349,8 @@ pub(crate) async fn sample<R: NativeRead>(
         deltas.values().fold((0.0, 0.0), |(wait, signal), (ms, signal_ms, _)| (wait + ms, signal + signal_ms));
     let categories = waits::categories(&deltas);
 
-    let rates = crate::performance::sampled_rates(&counters_before, &counters_after, elapsed);
+    let rates =
+        crate::performance::sampled_rates(&counters_before.sample.counters, &counters_after.sample.counters, elapsed);
     let rate = |name: &str| rates.get(name).copied();
     let signals = sampled_signals(rate, signal_total, wait_total, azure);
     let view = if azure { "sys.dm_db_wait_stats" } else { "sys.dm_os_wait_stats" };
@@ -507,6 +509,7 @@ mod tests {
     #[test]
     fn aggregate_resource_counters_need_individual_samples_before_a_pressure_verdict() {
         let calm = resource_signals(&crate::resources::Summary {
+            data_io_accounting: culprit_core::telemetry::DataIoAccounting::DataFiles,
             data_io: Some(0.0),
             data_io_peak: Some(3.0),
             memory: Some(0.4),
@@ -517,6 +520,7 @@ mod tests {
         assert_eq!(
             signal(
                 &resource_signals(&crate::resources::Summary {
+                    data_io_accounting: culprit_core::telemetry::DataIoAccounting::DataFiles,
                     data_io: Some(85.0),
                     data_io_peak: Some(100.0),
                     memory: Some(90.0)

@@ -161,6 +161,7 @@ impl Budget {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Family {
+    WaitCounterSamples,
     ResourceSamples,
     OperationalSamples,
     ActivityObservations,
@@ -175,6 +176,7 @@ enum Family {
 impl From<Family> for EvidenceFamily {
     fn from(family: Family) -> Self {
         match family {
+            Family::WaitCounterSamples => Self::WaitCounterSamples,
             Family::ResourceSamples => Self::ResourceSamples,
             Family::OperationalSamples => Self::OperationalSamples,
             Family::ActivityObservations => Self::ActivityObservations,
@@ -218,6 +220,7 @@ enum Analysis {
     CurrentRequestWork,
     Replication,
     ConnectionOutcomes,
+    CounterRatios,
     Cleanup,
     Tuning,
 }
@@ -247,6 +250,7 @@ impl Analysis {
             | Self::TaskSpace
             | Self::StatementWork
             | Self::CompletedSpills
+            | Self::CounterRatios
             | Self::ConnectionOutcomes
             | Self::StatementGrants
             | Self::CacheEntryMemory
@@ -409,6 +413,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::Replication) => {
             let analysis = culprit_engine::collected_resources::replication(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::replication(&analysis.report))?;
+        }
+        Some(Analysis::CounterRatios) => {
+            let analysis = culprit_engine::collected_resources::counter_ratios(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::counter_ratios(&analysis.report))?;
         }
         Some(Analysis::ConnectionOutcomes) => {
             let analysis = culprit_engine::collected_resources::connection_outcomes(&capture)?;

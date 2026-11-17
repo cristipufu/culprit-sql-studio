@@ -9,6 +9,7 @@ import { ENGINES } from "./engines";
 
 function recorded(engine: Engine, mean: number | null, executions: number): WaitsReport {
   const category = partial<WaitCategory>({
+    mechanisms: [],
     key: "lock", label: "Native locks", wait_ms: 6_000, share: 1,
     top_wait: "native-lock", meaning: "The source's recorded native category.", detail: null, attribution: null,
     queries: [{

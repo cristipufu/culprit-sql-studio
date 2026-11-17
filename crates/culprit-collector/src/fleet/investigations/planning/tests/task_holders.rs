@@ -51,6 +51,7 @@ async fn missing_original_task_page_never_chooses_a_current_actor_or_opens_a_sou
         recovery: None,
         cancellation: &cancellation,
         population_frames: BTreeMap::new(),
+        execution_owners: BTreeMap::new(),
     };
     assert!(
         evidence

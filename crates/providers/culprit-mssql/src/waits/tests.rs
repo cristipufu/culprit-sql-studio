@@ -85,6 +85,7 @@ async fn missing_or_regressing_counters_including_idle_waits_invalidate_the_shor
 #[test]
 fn invalid_wire_counts_and_reset_markers_are_rejected() {
     let base = WaitCounterObservation {
+        mechanism: None,
         source: "waits".into(),
         wait_type: "WRITELOG".into(),
         scope: MeasurementScope::Database,
@@ -122,4 +123,39 @@ fn categorises_wait_types() {
     assert_eq!(wait_type_category("RESOURCE_SEMAPHORE"), "Memory");
     assert_eq!(wait_type_category("CXPACKET"), "Parallelism");
     assert_eq!(wait_type_category("ASYNC_NETWORK_IO"), "Network");
+}
+
+#[tokio::test]
+async fn each_native_rbio_mechanism_keeps_raw_counter_identity_and_a_separate_scan_subtotal() {
+    let names = [
+        "RBIO_RG_STORAGE",
+        "RBIO_RG_REPLICA",
+        "RBIO_RG_LOCALDESTAGE",
+        "RBIO_RG_DESTAGE",
+        "RBIO_RG_GEOREPLICA",
+        "RBIO_RG_STORAGE_CHECKPOINT",
+        "RBIO_RG_MIGRATION_TARGET",
+    ];
+    let mut native: Vec<_> = names.iter().map(|name| row(name, 9_007_199_254_740_993)).collect();
+    native.push(row("WRITELOG", 100));
+    native.push(row("RBIO_RG_FUTURE_COMPONENT", 200));
+    let mut io = FakeRead::new(vec![Ok(native)]);
+    let records = read(&mut io, true, 500).await.unwrap();
+    let display = categories(&totals(&records));
+    for name in names {
+        let raw = records.iter().find(|raw| raw.wait_type == name).unwrap();
+        assert_eq!(raw.wait_time_ms, "9007199254740993");
+        assert_eq!(raw.reset, ResetMarker::Unknown);
+        let shown = display.iter().find(|shown| shown.mechanism == raw.mechanism).unwrap();
+        assert_eq!(shown.category, "Log Governance");
+        assert_eq!(shown.wait_type.as_deref(), Some(name));
+    }
+    assert_eq!(display.iter().filter(|row| row.category == "Log Governance").count(), 7);
+    assert!(display.iter().any(|row| row.category == "Log" && row.mechanism.is_none()));
+    assert!(
+        display
+            .iter()
+            .any(|row| row.category == "Other" && row.wait_type.as_deref() == Some("RBIO_RG_FUTURE_COMPONENT"))
+    );
+    assert_eq!(io.calls.len(), 1);
 }

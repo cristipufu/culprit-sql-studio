@@ -366,7 +366,13 @@ pub(in crate::checks::queries) fn idle_time(snapshot: &Snapshot, q: &QueryStat) 
         let explains_idle = match class {
             Some(WaitClass::Lock | WaitClass::Network | WaitClass::Memory | WaitClass::Latch) => true,
             // These classes need their own diagnosis, not a guessed idle cause.
-            Some(WaitClass::Io | WaitClass::Log | WaitClass::Parallelism | WaitClass::Compilation) => return None,
+            Some(
+                WaitClass::Io
+                | WaitClass::Log
+                | WaitClass::LogGovernance
+                | WaitClass::Parallelism
+                | WaitClass::Compilation,
+            ) => return None,
             Some(_) | None => false,
         };
         if let (true, Some(w), Some(class)) = (explains_idle, top, class) {

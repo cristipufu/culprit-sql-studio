@@ -9,6 +9,8 @@ fn row(name: &str, value: u64, nature: CounterNature) -> NativeCounterSet {
         NativeCounterSample::gauge(name, value, CounterUnit::Count, MeasurementScope::Server, "global-status", name);
     counter.nature = nature;
     NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(name),
         scope: MeasurementScope::Server,
         counters: vec![counter],

@@ -207,9 +207,12 @@ impl Files {
         };
         let original_frame = paired_original.as_ref().map(DiagnosticInput::activity_frame).transpose()?;
         for revision in &update.revisions {
-            if let Some(event) = &revision.investigation {
-                self.validate_investigation_event(event)?;
-            }
+            let source_read_result = revision
+                .investigation
+                .as_deref()
+                .map(|event| self.validate_investigation_event(event, &current))
+                .transpose()?
+                .flatten();
             if revision.previous_revision.is_none() {
                 validate_new_episode(&current, &revision.episode, original_frame.as_ref())?;
             }
@@ -223,7 +226,7 @@ impl Files {
             }
             if let Some(intent) = &intent
                 && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
-                && (!revision.inputs.contains(&intent.focus.participant().parent) || !revision.inputs.contains(owner))
+                && (!revision.inputs.contains(intent.focus.parent()) || !revision.inputs.contains(owner))
             {
                 return Err(integrity());
             }
@@ -296,6 +299,7 @@ impl Files {
                 .checkpoint
                 .as_ref()
                 .and_then(|checkpoint| checkpoint.episodes.iter().find(|episode| episode.id == revision.episode.id));
+            self.validate_source_read_revision(prior, revision, source_read_result.as_ref())?;
             if revision.episode.lifecycle == DiagnosticLifecycle::Resolved
                 && prior.is_none_or(|episode| episode.lifecycle != DiagnosticLifecycle::Resolved)
             {
@@ -466,8 +470,20 @@ impl Files {
         Ok(())
     }
 
-    fn validate_investigation_event(&mut self, event: &DiagnosticInvestigationEvent) -> Result<()> {
+    fn validate_investigation_event(
+        &mut self,
+        event: &DiagnosticInvestigationEvent,
+        input: &DiagnosticInput,
+    ) -> Result<Option<CollectionDescription>> {
+        if !event.is_valid() {
+            return Err(integrity());
+        }
         self.verify_investigation_intent(&event.intent)?;
+        if matches!(event.intent.focus, DiagnosticFocus::SourceRead { .. })
+            && matches!(event.outcome, DiagnosticInvestigationOutcome::Captured { .. })
+        {
+            return self.validate_source_read_capture(event, input).map(Some);
+        }
         if let Some(attempt) = &event.attempt {
             let owner = DiagnosticInvestigationLineage::from_intent(&event.intent)?;
             if attempt.manifest_sha256.is_some() {
@@ -494,7 +510,7 @@ impl Files {
                 return Err(integrity());
             }
         }
-        Ok(())
+        Ok(None)
     }
 }
 

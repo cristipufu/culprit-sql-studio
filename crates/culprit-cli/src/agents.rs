@@ -2,6 +2,7 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::{Args, Subcommand, ValueEnum};
 use culprit_core::{Error, Result};
@@ -10,11 +11,16 @@ use serde_json::json;
 
 use crate::output::{Format, Out};
 
+#[cfg(test)]
+mod local_capture_tests;
+
 #[derive(Args)]
 pub struct McpArgs {
     /// Expose only this connection (repeatable). Defaults to every connection whose agent access isn't `off`.
     #[arg(long = "connection", value_name = "NAME")]
     pub connections: Vec<String>,
+    #[arg(long, value_name = "DIRECTORY", help=culprit_core::t!("mcp.local_capture.outbox"))]
+    pub evidence_outbox: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -113,7 +119,15 @@ pub async fn mcp(ws: Workspace, args: McpArgs) -> Result<u8> {
         ws.connection(name)?;
     }
     let options = culprit_mcp::Options { connections: args.connections, ..Default::default() };
-    culprit_mcp::serve_stdio(ws, options).await?;
+    let mut server = culprit_mcp::CulpritMcp::new(Arc::new(ws), options);
+    if let Some(directory) = args.evidence_outbox {
+        let reader = culprit_engine::OutboxCaptureReader::directory(
+            directory,
+            culprit_collector::outbox::CompletedCaptureBudget::default(),
+        )?;
+        server = server.with_local_captures(Arc::new(reader));
+    }
+    culprit_mcp::serve_stdio(server).await?;
     Ok(0)
 }
 

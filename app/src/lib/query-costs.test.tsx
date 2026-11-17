@@ -45,7 +45,7 @@ test(`Query cost rendering follows shared statement metrics for all ${profiles.l
     check(!unknown.includes("track_planning is off"), `${engine}: missing evidence was reported as an off setting`);
     query.text = "UPDATE public.orders SET status = 'paid'";
     query.costs.log_bytes = 102400;
-    query.waits = [{ category: "Lock", wait_type: null, wait_ms: 1000, tasks: null }];
+    query.waits = [{ category: "Lock", wait_type: null, mechanism: null, wait_ms: 1000, tasks: null }];
     const io = renderToStaticMarkup(createElement(QueryCostsPanel, { report, query }));
     check(io.includes(`>${t(metrics.log_label)}</span>`), `${product}: wrong log terminology`);
     check(io.includes(">Lock waits</span>") === metrics.lock_time, `${product}: another source's lock timing leaked`);

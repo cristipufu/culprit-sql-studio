@@ -45,7 +45,11 @@ const CATEGORIES: &[Category] = &[
     Category { id: 20, native_name: "Full Text Search", disposition: WaitDisposition::Analyze(WaitClass::Other) },
     Category { id: 21, native_name: "Other Disk IO", disposition: WaitDisposition::Analyze(WaitClass::Io) },
     Category { id: 22, native_name: "Replication", disposition: WaitDisposition::Analyze(WaitClass::Other) },
-    Category { id: 23, native_name: "Log Rate Governor", disposition: WaitDisposition::Analyze(WaitClass::Log) },
+    Category {
+        id: 23,
+        native_name: "Log Rate Governor",
+        disposition: WaitDisposition::Analyze(WaitClass::LogGovernance),
+    },
 ];
 
 pub(crate) fn semantics(capture: WaitCaptureState) -> QueryWaitSemantics {
@@ -174,6 +178,7 @@ pub(crate) fn fold<'a>(items: impl IntoIterator<Item = &'a Summary>) -> Folded {
     let mut values = by_category
         .into_iter()
         .map(|(category, (wait_ms, sources))| WaitStat {
+            mechanism: None,
             category: category.into(),
             wait_type: sources.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(source, _)| source),
             wait_ms,

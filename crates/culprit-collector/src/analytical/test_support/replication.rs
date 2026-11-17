@@ -163,6 +163,8 @@ fn native(
     counters: &[(&str, u64, CounterUnit)],
 ) -> ReplicationObservation {
     let measurements = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(source).qualified("native_id", id),
         scope: MeasurementScope::Server,
         properties: properties.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect(),

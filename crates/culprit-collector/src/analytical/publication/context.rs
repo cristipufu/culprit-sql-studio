@@ -19,6 +19,11 @@ enum PublicObservation<'a> {
         closure: &'a BlockingClosureDescription,
     },
     Snapshot(&'a StateSnapshotDescription),
+    SourceReadContext {
+        snapshot: &'a StateSnapshotDescription,
+        focus_key: &'a str,
+        execution_key: String,
+    },
     Jobs {
         snapshot: &'a StateSnapshotDescription,
         metadata: &'a TimescaleJobsMetadata,
@@ -121,6 +126,11 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
             closure: &result.closure,
         },
         SourceObservation::Snapshot(value) => PublicObservation::Snapshot(value),
+        SourceObservation::SourceRead { snapshot, focus_key, execution } => PublicObservation::SourceReadContext {
+            snapshot,
+            focus_key,
+            execution_key: NativeSourceReadScope::from_context(execution)?.key()?,
+        },
         SourceObservation::PageWaitTargets { snapshot, database_writable, original_activity } => {
             PublicObservation::PageWaitTargetsContext {
                 snapshot,
@@ -193,7 +203,9 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::Diagnostics(value) => {
             PublicObservation::DiagnosticContext(super::super::investigations::diagnostic_context(value)?)
         }
-        SourceObservation::PagedSnapshot(_) => return Err(DeliveryProblem::Integrity.error()),
+        SourceObservation::PagedSnapshot(_) | SourceObservation::PagedSourceRead { .. } => {
+            return Err(DeliveryProblem::Integrity.error());
+        }
     };
     serde_json::to_value(projected).map_err(|_| DeliveryProblem::Integrity.error())
 }

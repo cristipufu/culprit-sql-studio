@@ -16,6 +16,7 @@ mod compilation;
 mod compilation_definitions;
 mod compiler_admission;
 mod completed_spills;
+mod counter_ratios;
 mod current_request_work;
 mod diagnostics;
 mod file_io;
@@ -33,6 +34,7 @@ mod parameters;
 mod populations;
 mod queries;
 mod replication;
+mod resource_io;
 mod source_overhead;
 mod source_partitions;
 mod statement_grants;
@@ -63,7 +65,9 @@ impl Fixture {
         let mut recovery = Recovery::capture("adx:test", catalog.digest(), source, records, 50_000);
         recovery.manifest.source_queries = source_queries;
         recovery.manifest.read_metrics = metrics;
-        let recovery = Arc::new(recovery);
+        Self::from_recovery(catalog, Arc::new(recovery)).await
+    }
+    async fn from_recovery(catalog: Arc<SchemaCatalog>, recovery: Arc<Recovery>) -> Self {
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
         let scratch = tempfile::tempdir().unwrap();

@@ -33,6 +33,7 @@ pub(crate) fn statement_io_waits(statements_io_ms: f64) -> Vec<WaitStat> {
         return Vec::new();
     }
     vec![WaitStat {
+        mechanism: None,
         category: "IO".into(),
         wait_type: Some(t!("provider.postgres.wait.data_files")),
         wait_ms: statements_io_ms,
@@ -414,6 +415,7 @@ pub async fn sample(client: &Client, seconds: u32) -> Result<WaitSample> {
     let mut categories: Vec<WaitStat> = by_category
         .into_iter()
         .map(|(category, (n, top, _))| WaitStat {
+            mechanism: None,
             category: category.into(),
             wait_type: Some(top),
             wait_ms: n / samples * elapsed * 1000.0,

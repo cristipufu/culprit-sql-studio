@@ -108,10 +108,22 @@ pub struct WaitQuery {
     pub rows_per_run: Option<f64>,
 }
 
+/// An independently typed native mechanism subtotal. The containing report owns its original measurement period;
+/// a historical counter does not identify a current named component or a current application incident.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct WaitMechanismSummary {
+    pub mechanism: crate::telemetry::WaitMechanism,
+    pub label: String,
+    pub native_types: Vec<String>,
+    pub wait_ms: f64,
+}
+
 /// One category of waiting, explained in plain words.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct WaitCategory {
+    pub mechanisms: Vec<WaitMechanismSummary>,
     /// Stable analytical key from [`WaitClass::key`].
     pub key: String,
     /// What a person calls it, e.g. "Sending results".
@@ -542,6 +554,9 @@ pub fn category_info(key: &str, engine: Engine) -> (String, String) {
                 Engine::Sqlite => t!("core.waits.category.log.meaning.sqlite"),
             },
         ),
+        "log-governance" => {
+            (t!("core.waits.category.log_governance.label"), t!("core.waits.category.log_governance.meaning"))
+        }
         "network" => {
             (t!("core.waits.category.network.label"), t!("core.waits.category.network.meaning", engine = name))
         }
@@ -571,6 +586,7 @@ pub fn category_gist(key: &str, engine: Engine) -> String {
             Engine::Mssql => t!("core.waits.category.log.gist.mssql"),
             Engine::Sqlite => t!("core.waits.category.log.gist.sqlite"),
         },
+        "log-governance" => t!("core.waits.category.log_governance.gist"),
         "network" => t!("core.waits.category.network.gist", engine = engine.label()),
         "parallelism" => t!("core.waits.category.parallelism.gist"),
         "memory" => t!("core.waits.category.memory.gist"),
@@ -596,7 +612,8 @@ pub fn known_category_key(category: &str) -> Option<&'static str> {
         "rows" | "table io" => "rows",
         "lock" => "lock",
         "latch" | "buffer latch" | "lwlock" | "bufferpin" => "latch",
-        "log" | "tran log io" | "log rate governor" | "wal" => "log",
+        "log" | "tran log io" | "wal" => "log",
+        "log-governance" | "log governance" | "log rate governor" => "log-governance",
         "network" | "network io" | "client" => "network",
         "parallelism" => "parallelism",
         "memory" => "memory",
@@ -614,7 +631,8 @@ mod tests {
         let snapshot: crate::Snapshot =
             serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
         let mut query = snapshot.queries()[0].clone();
-        query.waits = vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: 40.0, tasks: None }];
+        query.waits =
+            vec![WaitStat { mechanism: None, category: "IO".into(), wait_type: None, wait_ms: 40.0, tasks: None }];
         query.waits_coverage = None;
         query.spread = None;
         query
@@ -640,7 +658,13 @@ mod tests {
         assert_eq!(query.observed_wait_ms(WaitClass::Io), Some(40.0));
         assert_eq!(query.measured_wait_ms(WaitClass::Io), None);
         assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
-        query.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 15.0, tasks: None });
+        query.waits.push(WaitStat {
+            mechanism: None,
+            category: "Lock".into(),
+            wait_type: None,
+            wait_ms: 15.0,
+            tasks: None,
+        });
         assert_eq!(query.observed_wait_ms(WaitClass::Lock), Some(15.0));
         assert_eq!(query.measured_wait_ms(WaitClass::Lock), None);
     }
@@ -695,7 +719,13 @@ mod tests {
     #[test]
     fn withdrawing_invalid_lock_measurements_also_withdraws_their_zero_qualification() {
         let mut query = query_with_waits();
-        query.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 15.0, tasks: None });
+        query.waits.push(WaitStat {
+            mechanism: None,
+            category: "Lock".into(),
+            wait_type: None,
+            wait_ms: 15.0,
+            tasks: None,
+        });
         query.waits_coverage =
             Some(QueryWaitCoverage { classes: vec![WaitClass::Io, WaitClass::Lock], complete: true });
         query.spread = Some(crate::Spread { lock_ms: Some(15.0), ..Default::default() });
@@ -830,6 +860,8 @@ Sqlite other: Everything else | Everything SQLite doesn't break down further."#
     fn engine_categories_share_keys() {
         assert_eq!(category_key("Network"), "network");
         assert_eq!(category_key("Tran Log IO"), "log");
+        assert_eq!(category_key("Log Rate Governor"), "log-governance");
+        assert_eq!(category_key("Log Governance"), "log-governance");
         assert_eq!(category_key("LWLock"), "latch");
         assert_eq!(category_key("Table IO"), "rows");
         assert_eq!(category_key("Idle"), "other");

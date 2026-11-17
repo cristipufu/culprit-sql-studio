@@ -124,7 +124,11 @@ impl<R: NativeRead> ActivityReader<R> {
         let limit = self.options.budget.max_snapshot_rows.min(MAX_PAGE_WAIT_OBSERVATIONS as u32) as usize;
         let rows = self
             .io
-            .query(&sql::observation(self.options.identity), vec![Parameter::Integer(limit as i64 + 1)], limit + 1)
+            .query(
+                &sql::observation(self.options.identity, self.request_page_server_read_capability),
+                vec![Parameter::Integer(limit as i64 + 1)],
+                limit + 1,
+            )
             .await
             .map_err(ReadError::into_error)?;
         if rows.len() > limit + 1 {

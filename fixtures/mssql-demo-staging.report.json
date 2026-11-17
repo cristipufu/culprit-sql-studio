@@ -1485,7 +1485,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 10,
+    "format": 11,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {
@@ -2046,15 +2046,15 @@
           "value": 43.00887499999999
         },
         {
-          "healthy": "7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 26.25%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.",
+          "healthy": "The native source reports I/O utilization against its limit, but does not establish which I/O it accounts for. 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 26.25%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.",
           "key": "data-io",
-          "label": "Storage I/O used against its limit",
+          "label": "Data I/O (accounting unknown)",
           "label_message": {
             "kind": "text",
-            "text": "Storage I/O used against its limit"
+            "text": "Data I/O (accounting unknown)"
           },
           "scope": "last-hour",
-          "status": "good",
+          "status": "info",
           "unit": "percent",
           "value": 14.772333333333329
         },
@@ -2105,6 +2105,7 @@
       {
         "at": "2026-10-11T11:00:00Z",
         "cpu_pct": 35.89,
+        "data_io_accounting": "unknown",
         "data_io_pct": 11.21,
         "log_write_pct": 48.41,
         "memory_pct": 72.29,
@@ -2113,6 +2114,7 @@
       {
         "at": "2026-10-11T11:00:15Z",
         "cpu_pct": 37.55,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.75,
         "log_write_pct": 47.75,
         "memory_pct": 72.15,
@@ -2121,6 +2123,7 @@
       {
         "at": "2026-10-11T11:00:30Z",
         "cpu_pct": 35.15,
+        "data_io_accounting": "unknown",
         "data_io_pct": 11.31,
         "log_write_pct": 48.05,
         "memory_pct": 75.31,
@@ -2129,6 +2132,7 @@
       {
         "at": "2026-10-11T11:00:45Z",
         "cpu_pct": 38.14,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.89,
         "log_write_pct": 58.01,
         "memory_pct": 74.31,
@@ -2137,6 +2141,7 @@
       {
         "at": "2026-10-11T11:01:00Z",
         "cpu_pct": 48.31,
+        "data_io_accounting": "unknown",
         "data_io_pct": 11.53,
         "log_write_pct": 58.14,
         "memory_pct": 73.16,
@@ -2145,6 +2150,7 @@
       {
         "at": "2026-10-11T11:01:15Z",
         "cpu_pct": 39.14,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.91,
         "log_write_pct": 58.96,
         "memory_pct": 72.72,
@@ -2153,6 +2159,7 @@
       {
         "at": "2026-10-11T11:01:30Z",
         "cpu_pct": 46.5,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.71,
         "log_write_pct": 56.1,
         "memory_pct": 72.25,
@@ -2161,6 +2168,7 @@
       {
         "at": "2026-10-11T11:01:45Z",
         "cpu_pct": 42.39,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.46,
         "log_write_pct": 55.54,
         "memory_pct": 73.26,
@@ -2169,6 +2177,7 @@
       {
         "at": "2026-10-11T11:02:00Z",
         "cpu_pct": 60.43,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.7,
         "log_write_pct": 99.6,
         "memory_pct": 75.18,
@@ -2177,6 +2186,7 @@
       {
         "at": "2026-10-11T11:02:15Z",
         "cpu_pct": 58.96,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.17,
         "log_write_pct": 99.6,
         "memory_pct": 74.1,
@@ -2185,6 +2195,7 @@
       {
         "at": "2026-10-11T11:02:30Z",
         "cpu_pct": 65.81,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.16,
         "log_write_pct": 99.6,
         "memory_pct": 75.92,
@@ -2193,6 +2204,7 @@
       {
         "at": "2026-10-11T11:02:45Z",
         "cpu_pct": 63.05,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.18,
         "log_write_pct": 99.6,
         "memory_pct": 72.61,
@@ -2201,6 +2213,7 @@
       {
         "at": "2026-10-11T11:03:00Z",
         "cpu_pct": 59.46,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.74,
         "log_write_pct": 99.6,
         "memory_pct": 75.06,
@@ -2209,6 +2222,7 @@
       {
         "at": "2026-10-11T11:03:15Z",
         "cpu_pct": 70.41,
+        "data_io_accounting": "unknown",
         "data_io_pct": 16.17,
         "log_write_pct": 99.6,
         "memory_pct": 74.78,
@@ -2217,6 +2231,7 @@
       {
         "at": "2026-10-11T11:03:30Z",
         "cpu_pct": 67.74,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.58,
         "log_write_pct": 99.6,
         "memory_pct": 75.36,
@@ -2225,6 +2240,7 @@
       {
         "at": "2026-10-11T11:03:45Z",
         "cpu_pct": 67.31,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.5,
         "log_write_pct": 99.6,
         "memory_pct": 72.24,
@@ -2233,6 +2249,7 @@
       {
         "at": "2026-10-11T11:04:00Z",
         "cpu_pct": 70.18,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.39,
         "log_write_pct": 99.6,
         "memory_pct": 75.29,
@@ -2241,6 +2258,7 @@
       {
         "at": "2026-10-11T11:04:15Z",
         "cpu_pct": 67.79,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.04,
         "log_write_pct": 99.6,
         "memory_pct": 72.09,
@@ -2249,6 +2267,7 @@
       {
         "at": "2026-10-11T11:04:30Z",
         "cpu_pct": 65.88,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.87,
         "log_write_pct": 99.6,
         "memory_pct": 72.24,
@@ -2257,6 +2276,7 @@
       {
         "at": "2026-10-11T11:04:45Z",
         "cpu_pct": 66.06,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.16,
         "log_write_pct": 99.6,
         "memory_pct": 73.56,
@@ -2265,6 +2285,7 @@
       {
         "at": "2026-10-11T11:05:00Z",
         "cpu_pct": 66.08,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.01,
         "log_write_pct": 99.6,
         "memory_pct": 74.2,
@@ -2273,6 +2294,7 @@
       {
         "at": "2026-10-11T11:05:15Z",
         "cpu_pct": 75.49,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.55,
         "log_write_pct": 99.6,
         "memory_pct": 73.11,
@@ -2281,6 +2303,7 @@
       {
         "at": "2026-10-11T11:05:30Z",
         "cpu_pct": 70.46,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.94,
         "log_write_pct": 99.6,
         "memory_pct": 75.83,
@@ -2289,6 +2312,7 @@
       {
         "at": "2026-10-11T11:05:45Z",
         "cpu_pct": 54.7,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.94,
         "log_write_pct": 57.35,
         "memory_pct": 73.94,
@@ -2297,6 +2321,7 @@
       {
         "at": "2026-10-11T11:06:00Z",
         "cpu_pct": 56.12,
+        "data_io_accounting": "unknown",
         "data_io_pct": 16.33,
         "log_write_pct": 59.45,
         "memory_pct": 73.48,
@@ -2305,6 +2330,7 @@
       {
         "at": "2026-10-11T11:06:15Z",
         "cpu_pct": 64.73,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.02,
         "log_write_pct": 59.99,
         "memory_pct": 74.47,
@@ -2313,6 +2339,7 @@
       {
         "at": "2026-10-11T11:06:30Z",
         "cpu_pct": 54.2,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.89,
         "log_write_pct": 63.11,
         "memory_pct": 75.5,
@@ -2321,6 +2348,7 @@
       {
         "at": "2026-10-11T11:06:45Z",
         "cpu_pct": 58.46,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.08,
         "log_write_pct": 51.07,
         "memory_pct": 74.54,
@@ -2329,6 +2357,7 @@
       {
         "at": "2026-10-11T11:07:00Z",
         "cpu_pct": 54.7,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.74,
         "log_write_pct": 50.7,
         "memory_pct": 73.36,
@@ -2337,6 +2366,7 @@
       {
         "at": "2026-10-11T11:07:15Z",
         "cpu_pct": 53.98,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.45,
         "log_write_pct": 48.34,
         "memory_pct": 73.45,
@@ -2345,6 +2375,7 @@
       {
         "at": "2026-10-11T11:07:30Z",
         "cpu_pct": 64.49,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.33,
         "log_write_pct": 47.62,
         "memory_pct": 73.01,
@@ -2353,6 +2384,7 @@
       {
         "at": "2026-10-11T11:07:45Z",
         "cpu_pct": 58.33,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.56,
         "log_write_pct": 57.3,
         "memory_pct": 75.97,
@@ -2361,6 +2393,7 @@
       {
         "at": "2026-10-11T11:08:00Z",
         "cpu_pct": 59.66,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.41,
         "log_write_pct": 43.78,
         "memory_pct": 73.37,
@@ -2369,6 +2402,7 @@
       {
         "at": "2026-10-11T11:08:15Z",
         "cpu_pct": 63.64,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.16,
         "log_write_pct": 40.91,
         "memory_pct": 75.8,
@@ -2377,6 +2411,7 @@
       {
         "at": "2026-10-11T11:08:30Z",
         "cpu_pct": 55.24,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.35,
         "log_write_pct": 39.34,
         "memory_pct": 74.11,
@@ -2385,6 +2420,7 @@
       {
         "at": "2026-10-11T11:08:45Z",
         "cpu_pct": 63.56,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.71,
         "log_write_pct": 41.45,
         "memory_pct": 73.47,
@@ -2393,6 +2429,7 @@
       {
         "at": "2026-10-11T11:09:00Z",
         "cpu_pct": 62.12,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.52,
         "log_write_pct": 48.11,
         "memory_pct": 73.32,
@@ -2401,6 +2438,7 @@
       {
         "at": "2026-10-11T11:09:15Z",
         "cpu_pct": 62.2,
+        "data_io_accounting": "unknown",
         "data_io_pct": 26.25,
         "log_write_pct": 47.68,
         "memory_pct": 75.22,
@@ -2409,6 +2447,7 @@
       {
         "at": "2026-10-11T11:09:30Z",
         "cpu_pct": 60.88,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.28,
         "log_write_pct": 40.74,
         "memory_pct": 73.42,
@@ -2417,6 +2456,7 @@
       {
         "at": "2026-10-11T11:09:45Z",
         "cpu_pct": 51.83,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.8,
         "log_write_pct": 35.07,
         "memory_pct": 74.77,
@@ -2425,6 +2465,7 @@
       {
         "at": "2026-10-11T11:10:00Z",
         "cpu_pct": 56.3,
+        "data_io_accounting": "unknown",
         "data_io_pct": 26.14,
         "log_write_pct": 45.26,
         "memory_pct": 75.82,
@@ -2433,6 +2474,7 @@
       {
         "at": "2026-10-11T11:10:15Z",
         "cpu_pct": 52.96,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.54,
         "log_write_pct": 31.2,
         "memory_pct": 72.82,
@@ -2441,6 +2483,7 @@
       {
         "at": "2026-10-11T11:10:30Z",
         "cpu_pct": 60.45,
+        "data_io_accounting": "unknown",
         "data_io_pct": 25.51,
         "log_write_pct": 34.4,
         "memory_pct": 74.61,
@@ -2449,6 +2492,7 @@
       {
         "at": "2026-10-11T11:10:45Z",
         "cpu_pct": 49.95,
+        "data_io_accounting": "unknown",
         "data_io_pct": 24.13,
         "log_write_pct": 40.06,
         "memory_pct": 75.13,
@@ -2457,6 +2501,7 @@
       {
         "at": "2026-10-11T11:11:00Z",
         "cpu_pct": 53.91,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.33,
         "log_write_pct": 37.0,
         "memory_pct": 73.33,
@@ -2465,6 +2510,7 @@
       {
         "at": "2026-10-11T11:11:15Z",
         "cpu_pct": 59.02,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.1,
         "log_write_pct": 29.79,
         "memory_pct": 75.79,
@@ -2473,6 +2519,7 @@
       {
         "at": "2026-10-11T11:11:30Z",
         "cpu_pct": 48.56,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.98,
         "log_write_pct": 24.89,
         "memory_pct": 75.62,
@@ -2481,6 +2528,7 @@
       {
         "at": "2026-10-11T11:11:45Z",
         "cpu_pct": 47.38,
+        "data_io_accounting": "unknown",
         "data_io_pct": 25.6,
         "log_write_pct": 37.4,
         "memory_pct": 74.63,
@@ -2489,6 +2537,7 @@
       {
         "at": "2026-10-11T11:12:00Z",
         "cpu_pct": 65.28,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.05,
         "log_write_pct": 99.6,
         "memory_pct": 72.06,
@@ -2497,6 +2546,7 @@
       {
         "at": "2026-10-11T11:12:15Z",
         "cpu_pct": 65.53,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.21,
         "log_write_pct": 99.6,
         "memory_pct": 75.73,
@@ -2505,6 +2555,7 @@
       {
         "at": "2026-10-11T11:12:30Z",
         "cpu_pct": 67.2,
+        "data_io_accounting": "unknown",
         "data_io_pct": 25.6,
         "log_write_pct": 99.6,
         "memory_pct": 72.84,
@@ -2513,6 +2564,7 @@
       {
         "at": "2026-10-11T11:12:45Z",
         "cpu_pct": 59.23,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.9,
         "log_write_pct": 99.6,
         "memory_pct": 74.35,
@@ -2521,6 +2573,7 @@
       {
         "at": "2026-10-11T11:13:00Z",
         "cpu_pct": 59.69,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.0,
         "log_write_pct": 99.6,
         "memory_pct": 75.64,
@@ -2529,6 +2582,7 @@
       {
         "at": "2026-10-11T11:13:15Z",
         "cpu_pct": 59.09,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.58,
         "log_write_pct": 99.6,
         "memory_pct": 75.62,
@@ -2537,6 +2591,7 @@
       {
         "at": "2026-10-11T11:13:30Z",
         "cpu_pct": 63.5,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.88,
         "log_write_pct": 99.6,
         "memory_pct": 74.13,
@@ -2545,6 +2600,7 @@
       {
         "at": "2026-10-11T11:13:45Z",
         "cpu_pct": 51.6,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.34,
         "log_write_pct": 99.6,
         "memory_pct": 72.73,
@@ -2553,6 +2609,7 @@
       {
         "at": "2026-10-11T11:14:00Z",
         "cpu_pct": 59.84,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.13,
         "log_write_pct": 99.6,
         "memory_pct": 73.89,
@@ -2561,6 +2618,7 @@
       {
         "at": "2026-10-11T11:14:15Z",
         "cpu_pct": 55.78,
+        "data_io_accounting": "unknown",
         "data_io_pct": 21.29,
         "log_write_pct": 99.6,
         "memory_pct": 74.07,
@@ -2569,6 +2627,7 @@
       {
         "at": "2026-10-11T11:14:30Z",
         "cpu_pct": 57.37,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.45,
         "log_write_pct": 99.6,
         "memory_pct": 74.24,
@@ -2577,6 +2636,7 @@
       {
         "at": "2026-10-11T11:14:45Z",
         "cpu_pct": 50.12,
+        "data_io_accounting": "unknown",
         "data_io_pct": 24.69,
         "log_write_pct": 99.6,
         "memory_pct": 74.03,
@@ -2585,6 +2645,7 @@
       {
         "at": "2026-10-11T11:15:00Z",
         "cpu_pct": 54.76,
+        "data_io_accounting": "unknown",
         "data_io_pct": 25.71,
         "log_write_pct": 99.6,
         "memory_pct": 73.77,
@@ -2593,6 +2654,7 @@
       {
         "at": "2026-10-11T11:15:15Z",
         "cpu_pct": 50.55,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.4,
         "log_write_pct": 99.6,
         "memory_pct": 74.77,
@@ -2601,6 +2663,7 @@
       {
         "at": "2026-10-11T11:15:30Z",
         "cpu_pct": 49.73,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.01,
         "log_write_pct": 99.6,
         "memory_pct": 75.77,
@@ -2609,6 +2672,7 @@
       {
         "at": "2026-10-11T11:15:45Z",
         "cpu_pct": 38.71,
+        "data_io_accounting": "unknown",
         "data_io_pct": 25.6,
         "log_write_pct": 32.65,
         "memory_pct": 74.24,
@@ -2617,6 +2681,7 @@
       {
         "at": "2026-10-11T11:16:00Z",
         "cpu_pct": 37.13,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.02,
         "log_write_pct": 31.87,
         "memory_pct": 73.77,
@@ -2625,6 +2690,7 @@
       {
         "at": "2026-10-11T11:16:15Z",
         "cpu_pct": 28.82,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.37,
         "log_write_pct": 42.13,
         "memory_pct": 75.14,
@@ -2633,6 +2699,7 @@
       {
         "at": "2026-10-11T11:16:30Z",
         "cpu_pct": 26.68,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.36,
         "log_write_pct": 43.53,
         "memory_pct": 72.57,
@@ -2641,6 +2708,7 @@
       {
         "at": "2026-10-11T11:16:45Z",
         "cpu_pct": 35.35,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.23,
         "log_write_pct": 49.8,
         "memory_pct": 73.59,
@@ -2649,6 +2717,7 @@
       {
         "at": "2026-10-11T11:17:00Z",
         "cpu_pct": 34.56,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.97,
         "log_write_pct": 38.76,
         "memory_pct": 73.73,
@@ -2657,6 +2726,7 @@
       {
         "at": "2026-10-11T11:17:15Z",
         "cpu_pct": 25.72,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.7,
         "log_write_pct": 42.91,
         "memory_pct": 74.89,
@@ -2665,6 +2735,7 @@
       {
         "at": "2026-10-11T11:17:30Z",
         "cpu_pct": 27.29,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.48,
         "log_write_pct": 39.74,
         "memory_pct": 73.33,
@@ -2673,6 +2744,7 @@
       {
         "at": "2026-10-11T11:17:45Z",
         "cpu_pct": 25.81,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.28,
         "log_write_pct": 56.83,
         "memory_pct": 75.15,
@@ -2681,6 +2753,7 @@
       {
         "at": "2026-10-11T11:18:00Z",
         "cpu_pct": 19.98,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.7,
         "log_write_pct": 43.3,
         "memory_pct": 75.12,
@@ -2689,6 +2762,7 @@
       {
         "at": "2026-10-11T11:18:15Z",
         "cpu_pct": 19.37,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.75,
         "log_write_pct": 58.81,
         "memory_pct": 75.28,
@@ -2697,6 +2771,7 @@
       {
         "at": "2026-10-11T11:18:30Z",
         "cpu_pct": 18.75,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.52,
         "log_write_pct": 54.86,
         "memory_pct": 74.8,
@@ -2705,6 +2780,7 @@
       {
         "at": "2026-10-11T11:18:45Z",
         "cpu_pct": 16.82,
+        "data_io_accounting": "unknown",
         "data_io_pct": 21.46,
         "log_write_pct": 53.98,
         "memory_pct": 72.29,
@@ -2713,6 +2789,7 @@
       {
         "at": "2026-10-11T11:19:00Z",
         "cpu_pct": 22.96,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.14,
         "log_write_pct": 49.88,
         "memory_pct": 75.42,
@@ -2721,6 +2798,7 @@
       {
         "at": "2026-10-11T11:19:15Z",
         "cpu_pct": 24.97,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.13,
         "log_write_pct": 55.25,
         "memory_pct": 74.21,
@@ -2729,6 +2807,7 @@
       {
         "at": "2026-10-11T11:19:30Z",
         "cpu_pct": 17.15,
+        "data_io_accounting": "unknown",
         "data_io_pct": 16.3,
         "log_write_pct": 59.44,
         "memory_pct": 72.95,
@@ -2737,6 +2816,7 @@
       {
         "at": "2026-10-11T11:19:45Z",
         "cpu_pct": 15.23,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.43,
         "log_write_pct": 55.31,
         "memory_pct": 73.25,
@@ -2745,6 +2825,7 @@
       {
         "at": "2026-10-11T11:20:00Z",
         "cpu_pct": 21.83,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.11,
         "log_write_pct": 61.05,
         "memory_pct": 72.71,
@@ -2753,6 +2834,7 @@
       {
         "at": "2026-10-11T11:20:15Z",
         "cpu_pct": 12.4,
+        "data_io_accounting": "unknown",
         "data_io_pct": 16.54,
         "log_write_pct": 54.12,
         "memory_pct": 74.93,
@@ -2761,6 +2843,7 @@
       {
         "at": "2026-10-11T11:20:30Z",
         "cpu_pct": 13.98,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.08,
         "log_write_pct": 69.54,
         "memory_pct": 72.43,
@@ -2769,6 +2852,7 @@
       {
         "at": "2026-10-11T11:20:45Z",
         "cpu_pct": 16.47,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.99,
         "log_write_pct": 68.5,
         "memory_pct": 73.57,
@@ -2777,6 +2861,7 @@
       {
         "at": "2026-10-11T11:21:00Z",
         "cpu_pct": 19.18,
+        "data_io_accounting": "unknown",
         "data_io_pct": 21.63,
         "log_write_pct": 61.06,
         "memory_pct": 75.33,
@@ -2785,6 +2870,7 @@
       {
         "at": "2026-10-11T11:21:15Z",
         "cpu_pct": 18.26,
+        "data_io_accounting": "unknown",
         "data_io_pct": 16.74,
         "log_write_pct": 61.42,
         "memory_pct": 72.22,
@@ -2793,6 +2879,7 @@
       {
         "at": "2026-10-11T11:21:30Z",
         "cpu_pct": 11.23,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.16,
         "log_write_pct": 60.08,
         "memory_pct": 72.65,
@@ -2801,6 +2888,7 @@
       {
         "at": "2026-10-11T11:21:45Z",
         "cpu_pct": 20.29,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.92,
         "log_write_pct": 66.7,
         "memory_pct": 73.13,
@@ -2809,6 +2897,7 @@
       {
         "at": "2026-10-11T11:22:00Z",
         "cpu_pct": 27.59,
+        "data_io_accounting": "unknown",
         "data_io_pct": 16.36,
         "log_write_pct": 99.6,
         "memory_pct": 72.63,
@@ -2817,6 +2906,7 @@
       {
         "at": "2026-10-11T11:22:15Z",
         "cpu_pct": 27.17,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.1,
         "log_write_pct": 99.6,
         "memory_pct": 75.89,
@@ -2825,6 +2915,7 @@
       {
         "at": "2026-10-11T11:22:30Z",
         "cpu_pct": 26.94,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.85,
         "log_write_pct": 99.6,
         "memory_pct": 73.24,
@@ -2833,6 +2924,7 @@
       {
         "at": "2026-10-11T11:22:45Z",
         "cpu_pct": 24.08,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.89,
         "log_write_pct": 99.6,
         "memory_pct": 73.9,
@@ -2841,6 +2933,7 @@
       {
         "at": "2026-10-11T11:23:00Z",
         "cpu_pct": 26.6,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.59,
         "log_write_pct": 99.6,
         "memory_pct": 72.02,
@@ -2849,6 +2942,7 @@
       {
         "at": "2026-10-11T11:23:15Z",
         "cpu_pct": 25.44,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.47,
         "log_write_pct": 99.6,
         "memory_pct": 72.17,
@@ -2857,6 +2951,7 @@
       {
         "at": "2026-10-11T11:23:30Z",
         "cpu_pct": 28.26,
+        "data_io_accounting": "unknown",
         "data_io_pct": 12.84,
         "log_write_pct": 99.6,
         "memory_pct": 74.34,
@@ -2865,6 +2960,7 @@
       {
         "at": "2026-10-11T11:23:45Z",
         "cpu_pct": 33.91,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.95,
         "log_write_pct": 99.6,
         "memory_pct": 74.86,
@@ -2873,6 +2969,7 @@
       {
         "at": "2026-10-11T11:24:00Z",
         "cpu_pct": 29.94,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.01,
         "log_write_pct": 99.6,
         "memory_pct": 75.94,
@@ -2881,6 +2978,7 @@
       {
         "at": "2026-10-11T11:24:15Z",
         "cpu_pct": 34.37,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.26,
         "log_write_pct": 99.6,
         "memory_pct": 72.18,
@@ -2889,6 +2987,7 @@
       {
         "at": "2026-10-11T11:24:30Z",
         "cpu_pct": 36.85,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.84,
         "log_write_pct": 99.6,
         "memory_pct": 74.94,
@@ -2897,6 +2996,7 @@
       {
         "at": "2026-10-11T11:24:45Z",
         "cpu_pct": 28.35,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.72,
         "log_write_pct": 99.6,
         "memory_pct": 74.02,
@@ -2905,6 +3005,7 @@
       {
         "at": "2026-10-11T11:25:00Z",
         "cpu_pct": 36.91,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.85,
         "log_write_pct": 99.6,
         "memory_pct": 74.34,
@@ -2913,6 +3014,7 @@
       {
         "at": "2026-10-11T11:25:15Z",
         "cpu_pct": 36.08,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.5,
         "log_write_pct": 99.6,
         "memory_pct": 72.92,
@@ -2921,6 +3023,7 @@
       {
         "at": "2026-10-11T11:25:30Z",
         "cpu_pct": 30.16,
+        "data_io_accounting": "unknown",
         "data_io_pct": 11.55,
         "log_write_pct": 99.6,
         "memory_pct": 72.42,
@@ -2929,6 +3032,7 @@
       {
         "at": "2026-10-11T11:25:45Z",
         "cpu_pct": 22.0,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.4,
         "log_write_pct": 49.12,
         "memory_pct": 74.72,
@@ -2937,6 +3041,7 @@
       {
         "at": "2026-10-11T11:26:00Z",
         "cpu_pct": 16.11,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.48,
         "log_write_pct": 49.44,
         "memory_pct": 74.01,
@@ -2945,6 +3050,7 @@
       {
         "at": "2026-10-11T11:26:15Z",
         "cpu_pct": 24.81,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.34,
         "log_write_pct": 47.62,
         "memory_pct": 73.01,
@@ -2953,6 +3059,7 @@
       {
         "at": "2026-10-11T11:26:30Z",
         "cpu_pct": 20.94,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.37,
         "log_write_pct": 37.5,
         "memory_pct": 74.96,
@@ -2961,6 +3068,7 @@
       {
         "at": "2026-10-11T11:26:45Z",
         "cpu_pct": 24.59,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.31,
         "log_write_pct": 40.3,
         "memory_pct": 74.73,
@@ -2969,6 +3077,7 @@
       {
         "at": "2026-10-11T11:27:00Z",
         "cpu_pct": 27.0,
+        "data_io_accounting": "unknown",
         "data_io_pct": 12.12,
         "log_write_pct": 32.34,
         "memory_pct": 72.59,
@@ -2977,6 +3086,7 @@
       {
         "at": "2026-10-11T11:27:15Z",
         "cpu_pct": 29.49,
+        "data_io_accounting": "unknown",
         "data_io_pct": 9.14,
         "log_write_pct": 38.7,
         "memory_pct": 72.05,
@@ -2985,6 +3095,7 @@
       {
         "at": "2026-10-11T11:27:30Z",
         "cpu_pct": 24.8,
+        "data_io_accounting": "unknown",
         "data_io_pct": 11.82,
         "log_write_pct": 39.28,
         "memory_pct": 74.7,
@@ -2993,6 +3104,7 @@
       {
         "at": "2026-10-11T11:27:45Z",
         "cpu_pct": 28.81,
+        "data_io_accounting": "unknown",
         "data_io_pct": 9.89,
         "log_write_pct": 34.34,
         "memory_pct": 72.47,
@@ -3001,6 +3113,7 @@
       {
         "at": "2026-10-11T11:28:00Z",
         "cpu_pct": 26.06,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.74,
         "log_write_pct": 40.62,
         "memory_pct": 72.07,
@@ -3009,6 +3122,7 @@
       {
         "at": "2026-10-11T11:28:15Z",
         "cpu_pct": 34.59,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.4,
         "log_write_pct": 31.69,
         "memory_pct": 73.07,
@@ -3017,6 +3131,7 @@
       {
         "at": "2026-10-11T11:28:30Z",
         "cpu_pct": 37.2,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.09,
         "log_write_pct": 32.78,
         "memory_pct": 72.57,
@@ -3025,6 +3140,7 @@
       {
         "at": "2026-10-11T11:28:45Z",
         "cpu_pct": 38.41,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.22,
         "log_write_pct": 35.69,
         "memory_pct": 74.03,
@@ -3033,6 +3149,7 @@
       {
         "at": "2026-10-11T11:29:00Z",
         "cpu_pct": 36.55,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.77,
         "log_write_pct": 36.16,
         "memory_pct": 73.94,
@@ -3041,6 +3158,7 @@
       {
         "at": "2026-10-11T11:29:15Z",
         "cpu_pct": 29.29,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.61,
         "log_write_pct": 28.36,
         "memory_pct": 73.21,
@@ -3049,6 +3167,7 @@
       {
         "at": "2026-10-11T11:29:30Z",
         "cpu_pct": 34.53,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.98,
         "log_write_pct": 34.09,
         "memory_pct": 72.01,
@@ -3057,6 +3176,7 @@
       {
         "at": "2026-10-11T11:29:45Z",
         "cpu_pct": 41.63,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.18,
         "log_write_pct": 35.1,
         "memory_pct": 74.85,
@@ -3065,6 +3185,7 @@
       {
         "at": "2026-10-11T11:30:00Z",
         "cpu_pct": 36.2,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.98,
         "log_write_pct": 26.35,
         "memory_pct": 76.0,
@@ -3073,6 +3194,7 @@
       {
         "at": "2026-10-11T11:30:15Z",
         "cpu_pct": 38.2,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.21,
         "log_write_pct": 24.4,
         "memory_pct": 72.19,
@@ -3081,6 +3203,7 @@
       {
         "at": "2026-10-11T11:30:30Z",
         "cpu_pct": 45.04,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.87,
         "log_write_pct": 35.05,
         "memory_pct": 73.0,
@@ -3089,6 +3212,7 @@
       {
         "at": "2026-10-11T11:30:45Z",
         "cpu_pct": 42.3,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.9,
         "log_write_pct": 26.28,
         "memory_pct": 75.82,
@@ -3097,6 +3221,7 @@
       {
         "at": "2026-10-11T11:31:00Z",
         "cpu_pct": 47.04,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.24,
         "log_write_pct": 35.3,
         "memory_pct": 75.76,
@@ -3105,6 +3230,7 @@
       {
         "at": "2026-10-11T11:31:15Z",
         "cpu_pct": 47.05,
+        "data_io_accounting": "unknown",
         "data_io_pct": 3.4,
         "log_write_pct": 32.92,
         "memory_pct": 73.8,
@@ -3113,6 +3239,7 @@
       {
         "at": "2026-10-11T11:31:30Z",
         "cpu_pct": 47.24,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.11,
         "log_write_pct": 22.65,
         "memory_pct": 75.71,
@@ -3121,6 +3248,7 @@
       {
         "at": "2026-10-11T11:31:45Z",
         "cpu_pct": 46.25,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.4,
         "log_write_pct": 27.42,
         "memory_pct": 74.96,
@@ -3129,6 +3257,7 @@
       {
         "at": "2026-10-11T11:32:00Z",
         "cpu_pct": 58.76,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.74,
         "log_write_pct": 99.6,
         "memory_pct": 73.2,
@@ -3137,6 +3266,7 @@
       {
         "at": "2026-10-11T11:32:15Z",
         "cpu_pct": 61.4,
+        "data_io_accounting": "unknown",
         "data_io_pct": 3.67,
         "log_write_pct": 99.6,
         "memory_pct": 72.65,
@@ -3145,6 +3275,7 @@
       {
         "at": "2026-10-11T11:32:30Z",
         "cpu_pct": 68.54,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.16,
         "log_write_pct": 99.6,
         "memory_pct": 72.88,
@@ -3153,6 +3284,7 @@
       {
         "at": "2026-10-11T11:32:45Z",
         "cpu_pct": 70.59,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.64,
         "log_write_pct": 99.6,
         "memory_pct": 72.56,
@@ -3161,6 +3293,7 @@
       {
         "at": "2026-10-11T11:33:00Z",
         "cpu_pct": 60.65,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.65,
         "log_write_pct": 99.6,
         "memory_pct": 72.36,
@@ -3169,6 +3302,7 @@
       {
         "at": "2026-10-11T11:33:15Z",
         "cpu_pct": 63.55,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.35,
         "log_write_pct": 99.6,
         "memory_pct": 75.55,
@@ -3177,6 +3311,7 @@
       {
         "at": "2026-10-11T11:33:30Z",
         "cpu_pct": 66.26,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.99,
         "log_write_pct": 99.6,
         "memory_pct": 74.1,
@@ -3185,6 +3320,7 @@
       {
         "at": "2026-10-11T11:33:45Z",
         "cpu_pct": 66.17,
+        "data_io_accounting": "unknown",
         "data_io_pct": 2.07,
         "log_write_pct": 99.6,
         "memory_pct": 73.11,
@@ -3193,6 +3329,7 @@
       {
         "at": "2026-10-11T11:34:00Z",
         "cpu_pct": 64.39,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.5,
         "log_write_pct": 99.6,
         "memory_pct": 74.52,
@@ -3201,6 +3338,7 @@
       {
         "at": "2026-10-11T11:34:15Z",
         "cpu_pct": 66.19,
+        "data_io_accounting": "unknown",
         "data_io_pct": 3.55,
         "log_write_pct": 99.6,
         "memory_pct": 72.99,
@@ -3209,6 +3347,7 @@
       {
         "at": "2026-10-11T11:34:30Z",
         "cpu_pct": 69.62,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.94,
         "log_write_pct": 99.6,
         "memory_pct": 75.39,
@@ -3217,6 +3356,7 @@
       {
         "at": "2026-10-11T11:34:45Z",
         "cpu_pct": 65.15,
+        "data_io_accounting": "unknown",
         "data_io_pct": 1.49,
         "log_write_pct": 99.6,
         "memory_pct": 74.84,
@@ -3225,6 +3365,7 @@
       {
         "at": "2026-10-11T11:35:00Z",
         "cpu_pct": 71.14,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.87,
         "log_write_pct": 99.6,
         "memory_pct": 72.0,
@@ -3233,6 +3374,7 @@
       {
         "at": "2026-10-11T11:35:15Z",
         "cpu_pct": 77.09,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.73,
         "log_write_pct": 99.6,
         "memory_pct": 75.42,
@@ -3241,6 +3383,7 @@
       {
         "at": "2026-10-11T11:35:30Z",
         "cpu_pct": 69.41,
+        "data_io_accounting": "unknown",
         "data_io_pct": 1.95,
         "log_write_pct": 99.6,
         "memory_pct": 72.62,
@@ -3249,6 +3392,7 @@
       {
         "at": "2026-10-11T11:35:45Z",
         "cpu_pct": 61.01,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.58,
         "log_write_pct": 57.11,
         "memory_pct": 74.59,
@@ -3257,6 +3401,7 @@
       {
         "at": "2026-10-11T11:36:00Z",
         "cpu_pct": 58.66,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.43,
         "log_write_pct": 47.65,
         "memory_pct": 75.13,
@@ -3265,6 +3410,7 @@
       {
         "at": "2026-10-11T11:36:15Z",
         "cpu_pct": 64.5,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.17,
         "log_write_pct": 53.25,
         "memory_pct": 72.51,
@@ -3273,6 +3419,7 @@
       {
         "at": "2026-10-11T11:36:30Z",
         "cpu_pct": 61.32,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.59,
         "log_write_pct": 51.48,
         "memory_pct": 72.28,
@@ -3281,6 +3428,7 @@
       {
         "at": "2026-10-11T11:36:45Z",
         "cpu_pct": 60.84,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.11,
         "log_write_pct": 54.46,
         "memory_pct": 74.4,
@@ -3289,6 +3437,7 @@
       {
         "at": "2026-10-11T11:37:00Z",
         "cpu_pct": 57.57,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.7,
         "log_write_pct": 67.31,
         "memory_pct": 74.58,
@@ -3297,6 +3446,7 @@
       {
         "at": "2026-10-11T11:37:15Z",
         "cpu_pct": 59.7,
+        "data_io_accounting": "unknown",
         "data_io_pct": 2.92,
         "log_write_pct": 56.89,
         "memory_pct": 75.84,
@@ -3305,6 +3455,7 @@
       {
         "at": "2026-10-11T11:37:30Z",
         "cpu_pct": 57.67,
+        "data_io_accounting": "unknown",
         "data_io_pct": 1.25,
         "log_write_pct": 61.76,
         "memory_pct": 74.7,
@@ -3313,6 +3464,7 @@
       {
         "at": "2026-10-11T11:37:45Z",
         "cpu_pct": 56.99,
+        "data_io_accounting": "unknown",
         "data_io_pct": 6.45,
         "log_write_pct": 69.31,
         "memory_pct": 72.91,
@@ -3321,6 +3473,7 @@
       {
         "at": "2026-10-11T11:38:00Z",
         "cpu_pct": 57.82,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.53,
         "log_write_pct": 66.01,
         "memory_pct": 72.79,
@@ -3329,6 +3482,7 @@
       {
         "at": "2026-10-11T11:38:15Z",
         "cpu_pct": 62.44,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.26,
         "log_write_pct": 58.82,
         "memory_pct": 75.88,
@@ -3337,6 +3491,7 @@
       {
         "at": "2026-10-11T11:38:30Z",
         "cpu_pct": 63.15,
+        "data_io_accounting": "unknown",
         "data_io_pct": 3.14,
         "log_write_pct": 59.37,
         "memory_pct": 75.04,
@@ -3345,6 +3500,7 @@
       {
         "at": "2026-10-11T11:38:45Z",
         "cpu_pct": 64.41,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.34,
         "log_write_pct": 58.98,
         "memory_pct": 72.89,
@@ -3353,6 +3509,7 @@
       {
         "at": "2026-10-11T11:39:00Z",
         "cpu_pct": 60.6,
+        "data_io_accounting": "unknown",
         "data_io_pct": 9.05,
         "log_write_pct": 58.32,
         "memory_pct": 73.57,
@@ -3361,6 +3518,7 @@
       {
         "at": "2026-10-11T11:39:15Z",
         "cpu_pct": 63.87,
+        "data_io_accounting": "unknown",
         "data_io_pct": 2.69,
         "log_write_pct": 56.66,
         "memory_pct": 72.24,
@@ -3369,6 +3527,7 @@
       {
         "at": "2026-10-11T11:39:30Z",
         "cpu_pct": 62.47,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.73,
         "log_write_pct": 67.26,
         "memory_pct": 75.99,
@@ -3377,6 +3536,7 @@
       {
         "at": "2026-10-11T11:39:45Z",
         "cpu_pct": 55.1,
+        "data_io_accounting": "unknown",
         "data_io_pct": 3.25,
         "log_write_pct": 70.08,
         "memory_pct": 74.99,
@@ -3385,6 +3545,7 @@
       {
         "at": "2026-10-11T11:40:00Z",
         "cpu_pct": 58.53,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.92,
         "log_write_pct": 60.5,
         "memory_pct": 73.33,
@@ -3393,6 +3554,7 @@
       {
         "at": "2026-10-11T11:40:15Z",
         "cpu_pct": 49.94,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.26,
         "log_write_pct": 59.43,
         "memory_pct": 75.82,
@@ -3401,6 +3563,7 @@
       {
         "at": "2026-10-11T11:40:30Z",
         "cpu_pct": 60.78,
+        "data_io_accounting": "unknown",
         "data_io_pct": 3.82,
         "log_write_pct": 58.66,
         "memory_pct": 75.29,
@@ -3409,6 +3572,7 @@
       {
         "at": "2026-10-11T11:40:45Z",
         "cpu_pct": 53.66,
+        "data_io_accounting": "unknown",
         "data_io_pct": 2.7,
         "log_write_pct": 59.56,
         "memory_pct": 73.49,
@@ -3417,6 +3581,7 @@
       {
         "at": "2026-10-11T11:41:00Z",
         "cpu_pct": 49.99,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.38,
         "log_write_pct": 65.25,
         "memory_pct": 72.12,
@@ -3425,6 +3590,7 @@
       {
         "at": "2026-10-11T11:41:15Z",
         "cpu_pct": 56.59,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.76,
         "log_write_pct": 50.36,
         "memory_pct": 72.14,
@@ -3433,6 +3599,7 @@
       {
         "at": "2026-10-11T11:41:30Z",
         "cpu_pct": 57.01,
+        "data_io_accounting": "unknown",
         "data_io_pct": 4.85,
         "log_write_pct": 60.37,
         "memory_pct": 75.59,
@@ -3441,6 +3608,7 @@
       {
         "at": "2026-10-11T11:41:45Z",
         "cpu_pct": 48.32,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.63,
         "log_write_pct": 56.91,
         "memory_pct": 73.05,
@@ -3449,6 +3617,7 @@
       {
         "at": "2026-10-11T11:42:00Z",
         "cpu_pct": 61.9,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.36,
         "log_write_pct": 99.6,
         "memory_pct": 72.02,
@@ -3457,6 +3626,7 @@
       {
         "at": "2026-10-11T11:42:15Z",
         "cpu_pct": 68.12,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.42,
         "log_write_pct": 99.6,
         "memory_pct": 75.77,
@@ -3465,6 +3635,7 @@
       {
         "at": "2026-10-11T11:42:30Z",
         "cpu_pct": 58.91,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.35,
         "log_write_pct": 99.6,
         "memory_pct": 75.83,
@@ -3473,6 +3644,7 @@
       {
         "at": "2026-10-11T11:42:45Z",
         "cpu_pct": 59.7,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.76,
         "log_write_pct": 99.6,
         "memory_pct": 73.72,
@@ -3481,6 +3653,7 @@
       {
         "at": "2026-10-11T11:43:00Z",
         "cpu_pct": 65.14,
+        "data_io_accounting": "unknown",
         "data_io_pct": 5.43,
         "log_write_pct": 99.6,
         "memory_pct": 75.21,
@@ -3489,6 +3662,7 @@
       {
         "at": "2026-10-11T11:43:15Z",
         "cpu_pct": 62.78,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.37,
         "log_write_pct": 99.6,
         "memory_pct": 74.43,
@@ -3497,6 +3671,7 @@
       {
         "at": "2026-10-11T11:43:30Z",
         "cpu_pct": 55.64,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.3,
         "log_write_pct": 99.6,
         "memory_pct": 75.13,
@@ -3505,6 +3680,7 @@
       {
         "at": "2026-10-11T11:43:45Z",
         "cpu_pct": 53.05,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.66,
         "log_write_pct": 99.6,
         "memory_pct": 72.99,
@@ -3513,6 +3689,7 @@
       {
         "at": "2026-10-11T11:44:00Z",
         "cpu_pct": 49.95,
+        "data_io_accounting": "unknown",
         "data_io_pct": 9.3,
         "log_write_pct": 99.6,
         "memory_pct": 73.3,
@@ -3521,6 +3698,7 @@
       {
         "at": "2026-10-11T11:44:15Z",
         "cpu_pct": 58.99,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.02,
         "log_write_pct": 99.6,
         "memory_pct": 73.06,
@@ -3529,6 +3707,7 @@
       {
         "at": "2026-10-11T11:44:30Z",
         "cpu_pct": 48.4,
+        "data_io_accounting": "unknown",
         "data_io_pct": 9.35,
         "log_write_pct": 99.6,
         "memory_pct": 74.84,
@@ -3537,6 +3716,7 @@
       {
         "at": "2026-10-11T11:44:45Z",
         "cpu_pct": 48.89,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.95,
         "log_write_pct": 99.6,
         "memory_pct": 74.48,
@@ -3545,6 +3725,7 @@
       {
         "at": "2026-10-11T11:45:00Z",
         "cpu_pct": 53.9,
+        "data_io_accounting": "unknown",
         "data_io_pct": 12.65,
         "log_write_pct": 99.6,
         "memory_pct": 74.66,
@@ -3553,6 +3734,7 @@
       {
         "at": "2026-10-11T11:45:15Z",
         "cpu_pct": 53.86,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.48,
         "log_write_pct": 99.6,
         "memory_pct": 74.27,
@@ -3561,6 +3743,7 @@
       {
         "at": "2026-10-11T11:45:30Z",
         "cpu_pct": 51.48,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.99,
         "log_write_pct": 99.6,
         "memory_pct": 72.99,
@@ -3569,6 +3752,7 @@
       {
         "at": "2026-10-11T11:45:45Z",
         "cpu_pct": 29.32,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.74,
         "log_write_pct": 32.84,
         "memory_pct": 73.31,
@@ -3577,6 +3761,7 @@
       {
         "at": "2026-10-11T11:46:00Z",
         "cpu_pct": 38.27,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.99,
         "log_write_pct": 26.37,
         "memory_pct": 75.23,
@@ -3585,6 +3770,7 @@
       {
         "at": "2026-10-11T11:46:15Z",
         "cpu_pct": 37.14,
+        "data_io_accounting": "unknown",
         "data_io_pct": 8.03,
         "log_write_pct": 29.47,
         "memory_pct": 75.28,
@@ -3593,6 +3779,7 @@
       {
         "at": "2026-10-11T11:46:30Z",
         "cpu_pct": 35.13,
+        "data_io_accounting": "unknown",
         "data_io_pct": 7.81,
         "log_write_pct": 25.91,
         "memory_pct": 72.48,
@@ -3601,6 +3788,7 @@
       {
         "at": "2026-10-11T11:46:45Z",
         "cpu_pct": 34.76,
+        "data_io_accounting": "unknown",
         "data_io_pct": 12.43,
         "log_write_pct": 35.58,
         "memory_pct": 73.49,
@@ -3609,6 +3797,7 @@
       {
         "at": "2026-10-11T11:47:00Z",
         "cpu_pct": 27.43,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.13,
         "log_write_pct": 32.76,
         "memory_pct": 75.78,
@@ -3617,6 +3806,7 @@
       {
         "at": "2026-10-11T11:47:15Z",
         "cpu_pct": 28.17,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.29,
         "log_write_pct": 23.57,
         "memory_pct": 73.47,
@@ -3625,6 +3815,7 @@
       {
         "at": "2026-10-11T11:47:30Z",
         "cpu_pct": 22.48,
+        "data_io_accounting": "unknown",
         "data_io_pct": 10.66,
         "log_write_pct": 29.59,
         "memory_pct": 74.61,
@@ -3633,6 +3824,7 @@
       {
         "at": "2026-10-11T11:47:45Z",
         "cpu_pct": 19.21,
+        "data_io_accounting": "unknown",
         "data_io_pct": 11.52,
         "log_write_pct": 30.92,
         "memory_pct": 72.74,
@@ -3641,6 +3833,7 @@
       {
         "at": "2026-10-11T11:48:00Z",
         "cpu_pct": 20.6,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.56,
         "log_write_pct": 29.05,
         "memory_pct": 72.25,
@@ -3649,6 +3842,7 @@
       {
         "at": "2026-10-11T11:48:15Z",
         "cpu_pct": 22.02,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.88,
         "log_write_pct": 30.86,
         "memory_pct": 72.36,
@@ -3657,6 +3851,7 @@
       {
         "at": "2026-10-11T11:48:30Z",
         "cpu_pct": 24.78,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.05,
         "log_write_pct": 25.67,
         "memory_pct": 73.23,
@@ -3665,6 +3860,7 @@
       {
         "at": "2026-10-11T11:48:45Z",
         "cpu_pct": 19.39,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.6,
         "log_write_pct": 27.5,
         "memory_pct": 73.67,
@@ -3673,6 +3869,7 @@
       {
         "at": "2026-10-11T11:49:00Z",
         "cpu_pct": 26.85,
+        "data_io_accounting": "unknown",
         "data_io_pct": 13.26,
         "log_write_pct": 25.71,
         "memory_pct": 74.91,
@@ -3681,6 +3878,7 @@
       {
         "at": "2026-10-11T11:49:15Z",
         "cpu_pct": 14.26,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.86,
         "log_write_pct": 30.24,
         "memory_pct": 75.28,
@@ -3689,6 +3887,7 @@
       {
         "at": "2026-10-11T11:49:30Z",
         "cpu_pct": 24.13,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.62,
         "log_write_pct": 27.08,
         "memory_pct": 72.06,
@@ -3697,6 +3896,7 @@
       {
         "at": "2026-10-11T11:49:45Z",
         "cpu_pct": 20.62,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.5,
         "log_write_pct": 27.04,
         "memory_pct": 74.49,
@@ -3705,6 +3905,7 @@
       {
         "at": "2026-10-11T11:50:00Z",
         "cpu_pct": 18.43,
+        "data_io_accounting": "unknown",
         "data_io_pct": 12.68,
         "log_write_pct": 31.39,
         "memory_pct": 74.08,
@@ -3713,6 +3914,7 @@
       {
         "at": "2026-10-11T11:50:15Z",
         "cpu_pct": 13.19,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.72,
         "log_write_pct": 41.06,
         "memory_pct": 75.87,
@@ -3721,6 +3923,7 @@
       {
         "at": "2026-10-11T11:50:30Z",
         "cpu_pct": 12.96,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.62,
         "log_write_pct": 45.2,
         "memory_pct": 73.93,
@@ -3729,6 +3932,7 @@
       {
         "at": "2026-10-11T11:50:45Z",
         "cpu_pct": 22.17,
+        "data_io_accounting": "unknown",
         "data_io_pct": 15.46,
         "log_write_pct": 45.54,
         "memory_pct": 74.48,
@@ -3737,6 +3941,7 @@
       {
         "at": "2026-10-11T11:51:00Z",
         "cpu_pct": 12.66,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.92,
         "log_write_pct": 36.16,
         "memory_pct": 73.62,
@@ -3745,6 +3950,7 @@
       {
         "at": "2026-10-11T11:51:15Z",
         "cpu_pct": 20.42,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.38,
         "log_write_pct": 37.68,
         "memory_pct": 73.6,
@@ -3753,6 +3959,7 @@
       {
         "at": "2026-10-11T11:51:30Z",
         "cpu_pct": 14.86,
+        "data_io_accounting": "unknown",
         "data_io_pct": 14.17,
         "log_write_pct": 39.76,
         "memory_pct": 74.9,
@@ -3761,6 +3968,7 @@
       {
         "at": "2026-10-11T11:51:45Z",
         "cpu_pct": 10.6,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.96,
         "log_write_pct": 49.55,
         "memory_pct": 72.15,
@@ -3769,6 +3977,7 @@
       {
         "at": "2026-10-11T11:52:00Z",
         "cpu_pct": 25.44,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.52,
         "log_write_pct": 99.6,
         "memory_pct": 74.2,
@@ -3777,6 +3986,7 @@
       {
         "at": "2026-10-11T11:52:15Z",
         "cpu_pct": 27.67,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.35,
         "log_write_pct": 99.6,
         "memory_pct": 74.33,
@@ -3785,6 +3995,7 @@
       {
         "at": "2026-10-11T11:52:30Z",
         "cpu_pct": 31.94,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.82,
         "log_write_pct": 99.6,
         "memory_pct": 73.75,
@@ -3793,6 +4004,7 @@
       {
         "at": "2026-10-11T11:52:45Z",
         "cpu_pct": 31.56,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.41,
         "log_write_pct": 99.6,
         "memory_pct": 72.94,
@@ -3801,6 +4013,7 @@
       {
         "at": "2026-10-11T11:53:00Z",
         "cpu_pct": 33.65,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.41,
         "log_write_pct": 99.6,
         "memory_pct": 72.72,
@@ -3809,6 +4022,7 @@
       {
         "at": "2026-10-11T11:53:15Z",
         "cpu_pct": 25.79,
+        "data_io_accounting": "unknown",
         "data_io_pct": 16.02,
         "log_write_pct": 99.6,
         "memory_pct": 73.72,
@@ -3817,6 +4031,7 @@
       {
         "at": "2026-10-11T11:53:30Z",
         "cpu_pct": 30.09,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.31,
         "log_write_pct": 99.6,
         "memory_pct": 72.16,
@@ -3825,6 +4040,7 @@
       {
         "at": "2026-10-11T11:53:45Z",
         "cpu_pct": 26.11,
+        "data_io_accounting": "unknown",
         "data_io_pct": 21.33,
         "log_write_pct": 99.6,
         "memory_pct": 75.11,
@@ -3833,6 +4049,7 @@
       {
         "at": "2026-10-11T11:54:00Z",
         "cpu_pct": 26.16,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.72,
         "log_write_pct": 99.6,
         "memory_pct": 73.51,
@@ -3841,6 +4058,7 @@
       {
         "at": "2026-10-11T11:54:15Z",
         "cpu_pct": 27.6,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.77,
         "log_write_pct": 99.6,
         "memory_pct": 75.98,
@@ -3849,6 +4067,7 @@
       {
         "at": "2026-10-11T11:54:30Z",
         "cpu_pct": 36.25,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.68,
         "log_write_pct": 99.6,
         "memory_pct": 75.93,
@@ -3857,6 +4076,7 @@
       {
         "at": "2026-10-11T11:54:45Z",
         "cpu_pct": 38.51,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.67,
         "log_write_pct": 99.6,
         "memory_pct": 72.66,
@@ -3865,6 +4085,7 @@
       {
         "at": "2026-10-11T11:55:00Z",
         "cpu_pct": 38.81,
+        "data_io_accounting": "unknown",
         "data_io_pct": 17.06,
         "log_write_pct": 99.6,
         "memory_pct": 73.4,
@@ -3873,6 +4094,7 @@
       {
         "at": "2026-10-11T11:55:15Z",
         "cpu_pct": 30.21,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.91,
         "log_write_pct": 99.6,
         "memory_pct": 73.1,
@@ -3881,6 +4103,7 @@
       {
         "at": "2026-10-11T11:55:30Z",
         "cpu_pct": 30.74,
+        "data_io_accounting": "unknown",
         "data_io_pct": 20.94,
         "log_write_pct": 99.6,
         "memory_pct": 75.68,
@@ -3889,6 +4112,7 @@
       {
         "at": "2026-10-11T11:55:45Z",
         "cpu_pct": 18.93,
+        "data_io_accounting": "unknown",
         "data_io_pct": 21.16,
         "log_write_pct": 60.91,
         "memory_pct": 72.15,
@@ -3897,6 +4121,7 @@
       {
         "at": "2026-10-11T11:56:00Z",
         "cpu_pct": 18.51,
+        "data_io_accounting": "unknown",
         "data_io_pct": 24.77,
         "log_write_pct": 66.85,
         "memory_pct": 75.58,
@@ -3905,6 +4130,7 @@
       {
         "at": "2026-10-11T11:56:15Z",
         "cpu_pct": 26.84,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.37,
         "log_write_pct": 64.48,
         "memory_pct": 74.55,
@@ -3913,6 +4139,7 @@
       {
         "at": "2026-10-11T11:56:30Z",
         "cpu_pct": 28.79,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.05,
         "log_write_pct": 65.14,
         "memory_pct": 75.53,
@@ -3921,6 +4148,7 @@
       {
         "at": "2026-10-11T11:56:45Z",
         "cpu_pct": 31.15,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.8,
         "log_write_pct": 61.89,
         "memory_pct": 75.19,
@@ -3929,6 +4157,7 @@
       {
         "at": "2026-10-11T11:57:00Z",
         "cpu_pct": 32.08,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.52,
         "log_write_pct": 60.92,
         "memory_pct": 75.06,
@@ -3937,6 +4166,7 @@
       {
         "at": "2026-10-11T11:57:15Z",
         "cpu_pct": 23.31,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.99,
         "log_write_pct": 55.37,
         "memory_pct": 75.28,
@@ -3945,6 +4175,7 @@
       {
         "at": "2026-10-11T11:57:30Z",
         "cpu_pct": 29.88,
+        "data_io_accounting": "unknown",
         "data_io_pct": 26.04,
         "log_write_pct": 63.27,
         "memory_pct": 74.65,
@@ -3953,6 +4184,7 @@
       {
         "at": "2026-10-11T11:57:45Z",
         "cpu_pct": 23.28,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.55,
         "log_write_pct": 55.45,
         "memory_pct": 74.46,
@@ -3961,6 +4193,7 @@
       {
         "at": "2026-10-11T11:58:00Z",
         "cpu_pct": 30.49,
+        "data_io_accounting": "unknown",
         "data_io_pct": 25.55,
         "log_write_pct": 54.21,
         "memory_pct": 72.91,
@@ -3969,6 +4202,7 @@
       {
         "at": "2026-10-11T11:58:15Z",
         "cpu_pct": 25.7,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.51,
         "log_write_pct": 56.71,
         "memory_pct": 72.43,
@@ -3977,6 +4211,7 @@
       {
         "at": "2026-10-11T11:58:30Z",
         "cpu_pct": 29.24,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.25,
         "log_write_pct": 59.27,
         "memory_pct": 72.82,
@@ -3985,6 +4220,7 @@
       {
         "at": "2026-10-11T11:58:45Z",
         "cpu_pct": 33.37,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.74,
         "log_write_pct": 63.55,
         "memory_pct": 72.97,
@@ -3993,6 +4229,7 @@
       {
         "at": "2026-10-11T11:59:00Z",
         "cpu_pct": 29.96,
+        "data_io_accounting": "unknown",
         "data_io_pct": 23.85,
         "log_write_pct": 61.14,
         "memory_pct": 75.13,
@@ -4001,6 +4238,7 @@
       {
         "at": "2026-10-11T11:59:15Z",
         "cpu_pct": 33.13,
+        "data_io_accounting": "unknown",
         "data_io_pct": 18.9,
         "log_write_pct": 56.08,
         "memory_pct": 74.25,
@@ -4009,6 +4247,7 @@
       {
         "at": "2026-10-11T11:59:30Z",
         "cpu_pct": 38.87,
+        "data_io_accounting": "unknown",
         "data_io_pct": 22.41,
         "log_write_pct": 59.25,
         "memory_pct": 74.93,
@@ -4017,6 +4256,7 @@
       {
         "at": "2026-10-11T11:59:45Z",
         "cpu_pct": 43.12,
+        "data_io_accounting": "unknown",
         "data_io_pct": 19.26,
         "log_write_pct": 51.2,
         "memory_pct": 73.62,
@@ -4891,30 +5131,35 @@
     "waits": [
       {
         "category": "Latch",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 82441.0,
         "wait_type": "Latch"
       },
       {
         "category": "Parallelism",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 17665.0,
         "wait_type": "Parallelism"
       },
       {
         "category": "Memory",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 5947.0,
         "wait_type": "Memory"
       },
       {
         "category": "CPU",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 423.0,
         "wait_type": "CPU"
       },
       {
         "category": "Lock",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 15.0,
         "wait_type": "Lock"

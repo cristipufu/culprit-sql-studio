@@ -7,7 +7,7 @@ mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 9;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 10;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -416,6 +416,10 @@ pub struct DiagnosticEpisode {
     pub lifecycle: DiagnosticLifecycle,
     pub analysis: DiagnosticAnalysisStatus,
     pub report: Option<DiagnosticReport>,
+    /// A separately owed historical question never replaces the completed waiter/gateway answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_read: Option<Box<SourceReadStage>>,
     pub issue: Option<DiagnosticAnalysisIssue>,
     pub first_seen_at: String,
     pub last_seen_at: String,
@@ -436,6 +440,7 @@ impl DiagnosticEpisode {
             && self.scope.is_valid()
             && self.signal.is_valid()
             && self.task_point_is_consistent()
+            && self.source_read.as_deref().is_none_or(|stage| stage.matches_episode(self))
             && [&self.first, &self.latest]
                 .into_iter()
                 .chain(self.peak.iter())
@@ -495,6 +500,7 @@ impl DiagnosticEpisode {
             lifecycle,
             analysis: DiagnosticAnalysisStatus::Pending,
             report: None,
+            source_read: None,
             issue: None,
             first_seen_at: observed_at.clone(),
             last_seen_at: observed_at,
@@ -531,6 +537,13 @@ impl DiagnosticEpisode {
     }
     pub fn matches_focus(&self, focus: &DiagnosticFocus) -> bool {
         match focus {
+            DiagnosticFocus::SourceRead { focus } => {
+                self.is_valid()
+                    && self
+                        .source_read
+                        .as_deref()
+                        .is_some_and(|stage| stage.focus == **focus && stage.matches_episode(self))
+            }
             DiagnosticFocus::Blocking { focus } => self.matches_blocking_focus(focus),
             DiagnosticFocus::PageWait { focus } => self.matches_page_wait_focus(focus),
             DiagnosticFocus::PageWaitWriters { focus } => self.matches_page_wait_writer_focus(focus),
@@ -580,11 +593,53 @@ impl DiagnosticEpisode {
                 .is_some_and(|bounds| bounds.contains(&focus.original_observed_at))
     }
     pub fn retained_in_checkpoint(&self) -> bool {
-        if self.signal.is_task_point() {
-            self.analysis.needs_work()
-        } else {
-            self.lifecycle != DiagnosticLifecycle::Resolved || self.analysis.needs_work()
-        }
+        let owed = self.has_owed_question();
+        if self.signal.is_task_point() { owed } else { self.lifecycle != DiagnosticLifecycle::Resolved || owed }
+    }
+}
+
+/// Closed original compiler context. It contains bounded receipts only, never SQL, Activity frames, or history rows.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct CompilationAdmissionReport {
+    pub observation: DiagnosticEvidenceRef,
+    pub gateways: Vec<DiagnosticEvidenceRef>,
+}
+impl CompilationAdmissionReport {
+    pub fn references(&self) -> impl Iterator<Item = &DiagnosticEvidenceRef> {
+        std::iter::once(&self.observation).chain(&self.gateways)
+    }
+    pub fn matches_input<'a>(
+        &self,
+        source: &CollectionDescription,
+        rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a OperationalObservation)>,
+    ) -> bool {
+        let SourceObservation::FocusedCompilationAdmission { result, .. } = &source.observation else { return false };
+        let rows = rows.into_iter().take(MAX_FOCUSED_COMPILER_GATEWAYS + 2).collect::<Vec<_>>();
+        let mut references = BTreeSet::new();
+        self.is_valid()
+            && rows.len() == self.gateways.len() + 1
+            && result.matches_observations(rows.iter().map(|(_, row)| *row))
+            && rows.iter().all(|(reference, row)| {
+                reference.key().is_ok_and(|key| references.insert(key))
+                    && if matches!(row.fact, OperationalFact::CompilerWaiter(_)) {
+                        *reference == &self.observation
+                    } else {
+                        self.gateways.contains(reference)
+                    }
+            })
+    }
+    pub fn is_valid(&self) -> bool {
+        self.gateways.len() <= MAX_FOCUSED_COMPILER_GATEWAYS
+            && unique_references(&self.gateways)
+            && !self.gateways.contains(&self.observation)
+            && self.references().all(|reference| {
+                reference.is_valid()
+                    && reference.stream == TelemetryStream::OperationalSamples
+                    && matches!(reference.native_key, NativeRecordIdentity::Operational { .. })
+                    && reference.capture_ref() == self.observation.capture_ref()
+            })
     }
 }
 
@@ -617,8 +672,7 @@ pub enum DiagnosticReport {
         peers: Vec<DiagnosticEvidenceRef>,
     },
     CompilationAdmission {
-        observation: DiagnosticEvidenceRef,
-        gateways: Vec<DiagnosticEvidenceRef>,
+        report: Box<CompilationAdmissionReport>,
     },
     CurrentRequestWork {
         observation: DiagnosticEvidenceRef,
@@ -725,8 +779,8 @@ impl DiagnosticReport {
             | Self::PageWaitWriters { observation, .. }
             | Self::PageTaskHolders { observation, .. }
             | Self::RequestMemory { observation, .. }
-            | Self::CompilationAdmission { observation, .. }
             | Self::CurrentRequestWork { observation } => observation,
+            Self::CompilationAdmission { report } => &report.observation,
         }
     }
     /// Every raw row used by this explanation participates in pinning, validation and immutable history.
@@ -741,7 +795,7 @@ impl DiagnosticReport {
                 (Some(page.as_ref()), std::slice::from_ref(parent.as_ref()), &[][..])
             }
             Self::RequestMemory { peers, .. } => (None, peers.as_slice(), &[][..]),
-            Self::CompilationAdmission { gateways, .. } => (None, gateways.as_slice(), &[][..]),
+            Self::CompilationAdmission { report } => (None, report.gateways.as_slice(), &[][..]),
             Self::CurrentRequestWork { .. } => (None, &[][..], &[][..]),
         };
         let mut seen = Vec::new();
@@ -807,15 +861,7 @@ impl DiagnosticReport {
                     && page.as_ref() != self.evidence()
                     && parent.as_ref() != self.evidence()
             }
-            Self::CompilationAdmission { gateways, .. } => {
-                gateways.len() <= MAX_FOCUSED_COMPILER_GATEWAYS
-                    && unique_references(gateways)
-                    && !gateways.contains(self.evidence())
-                    && gateways.iter().all(|reference| {
-                        reference.capture_ref() == self.evidence().capture_ref()
-                            && matches!(reference.native_key, NativeRecordIdentity::Operational { .. })
-                    })
-            }
+            Self::CompilationAdmission { report } => report.is_valid(),
             Self::RequestMemory { peers, .. } => {
                 peers.len() < MAX_DIAGNOSTIC_INPUTS
                     && unique_references(peers)
@@ -875,21 +921,8 @@ impl DiagnosticReport {
         source: &CollectionDescription,
         rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a OperationalObservation)>,
     ) -> bool {
-        let Self::CompilationAdmission { observation, gateways } = self else { return false };
-        let SourceObservation::FocusedCompilationAdmission { result, .. } = &source.observation else { return false };
-        let rows = rows.into_iter().collect::<Vec<_>>();
-        let mut references = BTreeSet::new();
-        self.is_valid()
-            && rows.len() == gateways.len() + 1
-            && result.matches_observations(rows.iter().map(|(_, row)| *row))
-            && rows.iter().all(|(reference, row)| {
-                reference.key().is_ok_and(|key| references.insert(key))
-                    && if matches!(row.fact, OperationalFact::CompilerWaiter(_)) {
-                        *reference == observation
-                    } else {
-                        gateways.contains(reference)
-                    }
-            })
+        let Self::CompilationAdmission { report } = self else { return false };
+        report.matches_input(source, rows)
     }
 
     /// A focused grant report retains every declared raw participant from the same authenticated input.
@@ -971,12 +1004,13 @@ impl DiagnosticRevision {
             && self.inputs.len() <= MAX_DIAGNOSTIC_INPUTS
             && self.inputs.iter().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
             && self.episode.signal.references().all(|reference| self.inputs.contains(reference))
+            && self.episode.source_read.as_deref().is_none_or(|stage| self.inputs.contains(&stage.focus.basis))
             && self.investigation.as_ref().is_none_or(|event| {
                 event.matches_episode(&self.episode)
                     && event.key().ok().as_deref() == self.episode.investigation_event.as_deref()
                     && event.intent.focus.references().all(|reference| self.inputs.contains(reference))
                     && match &event.intent.execution {
-                        DiagnosticExecutionBinding::Database => true,
+                        DiagnosticExecutionBinding::Database | DiagnosticExecutionBinding::NativeRead { .. } => true,
                         DiagnosticExecutionBinding::Shared { owner } => self.inputs.contains(owner),
                     }
             })

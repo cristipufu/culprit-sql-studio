@@ -29,7 +29,7 @@ impl DiagnosticEpisode {
         if !self.is_valid() {
             return Err(invalid());
         }
-        if !self.analysis.needs_work() {
+        if self.source_read.is_some() || !self.analysis.needs_work() {
             return Ok(DiagnosticFocusPlan::NotRequired);
         }
         if matches!(self.signal, DiagnosticSignal::LockWait { .. }) {

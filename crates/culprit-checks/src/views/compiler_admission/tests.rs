@@ -6,6 +6,8 @@ fn gateway(pool: &str, waiting: u64) -> OperationalObservation {
     OperationalObservation::from_counters(
         culprit_core::source_id::COMPILATION_GATEWAYS,
         NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new("Big Gateway")
                 .qualified("native_object", object)
                 .qualified("resource_pool_id", pool),

@@ -181,6 +181,7 @@ impl SnapshotReader for Reader {
         let after = metadata::read(&mut self.io, &self.host, self.port).await?;
         let before = self.metadata.as_ref().ok_or_else(native::invalid)?;
         Ok(SnapshotRecheck {
+            execution: None,
             unchanged: before.same_source(&after)
                 && (!matches!(self.recipe, Recipe::Schema(schema::Kind::Catalog(catalog::Kind::Statistics)))
                     || catalog::statistics_visible(&mut self.io).await?),

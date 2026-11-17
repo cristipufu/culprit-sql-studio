@@ -20,6 +20,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
     #[derive(Serialize)]
     struct View<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
+        counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         page_server_reads: &'a Option<Box<culprit_core::page_server_read_report::PageServerReadReport>>,
@@ -80,6 +82,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         task_space,
         query_compilation,
         compiler_admission,
+        counter_ratios,
         maintenance_progress,
         replication,
         statement_work,
@@ -106,6 +109,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         task_space,
         query_compilation,
         compiler_admission,
+        counter_ratios,
         maintenance_progress,
         replication,
         statement_work,

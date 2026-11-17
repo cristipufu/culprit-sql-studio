@@ -63,7 +63,9 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
             let (label, meaning) = category_info(key, engine);
             let top_wait = types.iter().max_by(|a, b| a.1.total_cmp(b.1)).map(|(t, _)| t.clone());
             let contributors = attributed.get(key).map(Vec::as_slice).unwrap_or(&[]);
+            let mechanisms = mechanisms(snapshot, key);
             let mut category = WaitCategory {
+                mechanisms,
                 key: key.to_string(),
                 label: label.to_string(),
                 wait_ms: *ms,
@@ -75,7 +77,19 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
                 attribution: None,
             };
             fill_queries(&mut category, contributors);
-            category.detail = detail(snapshot, &category, contributors);
+            category.detail = if category.mechanisms.is_empty() {
+                detail(snapshot, &category, contributors)
+            } else {
+                Some(t!(
+                    "view.waits.mechanisms",
+                    mechanisms = category
+                        .mechanisms
+                        .iter()
+                        .map(|row| format!("{} ({})", row.label, row.native_types.join(", ")))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ))
+            };
             if category.queries.is_empty() {
                 category.attribution = Some(engine.spec().wait_not_per_statement(&snapshot.server, key));
             }
@@ -130,6 +144,44 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
         Engine::Mssql | Engine::Sqlite => {}
     }
     Some(WaitsReport { engine, scope, source, total_ms: Some(total_ms), categories, notes, activity })
+}
+
+fn mechanisms(snapshot: &Snapshot, category: &str) -> Vec<culprit_core::waits::WaitMechanismSummary> {
+    let mut summaries =
+        BTreeMap::<culprit_core::telemetry::WaitMechanism, culprit_core::waits::WaitMechanismSummary>::new();
+    for wait in snapshot.waits.iter().filter(|wait| category_key(&wait.category) == category) {
+        let Some(mechanism) = wait.mechanism else { continue };
+        let Some(native_type) = wait.wait_type.as_deref() else { continue };
+        if !wait.wait_ms.is_finite()
+            || wait.wait_ms <= 0.0
+            || mechanism.class().key() != category
+            || snapshot.server.engine.spec().native_wait_mechanism(native_type) != Some(mechanism)
+        {
+            continue;
+        }
+        let row = summaries.entry(mechanism).or_insert_with(|| culprit_core::waits::WaitMechanismSummary {
+            mechanism,
+            label: mechanism.label(),
+            native_types: vec![],
+            wait_ms: 0.0,
+        });
+        let total = row.wait_ms + wait.wait_ms;
+        if !total.is_finite() {
+            continue;
+        }
+        row.wait_ms = total;
+        if !row.native_types.iter().any(|value| value == native_type) {
+            row.native_types.push(native_type.into());
+        }
+    }
+    let mut result: Vec<_> = summaries.into_values().collect();
+    for row in &mut result {
+        row.native_types.sort();
+    }
+    result.sort_by(|left, right| {
+        right.wait_ms.total_cmp(&left.wait_ms).then_with(|| left.mechanism.cmp(&right.mechanism))
+    });
+    result
 }
 
 fn activity(snapshot: &Snapshot) -> Option<ActivityReport> {
@@ -473,7 +525,13 @@ mod tests {
     use culprit_core::WaitStat;
 
     fn wait(category: &str, wait_type: &str, ms: f64) -> WaitStat {
-        WaitStat { category: category.into(), wait_type: Some(wait_type.into()), wait_ms: ms, tasks: None }
+        WaitStat {
+            mechanism: None,
+            category: category.into(),
+            wait_type: Some(wait_type.into()),
+            wait_ms: ms,
+            tasks: None,
+        }
     }
 
     fn sampled_activity() -> Snapshot {
@@ -794,5 +852,75 @@ mod tests {
         let mut snapshot = snapshot_with(Engine::Mssql);
         snapshot.waits.clear();
         assert!(explain(&snapshot).is_none());
+    }
+}
+
+#[cfg(test)]
+mod log_governance_tests {
+    use super::*;
+    use culprit_core::WaitStat;
+
+    #[test]
+    fn historical_reasons_remain_independent_from_current_components_and_generic_log_storage() {
+        let mut snapshot = snapshot_with(Engine::Mssql);
+        snapshot.pressure = None;
+        let names = [
+            "RBIO_RG_STORAGE",
+            "RBIO_RG_REPLICA",
+            "RBIO_RG_LOCALDESTAGE",
+            "RBIO_RG_DESTAGE",
+            "RBIO_RG_GEOREPLICA",
+            "RBIO_RG_STORAGE_CHECKPOINT",
+            "RBIO_RG_MIGRATION_TARGET",
+        ];
+        snapshot.waits = names
+            .into_iter()
+            .map(|name| WaitStat {
+                category: "Log Governance".into(),
+                wait_type: Some(name.into()),
+                wait_ms: 100.0,
+                tasks: Some(1.0),
+                mechanism: Engine::Mssql.spec().native_wait_mechanism(name),
+            })
+            .collect();
+        snapshot.waits.push(WaitStat {
+            category: "Log".into(),
+            wait_type: Some("WRITELOG".into()),
+            wait_ms: 10.0,
+            tasks: Some(1.0),
+            mechanism: None,
+        });
+        let report = explain(&snapshot).unwrap();
+        assert_eq!(report.scope, WaitScope::SinceStartup);
+        let governance = report.categories.iter().find(|row| row.key == "log-governance").unwrap();
+        assert_eq!(governance.mechanisms.len(), 7);
+        assert_eq!(governance.wait_ms, 700.0);
+        assert!(governance.queries.is_empty());
+        assert!(governance.meaning.contains("Historical totals"));
+        assert!(!governance.meaning.contains("disk"));
+        for row in &governance.mechanisms {
+            assert_eq!(row.wait_ms, 100.0);
+            assert_eq!(row.native_types.len(), 1);
+            assert!(governance.detail.as_ref().unwrap().contains(&row.native_types[0]));
+        }
+        let log = report.categories.iter().find(|row| row.key == "log").unwrap();
+        assert!(log.mechanisms.is_empty());
+        assert_eq!(log.wait_ms, 10.0);
+    }
+
+    #[test]
+    fn a_forged_mechanism_or_another_engines_same_named_wait_cannot_supply_typed_subtotals() {
+        for engine in Engine::ALL.into_iter().filter(|engine| *engine != Engine::Sqlite) {
+            let mut snapshot = snapshot_with(engine);
+            snapshot.waits = vec![WaitStat {
+                category: "Log Governance".into(),
+                wait_type: Some("WRITELOG".into()),
+                wait_ms: 100.0,
+                tasks: None,
+                mechanism: Engine::Mssql.spec().native_wait_mechanism("RBIO_RG_STORAGE"),
+            }];
+            let report = explain(&snapshot).unwrap();
+            assert!(report.categories.iter().all(|row| row.mechanisms.is_empty()));
+        }
     }
 }

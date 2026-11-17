@@ -239,6 +239,40 @@ impl Scheduler {
         self.remove_focus(key, now, wall)
     }
 
+    /// The caller authenticates an already-consumed, durably quiescent result and its exact saved intent.
+    /// Reconciliation settles only this historical admission; it grants no native work or source-gate release.
+    pub fn reconcile_completed_focus(
+        &mut self,
+        key: &str,
+        result: &DiagnosticCaptureRef,
+        now: Duration,
+        wall: DateTime<Utc>,
+    ) -> Result<ScheduleUpdate> {
+        self.require_idle()?;
+        let mut pending = self.focused.get(key).cloned().ok_or_else(state_failed)?;
+        if !result.is_valid()
+            || pending.status != FocusStatus::Pending
+            || pending.attempts == 0
+            || !matches!(pending.source_work, SourceWorkState::Quiescent | SourceWorkState::Unconfirmed)
+        {
+            return Err(state_failed());
+        }
+        pending.status = FocusStatus::Completed { result: result.clone() };
+        pending.failures = 0;
+        pending.last_attempt = Some(result.capture.clone());
+        pending.source_work = SourceWorkState::Quiescent;
+        let mut update = self.focus_update(
+            &pending,
+            self.focused_families.get(&pending.job.family).ok_or_else(state_failed)?,
+            self.resources.get(&pending.job.resource).ok_or_else(state_failed)?,
+            now,
+            wall,
+        )?;
+        self.advance_metadata_sequence(&mut update)?;
+        self.focused.insert(key.into(), pending);
+        Ok(update)
+    }
+
     /// The caller authenticates result consumption and parent-pin settlement before retirement.
     pub fn retire_focused(&mut self, key: &str, now: Duration, wall: DateTime<Utc>) -> Result<ScheduleUpdate> {
         self.require_idle()?;

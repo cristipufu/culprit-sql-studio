@@ -50,6 +50,7 @@ struct PublicLineage<'a> {
 enum PublicExecution<'a> {
     Database,
     Shared { owner: &'a DiagnosticEvidenceRef },
+    NativeRead { execution_key: String },
 }
 
 pub(super) fn lineage(value: &DiagnosticInvestigationLineage) -> Result<Value> {
@@ -66,6 +67,9 @@ pub(super) fn lineage(value: &DiagnosticInvestigationLineage) -> Result<Value> {
         execution: match &value.execution {
             DiagnosticExecutionBinding::Database => PublicExecution::Database,
             DiagnosticExecutionBinding::Shared { owner } => PublicExecution::Shared { owner },
+            DiagnosticExecutionBinding::NativeRead { execution } => {
+                PublicExecution::NativeRead { execution_key: execution.key()? }
+            }
         },
     })
     .map_err(|_| DeliveryProblem::Integrity.error())

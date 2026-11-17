@@ -187,7 +187,8 @@ impl Kind {
         if self.database_scoped() {
             identity = identity.qualified("schema", database);
         }
-        let set = NativeCounterSet { identity, scope, counters, properties };
+        let set =
+            NativeCounterSet { ratios: Vec::new(), ratio_gaps: Vec::new(), identity, scope, counters, properties };
         if !set.is_valid() {
             return Err(invalid());
         }

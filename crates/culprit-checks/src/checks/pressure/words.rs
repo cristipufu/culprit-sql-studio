@@ -159,6 +159,7 @@ fn samples(pick: impl Fn(usize) -> f64, dim: usize) -> Vec<ResourceSample> {
             let mut v = [30.0, 10.0, 10.0, 5.0];
             v[dim] = pick(i);
             ResourceSample {
+                data_io_accounting: culprit_core::telemetry::DataIoAccounting::DataFiles,
                 at: format::iso_from_epoch(format::epoch_seconds("2026-10-11T10:00:15Z").unwrap() + i as f64 * 15.0),
                 cpu_pct: Some(v[0]),
                 data_io_pct: Some(v[1]),
@@ -215,6 +216,7 @@ fn network_wait_words() {
         }
         let q = &mut s.workload.as_mut().unwrap().queries[0];
         q.waits = vec![WaitStat {
+            mechanism: None,
             category: "Network".into(),
             wait_type: Some("Network IO".into()),
             wait_ms: q.total_time_ms * 0.6,
@@ -245,7 +247,13 @@ fn row_lock_waits_words() {
     set(&mut here, "transaction_isolation", "SERIALIZABLE");
     last_hours(&mut here, 10.0);
     let q = &mut here.workload.as_mut().unwrap().queries[0];
-    q.waits = vec![WaitStat { category: "Lock".into(), wait_type: None, wait_ms: q.total_time_ms * 0.8, tasks: None }];
+    q.waits = vec![WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: None,
+        wait_ms: q.total_time_ms * 0.8,
+        tasks: None,
+    }];
     let server = uptime(
         with_signals(
             Engine::Mysql,
@@ -259,7 +267,13 @@ fn row_lock_waits_words() {
 /// The demo's waits with `ms` of memory waits in place of its own.
 fn memory_waits(mut s: Snapshot, ms: f64) -> Snapshot {
     s.waits.retain(|w| w.category != "Memory");
-    s.waits.push(WaitStat { category: "Memory".into(), wait_type: Some("Memory".into()), wait_ms: ms, tasks: None });
+    s.waits.push(WaitStat {
+        mechanism: None,
+        category: "Memory".into(),
+        wait_type: Some("Memory".into()),
+        wait_ms: ms,
+        tasks: None,
+    });
     s
 }
 
@@ -270,7 +284,7 @@ fn memory_queue_words() {
     // Query Store's window: the waits are this database's.
     let mut windowed = snapshot_with(Engine::Mssql);
     windowed.workload.as_mut().unwrap().queries[0].waits =
-        vec![WaitStat { category: "Memory".into(), wait_type: None, wait_ms: 1_000.0, tasks: None }];
+        vec![WaitStat { mechanism: None, category: "Memory".into(), wait_type: None, wait_ms: 1_000.0, tasks: None }];
     let hours = windowed.workload.as_ref().unwrap().window_hours;
     let windowed = memory_waits(windowed, 20.0 * MINUTE_MS * hours * 4.0);
     // The instance's totals since it started, with queries queueing now.
@@ -587,13 +601,13 @@ verify: Re-scan: cpu should stay under 95% for most of the time (the Health stri
     (
         "data-io",
         r#"tier-limit:data-io · High · High · OptionalImprovement · score 57.00
-title: Data reads reached 95% of the tier's limit in 40% of samples over the last 60 minutes
-summary: Azure caps each tier's data reads. In the last 60 minutes it was at 95% or more of that cap in 40% of the 15-second samples (peak 99%). This is measured resource use, not a share of waits: reads can be throttled at the cap. At the cap, Azure makes requests wait rather than fail, so it shows up as slowness. Samples near the cap alone do not prove throttling or failed requests occurred.
+title: Data-file I/O reached 95% of the tier's limit in 40% of samples over the last 60 minutes
+summary: The native percentage covers reads and writes against data files relative to the data-I/O limit. In the last 60 minutes it was at 95% or more of that cap in 40% of the 15-second samples (peak 99%). This measures utilization against the native I/O limit. It does not identify the request responsible or measure its delay. At the cap, Azure makes requests wait rather than fail, so it shows up as slowness. Samples near the cap alone do not prove throttling or failed requests occurred.
 impact: near limit 40%
 metric: Samples at or above 95%
 metric: Peak
 fix: Cut scans with the missing-index findings and check memory; then consider a tier with more IO.
-verify: Re-scan: data reads should stay under 95% for most of the time (the Health strip on Dashboard shows it)."#,
+verify: Re-scan the same native I/O accounting basis: utilization should stay under 95% for most of the time (the Health strip on Dashboard shows it)."#,
     ),
     (
         "log-write",

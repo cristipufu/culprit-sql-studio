@@ -518,8 +518,13 @@ fn zero_waits_verify_only_the_category_actually_measured() {
         q.mean_time_ms = 100.0;
         q.spread = None;
         q.waits_coverage = None;
-        q.waits =
-            vec![culprit_core::WaitStat { category: category.into(), wait_type: None, wait_ms: 80_000.0, tasks: None }];
+        q.waits = vec![culprit_core::WaitStat {
+            mechanism: None,
+            category: category.into(),
+            wait_type: None,
+            wait_ms: 80_000.0,
+            tasks: None,
+        }];
         w.total_time_ms = q.total_time_ms;
         let before = culprit_checks::analyze(s.clone());
         let finding = before.findings.iter().find(|f| f.check == check).expect(check);
@@ -681,13 +686,14 @@ fn negative_wait_assessments_require_the_requested_class_even_when_positive_wait
     let queries = &mut s.workload.as_mut().unwrap().queries;
     queries.truncate(1);
     queries[0].spread = None;
-    queries[0].waits = vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: 100.0, tasks: None }];
+    queries[0].waits =
+        vec![WaitStat { mechanism: None, category: "IO".into(), wait_type: None, wait_ms: 100.0, tasks: None }];
     queries[0].waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Io], complete: true });
     let requirement = Requirement::Query(QueryMeasure::Waits(WaitClass::Lock));
     assert!(matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)));
 
     let query = &mut s.workload.as_mut().unwrap().queries[0];
-    query.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 5.0, tasks: None });
+    query.waits.push(WaitStat { mechanism: None, category: "Lock".into(), wait_type: None, wait_ms: 5.0, tasks: None });
     query.waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Lock], complete: false });
     assert!(
         matches!(assess(&[requirement], &s), CheckEvidence::Insufficient(_)),

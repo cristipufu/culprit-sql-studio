@@ -376,6 +376,8 @@ fn generic_case(engine: Engine) -> (CollectionDescription, Vec<TelemetryRecord>)
             },
         },
         counters: NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new(plan_id),
             scope: MeasurementScope::Database,
             counters: vec![NativeCounterSample {

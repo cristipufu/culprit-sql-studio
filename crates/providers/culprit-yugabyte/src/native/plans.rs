@@ -81,6 +81,8 @@ pub(crate) fn decode(
             plan,
         },
         counters: NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new(&id).qualified("node", &meta.node),
             scope: MeasurementScope::Node,
             counters,

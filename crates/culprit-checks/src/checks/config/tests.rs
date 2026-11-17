@@ -29,7 +29,13 @@ fn rcsi_preserves_lock_symptoms_without_claiming_a_proven_isolation_cure() {
 
     let w = s.workload.as_mut().unwrap();
     let read = w.queries.iter_mut().find(|q| q.text.starts_with("SELECT")).unwrap();
-    read.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 300_000.0, tasks: None });
+    read.waits.push(WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: None,
+        wait_ms: 300_000.0,
+        tasks: None,
+    });
     w.total_time_ms += 300_000.0;
     let candidate = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
     assert_eq!(candidate.severity, Severity::Medium);
@@ -54,7 +60,13 @@ fn rcsi_candidate_keeps_share_cadence_and_largest_reader_as_observations() {
     let w = s.workload.as_mut().unwrap();
     w.window_hours = 146.66;
     let read = w.queries.iter_mut().find(|q| q.text.starts_with("SELECT")).unwrap();
-    read.waits.push(WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 71_692.0, tasks: None });
+    read.waits.push(WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: None,
+        wait_ms: 71_692.0,
+        tasks: None,
+    });
     (read.first_seen, read.last_seen, read.trend) = (None, None, None);
     w.total_time_ms = 335_668.0;
     let f = found(&mssql::check(&s), "config:read-committed-snapshot").cloned().unwrap();
@@ -84,6 +96,7 @@ fn schema_and_unknown_aggregate_lock_waits_require_resource_investigation_before
         let w = s.workload.as_mut().unwrap();
         let read = w.queries.iter_mut().find(|query| mssql::row_versioning_candidate(query)).unwrap();
         read.waits = vec![WaitStat {
+            mechanism: None,
             category: "Lock".into(),
             wait_type: native_type.map(str::to_owned),
             wait_ms: 300_000.0,
@@ -129,7 +142,8 @@ fn rcsi_absence_requires_qualified_lock_measurements_for_every_captured_read() {
     let mut s = fixture("mssql-demo.json");
     let workload = s.workload.as_mut().unwrap();
     let mut read = workload.queries.iter().find(|q| mssql::row_versioning_candidate(q)).unwrap().clone();
-    read.waits = vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: 100.0, tasks: None }];
+    read.waits =
+        vec![WaitStat { mechanism: None, category: "IO".into(), wait_type: None, wait_ms: 100.0, tasks: None }];
     read.waits_coverage = Some(QueryWaitCoverage { classes: vec![WaitClass::Lock], complete: true });
     let mut unqualified = read.clone();
     unqualified.id.push_str("-unqualified");

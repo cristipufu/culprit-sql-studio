@@ -179,17 +179,27 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
     }
     let dimensions: [(&str, String, ResourcePick); 5] = [
         ("cpu-use", t!("health.resource.label.cpu_use"), |s| s.cpu_pct),
-        ("data-io", t!("health.resource.label.data_io"), |s| s.data_io_pct),
+        ("data-io", ResourceSample::common_data_io_accounting(&snapshot.resources).unwrap_or_default().label(), |s| {
+            s.data_io_pct
+        }),
         ("log-write-use", t!("health.resource.label.log_write_use"), |s| s.log_write_pct),
         ("workers-use", t!("health.resource.label.workers_use"), |s| s.workers_pct),
         ("memory-use", t!("health.resource.label.memory_use"), |s| s.memory_pct),
     ];
     for (key, label, pick) in dimensions {
         p.signals.retain(|s| s.key != key);
+        let data_io =
+            if key == "data-io" { ResourceSample::common_data_io_accounting(&snapshot.resources) } else { None };
+        if key == "data-io" && data_io.is_none() {
+            continue;
+        }
         let Some(u) = resource_usage(&snapshot.resources, pick) else {
             continue;
         };
-        let status = if key == "memory-use" || !u.measured {
+        let status = if key == "memory-use"
+            || data_io == Some(culprit_core::telemetry::DataIoAccounting::Unknown)
+            || !u.measured
+        {
             SignalStatus::Info
         } else if u.at_limit >= 0.3 {
             SignalStatus::Bad
@@ -218,7 +228,15 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
             },
         ];
         let signal = Signal {
-            healthy: Some(coverage.into_iter().chain(said).collect::<Vec<_>>().join(" ")),
+            healthy: Some(
+                data_io
+                    .map(|accounting| accounting.meaning())
+                    .into_iter()
+                    .chain(coverage)
+                    .chain(said)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
             status,
             ..Signal::new(
                 key,
@@ -315,6 +333,7 @@ mod tests {
         let start = parse_epoch_seconds("2026-10-11T10:00:15Z").unwrap();
         s.resources = (0..240)
             .map(|i| ResourceSample {
+                data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
                 at: format::iso_from_epoch(start + i as f64 * 15.0),
                 cpu_pct: Some(cpu(i)),
                 data_io_pct: Some(0.0),
@@ -780,28 +799,28 @@ oldest-transaction | Label of oldest-transaction | Info | A cleanup holder obser
 
 azure:
 cpu-use | CPU used against its limit | Watch | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 100%. At or above 95% of this database's limit in 25% of samples. A warning needs at least 10% of samples near the limit.
-data-io | Storage I/O used against its limit | Good | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+data-io | Data I/O (accounting unknown) | Info | The native source reports I/O utilization against its limit, but does not establish which I/O it accounts for. 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 log-write-use | Log throughput used against its limit | Good | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 workers-use | Worker slots used against their limit | Good | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 memory-use | Memory allocated against its limit | Info | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure.
 
 azure, sparse:
 cpu-use | CPU used against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 50%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
-data-io | Storage I/O used against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
+data-io | Data I/O (accounting unknown) | Info | The native source reports I/O utilization against its limit, but does not establish which I/O it accounts for. 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
 log-write-use | Log throughput used against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
 workers-use | Worker slots used against their limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
 memory-use | Memory allocated against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure.
 
 azure, no window:
 cpu-use | CPU used against its limit | Good | Average over 60 minutes of recorded samples; peak <0.01%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
-data-io | Storage I/O used against its limit | Good | Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+data-io | Data I/O (accounting unknown) | Info | The native source reports I/O utilization against its limit, but does not establish which I/O it accounts for. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 log-write-use | Log throughput used against its limit | Good | Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 workers-use | Worker slots used against their limit | Good | Average over 60 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 memory-use | Memory allocated against its limit | Info | Average over 60 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure.
 
 azure, a week selected:
 cpu-use | CPU used against its limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 3%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
-data-io | Storage I/O used against its limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+data-io | Data I/O (accounting unknown) | Info | The native source reports I/O utilization against its limit, but does not establish which I/O it accounts for. 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 log-write-use | Log throughput used against its limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 workers-use | Worker slots used against their limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
 memory-use | Memory allocated against its limit | Info | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure."#;

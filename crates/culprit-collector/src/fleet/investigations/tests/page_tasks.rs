@@ -264,7 +264,7 @@ async fn changed_route_refuses_before_open_and_failed_native_describe_keeps_the_
             assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::SourceUnavailable));
             assert!(manifest.description.is_none());
             assert_eq!(manifest.investigation_intent().unwrap(), Some(intent.clone()));
-            assert!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.is_ok());
+            assert!(runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.is_ok());
             assert_eq!(runtime.native_calls()[4], before[4] + 1, "the same native observer is closed");
             runtime.finish(result.outcome).await;
         }
@@ -288,7 +288,7 @@ async fn pending_question_reopens_with_its_exact_first_frame_context_and_pin_wit
     assert_eq!(journal.focused_intents().await.unwrap(), vec![intent.clone()]);
     assert!(outbox.investigation_parent_keys().await.unwrap().contains(&intent.key().unwrap()));
     let original = outbox
-        .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+        .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await
         .unwrap();
     let DiagnosticFocus::PageWaitTasks { original_context, .. } = &intent.focus else { panic!() };
@@ -344,7 +344,7 @@ async fn cancellation_before_native_admission_keeps_the_pending_question_and_ori
     runtime.finish(result.outcome).await;
     assert_eq!(runtime.fixture.journal.focused_intents().await.unwrap(), vec![intent.clone()]);
     assert!(runtime.fixture.outbox.investigation_parent_keys().await.unwrap().contains(&intent.key().unwrap()));
-    assert!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.is_ok());
+    assert!(runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.is_ok());
 }
 
 #[tokio::test]
@@ -391,8 +391,8 @@ async fn an_original_missing_token_cannot_starve_an_eligible_sibling_from_the_sa
     let before = runtime.native_calls();
     assert!(runtime.enroll().await);
     let admitted = intent(&runtime).await;
-    assert_ne!(admitted.focus.participant().original.key, invalid);
-    assert!(admitted.focus.participant().original.statement_identity.is_some());
+    assert_ne!(admitted.focus.activity_participant().unwrap().original.key, invalid);
+    assert!(admitted.focus.activity_participant().unwrap().original.statement_identity.is_some());
     assert_eq!(runtime.fixture.backend.verified.load(Ordering::SeqCst), 1);
     assert_eq!(runtime.native_calls(), before, "invalid triggers do not open native work");
     assert!(!runtime.enroll().await);

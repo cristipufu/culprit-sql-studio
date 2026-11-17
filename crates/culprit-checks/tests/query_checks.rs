@@ -767,6 +767,7 @@ fn a_stopped_unstable_insert_points_at_what_runs_now() {
     q.first_seen = Some("2026-10-10T06:00:00Z".into());
     q.last_seen = Some("2026-10-10T08:00:00Z".into());
     q.waits = vec![WaitStat {
+        mechanism: None,
         category: "IO".into(),
         wait_type: Some("data file reads and writes".into()),
         wait_ms: 86.0,
@@ -901,7 +902,7 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
     });
     let q = query(&mut keyed, PG);
     q.rows = Some(q.executions * 0.25);
-    q.waits = vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: 86.0, tasks: None }];
+    q.waits = vec![WaitStat { mechanism: None, category: "IO".into(), wait_type: None, wait_ms: 86.0, tasks: None }];
     let mut rare = keyed.clone();
     rare.workload.as_mut().unwrap().window_hours = 30_000.0;
     let events = || insert("INSERT INTO events (customer_id, kind) VALUES ($1, $2)", "public.events");
@@ -945,6 +946,7 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
         s
     };
     let wait = |category: &str, wait_type: &str, ms: f64| WaitStat {
+        mechanism: None,
         category: category.into(),
         wait_type: Some(wait_type.into()),
         wait_ms: ms,
@@ -1572,6 +1574,7 @@ fn query_store_waits_name_what_a_statement_waited_for() {
     q.total_time_ms = 900.0 * q.executions;
     q.cpu_time_ms = Some(q.total_time_ms * 0.02);
     q.waits = vec![WaitStat {
+        mechanism: None,
         category: "Latch".into(),
         wait_type: Some("Buffer Latch".into()),
         wait_ms: q.total_time_ms * 0.9,
@@ -2230,6 +2233,7 @@ fn a_material_native_wait_is_a_lower_bound_without_an_elapsed_share_or_cache_cau
     let mut s = point_lookup(1.0, 0.0066);
     let q = query(&mut s, "7");
     q.waits = vec![WaitStat {
+        mechanism: None,
         category: "IO".into(),
         wait_type: Some("Buffer IO".into()),
         wait_ms: q.total_time_ms * 0.85,
@@ -2248,6 +2252,7 @@ fn a_material_native_wait_is_a_lower_bound_without_an_elapsed_share_or_cache_cau
     let mut s = point_lookup(1.0, 0.0066);
     let q = query(&mut s, "7");
     q.waits = vec![WaitStat {
+        mechanism: None,
         category: "IO".into(),
         wait_type: Some("Buffer IO".into()),
         wait_ms: q.total_time_ms * 0.3,
@@ -2285,6 +2290,7 @@ fn a_check_for_a_row_names_the_unique_index_its_plan_seeks() {
     let q = query(&mut s, "7");
     q.rows = Some(1.0);
     q.waits = vec![WaitStat {
+        mechanism: None,
         category: "IO".into(),
         wait_type: Some("Buffer IO".into()),
         wait_ms: q.total_time_ms * 0.86,
@@ -2345,6 +2351,7 @@ fn storage_wait_share_does_not_diagnose_eviction_or_insufficient_memory() {
     let q = query(&mut s, "7");
     q.rows = Some(1.0);
     q.waits = vec![WaitStat {
+        mechanism: None,
         category: "IO".into(),
         wait_type: Some("Buffer IO".into()),
         wait_ms: q.total_time_ms * 0.86,

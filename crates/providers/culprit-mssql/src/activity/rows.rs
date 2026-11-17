@@ -28,6 +28,7 @@ fn counters(row: &Rec, prefix: &str) -> Result<ActivityCounters> {
         logical_reads: optional_counter(row, &format!("{prefix}_logical_reads"))?,
         physical_reads: optional_counter(row, &format!("{prefix}_physical_reads"))?,
         writes: optional_counter(row, &format!("{prefix}_writes"))?,
+        page_server_reads: None,
     })
 }
 pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
@@ -90,7 +91,7 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
         elapsed_ms: optional_counter(row, "elapsed_ms")?,
         transaction_age_ms: age(row, "transaction_start")?,
         session_counters: counters(row, "session")?,
-        request_counters: if request.is_some() { Some(counters(row, "request")?) } else { None },
+        request_counters: if request.is_some() { Some(request_counters(row)?) } else { None },
         wait,
         query_hash: optional_text(row, "query_hash")?,
         statement_identity: current_locator.as_ref().map(RequestLocator::identity),
@@ -116,6 +117,11 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
         current_locator,
         previous_locator,
     }))
+}
+fn request_counters(row: &Rec) -> Result<ActivityCounters> {
+    let mut counters = counters(row, "request")?;
+    counters.page_server_reads = super::page_server_reads::count(row)?;
+    Ok(counters)
 }
 fn request_locator(row: &Rec) -> Result<Option<RequestLocator>> {
     let Some(handle) = optional_text(row, "sql_handle")? else { return Ok(None) };

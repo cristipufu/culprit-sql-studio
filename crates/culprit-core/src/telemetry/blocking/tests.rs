@@ -308,7 +308,7 @@ fn a_genuinely_qualified_original_plans_one_question_and_retains_every_explanati
         panic!("qualified original asks a native lock question")
     };
     assert_eq!(*question, DiagnosticFocus::Blocking { focus: Box::new(result.focus.clone()) });
-    assert_eq!(DiagnosticFocus::from_selection(&question.database_selection()), Some(*question));
+    assert_eq!(DiagnosticFocus::from_selection(&question.activity_selection().unwrap()), Some(*question));
 
     let references = current_references(&source, &rows);
     let observed = rows

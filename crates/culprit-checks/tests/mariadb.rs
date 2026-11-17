@@ -133,6 +133,7 @@ fn as_scanned() -> Snapshot {
         };
         q.spread.as_mut().expect("the slow log's spread").lock_ms = Some(lock);
         q.waits.push(WaitStat {
+            mechanism: None,
             category: "Lock".into(),
             wait_type: Some("lock time".into()),
             wait_ms: lock,

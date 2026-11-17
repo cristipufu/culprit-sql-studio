@@ -222,8 +222,15 @@ fn a_counter_says_its_share_apart_from_the_lock_waits_measured() {
     let mut s = mssql();
     let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == "7").expect("query");
     q.waits = vec![
-        culprit_core::WaitStat { category: "Lock".into(), wait_type: Some("Lock".into()), wait_ms: 1.0, tasks: None },
         culprit_core::WaitStat {
+            mechanism: None,
+            category: "Lock".into(),
+            wait_type: Some("Lock".into()),
+            wait_ms: 1.0,
+            tasks: None,
+        },
+        culprit_core::WaitStat {
+            mechanism: None,
             category: "IO".into(),
             wait_type: Some("Buffer IO".into()),
             wait_ms: 179.0,
@@ -271,7 +278,13 @@ fn a_counter_says_its_share_apart_from_the_lock_waits_measured() {
     // An I/O row cannot qualify an absent lock class, even when I/O coverage is complete.
     let mut s = mssql();
     let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == "7").expect("query");
-    q.waits = vec![culprit_core::WaitStat { category: "IO".into(), wait_type: None, wait_ms: 179.0, tasks: None }];
+    q.waits = vec![culprit_core::WaitStat {
+        mechanism: None,
+        category: "IO".into(),
+        wait_type: None,
+        wait_ms: 179.0,
+        tasks: None,
+    }];
     q.waits_coverage =
         Some(culprit_core::QueryWaitCoverage { classes: vec![culprit_core::telemetry::WaitClass::Io], complete: true });
     let unqualified = chatty_write(s.clone(), "7", counter, None);
@@ -454,7 +467,13 @@ fn chatty_statements_say_what_their_round_trips_do_in_english() {
     let compound = "(@par0 nvarchar(4000))update [app].[conversations] set [last_seq] = [app].[conversations].[last_seq] + 1, [updated_at] = SYSUTCDATETIME() output INSERTED.[last_seq], INSERTED.[status] where ([app].[conversations].[id] = @par0)";
     let isolated = "(@par0 nvarchar(4000))update [app].[conversations] set [last_seq] = [app].[conversations].[last_seq] + 1 output INSERTED.[last_seq] where ([app].[conversations].[id] = @par0)";
     let lock_waits = |q: &mut culprit_core::QueryStat| {
-        q.waits = vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 40.0, tasks: None }];
+        q.waits = vec![culprit_core::WaitStat {
+            mechanism: None,
+            category: "Lock".into(),
+            wait_type: None,
+            wait_ms: 40.0,
+            tasks: None,
+        }];
     };
     let end = epoch_seconds("2026-10-11T12:13:47Z").unwrap();
     let stopped = |q: &mut culprit_core::QueryStat| {

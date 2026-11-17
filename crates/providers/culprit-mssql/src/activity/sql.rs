@@ -1,5 +1,8 @@
 //! Native activity projections. Scope and optional database identity are requested facts, independent of consumers.
-use super::IdentityDetail;
+use super::{
+    IdentityDetail,
+    page_server_reads::{self, Availability},
+};
 
 #[derive(Clone, Copy)]
 pub(crate) enum QueryPolicy {
@@ -73,8 +76,24 @@ OUTER APPLY ({rows}) a
     )
 }
 
+/// Request counters opt into their native column capability at the same point as the enclosing frame.
+/// Ordinary source-authority projections retain their existing query and do not read this metadata.
+pub(crate) fn request_frame_query(rows: &str, identity: IdentityDetail, policy: QueryPolicy) -> String {
+    format!("{FRAME_CLOCK}{}", request_frame_select_with_context(rows, identity, policy, ""))
+}
+
+pub(super) fn request_frame_select_with_context(
+    rows: &str,
+    identity: IdentityDetail,
+    policy: QueryPolicy,
+    context_columns: &str,
+) -> String {
+    let context = format!("{} AS request_page_server_read_capability,{context_columns}", page_server_reads::CAPABILITY);
+    frame_select_with_context(rows, identity, policy, &context)
+}
+
 /// One request projection and decoder own generations, waits, application context and guarded SQL locators.
-pub(super) const REQUEST_COLUMNS: &str = r#"s.session_id,CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS session_generation,
+const REQUEST_COLUMNS: &str = r#"s.session_id,CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS session_generation,
   r.request_id,CONVERT(varchar(40),CAST(r.start_time AS datetime2),126) AS request_generation,
   DB_NAME(COALESCE(r.database_id,s.database_id)) AS session_database,r.command,COALESCE(r.status,s.status) AS state,
   s.program_name,s.login_name,s.host_name,s.open_transaction_count,
@@ -88,9 +107,18 @@ pub(super) const REQUEST_COLUMNS: &str = r#"s.session_id,CONVERT(varchar(40),CAS
   CONVERT(varchar(16),r.query_hash,2) AS query_hash,CONVERT(varchar(128),r.sql_handle,2) AS sql_handle,
   r.statement_start_offset AS statement_start,r.statement_end_offset AS statement_end,r.database_id AS request_database_id"#;
 
-pub(super) fn metadata(identity: IdentityDetail) -> String {
+pub(crate) fn request_columns(availability: Availability) -> String {
+    format!(
+        "{REQUEST_COLUMNS},{} AS request_page_server_read_availability,{} AS request_page_server_reads",
+        page_server_reads::current_availability(availability),
+        page_server_reads::column(availability, "r")
+    )
+}
+
+pub(super) fn metadata(identity: IdentityDetail, availability: Availability) -> String {
+    let columns = request_columns(availability);
     let rows = format!(
-        r#"SELECT {REQUEST_COLUMNS},
+        r#"SELECT {columns},
   CASE WHEN NOT EXISTS(SELECT 1 FROM sys.dm_exec_requests ar WHERE ar.session_id=s.session_id) THEN 1 ELSE 0 END AS no_current_request,
   CASE WHEN r.request_id IS NOT NULL THEN CASE WHEN r.database_id=DB_ID() THEN 1
    WHEN s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE database_id=DB_ID() AND blocking_session_id>0) THEN 4 ELSE 5 END
@@ -114,7 +142,7 @@ pub(super) fn metadata(identity: IdentityDetail) -> String {
    OR s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE database_id=DB_ID() AND blocking_session_id>0))
 "#
     );
-    frame_query(&rows, identity, QueryPolicy::Activity)
+    request_frame_query(&rows, identity, QueryPolicy::Activity)
 }
 
 // XML selectors work on databases whose compatibility level predates OPENJSON. Values are typed and validated.

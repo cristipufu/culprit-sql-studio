@@ -35,11 +35,16 @@ separate consumer; this service does not add an ADX-backed desktop connection.
 Embedders can read a specifically selected committed capture through
 `culprit_collector::analytical::evidence::EvidenceReader`; the store crates expose `evidence::AdxReadStore` and
 `evidence::ClickHouseReadStore`. The reader accepts an authenticated `CommittedRange`, selected evidence families and a read budget.
-`EvidenceFamily::ALL` declares the supported families: resource samples, native activity observations, inline typed operational facts, object, query and
+`EvidenceFamily::ALL` declares the supported families: resource samples, native cumulative wait-counter samples, native activity observations, inline typed operational facts, object, query and
 plan definitions, interval query runtime and query waits. Runtime and waits retain native identities, dimensions,
 outcomes, exact execution counters, units and query/plan references. Definitions retain native context and plan-to-query
 parents; an available SQL or plan payload is reconstructed only when the stored preview is complete and verified.
 Truncated payloads require recovery. A native unavailable payload keeps its original reason.
+Resource samples retain the native data-I/O accounting basis separately from the percentage, scope and limit.
+Hyperscale local SSD accounting includes RBPEX and tempdb and excludes page-server I/O; unknown pool accounting
+cannot borrow a member database's profile. Read native waits with `--family wait-counter-samples`: original wait
+names, exact counters, reset evidence and typed log-governance reasons remain historical facts, without naming a
+current limiting component or request.
 Scope, reset evidence, source coverage and observation bounds remain attached to the typed records. The reader does
 not select a latest head, resolve references across captures, merge epochs or create a report.
 `is_read_complete()` confirms retrieval of the selected capture's evidence. Native source coverage remains
@@ -51,6 +56,22 @@ physical receipts bind their exact batch, one-based ordinal and original payload
 advance collection and retire normally after verified delivery. Every supplied definition ID still has to resolve,
 and incomplete source reads or unconfirmed shutdown cannot take this route. Informational readback preserves these
 facts and uncertainty without granting trusted query totals or diagnostic escalation.
+
+An explicitly configured MCP host can also read original local captures through `LocalCaptureReader` and the
+engine's optional `OutboxCaptureReader` adapter. `culprit mcp --evidence-outbox DIRECTORY` installs that capability;
+`captured_page_server_reads` accepts a delegated connection and its exact original observation ID. The existing
+Outbox owner checks the journal association, Ready state, confirmed native shutdown, manifest and every artifact
+in one canonical verification pass before projecting runtime rows and independently matched query definitions.
+It performs no native, recovery or warehouse read. The original native window, optional population membership,
+collector clocks and actual local verification bytes remain distinct in the result.
+
+`CompletedCaptureBudget` applies to both local snapshot and query-history reads: 10,000 retained rows, 8 MiB of
+all verified artifact/manifest bytes and five seconds by default, including queueing. Limits refuse rather than
+truncate; unselected artifact bytes still count. Cancellation joins any started worker before releasing ownership.
+The MCP response presents at most five entries, with matched redacted SQL previews capped at 512 characters and
+the complete compact JSON capped at 64 KiB. An active external owner is refused; an embedding host can inject its
+existing `OutboxDelivery` instead. Local native-reference positions start at zero; analytical storage ordinals
+start at one, with conversion confined to the shared adapter.
 
 Reads need warehouse query access, without an ingestion identity, plus the independently configured recovery
 identity for the committed manifest and immutable projection indexes. Reopening the manifest and checking those indexes does not reread every native
@@ -468,6 +489,15 @@ native resource-pool identities, active/waiting counts and admission policy. The
 current compilation-memory holders remain unknown; gateway counts do not establish memory exhaustion. Scans retain
 the gateway facts they already read. A focused collector selection binds the original request, statement and native
 compute generation, stays within its declared budget, and remains cost-unqualified until native qualification passes.
+
+After a completed compiler-admission answer, the controller can retain one separate compilation-history question.
+It authenticates the original request and gateway captures before admission, then uses the existing compilation
+reader under an independently qualified native member, process and updateability scope. Dataset identity stays
+logical. A recovered wait keeps this owed context; it does not reopen the gateway question.
+
+The result becomes one retained capture pointer through the existing offline queue and atomic checkpoint update.
+Restart reconciliation cannot replace an admitted read or clear an unconfirmed shutdown. Capturing history does
+not establish a current compiler, memory owner or root cause; the original rows need their own bounded analysis.
 
 `maintenance` explains current maintenance statements and their participation in blocking from an authenticated
 activity capture. It reuses captured statements, request/session generations and native wait-owner relationships;
@@ -1481,3 +1511,17 @@ the image with networking disabled, a non-root user,
 read-only filesystem and dropped capabilities. Fabricated connection metadata exercises offline validation; no real
 workspace is mounted. Owned test containers/images are removed; `--keep-image` retains the resulting local image.
 CI performs the Linux container check. It does not publish an image or deploy the Kubernetes resources.
+
+
+### Recorded native cache ratios
+
+`culprit collect evidence analyze --analysis counter-ratios` uses only the original `OperationalSamples` capture and
+its source coverage. Scans expose the same shared explanation in `Report.counter_ratios`. RBPEX inputs come from the
+existing performance-counter read: native object, instance, counter types and shared scope must match. Raw integers
+and rejected signed native inputs remain exact; missing inputs, an unknown profile, a zero base or a numerator above
+its base withhold the percentage. There is no selected-database denominator, recent rate, pressure grade or query-cause
+claim. Native read time is independent of counter reset/lifetime, and unavailable archive rows remain partial.
+
+The query retains the existing 32-row cap and adds no default roundtrip. That cap does not bound native counter
+enumeration work. Actual Hyperscale compatibility and measured native cost remain unqualified; boxed SQL Server
+fixtures cannot establish positive RBPEX support.

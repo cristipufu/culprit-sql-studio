@@ -743,6 +743,7 @@ mod tests {
             complete: true,
         });
         let wait = |category: &str, wait_type: &str, ms: f64| culprit_core::WaitStat {
+            mechanism: None,
             category: category.into(),
             wait_type: Some(wait_type.into()),
             wait_ms: ms,
@@ -793,6 +794,7 @@ mod tests {
             let query = snapshot.workload.as_mut().unwrap().queries.iter_mut().find(|query| query.id == "10").unwrap();
             query.waits_coverage = coverage;
             query.waits = vec![culprit_core::WaitStat {
+                mechanism: None,
                 category: "IO".into(),
                 wait_type: Some("native read wait".into()),
                 wait_ms: 1000.0,
@@ -821,6 +823,7 @@ mod tests {
             let query = workload.queries.iter_mut().find(|query| query.id == "10").unwrap();
             query.waits_coverage = coverage;
             query.waits = vec![culprit_core::WaitStat {
+                mechanism: None,
                 category: "Lock".into(),
                 wait_type: None,
                 wait_ms: 10_000.0,

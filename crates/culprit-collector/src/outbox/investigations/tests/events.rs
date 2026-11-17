@@ -83,7 +83,7 @@ impl Harness {
         let source = "focused-native-pages".to_owned();
         let description = CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: self.intent.focus.participant().target.clone(),
+            target: self.intent.focus.target().clone(),
             source: source.clone(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::FocusedPageWait {
@@ -170,9 +170,9 @@ fn raw_revision(
     next.revision = (before.revision.parse::<u64>().unwrap() + 1).to_string();
     let mut inputs = vec![next.latest.clone()];
     if let Some(event) = &investigation
-        && !inputs.contains(&event.intent.focus.participant().parent)
+        && !inputs.contains(event.intent.focus.parent())
     {
-        inputs.push(event.intent.focus.participant().parent.clone());
+        inputs.push(event.intent.focus.parent().clone());
     }
     let mut revision = DiagnosticRevision {
         id: String::new(),
@@ -268,9 +268,9 @@ fn full_event_original_is_authenticated_even_when_its_compact_native_relation_is
     for changed in ["original", "receipt"] {
         let mut event = harness.admitted();
         if changed == "original" {
-            event.intent.focus.participant_mut().original.elapsed_ms = Some("90001".into());
+            event.intent.focus.activity_participant_mut().unwrap().original.elapsed_ms = Some("90001".into());
         } else {
-            event.intent.focus.participant_mut().parent.row_ordinal += 1;
+            event.intent.focus.activity_participant_mut().unwrap().parent.row_ordinal += 1;
         }
         assert!(event.matches_episode(&before));
         let revision =

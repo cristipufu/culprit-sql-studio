@@ -269,6 +269,8 @@ fn native_measurements(
         }
     }
     Ok(NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(&node.node).qualified("node", &node.node),
         scope: MeasurementScope::Node,
         counters,

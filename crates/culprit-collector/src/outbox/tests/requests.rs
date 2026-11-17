@@ -17,7 +17,7 @@ fn statement(bytes: usize) -> DefinitionPayload {
 fn request_for(fixture: &InvestigationFixture) -> CollectionRequest {
     CollectionRequest {
         subject: fixture.intent.subject(),
-        selection: fixture.intent.selection(),
+        selection: fixture.intent.selection().unwrap(),
         budget: fixture.intent.budget.clone(),
     }
 }
@@ -25,7 +25,7 @@ fn request_for(fixture: &InvestigationFixture) -> CollectionRequest {
 fn set_original_statement(fixture: &mut InvestigationFixture, sql: DefinitionPayload) {
     let TelemetryRecord::Activity(activity) = &mut fixture.baseline_record.record else { panic!() };
     activity.statement = sql.clone();
-    fixture.intent.focus.participant_mut().original.statement = sql;
+    fixture.intent.focus.activity_participant_mut().unwrap().original.statement = sql;
 }
 
 fn seal(
@@ -73,7 +73,7 @@ fn qualified_request(files: &mut Files, mut fixture: InvestigationFixture) -> Co
         vec![fixture.baseline_record.record.clone()],
     );
     let input = files.diagnostic_input(&baseline.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
-    let focus = fixture.intent.focus.participant_mut();
+    let focus = fixture.intent.focus.activity_participant_mut().unwrap();
     focus.parent = input.rows[0].reference.clone();
     let request = request_for(&fixture);
     request.validate().unwrap();

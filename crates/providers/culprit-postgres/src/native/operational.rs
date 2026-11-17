@@ -201,7 +201,7 @@ pub(crate) fn decode_values(source: String, values: Value, meta: CounterReadCont
             native_type: None,
         });
     }
-    let set = NativeCounterSet { identity, scope, counters, properties };
+    let set = NativeCounterSet { ratios: Vec::new(), ratio_gaps: Vec::new(), identity, scope, counters, properties };
     let observation =
         OperationalObservation { source, key: set.key()?, fact: OperationalFact::CounterSet(Box::new(set)) };
     if !observation.is_valid() {

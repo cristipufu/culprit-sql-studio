@@ -16,12 +16,12 @@ export type ProgressProbe = {
 export type ProgressWindow = typeof window & { queryProgressProbe: ProgressProbe };
 
 /** Script native API points only. The production panel still owns polling, caching and rendering. */
-export async function showProgress(page: Page, point: QueryProgress): Promise<void> {
-  await openConnection(page, "mysql-demo");
+export async function showProgress(page: Page, point: QueryProgress, connection = "mysql-demo"): Promise<void> {
+  await openConnection(page, connection);
   await waitForReport(page);
-  await page.evaluate(async ({ point, live, apiPath, storePath }) => {
+  await page.evaluate(async ({ point, connection, live, apiPath, storePath }) => {
     const client = await (await import(apiPath)).api() as Api;
-    const probe: ProgressProbe = { frames: { "mysql-demo": point }, live, calls: [], heldConnections: [], pending: [] };
+    const probe: ProgressProbe = { frames: { [connection]: point }, live, calls: [], heldConnections: [], pending: [] };
     (window as ProgressWindow).queryProgressProbe = probe;
     client.live = async () => structuredClone(probe.live);
     client.queryProgress = async (connection, session, withPlan) => {
@@ -32,7 +32,7 @@ export async function showProgress(page: Page, point: QueryProgress): Promise<vo
       return { ...structuredClone(frame), session, plan: withPlan ? structuredClone(frame.plan) : null };
     };
     (await import(storePath)).setState({ view: "live" });
-  }, { point, live: progressLiveState(), apiPath: "/src/lib/api.ts", storePath: "/src/lib/store.ts" });
+  }, { point, connection, live: progressLiveState(), apiPath: "/src/lib/api.ts", storePath: "/src/lib/store.ts" });
   await page.locator('tr[data-session="42"]').click();
   await expect(page.locator(".qprog")).toBeVisible();
 }

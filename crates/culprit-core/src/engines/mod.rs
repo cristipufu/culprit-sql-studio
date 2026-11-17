@@ -150,6 +150,10 @@ pub trait EngineSpec: Send + Sync {
     fn cleanup_evidence(&self) -> CleanupEvidence;
     /// How a live wait sample is collected. Required so a new engine cannot inherit another engine's description.
     fn wait_sampling(&self) -> Option<WaitSampling>;
+    /// Meaning of an individual source-native wait type, independently of translated category labels.
+    fn native_wait_mechanism(&self, _native_type: &str) -> Option<crate::telemetry::WaitMechanism> {
+        None
+    }
     /// Whether a health counter measures this database or a shared server, independently of its temporal scope.
     fn signal_scope(&self, server: &ServerInfo, key: &str) -> crate::MeasurementScope;
     /// A native label that already names its shared scope.

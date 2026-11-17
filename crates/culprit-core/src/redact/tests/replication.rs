@@ -217,6 +217,8 @@ fn availability_and_geo_names_and_complete_urls_are_private_without_changing_nat
 
 fn native_row(source: &str, id: &str, values: &[(&str, &str)]) -> ReplicationObservation {
     let set = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(source).qualified("native_id", id).qualified("backend_start", STARTED),
         scope: MeasurementScope::Server,
         counters: vec![NativeCounterSample::gauge(

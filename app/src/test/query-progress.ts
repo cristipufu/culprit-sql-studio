@@ -1,6 +1,7 @@
 import samples from "../../../fixtures/actual.sample.json" with { type: "json" };
 import type { CurrentRequestWorkReport } from "../gen/CurrentRequestWorkReport";
 import type { LiveState } from "../gen/LiveState";
+import type { PageServerReadExplanation } from "../gen/PageServerReadExplanation";
 import type { Plan } from "../gen/Plan";
 import type { QueryProgress } from "../gen/QueryProgress";
 import type { SessionProgressContext } from "../gen/SessionProgressContext";
@@ -20,6 +21,16 @@ export function progressObservation(overrides: Partial<QueryProgress> = {}): Que
     percent: null, percent_basis: null, hot_node: null, phase: null, phase_percent: null, phase_percent_basis: null, note: null,
     current_work: null, current_work_report: null, session_context: null, request_key: "native-request-a",
     ...overrides,
+  };
+}
+
+export function requestPageServerReadReport(): PageServerReadExplanation {
+  return {
+    availability: "available", title: "Native page-server reads for this request",
+    summary: "Page-server reads recorded over this request’s lifetime: 9,007,199,254,740,993.",
+    metrics: [{ key: "view.page_server_reads.request.count", label: "Request-lifetime page-server reads", value: 0, unit: "text", text: "9,007,199,254,740,993" }],
+    limitations: ["This count covers the request lifetime; it does not identify the statement that caused the reads.", "It does not measure physical storage I/O, cache misses or waiting time."],
+    investigate: "Keep earlier statements and session totals separate.", verify: "Missing request or scope evidence leaves the outcome unknown.",
   };
 }
 

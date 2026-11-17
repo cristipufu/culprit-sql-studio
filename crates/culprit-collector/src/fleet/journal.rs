@@ -11,7 +11,7 @@ pub(in crate::fleet) use investigations::FocusedSettlement;
 pub(in crate::fleet) use investigations::FocusedStage;
 
 const MAX_CHECKPOINT_BYTES: usize = 256 * 1024;
-const JOURNAL_VERSION: i64 = 13;
+const JOURNAL_VERSION: i64 = 14;
 
 pub struct FleetJournal {
     files: BlockingState<Files>,

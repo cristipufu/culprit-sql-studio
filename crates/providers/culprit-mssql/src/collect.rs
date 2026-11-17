@@ -402,7 +402,11 @@ async fn collect_misc(
         crate::resource_counters::collect(provider.pool.clone(), probe, options.collect_shared_resources).await;
     part.outcome.merge(shared_coverage);
     if let Some(counters) = shared_resources {
-        part.pressure.get_or_insert_with(Default::default).resource_counters = Some(counters);
+        part.pressure
+            .get_or_insert_with(Default::default)
+            .resource_counters
+            .get_or_insert_with(Vec::new)
+            .extend(counters);
     }
     let (request_memory, request_coverage) = crate::request_memory::collect(
         provider.pool.clone(),

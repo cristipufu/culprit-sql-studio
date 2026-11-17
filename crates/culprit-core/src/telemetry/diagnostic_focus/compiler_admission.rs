@@ -41,7 +41,8 @@ pub fn analyze_diagnostic_compilation_admission(
     let mut episodes = Vec::new();
     for before in &previous.episodes {
         let mut next = before.clone();
-        if before.analysis.needs_work()
+        if before.source_read.is_none()
+            && before.analysis.needs_work()
             && before.matches_compilation_admission_focus(&result.focus)
             && intent.is_none_or(|intent| intent.matches_episode(before))
         {
@@ -49,12 +50,14 @@ pub fn analyze_diagnostic_compilation_admission(
                 rows.iter().find(|row| matches!(row.observation.fact, OperationalFact::CompilerWaiter(_)))
             {
                 next.report = Some(DiagnosticReport::CompilationAdmission {
-                    observation: waiter.reference.clone(),
-                    gateways: rows
-                        .iter()
-                        .filter(|row| matches!(row.observation.fact, OperationalFact::CounterSet(_)))
-                        .map(|row| row.reference.clone())
-                        .collect(),
+                    report: Box::new(CompilationAdmissionReport {
+                        observation: waiter.reference.clone(),
+                        gateways: rows
+                            .iter()
+                            .filter(|row| matches!(row.observation.fact, OperationalFact::CounterSet(_)))
+                            .map(|row| row.reference.clone())
+                            .collect(),
+                    }),
                 });
                 next.analysis = if snapshot.sources.iter().all(|source| source.complete_scope) {
                     DiagnosticAnalysisStatus::Analyzed

@@ -107,12 +107,20 @@ pub struct ActivityCounters {
     pub logical_reads: Option<String>,
     pub physical_reads: Option<String>,
     pub writes: Option<String>,
+    /// Native request-lifetime page-server reads. No statement attribution, elapsed time or cache-miss inference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_server_reads: Option<String>,
 }
 impl ActivityCounters {
     fn is_valid(&self) -> bool {
         [&self.cpu_ms, &self.logical_reads, &self.physical_reads, &self.writes]
             .into_iter()
             .all(|value| value.as_deref().is_none_or(counter))
+            && self
+                .page_server_reads
+                .as_deref()
+                .is_none_or(|value| PageServerReadStatistics::native_count(value).is_some())
     }
     pub fn progress(&self, before: &Self) -> ActivityProgress {
         let pairs = [
@@ -120,6 +128,7 @@ impl ActivityCounters {
             (&self.logical_reads, &before.logical_reads),
             (&self.physical_reads, &before.physical_reads),
             (&self.writes, &before.writes),
+            (&self.page_server_reads, &before.page_server_reads),
         ];
         let comparable: Vec<_> = pairs
             .into_iter()

@@ -2,6 +2,8 @@ use super::*;
 
 pub(in crate::telemetry) fn gateway(pool: &str, waiting: u64) -> OperationalObservation {
     let counters = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("Big Gateway")
             .qualified("native_object", GATEWAY_OBJECT)
             .qualified("resource_pool_id", pool),

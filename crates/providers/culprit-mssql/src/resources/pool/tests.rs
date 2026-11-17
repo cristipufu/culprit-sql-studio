@@ -101,3 +101,17 @@ async fn pool_history_reuses_bound_selection_and_validates_the_overflow_witness(
         assert!(windowed(&mut reader, &context, &window(), None, 1).await.is_err());
     }
 }
+
+#[test]
+fn pool_accounting_cannot_borrow_a_member_database_hyperscale_profile() {
+    let native = row("2020-01-01T06:00:15Z");
+    let mut fields: Vec<_> = native.columns().map(|(key, value)| (key, value.clone())).collect();
+    fields.extend([
+        ("engine_edition", Val::Int(5)),
+        ("database_edition", Val::Text("Hyperscale".into())),
+        ("replica_id", Val::Text("91487244-730d-4b83-8e49-d482241c7288".into())),
+    ]);
+    let point = sample::decode(&Rec::of(&fields), Pricing::Vcore).unwrap();
+    assert_eq!(point.data_io_accounting, DataIoAccounting::Unknown);
+    assert!(point.replica_id.is_none());
+}

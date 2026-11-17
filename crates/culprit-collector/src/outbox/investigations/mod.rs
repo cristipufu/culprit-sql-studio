@@ -3,6 +3,7 @@ mod focus_pins;
 mod input;
 pub(super) mod journal;
 pub(super) mod retirement;
+mod source_read;
 #[cfg(test)]
 mod tests;
 mod writer;
@@ -31,7 +32,8 @@ pub enum DiagnosticInputState {
     Consumed,
 }
 
-/// Rows and their exact receipt references are already verified. Native source work has ended before this value exists.
+/// Diagnostic-role rows have verified original receipts. A typed SourceRead control input retains only its
+/// authenticated capture/header/lineage; its history body is not materialized as a diagnostic row roster.
 #[derive(Clone, Debug)]
 pub struct DiagnosticInput {
     pub parent: DiagnosticCaptureRef,
@@ -115,6 +117,10 @@ pub(crate) fn eligible_source(
     let intent = investigation_intent(source, investigation)?;
     Ok(match (&source.observation, &source.target) {
         (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
+        (SourceObservation::SourceRead { .. }, CollectionTarget::Database(_)) => {
+            source.observation.covers_request()
+                && intent.as_ref().is_some_and(|intent| matches!(intent.focus, DiagnosticFocus::SourceRead { .. }))
+        }
         (SourceObservation::PageWaitTargets { original_activity: Some(_), .. }, CollectionTarget::Database(_)) => true,
         (SourceObservation::CurrentRequestWork { result, .. }, CollectionTarget::Database(_)) => {
             result.focus.as_deref().is_some_and(ActivityRequestFocus::is_current_request_work_focus)
@@ -162,7 +168,7 @@ fn investigation_intent(
 
 fn controller_target<'a>(
     source: &'a CollectionDescription,
-    investigation: Option<&DiagnosticInvestigationLineage>,
+    investigation: Option<&'a DiagnosticInvestigationLineage>,
 ) -> Result<&'a CollectionTarget> {
     if !eligible_source(source, investigation)?
         && !matches!(source.observation, SourceObservation::PageWaitTargets { .. })
@@ -170,6 +176,7 @@ fn controller_target<'a>(
         return Err(integrity());
     }
     Ok(match &source.observation {
+        SourceObservation::SourceRead { .. } => investigation.ok_or_else(integrity)?.focus.target(),
         SourceObservation::FocusedBlocking { result, .. } => &result.focus.target,
         SourceObservation::FocusedPageWait { result, .. } => &result.focus.participant.target,
         SourceObservation::PageWaitWriters { focus, .. } => &focus.waiter.participant.target,

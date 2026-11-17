@@ -34,7 +34,7 @@ fn typed_classes_use_the_existing_unique_analytical_keys() {
         assert_eq!(crate::waits::category_key(class.category()), class.key());
         assert_eq!(serde_json::to_value(class).unwrap(), serde_json::json!(class.key()));
     }
-    assert_eq!(keys.len(), 14);
+    assert_eq!(keys.len(), 15);
 }
 
 #[test]
@@ -135,4 +135,53 @@ fn current_mode_and_historical_interval_qualification_remain_independent_explici
     let mut missing = serde_json::to_value(evidence).unwrap();
     missing.as_object_mut().unwrap().remove("coverage");
     assert!(serde_json::from_value::<QueryWaitSemantics>(missing).is_err());
+}
+
+#[test]
+fn native_log_governance_mechanisms_are_source_owned_and_every_class_has_a_distinct_shared_key() {
+    let mut keys = std::collections::BTreeSet::new();
+    for class in WaitClass::ALL {
+        assert!(keys.insert(class.key()));
+        assert_eq!(crate::waits::known_category_key(class.category()), Some(class.key()));
+    }
+    let names = [
+        "RBIO_RG_STORAGE",
+        "RBIO_RG_REPLICA",
+        "RBIO_RG_LOCALDESTAGE",
+        "RBIO_RG_DESTAGE",
+        "RBIO_RG_GEOREPLICA",
+        "RBIO_RG_STORAGE_CHECKPOINT",
+        "RBIO_RG_MIGRATION_TARGET",
+    ];
+    for engine in crate::Engine::ALL {
+        for (name, reason) in names.iter().zip(LogRateGovernanceReason::ALL) {
+            let expected = (engine == crate::Engine::Mssql).then_some(WaitMechanism::LogRateGovernance(*reason));
+            assert_eq!(engine.spec().native_wait_mechanism(name), expected);
+        }
+        assert_eq!(engine.spec().native_wait_mechanism("RBIO_RG_FUTURE_COMPONENT"), None);
+        assert_eq!(engine.spec().native_wait_mechanism("WRITELOG"), None);
+    }
+}
+
+#[test]
+fn a_wait_counter_cannot_claim_another_native_mechanism_or_engine() {
+    let mut row = WaitCounterObservation {
+        source: crate::source_id::WAITS.into(),
+        wait_type: "RBIO_RG_STORAGE".into(),
+        mechanism: crate::Engine::Mssql.spec().native_wait_mechanism("RBIO_RG_STORAGE"),
+        scope: crate::MeasurementScope::Database,
+        reset: crate::ResetMarker::Unknown,
+        waiting_tasks_count: "9007199254740993".into(),
+        wait_time_ms: "18446744073709551615".into(),
+        signal_wait_time_ms: "0".into(),
+        max_wait_time_ms: "0".into(),
+    };
+    assert!(row.is_valid_for(crate::Engine::Mssql));
+    for engine in crate::Engine::ALL.into_iter().filter(|engine| *engine != crate::Engine::Mssql) {
+        assert!(!row.is_valid_for(engine));
+    }
+    row.mechanism = None;
+    assert!(!row.is_valid_for(crate::Engine::Mssql));
+    row.mechanism = crate::Engine::Mssql.spec().native_wait_mechanism("RBIO_RG_REPLICA");
+    assert!(!row.is_valid_for(crate::Engine::Mssql));
 }

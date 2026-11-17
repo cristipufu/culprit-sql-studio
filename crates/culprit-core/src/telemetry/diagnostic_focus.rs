@@ -43,7 +43,7 @@ pub fn analyze_diagnostic_focus_with_intent(
     intent: &DiagnosticInvestigationIntent,
 ) -> Result<DiagnosticFocusUpdate> {
     if !intent.matches_result_source(source)
-        || previous.target.telemetry_id()? != intent.focus.participant().target.telemetry_id()?
+        || previous.target.telemetry_id()? != intent.focus.target().telemetry_id()?
     {
         return Err(invalid());
     }

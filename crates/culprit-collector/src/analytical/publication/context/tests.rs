@@ -3,6 +3,7 @@ mod compiler_admission;
 mod maintenance_progress;
 mod memory;
 mod page_task_holders;
+mod source_read;
 use super::*;
 use crate::{
     analytical::{catalog::PhysicalCatalog, envelope, test_support},
@@ -171,9 +172,9 @@ fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sq
     let mut intent = test_support::investigation_fixture().intent;
     intent.focus = result.focus.clone().into();
     let RecipeCostScope::Activity(scope) = &mut intent.qualification.scope else { panic!() };
-    scope.target = intent.focus.participant().target.clone();
-    scope.source = intent.focus.participant().source.clone();
-    scope.native_epoch = Some(intent.focus.participant().epoch.clone());
+    scope.target = intent.focus.target().clone();
+    scope.source = intent.focus.activity_participant().unwrap().source.clone();
+    scope.native_epoch = Some(intent.focus.activity_participant().unwrap().epoch.clone());
     intent.qualification.read_metrics.templates[0].statement = DefinitionPayload::sql(
         "SELECT private_qualification_query FROM private_cost_observer WHERE label='private-client'",
         Engine::Mssql,

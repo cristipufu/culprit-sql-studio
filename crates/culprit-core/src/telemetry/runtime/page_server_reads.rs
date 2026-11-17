@@ -54,7 +54,7 @@ impl PageServerReadStatistics {
             && [&self.last_pages, &self.minimum_pages, &self.maximum_pages]
                 .into_iter()
                 .flatten()
-                .all(|value| exact_count(value).is_some())
+                .all(|value| PageServerReadStatistics::native_count(value).is_some())
             && (self.availability == PageServerReadAvailability::Available || !self.has_values())
     }
     pub fn has_values(&self) -> bool {
@@ -101,14 +101,14 @@ impl PageServerReadSummary {
     }
     pub fn is_valid(&self) -> bool {
         self.statistics().is_valid()
-            && exact_count(self.executions()).is_some()
+            && PageServerReadStatistics::native_count(self.executions()).is_some()
             && match self {
                 Self::NativeFragment { native, .. } => native.as_ref().is_none_or(NativeIdentity::is_valid),
                 Self::Derived { native_fragments, execution_type, statistics, .. } => {
-                    exact_count(native_fragments).is_some_and(|count| count >= 2)
-                        && execution_type
-                            .as_deref()
-                            .is_none_or(|value| exact_count(value).is_some_and(|kind| kind <= u8::MAX as i64))
+                    PageServerReadStatistics::native_count(native_fragments).is_some_and(|count| count >= 2)
+                        && execution_type.as_deref().is_none_or(|value| {
+                            PageServerReadStatistics::native_count(value).is_some_and(|kind| kind <= u8::MAX as i64)
+                        })
                         && (execution_type.is_some() || !statistics.has_values())
                         && statistics.last_pages.is_none()
                         && statistics.standard_deviation_pages.is_none()
@@ -117,11 +117,14 @@ impl PageServerReadSummary {
     }
 }
 
-fn exact_count(value: &str) -> Option<i64> {
-    (value.len() <= 19)
-        .then(|| value.parse::<i64>().ok())
-        .flatten()
-        .filter(|number| *number >= 0 && number.to_string() == value)
+impl PageServerReadStatistics {
+    /// Canonical nonnegative native bigint, without floating-point conversion.
+    pub fn native_count(value: &str) -> Option<i64> {
+        (value.len() <= 19)
+            .then(|| value.parse::<i64>().ok())
+            .flatten()
+            .filter(|number| *number >= 0 && number.to_string() == value)
+    }
 }
 
 #[cfg(test)]

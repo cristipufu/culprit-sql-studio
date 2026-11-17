@@ -102,7 +102,7 @@ pub fn focused_request_memory_evidence() -> (CollectionDescription, Vec<Telemetr
 /// One original waiter and a bounded observed resource subset. The synthetic approval has no production authority.
 pub fn focused_request_memory_evidence_with_peers(peers: usize) -> (CollectionDescription, Vec<TelemetryRecord>) {
     let fixture = request_memory_investigation_fixture_with_peers(peers);
-    let focus = fixture.intent.focus.participant();
+    let focus = fixture.intent.focus.activity_participant().unwrap();
     let (_, mut rows) =
         request_memory_evidence(DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected }, true);
     let TelemetryRecord::Operational(row) = &mut rows[0] else { unreachable!() };
@@ -159,7 +159,7 @@ pub fn focused_request_memory_evidence_with_peers(peers: usize) -> (CollectionDe
     result.peers = rows.iter().skip(1).map(|row| grant_observation(row).identity.clone()).collect();
     assert!(source.matches_request(&CollectionRequest {
         subject: fixture.intent.subject(),
-        selection: fixture.intent.selection(),
+        selection: fixture.intent.selection().unwrap(),
         budget: fixture.intent.budget
     }));
     (source, rows)

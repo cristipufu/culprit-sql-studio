@@ -28,8 +28,12 @@ pub struct OperationHandle {
 }
 
 impl OperationHandle {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
     pub fn stopped(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire) || Instant::now() >= self.deadline
+        self.is_cancelled() || Instant::now() >= self.deadline
     }
 
     pub fn remaining(&self) -> Duration {

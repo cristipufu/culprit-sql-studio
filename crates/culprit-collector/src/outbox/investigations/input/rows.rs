@@ -4,6 +4,7 @@ use crate::outbox::artifacts::{CanonicalRows, MAX_CANONICAL_ROWS, VerificationOb
 
 pub(super) enum RowSelection {
     All,
+    Diagnostic,
     SharedOwner,
 }
 
@@ -17,6 +18,7 @@ impl VerificationObserver for DiagnosticRows {
         let source = manifest.description.as_ref().ok_or_else(integrity)?;
         self.selected = match self.selection {
             RowSelection::All => true,
+            RowSelection::Diagnostic => !matches!(source.observation, SourceObservation::SourceRead { .. }),
             RowSelection::SharedOwner => shared_owner_source(source),
         };
         Ok(())

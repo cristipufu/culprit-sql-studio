@@ -396,7 +396,9 @@ impl Provider for MysqlProvider {
             .to_string();
             match waits.iter_mut().find(|w| w.category == category) {
                 Some(existing) => existing.tasks = Some(existing.tasks.unwrap_or(0.0) + 1.0),
-                None => waits.push(WaitStat { category, wait_type: None, wait_ms: 0.0, tasks: Some(1.0) }),
+                None => {
+                    waits.push(WaitStat { mechanism: None, category, wait_type: None, wait_ms: 0.0, tasks: Some(1.0) })
+                }
             }
         }
         if sessions.iter().any(|s| {

@@ -437,6 +437,7 @@ fn network_waits_do_not_hide_a_heavy_query_without_an_exclusive_causal_measureme
         let mut s = base.clone();
         let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == id).unwrap();
         q.waits = vec![WaitStat {
+            mechanism: None,
             category: "Network".into(),
             wait_type: None,
             wait_ms: q.total_time_ms * share,

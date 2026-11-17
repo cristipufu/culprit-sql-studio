@@ -3,23 +3,28 @@ pub(super) struct HistoryTable {
     relation: &'static str,
     columns: fn() -> String,
     replica: Option<&'static str>,
+    profile: &'static str,
 }
 pub(super) const DATABASE: HistoryTable = HistoryTable {
     relation: "sys.dm_db_resource_stats",
     columns: super::sample::columns,
     replica: Some("replica_role"),
+    profile: super::sample::PROFILE_COLUMNS,
 };
 pub(super) const POOL: HistoryTable = HistoryTable {
     relation: "sys.dm_elastic_pool_resource_stats",
     columns: super::pool::sample::columns,
     replica: None,
+    profile: "",
 };
 impl HistoryTable {
     pub(super) fn retained(&self) -> String {
-        self.select("TOP (@P1) ", "", "ASC")
+        self.select("TOP (@P1) ", "", "ASC", self.profile)
     }
     pub(super) fn latest(&self) -> String {
-        self.select("TOP (1) CONVERT(varchar(40),SYSUTCDATETIME(),126)+'Z' AS observed_at, ", "", "DESC")
+        // Admission needs the same utilization values, not a deployment interpretation. Keep its existing
+        // native template unchanged; missing profile facts decode explicitly as Unknown.
+        self.select("TOP (1) CONVERT(varchar(40),SYSUTCDATETIME(),126)+'Z' AS observed_at, ", "", "DESC", "")
     }
     pub(super) fn windowed(&self) -> String {
         self.select(
@@ -28,11 +33,12 @@ impl HistoryTable {
  AND end_time < CAST(CONVERT(datetimeoffset,@P3,127) AS datetime2)
  AND (NULLIF(@P4,'') IS NULL OR end_time > CAST(CONVERT(datetimeoffset,NULLIF(@P4,''),127) AS datetime))"#,
             "ASC",
+            self.profile,
         )
     }
-    fn select(&self, prefix: &str, filter: &str, order: &str) -> String {
+    fn select(&self, prefix: &str, filter: &str, order: &str, profile: &str) -> String {
         format!(
-            "SELECT /* culprit */ {prefix}CONVERT(varchar(40),CAST(end_time AS datetime2),126)+'Z' AS sample_at,{} FROM {} {filter} ORDER BY end_time {order} OPTION(MAXDOP 1)",
+            "SELECT /* culprit */ {prefix}CONVERT(varchar(40),CAST(end_time AS datetime2),126)+'Z' AS sample_at,{}{profile} FROM {} {filter} ORDER BY end_time {order} OPTION(MAXDOP 1)",
             (self.columns)(),
             self.relation
         )

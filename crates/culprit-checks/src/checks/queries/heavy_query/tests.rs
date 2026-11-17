@@ -490,7 +490,13 @@ fn point_lookup_with(change: impl FnOnce(&mut QueryStat)) -> Snapshot {
 }
 
 fn wait(category: &str, wait_type: &str, ms: f64) -> culprit_core::WaitStat {
-    culprit_core::WaitStat { category: category.into(), wait_type: Some(wait_type.into()), wait_ms: ms, tasks: None }
+    culprit_core::WaitStat {
+        mechanism: None,
+        category: category.into(),
+        wait_type: Some(wait_type.into()),
+        wait_ms: ms,
+        tasks: None,
+    }
 }
 
 /// A PostgreSQL plan that inserts the values it is given into `object`.

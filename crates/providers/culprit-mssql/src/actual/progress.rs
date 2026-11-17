@@ -23,6 +23,7 @@ struct Scope {
     reader: i64,
     login: String,
     role: Option<String>,
+    request_page_server_read_capability: crate::activity::page_server_reads::Availability,
 }
 impl Scope {
     fn read(row: &Rec) -> Result<Self> {
@@ -36,6 +37,7 @@ impl Scope {
             reader: integer(row, "reader_session_id")?,
             login: crate::sql_time::native_time(&text(row, "reader_session_generation")?)?,
             role,
+            request_page_server_read_capability: crate::activity::page_server_reads::capability(row)?,
         };
         if scope.database <= 0 || scope.reader <= 0 {
             return Err(invalid_data());
@@ -48,6 +50,7 @@ impl Scope {
             && self.reader == other.reader
             && self.login == other.login
             && self.role == other.role
+            && self.request_page_server_read_capability == other.request_page_server_read_capability
     }
 }
 
@@ -72,10 +75,14 @@ pub(crate) async fn query_progress(pool: &Arc<Pool>, session: &str) -> Result<Qu
 }
 
 async fn read<R: NativeRead>(reader: &mut R, id: u64) -> Result<Reading> {
-    let layout = Layout::read(reader).await?;
+    let layout = Layout::read_request(reader).await?;
     let generation = reader.connection_generation();
     let mut requests = reader
-        .query(&sql::request(layout.live_xml == Availability::Available), vec![Parameter::Integer(id as i64)], 2)
+        .query(
+            &sql::request(layout.live_xml == Availability::Available, layout.request_page_server_read_capability),
+            vec![Parameter::Integer(id as i64)],
+            2,
+        )
         .await
         .map_err(ReadError::into_error)?;
     if generation != reader.connection_generation() {
@@ -92,6 +99,9 @@ async fn read<R: NativeRead>(reader: &mut R, id: u64) -> Result<Reading> {
     }
     let check = Check::decode(&row)?;
     let scope = Scope::read(&row)?;
+    if scope.request_page_server_read_capability != layout.request_page_server_read_capability {
+        return Err(CollectionStop::SourceChanged.error());
+    }
     let Some((key, statement)) = check.selector() else { return Ok(Reading::Changed { at }) };
     if key.session.id != id.to_string()
         || statement.qualifiers.get("database_id").and_then(|id| id.parse::<i64>().ok()) != Some(scope.database)
@@ -199,6 +209,7 @@ fn present(session: &str, reading: Reading) -> Result<QueryProgress> {
         progress.note = Some(t!("provider.mssql.progress.unverified_request"));
         return Ok(progress);
     }
+    progress.page_server_reads = crate::activity::page_server_reads::count(row)?;
     let hash = point.check.query_hash().map(|hash| format!("0x{hash}"));
     let parse = |field| row.str(field).and_then(|xml| plan_xml::parse_native_statement(&xml, hash.as_deref()).ok());
     progress.plan = parse("live_plan").or_else(|| parse("cached_plan")).map(|mut plan| {

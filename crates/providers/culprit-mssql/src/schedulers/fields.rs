@@ -149,6 +149,8 @@ impl Columns {
     }
     pub(super) fn decode(&self, row: &Rec) -> Result<NativeCounterSet> {
         let mut sample = NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new(signed_integer(row, IDENTITY_COLUMN)?.to_string())
                 .qualified("native_object", NATIVE_OBJECT),
             scope: MeasurementScope::Server,

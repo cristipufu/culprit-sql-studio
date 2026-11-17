@@ -1,11 +1,12 @@
 //! Finite original selectors. Native payload functions receive only checked request handles and byte offsets.
 use super::*;
 
-pub(super) fn requests(metadata: bool) -> String {
+pub(super) fn requests(metadata: bool, availability: crate::activity::page_server_reads::Availability) -> String {
     let columns = if metadata {
         format!(
-            ",{},CONVERT(varchar(40),SYSDATETIME(),126) AS native_observed_at,0 AS no_current_request,CASE WHEN r.database_id=DB_ID() THEN 1 ELSE 5 END AS scope_basis,CAST(NULL AS bigint) AS transaction_id,CAST(NULL AS varchar(40)) AS transaction_start",
-            crate::activity::sql::REQUEST_COLUMNS
+            ",{},{} AS request_page_server_read_capability,CONVERT(varchar(40),SYSDATETIME(),126) AS native_observed_at,0 AS no_current_request,CASE WHEN r.database_id=DB_ID() THEN 1 ELSE 5 END AS scope_basis,CAST(NULL AS bigint) AS transaction_id,CAST(NULL AS varchar(40)) AS transaction_start",
+            crate::activity::sql::request_columns(availability),
+            crate::activity::page_server_reads::CAPABILITY,
         )
     } else {
         String::new()

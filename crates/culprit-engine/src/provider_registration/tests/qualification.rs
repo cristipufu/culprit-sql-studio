@@ -248,7 +248,7 @@ fn replacing_a_selected_registration_does_not_borrow_the_old_cost_verifier() {
     let factories = Arc::new(AtomicUsize::new(0));
     let verifiers = Arc::new(AtomicUsize::new(0));
     let directory = tempfile::tempdir().unwrap();
-    let engine = fixture.intent.focus.participant().target.engine();
+    let engine = fixture.intent.focus.target().engine();
     let workspace = Workspace::open_in(directory.path())
         .with_provider(engine, selected(&fixture, factories.clone(), verifiers.clone()))
         .with_provider(engine, registration(factories.clone(), vec![fixture.recipe.clone()]).unwrap());

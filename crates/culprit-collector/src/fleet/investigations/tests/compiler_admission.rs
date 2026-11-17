@@ -12,8 +12,17 @@ use crate::{
 };
 use culprit_core::telemetry::*;
 
-pub(super) fn focused_frame(focus: &ActivityRequestFocus) -> Frame {
+pub(super) fn focused_frame(focus: &ActivityRequestFocus, native_gateways: Option<&[OperationalObservation]>) -> Frame {
     let (_, mut records) = compiler_admission_evidence();
+    if let Some(gateways) = native_gateways {
+        records.retain(|row| {
+            matches!(
+                row,
+                TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::CompilerWaiter(_), .. })
+            )
+        });
+        records.extend(gateways.iter().cloned().map(TelemetryRecord::Operational));
+    }
     let at = (chrono::DateTime::parse_from_rfc3339(&focus.original_observed_at).unwrap()
         + chrono::Duration::seconds(1))
     .to_rfc3339();
@@ -85,7 +94,7 @@ async fn an_admitted_compiler_waiter_retains_original_incident_and_all_gateway_r
     let [intent] = intents.as_slice() else { panic!() };
     let intent = intent.clone();
     assert_eq!(intent.focus.selector(), RecipeSelector::FocusedCompilationAdmission);
-    let parent = intent.focus.participant().parent.clone();
+    let parent = intent.focus.parent().clone();
     let original = runtime.fixture.outbox.diagnostic_evidence(&parent).await.unwrap();
     let job = runtime.take_focus().await;
     let result = runtime.execute(&job).await;
@@ -105,12 +114,10 @@ async fn an_admitted_compiler_waiter_retains_original_incident_and_all_gateway_r
     assert_eq!(revision.episode.analysis, DiagnosticAnalysisStatus::Analyzed);
     assert!(revision.episode.recovery.is_none());
     assert_eq!(revision.episode.latest, parent);
-    let Some(DiagnosticReport::CompilationAdmission { observation, gateways }) = &revision.episode.report else {
-        panic!()
-    };
-    assert!(!gateways.is_empty());
-    assert!(revision.inputs.contains(observation));
-    assert!(gateways.iter().all(|reference| revision.inputs.contains(reference)));
+    let Some(DiagnosticReport::CompilationAdmission { report }) = &revision.episode.report else { panic!() };
+    assert!(!report.gateways.is_empty());
+    assert!(revision.inputs.contains(&report.observation));
+    assert!(report.gateways.iter().all(|reference| revision.inputs.contains(reference)));
     assert!(revision.inputs.contains(&parent));
     assert_eq!(runtime.fixture.outbox.diagnostic_evidence(&parent).await.unwrap(), original);
     assert_eq!(

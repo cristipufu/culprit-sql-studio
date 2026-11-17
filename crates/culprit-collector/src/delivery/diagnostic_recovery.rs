@@ -6,6 +6,7 @@ use super::{
 use culprit_core::{Result, telemetry::*};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod source_reads;
 mod task_holders;
 
 const MAX_DIAGNOSTIC_RECOVERY_BYTES: u64 = 16 * 1024 * 1024;
@@ -266,15 +267,27 @@ pub async fn load_diagnostic_input(store: &dyn RecoveryStore, range_id: &str) ->
     if !crate::outbox::diagnostic_source_eligible(&range.manifest().source, range.manifest().investigation.as_ref())? {
         return Err(invalid());
     }
-    let rows = read_rows(store, range.manifest(), None).await?;
+    if matches!(range.manifest().source.observation, SourceObservation::SourceRead { .. }) {
+        let intent =
+            range.manifest().investigation.as_ref().ok_or_else(invalid)?.intent_for_source(&range.manifest().source)?;
+        source_reads::authenticate(store, &intent).await?;
+        // A control input attests the committed capture pointer. It neither loads nor interprets history rows.
+        return Ok(RecoveredDiagnosticInput { range, rows: vec![] });
+    }
+    let rows = input_body(store, range.manifest()).await?;
+    Ok(RecoveredDiagnosticInput { range, rows })
+}
+
+async fn input_body(store: &dyn RecoveryStore, manifest: &RangeManifest) -> Result<Vec<ExportedRecord>> {
+    let rows = read_rows(store, manifest, None).await?;
     let mut references = crate::collection_references::ObservationReferences::default();
     for row in &rows {
         references.record(&row.record);
     }
-    if !references.coverage(true, Some(&range.manifest().source)).complete {
+    if !references.coverage(true, Some(&manifest.source)).complete {
         return Err(invalid());
     }
-    Ok(RecoveredDiagnosticInput { range, rows })
+    Ok(rows)
 }
 pub async fn load_diagnostic_checkpoint(
     store: &dyn RecoveryStore,
@@ -326,14 +339,14 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             if manifests.len() >= MAX_DIAGNOSTIC_EPISODES {
                 return Err(DeliveryProblem::Capacity.error());
             }
-            // Receipt membership alone cannot authenticate retained native payloads. Read to verified EOF before
-            // an immutable owner event may claim this result, including a valid zero-row focused result.
+            // Focused row results require verified EOF. Typed SourceRead control inputs authenticate a committed
+            // capture pointer and its originals; their history bodies remain independently loaded evidence.
             let recovered = load_diagnostic_input(store, &range_id).await?;
             manifests.insert(range_id.clone(), recovered.range().manifest().clone());
         }
         let native = manifests.get(&range_id).ok_or_else(invalid)?;
         if capture_reference(native)? != *capture
-            || event.intent.focus.participant().target.telemetry_id()? != manifest.source.target.telemetry_id()?
+            || event.intent.focus.target().telemetry_id()? != manifest.source.target.telemetry_id()?
             || !event.intent.matches_result_source(&native.source)
         {
             return Err(invalid());
@@ -356,6 +369,22 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             && authenticated_tasks.insert(episode.id.clone())
         {
             task_holders::authenticate_episode(store, &manifest.contract, episode).await?;
+        }
+        if let Some(capture) = episode.source_read_capture() {
+            let native = recovery::reopen(store, &range_id_for(&manifest.contract, &capture.capture)?).await?;
+            if capture_reference(native.manifest())? != *capture {
+                return Err(invalid());
+            }
+            let intent = native
+                .manifest()
+                .investigation
+                .as_ref()
+                .ok_or_else(invalid)?
+                .intent_for_source(&native.manifest().source)?;
+            if !intent.matches_episode(episode) || !matches!(intent.focus, DiagnosticFocus::SourceRead { .. }) {
+                return Err(invalid());
+            }
+            source_reads::authenticate(store, &intent).await?;
         }
         let Some(report) = &episode.report else { continue };
         let range_id = range_id_for(&manifest.contract, &report.evidence().capture)?;
@@ -483,8 +512,13 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             return Err(invalid());
         }
         let intent = native_intent(&parent)?.ok_or_else(invalid)?;
-        if intent.focus.participant().target != manifest.source.target
-            || !matches!(intent.execution, DiagnosticExecutionBinding::Shared { .. })
+        let matches_original_namespace =
+            intent.focus.target().telemetry_id()? == manifest.source.target.telemetry_id()?;
+        if !matches_original_namespace
+            || !matches!(
+                intent.execution,
+                DiagnosticExecutionBinding::Shared { .. } | DiagnosticExecutionBinding::NativeRead { .. }
+            )
         {
             return Err(invalid());
         }
@@ -702,7 +736,8 @@ async fn authenticate_investigation_intent(
         }
         _ => None,
     };
-    if writer.is_none() && holder.is_none() && shared.is_none() && population.is_none() {
+    let source_read = matches!(intent.focus, DiagnosticFocus::SourceRead { .. });
+    if writer.is_none() && holder.is_none() && shared.is_none() && population.is_none() && !source_read {
         return Ok(());
     }
     let key = intent.key()?;
@@ -711,6 +746,9 @@ async fn authenticate_investigation_intent(
     }
     if authenticated.len() >= MAX_DIAGNOSTIC_EPISODES {
         return Err(DeliveryProblem::Capacity.error());
+    }
+    if source_read {
+        source_reads::authenticate(store, intent).await?;
     }
     if let Some(focus) = writer {
         authenticate_page_writer_focus(store, contract, focus).await?;
@@ -736,11 +774,8 @@ async fn authenticate_investigation_intent(
         }
     }
     if let Some(owner) = shared {
-        let parent = load_diagnostic_evidence(store, &intent.focus.participant().parent).await?;
-        let TelemetryRecord::Activity(original) = &parent.record().record else {
-            return Err(invalid());
-        };
-        if !intent.focus.matches_parent(parent.source(), original, &intent.focus.participant().parent) {
+        let parent = load_diagnostic_evidence(store, intent.focus.parent()).await?;
+        if !intent.matches_parent_record(parent.source(), parent.record()) {
             return Err(invalid());
         }
         let recovered_owner = load_diagnostic_evidence(store, owner).await?;

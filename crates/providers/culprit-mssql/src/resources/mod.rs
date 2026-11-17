@@ -145,7 +145,7 @@ pub(crate) async fn latest<R: NativeRead>(io: &mut R) -> ReadResult<Option<Lates
     rows.first()
         .map(|row| {
             Ok(Latest {
-                sample: Sample::decode(row)?,
+                sample: Sample::decode_utilization(row)?,
                 observed_at: DateTime::parse_from_rfc3339(&text(row, "observed_at")?)
                     .map_err(|_| invalid_data())?
                     .with_timezone(&Utc),
@@ -173,6 +173,7 @@ async fn snapshot_from<R: NativeRead>(io: &mut R) -> Result<Vec<Sample>> {
 }
 #[derive(Default)]
 pub(crate) struct Summary {
+    pub data_io_accounting: DataIoAccounting,
     pub data_io: Option<f64>,
     pub data_io_peak: Option<f64>,
     pub memory: Option<f64>,
@@ -184,7 +185,16 @@ impl Summary {
         fn mean(values: &[f64]) -> Option<f64> {
             (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
         }
-        Self { data_io: mean(&data_io), data_io_peak: data_io.into_iter().reduce(f64::max), memory: mean(&memory) }
+        let accounting = DataIoAccounting::common(
+            samples
+                .iter()
+                .filter(|sample| sample.value(Metric::DataIo).is_some())
+                .map(|sample| sample.data_io_accounting),
+        );
+        // Different measured resources are not one comparable utilization series, even if both use percent units.
+        let data_io_peak = accounting.and_then(|_| data_io.iter().copied().reduce(f64::max));
+        let data_io = accounting.and_then(|_| mean(&data_io));
+        Self { data_io_accounting: accounting.unwrap_or_default(), data_io, data_io_peak, memory: mean(&memory) }
     }
 }
 #[cfg(test)]

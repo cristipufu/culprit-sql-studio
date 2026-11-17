@@ -9,6 +9,8 @@ const SOURCE: &str = "replication-channels";
 
 fn channel(id: usize, stopped: bool) -> ReplicationObservation {
     let measurements = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(format!("channel-{id}")),
         scope: MeasurementScope::Server,
         counters: vec![NativeCounterSample::gauge(

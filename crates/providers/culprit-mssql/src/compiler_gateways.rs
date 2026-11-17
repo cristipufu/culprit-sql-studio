@@ -62,6 +62,8 @@ impl Gateway {
             ));
         }
         NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity {
                 id: self.name.clone(),
                 qualifiers: [

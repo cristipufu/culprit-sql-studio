@@ -1,0 +1,79 @@
+//! An original local history read has neither warehouse publication authority nor a live database owner.
+use super::{
+    OutboxDelivery,
+    completed_capture::{CompletedCapture, CompletedCaptureBudget, CompletedCaptureRead},
+};
+use culprit_core::{Result, limits::OperationHandle, telemetry::*};
+
+/// Canonical Runtime/QueryDefinition originals. Only the serialized Outbox verifier may construct this value.
+/// Every original artifact is verified once; retained definitions never upgrade unresolved runtime receipts.
+#[derive(Debug)]
+pub struct CompletedQueryHistory {
+    completed: CompletedCapture,
+}
+impl CompletedQueryHistory {
+    pub fn source(&self) -> &CollectionDescription {
+        &self.completed.source
+    }
+    pub fn capture(&self) -> &DiagnosticCaptureRef {
+        &self.completed.capture
+    }
+    pub fn records(&self) -> &[ExportedRecord] {
+        &self.completed.records
+    }
+    pub fn row_ordinals(&self) -> &[u32] {
+        &self.completed.row_ordinals
+    }
+    pub fn captured_rows(&self, stream: TelemetryStream) -> Option<u32> {
+        self.completed.streams.iter().find(|selected| selected.stream == stream).map(|selected| selected.rows)
+    }
+    pub fn reference_coverage(&self) -> &ReferenceCoverage {
+        &self.completed.references
+    }
+    /// Collector acquisition clocks, independent of the original native history interval.
+    pub fn collected_from(&self) -> &str {
+        &self.completed.collected_from
+    }
+    pub fn collected_until(&self) -> &str {
+        &self.completed.collected_until
+    }
+    pub fn bytes_read(&self) -> u64 {
+        self.completed.bytes_read
+    }
+    /// Move the verified original bodies once into the shared offline record shape. Its storage ordinal is
+    /// one based; native/ref positions remain zero based and are converted at the shared adapter boundary.
+    pub fn into_analysis_records(self) -> Result<Vec<culprit_core::collected_analysis::CollectedAnalysisRecord>> {
+        self.completed
+            .records
+            .into_iter()
+            .zip(self.completed.row_ordinals)
+            .map(|(row, ordinal)| {
+                Ok(culprit_core::collected_analysis::CollectedAnalysisRecord {
+                    batch_id: row.batch_id.clone(),
+                    row_ordinal: ordinal.checked_add(1).ok_or_else(|| DeliveryProblem::Integrity.error())?,
+                    native_payload_sha256: row.payload_sha256()?,
+                    row,
+                })
+            })
+            .collect()
+    }
+}
+
+impl OutboxDelivery {
+    /// Lookup, queue and verification share the caller's original operation deadline. The journal supplies the
+    /// actual receipt; a guessed capture ID cannot change its connection, original manifest or native scope.
+    pub async fn with_completed_query_history<T: Send + 'static>(
+        &self,
+        connection: &str,
+        observation_id: &str,
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+        project: impl FnOnce(CompletedQueryHistory) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let read = CompletedCaptureRead::query_history(connection, observation_id, budget, operation)?;
+        self.with_completed_capture(read, move |completed| project(CompletedQueryHistory { completed })).await
+    }
+}
+
+#[cfg(test)]
+mod tests;

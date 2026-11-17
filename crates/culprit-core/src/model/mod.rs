@@ -22,7 +22,7 @@ pub use workload::{
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 10;
+pub const SNAPSHOT_FORMAT: u32 = 11;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {
@@ -647,6 +647,7 @@ pub struct StatisticsInfo {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct WaitStat {
+    pub mechanism: Option<crate::telemetry::WaitMechanism>,
     pub category: String,
     pub wait_type: Option<String>,
     pub wait_ms: f64,
@@ -670,12 +671,27 @@ pub struct Setting {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct ResourceSample {
+    pub data_io_accounting: crate::telemetry::DataIoAccounting,
     pub at: String,
     pub cpu_pct: Option<f64>,
     pub data_io_pct: Option<f64>,
     pub log_write_pct: Option<f64>,
     pub memory_pct: Option<f64>,
     pub workers_pct: Option<f64>,
+}
+impl ResourceSample {
+    /// Only measured data-I/O values participate in the accounting population. Unknown is explicit; different
+    /// known bases cannot be pooled into one utilization verdict.
+    pub fn common_data_io_accounting(samples: &[Self]) -> Option<crate::telemetry::DataIoAccounting> {
+        crate::telemetry::DataIoAccounting::common(
+            samples
+                .iter()
+                .filter(|sample| {
+                    sample.data_io_pct.is_some_and(|value| value.is_finite() && (0.0..=100.0).contains(&value))
+                })
+                .map(|sample| sample.data_io_accounting),
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

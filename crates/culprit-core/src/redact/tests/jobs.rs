@@ -226,6 +226,8 @@ fn a_valid_foreign_fact_with_private_identity_and_properties_is_withheld_as_an_e
     let foreign = OperationalObservation::from_counters(
         TIMESCALE_JOBS_SOURCE,
         NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new("JOBS-REDACTION-PRIVATE-foreign-identity")
                 .qualified("endpoint", "JOBS-REDACTION-PRIVATE-foreign-host"),
             scope: MeasurementScope::Database,

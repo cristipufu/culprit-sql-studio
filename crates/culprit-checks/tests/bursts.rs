@@ -142,7 +142,8 @@ fn reads_that_waited_one_afternoon_and_stopped_are_said_by_when() {
     q.last_seen = Some("2026-10-11T14:19:10Z".into());
     q.total_time_ms = 71_698.8;
     q.mean_time_ms = q.total_time_ms / 3.0;
-    q.waits = vec![WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 71_600.0, tasks: None }];
+    q.waits =
+        vec![WaitStat { mechanism: None, category: "Lock".into(), wait_type: None, wait_ms: 71_600.0, tasks: None }];
     w.total_time_ms = w.queries.iter().map(|q| q.total_time_ms).sum();
     let report = analyze(s);
     let f = report.findings.iter().find(|f| f.id == "config:read-committed-snapshot").expect("RCSI");

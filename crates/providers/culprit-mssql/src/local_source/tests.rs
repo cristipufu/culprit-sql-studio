@@ -124,3 +124,54 @@ impl NativeRead for GenerationalRead {
         self.inner.close().await
     }
 }
+
+#[test]
+fn authority_templates_do_not_acquire_activity_column_metadata() {
+    for (identity, expected) in [
+        (IdentityDetail::Endpoint, "abfa21b61903a15089f69f635ce3573162c284c086ef63a32a76e0f272d78e53"),
+        (IdentityDetail::AzureDatabase, "fd1631d35518b7535b0104be9a8cf231e45f3f6dac20f743694c8bfbbc688f92"),
+    ] {
+        let authority = query(identity, Detail::Authority);
+        assert_eq!(digest(authority.as_bytes()), expected);
+        assert!(!authority.contains("sys.all_columns"));
+        assert!(!authority.contains("request_page_server_read_capability"));
+        for detail in [Detail::Activity, Detail::PageLookup] {
+            let requested = query(identity, detail);
+            assert!(requested.contains(crate::activity::page_server_reads::CAPABILITY));
+            assert!(requested.contains(" AS request_page_server_read_capability,"));
+            assert!(!requested.contains("r.page_server_reads"), "authority selects no request counters");
+        }
+    }
+}
+
+#[tokio::test]
+async fn optional_activity_detail_uses_the_same_context_owner_and_dispatch_count() {
+    use crate::activity::page_server_reads::Availability;
+    for detail in [Detail::Authority, Detail::Activity, Detail::PageLookup] {
+        let original = row(5);
+        let mut fields = original.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+        let requested = !matches!(detail, Detail::Authority);
+        if requested {
+            fields.push(("request_page_server_read_capability", Val::Int(1)));
+        }
+        let native = Rec::of(&fields);
+        let mut reader = FakeRead::new(vec![Ok(vec![native.clone()]), Ok(vec![native])]);
+        let (before, _) =
+            read_initial(&mut reader, "fixture.invalid", 1433, IdentityDetail::AzureDatabase, detail).await.unwrap();
+        let (after, _) = read_again(&mut reader, "fixture.invalid", 1433, &before, detail).await.unwrap();
+        let expected = if requested { Availability::Available } else { Availability::Unknown };
+        assert_eq!(before.activity.request_page_server_read_capability, expected);
+        assert_eq!(after.activity.request_page_server_read_capability, expected);
+        assert!(before.same_source(&after));
+        assert!(before.completed(&after).unwrap().partition.is_qualified());
+        assert_eq!(reader.queries(), 2);
+        assert_eq!(reader.closed, 0);
+        for call in &reader.calls {
+            assert_eq!(call.limit, 1);
+            assert!(matches!(&call.parameters[..], [Parameter::Integer(1)]));
+            assert_eq!(call.sql.contains("request_page_server_read_capability"), requested);
+        }
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+        assert_eq!(reader.closed, 1);
+    }
+}

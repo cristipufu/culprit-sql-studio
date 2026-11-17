@@ -337,8 +337,9 @@ fn a_restored_resolved_but_owed_episode_can_reconstruct_its_exact_middle_parent(
     else {
         panic!()
     };
-    assert_eq!(question.participant().parent, middle.2[0].0);
-    let (source, input, _) = captured(question.participant().clone(), RequestMemoryMembership::NotObserved);
+    assert_eq!(question.activity_participant().unwrap().parent, middle.2[0].0);
+    let (source, input, _) =
+        captured(question.activity_participant().unwrap().clone(), RequestMemoryMembership::NotObserved);
     let update = analyze_diagnostic_memory(&source, &input, &[], &restored, "2020-01-01T01:00:00Z", None).unwrap();
     assert_eq!(update.revisions[0].episode.lifecycle, DiagnosticLifecycle::Resolved);
     assert_eq!(update.revisions[0].episode.recovery, episode.recovery);

@@ -1,10 +1,13 @@
 //! Offline analysis runs on sealed evidence. This module has no provider, credential or native query dependency.
 mod planning;
 pub(crate) use planning::long_running_question;
+mod source_reads;
 mod tasks;
 mod transition;
 mod writers;
-pub(crate) use transition::{record_investigation, set_analysis};
+#[cfg(test)]
+pub(crate) use transition::set_analysis;
+pub(crate) use transition::{record_investigation, set_question_analysis, set_source_read_issue};
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -109,6 +112,15 @@ pub async fn analyze_pending(
         let Some(input) = outbox.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).await? else {
             break;
         };
+        if matches!(input.source.observation, SourceObservation::SourceRead { .. }) {
+            if !source_reads::parents(outbox, &input, recovery, cancellation).await? {
+                break;
+            }
+            let Some(update) = source_reads::analyze(&input, &chrono::Utc::now().to_rfc3339())? else { break };
+            outbox.commit_diagnostics(input, update).await?;
+            processed += 1;
+            continue;
+        }
         if let Some(focus) = input.source.observation.focus()
             && !verify_focus_parent(outbox, &input.connection, focus, recovery, cancellation).await?
         {

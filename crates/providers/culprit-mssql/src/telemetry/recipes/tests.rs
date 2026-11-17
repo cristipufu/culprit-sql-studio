@@ -7,24 +7,33 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
     let revised = recipes
         .iter()
         .filter(|recipe| recipe.version != 1)
-        .map(|recipe| (recipe.id.as_str(), recipe.version, recipe.selector, recipe.cost.clone()))
-        .collect::<Vec<_>>();
+        .map(|recipe| {
+            assert_eq!(recipe.cost, RecipeCostQualification::Unqualified, "{}", recipe.id);
+            (recipe.id.as_str(), recipe.version)
+        })
+        .collect::<BTreeSet<_>>();
     assert_eq!(
         revised,
-        vec![
-            (
-                "mssql.query-history",
-                2,
-                RecipeSelector::Collection(TelemetryCollection::QueryHistory),
-                RecipeCostQualification::Unqualified
-            ),
-            (
-                "mssql.query-compilation",
-                2,
-                RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::QueryCompilation)),
-                RecipeCostQualification::Unqualified
-            )
-        ]
+        BTreeSet::from([
+            ("mssql.query-history", 2),
+            ("mssql.resource-history", 2),
+            ("mssql.activity", 2),
+            ("mssql.page-wait-targets", 2),
+            ("mssql.page-wait-tasks", 2),
+            ("mssql.shared-tempdb-page-wait-targets", 2),
+            ("mssql.focused-page-wait", 2),
+            ("mssql.focused-page-task-holders", 2),
+            ("mssql.focused-page-wait-writers", 2),
+            ("mssql.focused-shared-tempdb-page-wait", 2),
+            ("mssql.focused-compiler-admission", 2),
+            ("mssql.focused-shared-compiler-admission", 2),
+            ("mssql.current-request-memory", 2),
+            ("mssql.focused-request-memory", 2),
+            ("mssql.task-space", 2),
+            ("mssql.operational", 2),
+            ("mssql.shared-operational", 2),
+            ("mssql.query-compilation", 3),
+        ])
     );
 }
 

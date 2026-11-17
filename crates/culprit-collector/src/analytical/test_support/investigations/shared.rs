@@ -10,7 +10,7 @@ pub struct SharedInvestigationFixture {
 
 pub fn shared_investigation_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
     let fixture = shared_investigation_fixture().investigation;
-    let parent = fixture.intent.focus.participant().parent.capture_ref();
+    let parent = fixture.intent.focus.parent().capture_ref();
     let mut next = fixture.episode.clone();
     next.analysis = DiagnosticAnalysisStatus::Collecting;
     let event = DiagnosticInvestigationEvent {
@@ -152,6 +152,8 @@ fn owner_source(resource: SharedResourceIdentity) -> CollectionDescription {
 
 fn counter_record(source: &CollectionDescription, observation_id: &str, native: &str) -> ExportedRecord {
     let counter = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(native),
         scope: MeasurementScope::Server,
         counters: vec![NativeCounterSample::gauge(

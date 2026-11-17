@@ -1624,17 +1624,6 @@
           {
             "at": null,
             "finding_id": null,
-            "id": "data-io",
-            "kind": "signal",
-            "label": "Storage I/O used against its limit",
-            "query_id": null,
-            "share": null,
-            "status": "good",
-            "value": "14.77%"
-          },
-          {
-            "at": null,
-            "finding_id": null,
             "id": "workers-use",
             "kind": "signal",
             "label": "Worker slots used against their limit",
@@ -1642,6 +1631,17 @@
             "share": null,
             "status": "good",
             "value": "6.41%"
+          },
+          {
+            "at": null,
+            "finding_id": null,
+            "id": "data-io",
+            "kind": "signal",
+            "label": "Data I/O (accounting unknown)",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "14.77%"
           },
           {
             "at": null,
@@ -1672,8 +1672,8 @@
           {
             "key": "healthy",
             "label": "Healthy",
-            "text": "3",
-            "value": 3.0
+            "text": "2",
+            "value": 2.0
           }
         ],
         "next": "culprit waits mssql-demo-staging",

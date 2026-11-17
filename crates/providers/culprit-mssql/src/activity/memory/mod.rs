@@ -82,7 +82,7 @@ impl<R: NativeRead> ActivityReader<R> {
             &self.host,
             self.port,
             IdentityDetail::Endpoint,
-            crate::local_source::Detail::Authority,
+            crate::local_source::Detail::Activity,
         )
         .await?;
         if !initial.database_wide {
@@ -105,7 +105,7 @@ impl<R: NativeRead> ActivityReader<R> {
         let native = self
             .io
             .query(
-                &sql::observation(&layout, self.options.identity),
+                &sql::observation(&layout, self.options.identity, initial.activity.request_page_server_read_capability),
                 vec![Parameter::Integer((limit + 1) as i64)],
                 limit + 1,
             )
@@ -165,7 +165,7 @@ impl<R: NativeRead> ActivityReader<R> {
             &self.host,
             self.port,
             initial,
-            crate::local_source::Detail::Authority,
+            crate::local_source::Detail::Activity,
         )
         .await?;
         if !current.database_wide {

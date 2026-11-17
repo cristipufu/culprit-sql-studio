@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 mod page_tasks;
+mod source_reads;
 mod task_holders;
 mod writers;
 
@@ -33,6 +34,7 @@ struct EvidencePlanner<'a> {
     recovery: Option<&'a dyn RecoveryStore>,
     cancellation: &'a CollectionCancellation,
     population_frames: BTreeMap<String, DiagnosticInput>,
+    execution_owners: BTreeMap<String, NativeSourceReadScope>,
 }
 
 struct SelectedRoute {
@@ -95,7 +97,14 @@ async fn bounded(
     let (mut cursor, mut offset) = bindings.planning_position();
     let mut scanned = 0;
     let mut questions = 0;
-    let mut evidence = EvidencePlanner { backend, journal, recovery, cancellation, population_frames: BTreeMap::new() };
+    let mut evidence = EvidencePlanner {
+        backend,
+        journal,
+        recovery,
+        cancellation,
+        population_frames: BTreeMap::new(),
+        execution_owners: BTreeMap::new(),
+    };
     for _ in 0..MAX_CHECKPOINTS_PER_PASS {
         if cancellation.is_cancelled() {
             break;
@@ -111,7 +120,7 @@ async fn bounded(
             }
             let episode = &checkpoint.episodes[offset];
             scanned += 1;
-            if episode.analysis.needs_work()
+            if episode.has_owed_question()
                 && matches!(
                     episode.signal,
                     DiagnosticSignal::PageWait { .. }
@@ -158,6 +167,14 @@ async fn bounded(
                         continue;
                     }
                     let requested = available[0].0;
+                    if let Some(stage) = &episode.source_read
+                        && matches!(
+                            journal.focused_stage(&stage.key(&episode.id)?).await?,
+                            Some(FocusedStage::Outstanding | FocusedStage::Completed)
+                        )
+                    {
+                        continue;
+                    }
                     let population_stage = if requested == RecipeSelector::PageWaitTasks {
                         let stage = page_wait_tasks_stage_key(&episode.first.capture_ref(), &binding.source.target)?;
                         if populations.contains(&stage)
@@ -210,6 +227,9 @@ async fn bounded(
 }
 
 fn possible_questions(episode: &DiagnosticEpisode) -> Vec<RecipeSelector> {
+    if let Some(stage) = &episode.source_read {
+        return if stage.needs_work() { vec![stage.focus.question.selector()] } else { vec![] };
+    }
     match &episode.signal {
         DiagnosticSignal::LockWait { .. } => vec![RecipeSelector::FocusedBlocking],
         DiagnosticSignal::PageTaskWait { .. } => vec![RecipeSelector::FocusedPageTaskHolders],
@@ -274,7 +294,18 @@ impl EvidencePlanner<'_> {
         let Some(budget) = binding.budget(target) else {
             return Ok(None);
         };
-        let proposed = if let Some(owner) = &binding.shared_owner {
+        let proposed = if let DiagnosticFocus::SourceRead { focus } = focus {
+            let execution =
+                self.execution_owners.get(&focus.key()?).ok_or_else(|| DeliveryProblem::Integrity.error())?;
+            DiagnosticInvestigationIntent::new_source_read(
+                episode,
+                &route.recipe,
+                *focus,
+                execution.clone(),
+                &route.component,
+                budget,
+            )
+        } else if let Some(owner) = &binding.shared_owner {
             let Some((owner_source, owner_row)) =
                 resolve_optional_evidence(outbox, &target.connection, owner, self.recovery, self.cancellation).await?
             else {

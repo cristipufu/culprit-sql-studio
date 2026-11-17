@@ -3,6 +3,8 @@ use crate::{DatabaseIdentity, Engine, SourceState};
 
 fn snapshot() -> ConnectionOutcomeSnapshot {
     let counters = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("pg_stat_database")
             .qualified("dbid", "42")
             .qualified("postmaster_started_at", "2020-01-01T23:00:00Z"),

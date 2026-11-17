@@ -5,10 +5,15 @@ use crate::activity::{
 
 /// Only the original task slot and its natively reported blocking-task pointer are considered. Native DMVs
 /// need not seek these predicates; this separately admitted profile remains cost-Unqualified.
-pub(super) fn point(identity: IdentityDetail) -> String {
+pub(super) fn point(
+    identity: IdentityDetail,
+    availability: crate::activity::page_server_reads::Availability,
+) -> String {
     let task = super::super::task_waits::gated_projection("w.wait_type LIKE 'PAGELATCH[_]%'");
-    let rows = actors(&format!(
-        r#"OUTER APPLY(
+    let rows = actors(
+        availability,
+        &format!(
+            r#"OUTER APPLY(
  SELECT TOP (2) {task},
   CONVERT(varchar(16),task.task_address,2) AS checked_task_address,
   task.session_id AS checked_task_session_id,task.request_id AS checked_task_request_id,
@@ -28,18 +33,22 @@ OUTER APPLY(
  WHERE holder.task_address=CASE WHEN selected.reported_session>0
   AND selected.reported_address<>CONVERT(varbinary(8),@P4,2) THEN selected.reported_address END
 ) holder"#,
-    ));
-    let unavailable = actors(&format!(
-        r#"OUTER APPLY(SELECT {empty},
+        ),
+    );
+    let unavailable = actors(
+        availability,
+        &format!(
+            r#"OUTER APPLY(SELECT {empty},
  CAST(NULL AS varchar(16)) AS checked_task_address,CAST(NULL AS smallint) AS checked_task_session_id,
  CAST(NULL AS int) AS checked_task_request_id,CAST(NULL AS int) AS checked_task_execution_context_id,
  CAST(NULL AS nvarchar(60)) AS checked_task_wait_type,CAST(NULL AS nvarchar(3072)) AS checked_task_resource) selected
 OUTER APPLY(SELECT CAST(NULL AS varbinary(8)) AS task_address,CAST(NULL AS smallint) AS session_id,
  CAST(NULL AS int) AS request_id,CAST(NULL AS int) AS exec_context_id) holder"#,
-        empty = super::super::task_waits::empty_projection(),
-    ));
+            empty = super::super::task_waits::empty_projection(),
+        ),
+    );
     let select = |rows: &str| {
-        activity::frame_select_with_context(
+        activity::request_frame_select_with_context(
             rows,
             identity,
             QueryPolicy::SerialMetadata,
@@ -55,7 +64,7 @@ OUTER APPLY(SELECT CAST(NULL AS varbinary(8)) AS task_address,CAST(NULL AS small
     )
 }
 
-fn actors(native_task: &str) -> String {
+fn actors(availability: crate::activity::page_server_reads::Availability, native_task: &str) -> String {
     format!(
         r#"SELECT {request},
  CASE WHEN r.request_id IS NULL THEN 1 ELSE 0 END AS no_current_request,
@@ -72,7 +81,7 @@ CROSS APPLY(SELECT 0 AS ordinal,@P2 AS session_id,@P3 AS request_id
 LEFT JOIN sys.dm_exec_sessions s ON s.session_id=a.session_id
 LEFT JOIN sys.dm_exec_requests r ON r.session_id=a.session_id AND r.request_id=a.request_id
 LEFT JOIN sys.dm_exec_sessions b ON b.session_id=r.blocking_session_id"#,
-        request = activity::REQUEST_COLUMNS,
+        request = activity::request_columns(availability),
         checks = crate::activity::participants::CHECK_COLUMNS,
     )
 }

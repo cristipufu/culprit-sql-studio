@@ -1,6 +1,7 @@
 //! Recipe declarations explain withheld native questions; they never open a source or grant admission.
 use super::*;
 use std::collections::BTreeMap;
+mod source_read;
 
 /// Catalog and subject order have no policy meaning. Keep every descriptor field in its replay fingerprint.
 pub(super) fn canonical_catalog(mut recipes: Vec<RecipeDescriptor>) -> Result<Vec<RecipeDescriptor>> {
@@ -25,6 +26,9 @@ pub(super) fn qualify_questions(
     update: &mut DiagnosticUpdate,
 ) -> Result<()> {
     let Some(assignment) = assignment else { return Ok(()) };
+    if matches!(input.source.observation, SourceObservation::FocusedCompilationAdmission { .. }) {
+        return source_read::qualify(input, assignment, update);
+    }
     let Some(recipes) = &assignment.recipes else { return Ok(()) };
     if matches!(input.source.observation, SourceObservation::FocusedPageWait { .. }) {
         return qualify_writer_question(input, assignment, recipes, update);
@@ -128,7 +132,10 @@ fn qualification_issue(
 ) -> DiagnosticAnalysisIssue {
     let request = CollectionRequest {
         subject: subject.clone(),
-        selection: focus.database_selection(),
+        selection: match focus.activity_selection() {
+            Some(selection) => selection,
+            None => return DiagnosticAnalysisIssue::Unsupported,
+        },
         budget: CollectionBudget::default(),
     };
     let recipe =

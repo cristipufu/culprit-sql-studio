@@ -153,7 +153,14 @@ pub(crate) fn decode(row: &Row) -> Result<ReplicationObservation> {
         .map(|(id, generation)| NativeActivityIdentity { id: id.clone(), generation: generation.clone() });
     let unresolved_session_id = session_id.filter(|_| session.is_none());
     let slot_name = properties.get("slot_name").cloned();
-    let mut sample = NativeReplicationSample::new(NativeCounterSet { identity, scope, counters, properties })?;
+    let mut sample = NativeReplicationSample::new(NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
+        identity,
+        scope,
+        counters,
+        properties,
+    })?;
     sample.session = session;
     sample.unresolved_session_id = unresolved_session_id;
     sample.slot_name = slot_name;

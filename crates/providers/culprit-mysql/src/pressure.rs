@@ -78,6 +78,7 @@ fn fold(items: impl IntoIterator<Item = (String, f64, f64)>) -> Vec<WaitStat> {
     let mut out: Vec<WaitStat> = by_category
         .into_iter()
         .map(|(category, (ms, tasks, top, _))| WaitStat {
+            mechanism: None,
             category: category.into(),
             wait_type: Some(top),
             wait_ms: ms,
@@ -548,6 +549,7 @@ impl Sampled {
             let mut sampled: Vec<WaitStat> = by_category
                 .into_iter()
                 .map(|(category, (n, top, _))| WaitStat {
+                    mechanism: None,
                     category: category.into(),
                     wait_type: Some(top),
                     wait_ms: n / samples * elapsed * 1000.0,

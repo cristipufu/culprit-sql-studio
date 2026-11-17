@@ -1,10 +1,10 @@
 use super::super::{
     IdentityDetail,
-    sql::{QueryPolicy, REQUEST_COLUMNS, frame_query},
+    sql::{QueryPolicy, request_columns, request_frame_query},
 };
 
 pub(super) fn context(identity: IdentityDetail) -> String {
-    frame_query(
+    request_frame_query(
         r#"SELECT CAST(NULL AS int) AS session_id,
  CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int)=5 THEN
   CASE WHEN IS_SRVROLEMEMBER('##MS_ServerStateReader##')=1
@@ -21,9 +21,13 @@ pub(super) fn context(identity: IdentityDetail) -> String {
     )
 }
 
-pub(super) fn observation(identity: IdentityDetail) -> String {
+pub(super) fn observation(
+    identity: IdentityDetail,
+    availability: crate::activity::page_server_reads::Availability,
+) -> String {
+    let columns = request_columns(availability);
     let rows = format!(
-        r#"SELECT {REQUEST_COLUMNS},
+        r#"SELECT {columns},
  CASE WHEN r.request_id IS NULL THEN 1 ELSE 0 END AS no_current_request,
  CASE WHEN r.database_id=DB_ID() THEN 1 ELSE 5 END AS scope_basis,
  CAST(NULL AS bigint) AS transaction_id,CAST(NULL AS varchar(40)) AS transaction_start,
@@ -41,5 +45,5 @@ pub(super) fn observation(identity: IdentityDetail) -> String {
     );
     // Unsorted native task counters only: no session totals, net sums, SQL text, plans or task-address joins.
     // TOP limits returned records; native DMV traversal/join cost remains subject to separate qualification.
-    frame_query(&rows, identity, QueryPolicy::SerialMetadata)
+    request_frame_query(&rows, identity, QueryPolicy::SerialMetadata)
 }

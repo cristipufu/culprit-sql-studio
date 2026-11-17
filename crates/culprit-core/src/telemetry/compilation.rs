@@ -321,6 +321,8 @@ mod tests {
         changed.observations.push(later);
         assert!(!changed.is_valid(), "changing measurements does not create another native query incarnation");
         let counters = NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new("compiler gateway"),
             scope: crate::MeasurementScope::Server,
             counters: vec![NativeCounterSample::gauge(

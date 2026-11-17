@@ -122,7 +122,14 @@ pub(crate) fn decode_values(values: &str, started_at: &str) -> Result<NativeCoun
             Err(error) => Some(Err(error)),
         })
         .collect::<Result<Vec<_>>>()?;
-    let sample = NativeCounterSet { identity, scope: MeasurementScope::Server, counters, properties };
+    let sample = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
+        identity,
+        scope: MeasurementScope::Server,
+        counters,
+        properties,
+    };
     if !sample.is_valid() {
         return Err(invalid());
     }

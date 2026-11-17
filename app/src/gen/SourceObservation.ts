@@ -10,6 +10,7 @@ import type { DiagnosticCaptureDescription } from "./DiagnosticCaptureDescriptio
 import type { DiagnosticCaptureRef } from "./DiagnosticCaptureRef";
 import type { EventHistoryDescription } from "./EventHistoryDescription";
 import type { FocusedRequestResult } from "./FocusedRequestResult";
+import type { NativeReadContext } from "./NativeReadContext";
 import type { PageTaskHolderFocus } from "./PageTaskHolderFocus";
 import type { PageWaitWriterFocus } from "./PageWaitWriterFocus";
 import type { PagedSnapshotDescription } from "./PagedSnapshotDescription";
@@ -18,7 +19,7 @@ import type { SampleHistoryDescription } from "./SampleHistoryDescription";
 import type { StateSnapshotDescription } from "./StateSnapshotDescription";
 import type { TimescaleJobsMetadata } from "./TimescaleJobsMetadata";
 
-export type SourceObservation = { "kind": "query-history", "data": QueryHistoryDescription } | { "kind": "retained-samples", "data": SampleHistoryDescription } | { "kind": "retained-events", "data": EventHistoryDescription } | { "kind": "activity", "data": ActivitySnapshotDescription } | { "kind": "focused-blocking", "data": { snapshot: ActivitySnapshotDescription, result: ActivityBlockingFocusResult, } } | { "kind": "jobs", "data": { snapshot: StateSnapshotDescription, metadata: TimescaleJobsMetadata, } } | { "kind": "cache-entry-memory", "data": { snapshot: StateSnapshotDescription, focus: CacheEntryMemoryFocus, } } | { "kind": "page-wait-targets", "data": { snapshot: StateSnapshotDescription, database_writable: boolean | null, 
+export type SourceObservation = { "kind": "source-read", "data": { snapshot: StateSnapshotDescription, focus_key: string, execution: NativeReadContext, } } | { "kind": "paged-source-read", "data": { snapshot: PagedSnapshotDescription, focus_key: string, execution: NativeReadContext, } } | { "kind": "query-history", "data": QueryHistoryDescription } | { "kind": "retained-samples", "data": SampleHistoryDescription } | { "kind": "retained-events", "data": EventHistoryDescription } | { "kind": "activity", "data": ActivitySnapshotDescription } | { "kind": "focused-blocking", "data": { snapshot: ActivitySnapshotDescription, result: ActivityBlockingFocusResult, } } | { "kind": "jobs", "data": { snapshot: StateSnapshotDescription, metadata: TimescaleJobsMetadata, } } | { "kind": "cache-entry-memory", "data": { snapshot: StateSnapshotDescription, focus: CacheEntryMemoryFocus, } } | { "kind": "page-wait-targets", "data": { snapshot: StateSnapshotDescription, database_writable: boolean | null, 
 /**
  * Captured in the authenticated request before native work; None is an unpaired raw population.
  */

@@ -3,6 +3,7 @@ import type { CurrentRequestWorkReport } from "./CurrentRequestWorkReport";
 import type { CurrentRequestWorkSnapshot } from "./CurrentRequestWorkSnapshot";
 import type { Engine } from "./Engine";
 import type { NodeProgress } from "./NodeProgress";
+import type { PageServerReadExplanation } from "./PageServerReadExplanation";
 import type { Plan } from "./Plan";
 import type { SessionProgressContext } from "./SessionProgressContext";
 
@@ -14,6 +15,10 @@ export type QueryProgress = { session: string, engine: Engine, taken_at: string,
  * `None` means the current request was not established; only an observed idle point supplies `Some(false)`.
  */
 running: boolean | null, state: string | null, wait: string | null, wait_ms: number | null, elapsed_ms: number | null, cpu_ms: number | null, logical_reads: number | null, 
+/**
+ * Source-qualified current-request lifetime count, retained exactly; never a historical average.
+ */
+page_server_reads?: string, page_server_reads_report?: PageServerReadExplanation, 
 /**
  * Rows the statement has examined so far (MySQL).
  */

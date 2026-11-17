@@ -34,11 +34,17 @@ impl SnapshotScope {
 pub struct SnapshotRecheck {
     pub unchanged: bool,
     pub observed_until: String,
+    /// Present only for a declared SourceRead; it is the actual final native owner, not dataset partitioning.
+    pub execution: Option<Box<NativeReadContext>>,
     pub scopes: Vec<SnapshotScope>,
 }
 #[async_trait::async_trait]
 pub trait SnapshotReader: Send {
     type Row: Send;
+    /// Registration routes and native qualification remain mandatory; unsupported readers refuse offline.
+    fn supports_source_read(&self, _question: SourceReadQuestion) -> bool {
+        false
+    }
     async fn describe(&mut self, request: &CollectionRequest) -> Result<CollectionDescription>;
     async fn begin(&mut self, request: &CollectionRequest) -> Result<()>;
     async fn next_batch(&mut self) -> Result<ReadBatch<Self::Row>>;
@@ -64,8 +70,10 @@ pub struct SnapshotSource<R: SnapshotReader> {
 impl<R: SnapshotReader> SnapshotSource<R> {
     pub fn new(reader: R, request: &CollectionRequest) -> Result<Self> {
         request.validate()?;
-        if !matches!(request.selection, CollectionSelection::Snapshot { .. }) {
-            return Err(invalid_source());
+        match &request.selection {
+            CollectionSelection::Snapshot { .. } => (),
+            CollectionSelection::SourceRead { focus, .. } if reader.supports_source_read(focus.question) => (),
+            _ => return Err(invalid_source()),
         }
         Ok(Self {
             reader,
@@ -85,9 +93,7 @@ impl<R: SnapshotReader> SnapshotSource<R> {
             return Err(invalid_source());
         }
         let description = self.description.as_ref().ok_or_else(invalid_source)?;
-        let SourceObservation::PagedSnapshot(declared) = &description.observation else {
-            return Err(invalid_source());
-        };
+        let declared = declaration(description)?;
         if stream != declared.dataset.stream() {
             return Err(invalid_source());
         }
@@ -186,9 +192,7 @@ impl<R: SnapshotReader> TelemetrySource for SnapshotSource<R> {
         }
         self.progress = Progress::Failed;
         let description = self.reader.describe(&self.request).await?;
-        if !matches!(description.observation, SourceObservation::PagedSnapshot(_))
-            || !description.matches_request(&self.request)
-        {
+        if declaration(&description).is_err() || !description.matches_request(&self.request) {
             return Err(invalid_source());
         }
         self.description = Some(description.clone());
@@ -219,19 +223,39 @@ impl<R: SnapshotReader> TelemetrySource for SnapshotSource<R> {
         if !recheck.unchanged {
             return Ok(SourceCompletion::Changed);
         }
-        let SourceObservation::PagedSnapshot(declared) = &description.observation else {
-            return Err(invalid_source());
-        };
-        Ok(SourceCompletion::Snapshot(StateSnapshotDescription {
+        let declared = declaration(description)?;
+        let snapshot = StateSnapshotDescription {
             dataset: declared.dataset,
             observed_from: declared.observed_from.clone(),
             observed_until: recheck.observed_until,
             records: self.rows,
             sources: self.coverage(declared, recheck.scopes)?,
-        }))
+        };
+        let completion = match (&description.observation, recheck.execution) {
+            (SourceObservation::PagedSnapshot(_), None) => SourceCompletion::Snapshot(snapshot),
+            (SourceObservation::PagedSourceRead { execution: initial, .. }, Some(execution)) => {
+                if !NativeSourceReadScope::from_context(initial)?.matches_context(&execution) {
+                    return Ok(SourceCompletion::Changed);
+                }
+                SourceCompletion::SourceRead { snapshot, execution }
+            }
+            _ => return Err(invalid_source()),
+        };
+        // Validate both the original declaration and final authority before returning successful closure.
+        description.completed(completion.clone())?.ok_or_else(invalid_source)?;
+        Ok(completion)
     }
     async fn close(&mut self) -> SourceShutdown {
         self.progress = Progress::Closed;
         self.reader.close().await
+    }
+}
+
+fn declaration(description: &CollectionDescription) -> Result<&PagedSnapshotDescription> {
+    match &description.observation {
+        SourceObservation::PagedSnapshot(snapshot) | SourceObservation::PagedSourceRead { snapshot, .. } => {
+            Ok(snapshot)
+        }
+        _ => Err(invalid_source()),
     }
 }

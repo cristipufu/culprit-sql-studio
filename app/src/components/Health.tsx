@@ -25,6 +25,7 @@ import { CompletedSpills } from "./CompletedSpills";
 import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
 import { StatementWork } from "./StatementWork";
+import { CounterRatios } from "./CounterRatios";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
 import { PageServerReads, pageServerReadIssue } from "./PageServerReads";
 import { Jobs, JOBS_SOURCES } from "./Jobs";
@@ -128,6 +129,9 @@ export function HealthTab({
   const statementWork = report.snapshot.operations.statement_work;
   const statementWorkReport = report.statement_work;
   const statementWorkUnexplained = Boolean(statementWork && !statementWorkReport);
+  const counterRatios = report.counter_ratios;
+  const counterRatioRead = pressure?.resource_counters?.some((sample) => sample.ratios.length > 0) ?? false;
+  const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
   const connectionOutcomes = report.connection_outcomes;
   const connectionOutcomesRead = report.snapshot.pressure?.connection_outcomes;
   const connectionOutcomesIssue = observationReadIssue("sessions", report.snapshot.sources ?? []);
@@ -141,8 +145,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, counterRatios, counterRatioRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, counterRatioIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -207,6 +211,9 @@ export function HealthTab({
       {jobs && !jobsReport && jobsIssues.length === 0 && <ObservationSourceIssue source={{ source: "timescale-jobs", state: "unavailable", reason: t("view.jobs.invalid") }} title={t("view.jobs.title")} />}
       {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
       {statementWorkUnexplained && <ObservationExplanationIssue title={t("view.statement_work.title")} reason={t("view.statement_work.invalid")} />}
+      {counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
+      {!counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
+      {!counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
       {connectionOutcomes && <ConnectionOutcomes key={report.snapshot.id} report={connectionOutcomes} />}
       {pageServerReads && <PageServerReads key={report.snapshot.id} report={pageServerReads} />}
       {!pageServerReads && pageServerIssue && <ObservationSourceIssue source={pageServerIssue} title={t("view.page_server_reads.title")} />}
@@ -230,18 +237,27 @@ const LIMIT = 95;
 type Pick = (s: ResourceSample) => number | null;
 
 /** The tier's limits charted, each with the signal that grades it. */
-function dimensions(): { key: string; label: string; pick: Pick }[] {
+function dimensions(samples: ResourceSample[]): { key: string; signalKey: string; label: string; qualification?: string; pick: Pick }[] {
+  const ioLabels: Record<ResourceSample["data_io_accounting"], { label: string; qualification: string }> = {
+    "data-files": { label: t("core.resource_io.data_files.label"), qualification: t("core.resource_io.data_files.meaning") },
+    "compute-local-ssd": { label: t("core.resource_io.compute_local_ssd.label"), qualification: t("core.resource_io.compute_local_ssd.meaning") },
+    unknown: { label: t("core.resource_io.unknown.label"), qualification: t("core.resource_io.unknown.meaning") },
+  };
+  // Group only the already typed source facts. The browser neither identifies a deployment nor pools different
+  // accounting bases. Unknown remains its own series, including pool samples without native pool qualification.
+  const bases = [...new Set(samples.filter((sample) => sample.data_io_pct !== null).map((sample) => sample.data_io_accounting))];
+  const io = bases.map((basis) => ({ key: `data-io:${basis}`, signalKey: bases.length === 1 ? "data-io" : "", ...ioLabels[basis], pick: (sample: ResourceSample) => sample.data_io_accounting === basis ? sample.data_io_pct : null }));
   return [
-    { key: "log-write-use", label: t("ui.health.dimension.log_writes"), pick: (s) => s.log_write_pct },
-    { key: "cpu-use", label: t("ui.health.dimension.cpu"), pick: (s) => s.cpu_pct },
-    { key: "data-io", label: t("ui.health.dimension.data_reads"), pick: (s) => s.data_io_pct },
-    { key: "workers-use", label: t("ui.health.dimension.workers"), pick: (s) => s.workers_pct },
+    { key: "log-write-use", signalKey: "log-write-use", label: t("ui.health.dimension.log_writes"), pick: (s) => s.log_write_pct },
+    { key: "cpu-use", signalKey: "cpu-use", label: t("ui.health.dimension.cpu"), pick: (s) => s.cpu_pct },
+    ...io,
+    { key: "workers-use", signalKey: "workers-use", label: t("ui.health.dimension.workers"), pick: (s) => s.workers_pct },
   ];
 }
 
 const timeFmt = () => dateFormat({ timeZone: "UTC", hour: "2-digit", minute: "2-digit", hour12: false });
 
-function ResourceCharts({ samples, signals }: { samples: ResourceSample[]; signals: Signal[] }) {
+export function ResourceCharts({ samples, signals }: { samples: ResourceSample[]; signals: Signal[] }) {
   const times = samples.map((s) => Date.parse(s.at));
   return (
     <section className="resource-charts">
@@ -252,15 +268,15 @@ function ResourceCharts({ samples, signals }: { samples: ResourceSample[]; signa
         </span>
       </div>
       <div className="resource-grid">
-        {dimensions().map((d) => (
-          <ResourceChart key={d.key} label={d.label} status={signals.find((s) => s.key === d.key)?.status ?? "info"} times={times} values={samples.map(d.pick)} />
+        {dimensions(samples).map((d) => (
+          <ResourceChart key={d.key} label={d.label} qualification={d.qualification} status={signals.find((s) => s.key === d.signalKey)?.status ?? "info"} times={times} values={samples.map(d.pick)} />
         ))}
       </div>
     </section>
   );
 }
 
-function ResourceChart({ label, status, times, values }: { label: string; status: SignalStatus; times: number[]; values: (number | null)[] }) {
+function ResourceChart({ label, qualification, status, times, values }: { label: string; qualification?: string; status: SignalStatus; times: number[]; values: (number | null)[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const known = values.filter((v): v is number => v != null);
   if (known.length < 4) return null;
@@ -297,6 +313,7 @@ function ResourceChart({ label, status, times, values }: { label: string; status
             : t("ui.health.recorded_peak", { peak: percentValue(peak) })}
         </span>
       </div>
+      {qualification && <p className="muted">{qualification}</p>}
       <div className="resource-plot" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <div className="resource-yaxis" aria-hidden>
           <span style={{ top: "0%" }}>100%</span>

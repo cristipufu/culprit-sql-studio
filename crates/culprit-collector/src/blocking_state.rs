@@ -40,13 +40,33 @@ impl<S: Send + 'static> BlockingAccess<S> {
         T: Send + 'static,
     {
         let worker_failure = self.worker_failure;
-        tokio::task::spawn_blocking(move || operation(&mut self.state)).await.map_err(|_| worker_failure())?
+        let language = culprit_core::i18n::current();
+        tokio::task::spawn_blocking(move || culprit_core::i18n::scope(&language.code, || operation(&mut self.state)))
+            .await
+            .map_err(|_| worker_failure())?
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn worker_results_and_errors_inherit_the_scoped_callers_language() {
+        use culprit_core::{ErrorDetail, i18n, telemetry::DeliveryProblem};
+        let state = BlockingState::new((), || DeliveryProblem::Storage.error());
+        let language =
+            i18n::scope_async("fr", state.run(|| |_: &mut ()| Ok(i18n::current().code.clone()))).await.unwrap();
+        assert_eq!(language, "fr");
+        let error = i18n::scope_async("fr", state.run(|| |_: &mut ()| Err::<(), _>(DeliveryProblem::Storage.error())))
+            .await
+            .unwrap_err();
+        assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Storage)));
+        assert_eq!(error.message, i18n::scope("fr", || DeliveryProblem::Storage.error().message));
+        assert_ne!(error.message, i18n::scope("en", || DeliveryProblem::Storage.error().message));
+        assert_eq!(i18n::current().code, "en");
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn a_retired_caller_cannot_block_timers_or_let_a_later_operation_overtake_its_worker() {
         let state = BlockingState::new(Vec::<&'static str>::new(), || {

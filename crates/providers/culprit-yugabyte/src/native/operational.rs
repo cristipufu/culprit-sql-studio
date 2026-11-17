@@ -194,7 +194,8 @@ fn record(
     counters: Vec<NativeCounterSample>,
     properties: BTreeMap<String, String>,
 ) -> Result<TelemetryRecord> {
-    let counters = NativeCounterSet { identity, scope, counters, properties };
+    let counters =
+        NativeCounterSet { ratios: Vec::new(), ratio_gaps: Vec::new(), identity, scope, counters, properties };
     record_set(source, counters)
 }
 fn record_set(source: &str, counters: NativeCounterSet) -> Result<TelemetryRecord> {

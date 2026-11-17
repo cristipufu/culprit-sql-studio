@@ -87,6 +87,13 @@ pub struct QueryProgress {
     pub elapsed_ms: Option<f64>,
     pub cpu_ms: Option<f64>,
     pub logical_reads: Option<f64>,
+    /// Source-qualified current-request lifetime count, retained exactly; never a historical average.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_server_reads: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_server_reads_report: Option<Box<crate::page_server_read_report::PageServerReadExplanation>>,
     /// Rows the statement has examined so far (MySQL).
     pub rows_examined: Option<f64>,
     pub statement: Option<String>,
@@ -149,6 +156,8 @@ impl QueryProgress {
             elapsed_ms: None,
             cpu_ms: None,
             logical_reads: None,
+            page_server_reads: None,
+            page_server_reads_report: None,
             rows_examined: None,
             statement: None,
             plan: None,

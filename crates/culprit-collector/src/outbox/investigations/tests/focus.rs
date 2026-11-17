@@ -224,7 +224,7 @@ fn queued_investigation_parent_is_authenticated_idempotent_and_preserved_across_
     let intent = admitted_intent(&first);
     let key = intent.key().unwrap();
     let mut substituted = intent.clone();
-    substituted.focus.participant_mut().original.elapsed_ms = Some("90001".into());
+    substituted.focus.activity_participant_mut().unwrap().original.elapsed_ms = Some("90001".into());
     assert!(files.pin_investigation_parent(&substituted).is_err());
     assert!(files.investigation_parent_keys().unwrap().is_empty());
     files.pin_investigation_parent(&intent).unwrap();

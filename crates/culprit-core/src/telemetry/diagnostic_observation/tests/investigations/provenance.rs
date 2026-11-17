@@ -152,28 +152,37 @@ fn event_relation_requires_the_original_native_focus_scope_and_monotonic_episode
             "episode" => other.intent.episode_id = digest(b"other-episode"),
             "future-revision" => other.intent.episode_revision = "4".into(),
             "epoch" => {
-                other.intent.focus.participant_mut().epoch = "another-generation".into();
+                other.intent.focus.activity_participant_mut().unwrap().epoch = "another-generation".into();
                 activity_scope(&mut other.intent.qualification).native_epoch =
-                    Some(other.intent.focus.participant().epoch.clone());
+                    Some(other.intent.focus.activity_participant().unwrap().epoch.clone());
             }
             "source" => {
-                other.intent.focus.participant_mut().source = "other-native-source".into();
+                other.intent.focus.activity_participant_mut().unwrap().source = "other-native-source".into();
                 activity_scope(&mut other.intent.qualification).source =
-                    other.intent.focus.participant().source.clone();
+                    other.intent.focus.activity_participant().unwrap().source.clone();
             }
             "population" => {
                 activity_scope(&mut other.intent.qualification).population = ActivityPopulation::ClientBackends
             }
             "scope" => activity_scope(&mut other.intent.qualification).measurement_scope = MeasurementScope::Server,
             "statement" => {
-                other.intent.focus.participant_mut().statement_identity = NativeIdentity::new("different-statement");
-                other.intent.focus.participant_mut().original.statement_identity =
-                    Some(other.intent.focus.participant().statement_identity.clone());
+                other.intent.focus.activity_participant_mut().unwrap().statement_identity =
+                    NativeIdentity::new("different-statement");
+                other.intent.focus.activity_participant_mut().unwrap().original.statement_identity =
+                    Some(other.intent.focus.activity_participant().unwrap().statement_identity.clone());
             }
             _ => {
                 other.intent.focus.page_wait_mut().unwrap().resource.native = NativeIdentity::new("5:1:100");
-                other.intent.focus.participant_mut().original.wait.as_mut().unwrap().identified_resources =
-                    vec![other.intent.focus.page_wait().unwrap().resource.clone()];
+                other
+                    .intent
+                    .focus
+                    .activity_participant_mut()
+                    .unwrap()
+                    .original
+                    .wait
+                    .as_mut()
+                    .unwrap()
+                    .identified_resources = vec![other.intent.focus.page_wait().unwrap().resource.clone()];
             }
         }
         assert!(

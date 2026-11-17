@@ -4,7 +4,10 @@ use super::{super::IdentityDetail, fields};
 
 /// Only active user requests already reporting page waits are sampled. Reuse the shared request columns/decoder,
 /// without idle-transaction probes, SQL text, plans, grouping or ordering in this opt-in diagnostic.
-pub(super) fn observation(identity: IdentityDetail) -> String {
+pub(super) fn observation(
+    identity: IdentityDetail,
+    availability: crate::activity::page_server_reads::Availability,
+) -> String {
     let requests = format!(
         r#"SELECT {request},
  CASE WHEN r.request_id IS NULL THEN 1 ELSE 0 END AS no_current_request,
@@ -16,7 +19,7 @@ pub(super) fn observation(identity: IdentityDetail) -> String {
  LEFT JOIN sys.dm_exec_sessions b ON b.session_id=r.blocking_session_id
  WHERE r.session_id<>@@SPID AND s.is_user_process=1 AND r.database_id=DB_ID()
   AND (r.wait_type LIKE 'PAGELATCH[_]%' OR r.wait_type LIKE 'PAGEIOLATCH[_]%')"#,
-        request = super::super::sql::REQUEST_COLUMNS,
+        request = super::super::sql::request_columns(availability),
         task = super::task_waits::empty_projection(),
     );
     // The DMV task/wait populations can still require enumeration. TOP bounds the returned artifacts only;
@@ -36,12 +39,12 @@ pub(super) fn observation(identity: IdentityDetail) -> String {
  LEFT JOIN sys.dm_exec_sessions b ON b.session_id=r.blocking_session_id
  WHERE r.session_id<>@@SPID AND s.is_user_process=1 AND r.database_id=DB_ID()
   AND (w.wait_type LIKE 'PAGELATCH[_]%' OR w.wait_type LIKE 'PAGEIOLATCH[_]%')"#,
-        request = super::super::sql::REQUEST_COLUMNS,
+        request = super::super::sql::request_columns(availability),
         task = super::task_waits::projection(),
     );
     let rows = format!("{requests}\nUNION ALL\n{tasks}");
     let select = |rows: &str| {
-        super::super::sql::frame_select_with_context(
+        super::super::sql::request_frame_select_with_context(
             rows,
             identity,
             super::super::sql::QueryPolicy::SerialMetadata,
@@ -71,7 +74,10 @@ pub(super) fn task_visibility() -> &'static str {
 }
 
 /// A durable focus admits only its original native request. It never selects a replacement population.
-pub(in crate::activity) fn focused_observation(identity: IdentityDetail) -> String {
+pub(in crate::activity) fn focused_observation(
+    identity: IdentityDetail,
+    availability: crate::activity::page_server_reads::Availability,
+) -> String {
     let rows = format!(
         r#"SELECT {request},
  CASE WHEN r.request_id IS NULL THEN 1 ELSE 0 END AS no_current_request,
@@ -81,9 +87,9 @@ pub(in crate::activity) fn focused_observation(identity: IdentityDetail) -> Stri
  JOIN sys.dm_exec_sessions s ON s.session_id=r.session_id
  LEFT JOIN sys.dm_exec_sessions b ON b.session_id=r.blocking_session_id
  WHERE r.session_id=@P2 AND r.request_id=@P3 AND r.session_id<>@@SPID AND s.is_user_process=1"#,
-        request = super::super::sql::REQUEST_COLUMNS
+        request = super::super::sql::request_columns(availability)
     );
-    super::super::sql::frame_query(&rows, identity, super::super::sql::QueryPolicy::SerialMetadata)
+    super::super::sql::request_frame_query(&rows, identity, super::super::sql::QueryPolicy::SerialMetadata)
 }
 
 pub(super) fn headers() -> String {

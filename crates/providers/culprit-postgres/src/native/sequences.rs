@@ -56,6 +56,8 @@ pub(crate) fn decode(row: Row) -> Result<NativeCatalogCounters> {
         predicate: None,
     };
     let counters = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity,
         scope: MeasurementScope::Database,
         counters: vec![],

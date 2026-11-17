@@ -1,6 +1,47 @@
 //! Provider-neutral resource samples. Native adapters supply explicit units, scope and aggregation.
 use super::*;
 
+/// What the native data-I/O utilization percentage accounts for. Its measurement scope and limit denominator
+/// remain independent; an unknown deployment must not inherit conventional storage semantics.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum DataIoAccounting {
+    #[default]
+    Unknown,
+    /// Governed data-file I/O includes both reads and writes; it is independent of transaction-log throughput.
+    DataFiles,
+    /// Local SSD operations from the compute cache and temporary database, excluding remote page-server I/O.
+    ComputeLocalSsd,
+}
+impl DataIoAccounting {
+    /// A mixed population has no common accounting basis. The original samples remain independently available.
+    pub fn common(values: impl IntoIterator<Item = Self>) -> Option<Self> {
+        let mut values = values.into_iter();
+        let first = values.next()?;
+        values.all(|value| value == first).then_some(first)
+    }
+
+    pub fn label_message(self) -> crate::i18n::Message {
+        match self {
+            Self::Unknown => crate::message!("core.resource_io.unknown.label"),
+            Self::DataFiles => crate::message!("core.resource_io.data_files.label"),
+            Self::ComputeLocalSsd => crate::message!("core.resource_io.compute_local_ssd.label"),
+        }
+    }
+    pub fn label(self) -> String {
+        self.label_message().render()
+    }
+
+    pub fn meaning(self) -> String {
+        match self {
+            Self::Unknown => crate::t!("core.resource_io.unknown.meaning"),
+            Self::DataFiles => crate::t!("core.resource_io.data_files.meaning"),
+            Self::ComputeLocalSsd => crate::t!("core.resource_io.compute_local_ssd.meaning"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -66,6 +107,7 @@ impl ResourceMetricSample {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ResourceMeasurement {
+    pub data_io_accounting: DataIoAccounting,
     /// Native UTC timestamp. The collection window selects samples without prorating their values.
     pub at: String,
     /// Native replica identity when supplied by the source. A pool sample does not invent a replica.
@@ -94,6 +136,7 @@ mod tests {
     use super::*;
     fn sample() -> ResourceMeasurement {
         ResourceMeasurement {
+            data_io_accounting: crate::telemetry::DataIoAccounting::Unknown,
             at: "2020-01-01T06:00:15Z".into(),
             replica_id: Some("primary".into()),
             metrics: vec![ResourceMetricSample {
@@ -264,5 +307,20 @@ mod tests {
         history.available_until = None;
         history.expected_samples = 0;
         assert!(!history.covers_request());
+    }
+    #[test]
+    fn accounting_is_explicit_and_mixed_or_missing_populations_have_no_common_basis() {
+        use DataIoAccounting::{ComputeLocalSsd, DataFiles, Unknown};
+        assert_eq!(DataIoAccounting::common([]), None);
+        assert_eq!(DataIoAccounting::common([Unknown, Unknown]), Some(Unknown));
+        assert_eq!(DataIoAccounting::common([DataFiles, DataFiles]), Some(DataFiles));
+        assert_eq!(DataIoAccounting::common([ComputeLocalSsd, ComputeLocalSsd]), Some(ComputeLocalSsd));
+        assert_eq!(DataIoAccounting::common([DataFiles, ComputeLocalSsd]), None);
+        assert_eq!(DataIoAccounting::common([Unknown, ComputeLocalSsd]), None);
+        let mut encoded = serde_json::to_value(sample()).unwrap();
+        encoded.as_object_mut().unwrap().remove("data_io_accounting");
+        assert!(serde_json::from_value::<ResourceMeasurement>(encoded.clone()).is_err());
+        encoded["data_io_accounting"] = serde_json::json!("Hyperscale");
+        assert!(serde_json::from_value::<ResourceMeasurement>(encoded).is_err());
     }
 }

@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     capture::CollectionCancellation,
-    diagnostics::{resolve_evidence, set_analysis},
+    diagnostics::resolve_evidence,
     fleet::{
         FleetBackend, FleetJournal,
         scheduler::{FocusEnrollment, FocusStatus, Scheduler, state_failed},
@@ -71,10 +71,9 @@ impl Investigations {
                 }
                 FocusEnrollment::Existing { key: existing } if existing == key => {}
                 FocusEnrollment::Capacity => {
-                    set_analysis(
+                    crate::diagnostics::set_question_analysis(
                         storage.outbox,
-                        &candidate.intent.focus.participant().parent,
-                        &candidate.intent.episode_id,
+                        &candidate.intent,
                         DiagnosticAnalysisStatus::Deferred,
                         Some(DiagnosticAnalysisIssue::Capacity),
                     )
@@ -165,6 +164,12 @@ impl Investigations {
                     owners.storage.outbox.release_investigation_parent(&key).await?;
                 }
             } else if state.status == FocusStatus::Pending
+                && matches!(intent.focus, DiagnosticFocus::SourceRead { .. })
+                && matches!(state.source_work, SourceWorkState::Quiescent | SourceWorkState::Unconfirmed)
+                && self.reconcile_source_read(owners, started, cancellation, &intent).await?
+            {
+                continue;
+            } else if state.status == FocusStatus::Pending
                 && matches!(state.source_work, SourceWorkState::NotStarted | SourceWorkState::Quiescent)
                 && self.bindings.get(&state.job.target).is_some()
             {
@@ -188,6 +193,26 @@ impl Investigations {
         self.prune_receipts(owners.journal, owners.storage.outbox, started.elapsed(), cancellation).await
     }
 
+    async fn reconcile_source_read(
+        &self,
+        owners: &mut QueueOwners<'_, '_>,
+        started: tokio::time::Instant,
+        cancellation: &CollectionCancellation,
+        intent: &DiagnosticInvestigationIntent,
+    ) -> Result<bool> {
+        let Some(result) = owners.storage.outbox.consumed_source_read_result(intent).await? else {
+            return Ok(false);
+        };
+        if !self.result_consumed(owners.storage, intent, &result, cancellation).await? {
+            return Ok(false);
+        }
+        let key = intent.key()?;
+        let update =
+            owners.scheduler.reconcile_completed_focus(&key, &result, started.elapsed(), chrono::Utc::now())?;
+        owners.scheduler.persisted(owners.journal.update_scheduler(update).await?)?;
+        Ok(true)
+    }
+
     async fn cancel_stale(
         &self,
         owners: &mut QueueOwners<'_, '_>,
@@ -199,7 +224,7 @@ impl Investigations {
         let evidence = match resolve_evidence(
             owners.storage.outbox,
             &job.connection,
-            &intent.focus.participant().parent,
+            intent.focus.parent(),
             owners.storage.recovery,
             cancellation,
         )
@@ -210,21 +235,22 @@ impl Investigations {
             Err(error) => return Err(error),
         };
         let Some((source, row)) = evidence else { return Ok(()) };
-        let TelemetryRecord::Activity(original) = &row.record else { return Err(DeliveryProblem::Integrity.error()) };
-        if !intent.focus.matches_parent(&source, original, &intent.focus.participant().parent) {
+        if !intent.matches_parent_record(&source, &row) {
             return Err(DeliveryProblem::Integrity.error());
         }
         let current = owners
             .storage
             .outbox
-            .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
             .await?;
         let Some(checkpoint) = current.checkpoint else { return Ok(()) };
         let episode = checkpoint.episodes.iter().find(|episode| episode.id == intent.episode_id);
         let decision = match episode {
             None => Some((DiagnosticAnalysisIssue::PolicyChanged, None)),
             Some(episode) if !episode.matches_focus(&intent.focus) => return Err(DeliveryProblem::Integrity.error()),
-            Some(episode) if !episode.analysis.needs_work() => Some((DiagnosticAnalysisIssue::PolicyChanged, None)),
+            Some(episode) if !episode.needs_question(&intent.focus) => {
+                Some((DiagnosticAnalysisIssue::PolicyChanged, None))
+            }
             Some(episode) => self
                 .metadata_issue(owners.backend, job, intent, episode)?
                 .map(|issue| (issue, Some(DiagnosticAnalysisStatus::Deferred))),
@@ -234,14 +260,8 @@ impl Investigations {
             return Ok(());
         }
         if let Some(status) = status {
-            set_analysis(
-                owners.storage.outbox,
-                &intent.focus.participant().parent,
-                &intent.episode_id,
-                status,
-                Some(issue.clone()),
-            )
-            .await?;
+            crate::diagnostics::set_question_analysis(owners.storage.outbox, intent, status, Some(issue.clone()))
+                .await?;
         }
         let update = owners.scheduler.cancel_focused(&job.key, started.elapsed(), chrono::Utc::now())?;
         owners.scheduler.persisted(owners.journal.cancel_focused(update, issue).await?)?;

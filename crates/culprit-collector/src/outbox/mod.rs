@@ -1,7 +1,11 @@
 //! One local owner, immutable capture artifacts and a transactional commit boundary.
 mod archive;
+mod completed_capture;
+pub use completed_capture::CompletedCaptureBudget;
+mod completed_query_history;
+pub use completed_query_history::CompletedQueryHistory;
 mod completed_snapshot;
-pub use completed_snapshot::{CompletedSnapshot, CompletedSnapshotBudget};
+pub use completed_snapshot::CompletedSnapshot;
 mod artifacts;
 mod attempts;
 mod eviction;
@@ -257,7 +261,10 @@ impl Files {
         if !self.recovered || !self.journal.unfinished()?.is_empty() {
             self.recover()?;
         }
-        if let CollectionSelection::PageWaitTasks { activity, original_context, original_requests } = &request.selection
+        if let CollectionSelection::SourceRead { focus, execution } = &request.selection {
+            self.verify_source_read_parent(focus, execution)?;
+        } else if let CollectionSelection::PageWaitTasks { activity, original_context, original_requests } =
+            &request.selection
         {
             let (_, verified_context, verified_requests) = self.verified_page_task_activity(activity)?;
             if verified_context != **original_context || verified_requests != *original_requests {
@@ -351,7 +358,17 @@ impl Files {
             );
         }
         match artifacts::validate(&directory, &capture, None) {
-            Ok(validated) => self.journal.prepare_commit(&capture, &validated)?.commit().map_err(storage),
+            Ok(validated) => {
+                if matches!(
+                    validated.manifest.description.as_ref().map(|source| &source.observation),
+                    Some(SourceObservation::SourceRead { .. })
+                ) && let Some(intent) = validated.manifest.investigation_intent()?
+                {
+                    // Authenticate both exact originals before the queue/pin/Ready transaction becomes visible.
+                    self.verify_investigation_intent(&intent)?;
+                }
+                self.journal.prepare_commit(&capture, &validated)?.commit().map_err(storage)
+            }
             Err(error) => {
                 self.journal.fail(
                     &capture,

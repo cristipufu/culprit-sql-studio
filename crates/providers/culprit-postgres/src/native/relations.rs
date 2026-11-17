@@ -166,7 +166,14 @@ pub(crate) fn table(row: &Row, database_oid: &str) -> Result<NativeCounterSet> {
             properties.insert(name.into(), value);
         }
     }
-    let set = NativeCounterSet { identity, scope: MeasurementScope::Database, counters, properties };
+    let set = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
+        identity,
+        scope: MeasurementScope::Database,
+        counters,
+        properties,
+    };
     if !set.is_valid() {
         return Err(invalid());
     }

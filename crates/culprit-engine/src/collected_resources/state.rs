@@ -125,23 +125,27 @@ impl<'a> CapturedState<'a> {
     }
 
     pub fn outcome(&self, rows: usize) -> Result<SourceOutcome> {
-        if rows > self.coverage.records as usize {
-            return Err(invalid());
-        }
-        // A warehouse gap cannot turn an explicitly unavailable native source into a partially read population.
-        let readable = match self.coverage.state {
-            SourceState::Collected | SourceState::Empty | SourceState::Partial => true,
-            SourceState::Unavailable | SourceState::NotApplicable => false,
-        };
-        let incomplete_read = readable && (!self.capture.is_read_complete() || rows != self.coverage.records as usize);
-        Ok(SourceOutcome {
-            source: self.coverage.source.clone(),
-            state: if incomplete_read { SourceState::Partial } else { self.coverage.state },
-            reason: incomplete_read.then(|| culprit_core::t!("engine.collected_resources.incomplete_read")),
-            reason_message: incomplete_read
-                .then(|| culprit_core::message!("engine.collected_resources.incomplete_read")),
-        })
+        read_outcome(self.coverage, rows, self.capture.is_read_complete())
     }
+}
+
+/// One read qualification policy for authenticated archive selections and original local snapshots.
+pub(super) fn read_outcome(coverage: &StateSourceCoverage, rows: usize, read_complete: bool) -> Result<SourceOutcome> {
+    if rows > coverage.records as usize {
+        return Err(invalid());
+    }
+    // A warehouse gap cannot turn an explicitly unavailable native source into a partially read population.
+    let readable = match coverage.state {
+        SourceState::Collected | SourceState::Empty | SourceState::Partial => true,
+        SourceState::Unavailable | SourceState::NotApplicable => false,
+    };
+    let incomplete_read = readable && (!read_complete || rows != coverage.records as usize);
+    Ok(SourceOutcome {
+        source: coverage.source.clone(),
+        state: if incomplete_read { SourceState::Partial } else { coverage.state },
+        reason: incomplete_read.then(|| culprit_core::t!("engine.collected_resources.incomplete_read")),
+        reason_message: incomplete_read.then(|| culprit_core::message!("engine.collected_resources.incomplete_read")),
+    })
 }
 
 fn native_state(

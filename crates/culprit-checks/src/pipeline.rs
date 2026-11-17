@@ -24,6 +24,7 @@ mod cleanup;
 mod compiler_admission;
 mod completed_spills;
 mod connection_outcomes;
+mod counter_ratios;
 mod jobs;
 mod maintenance_progress;
 mod page_server_reads;
@@ -270,6 +271,7 @@ impl Pipeline {
         let task_space = explained_task_space(&mut snapshot);
         let query_compilation = explained_compilation(&mut snapshot);
         let compiler_admission = compiler_admission::explain(&mut snapshot);
+        let counter_ratios = counter_ratios::explain(&mut snapshot);
         let maintenance_progress = maintenance_progress::explain(&mut snapshot);
         let replication = replication::explain(&mut snapshot);
         let connection_outcomes = connection_outcomes::explain(&mut snapshot);
@@ -388,6 +390,7 @@ impl Pipeline {
             task_space,
             query_compilation,
             compiler_admission,
+            counter_ratios,
             maintenance_progress,
             jobs,
             replication,
@@ -749,8 +752,13 @@ mod tests {
                 s.server.capabilities.push(Capability::WaitStats);
                 s.notes.clear();
                 let total = s.workload.as_ref().unwrap().total_time_ms;
-                s.waits =
-                    vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: total * ratio, tasks: None }];
+                s.waits = vec![WaitStat {
+                    mechanism: None,
+                    category: "IO".into(),
+                    wait_type: None,
+                    wait_ms: total * ratio,
+                    tasks: None,
+                }];
                 for step in preparation() {
                     step.prepare(&mut s);
                 }

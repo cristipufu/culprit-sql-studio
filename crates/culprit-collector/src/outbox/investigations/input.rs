@@ -113,7 +113,7 @@ impl Files {
             }
             row_references(&parent, &source, decode(&restored)?)?
         } else {
-            let (validated, rows) = self.validated_rows(id, RowSelection::All)?;
+            let (validated, rows) = self.validated_rows(id, RowSelection::Diagnostic)?;
             if validated.manifest_sha != parent.manifest_sha256
                 || validated.manifest.description.as_ref() != Some(&source)
                 || encode_investigation(validated.manifest.investigation.as_ref())?
@@ -296,6 +296,36 @@ impl Files {
         let participation = culprit_core::page_wait_blocking_participation(&source, page, original, &frame)?;
         Ok(participation.references().cloned().collect())
     }
+    pub(in crate::outbox) fn verify_source_read_parent(
+        &mut self,
+        focus: &SourceReadFocus,
+        execution: &NativeSourceReadScope,
+    ) -> Result<()> {
+        let (source, row) = self.diagnostic_reference(&focus.basis)?;
+        if !focus.matches_basis(&source, &row, execution) {
+            return Err(integrity());
+        }
+        let context = self
+            .diagnostic_input(&focus.prerequisite.observation.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
+        let SourceObservation::FocusedCompilationAdmission { result, .. } = &context.source.observation else {
+            return Err(integrity());
+        };
+        self.verify_focus_parent(&result.focus)?;
+        let rows = context
+            .rows
+            .iter()
+            .map(|row| match &row.row.record {
+                TelemetryRecord::Operational(native) => Ok((&row.reference, native)),
+                _ => Err(integrity()),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if context.parent != focus.prerequisite.observation.capture_ref()
+            || !focus.matches_prerequisite_input(&source, &row, &context.source, rows)
+        {
+            return Err(integrity());
+        }
+        Ok(())
+    }
     pub(in crate::outbox) fn verify_investigation_intent(
         &mut self,
         intent: &DiagnosticInvestigationIntent,
@@ -318,7 +348,13 @@ impl Files {
                     return Err(integrity());
                 }
             }
-            _ => self.verify_focus_parent(intent.focus.participant())?,
+            DiagnosticFocus::SourceRead { focus } => {
+                let DiagnosticExecutionBinding::NativeRead { execution } = &intent.execution else {
+                    return Err(integrity());
+                };
+                self.verify_source_read_parent(focus, execution)?;
+            }
+            _ => self.verify_focus_parent(intent.focus.activity_participant().ok_or_else(integrity)?)?,
         }
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
             let (source, row) = self.diagnostic_reference(owner)?;
@@ -401,6 +437,9 @@ impl Files {
         }
         let rows = row_references(&input.parent, &input.source, input.rows.clone())?;
         if rows.iter().any(|row| !row.row.record.is_valid()) {
+            return Err(integrity());
+        }
+        if matches!(input.source.observation, SourceObservation::SourceRead { .. }) && !input.rows.is_empty() {
             return Err(integrity());
         }
         let encoded = encode(&input.rows)?;
@@ -537,7 +576,8 @@ fn pin_restored_focus(tx: &Transaction<'_>, input: &RestoredInput) -> Result<()>
             params![format!("focus:{}",input.parent.capture.observation_id),activity.capture.observation_id,input.parent.capture.observation_id],
         ).map_err(storage)?;
     }
-    if let Some(focus) = input.source.observation.diagnostic_focus() {
+    let saved_focus = investigation_intent(&input.source, input.investigation.as_ref())?.map(|intent| intent.focus);
+    if let Some(focus) = saved_focus.or_else(|| input.source.observation.diagnostic_focus()) {
         let captures = focus.references().map(|reference| &reference.capture.observation_id).collect::<BTreeSet<_>>();
         for capture in captures {
             tx.execute(

@@ -79,6 +79,8 @@ fn shared_scenario() -> SharedScenario {
         }),
     };
     let counters = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("native-shared-observer"),
         scope: MeasurementScope::Server,
         counters: vec![NativeCounterSample::gauge(
@@ -148,8 +150,11 @@ fn shared_cost_scope_retains_native_owner_without_inventing_activity_population_
     assert!(intent.is_valid() && intent.matches_episode(&shared.scenario.episode));
     assert!(intent.matches_shared_owner(&shared.owner_source, &shared.owner_row));
     assert!(intent.qualification.scope.as_activity().is_none());
-    assert_ne!(intent.qualification.scope.native_epoch(), Some(intent.focus.participant().epoch.as_str()));
-    assert_eq!(intent.focus.participant().target, shared.scenario.episode.scope.target);
+    assert_ne!(
+        intent.qualification.scope.native_epoch(),
+        Some(intent.focus.activity_participant().unwrap().epoch.as_str())
+    );
+    assert_eq!(intent.focus.target(), &shared.scenario.episode.scope.target);
     assert_eq!(intent.subject(), CollectionSubject::Shared { resource: shared.member });
     assert_eq!(intent.qualification.scope.target(), shared.owner_source.target);
     assert!(
@@ -275,8 +280,11 @@ fn shared_lineage_preserves_exact_selection_subject_budget_and_owner_without_an_
     let shared = shared_scenario();
     let intent = shared.intent();
     let lineage = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
-    let request =
-        CollectionRequest { subject: intent.subject(), selection: intent.selection(), budget: intent.budget.clone() };
+    let request = CollectionRequest {
+        subject: intent.subject(),
+        selection: intent.selection().unwrap(),
+        budget: intent.budget.clone(),
+    };
     request.validate().unwrap();
     assert!(lineage.matches_request(&request));
     assert_eq!(lineage.reconstruct(&intent.focus).unwrap().key().unwrap(), intent.key().unwrap());
@@ -350,7 +358,7 @@ fn shared_result_cannot_change_the_database_incident_without_exact_admitted_inte
     let revision = &update.revisions[0];
     assert_eq!(revision.episode.lifecycle, DiagnosticLifecycle::Resolved);
     assert_eq!(revision.episode.analysis, DiagnosticAnalysisStatus::Unresolved);
-    assert!(revision.inputs.contains(&intent.focus.participant().parent) && revision.inputs.contains(&shared.owner));
+    assert!(revision.inputs.contains(intent.focus.parent()) && revision.inputs.contains(&shared.owner));
     assert_eq!(revision.episode.first, shared.scenario.episode.first);
     assert_eq!(revision.episode.latest, shared.scenario.episode.latest);
     let proof = revision.episode.recovery.as_ref().unwrap();
@@ -478,7 +486,7 @@ fn admitted_shared_recovery_proof_rejects_delayed_and_malformed_native_upper_bou
     let (mut source, capture) = result(&shared, &intent);
     let proof = DiagnosticRecoveryProof::FocusedParticipantGone {
         capture: capture.clone(),
-        parent: Box::new(intent.focus.participant().parent.clone()),
+        parent: Box::new(intent.focus.parent().clone()),
     };
     assert!(intent.matches_result_source(&source), "a valid admitted result is still too early to establish recovery");
     assert!(!proof.matches_source_with_intent(episode, &source, &capture, &intent));
@@ -511,7 +519,7 @@ fn admitted_and_failed_shared_events_pin_both_authorities_and_replay_without_dup
     next.analysis = DiagnosticAnalysisStatus::Collecting;
     let revision =
         DiagnosticRevision::with_investigation(before, next, event.clone(), "2020-01-01T01:00:00Z").unwrap().unwrap();
-    assert!(revision.inputs.contains(&intent.focus.participant().parent) && revision.inputs.contains(&shared.owner));
+    assert!(revision.inputs.contains(intent.focus.parent()) && revision.inputs.contains(&shared.owner));
     assert!(
         DiagnosticRevision::with_investigation(
             &revision.episode,

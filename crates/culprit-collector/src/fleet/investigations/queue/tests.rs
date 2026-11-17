@@ -6,7 +6,7 @@ use crate::{
         file_store::FileRecoveryStore,
         recovery::{RecoveryStore, stage_and_commit},
     },
-    diagnostics::{DiagnosticPolicies, drain_pending},
+    diagnostics::{DiagnosticPolicies, drain_pending, set_analysis},
     fleet::{
         admission::AdmittedBackend,
         investigations::tests::support::{Harness, capture_frame},
@@ -106,7 +106,7 @@ async fn qualified_symptom_recovery_preserves_owed_work_and_does_not_claim_the_n
         .unwrap();
     let input = harness
         .outbox
-        .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+        .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await
         .unwrap();
     let episode =
@@ -155,7 +155,7 @@ async fn a_stale_never_started_route_cancels_durably_without_changing_native_res
     assert_eq!(harness.backend.calls.opened.load(std::sync::atomic::Ordering::SeqCst), opened);
     let current = harness
         .outbox
-        .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+        .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await
         .unwrap();
     let episode =
@@ -207,13 +207,13 @@ async fn declared_missing_metadata_cancels_only_the_queued_stage_and_keeps_perio
         assert_eq!(harness.backend.calls.captured.load(std::sync::atomic::Ordering::SeqCst), 0);
         let input = harness
             .outbox
-            .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
             .await
             .unwrap();
         let episode =
             input.checkpoint.unwrap().episodes.into_iter().find(|episode| episode.id == intent.episode_id).unwrap();
         assert_eq!(episode.lifecycle, DiagnosticLifecycle::Active);
-        assert_eq!(episode.first, intent.focus.participant().parent);
+        assert_eq!(episode.first, intent.focus.parent().clone());
         assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Deferred);
     }
 }
@@ -325,7 +325,7 @@ async fn an_interrupted_receipt_inventory_walk_never_turns_an_unvisited_head_int
     recover_symptom(&mut harness, &mut manager).await;
     set_analysis(
         &mut harness.outbox,
-        &intent.focus.participant().parent,
+        intent.focus.parent(),
         &intent.episode_id,
         DiagnosticAnalysisStatus::Unresolved,
         Some(DiagnosticAnalysisIssue::Unsupported),
@@ -375,7 +375,7 @@ fn numerically_equal_cost_accounting_cannot_replace_the_original_immutable_inten
     };
     let source = CollectionDescription {
         partition: culprit_core::telemetry::SourcePartition::Target,
-        target: intent.focus.participant().target.clone(),
+        target: intent.focus.target().clone(),
         source: "focused-page-state".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::FocusedPageWait {

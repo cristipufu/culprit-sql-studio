@@ -74,6 +74,8 @@ impl SnapshotReader for Reader {
     }
     fn decode(&self, row: &Row, _: &CollectionDescription) -> Result<SnapshotRecord> {
         let counters = NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new(row.value.to_string()),
             scope: MeasurementScope::Database,
             counters: vec![NativeCounterSample::gauge(
@@ -99,6 +101,7 @@ impl SnapshotReader for Reader {
     async fn recheck(&mut self, _: &CollectionDescription) -> Result<SnapshotRecheck> {
         self.called("recheck");
         Ok(SnapshotRecheck {
+            execution: None,
             unchanged: !self.changed,
             observed_until: UNTIL.into(),
             scopes: std::mem::take(&mut self.scopes),

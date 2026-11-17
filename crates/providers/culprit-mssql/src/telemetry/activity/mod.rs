@@ -108,6 +108,15 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
         Some(context) => database_context::recheck(reader, context).await,
         None => database_context::initial(reader).await,
     })?;
+    if before.context.is_none() || after.context.is_none() {
+        // Optional columns were admitted by the initial held profile. A missing final authority cannot
+        // attest that profile; retain the independent activity frame and its explicit coverage gap.
+        for record in &mut baseline.frame.records {
+            if let Some(counters) = &mut record.facts.request_counters {
+                counters.page_server_reads = None;
+            }
+        }
+    }
     for context in [&before.context, &after.context].into_iter().flatten() {
         if !context.matches_frame(&baseline.frame.context) {
             return Err(CollectionStop::SourceChanged.error());

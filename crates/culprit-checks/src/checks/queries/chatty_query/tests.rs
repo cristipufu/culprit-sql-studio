@@ -22,7 +22,7 @@ fn counter() -> Snapshot {
 }
 
 fn wait(class: WaitClass, ms: f64) -> WaitStat {
-    WaitStat { category: class.category().into(), wait_type: None, wait_ms: ms, tasks: None }
+    WaitStat { mechanism: None, category: class.category().into(), wait_type: None, wait_ms: ms, tasks: None }
 }
 
 fn case(snapshot: &Snapshot) -> ChattyQuery<'_> {

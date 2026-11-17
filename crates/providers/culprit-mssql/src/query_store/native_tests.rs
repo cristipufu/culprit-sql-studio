@@ -277,8 +277,8 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     );
     assert!(!crate::storage_io::display(&file_counters).is_empty());
     let native_counters = crate::performance::read(&mut operations, 32).await.unwrap();
-    assert!(native_counters.iter().all(|row| row.is_valid()));
-    assert!(!crate::performance::application(&native_counters).is_empty());
+    assert!(native_counters.sample.counters.iter().all(|row| row.is_valid()));
+    assert!(!crate::performance::application(&native_counters.sample.counters).is_empty());
     for kind in crate::queues::KINDS {
         let queue = crate::queues::read(&mut operations, kind).await.unwrap();
         assert_eq!(queue.scope, culprit_core::MeasurementScope::Database);

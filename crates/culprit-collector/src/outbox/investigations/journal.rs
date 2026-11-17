@@ -19,10 +19,16 @@ pub(in crate::outbox) fn prepare_commit(
         tx.execute("INSERT INTO diagnostic_inputs(observation_id,controller_version,parent_json,source_json,connection,acknowledged,restored_json,charged_bytes,lineage_json) VALUES(?1,?2,?3,?4,?5,0,NULL,?6,?7)",
             params![capture.identity.observation_id, DIAGNOSTIC_CONTROLLER_VERSION, parent_json, source_json, capture.connection, super::super::journal::bytes_to_sql(charge)?, investigation]).map_err(storage)?;
         pin(tx, &format!("input:{}", capture.identity.observation_id), &capture.identity.observation_id)?;
-        if let Some(intent) = investigation_intent(source, validated.manifest.investigation.as_ref())?
-            && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
-        {
-            pin(tx, &format!("focus:{}", capture.identity.observation_id), &owner.capture.observation_id)?;
+        if let Some(intent) = investigation_intent(source, validated.manifest.investigation.as_ref())? {
+            match &intent.execution {
+                DiagnosticExecutionBinding::Shared { owner } => {
+                    pin(tx, &format!("focus:{}", capture.identity.observation_id), &owner.capture.observation_id)?;
+                }
+                DiagnosticExecutionBinding::NativeRead { .. } => {
+                    super::focus_pins::pin_source_read_result(tx, &intent, &capture.identity)?;
+                }
+                DiagnosticExecutionBinding::Database => (),
+            }
         }
     } else if capture.request.focus().is_some() {
         // A manual shared result has no controller step to consume it. Keep its original parent until this
@@ -84,6 +90,9 @@ fn complete_step(
         if let Some(recovery) = &episode.recovery {
             pin(tx, &head_owner, &recovery.capture().capture.observation_id)?;
         }
+        if let Some(result) = episode.source_read_capture() {
+            pin(tx, &head_owner, &result.capture.observation_id)?;
+        }
     }
     pin(tx, &head_owner, &capture.identity.observation_id)?;
     let result = DiagnosticCaptureRef {
@@ -104,6 +113,9 @@ fn complete_step(
     let derived_owner = format!("derived:{}", capture.identity.observation_id);
     for reference in update.revisions.iter().flat_map(|revision| &revision.inputs) {
         pin(tx, &derived_owner, &reference.capture.observation_id)?;
+    }
+    for result in update.revisions.iter().filter_map(|revision| revision.episode.source_read_capture()) {
+        pin(tx, &derived_owner, &result.capture.observation_id)?;
     }
     tx.execute(
         "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,observation_id FROM diagnostic_pins WHERE owner=?2",
@@ -177,6 +189,7 @@ pub(in crate::outbox) fn validate_transition(
             && (revision.episode.first != prior.first
                 || revision.episode.scope != prior.scope
                 || revision.episode.signal != prior.signal
+                || !prior.accepts_source_read_transition(&revision.episode)
                 || revision.episode.first_seen_at != prior.first_seen_at
                 || ObservationBounds::new(&prior.last_seen_at, &revision.episode.last_seen_at).is_none()
                 || (prior.lifecycle == DiagnosticLifecycle::Resolved

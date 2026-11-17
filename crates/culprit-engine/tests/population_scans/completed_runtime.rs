@@ -3,7 +3,7 @@ use super::*;
 use culprit_collector::{
     analytical::test_support::cached_runtime_evidence_cases,
     capture::{self, CollectionCancellation, SourceFactory},
-    outbox::{CompletedSnapshotBudget, Outbox, OutboxDelivery},
+    outbox::{CompletedCaptureBudget, Outbox, OutboxDelivery},
 };
 use culprit_core::{CompletedSpillState, DatabaseLocation, SourceState, telemetry::*};
 use culprit_engine::CompletedRuntimeScanInput;
@@ -97,7 +97,7 @@ impl Captured {
         CompletedRuntimeScanInput {
             delivery,
             attempt: &self.attempt,
-            budget: CompletedSnapshotBudget::default(),
+            budget: CompletedCaptureBudget::default(),
             cancellation,
         }
     }
@@ -270,7 +270,7 @@ async fn an_existing_requested_read_is_never_overwritten_even_by_the_same_authen
         .completed_snapshot(
             &captured.attempt,
             SnapshotDataset::CachedRuntime,
-            CompletedSnapshotBudget::default(),
+            CompletedCaptureBudget::default(),
             &CollectionCancellation::default(),
         )
         .await
@@ -314,9 +314,9 @@ async fn cancellation_tampering_and_local_byte_refusal_cannot_construct_a_scan_p
         }
         let delivery = captured.outbox.delivery();
         let budget = if refusal == "bytes" {
-            CompletedSnapshotBudget { max_bytes: 1, ..Default::default() }
+            CompletedCaptureBudget { max_bytes: 1, ..Default::default() }
         } else {
-            CompletedSnapshotBudget::default()
+            CompletedCaptureBudget::default()
         };
         let error = workspace
             .scan_with_completed_runtime(

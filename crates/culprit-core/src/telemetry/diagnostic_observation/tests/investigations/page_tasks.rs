@@ -68,7 +68,11 @@ impl PopulationCase {
 
     fn intent(&self, index: usize) -> DiagnosticInvestigationIntent {
         let question = self.question(index);
-        let episode = self.episodes.iter().find(|episode| episode.first == question.participant().parent).unwrap();
+        let episode = self
+            .episodes
+            .iter()
+            .find(|episode| episode.first == question.activity_participant().unwrap().parent)
+            .unwrap();
         DiagnosticInvestigationIntent::new(
             episode,
             &self.recipe,
@@ -129,7 +133,7 @@ impl PopulationCase {
                     sources: vec![StateSourceCoverage::observed(source.into(), 0, false)],
                 },
                 database_writable: Some(true),
-                original_activity: Some(intent.focus.participant().parent.capture_ref()),
+                original_activity: Some(intent.focus.parent().capture_ref()),
             },
         }
     }
@@ -144,7 +148,7 @@ fn paired_question_retains_the_full_native_frame_context_without_fabricating_a_c
     assert_eq!(**original_context, NativeReadContext::from_activity(&case.source).unwrap());
     assert!(question.matches_parent(&case.source, &case.rows[0].1, &case.rows[0].0));
     assert_eq!(question.references().collect::<Vec<_>>(), [&case.rows[0].0]);
-    let selection = question.database_selection();
+    let selection = question.activity_selection().unwrap();
     assert!(
         matches!(&selection, CollectionSelection::PageWaitTasks { activity, original_context: context, original_requests: requests }
         if *activity == focus.parent.capture_ref() && context == original_context && requests == original_requests)
@@ -159,8 +163,11 @@ fn paired_lineage_restores_the_admitted_question_with_no_native_header_or_no_nat
     let intent = case.intent(0);
     let lineage = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
     let mut manifest = owner_manifest(&scenario());
-    manifest.request =
-        CollectionRequest { subject: intent.subject(), selection: intent.selection(), budget: intent.budget.clone() };
+    manifest.request = CollectionRequest {
+        subject: intent.subject(),
+        selection: intent.selection().unwrap(),
+        budget: intent.budget.clone(),
+    };
     manifest.investigation = Some(lineage.clone());
     assert_eq!(manifest.investigation_intent().unwrap(), Some(intent.clone()));
     let source = case.result(&intent);
@@ -181,8 +188,11 @@ fn siblings_from_one_original_frame_share_one_population_stage_but_never_one_tri
     assert_ne!(first.episode_id, second.episode_id);
     assert_ne!(first.key().unwrap(), second.key().unwrap());
     assert_eq!(first.episode_stage_key().unwrap(), second.episode_stage_key().unwrap());
-    assert_eq!(first.focus.participant().parent.capture_ref(), second.focus.participant().parent.capture_ref());
-    assert_ne!(first.focus.participant().parent, second.focus.participant().parent);
+    assert_eq!(
+        first.focus.activity_participant().unwrap().parent.capture_ref(),
+        second.focus.activity_participant().unwrap().parent.capture_ref()
+    );
+    assert_ne!(first.focus.activity_participant().unwrap().parent, second.focus.activity_participant().unwrap().parent);
 }
 
 #[test]
@@ -219,12 +229,12 @@ fn changed_result_owner_role_parent_or_private_original_cannot_repair_a_paired_r
         assert!(lineage.intent_for_source(&source).is_err(), "{field}");
     }
     let mut private = lineage.clone();
-    private.focus.participant_mut().original.statement =
+    private.focus.activity_participant_mut().unwrap().original.statement =
         DefinitionPayload::sql("SELECT secret FROM private_input", crate::Engine::Mssql);
     assert!(private.reconstruct(&private.focus).is_err());
     assert!(!private.matches_request(&CollectionRequest {
         subject: intent.subject(),
-        selection: intent.selection(),
+        selection: intent.selection().unwrap(),
         budget: intent.budget.clone()
     }));
 }
@@ -249,8 +259,9 @@ fn only_the_first_receipt_can_authorize_the_population_even_when_a_later_point_h
             DiagnosticFocusPlan::Ready(question) if first_token => {
                 assert!(episode.matches_focus(&question));
                 let mut substituted = *question;
-                substituted.participant_mut().parent = later.2[0].0.clone();
-                substituted.participant_mut().original_observed_at = later.0.observation.activity().unwrap().at.clone();
+                substituted.activity_participant_mut().unwrap().parent = later.2[0].0.clone();
+                substituted.activity_participant_mut().unwrap().original_observed_at =
+                    later.0.observation.activity().unwrap().at.clone();
                 assert!(!episode.matches_focus(&substituted));
             }
             DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity) if !first_token => (),
@@ -263,7 +274,7 @@ fn only_the_first_receipt_can_authorize_the_population_even_when_a_later_point_h
 fn the_early_population_stage_key_is_the_same_canonical_intent_key_and_separates_original_captures() {
     let case = PopulationCase::new();
     let intent = case.intent(0);
-    let original = intent.focus.participant().parent.capture_ref();
+    let original = intent.focus.parent().capture_ref();
     let target = intent.qualification.scope.target();
     assert_eq!(page_wait_tasks_stage_key(&original, &target).unwrap(), intent.episode_stage_key().unwrap());
     let later = case.later(true);

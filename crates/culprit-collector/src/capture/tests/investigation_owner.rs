@@ -251,7 +251,7 @@ async fn the_bounded_initial_manifest_rejects_an_oversized_admitted_envelope_bef
     let root = tempfile::tempdir().unwrap();
     let mut factory = question(root.path().join("capture"), FailureStage::AuthenticationFailed);
     // Structural validity is not native/cost authority. This exercises an oversized supplied question, not SQL execution.
-    factory.intent.focus.participant_mut().original.statement = DefinitionPayload::sql(
+    factory.intent.focus.activity_participant_mut().unwrap().original.statement = DefinitionPayload::sql(
         &format!("SELECT {} FROM fixture_metadata", "column_identifier".repeat(10_000)),
         culprit_core::Engine::Mssql,
     );

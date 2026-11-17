@@ -13,6 +13,8 @@ pub mod collected_resource_analysis;
 pub mod compilation;
 pub mod compilation_report;
 pub mod compiler_admission_report;
+pub mod counter_ratio_report;
+pub use counter_ratio_report::{CounterRatioEntry, CounterRatioReport};
 pub mod completed_spill_report;
 pub mod connection;
 pub mod connection_outcome_report;

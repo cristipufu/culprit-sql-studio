@@ -851,7 +851,13 @@ fn a_short_lock_incident_in_a_quiet_database_is_not_high() {
         q.text = "UPDATE `stock` SET `qty` = `qty` - ? WHERE `sku` = ?".into();
         q.executions = 4.0;
         q.total_time_ms = 120_000.0;
-        q.waits = vec![WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 119_000.0, tasks: None }];
+        q.waits = vec![WaitStat {
+            mechanism: None,
+            category: "Lock".into(),
+            wait_type: None,
+            wait_ms: 119_000.0,
+            tasks: None,
+        }];
         // Runs over the whole window, not the fixture's two minutes: a burst would be graded on its total.
         (q.first_seen, q.last_seen) = (None, None);
         analyze(s)
@@ -880,6 +886,7 @@ fn aggregate_read_lock_waits_require_resource_proof_before_row_versioning() {
         q.executions = 40.0;
         q.total_time_ms = 120_000.0;
         q.waits = vec![WaitStat {
+            mechanism: None,
             category: "Lock".into(),
             wait_type: wait_type.map(str::to_owned),
             wait_ms: 110_000.0,
@@ -932,7 +939,8 @@ fn overlapping_lock_totals_keep_each_query_without_a_native_episode() {
         let q = w.queries.iter_mut().find(|q| q.id == id).expect("demo query");
         (q.text, q.executions, q.total_time_ms, q.mean_time_ms) =
             (text.into(), runs, lock + 50.0, (lock + 50.0) / runs);
-        q.waits = vec![WaitStat { category: "Lock".into(), wait_type: None, wait_ms: lock, tasks: None }];
+        q.waits =
+            vec![WaitStat { mechanism: None, category: "Lock".into(), wait_type: None, wait_ms: lock, tasks: None }];
         (q.first_seen, q.last_seen) = (Some(first.into()), Some(last.into()));
         q.plan = None;
         q.plans.clear();

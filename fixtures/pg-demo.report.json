@@ -2369,7 +2369,7 @@
         "table": "order_items"
       }
     ],
-    "format": 10,
+    "format": 11,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {
@@ -3510,6 +3510,7 @@
     "waits": [
       {
         "category": "io",
+        "mechanism": null,
         "tasks": null,
         "wait_ms": 12553.594992000002,
         "wait_type": "data file reads and writes"
@@ -7583,6 +7584,7 @@
           "waits": [
             {
               "category": "IO",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 23.284315,
               "wait_type": "data file reads and writes"
@@ -9252,6 +9254,7 @@
           "waits": [
             {
               "category": "IO",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 0.402743,
               "wait_type": "data file reads and writes"
@@ -9522,6 +9525,7 @@
           "waits": [
             {
               "category": "IO",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 0.140789,
               "wait_type": "data file reads and writes"

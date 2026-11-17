@@ -159,8 +159,14 @@ fn settings(
     Ok(())
 }
 fn counter(source: &str, identity: NativeIdentity, counters: Vec<NativeCounterSample>) -> Result<TelemetryRecord> {
-    let counters =
-        NativeCounterSet { identity, scope: MeasurementScope::Database, counters, properties: BTreeMap::new() };
+    let counters = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
+        identity,
+        scope: MeasurementScope::Database,
+        counters,
+        properties: BTreeMap::new(),
+    };
     Ok(TelemetryRecord::Operational(OperationalObservation {
         source: source.into(),
         key: counters.key()?,
@@ -193,6 +199,8 @@ fn catalog_record(catalog: NativeCatalogDefinition) -> Result<TelemetryRecord> {
 }
 fn catalog_counters(catalog: NativeCatalogDefinition) -> Result<TelemetryRecord> {
     let counters = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: catalog.identity.clone(),
         scope: MeasurementScope::Database,
         counters: vec![],

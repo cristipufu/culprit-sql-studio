@@ -439,6 +439,8 @@ pub fn progress(progress: &culprit_core::QueryProgress) -> Value {
         "elapsed_ms": progress.elapsed_ms,
         "cpu_ms": progress.cpu_ms,
         "logical_reads": progress.logical_reads,
+        "page_server_reads": progress.page_server_reads,
+        "page_server_reads_report": progress.page_server_reads_report.as_deref().map(request_page_server_reads),
         "rows_examined": progress.rows_examined,
         "percent": progress.percent.map(|p| round(p * 100.0, 1)),
         "percent_basis": progress.percent_basis,
@@ -460,6 +462,14 @@ pub fn progress(progress: &culprit_core::QueryProgress) -> Value {
         "plan": progress.plan.as_ref().map(plan_tree),
         "note": progress.note,
         "statement": progress.statement.as_deref().map(|s| clip(s, 2000)),
+    })
+}
+
+fn request_page_server_reads(report: &culprit_core::page_server_read_report::PageServerReadExplanation) -> Value {
+    json!({
+        "availability": report.availability, "title": report.title, "summary": report.summary,
+        "metrics": report.metrics.iter().map(|metric|json!({"key":metric.key,"label":metric.label,"text":metric.text})).collect::<Vec<_>>(),
+        "limitations": report.limitations, "investigate": report.investigate, "verify": report.verify,
     })
 }
 
@@ -846,6 +856,36 @@ pub fn cloud(s: &culprit_core::CloudSignals) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_page_server_transport_keeps_exact_native_text_and_omits_numeric_placeholders() {
+        let mut observed =
+            culprit_core::QueryProgress::unobserved("42", culprit_core::Engine::Mssql, "2020-01-01T12:00:00Z".into());
+        observed.running = Some(true);
+        observed.page_server_reads = Some("9007199254740993".into());
+        observed.page_server_reads_report =
+            Some(Box::new(culprit_core::page_server_read_report::PageServerReadExplanation {
+                availability: culprit_core::telemetry::PageServerReadAvailability::Available,
+                title: "Native request evidence".into(),
+                summary: "One original request lifetime".into(),
+                metrics: vec![culprit_core::Metric::said_text(
+                    "view.page_server_reads.request.count",
+                    "9007199254740993",
+                )],
+                limitations: vec!["No statement, storage, time or cache-miss attribution".into()],
+                investigate: "Separate native observations".into(),
+                verify: "Unknown without request identity".into(),
+            }));
+        let value = progress(&observed);
+        assert_eq!(value["page_server_reads"], "9007199254740993");
+        assert_eq!(value["page_server_reads_report"]["metrics"][0]["text"], "9007199254740993");
+        assert!(value["page_server_reads_report"]["metrics"][0].get("value").is_none());
+        assert!(value["page_server_reads_report"].get("scope").is_none());
+        observed.page_server_reads = None;
+        observed.page_server_reads_report = None;
+        let value = progress(&observed);
+        assert!(value["page_server_reads"].is_null() && value["page_server_reads_report"].is_null());
+    }
 
     #[test]
     fn plan_forcing_distinguishes_native_false_true_and_unknown() {

@@ -134,6 +134,8 @@ impl Kind {
                 }
             }
             let measurements = NativeCounterSet {
+                ratios: Vec::new(),
+                ratio_gaps: Vec::new(),
                 identity: definition.identity.clone(),
                 scope: MeasurementScope::Node,
                 counters,

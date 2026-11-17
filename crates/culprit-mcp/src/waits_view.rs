@@ -12,8 +12,9 @@ const REPLICATION_ENTRIES: usize = 16;
 
 mod completed_spills;
 mod connection_outcomes;
+mod counter_ratios;
 mod jobs;
-mod page_server_reads;
+pub(crate) mod page_server_reads;
 mod statement_work;
 
 #[cfg(test)]
@@ -109,6 +110,7 @@ pub fn report(report: &Report) -> Value {
     completed_spills::attach(&mut response, report);
     page_server_reads::attach(&mut response, report);
     connection_outcomes::attach(&mut response, report);
+    counter_ratios::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
         match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {
             Ok(evidence) => {
@@ -745,8 +747,13 @@ mod tests {
         query.text = "SELECT id FROM shop.orders".into();
         query.total_time_ms = 1000.0;
         query.executions = 2.0;
-        query.waits =
-            vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 4000.0, tasks: None }];
+        query.waits = vec![culprit_core::WaitStat {
+            mechanism: None,
+            category: "Lock".into(),
+            wait_type: None,
+            wait_ms: 4000.0,
+            tasks: None,
+        }];
         let rendered = report(&data);
         let category = rendered["categories"].as_array().unwrap().iter().find(|c| c["key"] == "lock").unwrap();
         let query = &category["queries"][0];

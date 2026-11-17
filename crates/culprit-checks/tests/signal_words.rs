@@ -1233,6 +1233,7 @@ fn locked(name: &str, text: &str, runs: f64, total_ms: f64, lock_ms: f64, max_ms
     let q = only(&mut s, text);
     (q.executions, q.total_time_ms, q.mean_time_ms, q.max_time_ms) = (runs, total_ms, total_ms / runs, max_ms);
     q.waits = vec![culprit_core::WaitStat {
+        mechanism: None,
         category: "Lock".into(),
         wait_type: Some("lock time".into()),
         wait_ms: lock_ms,

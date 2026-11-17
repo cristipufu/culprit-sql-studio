@@ -61,8 +61,10 @@ async fn boxed_authority_reuses_single_native_platform_and_process_projection_wi
     assert_eq!(identity.qualifiers["recovery_fork_guid"], "native-recovery-fork");
     assert_eq!(reader.query_count(), 3);
     assert!(reader.io.calls.iter().all(|call| !call.sql.contains("sys.dm_user_db_resource_governance")
-        && !call.sql.contains("sys.dm_exec_requests")
+        && !call.sql.contains("FROM sys.dm_exec_requests")
+        && !call.sql.contains("JOIN sys.dm_exec_requests")
         && !call.sql.contains("sys.dm_db_page_info")));
+    assert!(reader.io.calls[2].sql.contains(crate::activity::page_server_reads::CAPABILITY));
     assert!(reader.io.calls[2].sql.contains("LEFT JOIN sys.database_recovery_status"));
 }
 

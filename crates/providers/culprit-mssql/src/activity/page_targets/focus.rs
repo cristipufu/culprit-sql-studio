@@ -59,7 +59,7 @@ impl<R: NativeRead> ActivityReader<R> {
         let request = native_id(&focus.participant().original.key.request.as_ref().ok_or_else(invalid_data)?.id)?;
         let frame = self
             .read_frame(
-                &sql::focused_observation(self.options.identity),
+                &sql::focused_observation(self.options.identity, self.request_page_server_read_capability),
                 vec![Parameter::Integer(1), Parameter::Integer(session), Parameter::Integer(request)],
             )
             .await?;

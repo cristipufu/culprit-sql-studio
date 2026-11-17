@@ -16,7 +16,7 @@ fn snapshot(name: &str) -> Snapshot {
 }
 
 fn wait(category: &str, ms: f64) -> WaitStat {
-    WaitStat { category: category.into(), wait_type: Some(category.into()), wait_ms: ms, tasks: None }
+    WaitStat { mechanism: None, category: category.into(), wait_type: Some(category.into()), wait_ms: ms, tasks: None }
 }
 
 /// Everything the report says in words, one line a part.

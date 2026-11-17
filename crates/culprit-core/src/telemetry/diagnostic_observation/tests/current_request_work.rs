@@ -162,7 +162,7 @@ fn existing_long_running_activity_gets_one_source_bound_question_without_a_new_s
     assert!(episode.matches_current_request_work_focus(&focus));
     let question = DiagnosticFocus::CurrentRequestWork { focus: Box::new(focus.clone()) };
     assert_eq!(question.selector(), RecipeSelector::CurrentRequestWork);
-    assert_eq!(DiagnosticFocus::from_selection(&question.database_selection()), Some(question));
+    assert_eq!(DiagnosticFocus::from_selection(&question.activity_selection().unwrap()), Some(question));
     assert_eq!(focus.original, current_actor());
 }
 

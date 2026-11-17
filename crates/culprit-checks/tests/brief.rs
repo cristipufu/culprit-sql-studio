@@ -865,8 +865,13 @@ fn a_statement_that_waited_is_not_rewritten() {
     (update.id, update.text, update.plan, update.spread) =
         ("update".into(), "UPDATE orders SET status = ? WHERE id = ?".into(), None, None);
     (update.executions, update.total_time_ms, update.mean_time_ms) = (10.0, 5000.0, 500.0);
-    update.waits =
-        vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 4500.0, tasks: None }];
+    update.waits = vec![culprit_core::WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: None,
+        wait_ms: 4500.0,
+        tasks: None,
+    }];
     update.cpu_time_ms = None;
     update.waits_coverage = None;
     workload.queries.push(update);

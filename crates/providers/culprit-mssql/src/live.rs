@@ -166,14 +166,15 @@ fn session_of(
 }
 
 fn current_waits(sessions: &[Session]) -> Vec<WaitStat> {
-    let mut by: BTreeMap<&'static str, (f64, f64, String)> = BTreeMap::new();
+    let mut by: BTreeMap<(&'static str, Option<culprit_core::telemetry::WaitMechanism>), (f64, f64, String)> =
+        BTreeMap::new();
     for s in sessions {
         let Some(wait) = s.wait.as_deref() else { continue };
         if BENIGN_WAITS.contains(&wait) {
             continue;
         }
         let Some(wait_ms) = s.wait_ms else { continue };
-        let entry = by.entry(wait_type_category(wait)).or_default();
+        let entry = by.entry((wait_type_category(wait), crate::waits::mechanism(wait))).or_default();
         entry.0 += wait_ms;
         entry.1 += 1.0;
         if entry.2.is_empty() {
@@ -182,7 +183,8 @@ fn current_waits(sessions: &[Session]) -> Vec<WaitStat> {
     }
     let mut out: Vec<WaitStat> = by
         .into_iter()
-        .map(|(category, (ms, tasks, wait_type))| WaitStat {
+        .map(|((category, mechanism), (ms, tasks, wait_type))| WaitStat {
+            mechanism,
             category: category.into(),
             wait_type: Some(wait_type),
             wait_ms: ms,

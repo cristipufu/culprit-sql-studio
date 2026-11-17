@@ -24,6 +24,7 @@ async fn a_mapping_receipt_and_original_frame_are_authenticated_before_the_write
         recovery: None,
         cancellation: &cancellation,
         population_frames: BTreeMap::new(),
+        execution_owners: BTreeMap::new(),
     };
     let mut forged = original.clone();
     let Some(DiagnosticReport::PageWait { observation, .. }) = &mut forged.report else { panic!() };
@@ -52,6 +53,7 @@ async fn unavailable_archived_page_evidence_withholds_the_optional_stage_without
         recovery: None,
         cancellation: &cancellation,
         population_frames: BTreeMap::new(),
+        execution_owners: BTreeMap::new(),
     };
     let before = native_calls(&harness);
     assert!(

@@ -37,8 +37,11 @@ async fn an_admitted_shared_question_requires_its_sealed_owner_before_route_cred
         DiagnosticSharedOwner { source: &fixture.owner_source, row: &fixture.owner_record, reference: owner },
     )
     .unwrap();
-    let request =
-        CollectionRequest { subject: intent.subject(), selection: intent.selection(), budget: intent.budget.clone() };
+    let request = CollectionRequest {
+        subject: intent.subject(),
+        selection: intent.selection().unwrap(),
+        budget: intent.budget.clone(),
+    };
     let admitted = FleetSourceAdmission {
         window: CollectionAdmissionWindow::new(tokio::time::Instant::now(), &request.budget).unwrap(),
         route_revision: Some("fixture-saved-route".into()),

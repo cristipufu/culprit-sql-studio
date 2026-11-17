@@ -3,6 +3,7 @@ use ScalarType::*;
 
 const RESOURCES: &[Field] = &[
     Field::required("SampleAt", "/record/data/at", Timestamp),
+    Field::required("DataIoAccounting", "/record/data/data_io_accounting", String),
     Field::optional("ReplicaId", "/record/data/replica_id", String),
     // Scope and capacity basis remain independent. Context cannot establish the subject's own pressure.
     Field::required("Metrics", "/_projection/resource_metrics", JsonContainer),
@@ -10,6 +11,7 @@ const RESOURCES: &[Field] = &[
 const WAITS: &[Field] = &[
     Field::required("NativeSource", "/record/data/source", String),
     Field::required("WaitType", "/record/data/wait_type", String),
+    Field::optional("WaitMechanism", "/record/data/mechanism", JsonContainer),
     Field::required("MeasurementScope", "/record/data/scope", String),
     Field::required("ResetKind", "/record/data/reset/kind", String),
     Field::optional("ResetValue", "/record/data/reset/value", String),

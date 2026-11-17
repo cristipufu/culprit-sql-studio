@@ -6,6 +6,7 @@ pub(in crate::fleet::investigations) mod page_writers;
 mod request_memory;
 mod runtime;
 mod shared;
+mod source_reads;
 pub(in crate::fleet::investigations) mod support;
 
 pub(in crate::fleet::investigations) mod page_task_holders;

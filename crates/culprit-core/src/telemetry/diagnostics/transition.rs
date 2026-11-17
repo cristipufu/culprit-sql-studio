@@ -37,7 +37,8 @@ impl DiagnosticRevision {
             && (!before.is_valid()
                 || before.id != next.id
                 || before.first != next.first
-                || before.signal != next.signal)
+                || before.signal != next.signal
+                || !before.accepts_source_read_transition(&next))
         {
             return Err(invalid());
         }
@@ -51,6 +52,11 @@ impl DiagnosticRevision {
                 .to_string();
         }
         let mut inputs = vec![next.latest.clone()];
+        if let Some(stage) = &next.source_read
+            && !inputs.contains(&stage.focus.basis)
+        {
+            inputs.push(stage.focus.basis.as_ref().clone());
+        }
         for reference in next.signal.references() {
             if !inputs.contains(reference) {
                 inputs.push(reference.clone());

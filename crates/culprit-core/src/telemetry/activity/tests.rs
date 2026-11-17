@@ -1,5 +1,27 @@
 use super::*;
 
+#[test]
+fn request_page_server_counts_keep_exact_native_bigint_and_do_not_compare_missing_or_decreased_counters() {
+    let mut row = request("1");
+    for count in ["0", "9007199254740993", "9223372036854775807"] {
+        row.request_counters.as_mut().unwrap().page_server_reads = Some(count.into());
+        assert!(row.is_valid());
+        let encoded = serde_json::to_string(&row).unwrap();
+        let decoded: ActivityObservation = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.request_counters.as_ref().unwrap().page_server_reads.as_deref(), Some(count));
+        assert!(decoded.session_counters.page_server_reads.is_none());
+    }
+    for invalid in ["-1", "00", "1.0", "9223372036854775808", "18446744073709551615"] {
+        row.request_counters.as_mut().unwrap().page_server_reads = Some(invalid.into());
+        assert!(!row.is_valid(), "{invalid}");
+    }
+    let count = |value: &str| ActivityCounters { page_server_reads: Some(value.into()), ..Default::default() };
+    assert_eq!(count("9007199254740994").progress(&count("9007199254740993")), ActivityProgress::ChangedCounters);
+    assert_eq!(count("9007199254740993").progress(&count("9007199254740994")), ActivityProgress::Unknown);
+    assert_eq!(count("0").progress(&ActivityCounters::default()), ActivityProgress::Unknown);
+    assert_eq!(count("0").progress(&count("0")), ActivityProgress::NoObservedCounterChange);
+}
+
 pub(crate) fn request(id: &str) -> ActivityObservation {
     ActivityObservation {
         blocking_status: crate::telemetry::ActivityBlockingStatus::Known,

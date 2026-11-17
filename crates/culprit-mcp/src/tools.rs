@@ -12,6 +12,8 @@ use serde_json::{Value, json};
 
 use crate::CulpritMcp;
 use crate::view;
+mod local_captures;
+pub(crate) use local_captures::{LOCAL_CAPTURE_TOOL, check_operation as check_local_operation};
 
 /// Tools whose `sql` argument is sent to the database; the audit log records it.
 pub const SQL_TOOLS: &[&str] = &["explain", "plan_insights", "run_query"];
@@ -273,8 +275,8 @@ fn tool<T: JsonSchema + 'static>(name: &'static str, title: &'static str, descri
         .with_annotations(ToolAnnotations::new().read_only(true).destructive(false).open_world(false))
 }
 
-pub fn definitions() -> Vec<Tool> {
-    vec![
+pub fn definitions(local_captures: bool) -> Vec<Tool> {
+    let mut tools = vec![
         Tool::new(
             "list_connections",
             "List the databases Culprit can investigate for you: name, engine, environment, what agents may do with \
@@ -536,7 +538,11 @@ pub fn definitions() -> Vec<Tool> {
         )
         .with_title("Run a read-only query")
         .with_annotations(ToolAnnotations::new().read_only(true).destructive(false).open_world(false)),
-    ]
+    ];
+    if local_captures {
+        tools.push(local_captures::definition());
+    }
+    tools
 }
 
 fn args<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T> {
@@ -554,8 +560,15 @@ where
 }
 
 impl CulpritMcp {
-    pub(crate) fn dispatch<'a>(&'a self, client: &'a str, tool: &'a str, value: Value) -> ToolTask<'a> {
+    pub(crate) fn dispatch<'a>(
+        &'a self,
+        client: &'a str,
+        tool: &'a str,
+        value: Value,
+        operation: Option<culprit_core::limits::OperationHandle>,
+    ) -> ToolTask<'a> {
         match tool {
+            LOCAL_CAPTURE_TOOL => tool_task(|| self.captured_page_server_reads(value, operation)),
             "scan" => tool_task(|| async move {
                 let a: ScanArgs = args(value)?;
                 self.allowed(&a.connection)?;
@@ -796,9 +809,7 @@ impl CulpritMcp {
                 let d = culprit_engine::drift_reports(&ra, &rb)?;
                 serde_json::to_value(&d).map_err(|e| Error::internal(e.to_string()))
             }
-            other => {
-                Err(Error::not_found(format!("No tool named '{other}'")).with_hint("Call tools/list for the tools"))
-            }
+            other => Err(unknown_tool(other)),
         }
     }
 
@@ -891,6 +902,10 @@ impl CulpritMcp {
     }
 }
 
+fn unknown_tool(name: &str) -> Error {
+    Error::not_found(format!("No tool named '{name}'")).with_hint("Call tools/list for the tools")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -908,7 +923,7 @@ mod tests {
 
     #[test]
     fn every_tool_has_an_object_schema_and_a_read_only_hint() {
-        let tools = definitions();
+        let tools = definitions(false);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
         assert_eq!(
             names,

@@ -13,7 +13,8 @@ mod waits_view;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use culprit_engine::{AuditEntry, AuditOutcome, Workspace};
+use culprit_core::limits::{OperationGuard, OperationHandle};
+use culprit_engine::{AuditEntry, AuditOutcome, LocalCaptureReader, Workspace};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation, JsonObject, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerConfig,
@@ -51,22 +52,89 @@ impl Default for Options {
 pub struct CulpritMcp {
     ws: Arc<Workspace>,
     options: Arc<Options>,
+    local_captures: Option<Arc<dyn LocalCaptureReader>>,
 }
 
 impl CulpritMcp {
     pub fn new(ws: Arc<Workspace>, options: Options) -> CulpritMcp {
-        CulpritMcp { ws, options: Arc::new(options) }
+        CulpritMcp { ws, options: Arc::new(options), local_captures: None }
+    }
+
+    /// Install one explicitly authorized local original-capture reader. No storage is discovered or opened here.
+    pub fn with_local_captures(mut self, reader: Arc<dyn LocalCaptureReader>) -> Self {
+        self.local_captures = Some(reader);
+        self
     }
 
     /// Run one tool call: check the connection's policy, do the work, write the audit entry, shape the result.
     pub async fn handle(&self, client: &str, tool: &str, args: JsonObject) -> CallToolResult {
+        self.handle_cancellable(client, tool, args, std::future::pending()).await
+    }
+
+    async fn handle_cancellable(
+        &self,
+        client: &str,
+        tool: &str,
+        args: JsonObject,
+        cancelled: impl std::future::Future<Output = ()>,
+    ) -> CallToolResult {
+        culprit_core::i18n::scope_async("en", async {
+            let mut guard = self.local_operation(tool);
+            let operation =
+                guard.as_ref().map(|guard| guard.as_ref().map(OperationGuard::handle)).map_err(Clone::clone);
+            let controlled = guard.as_ref().is_ok_and(Option::is_some);
+            let work = self.handle_started(client, tool, args, operation);
+            tokio::pin!(work);
+            if controlled {
+                tokio::select! {
+                    biased;
+                    _ = cancelled => {
+                        if let Ok(guard) = &mut guard { drop(guard.take()); }
+                        work.await
+                    }
+                    result = &mut work => result,
+                }
+            } else {
+                work.await
+            }
+        })
+        .await
+    }
+
+    fn local_operation(&self, tool: &str) -> culprit_core::Result<Option<OperationGuard>> {
+        if tool == tools::LOCAL_CAPTURE_TOOL
+            && let Some(reader) = &self.local_captures
+        {
+            return OperationGuard::new(reader.timeout()).map(Some);
+        }
+        Ok(None)
+    }
+
+    async fn handle_started(
+        &self,
+        client: &str,
+        tool: &str,
+        args: JsonObject,
+        operation: culprit_core::Result<Option<OperationHandle>>,
+    ) -> CallToolResult {
         let started = Instant::now();
         let connection = args.get("connection").and_then(Value::as_str).map(str::to_string);
         let sql = tools::SQL_TOOLS
             .contains(&tool)
             .then(|| args.get("sql").and_then(Value::as_str).map(str::to_string))
             .flatten();
-        let result = self.dispatch(client, tool, Value::Object(args)).await;
+        let result = match operation {
+            Ok(operation) => {
+                let result = self.dispatch(client, tool, Value::Object(args), operation.clone()).await;
+                result.and_then(|value| {
+                    if let Some(operation) = operation {
+                        tools::check_local_operation(&operation)?;
+                    }
+                    Ok(value)
+                })
+            }
+            Err(error) => Err(error),
+        };
         let (outcome, message) = match &result {
             Ok(_) => (AuditOutcome::Ok, None),
             Err(e) if e.code == culprit_core::ErrorCode::PermissionDenied => {
@@ -110,11 +178,11 @@ impl ServerHandler for CulpritMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tools::definitions()))
+        Ok(ListToolsResult::with_all_items(tools::definitions(self.local_captures.is_some())))
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
-        tools::definitions().into_iter().find(|t| t.name == name)
+        tools::definitions(self.local_captures.is_some()).into_iter().find(|t| t.name == name)
     }
 
     async fn call_tool(
@@ -128,14 +196,15 @@ impl ServerHandler for CulpritMcp {
             .map(|info| info.client_info.name.clone())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "unknown client".to_string());
-        let args = request.arguments.unwrap_or_default();
-        Ok(CallToolResponse::Complete(self.handle(&client, &request.name, args).await))
+        let result = self
+            .handle_cancellable(&client, &request.name, request.arguments.unwrap_or_default(), context.ct.cancelled())
+            .await;
+        Ok(CallToolResponse::Complete(result))
     }
 }
 
 /// Serve MCP over stdin/stdout until the client disconnects. Nothing else may write to stdout meanwhile.
-pub async fn serve_stdio(ws: Workspace, options: Options) -> culprit_core::Result<()> {
-    let server = CulpritMcp::new(Arc::new(ws), options);
+pub async fn serve_stdio(server: CulpritMcp) -> culprit_core::Result<()> {
     let running = server
         .serve(rmcp::transport::stdio())
         .await

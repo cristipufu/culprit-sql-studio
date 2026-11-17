@@ -149,7 +149,7 @@ async fn one_admitted_native_event_is_captured_consumed_and_pinned_on_the_origin
     assert!(runtime.enroll().await);
     let intent = selected_intent(&runtime).await;
     assert_eq!(intent.focus.selector(), RecipeSelector::CurrentRequestWork);
-    let original = runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap();
+    let original = runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.unwrap();
     let job = runtime.take_focus().await;
     let result = runtime.execute(&job).await;
     assert_eq!(result.event.status, CollectionStatus::Complete);
@@ -172,13 +172,13 @@ async fn one_admitted_native_event_is_captured_consumed_and_pinned_on_the_origin
     assert_eq!(revision.episode.id, intent.episode_id);
     assert_eq!(revision.episode.analysis, DiagnosticAnalysisStatus::Analyzed);
     assert_eq!(revision.episode.lifecycle, DiagnosticLifecycle::Active);
-    assert_eq!(revision.episode.latest, intent.focus.participant().parent);
+    assert_eq!(revision.episode.latest, intent.focus.parent().clone());
     let report = revision.episode.report.as_ref().unwrap();
     assert!(matches!(report, DiagnosticReport::CurrentRequestWork { .. }));
     assert_eq!(report.references().count(), 1);
-    assert!(revision.inputs.contains(&intent.focus.participant().parent));
+    assert!(revision.inputs.contains(intent.focus.parent()));
     assert!(revision.inputs.contains(report.evidence()));
-    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap(), original);
+    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.unwrap(), original);
     assert_eq!(
         runtime.fixture.outbox.diagnostic_input_state(&capture, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
         DiagnosticInputState::Consumed
@@ -206,7 +206,7 @@ async fn missing_current_work_after_symptom_recovery_retains_debt_history_and_on
     assert!(recovered.analysis.needs_work());
     assert!(runtime.enroll().await);
     let intent = selected_intent(&runtime).await;
-    runtime.fixture.backend.current_work = Some(missing_frame(intent.focus.participant()));
+    runtime.fixture.backend.current_work = Some(missing_frame(intent.focus.activity_participant().unwrap()));
     let job = runtime.take_focus().await;
     let result = runtime.execute(&job).await;
     let Outcome::FocusedComplete { result: capture } = &result.outcome else { panic!() };
@@ -294,7 +294,7 @@ async fn a_caller_cannot_commit_partial_current_work_as_a_completed_native_expla
     let mut runtime = Runtime::from_fixture(fixture().await).await;
     assert!(runtime.enroll().await);
     let intent = selected_intent(&runtime).await;
-    let mut frame = focused_frame(intent.focus.participant());
+    let mut frame = focused_frame(intent.focus.activity_participant().unwrap());
     let SourceObservation::CurrentRequestWork { snapshot, .. } = &mut frame.source.observation else { panic!() };
     snapshot.sources[0] = StateSourceCoverage::observed(frame.source.source.clone(), 1, false);
     runtime.fixture.backend.current_work = Some(frame);

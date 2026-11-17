@@ -9,6 +9,7 @@
 //! shared cases in `locales/.tests/messages.json`: `{name}`, `{n, plural, =0 {..} one {# ..} other {..}}` and
 //! `{v, select, .. other {..}}`.
 
+mod async_scope;
 mod language_code;
 mod message;
 mod plural;
@@ -18,6 +19,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+pub use async_scope::scope_async;
 pub use language_code::is_language_code;
 #[cfg(test)]
 pub(crate) use message::parse;

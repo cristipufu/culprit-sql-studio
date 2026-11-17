@@ -118,6 +118,7 @@ pub(in crate::fleet::investigations) struct Backend {
     pub(in crate::fleet::investigations) activity: Frame,
     pub(in crate::fleet::investigations) shared: Option<Frame>,
     pub(in crate::fleet::investigations) current_work: Option<Frame>,
+    pub(in crate::fleet::investigations) compiler_gateways: Option<Vec<OperationalObservation>>,
     pub(in crate::fleet::investigations) page_tasks: Option<Frame>,
     pub(in crate::fleet::investigations) focus_request: PageWaitRequestState,
     pub(in crate::fleet::investigations) focus_resolution: Option<PageWaitResolution>,
@@ -200,7 +201,7 @@ impl FleetBackend for Backend {
                 CollectionSelection::FocusedPageWait { focus } => {
                     let intent =
                         admission.investigation.as_ref().expect("automatic focus must retain its admitted intent");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     if self.focus_resolution == Some(PageWaitResolution::ObservedAtBothBounds) {
                         super::page_writers::mapped_frame(focus)
@@ -211,7 +212,7 @@ impl FleetBackend for Backend {
                 CollectionSelection::PageWaitTasks { activity, original_context, .. } => {
                     let intent =
                         admission.investigation.as_ref().expect("paired population retains its exact original trigger");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     self.page_tasks.clone().unwrap_or_else(|| {
                         super::page_tasks::population_frame(activity, original_context, &self.activity)
@@ -222,37 +223,43 @@ impl FleetBackend for Backend {
                         .investigation
                         .as_ref()
                         .expect("task-holder work retains both exact original receipts");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     super::page_task_holders::focused_frame(focus)
                 }
                 CollectionSelection::PageWaitWriters { focus } => {
                     let intent =
                         admission.investigation.as_ref().expect("writer work retains its exact admitted roster");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     super::page_writers::focused_frame(focus, &self.activity)
+                }
+                CollectionSelection::SourceRead { focus, execution } => {
+                    let intent =
+                        admission.investigation.as_ref().expect("source history retains its exact admitted question");
+                    assert_eq!(intent.selection().unwrap(), request.selection);
+                    super::source_reads::frame(focus, execution)
                 }
                 CollectionSelection::FocusedCompilationAdmission { focus } => {
                     let intent =
                         admission.investigation.as_ref().expect("automatic compiler question retains its intent");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.budget, request.budget);
-                    super::compiler_admission::focused_frame(focus)
+                    super::compiler_admission::focused_frame(focus, self.compiler_gateways.as_deref())
                 }
                 CollectionSelection::FocusedRequestMemory { focus } => {
                     let intent = admission
                         .investigation
                         .as_ref()
                         .expect("automatic memory question retains its admitted intent");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     super::request_memory::focused_frame(focus)
                 }
                 CollectionSelection::CurrentRequestWork { focus } => {
                     let intent =
                         admission.investigation.as_ref().expect("current work retains its admitted native request");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.budget, request.budget);
                     self.current_work.clone().unwrap_or_else(|| super::current_request_work::focused_frame(focus))
                 }
@@ -262,7 +269,7 @@ impl FleetBackend for Backend {
                 }
                 CollectionSelection::SharedPageWaitFocus { focus, partition } => {
                     let intent = admission.investigation.as_ref().expect("shared work retains its admitted intent");
-                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.selection().unwrap(), request.selection);
                     assert_eq!(intent.subject(), request.subject);
                     assert_eq!(intent.budget, request.budget);
                     let mut frame = focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution);
@@ -477,6 +484,7 @@ impl Harness {
                 activity,
                 shared,
                 current_work: None,
+                compiler_gateways: None,
                 page_tasks: None,
                 focus_request: PageWaitRequestState::Missing,
                 focus_resolution: None,
@@ -512,6 +520,8 @@ fn shared_frame() -> Frame {
     };
     let source = "fixture-shared-native-owner".to_owned();
     let counters = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("shared-native-counter-point"),
         scope: MeasurementScope::Server,
         counters: vec![NativeCounterSample::gauge(

@@ -13,6 +13,7 @@ fn snapshot() -> Snapshot {
     let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
     query.query_hash = snapshot.pressure.as_ref().unwrap().grants[0].observations[0].context.query_hash.clone();
     query.waits = vec![culprit_core::WaitStat {
+        mechanism: None,
         category: "Memory".into(),
         wait_type: None,
         wait_ms: query.total_time_ms * 0.5,

@@ -103,7 +103,7 @@ async fn an_admitted_memory_question_is_captured_consumed_and_replayed_without_r
     let intent = intent.clone();
     assert_eq!(intent.focus.selector(), RecipeSelector::FocusedRequestMemory);
     let key = intent.key().unwrap();
-    let parent = intent.focus.participant().parent.clone();
+    let parent = intent.focus.parent().clone();
     let original = runtime.fixture.outbox.diagnostic_evidence(&parent).await.unwrap();
     let job = runtime.take_focus().await;
     let result = runtime.execute(&job).await;
@@ -121,7 +121,7 @@ async fn an_admitted_memory_question_is_captured_consumed_and_replayed_without_r
         .unwrap();
     assert_eq!(input.rows.len(), 1);
     let SourceObservation::FocusedRequestMemory { result, .. } = &input.source.observation else { panic!() };
-    assert_eq!(result.focus, *intent.focus.participant());
+    assert_eq!(result.focus, *intent.focus.activity_participant().unwrap());
     let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::ExecutionGrant(grant), .. }) =
         &input.rows[0].row.record
     else {

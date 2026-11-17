@@ -12,6 +12,7 @@ test("independent native wait totals remain visible without contribution percent
     categories: [{
       key: "parallelism", label: "Recorded parallel waits", wait_ms: 17_700, share: 1, top_wait: "native-workers",
       meaning: "The native category counter and query counter have separate scopes.", detail: null, attribution: null,
+      mechanisms: [],
       queries: [{
         id: "query-1", text: "SELECT id FROM app.orders WHERE customer_id = @id", wait_ms: 120_000,
         mean_recorded_ms: 60_000, executions: 2, rows_per_run: 3,

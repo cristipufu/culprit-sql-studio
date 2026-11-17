@@ -6,6 +6,8 @@ fn sample() -> Box<ConnectionOutcomeSnapshot> {
     let row = ConnectionOutcomeObservation {
         source: "pg_stat_database".into(),
         counters: NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new("pg_stat_database")
                 .qualified("dbid", "private-oid")
                 .qualified("member", "private-physical-member"),

@@ -344,6 +344,8 @@ mod tests {
         let mut values = BTreeMap::from([("kind".into(), kind.into())]);
         values.extend(properties.iter().map(|(key, value)| (key.to_string(), value.to_string())));
         let sample = NativeReplicationSample::new(NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new(source).qualified("native_id", "original"),
             scope: MeasurementScope::Server,
             counters,

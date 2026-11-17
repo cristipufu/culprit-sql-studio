@@ -154,10 +154,19 @@ const FIELDS: [ResourceField; METRIC_COUNT] = [
 pub(crate) struct Sample {
     pub at: String,
     pub replica_role: i64,
+    pub data_io_accounting: DataIoAccounting,
     values: [Option<f64>; METRIC_COUNT],
 }
 impl Sample {
     pub(super) fn decode(row: &Rec) -> Result<Self> {
+        Self::decode_values(row, crate::deployment::NativeDeployment::decode(row)?.data_io_accounting())
+    }
+    /// Admission intentionally acquires utilization only. A profile was not requested and remains unknown;
+    /// malformed or absent profile fields in a profiled history read still fail in the native decoder.
+    pub(super) fn decode_utilization(row: &Rec) -> Result<Self> {
+        Self::decode_values(row, DataIoAccounting::Unknown)
+    }
+    fn decode_values(row: &Rec, data_io_accounting: DataIoAccounting) -> Result<Self> {
         let mut values = [None; METRIC_COUNT];
         for field in &FIELDS {
             values[field.metric as usize] = number(row, field.column)?;
@@ -165,6 +174,7 @@ impl Sample {
         Ok(Self {
             at: canonical_time(&crate::read::text(row, "sample_at")?)?,
             replica_role: integer(row, "replica_role")?,
+            data_io_accounting,
             values,
         })
     }
@@ -173,6 +183,7 @@ impl Sample {
     }
     pub(crate) fn exported(&self) -> ResourceMeasurement {
         ResourceMeasurement {
+            data_io_accounting: self.data_io_accounting,
             at: self.at.clone(),
             replica_id: Some(self.replica_role.to_string()),
             metrics: FIELDS
@@ -191,6 +202,7 @@ impl Sample {
     }
     pub(crate) fn snapshot(&self) -> culprit_core::ResourceSample {
         culprit_core::ResourceSample {
+            data_io_accounting: self.data_io_accounting,
             at: self.at.clone(),
             cpu_pct: self.value(Metric::Cpu),
             data_io_pct: self.value(Metric::DataIo),
@@ -203,6 +215,7 @@ impl Sample {
 pub(super) fn columns() -> String {
     std::iter::once("replica_role").chain(FIELDS.iter().map(|field| field.column)).collect::<Vec<_>>().join(",")
 }
+pub(super) const PROFILE_COLUMNS: &str = ",CAST(SERVERPROPERTY('EngineEdition') AS int) AS engine_edition,\n CAST(DATABASEPROPERTYEX(DB_NAME(),'Edition') AS nvarchar(128)) AS database_edition,\n CAST(DATABASEPROPERTYEX(DB_NAME(),'ReplicaID') AS nvarchar(128)) AS replica_id";
 pub(super) fn number(row: &Rec, name: &str) -> Result<Option<f64>> {
     match row.columns().find(|(column, _)| *column == name).map(|(_, value)| value) {
         Some(Val::Null) => Ok(None),

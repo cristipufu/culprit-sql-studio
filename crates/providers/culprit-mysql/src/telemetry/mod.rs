@@ -306,6 +306,7 @@ impl SnapshotReader for MysqlSnapshotReader {
         let complete = self.layout.as_ref().is_none_or(|layout| layout.overflow_calls == 0)
             && layout_after.as_ref().is_none_or(|layout| layout.overflow_calls == 0);
         Ok(SnapshotRecheck {
+            execution: None,
             unchanged: before.same_source(&after) && compatible_layout,
             observed_until: after.connection.at,
             scopes: self

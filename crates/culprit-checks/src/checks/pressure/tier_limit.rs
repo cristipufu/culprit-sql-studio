@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::{ResourceSample, telemetry::DataIoAccounting};
 
 pub fn tier_limit_info() -> CheckInfo {
     CheckInfo {
@@ -33,21 +34,31 @@ pub(crate) fn tier_limit(snapshot: &Snapshot) -> Vec<Finding> {
 enum Resource {
     LogWrite,
     Cpu,
-    DataIo,
+    DataFileIo,
+    ComputeLocalSsdIo,
     Workers,
 }
 
 impl Resource {
     /// In the order their findings are listed.
-    const ALL: [Resource; 4] = [Resource::LogWrite, Resource::Cpu, Resource::DataIo, Resource::Workers];
+    const ALL: [Resource; 5] =
+        [Resource::LogWrite, Resource::Cpu, Resource::DataFileIo, Resource::ComputeLocalSsdIo, Resource::Workers];
 
     /// Its finding's key.
     fn key(self) -> &'static str {
         match self {
             Resource::LogWrite => "log-write",
             Resource::Cpu => "cpu",
-            Resource::DataIo => "data-io",
+            Resource::DataFileIo | Resource::ComputeLocalSsdIo => "data-io",
             Resource::Workers => "workers",
+        }
+    }
+
+    fn matches_accounting(self, accounting: Option<DataIoAccounting>) -> bool {
+        match self {
+            Self::DataFileIo => accounting == Some(DataIoAccounting::DataFiles),
+            Self::ComputeLocalSsdIo => accounting == Some(DataIoAccounting::ComputeLocalSsd),
+            Self::LogWrite | Self::Cpu | Self::Workers => true,
         }
     }
 
@@ -55,7 +66,7 @@ impl Resource {
         match self {
             Resource::LogWrite => |s| s.log_write_pct,
             Resource::Cpu => |s| s.cpu_pct,
-            Resource::DataIo => |s| s.data_io_pct,
+            Resource::DataFileIo | Resource::ComputeLocalSsdIo => |s| s.data_io_pct,
             Resource::Workers => |s| s.workers_pct,
         }
     }
@@ -79,8 +90,10 @@ fn tier_limits(snapshot: &Snapshot) -> Vec<TierLimit> {
     if samples.len() < 8 {
         return Vec::new();
     }
+    let accounting = ResourceSample::common_data_io_accounting(samples);
     Resource::ALL
         .into_iter()
+        .filter(|resource| resource.matches_accounting(accounting))
         .filter_map(|resource| {
             let usage = super::health::resource_usage(samples, resource.pick())?;
             if !usage.measured || usage.at_limit < 0.10 {
@@ -133,17 +146,10 @@ fn tier_limit_finding(snapshot: &Snapshot, l: TierLimit) -> Finding {
                 dashboard = culprit_core::t!("ui.common.view.dashboard")
             ),
         ),
-        Resource::DataIo => (
-            t!("check.tier_limit.data_io.name"),
-            t!("check.tier_limit.data_io.caps"),
-            t!("check.tier_limit.data_io.effect"),
-            t!("check.tier_limit.data_io.fix"),
-            t!(
-                "check.tier_limit.data_io.verify",
-                health = culprit_core::t!("core.dashboard.tile.health"),
-                dashboard = culprit_core::t!("ui.common.view.dashboard")
-            ),
-        ),
+        Resource::DataFileIo => data_io_words(DataIoAccounting::DataFiles, t!("check.tier_limit.data_io.fix")),
+        Resource::ComputeLocalSsdIo => {
+            data_io_words(DataIoAccounting::ComputeLocalSsd, t!("check.tier_limit.local_ssd.fix"))
+        }
         Resource::Workers => (
             t!("check.tier_limit.workers.name"),
             t!("check.tier_limit.workers.caps"),
@@ -180,4 +186,18 @@ fn tier_limit_finding(snapshot: &Snapshot, l: TierLimit) -> Finding {
     f.fix = Some(Fix { summary: fix, sql: None, cost: None });
     f.verify = vec![verify];
     f
+}
+
+fn data_io_words(accounting: DataIoAccounting, fix: String) -> (String, String, String, String, String) {
+    (
+        accounting.label(),
+        accounting.meaning(),
+        t!("check.tier_limit.io.effect"),
+        fix,
+        t!(
+            "check.tier_limit.io.verify",
+            health = culprit_core::t!("core.dashboard.tile.health"),
+            dashboard = culprit_core::t!("ui.common.view.dashboard")
+        ),
+    )
 }

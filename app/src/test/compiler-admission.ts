@@ -10,6 +10,7 @@ export function compilerGateway(index = 0): OperationalObservation {
   return { source: COMPILER_ADMISSION_SOURCE, key: String(index).padStart(64, "b"), fact: { kind: "counter-set", data: {
     identity: { id: `Gateway ${index}`, qualifiers: { native_object: "sys.dm_exec_query_optimizer_memory_gateways", resource_pool_id: String(index + 2) } },
     scope: "server", properties: { threshold: "9007199254740993", threshold_factor: "8", is_active: "1" },
+    ratios: [], ratio_gaps: [],
     counters: [{ key: "admission-threshold-bytes", value: { kind: "integer", value: "9007199254740993" }, unit: { kind: "bytes" }, nature: "gauge", scope: "server",
       reset: { kind: "unknown" }, native_object: "sys.dm_exec_query_optimizer_memory_gateways", native_name: "threshold", native_instance: null, native_type: null }],
   } } };

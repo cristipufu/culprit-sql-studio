@@ -5,16 +5,20 @@ use crate::{read::NativeRead, value::Rec};
 use culprit_core::Result;
 
 pub(crate) async fn initial<R: NativeRead>(reader: &mut ActivityReader<R>) -> Result<Context> {
-    read_initial(reader, Detail::Authority).await.map(|(context, _)| context)
+    read_initial(reader, Detail::Activity).await.map(|(context, _)| context)
 }
 pub(crate) async fn recheck<R: NativeRead>(reader: &mut ActivityReader<R>, initial: &Context) -> Result<Context> {
-    read_again(reader, initial, Detail::Authority).await.map(|(context, _)| context)
+    read_again(reader, initial, Detail::Activity).await.map(|(context, _)| context)
 }
 pub(super) async fn read_initial<R: NativeRead>(
     reader: &mut ActivityReader<R>,
     detail: Detail,
 ) -> Result<(Context, Rec)> {
-    crate::local_source::read_initial(&mut reader.io, &reader.host, reader.port, reader.options.identity, detail).await
+    let result =
+        crate::local_source::read_initial(&mut reader.io, &reader.host, reader.port, reader.options.identity, detail)
+            .await?;
+    reader.request_page_server_read_capability = result.0.activity.request_page_server_read_capability;
+    Ok(result)
 }
 pub(super) async fn read_again<R: NativeRead>(
     reader: &mut ActivityReader<R>,

@@ -1,6 +1,7 @@
 //! Admission decisions append revisions through the existing offline CAS owner, without replaying a baseline.
 use super::*;
 
+#[cfg(test)]
 pub(crate) async fn set_analysis(
     outbox: &mut Outbox,
     parent: &DiagnosticEvidenceRef,
@@ -8,7 +9,7 @@ pub(crate) async fn set_analysis(
     status: DiagnosticAnalysisStatus,
     issue: Option<DiagnosticAnalysisIssue>,
 ) -> Result<()> {
-    update_analysis(outbox, parent, episode_id, status, issue, None).await
+    update_analysis(outbox, parent, episode_id, AnalysisChange { status, issue, event: None, question: None }).await
 }
 
 pub(crate) async fn record_investigation(
@@ -17,19 +18,61 @@ pub(crate) async fn record_investigation(
     status: DiagnosticAnalysisStatus,
     issue: Option<DiagnosticAnalysisIssue>,
 ) -> Result<()> {
-    let parent = event.intent.focus.participant().parent.clone();
+    let parent = event.intent.focus.parent().clone();
     let episode_id = event.intent.episode_id.clone();
-    update_analysis(outbox, &parent, &episode_id, status, issue, Some(event)).await
+    update_analysis(outbox, &parent, &episode_id, AnalysisChange { status, issue, event: Some(event), question: None })
+        .await
+}
+
+pub(crate) async fn set_question_analysis(
+    outbox: &mut Outbox,
+    intent: &DiagnosticInvestigationIntent,
+    status: DiagnosticAnalysisStatus,
+    issue: Option<DiagnosticAnalysisIssue>,
+) -> Result<()> {
+    update_analysis(
+        outbox,
+        intent.focus.parent(),
+        &intent.episode_id,
+        AnalysisChange { status, issue, event: None, question: Some(intent.focus.clone()) },
+    )
+    .await
+}
+
+pub(crate) async fn set_source_read_issue(
+    outbox: &mut Outbox,
+    focus: &SourceReadFocus,
+    episode_id: &str,
+    issue: DiagnosticAnalysisIssue,
+) -> Result<()> {
+    update_analysis(
+        outbox,
+        &focus.basis,
+        episode_id,
+        AnalysisChange {
+            status: DiagnosticAnalysisStatus::Deferred,
+            issue: Some(issue),
+            event: None,
+            question: Some(DiagnosticFocus::SourceRead { focus: Box::new(focus.clone()) }),
+        },
+    )
+    .await
+}
+
+struct AnalysisChange {
+    status: DiagnosticAnalysisStatus,
+    issue: Option<DiagnosticAnalysisIssue>,
+    event: Option<DiagnosticInvestigationEvent>,
+    question: Option<DiagnosticFocus>,
 }
 
 async fn update_analysis(
     outbox: &mut Outbox,
     parent: &DiagnosticEvidenceRef,
     episode_id: &str,
-    status: DiagnosticAnalysisStatus,
-    issue: Option<DiagnosticAnalysisIssue>,
-    event: Option<DiagnosticInvestigationEvent>,
+    change: AnalysisChange,
 ) -> Result<()> {
+    let AnalysisChange { status, issue, event, question } = change;
     let input = outbox.diagnostic_input(&parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).await?;
     if input.parent != parent.capture_ref() {
         return Err(DeliveryProblem::Integrity.error());
@@ -43,7 +86,9 @@ async fn update_analysis(
     let Some(episode) = checkpoint.episodes.iter_mut().find(|episode| episode.id == episode_id) else {
         return Ok(());
     };
-    if !episode.analysis.needs_work() && event.is_none() {
+    let question = event.as_ref().map(|event| &event.intent.focus).or(question.as_ref());
+    let source_read = matches!(question, Some(DiagnosticFocus::SourceRead { .. }));
+    if !episode.analysis.needs_work() && event.is_none() && !source_read {
         return Ok(());
     }
     let task_question = if let DiagnosticSignal::PageTaskWait { parent: expected, page, .. } = &episode.signal {
@@ -65,8 +110,9 @@ async fn update_analysis(
         None
     };
     let matches_parent = match &event {
-        Some(event) => {
-            event.matches_episode(episode) && event.intent.focus.matches_parent(&input.source, original, parent)
+        Some(event) => event.matches_episode(episode) && event.intent.matches_parent_record(&input.source, &row.row),
+        None if source_read => {
+            question.is_some_and(|question| episode.matches_focus(question)) && episode.first == *parent
         }
         None => match task_question {
             Some(focus) => episode.matches_focus(&focus),
@@ -77,7 +123,30 @@ async fn update_analysis(
         return Err(DeliveryProblem::Integrity.error());
     }
     let previous = episode.clone();
-    if episode.analysis.needs_work() {
+    if source_read {
+        if event.is_none()
+            && matches!(
+                episode.source_read.as_deref().map(|stage| &stage.state),
+                Some(SourceReadStageState::Collecting)
+            )
+        {
+            // A metadata decision cannot rewind an admitted owner. Its attempt/result history settles this state.
+            return Ok(());
+        }
+        let state = match &event {
+            Some(event) => match &event.outcome {
+                DiagnosticInvestigationOutcome::Admitted => SourceReadStageState::Collecting,
+                DiagnosticInvestigationOutcome::Captured { capture } => {
+                    SourceReadStageState::Captured { capture: capture.clone() }
+                }
+                DiagnosticInvestigationOutcome::Stopped { issue } => {
+                    SourceReadStageState::Stopped { issue: issue.clone() }
+                }
+            },
+            None => SourceReadStageState::Deferred { issue: issue.ok_or_else(|| DeliveryProblem::Integrity.error())? },
+        };
+        *episode = episode.transition_source_read(state)?;
+    } else if episode.source_read.is_none() && episode.analysis.needs_work() {
         episode.analysis = status;
         episode.issue = issue;
     }

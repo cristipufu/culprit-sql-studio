@@ -37,6 +37,10 @@ impl TelemetryCollection {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum CollectionSelection {
+    SourceRead {
+        focus: Box<SourceReadFocus>,
+        execution: Box<NativeSourceReadScope>,
+    },
     QueryHistory {
         from: String,
         until: String,
@@ -102,6 +106,7 @@ pub enum CollectionSelection {
 impl CollectionSelection {
     pub fn collection(&self) -> TelemetryCollection {
         match self {
+            Self::SourceRead { focus, .. } => TelemetryCollection::Snapshot(focus.question.dataset()),
             Self::QueryHistory { .. } => TelemetryCollection::QueryHistory,
             Self::ResourceHistory { .. } => TelemetryCollection::ResourceHistory,
             Self::DeadlockHistory { .. } => TelemetryCollection::DeadlockHistory,
@@ -140,7 +145,8 @@ impl CollectionSelection {
 
     /// The outbox/recovery owner must authenticate retained capture receipts before this work can begin.
     pub fn requires_authenticated_parent(&self) -> bool {
-        self.focus().is_some() || matches!(self, Self::PageWaitTasks { .. } | Self::Diagnostics { .. })
+        self.focus().is_some()
+            || matches!(self, Self::SourceRead { .. } | Self::PageWaitTasks { .. } | Self::Diagnostics { .. })
     }
 
     pub fn shared_partition(&self) -> Option<&SourcePartition> {
@@ -379,6 +385,18 @@ impl DiagnosticCaptureDescription {
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum SourceObservation {
+    /// The dataset keeps its logical namespace. Execution is the original source-owned native read owner,
+    /// separate from query/compile population identities and from the private incident retained in lineage.
+    SourceRead {
+        snapshot: StateSnapshotDescription,
+        focus_key: String,
+        execution: Box<NativeReadContext>,
+    },
+    PagedSourceRead {
+        snapshot: PagedSnapshotDescription,
+        focus_key: String,
+        execution: Box<NativeReadContext>,
+    },
     QueryHistory(QueryHistoryDescription),
     RetainedSamples(SampleHistoryDescription),
     RetainedEvents(EventHistoryDescription),
@@ -493,12 +511,19 @@ impl SourceObservation {
             Self::CurrentRequestWork { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Diagnostics(_) => TelemetryCollection::Diagnostics,
             Self::Jobs { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
-            Self::Snapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
-            Self::PagedSnapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
+            Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } => {
+                TelemetryCollection::Snapshot(snapshot.dataset)
+            }
+            Self::PagedSnapshot(snapshot) | Self::PagedSourceRead { snapshot, .. } => {
+                TelemetryCollection::Snapshot(snapshot.dataset)
+            }
         }
     }
     pub fn range(&self) -> Result<TelemetryRange> {
         Ok(match self {
+            Self::SourceRead { focus_key, .. } | Self::PagedSourceRead { focus_key, .. } => {
+                TelemetryRange::Focused { key: focus_key.clone() }
+            }
             Self::QueryHistory(history) => TelemetryRange::NativeInterval { interval: history.interval.clone() },
             Self::RetainedSamples(history) => {
                 TelemetryRange::TimeWindow { from: history.from.clone(), until: history.until.clone() }
@@ -544,6 +569,14 @@ impl SourceObservation {
     }
     pub fn covers_request(&self) -> bool {
         match self {
+            Self::SourceRead { snapshot, focus_key, execution } => {
+                snapshot.is_valid()
+                    && snapshot.dataset == SourceReadQuestion::CompilationHistory.dataset()
+                    && valid_digest(focus_key)
+                    && NativeSourceReadScope::from_context(execution).is_ok()
+                    && same_time(&snapshot.observed_from, &execution.observed_from)
+                    && same_time(&snapshot.observed_until, &execution.observed_until)
+            }
             Self::QueryHistory(history) => history.is_valid(),
             Self::RetainedSamples(history) => history.covers_request(),
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
@@ -620,7 +653,7 @@ impl SourceObservation {
                         | SnapshotDataset::PageTaskHolders
                 ) && snapshot.is_valid()
             }
-            Self::PagedSnapshot(_) => false,
+            Self::PagedSnapshot(_) | Self::PagedSourceRead { .. } => false,
         }
     }
     pub fn events(&self) -> Option<&EventHistoryDescription> {
@@ -638,6 +671,7 @@ impl SourceObservation {
     pub fn snapshot(&self) -> Option<&StateSnapshotDescription> {
         match self {
             Self::Snapshot(snapshot)
+            | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
@@ -654,6 +688,7 @@ impl SourceObservation {
     pub fn accepts_snapshot_record(&self, stream: TelemetryStream, source: &str) -> bool {
         match self {
             Self::Snapshot(snapshot)
+            | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
@@ -665,7 +700,7 @@ impl SourceObservation {
             | Self::CurrentRequestWork { snapshot, .. }
             | Self::CacheEntryMemory { snapshot, .. } => snapshot.accepts(stream, source),
             Self::Diagnostics(_) => stream == TelemetryStream::OperationalSamples && source == DIAGNOSTICS_SOURCE,
-            Self::PagedSnapshot(snapshot) => snapshot.accepts(stream, source),
+            Self::PagedSnapshot(snapshot) | Self::PagedSourceRead { snapshot, .. } => snapshot.accepts(stream, source),
             _ => false,
         }
     }
@@ -698,8 +733,10 @@ impl SourceObservation {
                 count(TelemetryStream::OperationalSamples) == u64::from(description.records)
                     && count(TelemetryStream::DiagnosticCheckpoints) == u64::from(description.checkpoint_records)
             }
-            Self::Snapshot(snapshot) => count(snapshot.dataset.stream()) == u64::from(snapshot.records),
-            Self::PagedSnapshot(_) => false,
+            Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } => {
+                count(snapshot.dataset.stream()) == u64::from(snapshot.records)
+            }
+            Self::PagedSnapshot(_) | Self::PagedSourceRead { .. } => false,
         }
     }
 }
@@ -732,8 +769,34 @@ impl CollectionDescription {
         }
         match completion {
             SourceCompletion::Changed => Ok(None),
-            SourceCompletion::Verified if !matches!(self.observation, SourceObservation::PagedSnapshot(_)) => {
+            SourceCompletion::Verified
+                if !matches!(
+                    self.observation,
+                    SourceObservation::PagedSnapshot(_) | SourceObservation::PagedSourceRead { .. }
+                ) =>
+            {
                 Ok(Some(self.clone()))
+            }
+            SourceCompletion::SourceRead { snapshot, execution } => {
+                let SourceObservation::PagedSourceRead { snapshot: declared, focus_key, execution: initial } =
+                    &self.observation
+                else {
+                    return Err(CollectionStop::InvalidPage.error());
+                };
+                if !declared.accepts_completion(&snapshot)
+                    || !NativeSourceReadScope::from_context(initial)?.matches_context(&execution)
+                    || !same_time(&initial.observed_from, &execution.observed_from)
+                    || ObservationBounds::new(&initial.observed_until, &execution.observed_until).is_none()
+                {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                let mut completed = self.clone();
+                completed.observation =
+                    SourceObservation::SourceRead { snapshot, focus_key: focus_key.clone(), execution };
+                if !completed.partition_is_consistent() || !completed.observation.covers_request() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                Ok(Some(completed))
             }
             SourceCompletion::Snapshot(snapshot) => {
                 let SourceObservation::PagedSnapshot(declared) = &self.observation else {
@@ -765,6 +828,25 @@ impl CollectionDescription {
             || !request.subject.accepts(&self.target)
         {
             return false;
+        }
+        if let CollectionSelection::SourceRead { focus, execution: expected } = &request.selection {
+            let Some(actual) = self.observation.execution_context() else { return false };
+            let (dataset, observed_rows, focus_key, valid) = match &self.observation {
+                SourceObservation::SourceRead { snapshot, focus_key, .. } => {
+                    (snapshot.dataset, snapshot.records, focus_key, self.observation.covers_request())
+                }
+                SourceObservation::PagedSourceRead { snapshot, focus_key, .. } => {
+                    (snapshot.dataset, 0, focus_key, snapshot.is_valid())
+                }
+                _ => return false,
+            };
+            return valid
+                && focus.question.accepts_dataset(dataset)
+                && focus.key().ok().as_ref() == Some(focus_key)
+                && expected.matches_context(actual)
+                && expected.matches_target(&self.target)
+                && self.partition == SourcePartition::Target
+                && observed_rows <= request.budget.max_snapshot_rows;
         }
         if let (
             SourceObservation::FocusedBlocking { snapshot, result },

@@ -2,7 +2,7 @@
 use crate::{PopulationReports, Workspace};
 use culprit_collector::{
     capture::CollectionCancellation,
-    outbox::{CompletedSnapshotBudget, OutboxDelivery},
+    outbox::{CompletedCaptureBudget, OutboxDelivery},
 };
 use culprit_core::{
     Report, Result, SnapshotOptions,
@@ -15,7 +15,7 @@ use culprit_core::{
 pub struct CompletedRuntimeScanInput<'a> {
     pub delivery: &'a OutboxDelivery,
     pub attempt: &'a DiagnosticAttemptReceipt,
-    pub budget: CompletedSnapshotBudget,
+    pub budget: CompletedCaptureBudget,
     pub cancellation: &'a CollectionCancellation,
 }
 impl CompletedRuntimeScanInput<'_> {

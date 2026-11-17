@@ -129,6 +129,8 @@ impl Kind {
             let record = NativeCatalogCounters {
                 catalog: definition,
                 counters: NativeCounterSet {
+                    ratios: Vec::new(),
+                    ratio_gaps: Vec::new(),
                     identity,
                     scope: MeasurementScope::Database,
                     counters,

@@ -5,6 +5,8 @@ use std::time::SystemTime;
 
 fn point(source: &str) -> ReplicationObservation {
     let set = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("slot-a"),
         scope: MeasurementScope::Server,
         properties: BTreeMap::from([

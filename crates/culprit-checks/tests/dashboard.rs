@@ -354,6 +354,7 @@ fn slow_log_lock_time_is_not_called_where_time_goes() {
     workload.source = "slow query log".into();
     workload.windowed = true;
     r.snapshot.waits = vec![culprit_core::WaitStat {
+        mechanism: None,
         category: "Lock".into(),
         wait_type: Some("lock time".into()),
         wait_ms: 9.0,
@@ -629,6 +630,7 @@ fn saved_postgres_io_that_exceeds_execution_time_is_not_an_exclusive_share() {
     w.queries[0].total_time_ms = 100.0;
     w.queries[0].mean_time_ms = 100.0 / w.queries[0].executions;
     w.queries[0].waits = vec![WaitStat {
+        mechanism: None,
         category: "IO".into(),
         wait_type: Some("data file reads and writes".into()),
         wait_ms: 150.0,

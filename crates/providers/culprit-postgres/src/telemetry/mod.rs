@@ -161,6 +161,8 @@ impl Recipe {
                 let source = kind.source().to_owned();
                 let record = if matches!(kind, native::catalog::Kind::Statistics) {
                     let counters = NativeCounterSet {
+                        ratios: Vec::new(),
+                        ratio_gaps: Vec::new(),
                         identity: definition.identity.clone(),
                         scope: culprit_core::MeasurementScope::Database,
                         counters: vec![],
@@ -393,6 +395,7 @@ impl SnapshotReader for PostgresSnapshotReader {
             native::memory::Access::Unsupported
         };
         Ok(SnapshotRecheck {
+            execution: None,
             unchanged: (if matches!(self.recipe, Recipe::Replication) {
                 before.same_replication_source(&after)
             } else {

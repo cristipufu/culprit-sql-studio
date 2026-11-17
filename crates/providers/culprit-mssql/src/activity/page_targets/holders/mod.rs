@@ -174,7 +174,7 @@ impl<R: NativeRead> ActivityReader<R> {
         let rows = self
             .io
             .query(
-                &sql::point(self.options.identity),
+                &sql::point(self.options.identity, self.request_page_server_read_capability),
                 vec![
                     Parameter::Integer(HOLDER_POINT_ROWS as i64),
                     Parameter::Integer(i64::from(focus.task.session_id)),

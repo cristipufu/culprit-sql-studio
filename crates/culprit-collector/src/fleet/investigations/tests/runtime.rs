@@ -230,7 +230,7 @@ async fn admitted_missing_focus_keeps_lineage_and_original_after_terminal_retire
     assert_eq!(intents.len(), 1);
     let intent = intents[0].clone();
     let key = intent.key().unwrap();
-    let original = runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap();
+    let original = runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.unwrap();
     assert_eq!(runtime.fixture.outbox.investigation_parent_keys().await.unwrap(), vec![key.clone()]);
 
     let job = runtime.take_focus().await;
@@ -287,12 +287,12 @@ async fn admitted_missing_focus_keeps_lineage_and_original_after_terminal_retire
     assert_eq!(revisions.len(), 1);
     let episode = &revisions[0].episode;
     assert_eq!(episode.id, intent.episode_id);
-    assert_eq!(episode.latest, intent.focus.participant().parent);
+    assert_eq!(episode.latest, intent.focus.parent().clone());
     assert_eq!(episode.lifecycle, DiagnosticLifecycle::Resolved);
     assert_eq!(episode.analysis, DiagnosticAnalysisStatus::Unresolved);
     assert_eq!(episode.issue, Some(DiagnosticAnalysisIssue::NativeContextGone));
     assert!(episode.report.is_none(), "a missing participant never supplies a mapped target or causal report");
-    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap(), original);
+    assert_eq!(runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.unwrap(), original);
 
     runtime.reconcile().await;
     assert!(runtime.fixture.journal.focused_intent(&key).await.unwrap().is_none());
@@ -309,10 +309,10 @@ async fn admitted_missing_focus_keeps_lineage_and_original_after_terminal_retire
     let mut reopened = Outbox::open(&directory.path().join("outbox")).unwrap();
     let recovered = reopened.recover().await.unwrap();
     assert_eq!((recovered.interrupted, recovered.quarantined, recovered.source_debts), (0, 0, 0));
-    assert_eq!(reopened.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap(), original);
+    assert_eq!(reopened.diagnostic_evidence(intent.focus.parent()).await.unwrap(), original);
     let replayed = replay(
         &directory.path().join("outbox"),
-        &intent.focus.participant().parent.capture,
+        &intent.focus.parent().capture,
         &directory.path().join("original-after-restart"),
     )
     .await;
@@ -346,7 +346,7 @@ async fn complete_scope_recovery_preserves_one_owed_original_revalidation() {
     let job = runtime.take_focus().await;
     let intent = runtime.fixture.journal.focused_intent(&job.key).await.unwrap().unwrap();
     assert_eq!(intent.episode_id, recovered.id);
-    assert_eq!(intent.focus.participant().parent, recovered.latest);
+    assert_eq!(intent.focus.parent().clone(), recovered.latest);
     let result = runtime.execute(&job).await;
     let Outcome::FocusedComplete { result: captured } = &result.outcome else { panic!() };
     let captured = captured.clone();
@@ -431,7 +431,7 @@ async fn route_replacement_after_enrollment_withholds_before_factory_or_capture(
     let input = runtime
         .fixture
         .outbox
-        .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+        .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
         .await
         .unwrap();
     let episode =
@@ -448,11 +448,11 @@ async fn quiet_failed_and_withheld_attempts_can_retire_after_analysis_becomes_te
         assert!(runtime.enroll().await);
         let job = runtime.take_focus().await;
         let intent = runtime.fixture.journal.focused_intent(&job.key).await.unwrap().unwrap();
-        let original = runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap();
+        let original = runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.unwrap();
         let before = runtime
             .fixture
             .outbox
-            .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
             .await
             .unwrap()
             .checkpoint
@@ -484,7 +484,7 @@ async fn quiet_failed_and_withheld_attempts_can_retire_after_analysis_becomes_te
         let current = runtime
             .fixture
             .outbox
-            .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
             .await
             .unwrap()
             .checkpoint
@@ -508,15 +508,12 @@ async fn quiet_failed_and_withheld_attempts_can_retire_after_analysis_becomes_te
             current, expected,
             "settled retry changes analysis state without rewriting native lifecycle, scope or evidence"
         );
-        assert_eq!(
-            runtime.fixture.outbox.diagnostic_evidence(&intent.focus.participant().parent).await.unwrap(),
-            original
-        );
+        assert_eq!(runtime.fixture.outbox.diagnostic_evidence(intent.focus.parent()).await.unwrap(), original);
         assert_eq!(runtime.native_calls(), calls, "persisted retry-state inspection performs no native work");
 
         set_analysis(
             &mut runtime.fixture.outbox,
-            &intent.focus.participant().parent,
+            intent.focus.parent(),
             &intent.episode_id,
             DiagnosticAnalysisStatus::Unresolved,
             Some(DiagnosticAnalysisIssue::EvidenceUnavailable),
@@ -554,7 +551,7 @@ async fn an_interrupted_admission_cannot_release_its_parent_when_analysis_later_
 
     set_analysis(
         &mut runtime.fixture.outbox,
-        &intent.focus.participant().parent,
+        intent.focus.parent(),
         &intent.episode_id,
         DiagnosticAnalysisStatus::Unresolved,
         Some(DiagnosticAnalysisIssue::EvidenceUnavailable),

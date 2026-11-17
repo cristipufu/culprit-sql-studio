@@ -2,6 +2,7 @@ use super::*;
 use crate::{read::ReadResult, value::Val};
 use std::collections::VecDeque;
 mod replicas;
+mod request_page_server_reads;
 
 struct Call {
     sql: String,
@@ -493,7 +494,10 @@ async fn endpoint_projection_works_for_sql_server_without_azure_database_identit
     );
     let live = crate::live::collect_from(&mut reader).await.unwrap();
     assert_eq!(live.sessions.len(), 1);
-    assert_eq!(reader.io.calls[0].sql, sql::metadata(IdentityDetail::Endpoint));
+    assert_eq!(
+        reader.io.calls[0].sql,
+        sql::metadata(IdentityDetail::Endpoint, page_server_reads::Availability::Unknown)
+    );
     assert_eq!(reader.query_count(), 2);
 }
 

@@ -9,6 +9,7 @@
      "key": "latch",
      "label": "In-memory contention",
      "meaning": "Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 300.0,
@@ -45,6 +46,7 @@
      "key": "parallelism",
      "label": "Parallel queries",
      "meaning": "Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 300.0,
@@ -81,6 +83,7 @@
      "key": "memory",
      "label": "Memory",
      "meaning": "Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 600.0,
@@ -141,6 +144,7 @@
      "key": "cpu",
      "label": "CPU",
      "meaning": "Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 6.0,
@@ -169,6 +173,7 @@
      "key": "lock",
      "label": "Locks",
      "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 4.0,
@@ -218,6 +223,7 @@
      "key": "io",
      "label": "Disk reads",
      "meaning": "Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 1.0,
@@ -268,6 +274,7 @@
      "key": "rows",
      "label": "Row access",
      "meaning": "Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.613696015860944,
      "top_wait": null,
@@ -279,6 +286,7 @@
      "key": "io",
      "label": "Disk reads",
      "meaning": "Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.3862258762891582,
      "top_wait": null,
@@ -290,6 +298,7 @@
      "key": "lock",
      "label": "Locks",
      "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 4.0,
@@ -340,6 +349,7 @@
      "key": "rows",
      "label": "Row access",
      "meaning": "Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.9946136342566969,
      "top_wait": "wait/io/table/sql/handler",
@@ -351,6 +361,7 @@
      "key": "io",
      "label": "Disk reads",
      "meaning": "Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.005346067210619796,
      "top_wait": "wait/io/file/innodb/innodb_data_file",
@@ -362,6 +373,7 @@
      "key": "lock",
      "label": "Locks",
      "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
+     "mechanisms": [],
      "queries": [
       {
        "executions": 30000.0,
@@ -3110,6 +3122,7 @@
      "key": "latch",
      "label": "In-memory contention",
      "meaning": "Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.7741593186278652,
      "top_wait": "Latch",
@@ -3121,6 +3134,7 @@
      "key": "parallelism",
      "label": "Parallel queries",
      "meaning": "Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.16588256284568648,
      "top_wait": "Parallelism",
@@ -3132,6 +3146,7 @@
      "key": "memory",
      "label": "Memory",
      "meaning": "Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.05584509489064804,
      "top_wait": "Memory",
@@ -3143,6 +3158,7 @@
      "key": "cpu",
      "label": "CPU",
      "meaning": "Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.003972166661971434,
      "top_wait": "CPU",
@@ -3154,6 +3170,7 @@
      "key": "lock",
      "label": "Locks",
      "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
+     "mechanisms": [],
      "queries": [],
      "share": 0.00014085697382877426,
      "top_wait": "Lock",

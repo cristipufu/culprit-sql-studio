@@ -42,6 +42,8 @@ fn observation(row: &Rec) -> Result<ReplicationObservation> {
     let properties = fields::properties(row)?;
     let channel = properties.get("channel").cloned().ok_or_else(invalid)?;
     let set = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(serde_json::to_string(&channel).map_err(|_| invalid())?),
         scope: MeasurementScope::Server,
         properties,

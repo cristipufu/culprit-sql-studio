@@ -32,7 +32,7 @@ pub(super) fn captured_read(capture: &EvidenceCapture) -> Result<CapturedReadRef
     CapturedReadRef::new(capture.source(), capture.capture().clone(), capture.capture_manifest_sha256().into(), streams)
 }
 
-pub(super) fn analysis_reference(
+pub(crate) fn analysis_reference(
     original: &CapturedReadBinding<'_>,
     record: &culprit_core::collected_analysis::CollectedAnalysisRecord,
 ) -> Result<CapturedRecordReference> {

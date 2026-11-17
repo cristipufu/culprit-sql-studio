@@ -10,6 +10,7 @@ fn capture(recorded_ms: f64) -> Snapshot {
     query.mean_time_ms = 5_000.0;
     query.rows = Some(4_000.0);
     query.waits = vec![WaitStat {
+        mechanism: None,
         category: WaitClass::Network.category().into(),
         wait_type: Some("Native.TransportWait".into()),
         wait_ms: recorded_ms,

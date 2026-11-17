@@ -104,6 +104,7 @@ pub(crate) fn lock_waits(milliseconds: Option<f64>) -> Vec<WaitStat> {
     milliseconds
         .filter(|ms| *ms > 0.0)
         .map(|wait_ms| WaitStat {
+            mechanism: None,
             category: "Lock".into(),
             wait_type: Some(LOCK_TIME_FIELD.into()),
             wait_ms,

@@ -65,6 +65,7 @@ pub(crate) fn lock_waits(milliseconds: Option<f64>) -> Vec<culprit_core::WaitSta
     milliseconds
         .filter(|ms| *ms > 0.0)
         .map(|wait_ms| culprit_core::WaitStat {
+            mechanism: None,
             category: "Lock".into(),
             wait_type: Some(format!("{SOURCE}.{LOCK_TIME_COLUMN}")),
             wait_ms,

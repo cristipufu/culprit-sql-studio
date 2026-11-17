@@ -10,6 +10,7 @@ impl SnapshotRecipe for QueryCompilation {
     const NAME: &'static str = "query-compilation-state";
     const SOURCE: &'static Source = &crate::sources::QUERY_COMPILATION;
     const INSTANCE_LOCAL: bool = false;
+    const SOURCE_READ: Option<SourceReadQuestion> = Some(SourceReadQuestion::CompilationHistory);
     const REQUIRES_FULL_METADATA: bool = true;
 
     async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<()>> {

@@ -98,6 +98,7 @@ impl SnapshotReader for Reader {
     }
     async fn recheck(&mut self, _: &CollectionDescription) -> Result<SnapshotRecheck> {
         Ok(SnapshotRecheck {
+            execution: None,
             unchanged: self.identity.as_ref().is_some_and(|identity| identity.unchanged(&self.path)),
             observed_until: self.observed_until.clone(),
             scopes: vec![self.scope.take().ok_or_else(native::invalid)?],

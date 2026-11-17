@@ -12,6 +12,8 @@ fn row(io: Option<&str>, sql: Option<&str>, counters: &[(&str, u64)]) -> Replica
         properties.insert("sql_running".into(), sql.into());
     }
     let measurements = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new("\"orders\""),
         scope: MeasurementScope::Server,
         properties,

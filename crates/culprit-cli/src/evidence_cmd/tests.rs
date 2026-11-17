@@ -712,3 +712,42 @@ fn archive_group_resolution_rejects_missing_unknown_and_ambiguous_identities_wit
         "the default delegates every independent group to the pure API"
     );
 }
+
+#[test]
+fn native_wait_counter_read_selects_its_canonical_family_without_automatic_recovery_or_analysis() {
+    let range = culprit_core::telemetry::digest(b"native-wait-counter-capture");
+    let parsed = crate::Cli::try_parse_from([
+        "culprit",
+        "collect",
+        "evidence",
+        "read",
+        "--config",
+        "archive.json",
+        "--range",
+        &range,
+        "--family",
+        "wait-counter-samples",
+        "--json",
+    ])
+    .unwrap();
+    let crate::Command::Collect(crate::collect_cmd::CollectCommand::Evidence(EvidenceCommand::Read(args))) =
+        parsed.command
+    else {
+        panic!("native wait counter archive read")
+    };
+    let request = args.common.request(args.families.into_iter().map(Into::into).collect(), Format::Json).unwrap();
+    assert_eq!(request.families, [EvidenceFamily::WaitCounterSamples]);
+    assert!(request.budget.recovery_payloads.is_none());
+}
+
+#[test]
+fn native_counter_ratio_analysis_uses_only_operational_evidence_with_existing_cumulative_budget() {
+    for (flags, format) in [(&["--json"][..], Format::Json), (&[][..], Format::Text)] {
+        let args = analyze_args("counter-ratios", flags);
+        assert!(args.analysis == Analysis::CounterRatios);
+        args.validate_selection().unwrap();
+        let request = args.common.request(args.analysis.families(), format).unwrap();
+        assert_eq!(request.families, [EvidenceFamily::OperationalSamples]);
+        assert!(request.budget.recovery_payloads.is_none());
+    }
+}

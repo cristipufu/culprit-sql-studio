@@ -10,6 +10,24 @@ fn owner(key: &str) -> Result<String> {
     Ok(format!("{OWNER_PREFIX}{key}"))
 }
 
+/// Keep the one completed control input until Fleet durably acknowledges this exact intent. The existing
+/// investigation owner releases both prerequisites and the result, including after a lost completion ack.
+pub(super) fn pin_source_read_result(
+    tx: &Transaction<'_>,
+    intent: &DiagnosticInvestigationIntent,
+    result: &CaptureIdentity,
+) -> Result<()> {
+    if !intent.is_valid() || !matches!(intent.focus, DiagnosticFocus::SourceRead { .. }) {
+        return Err(integrity());
+    }
+    tx.execute(
+        "INSERT OR IGNORE INTO diagnostic_pins VALUES(?1,?2)",
+        params![owner(&intent.key()?)?, result.observation_id],
+    )
+    .map_err(storage)?;
+    Ok(())
+}
+
 impl Files {
     pub(in crate::outbox) fn pin_investigation_parent(&mut self, intent: &DiagnosticInvestigationIntent) -> Result<()> {
         let owner = owner(&intent.key()?)?;
@@ -22,13 +40,15 @@ impl Files {
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
             expected.insert(owner.capture.observation_id.clone());
         }
+        let query_limit =
+            expected.len().checked_add(1).and_then(|limit| i64::try_from(limit).ok()).ok_or_else(integrity)?;
         let transaction = self.journal.conn.transaction().map_err(storage)?;
         let parents = {
             let mut query = transaction
-                .prepare("SELECT observation_id FROM diagnostic_pins WHERE owner=?1 LIMIT 3")
+                .prepare("SELECT observation_id FROM diagnostic_pins WHERE owner=?1 LIMIT ?2")
                 .map_err(storage)?;
             query
-                .query_map([&owner], |row| row.get::<_, String>(0))
+                .query_map(params![owner, query_limit], |row| row.get::<_, String>(0))
                 .map_err(storage)?
                 .collect::<rusqlite::Result<BTreeSet<_>>>()
                 .map_err(storage)?

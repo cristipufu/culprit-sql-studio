@@ -24,7 +24,7 @@ function informationalReport(): PageServerReadReport {
   if (!entry) throw new Error("The fixture requires one original runtime fragment");
   entry.identity = {
     kind: "runtime-fragment",
-    reference: { kind: "informational", position: { stream: "query-runtime", row_ordinal: 1, payload_sha256: "c".repeat(64) } },
+    reference: { kind: "informational", position: { stream: "query-runtime", row_ordinal: 0, payload_sha256: "c".repeat(64) } },
     native: { native: { id: "17", qualifiers: {} }, references: { query: { native: { id: "query-17", qualifiers: {} }, definition_id: null }, plan: null }, cohort: null },
   };
   report.limitations = [t("view.page_server_reads.limit.references")];
@@ -36,7 +36,7 @@ test("unresolved fragments disclose their original position and exact counters w
   const html = renderToStaticMarkup(<PageServerReads report={informationalReport()} />);
   expect(html).toContain(EXACT_PAGE_SERVER_PAGES);
   expect(html).not.toContain("9007199254740992");
-  expect(html).toContain(`<dt>${t("ui.page_server_reads.position")}</dt><dd>1</dd>`);
+  expect(html).toContain(`<dt>${t("ui.page_server_reads.position")}</dt><dd>0</dd>`);
   expect(html).toContain(t("view.page_server_reads.limit.identity"));
   expect(html).toContain(t("view.page_server_reads.limit.references"));
   expect(html).not.toContain("PRIVATE-ORIGINAL-CAPTURE");

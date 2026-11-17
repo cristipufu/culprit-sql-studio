@@ -9,6 +9,8 @@ pub fn connection_outcome_evidence_cases() -> Vec<(CollectionDescription, Vec<Te
     let unrelated = point(
         "pg_stat_database_conflicts",
         NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new("pg_stat_database_conflicts").qualified("dbid", "16384"),
             scope: MeasurementScope::Database,
             counters: vec![counter(
@@ -40,6 +42,8 @@ pub fn connection_outcome_evidence_cases() -> Vec<(CollectionDescription, Vec<Te
             vec![point(
                 "pg_stat_archiver",
                 NativeCounterSet {
+                    ratios: Vec::new(),
+                    ratio_gaps: Vec::new(),
                     identity: NativeIdentity::new("pg_stat_archiver"),
                     scope: MeasurementScope::Server,
                     counters: vec![counter(
@@ -117,6 +121,8 @@ fn postgres_row(present: bool, version: u32, reset: ResetMarker) -> TelemetryRec
     point(
         source,
         NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: NativeIdentity::new(source)
                 .qualified("dbid", "16384")
                 .qualified("postmaster_started_at", "2020-01-02T11:59:00Z"),
@@ -149,6 +155,8 @@ fn mysql_rows() -> Vec<TelemetryRecord> {
         point(
             "global-status",
             NativeCounterSet {
+                ratios: Vec::new(),
+                ratio_gaps: Vec::new(),
                 identity: NativeIdentity::new(key),
                 scope: MeasurementScope::Server,
                 counters: vec![counter(

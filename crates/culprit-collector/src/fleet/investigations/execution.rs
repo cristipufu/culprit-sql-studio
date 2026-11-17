@@ -44,7 +44,7 @@ impl Investigations {
                 match resolve_optional_evidence(
                     storage.outbox,
                     &job.connection,
-                    &intent.focus.participant().parent,
+                    intent.focus.parent(),
                     storage.recovery,
                     cancellation,
                 )
@@ -82,7 +82,7 @@ impl Investigations {
         .await?;
         let request = CollectionRequest {
             subject: job.subject.clone(),
-            selection: ready.intent.selection(),
+            selection: ready.intent.selection()?,
             budget: ready.intent.budget.clone(),
         };
         let manifest = match admitted
@@ -122,7 +122,20 @@ impl Investigations {
         {
             return Err(CollectionStop::InvalidPage.error());
         }
-        let result = if manifest.status == CollectionStatus::Complete {
+        let attempt = admitted.attempt()?.ok_or_else(|| DeliveryProblem::Integrity.error())?;
+        let result = if manifest.status == CollectionStatus::Complete
+            && matches!(ready.intent.focus, DiagnosticFocus::SourceRead { .. })
+        {
+            let source = manifest.description.as_ref().ok_or_else(|| DeliveryProblem::Integrity.error())?;
+            if !super::queue::result_matches_intent(source, manifest.investigation.as_ref(), &ready.intent)? {
+                return Err(DeliveryProblem::Integrity.error());
+            }
+            Some(DiagnosticCaptureRef {
+                capture: manifest.capture.clone(),
+                manifest_sha256: attempt.manifest_sha256.clone().ok_or_else(|| DeliveryProblem::Integrity.error())?,
+                source_scope_id: source.captured_range()?.scope_id,
+            })
+        } else if manifest.status == CollectionStatus::Complete {
             let input = storage
                 .outbox
                 .diagnostic_input(&manifest.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
@@ -137,18 +150,19 @@ impl Investigations {
         } else {
             None
         };
-        let attempt = admitted.attempt()?.ok_or_else(|| DeliveryProblem::Integrity.error())?;
         let mut completed = work::completed_for(job.into(), manifest, None, false)?;
         completed.outcome = match result {
             Some(result) => {
-                record_attempt(
-                    storage.outbox,
-                    &intent,
-                    Some(attempt),
-                    admitted.source_work(),
-                    DiagnosticInvestigationOutcome::Captured { capture: result.clone() },
-                )
-                .await?;
+                if !matches!(intent.focus, DiagnosticFocus::SourceRead { .. }) {
+                    record_attempt(
+                        storage.outbox,
+                        &intent,
+                        Some(attempt),
+                        admitted.source_work(),
+                        DiagnosticInvestigationOutcome::Captured { capture: result.clone() },
+                    )
+                    .await?;
+                }
                 Outcome::FocusedComplete { result }
             }
             None => {
@@ -222,7 +236,7 @@ impl Investigations {
         let Some((source, original)) = resolve_optional_evidence(
             storage.outbox,
             &job.connection,
-            &intent.focus.participant().parent,
+            intent.focus.parent(),
             storage.recovery,
             cancellation,
         )
@@ -230,10 +244,7 @@ impl Investigations {
         else {
             return Ok(missing_evidence(cancellation));
         };
-        let TelemetryRecord::Activity(original) = &original.record else {
-            return Err(CollectionStop::InvalidPage.error());
-        };
-        if !intent.focus.matches_parent(&source, original, &intent.focus.participant().parent) {
+        if !intent.matches_parent_record(&source, &original) {
             return Err(CollectionStop::InvalidPage.error());
         }
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
@@ -250,7 +261,7 @@ impl Investigations {
         storage.outbox.pin_investigation_parent(intent).await?;
         let current = storage
             .outbox
-            .diagnostic_input(&intent.focus.participant().parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+            .diagnostic_input(&intent.focus.parent().capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
             .await?;
         let episode = current
             .checkpoint

@@ -1,7 +1,14 @@
 //! Native cumulative waits. Export keeps nonzero native types; app projections choose relevant categories.
 use crate::read::{NativeRead, ReadResult, integer, invalid_data, text};
-use culprit_core::{MeasurementScope, ResetMarker, WaitStat, source_id, telemetry::WaitCounterObservation};
+use culprit_core::{
+    MeasurementScope, ResetMarker, WaitStat, source_id,
+    telemetry::{WaitCounterObservation, WaitMechanism},
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+pub(crate) fn mechanism(wait_type: &str) -> Option<WaitMechanism> {
+    culprit_core::Engine::Mssql.spec().native_wait_mechanism(wait_type)
+}
 
 pub(crate) type WaitTotals = HashMap<String, (f64, f64, f64)>;
 pub(crate) const MAX_WAIT_TYPES: usize = 4096;
@@ -22,6 +29,7 @@ OPTION (MAXDOP 1)"
     rows.iter()
         .map(|row| {
             let observation = WaitCounterObservation {
+                mechanism: mechanism(&text(row, "wait_type")?),
                 source: source_id::WAITS.into(),
                 wait_type: text(row, "wait_type")?,
                 scope: if database_scope { MeasurementScope::Database } else { MeasurementScope::Server },
@@ -32,7 +40,7 @@ OPTION (MAXDOP 1)"
                 signal_wait_time_ms: integer(row, "signal_wait_time_ms")?.to_string(),
                 max_wait_time_ms: integer(row, "max_wait_time_ms")?.to_string(),
             };
-            if !observation.is_valid() || !seen.insert(observation.wait_type.clone()) {
+            if !observation.is_valid_for(culprit_core::Engine::Mssql) || !seen.insert(observation.wait_type.clone()) {
                 return Err(invalid_data().into());
             }
             Ok(observation)
@@ -64,6 +72,7 @@ pub(crate) fn deltas(
         };
         if previous.scope != current.scope
             || previous.reset != current.reset
+            || previous.mechanism != current.mechanism
             || values(previous).into_iter().zip(values(current)).any(|(old, new)| new < old)
         {
             return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
@@ -93,24 +102,40 @@ pub(crate) fn relevant(wait: &str) -> bool {
     !BENIGN_WAITS.contains(&wait) && !wait.starts_with("SLEEP_")
 }
 
-pub(crate) fn categories(totals: &WaitTotals) -> Vec<WaitStat> {
-    let mut categories: BTreeMap<&str, (f64, f64, String, f64)> = BTreeMap::new();
-    for (wait_type, (ms, _, tasks)) in totals {
-        let entry = categories.entry(wait_type_category(wait_type)).or_default();
-        entry.0 += ms;
-        entry.1 += tasks;
-        if *ms > entry.3 || (*ms == entry.3 && (entry.2.is_empty() || wait_type < &entry.2)) {
-            entry.2 = wait_type.clone();
-            entry.3 = *ms;
+#[derive(Default)]
+struct CategoryTotals {
+    wait_ms: f64,
+    tasks: f64,
+    top_wait: String,
+    top_wait_ms: f64,
+}
+impl CategoryTotals {
+    fn record(&mut self, wait_type: &str, wait_ms: f64, tasks: f64) {
+        self.wait_ms += wait_ms;
+        self.tasks += tasks;
+        if wait_ms > self.top_wait_ms
+            || (wait_ms == self.top_wait_ms && (self.top_wait.is_empty() || wait_type < self.top_wait.as_str()))
+        {
+            self.top_wait = wait_type.to_owned();
+            self.top_wait_ms = wait_ms;
         }
+    }
+}
+
+pub(crate) fn categories(totals: &WaitTotals) -> Vec<WaitStat> {
+    let mut categories: BTreeMap<(&str, Option<WaitMechanism>), CategoryTotals> = BTreeMap::new();
+    for (wait_type, (ms, _, tasks)) in totals {
+        let entry = categories.entry((wait_type_category(wait_type), mechanism(wait_type))).or_default();
+        entry.record(wait_type, *ms, *tasks);
     }
     let mut result: Vec<_> = categories
         .into_iter()
-        .map(|(category, (ms, tasks, top, _))| WaitStat {
+        .map(|((category, mechanism), totals)| WaitStat {
+            mechanism,
             category: category.into(),
-            wait_type: Some(top),
-            wait_ms: ms,
-            tasks: Some(tasks),
+            wait_type: Some(totals.top_wait),
+            wait_ms: totals.wait_ms,
+            tasks: Some(totals.tasks),
         })
         .collect();
     result.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms).then_with(|| a.category.cmp(&b.category)));
@@ -207,6 +232,9 @@ pub(crate) fn is_lock_wait_type(wait_type: &str) -> bool {
     wait_type.get(..4).is_some_and(|prefix| prefix.eq_ignore_ascii_case("LCK_"))
 }
 pub(crate) fn wait_type_category(wait_type: &str) -> &'static str {
+    if let Some(mechanism) = mechanism(wait_type) {
+        return mechanism.class().category();
+    }
     let w = wait_type.to_ascii_uppercase();
     if is_lock_wait_type(&w) {
         return "Lock";

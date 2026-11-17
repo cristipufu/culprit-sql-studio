@@ -65,7 +65,7 @@ pub fn compiler_admission_investigation_fixture() -> InvestigationFixture {
 
 pub fn compiler_admission_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
     let fixture = compiler_admission_investigation_fixture();
-    let focus = fixture.intent.focus.participant();
+    let focus = fixture.intent.focus.activity_participant().unwrap();
     let at = "2020-01-01T12:00:01Z";
     let waiter = CompilerWaiterObservation { observed_at: at.into(), request: focus.original.clone() };
     let mut records = vec![TelemetryRecord::Operational(OperationalObservation {
@@ -100,6 +100,8 @@ pub fn compiler_admission_evidence() -> (CollectionDescription, Vec<TelemetryRec
             ));
         }
         let native = NativeCounterSet {
+            ratios: Vec::new(),
+            ratio_gaps: Vec::new(),
             identity: identity.clone(),
             scope: MeasurementScope::Server,
             counters,
@@ -143,7 +145,7 @@ pub fn compiler_admission_evidence() -> (CollectionDescription, Vec<TelemetryRec
     };
     assert!(source.matches_request(&CollectionRequest {
         subject: fixture.intent.subject(),
-        selection: fixture.intent.selection(),
+        selection: fixture.intent.selection().unwrap(),
         budget: fixture.intent.budget
     }));
     (source, records)

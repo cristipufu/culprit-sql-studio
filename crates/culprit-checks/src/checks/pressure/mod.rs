@@ -21,6 +21,8 @@ mod held_cleanup;
 mod memory_grant;
 mod memory_queue;
 mod network_wait;
+#[cfg(test)]
+mod resource_accounting_tests;
 mod row_lock_waits;
 #[cfg(test)]
 mod tests;

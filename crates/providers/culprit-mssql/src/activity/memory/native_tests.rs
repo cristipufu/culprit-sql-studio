@@ -159,7 +159,7 @@ async fn prove_native_grants(
     let layout = fields::observed_layout(&frame.grants.first().unwrap().available_columns);
     assert_no_execution_grant(
         &mut qualification,
-        &sql::observation(&layout, IdentityDetail::Endpoint),
+        &sql::observation(&layout, IdentityDetail::Endpoint, frame.context.request_page_server_read_capability),
         vec![Parameter::Integer(65)],
     )
     .await;

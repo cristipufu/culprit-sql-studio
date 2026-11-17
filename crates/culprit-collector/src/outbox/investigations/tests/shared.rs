@@ -97,7 +97,7 @@ impl SharedInvestigation {
     fn focused(&mut self, owned: bool, missing: bool) -> CaptureIdentity {
         let request = CollectionRequest {
             subject: self.intent.subject(),
-            selection: self.intent.selection(),
+            selection: self.intent.selection().unwrap(),
             budget: self.intent.budget.clone(),
         };
         let result = ActivityWaitFocusResult {
@@ -195,9 +195,9 @@ fn shared_input_keeps_immutable_lineage_and_the_original_database_head_after_res
     let mut fixture = SharedInvestigation::new();
     let focused = fixture.focused(true, false);
     let input = fixture.files.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
-    assert_ne!(input.source.target, fixture.intent.focus.participant().target);
-    assert_eq!(input.controller_target().unwrap(), &fixture.intent.focus.participant().target);
-    assert_eq!(input.checkpoint.as_ref().unwrap().target, fixture.intent.focus.participant().target);
+    assert_ne!(input.source.target, fixture.intent.focus.target().clone());
+    assert_eq!(input.controller_target().unwrap(), fixture.intent.focus.target());
+    assert_eq!(input.checkpoint.as_ref().unwrap().target, fixture.intent.focus.target().clone());
     assert_eq!(input.investigation_intent().unwrap().unwrap().key().unwrap(), fixture.intent.key().unwrap());
     let expected = input.checkpoint.clone();
     let path = fixture.root.path().join("outbox");
@@ -207,7 +207,7 @@ fn shared_input_keeps_immutable_lineage_and_the_original_database_head_after_res
     let input = reopened.next_diagnostic_input(DIAGNOSTIC_CONTROLLER_VERSION).unwrap().unwrap();
     assert_eq!(input.parent.capture, focused);
     assert_eq!(input.checkpoint, expected);
-    assert_eq!(input.controller_target().unwrap(), &fixture.intent.focus.participant().target);
+    assert_eq!(input.controller_target().unwrap(), fixture.intent.focus.target());
     assert_eq!(input.investigation_intent().unwrap().unwrap().key().unwrap(), fixture.intent.key().unwrap());
 }
 
@@ -299,9 +299,9 @@ async fn offline_shared_result_updates_only_the_original_database_checkpoint() {
     let input = outbox.diagnostic_input(&focused.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap();
     assert_eq!(input.source, native_source);
     let checkpoint = input.checkpoint.unwrap();
-    assert_eq!(checkpoint.target, fixture.intent.focus.participant().target);
+    assert_eq!(checkpoint.target, fixture.intent.focus.target().clone());
     assert_eq!(checkpoint.episodes.len(), 1);
-    assert_eq!(checkpoint.episodes[0].first, fixture.intent.focus.participant().parent);
+    assert_eq!(checkpoint.episodes[0].first, fixture.intent.focus.parent().clone());
     assert_eq!(checkpoint.episodes[0].report.as_ref().unwrap().evidence().capture, focused);
     assert_eq!(
         outbox.diagnostic_input_state(&input.parent, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
@@ -459,7 +459,7 @@ async fn cold_shared_inputs_authenticate_and_cache_both_originals_without_revivi
         DiagnosticExecutionBinding::Shared { owner } => owner.as_ref(),
         _ => unreachable!(),
     };
-    for reference in [&fixture.intent.focus.participant().parent, owner] {
+    for reference in [fixture.intent.focus.parent(), owner] {
         assert_eq!(
             cold.diagnostic_evidence(reference).await.unwrap_err().detail,
             Some(culprit_core::ErrorDetail::Outbox(OutboxProblem::MissingCapture))
@@ -483,7 +483,7 @@ async fn cold_shared_inputs_authenticate_and_cache_both_originals_without_revivi
         .unwrap(),
         1
     );
-    for reference in [&fixture.intent.focus.participant().parent, owner] {
+    for reference in [fixture.intent.focus.parent(), owner] {
         assert!(cold.diagnostic_evidence(reference).await.is_ok());
         assert_eq!(
             cold.diagnostic_input_state(&reference.capture_ref(), DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap(),
@@ -510,7 +510,7 @@ async fn cold_shared_inputs_authenticate_and_cache_both_originals_without_revivi
     let committed = stage_and_commit(&store, ownership.fence(), previous.as_deref(), &prepared).await.unwrap();
     let head = store.diagnostic_heads(None, 10).await.unwrap().heads.remove(0);
     let restored = crate::delivery::diagnostic_recovery::load_diagnostic_checkpoint(&store, &head).await.unwrap();
-    assert_eq!(restored.checkpoint().target, fixture.intent.focus.participant().target);
+    assert_eq!(restored.checkpoint().target, fixture.intent.focus.target().clone());
     assert_eq!(restored.checkpoint().input.capture, focused);
     assert_eq!(head.range_id, committed.manifest().range_id);
     assert!(!store.diagnostic_input_pending(&pending.parent, DIAGNOSTIC_CONTROLLER_VERSION).await.unwrap());
@@ -525,6 +525,6 @@ async fn cold_shared_inputs_authenticate_and_cache_both_originals_without_revivi
             .unwrap()
             .controller_target()
             .unwrap(),
-        &fixture.intent.focus.participant().target
+        fixture.intent.focus.target()
     );
 }

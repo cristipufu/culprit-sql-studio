@@ -31,17 +31,22 @@ impl RecipeCostReceipt {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.recipe_id)
             && self.recipe_version > 0
-            && matches!(
-                self.selector,
-                RecipeSelector::FocusedPageWait
-                    | RecipeSelector::FocusedBlocking
-                    | RecipeSelector::FocusedPageWaitWriters
-                    | RecipeSelector::FocusedPageTaskHolders
-                    | RecipeSelector::FocusedRequestMemory
-                    | RecipeSelector::FocusedCompilationAdmission
-                    | RecipeSelector::CurrentRequestWork
-                    | RecipeSelector::PageWaitTasks
-            )
+            && match (&self.scope, self.selector) {
+                (RecipeCostScope::NativeRead(_), selector) => {
+                    selector == SourceReadQuestion::CompilationHistory.selector()
+                }
+                (_, selector) => matches!(
+                    selector,
+                    RecipeSelector::FocusedPageWait
+                        | RecipeSelector::FocusedBlocking
+                        | RecipeSelector::FocusedPageWaitWriters
+                        | RecipeSelector::FocusedPageTaskHolders
+                        | RecipeSelector::FocusedRequestMemory
+                        | RecipeSelector::FocusedCompilationAdmission
+                        | RecipeSelector::CurrentRequestWork
+                        | RecipeSelector::PageWaitTasks
+                ),
+            }
             && self.scope.is_valid()
             && self.scope.native_epoch().is_some()
             && self.scope.partition().is_qualified()
@@ -168,7 +173,7 @@ impl DiagnosticInvestigationLineage {
         let intent = self.reconstruct(&self.focus)?;
         if intent.budget != request.budget
             || intent.subject() != request.subject
-            || intent.selection() != request.selection
+            || intent.selection()? != request.selection
         {
             return Err(invalid());
         }
@@ -196,6 +201,33 @@ impl DiagnosticInvestigationIntent {
             recipe_version: recipe.version,
             focus,
             execution: DiagnosticExecutionBinding::Database,
+            budget: receipt.tested_budget.clone(),
+            qualification: receipt.as_ref().clone(),
+        };
+        if !value.matches_admission(episode, recipe, component, caller_budget) {
+            return Err(invalid());
+        }
+        Ok(value)
+    }
+
+    /// Native execution approval is independent of the logical compilation dataset namespace. The caller
+    /// authenticates the original basis and selected registration's cost artifact before any live work.
+    pub fn new_source_read(
+        episode: &DiagnosticEpisode,
+        recipe: &RecipeDescriptor,
+        focus: SourceReadFocus,
+        execution: NativeSourceReadScope,
+        component: &ComponentVersion,
+        caller_budget: &CollectionBudget,
+    ) -> Result<Self> {
+        let RecipeCostQualification::Measured(receipt) = &recipe.cost else { return Err(invalid()) };
+        let value = Self {
+            episode_id: episode.id.clone(),
+            episode_revision: episode.revision.clone(),
+            recipe_id: recipe.id.clone(),
+            recipe_version: recipe.version,
+            focus: DiagnosticFocus::SourceRead { focus: Box::new(focus) },
+            execution: DiagnosticExecutionBinding::NativeRead { execution: Box::new(execution) },
             budget: receipt.tested_budget.clone(),
             qualification: receipt.as_ref().clone(),
         };
@@ -267,12 +299,7 @@ impl DiagnosticInvestigationIntent {
             // can justify it. Another trigger cannot spend the same population stage again after restart.
             return page_wait_tasks_stage_key(&focus.parent.capture_ref(), &self.qualification.scope.target());
         }
-        hash(&(
-            "diagnostic-question-stage-v3",
-            &self.episode_id,
-            self.focus.selector(),
-            self.qualification.scope.target().telemetry_id()?,
-        ))
+        question_stage_key(&self.episode_id, self.focus.selector(), &self.qualification.scope.target())
     }
 
     /// Revalidate the immutable question against current, authenticated context. A newer same-episode revision
@@ -288,7 +315,7 @@ impl DiagnosticInvestigationIntent {
         let RecipeCostQualification::Measured(receipt) = &recipe.cost else { return false };
         self.is_valid()
             && self.matches_episode(episode)
-            && episode.analysis.needs_work()
+            && episode.needs_question(&self.focus)
             && recipe.is_valid()
             && self.qualification.matches_recipe(recipe)
             && self.qualification.key().ok() == receipt.key().ok()
@@ -296,6 +323,17 @@ impl DiagnosticInvestigationIntent {
             && *component == self.qualification.component
             && within(&self.budget, caller_budget)
     }
+}
+
+pub(super) fn question_stage_key(
+    episode_id: &str,
+    selector: RecipeSelector,
+    target: &CollectionTarget,
+) -> Result<String> {
+    if !valid_digest(episode_id) {
+        return Err(invalid());
+    }
+    hash(&("diagnostic-question-stage-v3", episode_id, selector, target.telemetry_id()?))
 }
 
 /// The exact earlier frame and execution resource identify one population stage before its rows are recovered.

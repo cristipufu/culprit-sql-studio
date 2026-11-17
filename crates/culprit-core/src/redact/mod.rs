@@ -13,6 +13,7 @@ mod jobs;
 mod page_server_reads;
 mod plan;
 mod replication;
+mod resource_counters;
 mod sql;
 mod statement_work;
 #[cfg(test)]
@@ -196,6 +197,7 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
         && matches!(
             (source, key.as_str()),
             (crate::source_id::SESSIONS, "view.connection_outcomes.invalid")
+                | (crate::source_id::PERFORMANCE_COUNTERS, "view.counter_ratios.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
                 | (crate::telemetry::CACHED_RUNTIME_READ_SOURCE, "view.completed_spills.invalid")
                 | (crate::source_id::QUERY_STORE, "view.page_server_reads.invalid")
@@ -229,6 +231,19 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     }
     if !s.runtime_populations.as_ref().is_some_and(|catalog| catalog.is_valid() && !catalog.partitioned) {
         s.runtime_populations = None;
+    }
+    let counters = s.pressure.as_mut().and_then(|pressure| pressure.resource_counters.take());
+    if let Some(counters) = counters {
+        let result = resource_counters::redact(counters);
+        let redacted = admit_shared_evidence(
+            &mut s,
+            crate::source_id::PERFORMANCE_COUNTERS,
+            crate::message!("view.counter_ratios.invalid"),
+            result,
+        );
+        if let Some(pressure) = &mut s.pressure {
+            pressure.resource_counters = redacted;
+        }
     }
     if let Some(identity) = &mut s.identity {
         redact_identity(identity);

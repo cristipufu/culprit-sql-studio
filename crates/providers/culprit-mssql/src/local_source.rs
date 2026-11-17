@@ -56,6 +56,7 @@ impl Context {
             && self.activity.database.database == frame.database.database
             && self.activity.writable == frame.writable
             && self.activity.replica_id == frame.replica_id
+            && self.activity.request_page_server_read_capability == frame.request_page_server_read_capability
             && frame.epoch.as_ref().is_none_or(|epoch| self.activity.epoch.as_ref() == Some(epoch))
     }
     pub(crate) fn same_source(&self, other: &Self) -> bool {
@@ -142,6 +143,8 @@ impl Context {
 #[derive(Clone, Copy)]
 pub(crate) enum Detail {
     Authority,
+    /// Activity request counters need their native column capability; unrelated authority reads do not.
+    Activity,
     PageLookup,
 }
 
@@ -288,7 +291,7 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
         )
     };
     let page = match detail {
-        Detail::Authority => "",
+        Detail::Authority | Detail::Activity => "",
         Detail::PageLookup => {
             ",CASE WHEN OBJECT_ID('sys.dm_db_page_info') IS NOT NULL THEN 1 ELSE 0 END AS page_info_available,CASE WHEN HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE STATE')=1 OR HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE PERFORMANCE STATE')=1 THEN 1 ELSE 0 END AS page_permission"
         }
@@ -309,7 +312,12 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
         process_columns =
             if identity == IdentityDetail::AzureDatabase { process::COLUMNS } else { process::UNAVAILABLE_COLUMNS }
     );
-    let query = sql::frame_query(&rows, identity, sql::QueryPolicy::SerialMetadata);
+    let query = match detail {
+        Detail::Authority => sql::frame_query(&rows, identity, sql::QueryPolicy::SerialMetadata),
+        Detail::Activity | Detail::PageLookup => {
+            sql::request_frame_query(&rows, identity, sql::QueryPolicy::SerialMetadata)
+        }
+    };
     if identity == IdentityDetail::AzureDatabase { format!("{}{query}", process::AZURE_READ) } else { query }
 }
 

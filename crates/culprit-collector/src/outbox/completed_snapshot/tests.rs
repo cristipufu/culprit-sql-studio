@@ -102,7 +102,7 @@ impl Fixture {
         assert!(attempt.manifest_sha256.is_some());
         Self { _temp: temp, outbox, directory, manifest, attempt }
     }
-    async fn read(&self, budget: CompletedSnapshotBudget) -> Result<CompletedSnapshot> {
+    async fn read(&self, budget: CompletedCaptureBudget) -> Result<CompletedSnapshot> {
         self.outbox
             .delivery()
             .completed_snapshot(
@@ -128,7 +128,7 @@ impl Fixture {
 #[tokio::test]
 async fn a_real_ready_capture_returns_original_canonical_rows_positions_and_exact_single_pass_bytes() {
     let fixture = Fixture::new(2, false).await;
-    let read = fixture.read(CompletedSnapshotBudget::default()).await.unwrap();
+    let read = fixture.read(CompletedCaptureBudget::default()).await.unwrap();
     assert_eq!(read.bytes_read(), fixture.bytes());
     assert_eq!(read.capture().capture, fixture.attempt.capture);
     assert_eq!(Some(read.capture().manifest_sha256.clone()), fixture.attempt.manifest_sha256);
@@ -150,7 +150,7 @@ async fn a_real_ready_capture_returns_original_canonical_rows_positions_and_exac
 #[tokio::test]
 async fn a_fully_read_partial_native_population_is_not_a_missing_local_body_or_a_healthy_empty_read() {
     let fixture = Fixture::new(1, true).await;
-    let read = fixture.read(CompletedSnapshotBudget::default()).await.unwrap();
+    let read = fixture.read(CompletedCaptureBudget::default()).await.unwrap();
     assert!(read.is_read_complete());
     let header = read.source().observation.snapshot().unwrap();
     assert_eq!(header.records, 1);
@@ -164,11 +164,11 @@ async fn a_fully_read_partial_native_population_is_not_a_missing_local_body_or_a
 #[tokio::test]
 async fn byte_and_row_refusals_return_no_truncated_success_and_leave_the_valid_capture_ready() {
     let fixture = Fixture::new(2, false).await;
-    let exact = CompletedSnapshotBudget { max_bytes: fixture.bytes(), ..Default::default() };
+    let exact = CompletedCaptureBudget { max_bytes: fixture.bytes(), ..Default::default() };
     assert_eq!(fixture.read(exact).await.unwrap().bytes_read(), fixture.bytes());
     for budget in [
-        CompletedSnapshotBudget { max_bytes: fixture.bytes() - 1, ..exact },
-        CompletedSnapshotBudget { max_rows: 1, ..exact },
+        CompletedCaptureBudget { max_bytes: fixture.bytes() - 1, ..exact },
+        CompletedCaptureBudget { max_rows: 1, ..exact },
     ] {
         let error = fixture.read(budget).await.unwrap_err();
         assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Capacity)));
@@ -191,7 +191,7 @@ async fn source_selection_epoch_and_manifest_substitution_cannot_rebind_an_exact
             .completed_snapshot(
                 &attempt,
                 SnapshotDataset::CachedRuntime,
-                CompletedSnapshotBudget::default(),
+                CompletedCaptureBudget::default(),
                 &CollectionCancellation::default(),
             )
             .await
@@ -205,7 +205,7 @@ async fn source_selection_epoch_and_manifest_substitution_cannot_rebind_an_exact
         .completed_snapshot(
             &fixture.attempt,
             SnapshotDataset::QueryCompilation,
-            CompletedSnapshotBudget::default(),
+            CompletedCaptureBudget::default(),
             &CollectionCancellation::default(),
         )
         .await
@@ -216,7 +216,7 @@ async fn source_selection_epoch_and_manifest_substitution_cannot_rebind_an_exact
     let mut changed = fixture.manifest.clone();
     changed.directory_synced = !changed.directory_synced;
     std::fs::write(fixture.directory.join("manifest.json"), serde_json::to_vec(&changed).unwrap()).unwrap();
-    let error = fixture.read(CompletedSnapshotBudget::default()).await.unwrap_err();
+    let error = fixture.read(CompletedCaptureBudget::default()).await.unwrap_err();
     assert_eq!(
         error.detail,
         Some(ErrorDetail::Outbox(OutboxProblem::Integrity)),
@@ -228,14 +228,14 @@ async fn source_selection_epoch_and_manifest_substitution_cannot_rebind_an_exact
 #[tokio::test]
 async fn later_local_body_changes_cannot_rewrite_a_previously_authenticated_loaded_value() {
     let fixture = Fixture::new(1, false).await;
-    let read = fixture.read(CompletedSnapshotBudget::default()).await.unwrap();
+    let read = fixture.read(CompletedCaptureBudget::default()).await.unwrap();
     let original = serde_json::to_vec(&read.records()[0]).unwrap();
     let changed = std::fs::read_to_string(fixture.body()).unwrap().replace("9007199254740993", "9007199254740994");
     assert!(changed.contains("9007199254740994"));
     std::fs::write(fixture.body(), changed).unwrap();
     assert_eq!(serde_json::to_vec(&read.records()[0]).unwrap(), original);
     read.reference(0).unwrap().validate_canonical_record(read.source(), &read.records()[0].record).unwrap();
-    assert!(fixture.read(CompletedSnapshotBudget::default()).await.is_err());
+    assert!(fixture.read(CompletedCaptureBudget::default()).await.is_err());
     assert_eq!(fixture.state().await, OutboxCaptureState::Quarantined);
     assert!(read.into_cached_runtime_read().unwrap().is_valid());
 }
@@ -244,7 +244,7 @@ async fn later_local_body_changes_cannot_rewrite_a_previously_authenticated_load
 async fn an_unconfirmed_native_owner_cannot_gain_authority_from_a_ready_state_label() {
     let unsettled = Fixture::with_shutdown(1, false, SourceShutdown::Unconfirmed).await;
     assert_eq!(unsettled.state().await, OutboxCaptureState::Incomplete);
-    let error = unsettled.read(CompletedSnapshotBudget::default()).await.unwrap_err();
+    let error = unsettled.read(CompletedCaptureBudget::default()).await.unwrap_err();
     assert_eq!(error.detail, Some(ErrorDetail::Outbox(OutboxProblem::SourceUnconfirmed)));
     assert_eq!(unsettled.outbox.status(1, None).await.unwrap().entries[0].source_work, SourceWorkState::Unconfirmed);
 
@@ -267,7 +267,7 @@ async fn an_unconfirmed_native_owner_cannot_gain_authority_from_a_ready_state_la
         })
         .await
         .unwrap();
-    let error = fixture.read(CompletedSnapshotBudget::default()).await.unwrap_err();
+    let error = fixture.read(CompletedCaptureBudget::default()).await.unwrap_err();
     assert_eq!(error.detail, Some(ErrorDetail::Outbox(OutboxProblem::SourceUnconfirmed)));
     assert_eq!(fixture.outbox.status(1, None).await.unwrap().entries[0].source_work, SourceWorkState::Unconfirmed);
 }
@@ -284,7 +284,7 @@ async fn a_queued_read_obeys_its_original_deadline_and_cancellation_without_touc
             .completed_snapshot(
                 &attempt,
                 SnapshotDataset::CachedRuntime,
-                CompletedSnapshotBudget { timeout: Duration::from_millis(1), ..Default::default() },
+                CompletedCaptureBudget { timeout: Duration::from_millis(1), ..Default::default() },
                 &CollectionCancellation::default(),
             )
             .await
@@ -299,7 +299,7 @@ async fn a_queued_read_obeys_its_original_deadline_and_cancellation_without_touc
     let token = cancellation.clone();
     let reading = tokio::spawn(async move {
         delivery
-            .completed_snapshot(&attempt, SnapshotDataset::CachedRuntime, CompletedSnapshotBudget::default(), &token)
+            .completed_snapshot(&attempt, SnapshotDataset::CachedRuntime, CompletedCaptureBudget::default(), &token)
             .await
     });
     tokio::task::yield_now().await;
@@ -315,7 +315,7 @@ enum AfterRow {
     Rewrite(PathBuf),
 }
 struct ObservedRead {
-    read: SnapshotRead,
+    read: CompletedCaptureRead,
     after: AfterRow,
 }
 impl artifacts::VerificationObserver for ObservedRead {
@@ -337,7 +337,10 @@ impl artifacts::VerificationObserver for ObservedRead {
     fn row(&mut self, row: &ExportedRecord, ordinal: u32) -> Result<()> {
         self.read.row(row, ordinal)?;
         match &self.after {
-            AfterRow::Cancel => self.read.cancellation.cancel(),
+            AfterRow::Cancel => match &self.read.control {
+                ReadControl::Collection { cancellation, .. } => cancellation.cancel(),
+                _ => panic!("snapshot fixture owns collection cancellation"),
+            },
             AfterRow::Rewrite(path) => {
                 let old = std::fs::read_to_string(path).unwrap();
                 let changed = old.replace("9007199254740993", "9007199254740994");
@@ -349,16 +352,14 @@ impl artifacts::VerificationObserver for ObservedRead {
         self.read.check()
     }
 }
-fn reader(attempt: DiagnosticAttemptReceipt) -> SnapshotRead {
-    SnapshotRead {
+fn reader(attempt: DiagnosticAttemptReceipt) -> CompletedCaptureRead {
+    CompletedCaptureRead::snapshot(
         attempt,
-        dataset: SnapshotDataset::CachedRuntime,
-        budget: CompletedSnapshotBudget::default(),
-        deadline: Instant::now() + DEFAULT_TIMEOUT,
-        cancellation: CollectionCancellation::default(),
-        rows: artifacts::CanonicalRows::new(CompletedSnapshotBudget::default().max_rows),
-        bytes_read: 0,
-    }
+        SnapshotDataset::CachedRuntime,
+        CompletedCaptureBudget::default(),
+        CollectionCancellation::default(),
+    )
+    .unwrap()
 }
 
 #[tokio::test]
@@ -385,13 +386,13 @@ async fn cancellation_inside_the_verification_pass_discards_provisional_rows_and
         .unwrap();
     assert_eq!(result.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::Cancelled)));
     assert_eq!(fixture.state().await, OutboxCaptureState::Ready);
-    assert_eq!(fixture.read(CompletedSnapshotBudget::default()).await.unwrap().records().len(), 2);
+    assert_eq!(fixture.read(CompletedCaptureBudget::default()).await.unwrap().records().len(), 2);
 }
 
 #[tokio::test]
 async fn changed_files_after_consumption_cannot_supply_a_second_unverified_projection() {
     let fixture = Fixture::new(1, false).await;
-    let original = fixture.read(CompletedSnapshotBudget::default()).await.unwrap();
+    let original = fixture.read(CompletedCaptureBudget::default()).await.unwrap();
     let expected = serde_json::to_vec(&original.records()[0]).unwrap();
     let expected_bytes = fixture.bytes();
     let attempt = fixture.attempt.clone();
@@ -415,6 +416,6 @@ async fn changed_files_after_consumption_cannot_supply_a_second_unverified_proje
         "the returned projection is the exact row whose consumed bytes passed the original manifest digest"
     );
     assert_eq!(charged, expected_bytes);
-    assert!(fixture.read(CompletedSnapshotBudget::default()).await.is_err());
+    assert!(fixture.read(CompletedCaptureBudget::default()).await.is_err());
     assert_eq!(fixture.state().await, OutboxCaptureState::Quarantined);
 }

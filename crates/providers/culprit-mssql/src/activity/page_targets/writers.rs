@@ -165,7 +165,7 @@ impl<R: NativeRead> ActivityReader<R> {
         let mut keys =
             focus.candidates.iter().enumerate().map(|(index, candidate)| (index, &candidate.key)).collect::<Vec<_>>();
         keys.push((keys.len(), &focus.waiter.participant().original.key));
-        let query = sql::requests(include_metadata);
+        let query = sql::requests(include_metadata, self.request_page_server_read_capability);
         let rows = self
             .io
             .query(&query, vec![Parameter::Text(requests::selector_keys(&keys)?)], keys.len())

@@ -62,7 +62,7 @@ impl CapturedInvestigation {
         )
         .unwrap();
         let mut intent = fixture.intent;
-        intent.focus.participant_mut().parent = original.clone();
+        intent.focus.activity_participant_mut().unwrap().parent = original.clone();
         intent.episode_id = episode.id.clone();
         intent.episode_revision = episode.revision.clone();
         intent.qualification.read_metrics.templates[0].client_elapsed_ms = 0.0;
@@ -94,7 +94,7 @@ impl CapturedInvestigation {
         assert!(result.accepts_observation(&page));
         let source = CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: intent.focus.participant().target.clone(),
+            target: intent.focus.target().clone(),
             source: "focused-pages".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::FocusedPageWait {
@@ -160,7 +160,7 @@ impl CapturedInvestigation {
         let mut checkpoint = DiagnosticCheckpointPart {
             id: String::new(),
             controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
-            target: self.intent.focus.participant().target.clone(),
+            target: self.intent.focus.target().clone(),
             input: self.original.capture_ref(),
             part: 0,
             parts: 1,
@@ -169,7 +169,7 @@ impl CapturedInvestigation {
         checkpoint.id = checkpoint.expected_id().unwrap();
         let source = CollectionDescription {
             partition: culprit_core::telemetry::SourcePartition::Target,
-            target: self.intent.focus.participant().target.clone(),
+            target: self.intent.focus.target().clone(),
             source: DIAGNOSTICS_SOURCE.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Diagnostics(DiagnosticCaptureDescription {

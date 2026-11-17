@@ -73,6 +73,20 @@ impl CollectionDescription {
         {
             return false;
         }
+        if let Some(execution) = self.observation.execution_context() {
+            let Ok(scope) = NativeSourceReadScope::from_context(execution) else { return false };
+            let header_valid = match &self.observation {
+                SourceObservation::SourceRead { .. } => self.observation.covers_request(),
+                SourceObservation::PagedSourceRead { snapshot, focus_key, .. } => {
+                    snapshot.is_valid()
+                        && snapshot.dataset == SourceReadQuestion::CompilationHistory.dataset()
+                        && valid_digest(focus_key)
+                        && same_time(&snapshot.observed_from, &execution.observed_from)
+                }
+                _ => false,
+            };
+            return header_valid && self.partition == SourcePartition::Target && scope.matches_target(&self.target);
+        }
         if let SourceObservation::Jobs { snapshot, metadata } = &self.observation {
             return metadata.matches_source(self, snapshot);
         }

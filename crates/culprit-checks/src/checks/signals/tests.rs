@@ -193,8 +193,13 @@ fn lock_time_keeps_the_native_total_and_recorded_mean() {
     q.text = "UPDATE `stock` SET `qty` = `qty` - ? WHERE `sku` = ?".into();
     q.executions = 1_000.0;
     q.total_time_ms = 100_000.0;
-    q.waits =
-        vec![WaitStat { category: "Lock".into(), wait_type: Some("lock time".into()), wait_ms: 60_000.0, tasks: None }];
+    q.waits = vec![WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: Some("lock time".into()),
+        wait_ms: 60_000.0,
+        tasks: None,
+    }];
     let f = LockTimeCheck.run(&s);
     assert_eq!(f[0].title, "An update of stock has at least 1 min of recorded lock waits");
     assert_eq!(f[0].facts.lock_wait.as_ref().unwrap().ms, 60_000.0);

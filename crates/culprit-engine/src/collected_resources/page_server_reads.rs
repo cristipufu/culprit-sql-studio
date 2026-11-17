@@ -19,16 +19,7 @@ pub fn page_server_reads(
     }
     let context = crate::collected_context::from_capture(capture);
     let read = references::captured_read(capture)?;
-    let original = read.bind(capture.source())?;
-    let rows = context
-        .records
-        .iter()
-        .map(|record| {
-            let TelemetryRecord::QueryRuntime(runtime) = &record.row.record else { return Err(invalid()) };
-            let reference = references::analysis_reference(&original, record)?;
-            Ok(RuntimeEvidence { reference, runtime })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let rows = original_rows(capture.source(), &read, &context.records)?;
     let definition_rows = definitions.map(super::query_store_definitions::rows).transpose()?;
     let definition_evidence =
         definitions.zip(definition_rows.as_deref()).map(|(capture, rows)| QueryStoreDefinitionEvidence {
@@ -51,4 +42,20 @@ pub fn page_server_reads(
         definition_context: definitions.map(|capture| Box::new(crate::collected_context::from_capture(capture))),
         report,
     })
+}
+
+/// Warehouse and local owners pass the same unchanged canonical records to the one pure renderer.
+pub(crate) fn original_rows<'a>(
+    source: &CollectionDescription,
+    read: &CapturedReadRef,
+    records: impl IntoIterator<Item = &'a culprit_core::collected_analysis::CollectedAnalysisRecord>,
+) -> Result<Vec<RuntimeEvidence<'a>>> {
+    let original = read.bind(source)?;
+    records
+        .into_iter()
+        .map(|record| {
+            let TelemetryRecord::QueryRuntime(runtime) = &record.row.record else { return Err(invalid()) };
+            Ok(RuntimeEvidence { reference: references::analysis_reference(&original, record)?, runtime })
+        })
+        .collect()
 }

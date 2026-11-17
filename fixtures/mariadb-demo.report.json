@@ -1549,7 +1549,7 @@
         "table": "order_items"
       }
     ],
-    "format": 10,
+    "format": 11,
     "histograms": null,
     "id": "20261011T160540.394Z",
     "identity": {
@@ -2951,18 +2951,21 @@
     "waits": [
       {
         "category": "Table IO",
+        "mechanism": null,
         "tasks": 373065458.0,
         "wait_ms": 461172.709408455,
         "wait_type": "wait/io/table/sql/handler"
       },
       {
         "category": "IO",
+        "mechanism": null,
         "tasks": 187720.0,
         "wait_ms": 2478.81208872,
         "wait_type": "wait/io/file/innodb/innodb_data_file"
       },
       {
         "category": "Lock",
+        "mechanism": null,
         "tasks": 264642.0,
         "wait_ms": 18.68522898,
         "wait_type": "wait/lock/table/sql/handler"
@@ -3605,6 +3608,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 21.033,
               "wait_type": "lock time"
@@ -3966,6 +3970,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 177.46,
               "wait_type": "lock time"
@@ -4267,6 +4272,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 44.303,
               "wait_type": "lock time"
@@ -4650,6 +4656,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 52.766,
               "wait_type": "lock time"

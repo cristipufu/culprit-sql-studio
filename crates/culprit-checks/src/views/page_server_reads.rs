@@ -16,6 +16,8 @@ use std::collections::BTreeSet;
 mod definitions;
 mod snapshot;
 pub use snapshot::explain_snapshot;
+mod request;
+pub use request::explain_request;
 
 const MAX_RETAINED_ROWS: usize = 100_000;
 const MAX_DETAIL_ENTRIES: usize = 256;

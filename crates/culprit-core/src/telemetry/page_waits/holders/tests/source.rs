@@ -57,7 +57,7 @@ fn exact_holder_source_selection_and_export_preserve_original_receipts_and_all_s
     assert_eq!(question.selector(), RecipeSelector::FocusedPageTaskHolders);
     assert_eq!(question.references().collect::<Vec<_>>(), [&focus.participant.parent, &focus.page]);
     assert!(question.page_wait().is_none(), "a parallel task is not a fabricated coordinator wait");
-    assert_eq!(question.database_selection(), request.selection);
+    assert_eq!(question.activity_selection().unwrap(), request.selection);
     assert_eq!(source.observation.diagnostic_focus(), Some(question));
     let exported = export(&source, row).unwrap();
     let payloads = exported.record.definition_payloads().map(|field| field.pointer.into_owned()).collect::<Vec<_>>();

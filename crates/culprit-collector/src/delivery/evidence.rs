@@ -257,7 +257,7 @@ impl RangeManifest {
                 CollectionTarget::Database(_) => CollectionSubject::Database,
                 CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
             },
-            selection: intent.selection(),
+            selection: intent.selection()?,
             budget: intent.budget.clone(),
         };
         if !owner.matches_request(&request)

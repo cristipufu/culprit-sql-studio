@@ -5,6 +5,10 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod counter_ratios;
+mod resource_io;
+pub use counter_ratios::{CounterRatioCase, counter_ratio_evidence};
+pub use resource_io::{collected_resource_recovery, rbio_wait_evidence, resource_io_evidence};
 mod activity;
 mod compilation_definitions;
 mod compilation_intervals;
@@ -36,6 +40,8 @@ mod queries;
 pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};
 mod informational;
 pub use informational::{assert_informational_capture, informational_query_evidence};
+mod local_capture;
+pub use local_capture::LocalCaptureFixture;
 mod query_populations;
 pub use query_populations::{
     assert_query_population_capture, query_population_evidence, query_population_evidence_cases,
@@ -258,6 +264,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
         revision: Some(CaptureRevision { outbox_id: "outbox".into(), owner_epoch: "1".into(), sequence: "2".into() }),
     };
     let record = TelemetryRecord::ResourceSample(ResourceMeasurement {
+        data_io_accounting: culprit_core::telemetry::DataIoAccounting::Unknown,
         at: "2020-01-01T06:00:15Z".into(),
         replica_id: Some("primary".into()),
         metrics: vec![ResourceMetricSample {
@@ -783,6 +790,8 @@ pub fn native_counter_sets() -> (CollectionDescription, Vec<TelemetryRecord>) {
             cumulative.nature = CounterNature::Cumulative;
             cumulative.reset = culprit_core::ResetMarker::At("2020-01-01T01:00:00.000000001Z".into());
             let set = NativeCounterSet {
+                ratios: Vec::new(),
+                ratio_gaps: Vec::new(),
                 identity: NativeIdentity::new("native-clerk")
                     .qualified("memory_node_id", node.to_string())
                     .qualified("incarnation", "native-generation"),
@@ -945,6 +954,7 @@ pub fn waits(destination: &str, schema: &str, sequence: u64, empty: bool, comple
         sources: vec![StateSourceCoverage::observed("native-waits".into(), u32::from(!empty), complete)],
     });
     let row = TelemetryRecord::WaitCounter(WaitCounterObservation {
+        mechanism: None,
         source: "native-waits".into(),
         wait_type: "LCK_M_X".into(),
         scope: culprit_core::MeasurementScope::Database,

@@ -44,6 +44,10 @@ fn documented_native_id_name_and_policy_have_one_owner_for_scans_and_capture() {
     }
     assert_eq!(metadata.categories["1"].disposition, WaitDisposition::Analyze(WaitClass::Cpu));
     assert_eq!(metadata.categories["2"].disposition, WaitDisposition::Analyze(WaitClass::Workers));
+    assert_eq!(metadata.categories["23"].disposition, WaitDisposition::Analyze(WaitClass::LogGovernance));
+    let governed = fold(&[summary(23, "Log Rate Governor", 19)]);
+    assert_eq!(governed.values[0].category, WaitClass::LogGovernance.category());
+    assert_eq!(governed.values[0].mechanism, None, "a broad category does not identify a specific RBIO mechanism");
     assert!(!coverage(true).classes.contains(&WaitClass::Rpc));
 }
 

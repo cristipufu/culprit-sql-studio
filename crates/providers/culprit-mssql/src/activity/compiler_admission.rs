@@ -44,7 +44,10 @@ impl<R: NativeRead> ActivityReader<R> {
             let request = native_id(&focus.original.key.request.as_ref().ok_or_else(invalid_data)?.id)?;
             let mut frame = self
                 .read_frame(
-                    &super::page_targets::focused_observation(self.options.identity),
+                    &super::page_targets::focused_observation(
+                        self.options.identity,
+                        self.request_page_server_read_capability,
+                    ),
                     vec![Parameter::Integer(1), Parameter::Integer(session), Parameter::Integer(request)],
                 )
                 .await?;

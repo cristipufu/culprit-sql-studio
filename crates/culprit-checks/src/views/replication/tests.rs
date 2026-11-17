@@ -7,6 +7,8 @@ use std::{
 
 fn slot(name: &str, status: &str) -> ReplicationObservation {
     let set = NativeCounterSet {
+        ratios: Vec::new(),
+        ratio_gaps: Vec::new(),
         identity: NativeIdentity::new(name),
         scope: MeasurementScope::Server,
         counters: vec![NativeCounterSample::gauge(

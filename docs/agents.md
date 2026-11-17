@@ -39,6 +39,7 @@ Culprit's CLI is designed to be driven by agents: JSON output, stable ids, no pr
 | `blocking` | Who blocks whom right now, as chains under each head blocker |
 | `deadlocks` | Recent deadlocks explained, with the pattern and fix |
 | `waits` | Wait categories with the queries behind each, or a live sample (`now: true`) |
+| `captured_page_server_reads` | When explicitly enabled: explain one verified local collector capture without a database connection |
 | `schema` | Tables; or one table's columns, indexes and which captured plans use each index |
 | `drift` | Schema, index, setting and version differences between two connections |
 | `index_advice` | The index advisor: indexes to add, indexes to clean up, and table storage guidance |
@@ -58,6 +59,23 @@ Results are compact JSON. Text that comes from the database (query text, object 
 - The login. For `query` access on a production database, give the connection a login that can read the tables it needs and nothing else: no EXECUTE on administrative functions, no ownership of objects. That is the one complete guarantee.
 
 **Audit.** Every call (tool, client, connection, outcome, duration, and SQL for `explain` and `run_query`) is appended to `audit.jsonl` in the data directory. `culprit audit --json` reads it.
+
+### Saved collector captures
+
+Enable local evidence at server startup:
+
+```sh
+culprit mcp --connection shop-staging --evidence-outbox /path/to/outbox
+```
+
+`captured_page_server_reads` takes `connection` and `observation_id`; the latter is the capture's
+`manifest.json` → `capture.observation_id`. The connection must be delegated to the agent and match the original
+journal entry. The tool reanalyzes verified originals, with redacted SQL previews only when their exact original
+definitions match. It does not connect to the database or use credentials, recovery storage or a warehouse.
+
+The directory must be available for exclusive ownership; a running collector's lock is not bypassed. An embedding
+host can instead share its existing Outbox actor. Without the startup option or an injected reader, this tool is
+absent. MCP diagnostic text stays English independently of the desktop language.
 
 ## Dashboard
 

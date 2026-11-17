@@ -2,6 +2,7 @@
 pub(crate) mod compiler_admission;
 pub(crate) mod database_context;
 pub(crate) mod memory;
+pub(crate) mod page_server_reads;
 pub(crate) mod page_targets;
 pub(crate) mod participants;
 mod resources;
@@ -46,6 +47,7 @@ pub(crate) struct ActivityContext {
     pub at: String,
     pub writable: Option<bool>,
     pub replica_id: Option<String>,
+    pub request_page_server_read_capability: page_server_reads::Availability,
 }
 impl ActivityContext {
     fn decode(row: &Rec, host: &str, port: u16, identity: IdentityDetail) -> Result<Self> {
@@ -101,6 +103,7 @@ impl ActivityContext {
                 at: canonical_time(&text(row, "observed_at")?)?,
                 writable: crate::read::database_writable(row)?,
                 replica_id,
+                request_page_server_read_capability: page_server_reads::capability(row)?,
             },
             database_wide,
         ))
@@ -112,6 +115,7 @@ impl ActivityContext {
             && self.epoch == other.epoch
             && self.writable == other.writable
             && self.replica_id == other.replica_id
+            && self.request_page_server_read_capability == other.request_page_server_read_capability
     }
 }
 
@@ -195,6 +199,7 @@ pub(crate) struct ActivityReader<R = ReadSession> {
     host: String,
     port: u16,
     observed: bool,
+    request_page_server_read_capability: page_server_reads::Availability,
 }
 impl ActivityReader {
     pub(crate) fn open(pool: Arc<Pool>, options: ReadOptions, host: String, port: u16) -> Result<Self> {
@@ -205,7 +210,14 @@ impl ActivityReader {
 }
 impl<R: NativeRead> ActivityReader<R> {
     pub(crate) fn new(io: R, options: ReadOptions, host: String, port: u16) -> Self {
-        Self { io, options, host, port, observed: false }
+        Self {
+            io,
+            options,
+            host,
+            port,
+            observed: false,
+            request_page_server_read_capability: page_server_reads::Availability::Unknown,
+        }
     }
     pub(crate) fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         self.io.read_metrics()
@@ -224,7 +236,7 @@ impl<R: NativeRead> ActivityReader<R> {
     }
 
     pub(crate) async fn observe_baseline(&mut self) -> Result<ActivityBaseline> {
-        let sql = sql::metadata(self.options.identity);
+        let sql = sql::metadata(self.options.identity, self.request_page_server_read_capability);
         let scope = match self.options.scope {
             ActivityScope::Visible => 0,
             ActivityScope::CurrentDatabase => 1,

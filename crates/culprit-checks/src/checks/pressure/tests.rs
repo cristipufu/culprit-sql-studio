@@ -66,8 +66,13 @@ fn network_and_memory_wait_totals_are_independent_of_retained_grant_counters() {
     crate::statement_grant_fixture::install(&mut snapshot);
     let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
     query.query_hash = Some("0x0123456789ABCDEF".into());
-    query.waits =
-        vec![WaitStat { category: "Memory".into(), wait_type: None, wait_ms: query.total_time_ms * 0.1, tasks: None }];
+    query.waits = vec![WaitStat {
+        mechanism: None,
+        category: "Memory".into(),
+        wait_type: None,
+        wait_ms: query.total_time_ms * 0.1,
+        tasks: None,
+    }];
     let grant = memory_grant(&snapshot).remove(0);
     assert!(grant.queries.is_empty());
     assert_eq!(grant.impact.db_time_share, None);
@@ -75,7 +80,8 @@ fn network_and_memory_wait_totals_are_independent_of_retained_grant_counters() {
 
     let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
     let network = query.total_time_ms * 0.3;
-    query.waits = vec![WaitStat { category: "Network".into(), wait_type: None, wait_ms: network, tasks: None }];
+    query.waits =
+        vec![WaitStat { mechanism: None, category: "Network".into(), wait_type: None, wait_ms: network, tasks: None }];
     let findings = network_wait(&snapshot);
     assert_eq!(findings[0].impact.db_time_share, None);
     assert_eq!(findings[0].impact.time_ms_per_day, None);
@@ -100,6 +106,7 @@ fn memory_waits_need_an_amount_not_only_a_share() {
     let planted = (20.0 * MINUTE_MS * hours).max(other / 3.0);
     s.waits.retain(|w| w.category != "Memory");
     s.waits.push(WaitStat {
+        mechanism: None,
         category: "Memory".into(),
         wait_type: Some("Memory".into()),
         wait_ms: planted,
@@ -351,6 +358,7 @@ fn network_waits_preserve_counted_rows_without_inferring_result_consumption() {
     let mut s = snapshot_with(Engine::Mssql);
     let q = &mut s.workload.as_mut().unwrap().queries[0];
     q.waits = vec![WaitStat {
+        mechanism: None,
         category: "Network".into(),
         wait_type: Some("Network IO".into()),
         wait_ms: q.total_time_ms * 0.6,
@@ -368,6 +376,7 @@ fn samples(pick: impl Fn(usize) -> (f64, f64)) -> Vec<ResourceSample> {
         .map(|i| {
             let (log, workers) = pick(i);
             ResourceSample {
+                data_io_accounting: culprit_core::telemetry::DataIoAccounting::DataFiles,
                 at: format::iso_from_epoch(format::epoch_seconds("2026-10-11T10:00:15Z").unwrap() + i as f64 * 15.0),
                 cpu_pct: Some(30.0),
                 data_io_pct: Some(10.0),
@@ -450,8 +459,13 @@ fn measured_zero_query_waits_do_not_shorten_the_clock_of_server_memory_waits() {
     let mut s = crate::waits::snapshot_with(Engine::Mssql);
     s.pressure.get_or_insert_default().uptime_hours = Some(100.0);
     s.workload.as_mut().unwrap().window_hours = 1.0;
-    s.workload.as_mut().unwrap().queries[0].waits =
-        vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 0.0, tasks: None }];
+    s.workload.as_mut().unwrap().queries[0].waits = vec![culprit_core::WaitStat {
+        mechanism: None,
+        category: "Lock".into(),
+        wait_type: None,
+        wait_ms: 0.0,
+        tasks: None,
+    }];
     assert_eq!(waits_window(&s), (Some(100.0), false));
 }
 

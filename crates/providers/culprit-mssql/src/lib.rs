@@ -21,6 +21,7 @@ mod conn;
 mod constraints;
 mod database_identity;
 pub mod deadlocks;
+mod deployment;
 mod foreign_keys;
 mod grants;
 mod index_operations;

@@ -1902,7 +1902,7 @@
         "table": "orders"
       }
     ],
-    "format": 10,
+    "format": 11,
     "histograms": [
       {
         "buckets": 4.0,
@@ -3268,18 +3268,21 @@
     "waits": [
       {
         "category": "Table IO",
+        "mechanism": null,
         "tasks": 63505105.0,
         "wait_ms": 50381.8453542,
         "wait_type": null
       },
       {
         "category": "IO",
+        "mechanism": null,
         "tasks": 2436936.0,
         "wait_ms": 31707.509692225,
         "wait_type": null
       },
       {
         "category": "Lock",
+        "mechanism": null,
         "tasks": 44112.0,
         "wait_ms": 6.412323875,
         "wait_type": null
@@ -7055,6 +7058,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 115298.819,
               "wait_type": "lock time"
@@ -7337,6 +7341,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 12034.678,
               "wait_type": "lock time"
@@ -7772,6 +7777,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 0.012,
               "wait_type": "lock time"
@@ -7955,6 +7961,7 @@
           "waits": [
             {
               "category": "Lock",
+              "mechanism": null,
               "tasks": null,
               "wait_ms": 115296.687,
               "wait_type": "lock time"

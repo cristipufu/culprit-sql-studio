@@ -1,7 +1,24 @@
 import { expect, test } from "@playwright/test";
 import english from "../../locales/en.json" with { type: "json" };
-import { currentWorkReport, progressObservation, progressPlan, sessionProgressContext } from "../src/test/query-progress";
+import { currentWorkReport, progressObservation, progressPlan, requestPageServerReadReport, sessionProgressContext } from "../src/test/query-progress";
 import { progressCalls, replaceProgress, showProgress, type ProgressWindow } from "./query-progress";
+
+test("request page-server counts remain exact in folded shared details and clear when native evidence is unavailable", async ({ page }) => {
+  await showProgress(page, progressObservation({ engine: "mssql", page_server_reads: "9007199254740993", page_server_reads_report: requestPageServerReadReport() }), "mssql-demo");
+  const panel = page.locator(".qprog");
+  const details = panel.locator("details").filter({ has: page.locator("summary", { hasText: "Native page-server reads for this request" }) }).first();
+  await expect(details).not.toHaveAttribute("open");
+  await details.locator("summary").first().click();
+  await expect(details).toContainText("9,007,199,254,740,993");
+  const limits = details.locator("details").first();
+  await expect(limits).not.toHaveAttribute("open");
+  await limits.locator("summary").click();
+  await expect(limits).toContainText("does not identify the statement");
+  await expect(limits).toContainText("does not measure physical storage I/O");
+  await replaceProgress(page, progressObservation({ engine: "mssql", running: null, request_key: null }), "mssql-demo");
+  await expect(panel).not.toContainText("Native page-server reads for this request");
+  await expect.poll(async () => (await progressCalls(page)).length).toBeGreaterThan(2);
+});
 
 test("unavailable and independent observations keep polling, clear plans and a same-SQL new native request gets one plan read", async ({ page }, info) => {
   const original = progressObservation({ plan: progressPlan("Original native plan") });

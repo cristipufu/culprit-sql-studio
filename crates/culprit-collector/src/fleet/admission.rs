@@ -106,7 +106,7 @@ impl<'a> AdmittedBackend<'a> {
         let mut admission = self.context(connection, &request.budget, Some(expected_route))?;
         if !intent.is_valid()
             || request.budget != intent.budget
-            || request.selection != intent.selection()
+            || request.selection != intent.selection()?
             || request.subject != intent.subject()
         {
             return Err(CollectionStop::InvalidPage.error());

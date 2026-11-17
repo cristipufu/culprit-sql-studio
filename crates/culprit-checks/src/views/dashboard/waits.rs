@@ -180,6 +180,7 @@ pub(super) fn in_sentence(key: &str) -> String {
         "lock" => t!("view.dashboard.waits.category.lock"),
         "latch" => t!("view.dashboard.waits.category.latch"),
         "log" => t!("view.dashboard.waits.category.log"),
+        "log-governance" => t!("view.dashboard.waits.category.log_governance"),
         "network" => t!("view.dashboard.waits.category.network"),
         "parallelism" => t!("view.dashboard.waits.category.parallelism"),
         "memory" => t!("view.dashboard.waits.category.memory"),
@@ -259,6 +260,7 @@ mod tests {
             workload.kind = Some(culprit_core::WorkloadKind::SlowLog);
             workload.total_time_ms = 1_000.0;
             snapshot.waits = vec![culprit_core::WaitStat {
+                mechanism: None,
                 category: "Lock".into(),
                 wait_type: Some("native lock time".into()),
                 wait_ms: 6_000.0,
@@ -277,8 +279,13 @@ mod tests {
         for engine in Engine::ALL {
             let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
             snapshot.server.engine = engine;
-            snapshot.waits =
-                vec![culprit_core::WaitStat { category: "IO".into(), wait_type: None, wait_ms: 6_000.0, tasks: None }];
+            snapshot.waits = vec![culprit_core::WaitStat {
+                mechanism: None,
+                category: "IO".into(),
+                wait_type: None,
+                wait_ms: 6_000.0,
+                tasks: None,
+            }];
             let tile = waits(&snapshot);
             assert_ne!(tile.metrics[0].label, "Statement execution time", "{engine:?}");
             assert!(

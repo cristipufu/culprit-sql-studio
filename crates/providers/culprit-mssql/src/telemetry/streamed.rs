@@ -16,6 +16,7 @@ pub(super) trait SnapshotRecipe: Send + Sync {
     const REQUIRES_FULL_METADATA: bool = false;
     /// Connected-cache facts need a checked native compute member and process epoch, independent of history groups.
     const INSTANCE_LOCAL: bool;
+    const SOURCE_READ: Option<SourceReadQuestion> = None;
     async fn layout<R: NativeRead>(&self, reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>>;
     fn query(&self, layout: &Self::Layout) -> String;
     fn decode(&self, row: &Rec, layout: &Self::Layout, source: &CollectionDescription) -> Result<TelemetryRecord>;
@@ -46,9 +47,15 @@ struct NativeSnapshotReader<D: SnapshotRecipe, R> {
     host: String,
     port: u16,
     physical: Option<String>,
+    source_read: Option<SourceReadRequest>,
     local: Option<crate::local_source::Context>,
     layout: Option<D::Layout>,
 }
+struct SourceReadRequest {
+    focus_key: String,
+    execution: NativeSourceReadScope,
+}
+
 impl<D: SnapshotRecipe> StreamedSnapshot<D> {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16, recipe: D) -> Result<Self> {
         Self::with_io(ReadSession::new(pool, request.budget.clone()), request, host, port, recipe)
@@ -56,9 +63,16 @@ impl<D: SnapshotRecipe> StreamedSnapshot<D> {
 }
 impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16, recipe: D) -> Result<Self> {
-        if request.selection != (CollectionSelection::Snapshot { dataset: D::DATASET }) {
-            return Err(invalid_data());
-        }
+        request.validate()?;
+        let source_read = match &request.selection {
+            CollectionSelection::Snapshot { dataset } if *dataset == D::DATASET => None,
+            CollectionSelection::SourceRead { focus, execution }
+                if D::SOURCE_READ == Some(focus.question) && focus.question.dataset() == D::DATASET =>
+            {
+                Some(SourceReadRequest { focus_key: focus.key()?, execution: execution.as_ref().clone() })
+            }
+            _ => return Err(invalid_data()),
+        };
         let reader = NativeSnapshotReader {
             recipe,
             io,
@@ -66,6 +80,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
             host,
             port,
             physical: None,
+            source_read,
             local: None,
             layout: None,
         };
@@ -75,8 +90,32 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
 #[async_trait::async_trait]
 impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for NativeSnapshotReader<D, R> {
     type Row = Rec;
+    fn supports_source_read(&self, question: SourceReadQuestion) -> bool {
+        D::SOURCE_READ == Some(question)
+    }
     async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
-        let (target, partition, observed_from, metadata_visible) = if D::INSTANCE_LOCAL {
+        let (target, partition, observed_from, metadata_visible) = if let Some(expected) = &self.source_read {
+            description::ensure_supported(&mut self.io).await?;
+            // Replace the existing Azure identity projection with the held reader's native authority projection.
+            // This does not add a query or turn updateability into Primary/Secondary identity.
+            let (context, _) = crate::local_source::read_initial(
+                &mut self.io,
+                &self.host,
+                self.port,
+                crate::activity::IdentityDetail::AzureDatabase,
+                crate::local_source::Detail::Authority,
+            )
+            .await?;
+            let actual = context.completed(&context)?;
+            if !expected.execution.matches_context(&actual) {
+                return Err(CollectionStop::SourceChanged.error());
+            }
+            let visible = state::clock(&mut self.io).await?.1;
+            let target = actual.target.clone();
+            let observed_from = actual.observed_from.clone();
+            self.local = Some(context);
+            (target, SourcePartition::Target, observed_from, visible)
+        } else if D::INSTANCE_LOCAL {
             let context = crate::local_source::Context::read(&mut self.io, &self.host, self.port).await?;
             // Source locality does not expand this recipe's independently qualified platform or role policy.
             if context.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
@@ -104,16 +143,25 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         }
         crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
+        let snapshot =
+            PagedSnapshotDescription { dataset: D::DATASET, observed_from, sources: vec![D::SOURCE.name.into()] };
+        let observation = match &self.source_read {
+            Some(expected) => {
+                let context = self.local.as_ref().ok_or_else(invalid_data)?;
+                SourceObservation::PagedSourceRead {
+                    snapshot,
+                    focus_key: expected.focus_key.clone(),
+                    execution: Box::new(context.completed(context)?),
+                }
+            }
+            None => SourceObservation::PagedSnapshot(snapshot),
+        };
         Ok(CollectionDescription {
             partition,
             target,
             source: D::NAME.into(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
-                dataset: D::DATASET,
-                observed_from,
-                sources: vec![D::SOURCE.name.into()],
-            }),
+            observation,
         })
     }
     async fn begin(&mut self, request: &CollectionRequest) -> Result<()> {
@@ -148,11 +196,14 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
             self.recipe.recheck(&mut self.io, layout).await?;
         }
         if let Some(before) = &self.local {
+            let source_visibility =
+                if self.source_read.is_some() { Some(state::clock(&mut self.io).await?.1) } else { None };
             let after = before.recheck(&mut self.io, &self.host, self.port).await?;
             let context = match before.completed(&after) {
                 Ok(context) => context,
                 Err(error) if CollectionStop::from_error(&error) == CollectionStop::SourceChanged => {
                     return Ok(culprit_read::SnapshotRecheck {
+                        execution: None,
                         unchanged: false,
                         observed_until: String::new(),
                         scopes: vec![],
@@ -160,10 +211,22 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                 }
                 Err(error) => return Err(error),
             };
-            if initial.target != context.target || initial.partition != context.partition {
+            let scope_matches = match &self.source_read {
+                Some(expected) => {
+                    initial.partition == SourcePartition::Target
+                        && expected.execution.matches_target(&initial.target)
+                        && expected.execution.matches_context(&context)
+                }
+                None => initial.target == context.target && initial.partition == context.partition,
+            };
+            if !scope_matches {
                 return Err(CollectionStop::SourceChanged.error());
             }
-            let visible = if D::REQUIRES_FULL_METADATA { state::clock(&mut self.io).await?.1 } else { true };
+            let visible = match source_visibility {
+                Some(visible) => visible,
+                None if D::REQUIRES_FULL_METADATA => state::clock(&mut self.io).await?.1,
+                None => true,
+            };
             let scope = if self.layout.is_none() {
                 culprit_read::SnapshotScope::NotApplicable { source: D::SOURCE.name.into() }
             } else {
@@ -178,13 +241,15 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
             };
             return Ok(culprit_read::SnapshotRecheck {
                 unchanged: true,
-                observed_until: context.observed_until,
+                observed_until: context.observed_until.clone(),
+                execution: self.source_read.as_ref().map(|_| Box::new(context)),
                 scopes: vec![scope],
             });
         }
         let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
         if initial.target.database() != Some(&database) || self.physical.as_ref() != Some(&physical) {
             return Ok(culprit_read::SnapshotRecheck {
+                execution: None,
                 unchanged: false,
                 observed_until: String::new(),
                 scopes: vec![],
@@ -201,7 +266,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                 error_code: (!complete).then_some(culprit_core::ErrorCode::PermissionDenied),
             }
         };
-        Ok(culprit_read::SnapshotRecheck { unchanged: true, observed_until, scopes: vec![scope] })
+        Ok(culprit_read::SnapshotRecheck { unchanged: true, observed_until, execution: None, scopes: vec![scope] })
     }
     fn query_count(&self) -> u32 {
         self.io.queries()

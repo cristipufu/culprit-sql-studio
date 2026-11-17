@@ -87,6 +87,7 @@ async fn observe(session: &mut ReadSession, requested: u32) -> Result<WaitSample
     let mut categories: Vec<_> = counts
         .into_iter()
         .map(|((category, event), n)| WaitStat {
+            mechanism: None,
             category,
             wait_type: Some(event),
             wait_ms: n / samples * elapsed * 1000.0,

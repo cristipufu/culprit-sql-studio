@@ -236,12 +236,15 @@ async fn cold_paired_question_authenticates_the_full_original_frame_and_rejects_
         .unwrap();
     assert!(authenticated.contains(&intent.key().unwrap()));
     let expected_requests = frame.page_wait_task_requests().unwrap();
-    let selection_bytes = serde_json::to_vec(&intent.selection()).unwrap();
+    let selection_bytes = serde_json::to_vec(&intent.selection().unwrap()).unwrap();
     let lineage: DiagnosticInvestigationLineage = serde_json::from_slice(
         &serde_json::to_vec(&DiagnosticInvestigationLineage::from_intent(&intent).unwrap()).unwrap(),
     )
     .unwrap();
-    assert_eq!(serde_json::to_vec(&lineage.reconstruct(&lineage.focus).unwrap().selection()).unwrap(), selection_bytes);
+    assert_eq!(
+        serde_json::to_vec(&lineage.reconstruct(&lineage.focus).unwrap().selection().unwrap()).unwrap(),
+        selection_bytes
+    );
     for change in ["omitted", "injected", "token"] {
         let mut changed = intent.clone();
         let DiagnosticFocus::PageWaitTasks { original_requests, .. } = &mut changed.focus else { panic!() };
