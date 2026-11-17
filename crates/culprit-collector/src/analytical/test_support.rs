@@ -14,7 +14,10 @@ pub use compilation_intervals::compilation_interval_evidence;
 mod diagnostics;
 pub use diagnostics::{assert_diagnostic_capture, diagnostic_evidence_cases};
 mod source_overhead;
-pub use source_overhead::{SOURCE_OVERHEAD_QUERY_COUNT, source_overhead_read_metrics};
+pub use source_overhead::{
+    SOURCE_OVERHEAD_QUERY_COUNT, assert_native_source_overhead_summary, native_source_overhead_read_metrics,
+    source_overhead_read_metrics,
+};
 mod source_partitions;
 pub use source_partitions::{
     assert_replica_activity_capture, replica_activity_evidence_cases, replicated_history_evidence_cases,

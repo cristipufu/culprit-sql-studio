@@ -1146,7 +1146,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **38**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **39**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 [pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats
@@ -1246,6 +1246,16 @@ per-template task list and archive I/O. Human output shows the five templates wi
 JSON retains every recorded template. Client elapsed time includes transport and decoding; it does not measure
 database CPU, physical I/O, memory grants or database execution time. The archive path covers complete committed
 captures; use local inspection for failed or unsettled attempts.
+
+Where the SQL Server reader already acquires and rechecks native source authority, those same queries also retain
+its own session counters. A confirmed, generation-bound pair reports integer CPU milliseconds, native read counts,
+buffer-pool dirty marks and the two sampled session-memory gauges. Dirty marks are not completed storage writes;
+session memory is neither an execution grant nor a peak. The interval excludes work before the first observation,
+the remainder of the final boundary batch and cleanup, so it does not measure the whole capture or each template.
+Missing, changed or interrupted authority observations withhold measurements without issuing replacement SQL.
+Sources without that existing pair, including Query Store paths, remain unknown. These observations do not qualify
+production cost or authorize another source read. Original session/source authority stays in private authenticated
+metadata; the shared report and warehouse publication expose one numerical summary and an opaque proof reference.
 
 ## Tables and analytical reads
 
@@ -1365,6 +1375,18 @@ python3 dev/smoke-providers.py mssql --test culprit-mssql \
 The receipt directory must be absolute and already exist. Missing grant samples do not prove zero grants or a peak;
 failed or changed-owner measurements remain invalid. Warm samples, uncontrolled caches and emulated hardware do
 not establish a production envelope. This experiment does not issue a qualification receipt or enable a recipe.
+
+The source-authority experiment checks the unchanged context query before, during and after 32 unrelated idle
+sessions, using both authority and page-lookup projections. It records actual-plan grant/serial checks and deadline,
+shutdown and cleanup outcomes. Use a fresh receipt directory with the same runner:
+
+```sh
+export CULPRIT_NATIVE_COST_RECEIPT_DIR="$(mktemp -d)"
+python3 dev/smoke-providers.py mssql --test culprit-mssql local_source::native_tests::
+```
+
+A fast completed query does not exercise active cancellation. That case stays explicitly unqualified unless the
+observer sees the exact source template active. Endpoint evidence does not qualify Azure SQL or Hyperscale.
 
 Optional replication fixtures exercise the same native readers used by scans and retained collection:
 

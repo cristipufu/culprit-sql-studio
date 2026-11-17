@@ -102,6 +102,7 @@ fn scenario() -> Scenario {
         },
         evidence,
         read_metrics: ReadWorkMetrics {
+            native_session_work: None,
             active_tasks: 0,
             untracked_tasks: 0,
             templates: vec![ReadQueryMetrics {
@@ -621,6 +622,24 @@ fn initial_owner_metadata_rejects_wrong_selection_subject_or_a_contradictory_nat
 
 mod provenance;
 mod shared;
+
+#[test]
+fn native_ownership_must_be_settled_before_client_accounting_can_form_a_cost_receipt() {
+    for settlement in
+        [NativeReadSettlement::Pending, NativeReadSettlement::Unconfirmed, NativeReadSettlement::Quiescent]
+    {
+        let mut scenario = scenario();
+        let receipt = scenario.receipt();
+        receipt.read_metrics.native_session_work =
+            Some(Box::new(NativeSessionReadWork::MssqlSession(Box::new(MssqlSessionReadWork {
+                settlement,
+                issue: Some(NativeReadWorkIssue::MissingFinalObservation),
+                interval: None,
+            }))));
+        assert!(receipt.read_metrics.is_valid(), "unavailable native observations remain valid recorded facts");
+        assert_eq!(receipt.is_valid(), settlement == NativeReadSettlement::Quiescent, "{settlement:?}");
+    }
+}
 
 fn activity_scope(receipt: &mut RecipeCostReceipt) -> &mut DiagnosticScope {
     let RecipeCostScope::Activity(scope) = &mut receipt.scope else { panic!() };

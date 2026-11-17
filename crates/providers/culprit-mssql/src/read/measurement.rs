@@ -283,12 +283,16 @@ impl ReadSession {
         self.deadline = Instant::now() + Duration::from_millis(self.budget.total_timeout_ms.into());
         self.queries = 0;
         self.metrics = crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql);
+        self.native_work = super::session_work::SessionWork::default();
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl NativeRead for MeasuredRead {
+    fn observe_session_work(&mut self, observation: super::session_work::Observation) {
+        self.owner.observe_session_work(observation);
+    }
     async fn query(&mut self, sql: &str, parameters: Vec<Parameter>, row_limit: usize) -> ReadResult<Vec<Rec>> {
         self.begin(sql, &parameters, row_limit).await.map_err(ReadError::Source)?;
         let mut observer_error = None;

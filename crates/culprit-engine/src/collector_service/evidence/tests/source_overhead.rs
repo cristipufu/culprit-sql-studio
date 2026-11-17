@@ -71,7 +71,10 @@ async fn original_overhead_is_authenticated_without_rows_audit_proofs_or_payload
 
 #[tokio::test]
 async fn missing_and_recorded_empty_metrics_preserve_the_independent_original_query_total() {
-    for metrics in [None, Some(ReadWorkMetrics { active_tasks: 0, untracked_tasks: 0, templates: vec![] })] {
+    for metrics in [
+        None,
+        Some(ReadWorkMetrics { native_session_work: None, active_tasks: 0, untracked_tasks: 0, templates: vec![] }),
+    ] {
         let fixture = fixture(metrics.clone()).await;
         let cancellation = CollectionCancellation::default();
         let mut session = fixture.service.session(fixture.request.budget, &cancellation).unwrap();
@@ -80,7 +83,10 @@ async fn missing_and_recorded_empty_metrics_preserve_the_independent_original_qu
         assert_eq!(metadata.source_read_metrics(), metrics.as_ref());
         let analysis = crate::collected_resources::source_overhead(&metadata).unwrap();
         assert_eq!(analysis.report.evidence.source_queries, Some(100));
-        assert_eq!(analysis.report.evidence.read_metrics, metrics);
+        assert_eq!(
+            analysis.report.evidence.read_metrics,
+            metrics.as_ref().map(|metrics| metrics.summary(Some(metadata.source())).unwrap())
+        );
         assert_eq!(payload_reads(&fixture), 0);
     }
 }
@@ -237,4 +243,50 @@ async fn permitting_recovery_payloads_does_not_make_metadata_open_them() {
     assert_eq!(metadata.metrics().recovery_objects, 0);
     assert_eq!(metadata.metrics().recovery_bytes, 0);
     assert_eq!(payload_reads(&fixture), 0);
+}
+
+#[tokio::test]
+async fn private_native_proof_is_authenticated_but_only_numeric_summary_and_opaque_receipt_leave_the_sdk() {
+    let original = test_support::native_source_overhead_read_metrics();
+    let fixture = fixture(Some(original.clone())).await;
+    fixture.objects.remove_proofs();
+    let objects = fixture.objects.snapshot();
+    let cancellation = CollectionCancellation::default();
+    let mut session = fixture.service.session(fixture.request.budget, &cancellation).unwrap();
+    let captured = metadata(&mut session, &fixture).await;
+    assert_eq!(captured.source_read_metrics(), Some(&original));
+    let analysis = crate::collected_resources::source_overhead(&captured).unwrap();
+    let public = serde_json::to_value(&analysis).unwrap();
+    test_support::assert_native_source_overhead_summary(&public["report"]["evidence"]["read_metrics"], &original);
+    let native = analysis.report.native_interval.as_ref().unwrap();
+    assert_eq!(native.summary, t!("view.source_overhead.native.summary.settled"));
+    assert!(native.limitations.contains(&t!("view.source_overhead.native.limit.interval")));
+    assert_eq!(analysis.metrics.queries, 1);
+    assert_eq!(analysis.metrics.recovery_objects, 0);
+    assert_eq!(analysis.metrics.selected_rows, 0);
+    assert_eq!(payload_reads(&fixture), 0);
+    assert_eq!(fixture.objects.snapshot(), objects);
+}
+
+#[tokio::test]
+async fn warehouse_native_summary_changes_cannot_replace_the_original_private_session_proof() {
+    let fixture = fixture(Some(test_support::native_source_overhead_read_metrics())).await;
+    let cancellation = CollectionCancellation::default();
+    let mut calibration = fixture.service.session(fixture.request.budget, &cancellation).unwrap();
+    let captured = metadata(&mut calibration, &fixture).await;
+    let mut altered =
+        serde_json::to_value(captured.source_read_metrics().unwrap().summary(Some(captured.source())).unwrap())
+            .unwrap();
+    altered["native_session_work"]["interval"]["cpu_ms"] = serde_json::json!("700");
+    fixture.store.replace_publication("ReadMetrics", altered);
+    let mut session = fixture.service.session(fixture.request.budget, &cancellation).unwrap();
+    let error = session.read_metadata(&fixture.request.range_id).await.unwrap_err();
+    assert_eq!(error.detail, Some(ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    assert_eq!(payload_reads(&fixture), 0);
+    let requests = fixture.store.requests.load(Ordering::SeqCst);
+    assert_eq!(
+        session.read_metadata(&fixture.request.range_id).await.unwrap_err().detail,
+        Some(ErrorDetail::Delivery(DeliveryProblem::Capacity))
+    );
+    assert_eq!(fixture.store.requests.load(Ordering::SeqCst), requests);
 }

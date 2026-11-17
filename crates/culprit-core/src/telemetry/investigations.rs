@@ -325,6 +325,7 @@ pub fn qualification_component_is_valid(component: &ComponentVersion) -> bool {
 fn settled_accounting(metrics: &ReadWorkMetrics, budget: &CollectionBudget) -> bool {
     if !metrics.is_valid()
         || metrics.active_tasks != 0
+        || metrics.native_session_work.as_ref().is_some_and(|work| work.settlement() != NativeReadSettlement::Quiescent)
         || metrics.untracked_tasks != 0
         || metrics.templates.is_empty()
         || metrics.templates.iter().any(|metric| metric.completed_tasks == 0 || metric.failures != 0)

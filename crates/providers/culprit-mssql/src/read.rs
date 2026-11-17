@@ -3,6 +3,7 @@ pub(crate) mod measurement;
 #[cfg(test)]
 mod native_tests;
 mod output;
+pub(crate) mod session_work;
 use output::Output;
 pub(crate) use output::{ReadBatch, value_bytes};
 use std::{sync::Arc, time::Duration};
@@ -89,6 +90,7 @@ pub(crate) trait NativeRead: Send {
     fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         None
     }
+    fn observe_session_work(&mut self, _observation: session_work::Observation) {}
     async fn close(&mut self) -> culprit_core::telemetry::SourceShutdown;
 }
 
@@ -128,6 +130,7 @@ pub(crate) struct ReadSession {
     metrics: crate::read_metrics::Metrics,
     streaming: Option<StreamingRead>,
     connection_generation: u64,
+    native_work: session_work::SessionWork,
 }
 struct StreamingRead {
     _owner: tokio::sync::oneshot::Sender<()>,
@@ -155,11 +158,14 @@ impl ReadSession {
             metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
             streaming: None,
             connection_generation: 0,
+            native_work: session_work::SessionWork::default(),
         }
     }
 
     pub(crate) fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
-        self.metrics.snapshot()
+        let mut metrics = self.metrics.snapshot()?;
+        metrics.native_session_work = self.native_work.snapshot();
+        Some(metrics)
     }
     pub(crate) fn queries(&self) -> u32 {
         self.queries
@@ -288,6 +294,7 @@ impl ReadSession {
         match result {
             Ok(Ok(client)) => {
                 self.connection_generation = generation;
+                self.native_work.generation(generation);
                 Ok(client)
             }
             Ok(Err(error)) => Err(ReadError::Source(error)),
@@ -326,7 +333,9 @@ impl ReadSession {
         if !self.cancellation_confirmed {
             self.pool.mark_uncertain();
         }
-        self.pool.source_shutdown()
+        let shutdown = self.pool.source_shutdown();
+        self.native_work.close(shutdown, self.connection_generation);
+        shutdown
     }
 
     pub(crate) async fn finish<T>(&mut self, result: Result<T>) -> Result<T> {
@@ -355,6 +364,9 @@ impl NativeRead for ReadSession {
     }
     fn connection_generation(&self) -> Option<u64> {
         Some(self.connection_generation)
+    }
+    fn observe_session_work(&mut self, observation: session_work::Observation) {
+        self.native_work.observe(observation);
     }
     fn read_metrics(&self) -> Option<culprit_core::telemetry::ReadWorkMetrics> {
         self.read_metrics()

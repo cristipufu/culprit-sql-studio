@@ -128,7 +128,12 @@ impl ReadMetricsRecorder {
                 }
             })
             .collect();
-        Some(ReadWorkMetrics { active_tasks: state.active, untracked_tasks: state.untracked, templates })
+        Some(ReadWorkMetrics {
+            native_session_work: None,
+            active_tasks: state.active,
+            untracked_tasks: state.untracked,
+            templates,
+        })
     }
 }
 #[derive(Default)]

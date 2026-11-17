@@ -10,6 +10,12 @@ const PRIVATE_VALUES: &[&str] = &[
     "private-investigation-client",
     "private_original_investigation_sql",
     "private_observer_cost_sql",
+    "native-cost-reader-db-canary",
+    "native-cost-reader-host-canary.invalid",
+    "native-cost-reader-machine-canary",
+    "native-cost-reader-instance-canary",
+    "native-cost-reader-process-canary",
+    "2020-01-01T11:30:00.0030000",
 ];
 
 fn private_investigation() -> (DiagnosticInvestigationIntent, DiagnosticEpisode) {
@@ -61,6 +67,8 @@ fn private_investigation() -> (DiagnosticInvestigationIntent, DiagnosticEpisode)
         "SELECT private_observer_cost_sql FROM sys.dm_exec_requests WHERE session_id=9264",
         Engine::Mssql,
     );
+    fixture.intent.qualification.read_metrics.native_session_work =
+        test_support::native_source_overhead_read_metrics().native_session_work;
     assert!(fixture.intent.is_valid());
     assert!(episode.matches_focus(&fixture.intent.focus));
     (fixture.intent, episode)

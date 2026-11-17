@@ -6,6 +6,7 @@ pub fn source_overhead(metadata: &EvidenceCaptureMetadata) -> Result<CollectedSo
     let evidence = SourceOverheadEvidence {
         capture: metadata.capture().clone(),
         engine: Some(metadata.source().target.engine()),
+        source: Some(metadata.source().clone()),
         status: CollectionStatus::Complete,
         started_at: metadata.collected_from().into(),
         finished_at: Some(metadata.collected_until().into()),

@@ -193,7 +193,10 @@ pub use signals::{
     FileKind, FileScope, FileWriteOperation, IndexContention, IndexEscalationCounts, IndexLockCounts, QueryCosts,
     Replica, ReplicaCondition, ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
 };
-pub use source_overhead_report::{CollectedSourceOverheadAnalysis, SourceOverheadEvidence, SourceOverheadReport};
+pub use source_overhead_report::{
+    CollectedSourceOverheadAnalysis, SourceNativeIntervalExplanation, SourceOverheadCaptureSummary,
+    SourceOverheadEvidence, SourceOverheadReport,
+};
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_grant_report::{StatementGrantExplanation, StatementGrantRead, StatementGrantReport};
 pub use statement_work_report::{StatementOutcomeCounts, StatementWorkEntry, StatementWorkReport};

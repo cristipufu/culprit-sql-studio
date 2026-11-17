@@ -178,7 +178,10 @@ fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sq
         "SELECT private_qualification_query FROM private_cost_observer WHERE label='private-client'",
         Engine::Mssql,
     );
+    intent.qualification.read_metrics.native_session_work =
+        test_support::native_source_overhead_read_metrics().native_session_work;
     assert!(intent.is_valid());
+    let original = serde_json::to_vec(&intent).unwrap();
     let owner = DiagnosticInvestigationLineage::from_intent(&intent).unwrap();
     let mut manifest = test_support::fixture().0;
     manifest.source = source.clone();
@@ -188,8 +191,8 @@ fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sq
     assert_eq!(lineage["intent_key"], intent.key().unwrap());
     assert_eq!(lineage["recipe_id"], intent.recipe_id);
     assert_eq!(lineage["qualification_key"], intent.qualification.key().unwrap());
-    assert_eq!(lineage["cost_evidence"], serde_json::to_value(intent.qualification.evidence).unwrap());
-    assert_eq!(lineage["budget"], serde_json::to_value(intent.budget).unwrap());
+    assert_eq!(lineage["cost_evidence"], serde_json::to_value(&intent.qualification.evidence).unwrap());
+    assert_eq!(lineage["budget"], serde_json::to_value(&intent.budget).unwrap());
     for omitted in ["scope", "target", "qualification", "read_metrics"] {
         assert!(lineage.get(omitted).is_none(), "{omitted}");
     }
@@ -201,7 +204,49 @@ fn automatic_lineage_preserves_approval_identity_without_its_private_scope_or_sq
         "private-client",
         "private_original_query",
         "private_qualification_query",
+        "native-cost-reader-db-canary",
+        "native-cost-reader-host-canary.invalid",
+        "native-cost-reader-machine-canary",
+        "native-cost-reader-instance-canary",
+        "native-cost-reader-process-canary",
+        "2020-01-01T11:30:00.0030000",
     ] {
         assert!(!json.contains(canary), "{canary}");
     }
+    assert!(!json.contains("native_session_work"));
+    assert_eq!(
+        serde_json::to_vec(&intent).unwrap(),
+        original,
+        "public lineage cannot mask or re-sign canonical authorization"
+    );
+}
+
+#[tokio::test]
+async fn native_source_work_publication_and_capture_context_never_embed_private_reader_authority() {
+    let catalog = PhysicalCatalog::<test_support::JsonProjection>::new().unwrap();
+    let (source, rows) = test_support::memory_failure_evidence();
+    let mut recovery = test_support::Recovery::capture("fixture:test", catalog.digest(), source, rows, 240_001);
+    let metrics = test_support::native_source_overhead_read_metrics();
+    recovery.manifest.source_queries = test_support::SOURCE_OVERHEAD_QUERY_COUNT;
+    recovery.manifest.read_metrics = Some(metrics.clone());
+    recovery.manifest.validate().unwrap();
+    let original = serde_json::to_vec(&recovery.manifest).unwrap();
+    let range = reopen(&recovery, &recovery.manifest.range_id).await.unwrap();
+    let published = super::super::input(&catalog, &range).unwrap();
+    test_support::assert_native_source_overhead_summary(&published["read_metrics"], &metrics);
+    assert_eq!(published["source_queries"], test_support::SOURCE_OVERHEAD_QUERY_COUNT);
+    assert_eq!(
+        published["read_metrics"],
+        serde_json::to_value(metrics.summary(Some(&recovery.manifest.source)).unwrap()).unwrap()
+    );
+    assert!(
+        published["_culprit"].get("read_metrics").is_none(),
+        "one public numeric projection, no embedded private copy"
+    );
+    assert_eq!(
+        serde_json::to_vec(&recovery.manifest).unwrap(),
+        original,
+        "the native proof and manifest digest remain immutable"
+    );
+    assert!(String::from_utf8(original).unwrap().contains("native-cost-reader-process-canary"));
 }

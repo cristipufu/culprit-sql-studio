@@ -44,6 +44,14 @@ pub(crate) fn source_overhead(report: &SourceOverheadReport) -> String {
             ));
         }
     }
+    if let Some(native) = &report.native_interval {
+        text.push_str("\n\n");
+        text.push_str(&native.summary);
+        for detail in native.measurements.iter().chain(&native.limitations) {
+            text.push('\n');
+            text.push_str(detail);
+        }
+    }
     for limitation in &report.limitations {
         text.push('\n');
         text.push_str(limitation);

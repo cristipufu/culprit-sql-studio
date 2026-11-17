@@ -152,6 +152,18 @@ pub(crate) async fn read_initial<R: NativeRead>(
     identity: IdentityDetail,
     detail: Detail,
 ) -> Result<(Context, Rec)> {
+    reader.observe_session_work(crate::read::session_work::Observation::Started);
+    let result = read_initial_context(reader, host, port, identity, detail).await;
+    observe_context_result(reader, result)
+}
+
+async fn read_initial_context<R: NativeRead>(
+    reader: &mut R,
+    host: &str,
+    port: u16,
+    identity: IdentityDetail,
+    detail: Detail,
+) -> Result<(Context, Rec)> {
     if identity == IdentityDetail::AzureDatabase {
         return read_projection(reader, Address { host, port }, identity, None, None, detail).await;
     }
@@ -186,11 +198,22 @@ pub(crate) async fn read_again<R: NativeRead>(
     initial: &Context,
     detail: Detail,
 ) -> Result<(Context, Rec)> {
-    if initial.activity.edition == 5 {
+    reader.observe_session_work(crate::read::session_work::Observation::Started);
+    let result = if initial.activity.edition == 5 {
         read_projection(reader, Address { host, port }, IdentityDetail::AzureDatabase, None, None, detail).await
     } else {
-        read_initial(reader, host, port, IdentityDetail::Endpoint, detail).await
+        read_initial_context(reader, host, port, IdentityDetail::Endpoint, detail).await
+    };
+    observe_context_result(reader, result)
+}
+fn observe_context_result<R: NativeRead>(reader: &mut R, result: Result<(Context, Rec)>) -> Result<(Context, Rec)> {
+    match &result {
+        Ok((context, row)) => crate::read::session_work::observe(reader, context, row),
+        Err(_) => reader.observe_session_work(crate::read::session_work::Observation::Unavailable(
+            NativeReadWorkIssue::NativeScopeUnqualified,
+        )),
     }
+    result
 }
 struct Address<'a> {
     host: &'a str,
@@ -274,8 +297,14 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
         r#"SELECT CAST(NULL AS int) AS session_id,
  sd.database_id AS selected_database_id,CONVERT(varchar(40),CAST(sd.create_date AS datetime2),126) AS database_created_without_offset,
  CONVERT(varchar(36),df.file_guid) AS database_file_guid,CONVERT(varchar(30),df.create_lsn) AS database_file_create_lsn,
- {recovery},{process_columns}{page}
+ {recovery},{process_columns}{page},
+ collector.session_id AS collector_session_id,
+ CONVERT(varchar(40),CAST(collector.login_time AS datetime2),126) AS collector_login_without_offset,
+ collector.cpu_time AS collector_cpu_ms,collector.reads AS collector_reads,
+ collector.logical_reads AS collector_logical_reads,collector.writes AS collector_dirty_marks,
+ collector.memory_usage AS collector_memory_pages
  FROM sys.databases sd LEFT JOIN sys.database_files df ON df.file_id=1 AND df.type=0
+ LEFT JOIN sys.dm_exec_sessions collector ON collector.session_id=@@SPID
  {join} WHERE sd.database_id=DB_ID()"#,
         process_columns =
             if identity == IdentityDetail::AzureDatabase { process::COLUMNS } else { process::UNAVAILABLE_COLUMNS }
@@ -284,5 +313,7 @@ fn query(identity: IdentityDetail, detail: Detail) -> String {
     if identity == IdentityDetail::AzureDatabase { format!("{}{query}", process::AZURE_READ) } else { query }
 }
 
+#[cfg(test)]
+mod native_tests;
 #[cfg(test)]
 mod tests;

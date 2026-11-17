@@ -34,6 +34,7 @@ impl TelemetrySource for FailingSource {
     }
     fn read_metrics(&self) -> Option<ReadWorkMetrics> {
         Some(ReadWorkMetrics {
+            native_session_work: None,
             active_tasks: u32::from(self.unconfirmed),
             untracked_tasks: 1,
             templates: vec![ReadQueryMetrics {
