@@ -23,10 +23,7 @@ pub(crate) fn completed_spills(report: &CompletedSpillReport) -> String {
             (entry.title.as_str(), details)
         }),
     );
-    // These finite source qualifications apply to every row; a finding-count limit must not hide a role or read gap.
-    for limitation in report.limitations.iter().skip(1) {
-        super::super::append_brief_details(&mut text, std::iter::once(limitation.as_str()), OBSERVATION_DETAIL_CHARS);
-    }
+    append_remaining_limitations(&mut text, &report.limitations);
     text.push('\n');
     text.push_str(&t!(
         "evidence.cli.completed_spills.bounds",

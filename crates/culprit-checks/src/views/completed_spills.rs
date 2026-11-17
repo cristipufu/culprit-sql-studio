@@ -1,22 +1,22 @@
 //! Native completed spills name a cache incarnation, not its operator, current request, elapsed cost or cause.
 use culprit_core::{
-    CompletedSpillEntry, CompletedSpillReport, CompletedSpillState, CompletedSpillStatementBinding, Engine, Metric,
-    Result, SourceOutcome, SourceState, format, key, t, telemetry::*,
+    CompletedSpillEntry, CompletedSpillReference, CompletedSpillReport, CompletedSpillState,
+    CompletedSpillStatementBinding, Engine, Metric, Result, SourceOutcome, SourceState, format, key, t, telemetry::*,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
 mod binding;
+mod native;
+mod records;
+pub use native::{explain_read, explain_snapshot};
+pub use records::CompletedSpillRecord;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod validation;
 
-/// The storage owner authenticates these original rows. Pure validation also checks their canonical receipt binding.
-pub struct CompletedSpillRecord<'a> {
-    pub reference: DiagnosticEvidenceRef,
-    pub record: &'a TelemetryRecord,
-}
-
 pub struct CompletedSpillEvidence<'a> {
+    /// The actual original read owner's opaque identity, independent of native member/counter continuity.
+    pub read_id: &'a str,
     pub source: &'a CollectionDescription,
     pub rows: &'a [CompletedSpillRecord<'a>],
     pub sources: &'a [SourceOutcome],
@@ -48,13 +48,7 @@ pub fn explain(
     let index = binding::definitions(definitions.as_ref())?;
     let mut entries = Vec::with_capacity(runtime.rows.len());
     for row in runtime.rows {
-        let TelemetryRecord::Operational(OperationalObservation {
-            fact: OperationalFact::MssqlCachedRuntime(sample),
-            ..
-        }) = row.record
-        else {
-            return Err(invalid());
-        };
+        let sample = row.runtime().ok_or_else(invalid)?;
         let pages = sample.counters.get(&CachedRuntimeMetric::SpilledPages);
         let state = match pages {
             None => CompletedSpillState::Unavailable,
@@ -125,7 +119,7 @@ pub fn explain(
             verify: t!("view.completed_spills.verify"),
         });
     }
-    entries.sort_by(|left, right| left.observation.record_id.cmp(&right.observation.record_id));
+    entries.sort_by(|left, right| left.observation.position_key().cmp(right.observation.position_key()));
     let mut limitations = vec![
         t!("view.completed_spills.limit.population"),
         t!("view.completed_spills.limit.cause"),

@@ -43,10 +43,10 @@ async fn completed_spills_use_native_incarnations_and_keep_each_original_context
             let entry = &result.report.entries[0];
             assert_eq!(entry.state, state, "{}", case.name);
             assert_eq!(Some(entry.statement_binding), case.binding, "{}", case.name);
-            assert_eq!(entry.observation.capture, *capture.capture());
-            assert_eq!(entry.observation.manifest_sha256, capture.capture_manifest_sha256());
+            assert_eq!(entry.observation.captured().unwrap().capture, *capture.capture());
+            assert_eq!(entry.observation.captured().unwrap().manifest_sha256, capture.capture_manifest_sha256());
             if let Some(reference) = &entry.definition {
-                assert_eq!(reference.capture, *definitions.as_ref().unwrap().capture());
+                assert_eq!(reference.captured().unwrap().capture, *definitions.as_ref().unwrap().capture());
             }
             if state == CompletedSpillState::RecordedSpills {
                 assert_eq!(
@@ -155,4 +155,58 @@ async fn a_short_multibyte_warehouse_preview_is_never_mistaken_for_complete_stat
     assert!(!entry.statement_preview_truncated);
     assert_eq!(hydrated.metrics().recovery_objects, 1);
     assert_eq!(definition.recovery_object_reads(), definition_opens + 1);
+}
+
+#[tokio::test]
+async fn completed_original_capture_produces_distinct_cache_incarnations_without_a_hash_join_or_another_read() {
+    let case = completed_spill_evidence_cases().into_iter().find(|case| case.name == "recorded_spills").unwrap();
+    let (mut source, mut rows) = case.runtime;
+    let mut second = rows[0].clone();
+    let TelemetryRecord::Operational(OperationalObservation {
+        key,
+        fact: OperationalFact::MssqlCachedRuntime(runtime),
+        ..
+    }) = &mut second
+    else {
+        panic!()
+    };
+    runtime.context.identity.plan_generation =
+        (runtime.context.identity.plan_generation.parse::<u64>().unwrap() + 1).to_string();
+    let pages = runtime.counters.get_mut(&CachedRuntimeMetric::SpilledPages).unwrap();
+    pages.total = "0".into();
+    pages.last = "0".into();
+    pages.minimum = "0".into();
+    pages.maximum = "0".into();
+    *key = runtime.context.identity.key().unwrap();
+    rows.push(second);
+    let SourceObservation::Snapshot(header) = &mut source.observation else { panic!() };
+    header.records = 2;
+    header.sources[0].records = 2;
+    let fixture = Fixture::with_sequence(source.clone(), rows, 800_100).await;
+    let capture = fixture.read_families(RUNTIME).await;
+    let opens = fixture.recovery_object_reads();
+    let original = serde_json::to_value(capture.records()).unwrap();
+    let analyzed = collected_resources::completed_spills(&capture, None).unwrap();
+    assert_eq!(analyzed.report.entries.len(), 2);
+    assert_eq!(
+        analyzed.report.entries.iter().filter(|entry| entry.state == CompletedSpillState::RecordedSpills).count(),
+        1
+    );
+    assert_eq!(
+        analyzed.report.entries.iter().filter(|entry| entry.state == CompletedSpillState::NoRecordedSpills).count(),
+        1
+    );
+    assert_ne!(analyzed.report.entries[0].identity, analyzed.report.entries[1].identity);
+    assert_eq!(
+        analyzed.context.records.len(),
+        2,
+        "the result retains original raw records once, without a second carrier copy"
+    );
+    for entry in &analyzed.report.entries {
+        let receipt = entry.observation.captured().expect("authenticated SDK provenance stays captured");
+        assert_eq!(receipt.capture, *capture.capture());
+        assert_eq!(receipt.manifest_sha256, capture.capture_manifest_sha256());
+    }
+    assert_eq!(serde_json::to_value(capture.records()).unwrap(), original);
+    assert_eq!(fixture.recovery_object_reads(), opens);
 }

@@ -23,7 +23,7 @@ pub struct CompletedSpillReport {
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CompletedSpillEntry {
-    pub observation: DiagnosticEvidenceRef,
+    pub observation: CompletedSpillReference,
     pub identity: CachedStatementIdentity,
     pub database_id: u32,
     pub origin: StatementOrigin,
@@ -31,7 +31,7 @@ pub struct CompletedSpillEntry {
     pub monitoring_template_id: Option<String>,
     pub state: CompletedSpillState,
     pub statement_binding: CompletedSpillStatementBinding,
-    pub definition: Option<DiagnosticEvidenceRef>,
+    pub definition: Option<CompletedSpillReference>,
     /// Bounded redacted presentation only. The receipt identifies the original full payload in its own context.
     pub statement_preview: Option<String>,
     /// Presentation truncation of a complete authenticated native body, never warehouse preview completeness.
@@ -62,4 +62,36 @@ pub enum CompletedSpillStatementBinding {
     DefinitionNotObserved,
     SourceUnverified,
     SourceChanged,
+}
+
+/// A native read position never pretends to be a sealed outbox/archive receipt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+#[ts(export)]
+pub enum CompletedSpillReference {
+    NativeRead { read_key: String, observation_key: String },
+    Captured { reference: Box<DiagnosticEvidenceRef> },
+}
+
+impl CompletedSpillReference {
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::NativeRead { read_key, observation_key } => valid_digest(read_key) && valid_digest(observation_key),
+            Self::Captured { reference } => reference.is_valid(),
+        }
+    }
+
+    pub fn captured(&self) -> Option<&DiagnosticEvidenceRef> {
+        match self {
+            Self::Captured { reference } => Some(reference),
+            Self::NativeRead { .. } => None,
+        }
+    }
+
+    pub fn position_key(&self) -> &str {
+        match self {
+            Self::NativeRead { observation_key, .. } => observation_key,
+            Self::Captured { reference } => &reference.record_id,
+        }
+    }
 }

@@ -34,6 +34,9 @@ pub struct PlanMeasurementRef {
 #[ts(export)]
 pub struct PlanOperatorView {
     pub id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_server_io: Option<Box<PlanPageServerIoView>>,
     pub runs: Option<f64>,
     pub estimated_rows: Option<f64>,
     pub estimated_rows_for_runs: Option<f64>,
@@ -51,6 +54,14 @@ pub struct PlanOperatorView {
     pub subtree_time_share: Option<f64>,
     pub no_share_reason: Option<String>,
     pub finding_no_share_reason: Option<String>,
+}
+
+/// One operator's native page-server counters, formatted once without a statement-wide sum or cost verdict.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct PlanPageServerIoView {
+    pub metrics: Vec<crate::Metric>,
+    pub limitations: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

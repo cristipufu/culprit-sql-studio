@@ -142,6 +142,7 @@ fn runtime(map: &Map<String, Value>) -> Option<NodeRuntime> {
         cpu_ms: None,
         logical_reads: own(LOGICAL),
         physical_reads: own(PHYSICAL),
+        page_server_io: None,
         thread_rows: if thread_rows.len() >= 2 { thread_rows } else { Vec::new() },
         spill_pages: own(TEMP).filter(|p| *p > 0.0),
     };

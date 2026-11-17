@@ -1,32 +1,25 @@
 //! Compare authenticated native compiler counters, independently of runtimes, pools and retained memory peaks.
 use super::*;
-use culprit_core::telemetry::{CompilationBaseline, NativeReadContext, compilation_namespace};
+use culprit_core::telemetry::{CompilationBaseline, compilation_namespace};
 use culprit_core::{CompilationChange, CompilationComparisonIssue as Issue, CompilationComparisonReport};
 use std::collections::BTreeMap;
 
-pub fn compare(
-    context: Option<&NativeReadContext>,
-    observations: &[&OperationalObservation],
-    source: Option<&SourceOutcome>,
-    previous: &CompilationBaseline,
-) -> Result<CompilationComparisonReport> {
-    if !previous.is_valid()
-        || context.is_some_and(|context| {
-            !context.is_valid()
-                || context.target.database().is_none_or(|database| database.engine != culprit_core::Engine::Mssql)
-        })
-    {
+pub fn compare(input: CompilationEvidence<'_>, previous: &CompilationBaseline) -> Result<CompilationComparisonReport> {
+    validate_context(input.context)?;
+    if !previous.is_valid() {
         return Err(invalid());
     }
-    let cases = cases(observations, source)?;
+    let definitions =
+        input.definitions.map(|definitions| definitions::Definitions::new(input.context, definitions)).transpose()?;
+    let cases = qualified_cases(input.observations, input.source, definitions.as_ref())?;
     let mut report = empty_report(previous);
-    let Some(source) = source else {
+    let Some(source) = input.source else {
         return Ok(unavailable(report, Issue::SourceUnavailable));
     };
     if source.source != previous.source {
         return Ok(unavailable(report, Issue::DifferentSource));
     }
-    let (Some(before), Some(after)) = (&previous.context, context) else {
+    let (Some(before), Some(after)) = (&previous.context, input.context) else {
         return Ok(unavailable(report, Issue::NativeContextUnavailable));
     };
     let (Some(before_namespace), Some(after_namespace)) = (compilation_namespace(before), compilation_namespace(after))
@@ -152,7 +145,8 @@ fn render_change(
     } else {
         t!("view.compilation.comparison.entry.changed", count = count)
     };
-    let policy = delta > 0 && super::policy::recompile_statement(case.native).is_some();
+    let policy = delta > 0
+        && super::policy::recompile_statement(case.native, case.statement.payload, case.statement.origin).is_some();
     if policy {
         explanation.push(' ');
         explanation.push_str(&t!("view.compilation.comparison.entry.policy"));

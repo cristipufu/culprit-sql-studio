@@ -91,6 +91,7 @@ fn participant_hashes(participants: &[QueryParticipant<'_>]) -> Vec<String> {
 
 /// An exact database-scoped count, not a ratio against the instance's batches or an estimate for a runtime window.
 async fn database_compiles(reader: &mut Reader<impl NativeRead>) -> culprit_core::Result<Vec<Signal>> {
+    reader.require_compilation_profile()?;
     let rows = reader.read_rows(&crate::query_store::costs::database_compilation_sql()).await?;
     let Some(r) = rows.first() else { return Ok(Vec::new()) };
     let (Some(compiles), Some(ms)) = (r.f64("compiles"), r.f64("compile_ms")) else { return Ok(Vec::new()) };
@@ -441,6 +442,10 @@ pub(crate) mod tests {
         [(identity.query_id.clone(), identity)].into()
     }
 
+    pub(super) fn compilation_reader<R: NativeRead>(io: R) -> Reader<R> {
+        Reader::with_test_layout(io, &crate::query_store::window_sql::tests::layout_row()).unwrap()
+    }
+
     pub(super) fn unpartitioned_participants<'a>(
         queries: &'a mut [QueryStat],
         identities: &'a HashMap<String, NativeQueryIdentity>,
@@ -473,7 +478,7 @@ pub(crate) mod tests {
             let mut queries = vec![query_without_costs()];
             let mut coverage = Coverage::default();
             let signals = collect_query_compilations(
-                Reader::new(io),
+                compilation_reader(io),
                 60,
                 &mut unpartitioned_participants(&mut queries, &compilation_identities()),
                 &mut coverage,

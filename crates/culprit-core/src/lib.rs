@@ -83,6 +83,7 @@ pub mod waits;
 pub mod window;
 pub mod xml;
 
+pub use actual::page_server_io::{PlanPageServerIo, PlanPageServerIoIssue, PlanPageServerMetric};
 pub use actual::{
     ActualSummary, NodeProgress, NodeRuntime, NodeState, QueryProgress, SessionProgressContext, actual_summary,
     self_times,
@@ -108,7 +109,8 @@ pub use compilation_report::{
 };
 pub use compiler_admission_report::{CompilerAdmissionReport, CompilerGatewayExplanation, CompilerWaiterExplanation};
 pub use completed_spill_report::{
-    CompletedSpillEntry, CompletedSpillReport, CompletedSpillState, CompletedSpillStatementBinding,
+    CompletedSpillEntry, CompletedSpillReference, CompletedSpillReport, CompletedSpillState,
+    CompletedSpillStatementBinding,
 };
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
@@ -174,7 +176,7 @@ pub use plan_facts::{
     PlanIndexColumns, PlanMemoryGrantFeedback, PlanMemoryGrantFeedbackIssue, PlanMemoryGrantFeedbackState,
     PlanNodeFacts, PlanParentRelationship, PlanSampleSource,
 };
-pub use plan_view::{PlanInsightShare, PlanOperatorView, PlanView};
+pub use plan_view::{PlanInsightShare, PlanOperatorView, PlanPageServerIoView, PlanView};
 pub use platform::Platform;
 pub use provenance::{
     AnalysisExtension, AnalysisOrigin, AnalysisProvenance, AnalysisStage, BaselinePurpose, BaselineReference,

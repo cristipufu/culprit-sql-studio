@@ -15,6 +15,7 @@ use culprit_core::{
 use culprit_engine::collected_resources;
 
 mod memory_feedback;
+mod page_server_io;
 mod parameters;
 mod tvp_loops;
 

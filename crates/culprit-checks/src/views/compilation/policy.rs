@@ -15,7 +15,15 @@ pub(crate) struct RepeatedRecompile<'a> {
 }
 
 pub(crate) fn repeated_recompile(native: &MssqlQueryCompilation) -> Option<RepeatedRecompile<'_>> {
-    let statement = recompile_statement(native)?;
+    with_statement(native, &native.statement, native.origin)
+}
+
+pub(super) fn with_statement<'a>(
+    native: &MssqlQueryCompilation,
+    statement: &'a DefinitionPayload,
+    origin: StatementOrigin,
+) -> Option<RepeatedRecompile<'a>> {
+    let statement = recompile_statement(native, statement, origin)?;
     let count = native.compilations.parse::<u64>().ok()?;
     if count < MIN_RECORDED_COMPILATIONS || native.average_duration_us < MIN_AVERAGE_COMPILE_MICROSECONDS {
         return None;
@@ -25,11 +33,15 @@ pub(crate) fn repeated_recompile(native: &MssqlQueryCompilation) -> Option<Repea
         .then_some(RepeatedRecompile { total_milliseconds, statement })
 }
 
-pub(super) fn recompile_statement(native: &MssqlQueryCompilation) -> Option<&str> {
-    if !native.is_valid() || native.origin != StatementOrigin::Application {
+pub(super) fn recompile_statement<'a>(
+    native: &MssqlQueryCompilation,
+    statement: &'a DefinitionPayload,
+    origin: StatementOrigin,
+) -> Option<&'a str> {
+    if !native.is_valid() || origin != StatementOrigin::Application {
         return None;
     }
-    let DefinitionPayload::Available { text, .. } = &native.statement else { return None };
+    let DefinitionPayload::Available { text, .. } = statement else { return None };
     if culprit_core::sql::single_statement(culprit_core::sql::without_parameter_list(text), Engine::Mssql).is_err()
         || !culprit_core::sql::has_mssql_recompile_hint(text)
     {

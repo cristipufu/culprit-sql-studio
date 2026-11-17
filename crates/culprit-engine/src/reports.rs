@@ -19,6 +19,8 @@ pub(crate) use compilation::apply as apply_compilation_baseline;
 pub fn display(report: &Report) -> impl Serialize + '_ {
     #[derive(Serialize)]
     struct View<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
         snapshot: &'a culprit_core::Snapshot,
         findings: &'a [culprit_core::Finding],
         locked: &'a [culprit_core::LockedCheck],
@@ -58,6 +60,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
+        completed_spills,
         snapshot,
         findings,
         locked,
@@ -82,6 +85,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         cleanup,
     } = report;
     View {
+        completed_spills,
         snapshot,
         findings,
         locked,

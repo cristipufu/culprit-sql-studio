@@ -7,6 +7,7 @@ use roxmltree::{Document, Node};
 
 mod cached_definitions;
 mod memory_feedback;
+mod page_server_io;
 mod parameters;
 mod relational_inputs;
 mod scan_completion;
@@ -902,6 +903,7 @@ fn runtime_counters(rt: Node, props: &mut Properties, facts: &mut culprit_core::
     let mut elapsed: Option<f64> = None;
     let mut seen = false;
     let mut runtime = NodeRuntime::default();
+    let mut page_server = culprit_core::actual::page_server_io::PlanPageServerIoBuilder::default();
     let add = |total: &mut Option<f64>, value: Option<f64>| {
         if let Some(v) = value {
             *total = Some(total.unwrap_or(0.0) + v);
@@ -912,6 +914,7 @@ fn runtime_counters(rt: Node, props: &mut Properties, facts: &mut culprit_core::
     let mut workers = 0.0;
     let mut busiest: f64 = 0.0;
     for thread in children(rt, "RunTimeCountersPerThread") {
+        page_server_io::observe(&mut page_server, thread);
         seen = true;
         let thread_rows = attr_f64(thread, "ActualRows");
         rows += thread_rows;
@@ -960,6 +963,7 @@ fn runtime_counters(rt: Node, props: &mut Properties, facts: &mut culprit_core::
     if !seen {
         return Counters::default();
     }
+    runtime.page_server_io = page_server_io::finish(page_server, rt);
     if runtime.thread_rows.len() < 2 {
         runtime.thread_rows.clear();
     }

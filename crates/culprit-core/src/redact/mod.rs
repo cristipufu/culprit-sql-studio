@@ -7,6 +7,7 @@
 use crate::finding::Finding;
 use crate::model::{Engine, Snapshot};
 
+mod cached_runtime;
 mod connection_outcomes;
 mod jobs;
 mod plan;
@@ -195,6 +196,7 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
             (source, key.as_str()),
             (crate::source_id::SESSIONS, "view.connection_outcomes.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
+                | (crate::telemetry::CACHED_RUNTIME_READ_SOURCE, "view.completed_spills.invalid")
         )
 }
 
@@ -259,6 +261,15 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     }
     if let Some(resource) = s.operations.memory_failures.as_mut().and_then(|evidence| evidence.resource.as_mut()) {
         redact_resource_identity(resource);
+    }
+    if let Some(read) = s.operations.cached_runtime.take() {
+        let result = cached_runtime::redact(&mut s, read);
+        s.operations.cached_runtime = admit_shared_evidence(
+            &mut s,
+            crate::telemetry::CACHED_RUNTIME_READ_SOURCE,
+            crate::message!("view.completed_spills.invalid"),
+            result,
+        );
     }
     if let Some(evidence) = s.operations.jobs.take() {
         s.operations.jobs = admit_shared_evidence(

@@ -3,6 +3,8 @@ use super::*;
 use std::collections::BTreeSet;
 mod comparison;
 pub use comparison::{CompilationBaseline, CompilationCounterPoint, MAX_COMPILATION_BASELINE_BYTES};
+mod timings;
+pub use timings::{MssqlCompilationStage, MssqlCompilationTimings};
 
 pub const MAX_QUERY_COMPILATION_OBSERVATIONS: usize = 10_000;
 
@@ -67,12 +69,16 @@ fn native_context_fits_database(context: &NativeReadContext, database: &crate::D
 /// This source's durable namespace is Query Store's logical database. Neither a compute epoch, endpoint alias
 /// nor a selected runtime replica group can substitute for a missing native database incarnation.
 pub fn compilation_namespace(context: &NativeReadContext) -> Option<String> {
-    let database = context.target.database()?;
-    (context.is_valid()
-        && context.partition == SourcePartition::Target
+    context.is_valid().then(|| compilation_database_namespace(&context.target, &context.partition)).flatten()
+}
+
+/// Query Store's logical namespace needs no invented acquisition context from a runtime interval.
+pub fn compilation_database_namespace(target: &CollectionTarget, partition: &SourcePartition) -> Option<String> {
+    let database = target.database()?;
+    (*partition == SourcePartition::Target
         && database.engine == crate::Engine::Mssql
         && database.incarnation.as_ref().is_some_and(|id| !id.is_empty()))
-    .then(|| context.target.telemetry_id().ok())
+    .then(|| target.telemetry_id().ok())
     .flatten()
 }
 
@@ -88,6 +94,8 @@ pub struct MssqlQueryCompilation {
     pub last_compile_at: String,
     pub compilations: String,
     pub average_duration_us: f64,
+    /// Independent native last/stage statistics, with no synthetic total CPU or simultaneous owner.
+    pub timings: MssqlCompilationTimings,
     pub memory: Option<crate::CompilationMemory>,
     /// The native clock comparison can be negative after clock skew; it is not a measured duration.
     pub seconds_since_first_compile: i64,
@@ -132,6 +140,7 @@ impl MssqlQueryCompilation {
             && canonical_time(&self.last_compile_at).is_ok()
             && self.average_duration_us.is_finite()
             && self.average_duration_us >= 0.0
+            && self.timings.is_valid()
             && self.memory.as_ref().is_none_or(|memory| memory.is_valid() && memory.is_measured())
             && valid_reset(&self.reset)
     }
@@ -155,7 +164,7 @@ fn valid_identity(identity: &NativeQueryIdentity) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn observation() -> MssqlQueryCompilation {
+    pub(super) fn observation() -> MssqlQueryCompilation {
         MssqlQueryCompilation {
             statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
             origin: StatementOrigin::Unknown,
@@ -172,6 +181,7 @@ mod tests {
             last_compile_at: "2020-01-01T06:01:00Z".into(),
             compilations: "9007199254740993".into(),
             average_duration_us: 1500.5,
+            timings: MssqlCompilationTimings::default(),
             memory: Some(crate::CompilationMemory {
                 average_kb: Some(4096.5),
                 last_kb: Some(8192.0),

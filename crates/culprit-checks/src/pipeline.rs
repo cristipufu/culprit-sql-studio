@@ -22,6 +22,7 @@ use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot,
 
 mod cleanup;
 mod compiler_admission;
+mod completed_spills;
 mod connection_outcomes;
 mod jobs;
 mod maintenance_progress;
@@ -271,6 +272,7 @@ impl Pipeline {
         let connection_outcomes = connection_outcomes::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
+        let completed_spills = completed_spills::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
@@ -387,6 +389,7 @@ impl Pipeline {
             replication,
             connection_outcomes,
             statement_work,
+            completed_spills,
             cleanup,
         }
     }
@@ -481,10 +484,15 @@ fn explained_compilation(snapshot: &mut Snapshot) -> Option<culprit_core::Compil
     }
     let result = if captured.is_valid() && captured.fits_database(&snapshot.database_identity()) {
         let rows: Vec<_> = captured.observations.iter().collect();
-        crate::compilation::explain(&rows, source.as_ref()).and_then(|mut report| {
+        let evidence = crate::compilation::CompilationEvidence {
+            context: captured.context.as_ref(),
+            observations: &rows,
+            source: source.as_ref(),
+            definitions: None,
+        };
+        crate::compilation::explain(evidence).and_then(|mut report| {
             if let Some(baseline) = &snapshot.compilations_before {
-                report.comparison =
-                    Some(crate::compilation::compare(captured.context.as_ref(), &rows, source.as_ref(), baseline)?);
+                report.comparison = Some(crate::compilation::compare(evidence, baseline)?);
             }
             Ok(report)
         })
@@ -548,6 +556,7 @@ mod tests {
             compilations: "9007199254740993".into(),
             last_compile_at: "2020-01-01T11:59:00.1533333Z".into(),
             average_duration_us: 1500.5,
+            timings: Default::default(),
             memory: Some(CompilationMemory { average_kb: Some(2048.5), last_kb: Some(0.0), maximum_kb: Some(16384.0) }),
             seconds_since_first_compile: 21600,
             reset: ResetMarker::Unknown,
@@ -586,8 +595,14 @@ mod tests {
         };
         assert!(!point.contains(&compilation.first_compile_at().unwrap()));
         assert!(!point.contains(&compilation.last_compile_at));
-        let expected =
-            crate::compilation::explain(&native.observations.iter().collect::<Vec<_>>(), Some(source)).unwrap();
+        let rows = native.observations.iter().collect::<Vec<_>>();
+        let expected = crate::compilation::explain(crate::compilation::CompilationEvidence {
+            context: native.context.as_ref(),
+            observations: &rows,
+            source: Some(source),
+            definitions: None,
+        })
+        .unwrap();
         let original = native.clone();
         let report = crate::analyze(snapshot);
         assert_eq!(

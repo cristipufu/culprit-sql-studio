@@ -1,11 +1,12 @@
 import { ChevronRight, Search, TriangleAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { PlanInsight } from "../gen/PlanInsight";
 import type { Plan } from "../gen/Plan";
 import type { PlanNode } from "../gen/PlanNode";
+import type { PlanPageServerIoView } from "../gen/PlanPageServerIoView";
 import { duration, percent } from "../lib/format";
 import { t } from "../lib/i18n";
-import { cost, estRowsForRuns, exact, misestimate, operatorRuns, propValue } from "../lib/plan-format";
+import { cost, estRowsForRuns, exact, misestimate, operatorRuns, operatorView, propValue } from "../lib/plan-format";
 import { OpIcon } from "./OpIcon";
 import { DocdbWork } from "./DocdbWork";
 import { shortPredicate } from "./PlanView";
@@ -52,6 +53,33 @@ const SHOWN = new Set([
   "Parent Relationship",
 ]);
 
+const MAX_PAGE_SERVER_METRICS = 4;
+const MAX_PAGE_SERVER_LIMITATIONS = 2;
+
+/** Rust has already selected and formatted these native counters; the browser displays their exact text. */
+function PageServerIoDetails({ view }: { view: PlanPageServerIoView }) {
+  return (
+    <details className="nd-all nd-page-server">
+      <summary>
+        <ChevronRight size={13} className="chev" aria-hidden="true" /> {t("view.plan_page_server_io.title")}
+      </summary>
+      <div className="nd-card nd-page-server-body">
+        <dl>
+          {view.metrics.slice(0, MAX_PAGE_SERVER_METRICS).map((metric) => (
+            <Fragment key={metric.key || metric.label}>
+              <dt>{metric.label}</dt>
+              <dd>{metric.text ?? t("view.plan_page_server_io.unknown")}</dd>
+            </Fragment>
+          ))}
+        </dl>
+        {view.limitations.slice(0, MAX_PAGE_SERVER_LIMITATIONS).map((limitation) => (
+          <p className="nd-page-server-limit muted" key={limitation}>{limitation}</p>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 /** How far the actual rows were from the estimate; marked as bad only where the core flagged the operator. */
 function ratio(plan: Plan | undefined, n: PlanNode) {
   const factor = misestimate(plan, n);
@@ -96,6 +124,7 @@ export function NodeDetails({
   const split = Number.isFinite(cpu) && Number.isFinite(io) && cpu + io > 0 ? cpu / (cpu + io) : null;
   const removed = node.props["Rows Removed by Filter"];
   const executions = operatorRuns(plan, node) ?? 0;
+  const pageServerIo = operatorView(plan, node)?.page_server_io;
 
   return (
     <div className="nd">
@@ -254,6 +283,8 @@ export function NodeDetails({
           </section>
         )}
       </div>
+
+      {pageServerIo && <PageServerIoDetails key={node.id} view={pageServerIo} />}
 
       {Object.keys(node.props).length > 0 && (
         <details className="nd-all">

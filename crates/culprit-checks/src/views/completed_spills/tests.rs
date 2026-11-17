@@ -1,5 +1,5 @@
 use super::*;
-mod fixture;
+pub(crate) mod fixture;
 use fixture::{Evidence, report};
 
 #[test]
@@ -186,4 +186,169 @@ fn culprit_monitoring_work_is_preserved_separately_from_application_attribution(
     assert_eq!(entry.origin, StatementOrigin::CulpritMonitoring);
     assert_eq!(entry.monitoring_template_id, Some(digest(b"template")));
     assert!(entry.explanation.contains(&t!("view.completed_spills.origin.culprit")));
+}
+
+#[test]
+fn native_and_authenticated_captured_rows_share_one_diagnosis_without_fabricating_receipts() {
+    let input = Evidence::runtime(Some("9007199254740993"));
+    let read = input.runtime_read();
+    let native = explain_read(&read).unwrap();
+    let captured = report(&input, None);
+    assert_eq!(native.context, captured.context);
+    assert_eq!(native.entries[0].identity, captured.entries[0].identity);
+    assert_eq!(native.entries[0].state, captured.entries[0].state);
+    assert_eq!(
+        serde_json::to_value(&native.entries[0].metrics).unwrap(),
+        serde_json::to_value(&captured.entries[0].metrics).unwrap()
+    );
+    assert_eq!(native.entries[0].title, captured.entries[0].title);
+    assert_eq!(native.entries[0].explanation, captured.entries[0].explanation);
+    let CompletedSpillReference::NativeRead { read_key, .. } = &native.entries[0].observation else { panic!() };
+    assert_eq!(read_key, &read.read_key().unwrap());
+    assert!(native.entries[0].observation.captured().is_none());
+    assert_eq!(captured.entries[0].observation.captured(), Some(&input.references[0]));
+    assert!(native.entries[0].statement_preview.is_none());
+    assert_eq!(native.entries[0].statement_binding, CompletedSpillStatementBinding::NotRequested);
+}
+
+#[test]
+fn a_native_position_from_another_read_cannot_authorize_the_same_cache_entry() {
+    let input = Evidence::runtime(Some("64"));
+    let read = input.runtime_read();
+    let mut row = CompletedSpillRecord::native_runtime(digest(b"another-read"), &read.observations[0]).unwrap();
+    let sources = input.sources.clone();
+    assert!(
+        explain(
+            CompletedSpillEvidence {
+                read_id: &read.read_id,
+                source: &read.description,
+                rows: std::slice::from_ref(&row),
+                sources: &sources,
+                read_complete: true
+            },
+            None
+        )
+        .is_err()
+    );
+    row.reference = CompletedSpillReference::NativeRead {
+        read_key: read.read_key().unwrap(),
+        observation_key: digest(b"another-entry"),
+    };
+    assert!(
+        explain(
+            CompletedSpillEvidence {
+                read_id: &read.read_id,
+                source: &read.description,
+                rows: &[row],
+                sources: &sources,
+                read_complete: true
+            },
+            None
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn native_and_captured_rows_cannot_be_pooled_to_complete_one_declared_read() {
+    let mut input = Evidence::runtime(Some("64"));
+    let mut next = input.records[0].clone();
+    let TelemetryRecord::Operational(OperationalObservation {
+        fact: OperationalFact::MssqlCachedRuntime(runtime),
+        key,
+        ..
+    }) = &mut next
+    else {
+        panic!()
+    };
+    runtime.context.identity.plan_generation = "3".into();
+    *key = runtime.context.identity.key().unwrap();
+    input.records.push(next);
+    let SourceObservation::Snapshot(header) = &mut input.source.observation else { panic!() };
+    header.records = 2;
+    header.sources[0] = StateSourceCoverage::observed("native-cache".into(), 2, true);
+    input.refresh();
+    let read = input.runtime_read();
+    let captured = input.rows();
+    let rows = vec![
+        CompletedSpillRecord::native_runtime(read.read_key().unwrap(), &read.observations[0]).unwrap(),
+        CompletedSpillRecord::captured(input.references[1].clone(), &input.records[1]).unwrap(),
+    ];
+    assert!(explain(input.view(&rows), None).is_err());
+    assert!(explain(input.view(&captured), None).is_ok(), "the same genuine two-row captured source remains valid");
+}
+
+#[test]
+fn a_native_source_subset_and_a_missing_body_remain_independent_limits() {
+    let mut input = Evidence::runtime(Some("64"));
+    let SourceObservation::Snapshot(header) = &mut input.source.observation else { panic!() };
+    header.sources[0] = StateSourceCoverage::observed("native-cache".into(), 1, false);
+    input.refresh();
+    let mut read = input.runtime_read();
+    let native = explain_read(&read).unwrap();
+    assert!(native.read_complete);
+    assert_eq!(native.sources[0].state, SourceState::Partial);
+    assert_eq!(native.entries[0].state, CompletedSpillState::RecordedSpills);
+    read.observations.clear();
+    read.read_complete = false;
+    let missing = explain_read(&read).unwrap();
+    assert!(!missing.read_complete);
+    assert_eq!((missing.native_rows, missing.observed_rows), (1, 0));
+    assert!(missing.entries.is_empty());
+    assert_eq!(missing.sources[0].state, SourceState::Partial);
+}
+
+#[test]
+fn identical_unqualified_metadata_from_a_different_original_read_cannot_supply_a_native_position() {
+    let input = Evidence::runtime(Some("64"));
+    let mut first = input.runtime_read();
+    first.description.partition = SourcePartition::Target;
+    let mut second = first.clone();
+    second.read_id =
+        cached_statement_read_id(&CaptureIdentity { observation_id: "3".repeat(32), revision: None }).unwrap();
+    assert_eq!(first.description, second.description);
+    assert_ne!(first.read_key().unwrap(), second.read_key().unwrap());
+    let rows = vec![CompletedSpillRecord::native_runtime(first.read_key().unwrap(), &second.observations[0]).unwrap()];
+    let input = CompletedSpillEvidence {
+        read_id: &second.read_id,
+        source: &second.description,
+        rows: &rows,
+        sources: &input.sources,
+        read_complete: true,
+    };
+    assert!(explain(input, None).is_err());
+    assert_eq!(explain_read(&first).unwrap().entries[0].state, CompletedSpillState::RecordedSpills);
+    assert_eq!(explain_read(&second).unwrap().entries[0].state, CompletedSpillState::RecordedSpills);
+}
+
+#[test]
+fn a_captured_receipt_cannot_be_relabelled_with_another_original_read_owner() {
+    let input = Evidence::runtime(Some("64"));
+    let rows = input.rows();
+    let foreign_id =
+        cached_statement_read_id(&CaptureIdentity { observation_id: "4".repeat(32), revision: None }).unwrap();
+    let mut evidence = input.view(&rows);
+    evidence.read_id = &foreign_id;
+    assert!(explain(evidence, None).is_err());
+    let original = report(&input, None);
+    assert_eq!(original.entries[0].observation.captured(), Some(&input.references[0]));
+}
+
+#[test]
+fn optional_definitions_keep_their_independent_captured_owner_and_cannot_claim_native_runtime_provenance() {
+    let runtime = Evidence::runtime(Some("64"));
+    let definitions = Evidence::definition();
+    assert_ne!(runtime.read_id, definitions.read_id);
+    let runtime_rows = runtime.rows();
+    let mut definition_rows = definitions.rows();
+    assert!(explain(runtime.view(&runtime_rows), Some(definitions.view(&definition_rows))).is_ok());
+    let mut borrowed_owner = definitions.view(&definition_rows);
+    borrowed_owner.read_id = &runtime.read_id;
+    assert!(explain(runtime.view(&runtime_rows), Some(borrowed_owner)).is_err());
+
+    definition_rows[0].reference = CompletedSpillReference::NativeRead {
+        read_key: cached_statement_read_key(&definitions.read_id, &definitions.source).unwrap(),
+        observation_key: definition_rows[0].native_key().unwrap(),
+    };
+    assert!(explain(runtime.view(&runtime_rows), Some(definitions.view(&definition_rows))).is_err());
 }

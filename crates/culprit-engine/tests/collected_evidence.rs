@@ -9,6 +9,7 @@ mod cached_plans;
 mod cleanup;
 mod cohorts;
 mod compilation;
+mod compilation_definitions;
 mod compiler_admission;
 mod completed_spills;
 mod connection_outcomes;

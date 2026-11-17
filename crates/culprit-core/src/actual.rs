@@ -7,6 +7,8 @@ use ts_rs::TS;
 use crate::model::Engine;
 use crate::plan::{Plan, PlanKind, PlanNode};
 
+pub mod page_server_io;
+
 /// Runtime counters an operator reports beyond rows, executions and time. Every field is optional: engines report
 /// different subsets (Postgres has buffers but no CPU per operator, MySQL has neither).
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
@@ -17,6 +19,10 @@ pub struct NodeRuntime {
     pub logical_reads: Option<f64>,
     /// The part of `logical_reads` that had to come from disk.
     pub physical_reads: Option<f64>,
+    /// Native remote-page counters retain their own population and never become generic storage reads.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "page_server_io::deserialize")]
+    #[ts(optional)]
+    pub page_server_io: Option<Box<page_server_io::PlanPageServerIo>>,
     /// Rows each worker produced for parallel operators; uneven numbers mean one worker did most of the work.
     pub thread_rows: Vec<f64>,
     /// Pages written to and read back from tempdb / temp files: the operator ran out of memory.

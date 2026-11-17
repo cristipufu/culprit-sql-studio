@@ -10,6 +10,7 @@ const CLEANUP_BOUNDARY_REFERENCES: usize = 5;
 const PARTICIPANT_ENTRIES: usize = 5;
 const REPLICATION_ENTRIES: usize = 16;
 
+mod completed_spills;
 mod connection_outcomes;
 mod jobs;
 mod statement_work;
@@ -104,6 +105,7 @@ pub fn report(report: &Report) -> Value {
     });
     statement_work::attach(&mut response, report);
     jobs::attach(&mut response, report);
+    completed_spills::attach(&mut response, report);
     connection_outcomes::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
         match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {
@@ -405,6 +407,7 @@ mod tests {
                     compilations: "9007199254740993".into(),
                     last_compile_at: "2020-01-01T11:59:00.1533333Z".into(),
                     average_duration_us: 1500.5,
+                    timings: Default::default(),
                     memory: Some(CompilationMemory {
                         average_kb: Some(2048.5),
                         last_kb: Some(0.0),
@@ -425,6 +428,7 @@ mod tests {
             .map(|row| {
                 let OperationalFact::MssqlQueryCompilation(native) = &row.fact else { panic!() };
                 CompilationExplanation {
+                    statement: None,
                     observation_key: row.key.clone(),
                     identity: native.identity.clone(),
                     title: t!("view.compilation.entry.title", query = &native.identity.query_id),
@@ -451,6 +455,7 @@ mod tests {
         data.snapshot.workload.as_mut().unwrap().queries[0].text =
             "SELECT private_value FROM compilation_sql_body_canary".into();
         data.query_compilation = Some(CompilationReport {
+            definition_read: None,
             comparison: None,
             source_state: None,
             source_reason: Some("native visibility was not qualified".into()),

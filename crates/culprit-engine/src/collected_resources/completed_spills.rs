@@ -28,9 +28,11 @@ pub fn completed_spills(
             )
         })
         .transpose()?;
+    let runtime_rows = runtime.rows()?;
+    let definition_rows = definitions.as_ref().map(CapturedSpills::rows).transpose()?;
     let report = culprit_checks::completed_spills::explain(
-        runtime.evidence(),
-        definitions.as_ref().map(CapturedSpills::evidence),
+        runtime.evidence(&runtime_rows),
+        definitions.as_ref().zip(definition_rows.as_ref()).map(|(input, rows)| input.evidence(rows)),
     )?;
     Ok(CollectedCompletedSpillAnalysis {
         context: crate::collected_context::from_capture(capture),
@@ -41,12 +43,14 @@ pub fn completed_spills(
 
 struct CapturedSpills<'a> {
     capture: &'a EvidenceCapture,
-    rows: Vec<CompletedSpillRecord<'a>>,
+    read_id: String,
+    runtime: Option<CachedRuntimeRead>,
     sources: Vec<SourceOutcome>,
 }
 impl<'a> CapturedSpills<'a> {
     fn new(capture: &'a EvidenceCapture, dataset: SnapshotDataset, family: EvidenceFamily) -> Result<Self> {
         references::validate_capture(capture)?;
+        let read_id = cached_statement_read_id(capture.capture())?;
         let inputs = CapturedState::sources_for(capture, dataset, family)?;
         let mut sources = Vec::with_capacity(inputs.len());
         for input in inputs {
@@ -59,24 +63,66 @@ impl<'a> CapturedSpills<'a> {
             };
             sources.push(input.outcome(count)?);
         }
-        let rows = capture
-            .records()
-            .iter()
-            .map(|record| {
-                Ok(CompletedSpillRecord {
-                    reference: references::from_record(capture, record)?,
-                    record: &record.row().record,
+        let runtime = if dataset == SnapshotDataset::CachedRuntime {
+            let observations = capture
+                .records()
+                .iter()
+                .map(|record| match &record.row().record {
+                    TelemetryRecord::Operational(row) if matches!(row.fact, OperationalFact::MssqlCachedRuntime(_)) => {
+                        Ok(row.clone())
+                    }
+                    _ => Err(invalid()),
                 })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self { capture, rows, sources })
+                .collect::<Result<Vec<_>>>()?;
+            let read = CachedRuntimeRead {
+                read_id: read_id.clone(),
+                description: capture.source().clone(),
+                observations,
+                read_complete: capture.is_read_complete(),
+            };
+            if !read.is_valid() {
+                return Err(invalid());
+            }
+            Some(read)
+        } else {
+            None
+        };
+        Ok(Self { capture, read_id, runtime, sources })
     }
-    fn evidence(&self) -> CompletedSpillEvidence<'_> {
+    fn rows(&self) -> Result<Vec<CompletedSpillRecord<'_>>> {
+        match &self.runtime {
+            Some(read) => {
+                if read.observations.len() != self.capture.records().len() {
+                    return Err(invalid());
+                }
+                read.observations
+                    .iter()
+                    .zip(self.capture.records())
+                    .map(|(row, record)| {
+                        Ok(CompletedSpillRecord::captured_runtime(references::from_record(self.capture, record)?, row))
+                    })
+                    .collect()
+            }
+            None => self
+                .capture
+                .records()
+                .iter()
+                .map(|record| {
+                    CompletedSpillRecord::captured(references::from_record(self.capture, record)?, &record.row().record)
+                })
+                .collect(),
+        }
+    }
+    fn evidence<'s>(&'s self, rows: &'s [CompletedSpillRecord<'s>]) -> CompletedSpillEvidence<'s> {
         CompletedSpillEvidence {
-            source: self.capture.source(),
-            rows: &self.rows,
+            read_id: &self.read_id,
+            source: self.runtime.as_ref().map(|read| &read.description).unwrap_or_else(|| self.capture.source()),
+            rows,
             sources: &self.sources,
-            read_complete: self.capture.is_read_complete(),
+            read_complete: self
+                .runtime
+                .as_ref()
+                .map_or_else(|| self.capture.is_read_complete(), |read| read.read_complete),
         }
     }
 }

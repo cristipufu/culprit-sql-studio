@@ -79,7 +79,8 @@ impl<R: NativeRead> Reader<R> {
             return Err(invalid_data());
         }
         self.batch = Some(Batch::new(top_queries));
-        self.native_layout().await?;
+        let native = self.native_layout().await?;
+        self.prepare_population_catalog(native).await?;
         self.population_catalog.clone().ok_or_else(invalid_data)
     }
 

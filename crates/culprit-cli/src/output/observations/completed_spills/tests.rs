@@ -10,18 +10,20 @@ fn report() -> CompletedSpillReport {
 fn report_for(name: &str) -> CompletedSpillReport {
     let case = completed_spill_evidence_cases().into_iter().find(|case| case.name == name).unwrap();
     let (definition_source, definition_records) = case.definitions.unwrap();
-    let runtime_rows = receipts(&case.runtime.0, &case.runtime.1, 1);
-    let definition_rows = receipts(&definition_source, &definition_records, 2);
+    let (runtime_read_id, runtime_rows) = receipts(&case.runtime.0, &case.runtime.1, 1);
+    let (definition_read_id, definition_rows) = receipts(&definition_source, &definition_records, 2);
     let runtime_sources = outcomes(&case.runtime.0);
     let definition_sources = outcomes(&definition_source);
     culprit_checks::completed_spills::explain(
         CompletedSpillEvidence {
+            read_id: &runtime_read_id,
             source: &case.runtime.0,
             rows: &runtime_rows,
             sources: &runtime_sources,
             read_complete: true,
         },
         Some(CompletedSpillEvidence {
+            read_id: &definition_read_id,
             source: &definition_source,
             rows: &definition_rows,
             sources: &definition_sources,
@@ -34,16 +36,16 @@ fn receipts<'a>(
     source: &CollectionDescription,
     records: &'a [TelemetryRecord],
     sequence: u64,
-) -> Vec<CompletedSpillRecord<'a>> {
+) -> (String, Vec<CompletedSpillRecord<'a>>) {
     let recovery =
         Recovery::capture("unit:spill-renderer", &digest(b"schema"), source.clone(), records.to_vec(), sequence);
-    records
+    let rows = records
         .iter()
         .enumerate()
         .map(|(index, record)| {
             let row = ExportedRecord::new(source, &recovery.manifest.capture, record.clone()).unwrap();
-            CompletedSpillRecord {
-                reference: DiagnosticEvidenceRef::from_export(
+            CompletedSpillRecord::captured(
+                DiagnosticEvidenceRef::from_export(
                     source,
                     &recovery.manifest.capture_manifest_sha256,
                     &row,
@@ -51,9 +53,11 @@ fn receipts<'a>(
                 )
                 .unwrap(),
                 record,
-            }
+            )
+            .unwrap()
         })
-        .collect()
+        .collect();
+    (cached_statement_read_id(&recovery.manifest.capture).unwrap(), rows)
 }
 fn outcomes(source: &CollectionDescription) -> Vec<SourceOutcome> {
     source

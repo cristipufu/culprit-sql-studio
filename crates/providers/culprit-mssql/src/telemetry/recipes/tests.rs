@@ -1,6 +1,25 @@
 use super::*;
 use std::collections::BTreeSet;
 
+#[test]
+fn expanded_compilation_projection_retires_only_its_registered_source_version() {
+    let recipes = declarations();
+    let revised = recipes
+        .iter()
+        .filter(|recipe| recipe.version != 1)
+        .map(|recipe| (recipe.id.as_str(), recipe.version, recipe.selector, recipe.cost.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        revised,
+        vec![(
+            "mssql.query-compilation",
+            2,
+            RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::QueryCompilation)),
+            RecipeCostQualification::Unqualified
+        )]
+    );
+}
+
 fn subject(kind: RecipeSubject) -> CollectionSubject {
     match kind {
         RecipeSubject::Database => CollectionSubject::Database,
@@ -84,7 +103,7 @@ async fn every_declared_recipe_uses_exactly_one_actual_constructor_without_nativ
         assert!(descriptor.is_valid(), "{}", descriptor.id);
         assert!(ids.insert(&descriptor.id));
         assert_eq!(descriptor.cost, RecipeCostQualification::Unqualified);
-        assert_eq!(descriptor.version, 1);
+        assert_eq!(descriptor.version, registration.version);
         for &kind in registration.subjects {
             let mut selection = selection(descriptor.selector).await;
             let subject = subject(kind);

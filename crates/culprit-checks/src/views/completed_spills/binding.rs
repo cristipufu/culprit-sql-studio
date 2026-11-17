@@ -1,11 +1,11 @@
 use super::*;
 
 const STATEMENT_PREVIEW_CHARACTERS: usize = 512;
-type DefinitionIndex<'a> = BTreeMap<(u32, String), (&'a MssqlCachedPayload, &'a DiagnosticEvidenceRef)>;
+type DefinitionIndex<'a> = BTreeMap<(u32, String), (&'a MssqlCachedPayload, &'a CompletedSpillReference)>;
 
 pub(super) struct Binding {
     pub state: CompletedSpillStatementBinding,
-    pub reference: Option<DiagnosticEvidenceRef>,
+    pub reference: Option<CompletedSpillReference>,
     pub preview: Option<String>,
     pub truncated: bool,
     pub unavailable: Option<PayloadUnavailable>,
@@ -19,7 +19,7 @@ impl Binding {
 pub(super) fn definitions<'a>(input: Option<&'a CompletedSpillEvidence<'a>>) -> Result<DefinitionIndex<'a>> {
     let mut index = BTreeMap::new();
     for row in input.into_iter().flat_map(|input| input.rows) {
-        let TelemetryRecord::ObjectDefinition(record) = row.record else { return Err(invalid()) };
+        let record = row.definition().ok_or_else(invalid)?;
         let (context, statement) = match &record.fact {
             ObjectDefinitionFact::MssqlCachedDefinition(definition) => (&definition.context, &definition.statement),
             ObjectDefinitionFact::MssqlRetainedPlan(definition) => (&definition.context, &definition.statement),

@@ -77,7 +77,14 @@ fn compilation_policy_finding(snapshot: &Snapshot, case: RecordedRecompilation<'
     };
     let mut finding = finding("compilation-policy", &case.compilation.observation.key, Category::Queries, subject);
     let rows = case.read.observations.iter().collect::<Vec<_>>();
-    let limitations = compilation::limitations(&rows, case.source, true);
+    let limitations = compilation::limitations(
+        &rows,
+        case.source,
+        true,
+        rows.iter().any(|row| {
+            matches!(&row.fact, culprit_core::telemetry::OperationalFact::MssqlQueryCompilation(native) if !native.statement.is_available())
+        }),
+    );
     let entry = compilation::render(case.compilation);
     finding.title = entry.title;
     finding.summary = entry.explanation;

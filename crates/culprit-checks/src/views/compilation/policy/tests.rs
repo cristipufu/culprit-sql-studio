@@ -1,8 +1,5 @@
 use super::*;
-use crate::views::compilation::{
-    explain,
-    tests::{native, observation},
-};
+use crate::views::compilation::tests::{explain_native as explain, native, observation};
 use culprit_core::{
     SourceOutcome, SourceState,
     telemetry::{OperationalObservation, PayloadUnavailable},

@@ -21,6 +21,7 @@ import { ObservationExplanationIssue, ObservationSourceIssue, observationReadIss
 import { PageWaitTargets } from "./PageWaitTargets";
 import { TaskSpace } from "./TaskSpace";
 import { QueryCompilation } from "./QueryCompilation";
+import { CompletedSpills } from "./CompletedSpills";
 import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
 import { StatementWork } from "./StatementWork";
@@ -115,6 +116,10 @@ export function HealthTab({
   const compilation = report.snapshot.operations.query_compilation;
   const compilationReport = report.query_compilation;
   const compilationIssue = observationReadIssue(compilation?.source ?? "query compilation", report.snapshot.sources ?? []);
+  const completedSpillRead = report.snapshot.operations.cached_runtime;
+  const completedSpillReport = report.completed_spills;
+  const completedSpillIssue = observationReadIssue("statement-runtime-cache", report.snapshot.sources ?? []);
+  const completedSpillUnexplained = Boolean((completedSpillRead || completedSpillReport) && !(completedSpillRead && completedSpillReport));
   const compilerAdmission = report.snapshot.operations.compiler_admission;
   const compilerAdmissionReport = report.compiler_admission;
   const compilerAdmissionIssue = observationReadIssue(compilerAdmission?.source ?? "compilation gateways", report.snapshot.sources ?? []);
@@ -132,8 +137,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, compilerAdmission && compilerAdmissionReport, statementWork, connectionOutcomes, connectionOutcomesRead, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, compilerAdmissionIssue, connectionOutcomesIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, connectionOutcomes, connectionOutcomesRead, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, connectionOutcomesIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -188,6 +193,9 @@ export function HealthTab({
       {!(tasks && taskReport) && taskIssue && <ObservationSourceIssue source={taskIssue} title={t("view.task_space.title")} />}
       {compilation && compilationReport && <QueryCompilation key={compilation.observed_until} evidence={compilation} report={compilationReport} />}
       {!(compilation && compilationReport) && compilationIssue && <ObservationSourceIssue source={compilationIssue} title={t("view.compilation.title")} />}
+      {completedSpillRead && completedSpillReport && <CompletedSpills key={report.snapshot.id} report={completedSpillReport} />}
+      {!(completedSpillRead && completedSpillReport) && completedSpillIssue && <ObservationSourceIssue source={completedSpillIssue} title={t("view.completed_spills.title")} />}
+      {completedSpillUnexplained && !completedSpillIssue && <ObservationExplanationIssue title={t("view.completed_spills.title")} reason={t("view.completed_spills.invalid")} />}
       {compilerAdmission && compilerAdmissionReport && <CompilerAdmission key={report.snapshot.id} evidence={compilerAdmission} report={compilerAdmissionReport} />}
       {!(compilerAdmission && compilerAdmissionReport) && compilerAdmissionIssue && <ObservationSourceIssue source={compilerAdmissionIssue} title={t("view.compiler_admission.title")} />}
       {jobs && jobsReport && <Jobs key={report.snapshot.id} evidence={jobs} report={jobsReport} />}

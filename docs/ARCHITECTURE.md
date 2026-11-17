@@ -912,9 +912,10 @@ differences for retained input and collection. Loading restores the full report.
 in memory across these snapshots. Report lists read small summary sidecars, without deserializing plans and retained
 evidence. Culprit reads only what the current version writes: a snapshot records its format (`SNAPSHOT_FORMAT`), and one
 in another format is refused, never half-read with missing fields filled in.
-Snapshot format **8** carries native parameter-use relationships. Collector export format **39** carries retained
-parameter proofs and private source-session work observations; analytical publication exposes only their numerical
-summary and opaque proof reference. Both require fresh state, without migration.
+Snapshot format **9** carries exact cache-entry reads and native per-operator page-server counters. Collector export
+format **40** carries independent native compilation-stage timings. Retained parameter proofs and private source-session
+work observations keep their existing boundaries; analytical publication exposes only the numerical work summary and
+opaque proof reference. Both formats require fresh state, without migration.
 
 Consumers request only what they need. `latest_snapshot` and scan-to-scan comparisons read the prepared snapshot
 directly, skipping derived views and retained evidence. Analysis readers reconstruct retained input and collection

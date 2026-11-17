@@ -2,6 +2,15 @@ use super::*;
 use crate::views::compilation::tests::{native, observation};
 use culprit_core::{DatabaseIdentity, Engine, telemetry::*};
 
+fn compare(
+    context: Option<&NativeReadContext>,
+    observations: &[&OperationalObservation],
+    source: Option<&SourceOutcome>,
+    previous: &CompilationBaseline,
+) -> Result<CompilationComparisonReport> {
+    super::compare(CompilationEvidence { context, observations, source, definitions: None }, previous)
+}
+
 fn context(start: &str, end: &str) -> NativeReadContext {
     let mut database = DatabaseIdentity::server(Engine::Mssql, "db", "private-host.invalid", 1433, None);
     database.incarnation = Some("native-logical-database".into());

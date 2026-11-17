@@ -10,26 +10,51 @@ pub(crate) mod policy;
 pub(crate) use policy::{RepeatedRecompile, repeated_recompile};
 mod comparison;
 pub use comparison::compare;
+mod definitions;
+mod timings;
+pub use definitions::{CompilationDefinitionEvidence, CompilationDefinitionRecord};
 
-pub fn explain(observations: &[&OperationalObservation], source: Option<&SourceOutcome>) -> Result<CompilationReport> {
-    let mut cases = cases(observations, source)?;
+/// Native compiler history and an optional independently authenticated definition selection. Definition intervals
+/// remain runtime history; only the original compiler context supplies native compiler read bounds.
+#[derive(Clone, Copy)]
+pub struct CompilationEvidence<'a> {
+    pub context: Option<&'a culprit_core::telemetry::NativeReadContext>,
+    pub observations: &'a [&'a OperationalObservation],
+    pub source: Option<&'a SourceOutcome>,
+    pub definitions: Option<CompilationDefinitionEvidence<'a>>,
+}
+
+pub fn explain(input: CompilationEvidence<'_>) -> Result<CompilationReport> {
+    validate_context(input.context)?;
+    let definitions =
+        input.definitions.map(|definitions| definitions::Definitions::new(input.context, definitions)).transpose()?;
+    let mut cases = qualified_cases(input.observations, input.source, definitions.as_ref())?;
     cases.sort_by(|left, right| left.observation.key.cmp(&right.observation.key));
-    let limitations = limitations(observations, source, cases.iter().any(|case| case.recompile.is_some()));
+    let mut limitations = limitations(
+        input.observations,
+        input.source,
+        cases.iter().any(|case| case.recompile.is_some()),
+        cases.iter().any(|case| !case.statement.payload.is_available()),
+    );
+    if let Some(definitions) = &definitions {
+        definitions.append_limitations(&mut limitations);
+    }
     Ok(CompilationReport {
-        source_state: source.map(|source| source.state),
-        source_reason: source.and_then(|source| source.reason.clone()),
+        source_state: input.source.map(|source| source.state),
+        source_reason: input.source.and_then(|source| source.reason.clone()),
         title: t!("view.compilation.title"),
-        summary: if observations.is_empty() {
+        summary: if input.observations.is_empty() {
             t!("view.compilation.summary.empty")
         } else {
             t!(
                 "view.compilation.summary.entries",
-                n = observations.len(),
-                count = format::digits(observations.len().to_string())
+                n = input.observations.len(),
+                count = format::digits(input.observations.len().to_string())
             )
         },
         limitations,
         entries: cases.into_iter().map(render).collect(),
+        definition_read: definitions.as_ref().map(|definitions| Box::new(definitions.report())),
         comparison: None,
     })
 }
@@ -38,6 +63,7 @@ pub(crate) fn limitations(
     observations: &[&OperationalObservation],
     source: Option<&SourceOutcome>,
     explicit_policy: bool,
+    statement_unavailable: bool,
 ) -> Vec<String> {
     let mut limitations = vec![
         t!("view.compilation.limit.lifetime"),
@@ -45,15 +71,14 @@ pub(crate) fn limitations(
         if explicit_policy { t!("view.compilation.limit.policy") } else { t!("view.compilation.limit.causes") },
         t!("check.planning_time.caveat.compile_memory"),
         t!("view.compilation.limit.admission"),
+        t!("view.compilation.limit.stage_timings"),
     ];
     if observations.iter().any(|row| {
         matches!(&row.fact, OperationalFact::MssqlQueryCompilation(native) if native.seconds_since_first_compile < 0)
     }) {
         limitations.push(t!("view.compilation.limit.clock"));
     }
-    if observations.iter().any(
-        |row| matches!(&row.fact, OperationalFact::MssqlQueryCompilation(native) if !native.statement.is_available()),
-    ) {
+    if statement_unavailable {
         limitations.push(t!("view.compilation.limit.statement"));
     }
     match source.map(|source| source.state) {
@@ -73,11 +98,20 @@ pub(crate) struct QueryCompilation<'a> {
     count: u64,
     first_compile_at: String,
     pub recompile: Option<RepeatedRecompile<'a>>,
+    statement: definitions::Statement<'a>,
 }
 
 pub(crate) fn cases<'a>(
     observations: &[&'a OperationalObservation],
     source: Option<&SourceOutcome>,
+) -> Result<Vec<QueryCompilation<'a>>> {
+    qualified_cases(observations, source, None)
+}
+
+fn qualified_cases<'a>(
+    observations: &[&'a OperationalObservation],
+    source: Option<&SourceOutcome>,
+    definitions: Option<&definitions::Definitions<'a>>,
 ) -> Result<Vec<QueryCompilation<'a>>> {
     if observations.len() > MAX_QUERY_COMPILATION_OBSERVATIONS
         || !source_coverage::consistent_source(source, observations.iter().map(|row| row.source.as_str()))
@@ -92,12 +126,22 @@ pub(crate) fn cases<'a>(
                 return Err(invalid());
             }
             let OperationalFact::MssqlQueryCompilation(native) = &observation.fact else { return Err(invalid()) };
+            let statement = definitions
+                .map(|definitions| definitions.resolve(native))
+                .transpose()?
+                .unwrap_or_else(|| definitions::Statement::captured(native));
+            let recompile = if definitions.is_some() {
+                policy::with_statement(native, statement.payload, statement.origin)
+            } else {
+                repeated_recompile(native)
+            };
             Ok(QueryCompilation {
                 observation,
                 native,
                 count: native.compilations.parse().map_err(|_| invalid())?,
                 first_compile_at: native.first_compile_at().map_err(|_| invalid())?,
-                recompile: repeated_recompile(native),
+                recompile,
+                statement,
             })
         })
         .collect()
@@ -120,6 +164,7 @@ pub(crate) fn render(case: QueryCompilation<'_>) -> CompilationExplanation {
             t!("common.duration.us", n = format::digits(row.average_duration_us.to_string())),
         ),
     ];
+    metrics.extend(timings::metrics(row));
     if let Some(recompile) = case.recompile {
         explanation
             .push(t!("view.compilation.entry.recompile", total = format::duration(recompile.total_milliseconds)));
@@ -168,11 +213,24 @@ pub(crate) fn render(case: QueryCompilation<'_>) -> CompilationExplanation {
         } else {
             t!("view.compilation.verify")
         },
+        statement: case.statement.report,
     }
 }
 
 fn invalid() -> Error {
     Error::invalid(t!("view.compilation.invalid"))
+}
+
+fn validate_context(context: Option<&culprit_core::telemetry::NativeReadContext>) -> Result<()> {
+    if context.is_some_and(|context| {
+        !context.is_valid()
+            || context.target.engine() != culprit_core::Engine::Mssql
+            || context.target.database().is_none()
+            || context.partition != culprit_core::telemetry::SourcePartition::Target
+    }) {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

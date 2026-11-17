@@ -2,6 +2,8 @@
 use culprit_core::{NodeKind, Plan, PlanInsightShare, PlanKind, PlanNode, PlanOperatorView, PlanView, QueryStat};
 use std::collections::BTreeMap;
 
+mod page_server_io;
+
 pub fn plan_view(plan: &Plan, query: Option<&QueryStat>) -> PlanView {
     with_insights(plan, query, plan.insights.as_ref())
 }
@@ -60,6 +62,7 @@ pub(super) fn with_insights(
             let cost_share = (states_shares && n.self_cost > 0.0 && guess.is_none()).then(|| plan.cost_share(n));
             PlanOperatorView {
                 id: n.id,
+                page_server_io: page_server_io::explain(n),
                 runs: (n.act_executions.is_some() || !n.facts().estimated_rows_unavailable).then(|| n.runs()),
                 estimated_rows: (!n.facts().estimated_rows_unavailable).then(|| n.est_rows_total()),
                 estimated_rows_for_runs: (!n.facts().estimated_rows_unavailable).then(|| n.est_rows_for_runs()),

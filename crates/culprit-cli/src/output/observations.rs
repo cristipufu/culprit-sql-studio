@@ -6,6 +6,8 @@ use culprit_core::{
 };
 
 const OBSERVATION_DETAIL_CHARS: usize = 1024;
+#[cfg(test)]
+mod compilation_tests;
 mod completed_spills;
 pub(crate) use completed_spills::completed_spills;
 mod source_overhead;
@@ -207,15 +209,38 @@ pub(crate) fn statement_grants(report: &culprit_core::StatementGrantReport) -> S
 }
 
 pub(crate) fn compilation(report: &CompilationReport) -> String {
-    let mut text = render_explanations(
+    let mut text = native_work_summary(
         Summary {
             title: &report.title,
             summary: &report.summary,
             source: SourceQualification::Single { state: report.source_state, reason: report.source_reason.as_deref() },
             limitations: &report.limitations,
         },
-        report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
+        report.entries.iter().map(|entry| {
+            let mut details = vec![entry.explanation.clone()];
+            details.extend(native_metrics(&entry.metrics));
+            if let Some(statement) = &entry.statement {
+                details.push(statement.explanation.clone());
+                if let Some(sql) = &statement.preview {
+                    details.push(t!("evidence.cli.compilation.statement", sql = sql));
+                }
+                if statement.unavailable.is_some() {
+                    details.push(t!("evidence.cli.compilation.statement_unavailable"));
+                }
+            }
+            details.extend([entry.investigation.clone(), entry.verify.clone()]);
+            (entry.title.as_str(), details)
+        }),
     );
+    append_remaining_limitations(&mut text, &report.limitations);
+    if let Some(definitions) = &report.definition_read {
+        text.push('\n');
+        text.push_str(&t!(
+            "evidence.cli.compilation.definition_counts",
+            selected = format::digits(definitions.selected_rows.to_string()),
+            observed = format::digits(definitions.observed_rows.to_string())
+        ));
+    }
     if let Some(comparison) = &report.comparison {
         text.push('\n');
         let summary = match (&comparison.observed_from, &comparison.observed_until) {
@@ -243,6 +268,36 @@ pub(crate) fn compilation(report: &CompilationReport) -> String {
         }
     }
     text
+}
+
+pub(crate) fn collected_compilation(
+    analysis: &culprit_core::collected_resource_analysis::CollectedCompilationAnalysis,
+) -> String {
+    let mut text = compilation(&analysis.report);
+    if let Some(snapshot) = analysis.context.source.observation.snapshot() {
+        text.push('\n');
+        text.push_str(&t!(
+            "evidence.cli.compilation.counter_bounds",
+            from = &snapshot.observed_from,
+            until = &snapshot.observed_until
+        ));
+    }
+    if let Some(definitions) = &analysis.definition_context {
+        text.push('\n');
+        text.push_str(&t!(
+            "evidence.cli.compilation.definition_bounds",
+            from = &definitions.collected_from,
+            until = &definitions.collected_until
+        ));
+    }
+    text
+}
+
+fn append_remaining_limitations(text: &mut String, limitations: &[String]) {
+    // Native report qualifications are finite and apply to every row. A finding-count limit must not hide a gap.
+    for limitation in limitations.iter().skip(1) {
+        super::append_brief_details(text, std::iter::once(limitation.as_str()), OBSERVATION_DETAIL_CHARS);
+    }
 }
 
 pub(crate) fn compiler_admission(report: &culprit_core::CompilerAdmissionReport) -> String {
@@ -347,12 +402,19 @@ fn native_metrics(metrics: &[culprit_core::Metric]) -> impl Iterator<Item = Stri
 }
 
 fn native_work_summary<'a>(summary: Summary<'a>, entries: impl Iterator<Item = (&'a str, Vec<String>)>) -> String {
-    let details = entries
-        .take(super::BRIEF_FINDING_LIMIT)
-        .map(|(title, details)| t!("evidence.cli.observation_entry", title = title, explanation = details.join("\n")))
-        .collect::<Vec<_>>();
     render_summary(summary, |text| {
-        super::append_brief_details(text, details.iter().map(String::as_str), OBSERVATION_DETAIL_CHARS)
+        // Bound observations and each field independently; an earlier timing field must not hide later memory,
+        // statement-binding or verification evidence in the same structured observation.
+        let details = entries.map(|(title, fields)| {
+            let fields =
+                fields.iter().map(|field| super::brief_detail(field, OBSERVATION_DETAIL_CHARS)).collect::<Vec<_>>();
+            t!(
+                "evidence.cli.observation_entry",
+                title = super::brief_detail(title, OBSERVATION_DETAIL_CHARS),
+                explanation = fields.join("\n")
+            )
+        });
+        super::append_brief_items(text, details)
     })
 }
 
@@ -627,6 +689,7 @@ mod tests {
         };
         let key = culprit_core::telemetry::MssqlQueryCompilation::identity_key(&identity).unwrap();
         let report = CompilationReport {
+            definition_read: None,
             source_state: Some(SourceState::Collected),
             source_reason: None,
             title: "Retained compilations".into(),

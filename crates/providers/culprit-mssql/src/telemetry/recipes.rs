@@ -8,6 +8,7 @@ type BoundBudget = fn(&CollectionBudget) -> CollectionBudget;
 
 struct Registration {
     id: &'static str,
+    version: u32,
     purpose: RecipePurpose,
     selector: RecipeSelector,
     subjects: &'static [RecipeSubject],
@@ -19,6 +20,7 @@ impl Registration {
     const fn database(id: &'static str, selector: RecipeSelector, open: OpenSource) -> Self {
         Self {
             id,
+            version: 1,
             purpose: RecipePurpose::Investigation,
             selector,
             subjects: &[RecipeSubject::Database],
@@ -29,6 +31,10 @@ impl Registration {
     }
     const fn baseline(mut self) -> Self {
         self.purpose = RecipePurpose::Baseline;
+        self
+    }
+    const fn version(mut self, version: u32) -> Self {
+        self.version = version;
         self
     }
     const fn shared(mut self, subjects: &'static [RecipeSubject]) -> Self {
@@ -46,7 +52,7 @@ impl Registration {
     fn descriptor(&self) -> RecipeDescriptor {
         RecipeDescriptor {
             id: self.id.into(),
-            version: 1,
+            version: self.version,
             purpose: self.purpose,
             selector: self.selector,
             subjects: self.subjects.to_vec(),
@@ -233,7 +239,7 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.statistics", Statistics, statistics::Statistics),
     streamed!("mssql.indexes", Indexes, indexes::Indexes),
     streamed!("mssql.check-constraints", CheckConstraints, check_constraints::CheckConstraints),
-    streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation),
+    streamed!("mssql.query-compilation", QueryCompilation, compilation::QueryCompilation).version(2),
     streamed!("mssql.cached-runtime", CachedRuntime, cached_runtime::CachedRuntime),
     streamed!("mssql.objects", Objects, objects::Objects),
     streamed!("mssql.triggers", Triggers, triggers::Triggers),

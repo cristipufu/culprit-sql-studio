@@ -779,6 +779,13 @@ pub fn explain_jobs(snapshot: &culprit_core::Snapshot) -> Result<Option<culprit_
     culprit_checks::jobs::explain_snapshot(snapshot)
 }
 
+/// Explain retained cache entries under the same namespace policy as snapshot analysis, without native I/O.
+pub fn explain_completed_spills(
+    snapshot: &culprit_core::Snapshot,
+) -> Result<Option<culprit_core::CompletedSpillReport>> {
+    culprit_checks::completed_spills::explain_snapshot(snapshot)
+}
+
 /// Reword original connection/session counter evidence from a snapshot without credentials, source or archive I/O.
 pub fn explain_connection_outcomes(
     snapshot: &culprit_core::Snapshot,

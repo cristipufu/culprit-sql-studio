@@ -18,16 +18,26 @@ async fn scan_enriched_compilation_policy_requires_full_authenticated_statement_
     let before = fixture.recovery_object_reads();
     let preview = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(!preview.is_read_complete());
-    let limited = collected_resources::compilation(&preview, None).unwrap();
+    let limited = collected_resources::compilation(&preview, None, None).unwrap();
     assert!(limited.report.entries.is_empty(), "a truncated warehouse SQL preview cannot establish the policy");
     assert_eq!(fixture.recovery_object_reads(), before);
     let capture = fixture.read_families_with_recovery(&[EvidenceFamily::OperationalSamples], Default::default()).await;
     assert!(capture.is_read_complete());
     assert_eq!(capture.metrics().recovery_objects, 1);
     assert_eq!(fixture.recovery_object_reads(), before + 1);
-    let analysis = collected_resources::compilation(&capture, None).unwrap();
+    let analysis = collected_resources::compilation(&capture, None, None).unwrap();
     assert_eq!(analysis.context.source, source);
     assert_eq!(analysis.context.records[0].row.record, expected);
+    assert_eq!(
+        analysis.report.entries[0]
+            .metrics
+            .iter()
+            .find(|metric| metric.is("view.compilation.metric.last_duration"))
+            .unwrap()
+            .text
+            .as_deref(),
+        Some("9007199254740993 µs")
+    );
     let entry = &analysis.report.entries[0];
     assert!(entry.explanation.contains(&culprit_core::format::duration(6_000.0)));
     assert!(entry.investigation.contains("keep the hint if"));
@@ -92,14 +102,19 @@ async fn archived_compilations_reuse_the_scan_explanation_and_retain_exact_nativ
         reason: None,
         reason_message: None,
     };
-    let expected =
-        culprit_checks::compilation::explain(&snapshot.observations.iter().collect::<Vec<_>>(), Some(&source_outcome))
-            .unwrap();
+    let rows = snapshot.observations.iter().collect::<Vec<_>>();
+    let expected = culprit_checks::compilation::explain(culprit_checks::compilation::CompilationEvidence {
+        context: snapshot.context.as_ref(),
+        observations: &rows,
+        source: Some(&source_outcome),
+        definitions: None,
+    })
+    .unwrap();
     let fixture = Fixture::new(source.clone(), records.clone()).await;
     let reads_before = fixture.recovery_object_reads();
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
     assert!(capture.is_read_complete(), "{:?}", capture.gaps());
-    let analysis = collected_resources::compilation(&capture, None).unwrap();
+    let analysis = collected_resources::compilation(&capture, None, None).unwrap();
     assert_eq!(serde_json::to_value(&analysis.report).unwrap(), serde_json::to_value(expected).unwrap());
     assert_eq!(analysis.context.source, source);
     assert_eq!(analysis.context.records.len(), records.len());
@@ -113,6 +128,26 @@ async fn archived_compilations_reuse_the_scan_explanation_and_retain_exact_nativ
             .iter()
             .any(|metric| metric.is("view.compilation.metric.count")
                 && metric.text.as_deref() == Some("9007199254740993"))
+    );
+    for (key, text) in [
+        ("view.compilation.metric.last_duration", "9007199254740993 µs"),
+        ("view.compilation.metric.last_bind_cpu", "9007199254740994 µs"),
+        ("view.compilation.metric.last_bind_duration", "0 µs"),
+    ] {
+        assert_eq!(
+            analysis.report.entries[0].metrics.iter().find(|metric| metric.is(key)).unwrap().text.as_deref(),
+            Some(text)
+        );
+    }
+    assert_eq!(
+        analysis.report.entries[0]
+            .metrics
+            .iter()
+            .find(|metric| metric.is("view.compilation.metric.average_bind_cpu"))
+            .unwrap()
+            .text
+            .as_deref(),
+        Some(culprit_core::t!("view.compilation.timing_unknown").as_str())
     );
     assert_eq!(fixture.recovery_object_reads(), reads_before, "inline compilation facts need no native payload reread");
     assert_eq!(analysis.context.metrics.recovery_objects, 0);
@@ -136,7 +171,7 @@ async fn reused_native_query_numbers_keep_distinct_compilation_incarnations_with
     point.sources[0] = StateSourceCoverage::collected(point.sources[0].source.clone(), 2);
     let fixture = Fixture::new(source, records).await;
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let analysis = collected_resources::compilation(&capture, None).unwrap();
+    let analysis = collected_resources::compilation(&capture, None, None).unwrap();
     assert_eq!(analysis.report.entries.len(), 2);
     assert!(analysis.report.entries.iter().all(|entry| entry.identity.query_id == "42"));
     let mut counts = analysis
@@ -181,7 +216,7 @@ async fn native_coverage_and_missing_warehouse_rows_remain_independent_compilati
         let fixture = Fixture::new(source.clone(), rows.clone()).await;
         let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
         assert!(capture.is_read_complete());
-        let report = collected_resources::compilation(&capture, None).unwrap().report;
+        let report = collected_resources::compilation(&capture, None, None).unwrap().report;
         assert_eq!(report.source_state, Some(state));
         assert_eq!(report.entries.len(), rows.len());
     }
@@ -189,7 +224,7 @@ async fn native_coverage_and_missing_warehouse_rows_remain_independent_compilati
     let fixture = Fixture::new(source, rows).await;
     fixture.remove_first_row(TelemetryStream::OperationalSamples);
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-    let analysis = collected_resources::compilation(&capture, None).unwrap();
+    let analysis = collected_resources::compilation(&capture, None, None).unwrap();
     assert_eq!(analysis.report.source_state, Some(SourceState::Partial));
     assert!(analysis.report.entries.is_empty());
     assert!(analysis.context.read_gaps.iter().any(|gap| gap.reason == EvidenceGapReason::MissingRows));
@@ -230,7 +265,7 @@ async fn compilation_admission_rejects_foreign_subjects_formats_datasets_and_ope
         let family =
             if shape == "family" { EvidenceFamily::ResourceSamples } else { EvidenceFamily::OperationalSamples };
         let capture = fixture.read_families(&[family]).await;
-        let error = collected_resources::compilation(&capture, None).unwrap_err();
+        let error = collected_resources::compilation(&capture, None, None).unwrap_err();
         let problem = if shape == "fact" { DeliveryProblem::Integrity } else { DeliveryProblem::UnsupportedSchema };
         assert_eq!(error.detail, Some(ErrorDetail::Delivery(problem)), "{shape}");
     }

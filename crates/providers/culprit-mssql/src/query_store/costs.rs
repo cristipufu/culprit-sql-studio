@@ -7,32 +7,39 @@ use culprit_core::{Result, telemetry::canonical_time};
 
 mod statement;
 pub(crate) use statement::{CompilationStatement, bind_statement};
+mod timings;
 
-pub(crate) const COMPILATION_COLUMNS: &str = concat!(
-    super::catalog_sql::query_identity_columns!("q.query_id"),
-    r#",
+fn compilation_columns() -> String {
+    format!(
+        r#"{identity},
  q.count_compiles,q.avg_compile_duration,
+ {timings},
  q.avg_compile_memory_kb,q.last_compile_memory_kb,q.max_compile_memory_kb,
  CONVERT(varchar(40),q.last_compile_start_time,127) AS last_compile,
- DATEDIFF_BIG(second,q.initial_compile_start_time,SYSDATETIMEOFFSET()) AS compiling_s"#
-);
+ DATEDIFF_BIG(second,q.initial_compile_start_time,SYSDATETIMEOFFSET()) AS compiling_s"#,
+        identity = super::catalog_sql::query_identity_columns!("q.query_id"),
+        timings = timings::columns()
+    )
+}
 
 pub(crate) fn compilation_sql() -> String {
     format!(
         r#"DECLARE /* culprit */ @ids xml=CONVERT(xml,@P1);
-SELECT /* culprit */ {COMPILATION_COLUMNS}
+SELECT /* culprit */ {columns}
 FROM sys.query_store_query q
 WHERE q.query_id IN(SELECT n.x.value('@id[1]','bigint') FROM @ids.nodes('/ids/id') n(x))
-OPTION(MAXDOP 1)"#
+OPTION(MAXDOP 1)"#,
+        columns = compilation_columns()
     )
 }
 
 /// Bounded export of retained entries, including Culprit's own compilation overhead.
 pub(crate) fn compilation_snapshot_sql() -> String {
     format!(
-        r#"SELECT /* culprit */ TOP (@P1) {COMPILATION_COLUMNS}
+        r#"SELECT /* culprit */ TOP (@P1) {columns}
 FROM sys.query_store_query q
-OPTION(MAXDOP 1)"#
+OPTION(MAXDOP 1)"#,
+        columns = compilation_columns()
     )
 }
 
@@ -42,6 +49,7 @@ pub(crate) struct Compilation {
     pub origin: culprit_core::telemetry::StatementOrigin,
     pub count: u64,
     pub avg_duration_us: f64,
+    pub timings: culprit_core::telemetry::MssqlCompilationTimings,
     pub memory: Option<culprit_core::CompilationMemory>,
     pub first_at: String,
     pub last_at: String,
@@ -64,6 +72,7 @@ impl Compilation {
             origin: culprit_core::telemetry::StatementOrigin::Unknown,
             count: integer(row, "count_compiles")?.try_into().map_err(|_| invalid_data())?,
             avg_duration_us: crate::read::required_nonnegative_number(row, "avg_compile_duration")?,
+            timings: timings::decode(row)?,
             memory: memory.is_measured().then_some(memory),
             last_at: canonical_time(&crate::read::text(row, "last_compile")?)?,
             seconds_since_first: signed_integer(row, "compiling_s")?,
@@ -77,6 +86,7 @@ impl Compilation {
             last_compile_at: self.last_at.clone(),
             compilations: self.count.to_string(),
             average_duration_us: self.avg_duration_us,
+            timings: self.timings.clone(),
             memory: self.memory,
             seconds_since_first_compile: self.seconds_since_first,
             reset: culprit_core::ResetMarker::Unknown,

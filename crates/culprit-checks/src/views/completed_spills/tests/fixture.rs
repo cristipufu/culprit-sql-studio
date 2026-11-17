@@ -1,6 +1,7 @@
 use super::*;
 
-pub(super) struct Evidence {
+pub(crate) struct Evidence {
+    pub read_id: String,
     pub source: CollectionDescription,
     pub records: Vec<TelemetryRecord>,
     pub references: Vec<DiagnosticEvidenceRef>,
@@ -85,7 +86,8 @@ impl Evidence {
                 sources: vec![StateSourceCoverage::collected("native-cache".into(), records.len() as u32)],
             }),
         };
-        let mut result = Self { source, records, references: vec![], sources: vec![], complete: true };
+        let mut result =
+            Self { read_id: String::new(), source, records, references: vec![], sources: vec![], complete: true };
         result.refresh();
         result
     }
@@ -100,6 +102,7 @@ impl Evidence {
                 sequence: sequence.into(),
             }),
         };
+        self.read_id = cached_statement_read_id(&capture).unwrap();
         self.references = self
             .records
             .iter()
@@ -121,15 +124,37 @@ impl Evidence {
             })
             .collect();
     }
+    pub fn runtime_read(&self) -> CachedRuntimeRead {
+        let observations = self
+            .records
+            .iter()
+            .map(|record| match record {
+                TelemetryRecord::Operational(row) => row.clone(),
+                _ => panic!("runtime fixture contains a native cache observation"),
+            })
+            .collect();
+        CachedRuntimeRead {
+            read_id: self.read_id.clone(),
+            description: self.source.clone(),
+            observations,
+            read_complete: self.complete,
+        }
+    }
     pub fn rows(&self) -> Vec<CompletedSpillRecord<'_>> {
         self.references
             .iter()
             .zip(&self.records)
-            .map(|(reference, record)| CompletedSpillRecord { reference: reference.clone(), record })
+            .map(|(reference, record)| CompletedSpillRecord::captured(reference.clone(), record).unwrap())
             .collect()
     }
     pub fn view<'a>(&'a self, rows: &'a [CompletedSpillRecord<'a>]) -> CompletedSpillEvidence<'a> {
-        CompletedSpillEvidence { source: &self.source, rows, sources: &self.sources, read_complete: self.complete }
+        CompletedSpillEvidence {
+            read_id: &self.read_id,
+            source: &self.source,
+            rows,
+            sources: &self.sources,
+            read_complete: self.complete,
+        }
     }
     pub fn change_definition(&mut self, change: impl FnOnce(&mut MssqlCachedDefinition)) {
         let TelemetryRecord::ObjectDefinition(row) = &self.records[0] else { panic!() };

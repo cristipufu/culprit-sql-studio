@@ -6,8 +6,10 @@ use crate::delivery::{
 use culprit_core::telemetry::*;
 
 mod activity;
+mod compilation_definitions;
 mod compilation_intervals;
 pub use activity::{activity_evidence_cases, activity_observation, assert_activity_capture};
+pub use compilation_definitions::{CompilationDefinitionCase, compilation_definition_evidence_cases};
 mod blocking;
 pub use blocking::{BlockingCase, assert_blocking_capture, blocking_evidence, blocking_evidence_cases};
 pub use compilation_intervals::compilation_interval_evidence;
@@ -100,11 +102,11 @@ mod task_space;
 pub use task_space::{assert_task_space_capture, task_space_evidence_cases};
 mod object_definitions;
 pub use object_definitions::{
-    MemoryFeedbackCase, ParameterEvidenceCase, TvpLoopCase, assert_object_definition_capture, memory_feedback_evidence,
-    memory_feedback_evidence_cases, object_definition_bound_join_evidence, object_definition_evidence_cases,
-    object_definition_hydration_evidence, object_definition_recovery_only_evidence,
-    object_definition_retained_input_evidence, parameter_evidence, parameter_evidence_cases, tvp_loop_evidence,
-    tvp_loop_evidence_cases,
+    MemoryFeedbackCase, PageServerIoCase, ParameterEvidenceCase, TvpLoopCase, assert_object_definition_capture,
+    memory_feedback_evidence, memory_feedback_evidence_cases, object_definition_bound_join_evidence,
+    object_definition_evidence_cases, object_definition_hydration_evidence, object_definition_recovery_only_evidence,
+    object_definition_retained_input_evidence, page_server_io_evidence, parameter_evidence, parameter_evidence_cases,
+    tvp_loop_evidence, tvp_loop_evidence_cases,
 };
 mod projection;
 pub use projection::JsonProjection;
@@ -684,6 +686,21 @@ pub fn query_compilation_evidence() -> (CollectionDescription, Vec<TelemetryReco
         last_compile_at: "2020-01-01T11:59:00.1533333Z".into(),
         compilations: "9007199254740993".into(),
         average_duration_us: 1500.5,
+        timings: MssqlCompilationTimings {
+            last_duration_us: Some("9007199254740993".into()),
+            binding: MssqlCompilationStage {
+                average_duration_us: Some(25.5),
+                last_duration_us: Some("0".into()),
+                average_cpu_us: None,
+                last_cpu_us: Some("9007199254740994".into()),
+            },
+            optimization: MssqlCompilationStage {
+                average_duration_us: Some(1000.25),
+                last_duration_us: Some("2800".into()),
+                average_cpu_us: Some(0.0),
+                last_cpu_us: Some("900".into()),
+            },
+        },
         memory: Some(culprit_core::CompilationMemory {
             average_kb: Some(32768.5),
             last_kb: Some(16384.0),

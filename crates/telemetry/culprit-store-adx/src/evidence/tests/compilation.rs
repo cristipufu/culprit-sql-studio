@@ -16,13 +16,19 @@ async fn separate_compilation_reads_preserve_exact_counters_native_namespaces_an
         assert_eq!(fixture.recovery.object_reads.load(Ordering::SeqCst), reads);
         let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
         let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
-        let mut rows = fixture.rows_for(EvidenceFamily::OperationalSamples);
-        let mut details: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
-        details["compilations"] = json!("9007199254740995");
-        rows[0][column] = json!(details.to_string());
-        fixture.replies(vec![rows]);
-        let error = fixture.reader().read_capture(&fixture.range, FAMILY, budget(), None).await.unwrap_err();
-        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+        for timing in [false, true] {
+            let mut rows = fixture.rows_for(EvidenceFamily::OperationalSamples);
+            let mut details: Value = serde_json::from_str(rows[0][column].as_str().unwrap()).unwrap();
+            if timing {
+                details["timings"]["last_duration_us"] = json!("9007199254740995");
+            } else {
+                details["compilations"] = json!("9007199254740995");
+            }
+            rows[0][column] = json!(details.to_string());
+            fixture.replies(vec![rows]);
+            let error = fixture.reader().read_capture(&fixture.range, FAMILY, budget(), None).await.unwrap_err();
+            assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+        }
     }
 }
 
@@ -45,6 +51,16 @@ async fn compilation_policy_requires_complete_authenticated_sql_and_rejects_chan
         fixture.reader().read_capture(&fixture.range, FAMILY, options, Some(fixture.recovery.as_ref())).await.unwrap();
     test_support::assert_operational_capture(&capture, &source, &records);
     assert_eq!(capture.records()[0].row().record, records[0]);
+    let TelemetryRecord::Operational(OperationalObservation {
+        fact: OperationalFact::MssqlQueryCompilation(native),
+        ..
+    }) = &capture.records()[0].row().record
+    else {
+        panic!("compilation")
+    };
+    assert_eq!(native.timings.last_duration_us.as_deref(), Some("9007199254740993"));
+    assert_eq!(native.timings.binding.average_cpu_us, None);
+    assert_eq!(native.timings.binding.last_duration_us.as_deref(), Some("0"));
     assert_eq!(capture.metrics().recovery_objects, 1);
     assert!(!serde_json::to_string(&capture).unwrap().contains("private-compilation-value"));
 

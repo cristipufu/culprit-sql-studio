@@ -13,6 +13,10 @@ mod admission;
 mod blocking;
 mod cache_entry_memory;
 mod cached_definitions;
+mod cached_runtime_read;
+pub use cached_runtime_read::{
+    CACHED_RUNTIME_READ_SOURCE, CachedRuntimeRead, cached_statement_read_id, cached_statement_read_key,
+};
 mod cached_statements;
 mod catalog;
 mod check_constraints;

@@ -34,6 +34,9 @@ pub enum IndexUsageScope {
 pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub cached_runtime: Option<Box<crate::telemetry::CachedRuntimeRead>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub statement_work: Option<Box<crate::telemetry::StatementCounterSnapshot>>,
     /// None means that the native usage population was not established.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,6 +162,7 @@ impl OperationalStats {
         }
         let Self {
             statement_work: _,
+            cached_runtime: _,
             index_usage_scope,
             log_failures,
             spaces,

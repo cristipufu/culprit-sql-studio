@@ -1,5 +1,8 @@
 use super::{
-    tests::{compilation_identities, database_compilation_row, query_without_costs, unpartitioned_participants},
+    tests::{
+        compilation_identities, compilation_reader, database_compilation_row, query_without_costs,
+        unpartitioned_participants,
+    },
     *,
 };
 use crate::{
@@ -13,6 +16,48 @@ use culprit_core::{
     signals::CompileHistory,
     telemetry::{CollectionStop, SourceShutdown},
 };
+
+#[tokio::test]
+async fn unsupported_or_unknown_compilation_profile_is_unavailable_without_selected_or_database_count_sql() {
+    for edition in [None, Some(6), Some(0), Some(12)] {
+        let mut reader = match edition {
+            Some(edition) => Reader::with_test_layout(
+                FakeRead::new(vec![]),
+                &replace(
+                    &crate::query_store::window_sql::tests::layout_row(),
+                    &[("engine_edition", Val::Int(edition))],
+                ),
+            )
+            .unwrap(),
+            None => Reader::new(FakeRead::new(vec![])),
+        };
+        let mut query = query_without_costs();
+        query.costs = Some(QueryCosts {
+            compile_history: Some(CompileHistory {
+                count: 1.0,
+                total_ms: 10.0,
+                first_at: None,
+                last_at: None,
+                within_window: true,
+                memory: None,
+            }),
+            ..Default::default()
+        });
+        let mut queries = vec![query];
+        let identities = compilation_identities();
+        let mut participants = unpartitioned_participants(&mut queries, &identities);
+        let pending = read_compilations(&mut reader, &participants).await;
+        assert_eq!(reader.queries(), 0, "both selected and SUM(count_compiles) must be refused before SQL");
+        let closed = reader.close().await;
+        let result = pending.finish(60, &mut participants, closed, None);
+        drop(participants);
+        assert!(result.snapshot.is_none() && result.signals.is_empty());
+        assert!(queries[0].costs.as_ref().is_none_or(|costs| costs.compile_history.is_none()));
+        let outcomes = result.coverage.outcomes();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].state, SourceState::Unavailable);
+    }
+}
 
 #[tokio::test]
 async fn original_agreeing_population_definitions_supply_policy_only_after_quiet_native_close_without_extra_reads() {
@@ -44,7 +89,7 @@ async fn original_agreeing_population_definitions_supply_policy_only_after_quiet
             io.shutdown = SourceShutdown::Unconfirmed;
         }
         let mut coverage = Coverage::default();
-        let read = collect_query_compilations(Reader::new(&mut io), 30, &mut participants, &mut coverage).await;
+        let read = collect_query_compilations(compilation_reader(&mut io), 30, &mut participants, &mut coverage).await;
         drop(participants);
         assert_eq!(io.calls.len(), 2, "{outcome}");
         assert_eq!(io.closed, 1);
@@ -89,7 +134,7 @@ async fn matching_native_identity_retains_compile_history_without_borrowing_runt
     let original_sql = queries[0].text.clone();
     let mut coverage = Coverage::default();
     let signals = collect_query_compilations(
-        Reader::new(FakeRead::new(vec![Ok(vec![row]), Ok(vec![database_compilation_row()])])),
+        compilation_reader(FakeRead::new(vec![Ok(vec![row]), Ok(vec![database_compilation_row()])])),
         30,
         &mut unpartitioned_participants(&mut queries, &compilation_identities()),
         &mut coverage,
@@ -125,7 +170,7 @@ async fn recycled_native_query_qualifiers_cannot_attach_compilation_to_earlier_s
         let original_sql = queries[0].text.clone();
         let mut coverage = Coverage::default();
         let signals = collect_query_compilations(
-            Reader::new(FakeRead::new(vec![Ok(vec![changed]), Ok(vec![database_compilation_row()])])),
+            compilation_reader(FakeRead::new(vec![Ok(vec![changed]), Ok(vec![database_compilation_row()])])),
             60,
             &mut unpartitioned_participants(&mut queries, &compilation_identities()),
             &mut coverage,
@@ -145,7 +190,7 @@ async fn absent_definition_or_compilation_stays_unknown_without_retaining_an_old
         let mut queries = vec![query_with_previous_compilation()];
         let mut coverage = Coverage::default();
         collect_query_compilations(
-            Reader::new(FakeRead::new(vec![Ok(rows), Ok(vec![database_compilation_row()])])),
+            compilation_reader(FakeRead::new(vec![Ok(rows), Ok(vec![database_compilation_row()])])),
             60,
             &mut unpartitioned_participants(&mut queries, &identities),
             &mut coverage,
@@ -163,7 +208,7 @@ async fn one_unknown_query_does_not_erase_an_independently_matched_compilation()
     let mut queries = vec![query_without_costs(), other];
     let mut coverage = Coverage::default();
     collect_query_compilations(
-        Reader::new(FakeRead::new(vec![
+        compilation_reader(FakeRead::new(vec![
             Ok(vec![compilation_row(), replace(&compilation_row(), &[("query_id", Val::Int(4))])]),
             Ok(vec![database_compilation_row()]),
         ])),
@@ -183,7 +228,7 @@ async fn native_timeout_or_cancellation_prevents_followup_sql_and_clears_unadmit
         let mut queries = vec![query_with_previous_compilation()];
         let mut coverage = Coverage::default();
         let signals = collect_query_compilations(
-            Reader::new(FakeRead::new(vec![Err(ReadError::Stopped(stop))])),
+            compilation_reader(FakeRead::new(vec![Err(ReadError::Stopped(stop))])),
             60,
             &mut unpartitioned_participants(&mut queries, &compilation_identities()),
             &mut coverage,
@@ -201,7 +246,7 @@ async fn duplicate_or_unrequested_native_compilation_rows_retire_the_reader_with
     for rows in
         [vec![compilation_row(), compilation_row()], vec![replace(&compilation_row(), &[("query_id", Val::Int(7))])]]
     {
-        let mut reader = Reader::new(FakeRead::new(vec![Ok(rows)]));
+        let mut reader = compilation_reader(FakeRead::new(vec![Ok(rows)]));
         let error = reader.compilations(&["3".into()]).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
         assert!(reader.read_rows("must not execute").await.is_err());
@@ -274,7 +319,7 @@ async fn replica_participants_share_one_compilation_acquisition_without_borrowin
     ])
     .with_query_limit(2);
     let mut coverage = Coverage::default();
-    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    let captured = collect_query_compilations(compilation_reader(&mut io), 60, &mut participants, &mut coverage).await;
     drop(participants);
     for query in &queries[..3] {
         let costs = query.costs.as_ref().unwrap();
@@ -324,7 +369,7 @@ async fn same_query_id_with_different_native_incarnation_is_withheld_only_for_th
     ];
     let mut io = FakeRead::new(vec![Ok(vec![compilation_row()]), Ok(vec![database_compilation_row()])]);
     let mut coverage = Coverage::default();
-    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    let captured = collect_query_compilations(compilation_reader(&mut io), 60, &mut participants, &mut coverage).await;
     drop(participants);
     assert!(queries[0].costs.as_ref().unwrap().compile_history.is_some());
     assert_compilation_withheld(&queries[1]);
@@ -345,7 +390,7 @@ async fn unconfirmed_compilation_owner_clears_every_selected_population_without_
     let mut io = FakeRead::new(vec![Ok(vec![compilation_row()]), Ok(vec![database_compilation_row()])]);
     io.shutdown = SourceShutdown::Unconfirmed;
     let mut coverage = Coverage::default();
-    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    let captured = collect_query_compilations(compilation_reader(&mut io), 60, &mut participants, &mut coverage).await;
     drop(participants);
     for query in &queries {
         assert_compilation_withheld(query);
@@ -368,7 +413,7 @@ async fn failed_query_compilation_keeps_only_independent_database_context_and_ex
         Ok(vec![database_compilation_row()]),
     ]);
     let mut coverage = Coverage::default();
-    let captured = collect_query_compilations(Reader::new(&mut io), 60, &mut participants, &mut coverage).await;
+    let captured = collect_query_compilations(compilation_reader(&mut io), 60, &mut participants, &mut coverage).await;
     drop(participants);
     for query in &queries {
         assert_compilation_withheld(query);

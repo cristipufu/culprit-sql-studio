@@ -177,6 +177,10 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis compilation --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis compilation --definitions-range "$CULPRIT_DEFINITIONS_RANGE" --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis completed-spills --definitions-range "$CULPRIT_DEFINITIONS_RANGE" --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis maintenance --with-recovery-payloads --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis cleanup --json
@@ -398,6 +402,10 @@ retain the complete native query identity and its lifetime. Collector read bound
 clocks. These records do not establish a current compiler, a memory owner or a selected-window compilation rate.
 Partial, unavailable and complete-empty evidence stay distinct; an empty
 per-query selection cannot erase separately collected database-wide compilation totals.
+Binding and optimization duration/CPU measurements stay separate. Native averages retain floating-point precision;
+last measurements remain exact microsecond counts. They are not summed into total CPU or concurrent memory use.
+Compilation-only reads inspect the native profile without discovering runtime replica groups. Runtime reads
+independently require their actual native population catalog; an empty catalog does not establish an unpartitioned workload.
 
 Use `--compilation-baseline RANGE_SHA256` with `evidence analyze --analysis compilation` to compare two original
 captures. Scans reuse an eligible saved baseline through the same pure comparison. Comparisons require matching
@@ -411,8 +419,23 @@ When a scan already holds a complete statement definition with the exact native 
 comparability. The binding reuses acquired definitions and adds no source query. The same pure explanation accepts
 retained authenticated policy evidence; previews, truncated SQL, matching query numbers and neighboring captures
 cannot supply it. Standalone compilation-counter capture does not fetch statement definitions, so policy remains
-unavailable there. An explicit policy is not proof of every individual compilation cause, harmful plan reuse,
+unavailable without a separately selected definition range. An explicit policy is not proof of every individual compilation cause, harmful plan reuse,
 concurrent compilers or current memory pressure.
+
+Use `--definitions-range RANGE_SHA256` to select independently captured Query Store definitions for compilation
+analysis. Linking requires the original logical database incarnation and complete native query identity. Counter,
+baseline and definition reads share one budget and deadline while retaining their own receipts and clocks. A preview
+cannot supply missing SQL; `--with-recovery-payloads` permits bounded hydration of the original payload.
+
+`completed-spills` explains a `cached-runtime` capture using exact cache entries, plan generations and native completed
+spill counters. It does not merge entries by query hash or attribute historical spills to a current operator. Its
+optional `--definitions-range` selects `cached-definitions` or `retained-plans` object definitions, independently from
+the runtime capture. Missing SQL, partial native coverage and missing archive rows remain separate gaps.
+
+Scans, Health and MCP reuse that explanation when a provider supplies an exact cache-entry read. Built-in automatic
+acquisition still requires native cost and execution-owner qualification; an unavailable read is not a measured zero.
+Retained actual plans also preserve separate per-operator page-server demand, read-ahead and LOB counters. Their
+original runtime population does not identify a current request or establish page-server latency.
 
 `compiler-admission` explains an exact affected request and independently captured optimizer gateways. It preserves
 native resource-pool identities, active/waiting counts and admission policy. The request's pool membership and

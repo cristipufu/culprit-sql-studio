@@ -18,6 +18,7 @@ use culprit_engine::collector_service::{
 };
 use serde::Serialize;
 use std::{io::Write, path::PathBuf};
+mod selection;
 
 #[derive(Subcommand)]
 pub(crate) enum EvidenceCommand {
@@ -48,7 +49,7 @@ pub(crate) struct AnalyzeArgs {
     compilation_baseline: Option<String>,
     #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.blocking_range"))]
     blocking_range: Option<String>,
-    #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.completed_spills.definitions_range"))]
+    #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.definitions_range"))]
     definitions_range: Option<String>,
 }
 
@@ -89,10 +90,11 @@ impl AnalyzeArgs {
             return Err(culprit_core::Error::invalid(t!("evidence.cli.maintenance_blocking_required")));
         }
         if let Some(range) = &self.definitions_range {
-            if self.analysis != Analysis::CompletedSpills {
-                return Err(culprit_core::Error::invalid(t!("evidence.cli.completed_spills.definitions_only")));
+            if selection::DefinitionKind::for_analysis(self.analysis).is_none() {
+                return Err(culprit_core::Error::invalid(t!("evidence.cli.definitions_only")));
             }
-            if !valid_digest(range) || range == &self.common.range {
+            if !valid_digest(range) || range == &self.common.range || self.compilation_baseline.as_ref() == Some(range)
+            {
                 return Err(DeliveryProblem::InvalidContract.error());
             }
         }
@@ -283,48 +285,15 @@ impl CommonArgs {
 }
 
 pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
-    let (
-        common,
-        families,
-        analysis,
-        requested_population,
-        activity_range,
-        compilation_baseline,
-        blocking_range,
-        definitions_range,
-    ) = match command {
-        EvidenceCommand::Read(args) => {
-            (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None, None, None, None)
-        }
-        EvidenceCommand::Analyze(args) => {
-            args.validate_selection()?;
-            (
-                args.common,
-                args.analysis.families(),
-                Some(args.analysis),
-                args.workload_population,
-                args.activity_range,
-                args.compilation_baseline,
-                args.blocking_range,
-                args.definitions_range,
-            )
-        }
-    };
+    let selection::EvidenceSelection { common, plan } = selection::EvidenceSelection::from_command(command)?;
+    let analysis = plan.analysis;
     if analysis == Some(Analysis::SourceOverhead) {
         return source_overhead(&common, out).await;
     }
-    let request = common.request(families, out.format())?;
+    let request = common.request(plan.families.clone(), out.format())?;
     let service = common.service()?;
     let cancellation = CollectionCancellation::default();
-    let reading = read_captures(
-        &service,
-        &request,
-        activity_range.as_deref(),
-        compilation_baseline.as_deref(),
-        blocking_range.as_deref(),
-        definitions_range.as_deref(),
-        &cancellation,
-    );
+    let reading = read_captures(&service, &request, &plan.companions, &cancellation);
     let captures = crate::collection_shutdown::run(&cancellation, reading).await?;
     let complete = captures.is_read_complete();
     let ReadCaptures { capture, activity, baseline, blocking, definitions } = captures;
@@ -335,7 +304,7 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::SourceOverhead) => return Err(DeliveryProblem::InvalidContract.error()),
         Some(Analysis::Queries) => {
             let catalog = capture.source().query_history().and_then(|history| history.population_catalog.as_ref());
-            let population = resolve_population(catalog, requested_population.as_ref())?;
+            let population = resolve_population(catalog, plan.population.as_ref())?;
             let analysis = culprit_engine::collected_evidence::analyze(&capture, population.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::queries(&analysis))?;
         }
@@ -400,8 +369,9 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             emit(out, &analysis, common.max_output_bytes, || observations::cached_plans(&analysis.report))?;
         }
         Some(Analysis::Compilation) => {
-            let analysis = culprit_engine::collected_resources::compilation(&capture, baseline.as_ref())?;
-            emit(out, &analysis, common.max_output_bytes, || observations::compilation(&analysis.report))?;
+            let analysis =
+                culprit_engine::collected_resources::compilation(&capture, baseline.as_ref(), definitions.as_ref())?;
+            emit(out, &analysis, common.max_output_bytes, || observations::collected_compilation(&analysis))?;
         }
         Some(Analysis::CompilerAdmission) => {
             let analysis = culprit_engine::collected_resources::compiler_admission(&capture)?;
@@ -472,15 +442,12 @@ async fn source_overhead(common: &CommonArgs, out: &Out) -> Result<u8> {
 async fn read_captures(
     service: &EvidenceService,
     request: &EvidenceRequest,
-    activity_range: Option<&str>,
-    compilation_baseline: Option<&str>,
-    blocking_range: Option<&str>,
-    definitions_range: Option<&str>,
+    companions: &selection::CompanionReadPlan,
     cancellation: &CollectionCancellation,
 ) -> Result<ReadCaptures> {
     let mut session = service.session(request.budget, cancellation)?;
     let capture = session.read(&request.range_id, &request.families).await?;
-    let activity = if let Some(range) = activity_range {
+    let activity = if let Some(range) = &companions.activity {
         if !matches!(capture.source().observation, SourceObservation::FocusedPageWait { .. }) {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
@@ -488,7 +455,7 @@ async fn read_captures(
     } else {
         None
     };
-    let baseline = if let Some(range) = compilation_baseline {
+    let baseline = if let Some(range) = &companions.compilation_baseline {
         if !capture
             .source()
             .observation
@@ -501,7 +468,7 @@ async fn read_captures(
     } else {
         None
     };
-    let blocking = if let Some(range) = blocking_range {
+    let blocking = if let Some(range) = &companions.blocking {
         if !matches!(capture.source().observation, SourceObservation::MaintenanceProgress { .. }) {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
@@ -509,16 +476,11 @@ async fn read_captures(
     } else {
         None
     };
-    let definitions = if let Some(range) = definitions_range {
-        if !capture
-            .source()
-            .observation
-            .snapshot()
-            .is_some_and(|snapshot| snapshot.dataset == culprit_core::telemetry::SnapshotDataset::CachedRuntime)
-        {
+    let definitions = if let Some(definitions) = &companions.definitions {
+        if !definitions.kind.accepts_primary(capture.source()) {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
-        Some(session.read(range, &[EvidenceFamily::ObjectDefinitions]).await?)
+        Some(session.read(&definitions.range, &[definitions.kind.family()]).await?)
     } else {
         None
     };

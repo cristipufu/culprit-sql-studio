@@ -26,17 +26,16 @@ pub(crate) fn append_brief_titles<'a>(text: &mut String, titles: impl Iterator<I
 }
 
 pub(crate) fn append_brief_details<'a>(text: &mut String, details: impl Iterator<Item = &'a str>, max_chars: usize) {
-    append_brief_items(
-        text,
-        details.map(|detail| {
-            let mut chars = detail.chars();
-            let mut displayed: String = chars.by_ref().take(max_chars).collect();
-            if chars.next().is_some() {
-                displayed.push('…');
-            }
-            displayed
-        }),
-    );
+    append_brief_items(text, details.map(|detail| brief_detail(detail, max_chars)));
+}
+
+fn brief_detail(detail: &str, max_chars: usize) -> String {
+    let mut chars = detail.chars();
+    let mut displayed: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        displayed.push('…');
+    }
+    displayed
 }
 
 fn append_brief_items(text: &mut String, items: impl Iterator<Item = String>) {

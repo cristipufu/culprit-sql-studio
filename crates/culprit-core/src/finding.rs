@@ -378,6 +378,9 @@ pub struct SeverityCount {
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub completed_spills: Option<Box<crate::CompletedSpillReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub jobs: Option<Box<crate::JobsReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

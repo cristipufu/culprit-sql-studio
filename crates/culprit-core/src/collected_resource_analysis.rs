@@ -102,6 +102,11 @@ pub struct CollectedCompilationAnalysis {
     #[ts(optional)]
     pub baseline_context: Option<CollectedEvidenceContext>,
     pub report: crate::CompilationReport,
+    /// Independently authenticated original definitions. Neither its runtime interval nor its client read clocks
+    /// replace the native compiler acquisition bounds or baseline receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub definition_context: Option<Box<CollectedEvidenceContext>>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]

@@ -99,6 +99,7 @@ fn explain(
         // A captured definition has no current schema, indexes or settings. Keep explanatory advice, without
         // making an old optimizer request into an executable change against an unobserved current database.
         crate::archived_advice::withhold_plan_sql(plan);
+        culprit_checks::present_plan(plan, None);
         plan.raw = None;
         plan.statement = None;
         if plan.kind != PlanKind::Actual {

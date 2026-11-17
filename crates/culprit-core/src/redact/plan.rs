@@ -126,6 +126,11 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         };
         PlanNode {
             facts,
+            runtime: n.runtime.as_ref().map(|runtime| {
+                let mut runtime = runtime.clone();
+                runtime.page_server_io = runtime.page_server_io.filter(|io| io.is_valid());
+                runtime
+            }),
             detail: n.detail.as_deref().map(|d| redact_plan_text(d, engine)),
             seek_predicate: n.seek_predicate.as_deref().map(|p| redact_plan_text(p, engine)),
             predicate: n.predicate.as_deref().map(|p| redact_plan_text(p, engine)),

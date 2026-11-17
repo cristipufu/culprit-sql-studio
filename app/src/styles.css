@@ -5604,6 +5604,10 @@ table.rg {
 
 /* ───────── plans: import and compare ───────── */
 
+.view:has(> .plans) {
+  container: plans-workspace / inline-size;
+}
+
 .plans {
   position: relative;
   flex: 1;
@@ -5885,6 +5889,25 @@ table.rg {
 .plans-sql.open {
   max-height: none;
   mask-image: none;
+}
+
+/* The list and operator workspace share the space remaining beside application navigation. */
+@container plans-workspace (max-width: 600px) {
+  .plans {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .plans-list {
+    max-block-size: 14rem;
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--border);
+  }
+
+  .plans-single,
+  .plans-compare {
+    padding-inline: 12px;
+  }
 }
 
 .side-badge {
@@ -10048,6 +10071,7 @@ button.health-pill:hover {
 /* operator details */
 
 .nd {
+  container: operator-details / inline-size;
   border-top: 1px solid var(--border);
   padding: 12px 14px 14px;
   background: var(--sunken);
@@ -10058,6 +10082,7 @@ button.health-pill:hover {
 
 .nd-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 10px;
 }
@@ -10103,10 +10128,10 @@ button.health-pill:hover {
 }
 
 .nd-share {
+  max-inline-size: 100%;
   font-weight: 700;
   font-size: var(--fs-strong);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .nd-share .muted {
@@ -10135,7 +10160,7 @@ button.health-pill:hover {
 
 .nd-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 10px;
 }
 
@@ -10303,6 +10328,45 @@ button.health-pill:hover {
 
 .nd-all[open] .chev {
   transform: rotate(90deg);
+}
+
+.nd-page-server {
+  margin-block: 10px;
+}
+
+.nd-page-server-body {
+  margin-block-start: 6px;
+}
+
+.nd-page-server dl {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.nd-page-server dt {
+  overflow-wrap: anywhere;
+}
+
+@container operator-details (max-width: 320px) {
+  .nd-head .nd-share {
+    flex-basis: 100%;
+  }
+
+  .nd-card dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nd-card dd {
+    margin-block-end: 6px;
+    text-align: start;
+    overflow-wrap: anywhere;
+  }
+}
+
+.nd-page-server-limit {
+  margin: 8px 0 0;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .nd-search {

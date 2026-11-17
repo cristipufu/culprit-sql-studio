@@ -2,4 +2,9 @@
 import type { CollectedEvidenceContext } from "./CollectedEvidenceContext";
 import type { CompilationReport } from "./CompilationReport";
 
-export type CollectedCompilationAnalysis = { context: CollectedEvidenceContext, baseline_context?: CollectedEvidenceContext, report: CompilationReport, };
+export type CollectedCompilationAnalysis = { context: CollectedEvidenceContext, baseline_context?: CollectedEvidenceContext, report: CompilationReport, 
+/**
+ * Independently authenticated original definitions. Neither its runtime interval nor its client read clocks
+ * replace the native compiler acquisition bounds or baseline receipt.
+ */
+definition_context?: CollectedEvidenceContext, };

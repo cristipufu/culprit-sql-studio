@@ -8,6 +8,8 @@ mod memory_feedback;
 pub use memory_feedback::{MemoryFeedbackCase, memory_feedback_evidence, memory_feedback_evidence_cases};
 mod parameters;
 pub use parameters::{ParameterEvidenceCase, parameter_evidence, parameter_evidence_cases};
+mod page_server_io;
+pub use page_server_io::{PageServerIoCase, page_server_io_evidence};
 mod tvp_loops;
 pub use tvp_loops::{TvpLoopCase, tvp_loop_evidence, tvp_loop_evidence_cases};
 

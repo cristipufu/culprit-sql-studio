@@ -35,6 +35,6 @@ async fn invalid_same_or_unrelated_definition_ranges_fail_before_config_or_crede
     for mode in ["queries", "cached-plans", "statement-work", "source-overhead", "maintenance-progress"] {
         let args = analyze_args(mode, &["--definitions-range", &definition]);
         let error = run(EvidenceCommand::Analyze(args), &Out::new(Format::Json)).await.unwrap_err();
-        assert_eq!(error.message, t!("evidence.cli.completed_spills.definitions_only"));
+        assert_eq!(error.message, t!("evidence.cli.definitions_only"));
     }
 }

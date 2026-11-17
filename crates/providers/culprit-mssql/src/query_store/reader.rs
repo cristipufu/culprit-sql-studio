@@ -14,6 +14,9 @@ mod batch;
 const MAX_RESULT_ROWS: usize = 10_000;
 const SNAPSHOT_BYTES: u32 = 8 * 1024 * 1024;
 const SNAPSHOT_TIMEOUT_MS: u32 = 120_000;
+// Synapse exposes placeholder count/context/memory values. Only these native SQL Server database profiles
+// own the query compilation measurements consumed here; an unknown edition never inherits that meaning.
+const COMPILATION_NATIVE_EDITIONS: &[i64] = &[2, 3, 4, 5, 8];
 
 pub(crate) struct Reader<R = ReadSession> {
     io: R,
@@ -48,6 +51,9 @@ struct RuntimeLayout {
     mode: super::mode::ReadMode,
 }
 impl NativeLayout {
+    fn supports_compilation(&self) -> bool {
+        COMPILATION_NATIVE_EDITIONS.contains(&self.edition)
+    }
     fn decode(row: &Rec) -> Result<Self> {
         let flag = |name| match integer(row, name)? {
             0 => Ok(false),
@@ -96,6 +102,20 @@ impl<R: NativeRead> Reader<R> {
             connection_generation: None,
             batch: None,
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn with_test_layout(io: R, row: &Rec) -> Result<Self> {
+        let mut reader = Self::new(io);
+        reader.native_layout = Some(NativeLayout::decode(row)?);
+        Ok(reader)
+    }
+    /// Inspect only this reader's already acquired source profile; never perform replacement discovery.
+    pub(crate) fn require_compilation_profile(&self) -> Result<()> {
+        self.admit()?;
+        if self.native_layout.is_some_and(|layout| layout.supports_compilation()) {
+            return Ok(());
+        }
+        Err(culprit_core::Error::new(culprit_core::ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")))
     }
     pub(crate) fn select_population(&mut self, requested: Option<&NativeIdentity>) -> Result<()> {
         self.admit()?;
@@ -208,6 +228,7 @@ impl<R: NativeRead> Reader<R> {
             return Ok(layout);
         }
         let native = self.native_layout().await?;
+        self.prepare_population_catalog(native).await?;
         let population = match &self.replica_catalog {
             Some(catalog) => match catalog.select(self.requested_population.as_ref()) {
                 Ok(population) => population,
@@ -247,6 +268,16 @@ impl<R: NativeRead> Reader<R> {
         let rows = self.read(runtime::LAYOUT, vec![], 1).await?;
         let [row] = rows.as_slice() else { return Err(invalid_data()) };
         let layout = NativeLayout::decode(row)?;
+        self.native_layout = Some(layout);
+        Ok(layout)
+    }
+
+    /// Runtime membership has its own authority. Query-global compiler facts need only the native layout.
+    async fn prepare_population_catalog(&mut self, layout: NativeLayout) -> Result<()> {
+        self.admit()?;
+        if self.population_catalog.is_some() {
+            return Ok(());
+        }
         match layout.partitioned {
             false => {
                 if layout.mode == super::mode::ReadMode::ReadCaptureSecondary {
@@ -267,8 +298,7 @@ impl<R: NativeRead> Reader<R> {
                 self.replica_catalog = Some(catalog);
             }
         }
-        self.native_layout = Some(layout);
-        Ok(layout)
+        Ok(())
     }
 
     async fn query_native(
@@ -434,6 +464,7 @@ impl<R: NativeRead> Reader<R> {
         result
     }
     pub(crate) async fn compilations(&mut self, ids: &[String]) -> Result<Vec<super::costs::Compilation>> {
+        self.require_compilation_profile()?;
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -492,6 +523,10 @@ pub(crate) fn ids_parameter(ids: &[String]) -> Result<Parameter> {
     Ok(Parameter::Text(xml))
 }
 
+#[cfg(test)]
+mod compilation_profile_tests;
+#[cfg(test)]
+mod native_compilation;
 #[cfg(test)]
 mod replica_tests;
 #[cfg(test)]
