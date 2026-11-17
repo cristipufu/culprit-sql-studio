@@ -272,8 +272,11 @@ execution counters remain separate. Yugabyte node-cache counters retain node sco
 Stored SQL Server plans mask database names, so named relations in JOINs remain unclassified without retained proof
 of their original bindings. Direct and all-variable module proofs remain available. A TVP classification does not
 suppress an independent native Cartesian-join warning.
+Bounded built-in aggregate/scalar expressions and grouping preserve this binding, including `COUNT_BIG` over a
+filtered input. Unknown or qualified functions, nested queries and ambiguous lexical modes remain unresolved.
 For a qualified TVP, a complete serial native table scan can distinguish consumed input, rows kept by its filter and
-statement output. Missing end-of-scan counters, repeated or parallel execution, seeks and early-stop paths retain
+statement output. Every aggregate, compute or sort ancestor needs its own exact native serial-execution proof.
+Missing end-of-scan counters, repeated or parallel execution, seeks and early-stop paths retain
 access/output context. Input volume alone does not establish harmful reuse or the cause of a spill.
 The shared loop diagnosis can link an underestimated TVP access to material repeated inner reads in the same
 selected actual plan. It requires original TVP binding and explicit serial counter populations; one observed

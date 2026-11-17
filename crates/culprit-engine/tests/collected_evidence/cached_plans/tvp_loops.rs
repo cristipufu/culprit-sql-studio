@@ -12,7 +12,7 @@ fn retained(records: &[TelemetryRecord]) -> &MssqlRetainedPlanDefinition {
 
 #[tokio::test]
 async fn retained_tvp_loop_preview_stays_unavailable_until_the_exact_bounded_native_batch_is_hydrated() {
-    let (source, records) = tvp_loop_evidence(TvpLoopCase::RepeatedAccess);
+    let (source, records) = tvp_loop_evidence(TvpLoopCase::CountedJoin);
     let fixture = Fixture::new(source.clone(), records.clone()).await;
     let opens = fixture.recovery_object_reads();
     let preview = fixture.read_families(FAMILY).await;
@@ -97,7 +97,10 @@ async fn archived_tvp_loop_cases_share_the_selected_native_parser_and_never_prom
             actual.is_some(),
             matches!(
                 case,
-                TvpLoopCase::RepeatedAccess | TvpLoopCase::FilteredAndAggregated | TvpLoopCase::PartialSource
+                TvpLoopCase::RepeatedAccess
+                    | TvpLoopCase::FilteredAndAggregated
+                    | TvpLoopCase::CountedJoin
+                    | TvpLoopCase::PartialSource
             ),
             "{case:?}"
         );
@@ -109,7 +112,7 @@ async fn archived_tvp_loop_cases_share_the_selected_native_parser_and_never_prom
         let input = plan.nodes().into_iter().find(|node| node.id == 1).unwrap();
         assert_eq!(
             input.facts().relational_input.unwrap().qualified_kind(),
-            if matches!(case, TvpLoopCase::MissingBinding | TvpLoopCase::UnqualifiedFunctionAggregate) {
+            if matches!(case, TvpLoopCase::MissingBinding | TvpLoopCase::MissingAggregateBinding) {
                 RelationalInputKind::Unknown
             } else {
                 RelationalInputKind::TableValuedParameter
@@ -117,15 +120,66 @@ async fn archived_tvp_loop_cases_share_the_selected_native_parser_and_never_prom
         );
         assert_eq!(
             entry.limitations.iter().any(|limit| limit.reason == CachedPlanLimit::UnknownRelationalInput),
-            matches!(case, TvpLoopCase::MissingBinding | TvpLoopCase::UnqualifiedFunctionAggregate)
+            matches!(case, TvpLoopCase::MissingBinding | TvpLoopCase::MissingAggregateBinding)
         );
-        if case == TvpLoopCase::UnqualifiedFunctionAggregate {
-            assert!(native.relational_input_proof.is_none(), "unsupported COUNT_BIG(*) has no invented node proof");
-            assert!(native.module_parameters.is_some(), "module metadata alone does not close the relation grammar");
+        if case == TvpLoopCase::MissingAggregateBinding {
+            assert!(
+                native.relational_input_proof.is_none(),
+                "recognized COUNT_BIG(*) cannot invent a native namespace proof"
+            );
+            assert!(
+                native.module_parameters.is_some(),
+                "module metadata alone does not recover a redacted named relation"
+            );
             assert_eq!(plan.kind, PlanKind::Actual);
             assert_eq!(plan.root.act_rows, Some(1.0));
             assert_eq!(input.act_rows, Some(10_000.0));
             assert!(actual.is_none(), "actual counters cannot promote an unresolved input kind to a TVP");
+        }
+        if matches!(
+            case,
+            TvpLoopCase::ConsumedInput
+                | TvpLoopCase::ScalarInput
+                | TvpLoopCase::ParallelAggregate
+                | TvpLoopCase::UnknownAggregateParallelism
+                | TvpLoopCase::MissingInputRead
+                | TvpLoopCase::HealthyCountedInput
+        ) {
+            assert_eq!(input.act_rows, Some(10_000.0));
+            assert_eq!(plan.root.act_rows, Some(if case == TvpLoopCase::ScalarInput { 10_000.0 } else { 1.0 }));
+            let completed =
+                culprit_core::t!("insight.relational_input.completed_input_counts", estimated = "100", actual = "20K");
+            let proved = matches!(case, TvpLoopCase::ConsumedInput | TvpLoopCase::ScalarInput);
+            assert_eq!(
+                plan.insights.as_ref().unwrap().items.iter().any(|insight| insight.detail.contains(&completed)),
+                proved,
+                "{case:?}"
+            );
+            if proved {
+                let output = culprit_core::t!(
+                    "insight.relational_input.root_output",
+                    actual = if case == TvpLoopCase::ScalarInput { "10K" } else { "1" }
+                );
+                assert!(
+                    plan.insights.as_ref().unwrap().items.iter().any(|insight| insight.detail.contains(&output)),
+                    "{case:?}"
+                );
+            }
+            if matches!(case, TvpLoopCase::ParallelAggregate | TvpLoopCase::UnknownAggregateParallelism) {
+                assert!(plan.root.facts().serial_execution_count.is_none());
+            }
+        }
+        if case == TvpLoopCase::HealthyCountedInput {
+            assert_eq!(input.facts().access_rows.unwrap().estimated_per_execution, Some(20_000.0));
+            assert_eq!(input.facts().access_rows.unwrap().actual_total, Some(20_000.0));
+            assert!(
+                plan.insights
+                    .as_ref()
+                    .unwrap()
+                    .items
+                    .iter()
+                    .all(|insight| !matches!(insight.rule.as_str(), "misestimate" | "relational-input-access"))
+            );
         }
         if case == TvpLoopCase::FilteredAndAggregated {
             assert_eq!(plan.root.act_rows, Some(1.0));
@@ -161,7 +215,7 @@ async fn archived_tvp_loop_cases_share_the_selected_native_parser_and_never_prom
 #[cfg(feature = "mssql")]
 #[tokio::test]
 async fn original_tvp_scope_and_module_proof_cannot_move_to_a_different_namespace_epoch_or_module() {
-    let (source, records) = tvp_loop_evidence(TvpLoopCase::RepeatedAccess);
+    let (source, records) = tvp_loop_evidence(TvpLoopCase::CountedJoin);
     let native = retained(&records);
     let fixture = Fixture::new(source.clone(), records.clone()).await;
     let capture = fixture.read_families_with_recovery(FAMILY, RecoveryPayloadBudget::default()).await;

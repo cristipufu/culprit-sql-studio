@@ -18,6 +18,8 @@ const STATEMENT: &str = "SELECT id AS tvp_original_header_probe FROM @Rows";
 const TVP: &str = "@Rows dbo.RowsType READONLY,@secret nvarchar(100)=N'header-default-canary' AS";
 const LOCAL: &str = "@unused int=1 AS DECLARE @Rows dbo.RowsType;INSERT @Rows VALUES(1);";
 
+mod expressions;
+
 async fn execute(client: &mut MsClient, tvp: bool) {
     batch(
         client,

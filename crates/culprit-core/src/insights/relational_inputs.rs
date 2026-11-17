@@ -170,9 +170,28 @@ fn completed_tvp_input(cx: &Cx, node: &PlanNode, accessed: f64, output: Option<f
         && cx.ancestors(node).all(|parent| {
             matches!(parent.kind, NodeKind::Sort | NodeKind::Aggregate | NodeKind::Compute)
                 && parent.facts().estimated_rows_without_goal.is_none()
-                && parent.facts().parallel_threads.is_none()
-                && parent.act_executions == Some(1.0)
+                && serial_executions(parent) == Some(1.0)
         })
+}
+
+const MAX_EXACT_COUNT: u64 = (1 << 53) - 1;
+
+/// The source-issued count is exact native text. Binary64 totals are comparable only within its integer range,
+/// and an embedder's contradictory worker/output facts cannot turn it into stronger serial evidence.
+pub(super) fn serial_executions(node: &PlanNode) -> Option<f64> {
+    let native = node.facts().serial_execution_count.as_deref()?;
+    let count = native.parse::<u64>().ok()?;
+    (count > 0
+        && count <= MAX_EXACT_COUNT
+        && count.to_string() == native
+        && node.act_executions == Some(count as f64)
+        && node.facts().parallel_threads.is_none()
+        && node.act_rows.is_some_and(exact_count))
+    .then_some(count as f64)
+}
+
+pub(super) fn exact_count(value: f64) -> bool {
+    value.is_finite() && value >= 0.0 && value <= MAX_EXACT_COUNT as f64 && value.fract() == 0.0
 }
 
 const MAX_ACCESS_CONCERNS: usize = 2;

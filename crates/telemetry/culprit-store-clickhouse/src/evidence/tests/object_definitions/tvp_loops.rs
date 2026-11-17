@@ -3,7 +3,7 @@ use test_support::{TvpLoopCase, tvp_loop_evidence};
 
 #[tokio::test]
 async fn changed_tvp_proof_or_module_metadata_cannot_be_repaired_by_a_native_payload() {
-    let (source, records) = tvp_loop_evidence(TvpLoopCase::RepeatedAccess);
+    let (source, records) = tvp_loop_evidence(TvpLoopCase::CountedJoin);
     let fixture = Fixture::new_for_stream(source, records, TelemetryStream::ObjectDefinitions).await;
     let schema = fixture.catalog.get(TelemetryStream::ObjectDefinitions).unwrap();
     let details = schema.columns().iter().position(|column| column.name == "Details").unwrap();
@@ -46,7 +46,7 @@ async fn changed_tvp_proof_or_module_metadata_cannot_be_repaired_by_a_native_pay
 
 #[tokio::test]
 async fn a_missing_tvp_definition_stays_an_explicit_gap_without_native_fallback_or_coverage_rewrite() {
-    let (source, records) = tvp_loop_evidence(TvpLoopCase::RepeatedAccess);
+    let (source, records) = tvp_loop_evidence(TvpLoopCase::ConsumedInput);
     let fixture = Fixture::new_for_stream(source.clone(), records, TelemetryStream::ObjectDefinitions).await;
     let opens = fixture.recovery.object_reads.load(Ordering::SeqCst);
     *fixture.recovery.fault.lock().unwrap() = Fault::None;

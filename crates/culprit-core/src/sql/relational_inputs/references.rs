@@ -1,6 +1,9 @@
 use super::{Engine, Token, readings};
 
 const MAX_RELATIONAL_REFERENCES: usize = 64;
+const MAX_RELATIONAL_SQL_BYTES: usize = 64 * 1024;
+
+mod expressions;
 
 /// An original SQL reference, retaining spelling and case. A named relation is not proof of its resolved object.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,9 +20,13 @@ pub struct MssqlRelationReference {
 }
 
 /// Recognize a deliberately small SELECT/JOIN grammar, with agreement under every supported lexical mode.
-/// Functions, nested statements, derived tables, CTEs, APPLY, implicit joins and table hints are not resolved.
+/// Only bounded grouping and recognized built-in expressions are admitted. Nested statements, unknown functions,
+/// derived tables, CTEs, APPLY, implicit joins and table hints are not resolved.
 /// Multiple relations require distinct explicit aliases. Nothing here infers variable kind or default schema.
 pub fn mssql_relational_references(text: &str) -> Option<Vec<MssqlRelationReference>> {
+    if text.len() > MAX_RELATIONAL_SQL_BYTES {
+        return None;
+    }
     let readings = readings(text, Engine::Mssql).ok()?;
     let mut candidates = readings.iter().map(|tokens| references(tokens));
     let first = candidates.next()??;
@@ -30,7 +37,7 @@ fn references(tokens: &[Token<'_>]) -> Option<Vec<MssqlRelationReference>> {
     let start = tokens.iter().take_while(|token| matches!(token, Token::Semicolon(_))).count();
     let end = tokens.iter().rposition(|token| !matches!(token, Token::Semicolon(_)))? + 1;
     let tokens = &tokens[start..end];
-    if !word(tokens.first(), "SELECT") || tokens.iter().skip(1).any(unsupported) {
+    if !word(tokens.first(), "SELECT") || tokens.iter().skip(1).any(unsupported) || !expressions::closed(tokens) {
         return None;
     }
     let mut from = tokens.iter().enumerate().filter(|(_, token)| word(Some(token), "FROM"));
@@ -52,12 +59,7 @@ fn references(tokens: &[Token<'_>]) -> Option<Vec<MssqlRelationReference>> {
             }
             at += 1;
             let start = at;
-            while at < tokens.len() && !join_start(&tokens[at]) && !tail_clause(&tokens[at]) {
-                if tokens[at] == Token::Punct(',') || word(tokens.get(at), "ON") {
-                    return None;
-                }
-                at += 1;
-            }
+            at = predicate_end(tokens, at)?;
             if at == start {
                 return None;
             }
@@ -143,7 +145,7 @@ fn join(tokens: &[Token<'_>], at: &mut usize) -> Option<bool> {
 }
 
 fn unsupported(token: &Token<'_>) -> bool {
-    matches!(token, Token::Semicolon(_) | Token::Punct('(' | ')'))
+    matches!(token, Token::Semicolon(_))
         || [
             "SELECT",
             "WITH",
@@ -160,6 +162,26 @@ fn unsupported(token: &Token<'_>) -> bool {
         ]
         .iter()
         .any(|value| word(Some(token), value))
+}
+
+fn predicate_end(tokens: &[Token<'_>], start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, token) in tokens.iter().enumerate().skip(start) {
+        if depth == 0 {
+            if join_start(token) || tail_clause(token) {
+                return Some(at);
+            }
+            if *token == Token::Punct(',') || word(Some(token), "ON") {
+                return None;
+            }
+        }
+        match token {
+            Token::Punct('(') => depth += 1,
+            Token::Punct(')') => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0).then_some(tokens.len())
 }
 
 fn reserved(name: &str) -> bool {

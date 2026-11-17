@@ -1,10 +1,12 @@
 //! One actual TVP-fed loop can establish repeated access without identifying harmful reuse or an optimal join.
-use super::{relational_inputs::AccessComparison, *};
+use super::{
+    relational_inputs::{AccessComparison, exact_count, serial_executions},
+    *,
+};
 
 /// A repeated single-row seek can be an efficient implementation. Require materially more native access per
 /// invocation as well as the existing loop-count policy before diagnosing this particular mechanism.
 const MIN_ROWS_PER_INNER_EXECUTION: f64 = 100.0;
-const MAX_EXACT_COUNT: u64 = (1 << 53) - 1;
 
 pub(super) fn has_relational_input(node: &PlanNode) -> bool {
     relational_input_kind(node).is_some() || node.children.iter().any(has_relational_input)
@@ -120,22 +122,4 @@ fn single_serial_path(cx: &Cx, join: &PlanNode, outer: &PlanNode) -> bool {
                 && parent.facts().estimated_rows_without_goal.is_none()
                 && serial_executions(parent) == Some(1.0)
         })
-}
-
-/// The source-issued count is exact native text. Binary64 totals are comparable only within its integer range,
-/// and an embedder's contradictory worker/output facts cannot turn it into stronger serial evidence.
-fn serial_executions(node: &PlanNode) -> Option<f64> {
-    let native = node.facts().serial_execution_count.as_deref()?;
-    let count = native.parse::<u64>().ok()?;
-    (count > 0
-        && count <= MAX_EXACT_COUNT
-        && count.to_string() == native
-        && node.act_executions == Some(count as f64)
-        && node.facts().parallel_threads.is_none()
-        && node.act_rows.is_some_and(exact_count))
-    .then_some(count as f64)
-}
-
-fn exact_count(value: f64) -> bool {
-    value.is_finite() && value >= 0.0 && value <= MAX_EXACT_COUNT as f64 && value.fract() == 0.0
 }

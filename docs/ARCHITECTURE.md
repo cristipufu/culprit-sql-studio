@@ -1176,8 +1176,10 @@ its collection boundary.
 Native accessed-row facts separately retain estimated rows per execution and complete actual worker totals;
 estimated fallbacks in display-oriented `rows_read` cannot establish measured access. Relational-input diagnostics
 compare serial, qualified access and output populations to distinguish accessed volume from kept-fraction errors.
-Neither count measures the entire supplied TVP or proves cached-cardinality reuse. Parallel or incomplete scope
-remains unresolved. TVPs, local variables, temporary tables and functions retain their native kind-specific advice;
+A single completed native TVP table scan can establish consumed input only when every ancestor also has exact
+serial-execution proof and consumes the full input. Filtered rows and final aggregate output stay separate.
+Access counts alone cannot establish full input or harmful cached-cardinality reuse; parallel, early-stop and
+incomplete scope remain unresolved. TVPs, local variables, temporary tables and functions retain their native kind-specific advice;
 filter/spool evidence cannot generate persistent-table DDL against those inputs.
 
 Every plan and plan step carries its facts: the engine's parser records them from the native plan, and a provider that

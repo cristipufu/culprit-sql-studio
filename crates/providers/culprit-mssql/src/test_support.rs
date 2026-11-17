@@ -2,8 +2,10 @@
 use crate::conn::MsClient;
 use std::time::Duration;
 use tiberius::{AuthMethod, Config, EncryptionLevel};
+mod actual_plans;
 mod cost_receipts;
 mod owned_source;
+pub(crate) use actual_plans::actual_plans;
 pub(crate) use cost_receipts::{receipt_directory, save_cost_receipt};
 pub(crate) use owned_source::{OwnedSourceFixture, verify_owned_source};
 
@@ -69,60 +71,36 @@ pub(crate) async fn assert_no_execution_grant(
     sql: &str,
     parameters: Vec<crate::read::Parameter>,
 ) -> Vec<String> {
-    // Actual plan instrumentation is confined to the owned fixture and runs only Culprit's metadata statements.
-    batch(client, "SET STATISTICS XML ON").await;
-    let mut query = tiberius::Query::new(sql);
-    for parameter in &parameters {
-        match parameter {
-            crate::read::Parameter::Integer(value) => {
-                query.bind(*value);
-            }
-            crate::read::Parameter::Text(value) => {
-                query.bind(value.as_str());
-            }
-        }
-    }
-    let results = query.query(&mut *client).await.unwrap().into_results().await.unwrap();
-    batch(client, "SET STATISTICS XML OFF").await;
-    let mut plans = Vec::new();
-    for rows in results {
-        for row in rows {
-            let row = crate::value::Rec::from_row(&row);
-            for (_, value) in row.columns() {
-                let crate::value::Val::Text(value) = value else { continue };
-                if !value.contains("<ShowPlanXML") {
-                    continue;
-                }
-                culprit_core::xml::read(value, |document| {
-                    let document = document.unwrap();
-                    assert_eq!(document.root_element().tag_name().name(), "ShowPlanXML");
-                    for node in document.descendants().filter(|node| node.is_element()) {
+    // This validator remains restricted to Culprit's metadata statements. Owned fixture workload plans use the
+    // shared capture helper directly and establish their own runtime evidence instead of asserting no grant.
+    let plans = actual_plans(client, sql, parameters).await;
+    for xml in &plans {
+        culprit_core::xml::read(xml, |document| {
+            let document = document.unwrap();
+            assert_eq!(document.root_element().tag_name().name(), "ShowPlanXML");
+            for node in document.descendants().filter(|node| node.is_element()) {
+                assert!(
+                    !matches!(node.attribute("PhysicalOp"), Some("Hash Match" | "Sort")),
+                    "grant-bearing operator in metadata diagnostic: {xml}"
+                );
+                if node.tag_name().name() == "MemoryGrantInfo" {
+                    for name in [
+                        "GrantedMemory",
+                        "RequestedMemory",
+                        "RequiredMemory",
+                        "DesiredMemory",
+                        "SerialRequiredMemory",
+                        "SerialDesiredMemory",
+                        "MaxUsedMemory",
+                    ] {
                         assert!(
-                            !matches!(node.attribute("PhysicalOp"), Some("Hash Match" | "Sort")),
-                            "grant-bearing operator in metadata diagnostic: {value}"
+                            node.attribute(name).is_none_or(|value| value.parse::<u64>() == Ok(0)),
+                            "{name} in diagnostic actual plan: {xml}"
                         );
-                        if node.tag_name().name() == "MemoryGrantInfo" {
-                            for name in [
-                                "GrantedMemory",
-                                "RequestedMemory",
-                                "RequiredMemory",
-                                "DesiredMemory",
-                                "SerialRequiredMemory",
-                                "SerialDesiredMemory",
-                                "MaxUsedMemory",
-                            ] {
-                                assert!(
-                                    node.attribute(name).is_none_or(|value| value.parse::<u64>() == Ok(0)),
-                                    "{name} in diagnostic actual plan: {value}"
-                                );
-                            }
-                        }
                     }
-                });
-                plans.push(value.clone());
+                }
             }
-        }
+        });
     }
-    assert!(!plans.is_empty(), "actual metadata plan was not returned");
     plans
 }

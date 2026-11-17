@@ -118,3 +118,28 @@ fn an_important_query_does_not_supply_missing_native_inner_access_or_serial_exec
         assert!(!plan_insights(&snapshot).iter().any(|finding| finding.id.contains("nested-loops:")), "{missing}");
     }
 }
+
+#[test]
+fn a_count_aggregate_reports_consumed_tvp_rows_separately_from_filtered_rows_and_its_one_output_row() {
+    let mut snapshot = snapshot();
+    let plan = snapshot.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap();
+    let input = plan.root.children.remove(0);
+    plan.statement = Some("SELECT COUNT_BIG(*) FROM @Rows r WHERE (r.id > 9264)".into());
+    plan.root = operator(3, NodeKind::Aggregate, "Stream Aggregate", 1.0, 1.0, 1);
+    plan.root.children = vec![input];
+    let counts = culprit_core::t!("insight.relational_input.completed_input_counts", estimated = "100", actual = "20K");
+    let findings = plan_insights(&snapshot);
+    let finding = findings.iter().find(|finding| finding.summary.contains(&counts)).expect("qualified consumed input");
+    assert!(finding.summary.contains(&culprit_core::t!("insight.relational_input.root_output", actual = "1")));
+    assert_eq!(finding.queries[0].plan_node, Some(1));
+    assert!(finding.fix.as_ref().unwrap().sql.is_none());
+    let plan = snapshot.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap();
+    plan.root.facts_mut().serial_execution_count = None;
+    let findings = plan_insights(&snapshot);
+    assert!(findings.iter().all(|finding| !finding.summary.contains(&counts)));
+    assert!(findings.iter().any(|finding| finding.summary.contains(&culprit_core::t!(
+        "insight.relational_input.access_counts",
+        estimated = "100",
+        actual = "20K"
+    ))));
+}

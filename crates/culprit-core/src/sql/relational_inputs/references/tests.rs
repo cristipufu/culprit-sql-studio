@@ -105,3 +105,73 @@ fn relation_inventory_is_bounded_without_dropping_extra_inputs() {
     text.push_str(" CROSS JOIN @Overflow overflow");
     assert!(mssql_relational_references(&text).is_none());
 }
+
+#[test]
+fn aggregate_and_scalar_expressions_preserve_the_closed_native_relation_inventory() {
+    for expression in [
+        "COUNT_BIG(*)",
+        "COUNT(DISTINCT r.id)",
+        "SUM(ABS(r.id))",
+        "AVG(NULLIF(r.id,0))",
+        "MIN(r.id), MAX(r.id)",
+        "COALESCE(r.id,1)",
+        "ISNULL(r.id,0)",
+        "(r.id + 1) * (r.id - 1)",
+        "CASE WHEN (r.id > 0) THEN ABS(r.id) ELSE 0 END",
+    ] {
+        let sql = format!("SELECT {expression} FROM @Rows AS r WHERE (r.id > 1 AND (r.id IN (2,3) OR r.id < 0))");
+        assert_eq!(mssql_relational_references(&sql), Some(vec![parameter("@Rows", Some("r"))]), "{sql}");
+    }
+    let sql = "SELECT COUNT_BIG(*),SUM(ABS(r.id)) FROM @Rows r JOIN dbo.Items i ON (COALESCE(r.id,0)=i.id AND (i.id > 0)) WHERE (r.id > 0) GROUP BY (r.id) HAVING COUNT_BIG(*) > 1 ORDER BY ABS(r.id)";
+    assert_eq!(
+        mssql_relational_references(sql).unwrap(),
+        vec![
+            parameter("@Rows", Some("r")),
+            MssqlRelationReference {
+                name: MssqlRelationName::Named(vec!["dbo".into(), "Items".into()]),
+                alias: Some("i".into())
+            },
+        ]
+    );
+}
+
+#[test]
+fn recognized_builtin_spelling_does_not_admit_unknown_functions_hidden_relations_or_lexical_disagreement() {
+    for sql in [
+        "SELECT dbo.COUNT_BIG(r.id) FROM @Rows r",
+        "SELECT [COUNT_BIG](r.id) FROM @Rows r",
+        "SELECT unknown_function(r.id) FROM @Rows r",
+        "SELECT SUM(dbo.hidden(r.id)) FROM @Rows r",
+        "SELECT COUNT_BIG(*) FROM dbo.expand(@Rows)",
+        "SELECT (SELECT COUNT_BIG(*) FROM @Other) FROM @Rows r",
+        "SELECT COUNT_BIG(*) FROM @Rows r WHERE r.id IN (SELECT id FROM dbo.Items)",
+        "SELECT COUNT_BIG(*) FROM @Rows r WHERE EXISTS (SELECT 1 FROM @Other)",
+        "SELECT COUNT_BIG(*) FROM (@Rows) r",
+        "SELECT COUNT_BIG(*) FROM @Rows r CROSS APPLY dbo.expand(r.id) f",
+        "SELECT COUNT_BIG(*) FROM @Rows r JOIN dbo.Items i ON (r.id=i.id), dbo.More m",
+        "SELECT COUNT_BIG(*) FROM @Rows r WITH (NOLOCK)",
+        "SELECT COUNT_BIG(*) FROM @Rows r OPTION (RECOMPILE)",
+        "SELECT COUNT_BIG(*) FROM @Rows r UNION ALL SELECT COUNT_BIG(*) FROM @Other",
+        "SELECT COUNT_BIG(*) FROM @Rows r; SELECT COUNT_BIG(*) FROM @Other",
+        "SELECT ABS((r.id) FROM @Rows r",
+        "SELECT ABS(r.id)) FROM @Rows r",
+        "SELECT \"COUNT_BIG\"(*) FROM @Rows r",
+        "SELECT COUNT_BIG(*) FROM \"@Rows\" r",
+    ] {
+        assert!(mssql_relational_references(sql).is_none(), "{sql}");
+    }
+}
+
+#[test]
+fn expression_limits_refuse_the_whole_inventory_instead_of_retaining_a_prefix() {
+    let depth = expressions::MAX_EXPRESSION_DEPTH;
+    let sql = format!("SELECT {}r.id{} FROM @Rows r", "(".repeat(depth), ")".repeat(depth));
+    assert_eq!(mssql_relational_references(&sql), Some(vec![parameter("@Rows", Some("r"))]));
+    let excessive = format!("SELECT ({}) FROM @Rows r", &sql[7..sql.find(" FROM").unwrap()]);
+    assert!(mssql_relational_references(&excessive).is_none());
+    let sql = "SELECT COUNT_BIG(*) FROM @Rows r";
+    let bounded = format!("{sql} /*{}*/", "x".repeat(MAX_RELATIONAL_SQL_BYTES - sql.len() - 5));
+    assert_eq!(bounded.len(), MAX_RELATIONAL_SQL_BYTES);
+    assert!(mssql_relational_references(&bounded).is_some());
+    assert!(mssql_relational_references(&(bounded + " ")).is_none());
+}

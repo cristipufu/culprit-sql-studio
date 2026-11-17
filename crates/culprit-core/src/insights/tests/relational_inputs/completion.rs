@@ -34,6 +34,7 @@ fn completed_counts(plan: &Plan) -> String {
 fn a_completed_qualified_tvp_scan_distinguishes_consumed_input_kept_rows_and_statement_output() {
     let input = completed_input().root;
     let mut root = measured(0, "Stream Aggregate", NodeKind::Aggregate, 1.0, 1.0, 1.0);
+    root.facts_mut().serial_execution_count = Some("1".into());
     root.children.push(input);
     let plan = actual(Engine::Mssql, root, 400.0);
     let concern = estimate_concern(&plan);
@@ -176,6 +177,7 @@ fn spill_and_type_conversion_remain_independent_competing_mechanisms_even_with_c
     let expression = "CONVERT_IMPLICIT(nvarchar(20),[@Rows].[id],0)";
     scan.predicate = Some(format!("{expression}=N'10'"));
     let mut sort = measured(0, "Sort", NodeKind::Sort, 1000.0, 1000.0, 1.0);
+    sort.facts_mut().serial_execution_count = Some("1".into());
     sort.warnings.push(PlanWarning::Spill);
     sort.runtime = Some(crate::NodeRuntime { spill_pages: Some(128.0), ..Default::default() });
     sort.children.push(scan);
@@ -190,4 +192,32 @@ fn spill_and_type_conversion_remain_independent_competing_mechanisms_even_with_c
     assert!(!estimate.detail.contains("as a result"));
     assert!(observed.iter().any(|insight| insight.rule == "spill"));
     assert!(observed.iter().any(|insight| insight.rule == "implicit-conversion"));
+}
+
+#[test]
+fn every_aggregate_compute_or_sort_ancestor_requires_exact_source_issued_serial_execution_proof() {
+    for kind in [NodeKind::Aggregate, NodeKind::Compute, NodeKind::Sort] {
+        for missing in ["missing", "repeated", "noncanonical", "too-large", "parallel", "unknown-output"] {
+            let mut parent = measured(0, "native ancestor", kind, 1.0, 1.0, 1.0);
+            parent.facts_mut().serial_execution_count = Some("1".into());
+            parent.children.push(completed_input().root);
+            let mut plan = actual(Engine::Mssql, parent, 400.0);
+            let expected = completed_counts(&plan);
+            assert!(estimate_concern(&plan).detail.contains(&expected));
+            match missing {
+                "missing" => plan.root.facts_mut().serial_execution_count = None,
+                "repeated" => plan.root.facts_mut().serial_execution_count = Some("2".into()),
+                "noncanonical" => plan.root.facts_mut().serial_execution_count = Some("01".into()),
+                "too-large" => plan.root.facts_mut().serial_execution_count = Some("9007199254740993".into()),
+                "parallel" => plan.root.facts_mut().parallel_threads = Some(1),
+                _ => plan.root.act_rows = None,
+            }
+            assert!(!estimate_concern(&plan).detail.contains(&expected), "{kind:?}: {missing}");
+            assert!(estimate_concern(&plan).detail.contains(&t!(
+                "insight.relational_input.access_counts",
+                estimated = "100",
+                actual = "10K"
+            )));
+        }
+    }
 }

@@ -4,6 +4,7 @@ use culprit_core::{
     telemetry::{MssqlModuleParameters, NativeReadContext},
 };
 
+mod expressions;
 mod loops;
 
 const SQL: &str = "SELECT r.id FROM @Rows r JOIN dbo.Items i ON r.id=i.id";
