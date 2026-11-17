@@ -17,6 +17,7 @@ mod page_writers;
 mod populations;
 mod queries;
 mod replication;
+mod source_overhead;
 mod source_partitions;
 mod statement_grants;
 mod statement_outcomes;
@@ -105,8 +106,20 @@ impl Fixture {
         records: Vec<TelemetryRecord>,
         streams: &[TelemetryStream],
     ) -> Self {
+        Self::with_read_metrics(source, records, streams, 0, None).await
+    }
+    async fn with_read_metrics(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        streams: &[TelemetryStream],
+        source_queries: u32,
+        metrics: Option<ReadWorkMetrics>,
+    ) -> Self {
         let catalog = Arc::new(SchemaCatalog::new().unwrap());
-        let recovery = Arc::new(Recovery::capture("clickhouse:test", catalog.digest(), source, records, 140_000));
+        let mut recovery = Recovery::capture("clickhouse:test", catalog.digest(), source, records, 140_000);
+        recovery.manifest.source_queries = source_queries;
+        recovery.manifest.read_metrics = metrics;
+        let recovery = Arc::new(recovery);
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
         let scratch = tempfile::tempdir().unwrap();

@@ -27,6 +27,7 @@ mod page_writers;
 mod populations;
 mod queries;
 mod replication;
+mod source_overhead;
 mod source_partitions;
 mod statement_grants;
 mod statement_outcomes;
@@ -44,8 +45,19 @@ struct Fixture {
 }
 impl Fixture {
     async fn new(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+        Self::with_read_metrics(source, records, 0, None).await
+    }
+    async fn with_read_metrics(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        source_queries: u32,
+        metrics: Option<ReadWorkMetrics>,
+    ) -> Self {
         let catalog = Arc::new(SchemaCatalog::new().unwrap());
-        let recovery = Arc::new(Recovery::capture("adx:test", catalog.digest(), source, records, 50_000));
+        let mut recovery = Recovery::capture("adx:test", catalog.digest(), source, records, 50_000);
+        recovery.manifest.source_queries = source_queries;
+        recovery.manifest.read_metrics = metrics;
+        let recovery = Arc::new(recovery);
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
         let scratch = tempfile::tempdir().unwrap();

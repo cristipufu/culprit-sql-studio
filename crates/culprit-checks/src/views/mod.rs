@@ -29,6 +29,7 @@ pub mod request_memory;
 pub mod runtime_distributions;
 pub mod session_memory;
 mod source_coverage;
+pub mod source_overhead;
 pub mod sql_lint;
 pub mod statement_grants;
 pub mod statement_work;

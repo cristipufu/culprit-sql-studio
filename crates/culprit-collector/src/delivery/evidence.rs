@@ -120,6 +120,7 @@ pub struct RangeManifest {
     /// Collector clock readings, separate from native measurement and observation times.
     pub collected_from: String,
     pub collected_until: String,
+    pub source_queries: u32,
     pub read_metrics: Option<ReadWorkMetrics>,
     pub batches: Vec<BatchManifest>,
     pub advances: Vec<StreamAdvance>,
@@ -348,6 +349,7 @@ impl PreparedRange {
             source: manifest.description.clone().ok_or_else(|| DeliveryProblem::Integrity.error())?,
             collected_from: manifest.started_at.clone(),
             collected_until: manifest.finished_at.clone().ok_or_else(|| DeliveryProblem::NotReady.error())?,
+            source_queries: manifest.source_queries,
             read_metrics: manifest.read_metrics.clone(),
             batches,
             advances,

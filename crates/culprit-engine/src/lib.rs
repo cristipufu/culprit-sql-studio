@@ -17,6 +17,8 @@ pub mod collected_evidence;
 pub mod collected_resources;
 #[cfg(feature = "collector")]
 mod collection;
+#[cfg(feature = "collector")]
+pub use collection::inspect_source_overhead;
 #[cfg(any(feature = "store-adx", feature = "store-clickhouse"))]
 pub mod collector_service;
 mod connection;

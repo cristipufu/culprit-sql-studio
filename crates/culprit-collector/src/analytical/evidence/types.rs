@@ -158,6 +158,64 @@ impl VerifiedEvidenceRecord {
     }
 }
 
+/// Authenticated metadata for one committed capture, independently of its native rows. Publication absence is
+/// explicit; no membership audit, row proof or recovery payload is requested by this metadata-only read.
+/// It is intentionally not serializable: domain views project safe previews instead of exposing full source focus.
+#[derive(Clone, Debug)]
+pub struct EvidenceCaptureMetadata {
+    pub(super) range_id: String,
+    pub(super) recovery_manifest_sha256: String,
+    pub(super) capture_manifest_sha256: String,
+    pub(super) source: CollectionDescription,
+    pub(super) capture: CaptureIdentity,
+    pub(super) collected_from: String,
+    pub(super) collected_until: String,
+    pub(super) source_queries: u32,
+    pub(super) source_read_metrics: Option<ReadWorkMetrics>,
+    pub(super) gaps: Vec<EvidenceGap>,
+    pub(super) metrics: EvidenceReadMetrics,
+}
+impl EvidenceCaptureMetadata {
+    pub fn range_id(&self) -> &str {
+        &self.range_id
+    }
+    pub fn recovery_manifest_sha256(&self) -> &str {
+        &self.recovery_manifest_sha256
+    }
+    pub fn capture_manifest_sha256(&self) -> &str {
+        &self.capture_manifest_sha256
+    }
+    pub fn source(&self) -> &CollectionDescription {
+        &self.source
+    }
+    pub fn capture(&self) -> &CaptureIdentity {
+        &self.capture
+    }
+    /// Collector acquisition bounds, not the native source's retained history window.
+    pub fn collected_from(&self) -> &str {
+        &self.collected_from
+    }
+    pub fn collected_until(&self) -> &str {
+        &self.collected_until
+    }
+    /// The original source query counter, never a sum of the bounded template list.
+    pub fn source_queries(&self) -> u32 {
+        self.source_queries
+    }
+    pub fn source_read_metrics(&self) -> Option<&ReadWorkMetrics> {
+        self.source_read_metrics.as_ref()
+    }
+    pub fn gaps(&self) -> &[EvidenceGap] {
+        &self.gaps
+    }
+    pub fn metrics(&self) -> &EvidenceReadMetrics {
+        &self.metrics
+    }
+    pub fn is_read_complete(&self) -> bool {
+        self.gaps.is_empty()
+    }
+}
+
 /// A read of the requested families of this exact capture. Native source coverage, freshness, continuity and
 /// counter epochs remain separate facts in the source and records.
 #[derive(Clone, Debug, Serialize)]

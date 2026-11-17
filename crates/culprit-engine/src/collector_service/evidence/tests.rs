@@ -4,6 +4,7 @@ use culprit_collector::analytical::evidence::RecoveryPayloadBudget;
 mod lifecycle;
 mod profiles;
 mod session;
+mod source_overhead;
 
 #[test]
 fn evidence_requests_require_exact_range_identity_distinct_families_and_valid_budgets() {

@@ -83,7 +83,7 @@ pub fn input(catalog: &dyn ProjectionCatalog, range: &CommittedRange) -> Result<
         "receipts_sha256":receipts,"publication_id":publication_id,"capture":manifest.capture,
         "source":{"source":manifest.source.source,"continuity":manifest.source.continuity,
             "observation":observation},
-        "read_metrics":manifest.read_metrics,"batches":batches}))
+        "source_queries":manifest.source_queries,"read_metrics":manifest.read_metrics,"batches":batches}))
 }
 
 fn invalid() -> culprit_core::Error {

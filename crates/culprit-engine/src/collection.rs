@@ -1,4 +1,6 @@
 //! Workspace authentication composes with the source-independent capture controller.
+mod overhead;
+pub use overhead::inspect_source_overhead;
 #[cfg(test)]
 mod tests;
 use crate::Workspace;

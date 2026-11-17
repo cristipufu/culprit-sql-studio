@@ -3,6 +3,7 @@ use crate::collection_files::ObservationFiles;
 mod attempts;
 mod delivery_worker;
 mod eviction;
+mod inspection;
 mod requests;
 mod restored_diagnostics;
 

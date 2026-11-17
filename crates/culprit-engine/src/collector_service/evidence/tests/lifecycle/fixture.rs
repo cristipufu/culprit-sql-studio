@@ -191,6 +191,11 @@ impl AnalyticalReadStore for Store {
     }
 }
 impl Store {
+    pub(in crate::collector_service::evidence::tests) fn replace_publication(&self, field: &str, value: Value) {
+        let schema = self.catalog.publication();
+        let index = schema.columns().iter().position(|column| column.name == field).unwrap();
+        self.publication.lock().unwrap().as_mut().unwrap()[index] = value;
+    }
     pub(in crate::collector_service::evidence::tests) fn omit_first_row(&self) {
         self.rows.lock().unwrap().values_mut().next().unwrap().remove(0);
     }
@@ -246,9 +251,19 @@ impl Fixture {
         source: CollectionDescription,
         records: Vec<TelemetryRecord>,
     ) -> Self {
+        Self::capture_with_read_metrics(source, records, 0, None).await
+    }
+    pub(in crate::collector_service::evidence::tests) async fn capture_with_read_metrics(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        source_queries: u32,
+        read_metrics: Option<ReadWorkMetrics>,
+    ) -> Self {
         let objects = Arc::new(Objects::default());
         let catalog = Arc::new(PhysicalCatalog::<JsonProjection>::new().unwrap());
-        let native = Recovery::capture("fixture:archive", catalog.digest(), source, records, 100_000);
+        let mut native = Recovery::capture("fixture:archive", catalog.digest(), source, records, 100_000);
+        native.manifest.source_queries = source_queries;
+        native.manifest.read_metrics = read_metrics;
         let manifest = native.manifest.clone();
         let archive = Arc::new(ObjectRecoveryStore::create(objects.clone(), manifest.contract.clone()).await.unwrap());
         let fence = archive.acquire().await.unwrap();

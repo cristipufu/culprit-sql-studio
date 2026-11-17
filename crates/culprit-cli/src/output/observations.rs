@@ -6,6 +6,8 @@ use culprit_core::{
 };
 
 const OBSERVATION_DETAIL_CHARS: usize = 1024;
+mod source_overhead;
+pub(crate) use source_overhead::{collected_source_overhead, source_overhead};
 mod blocking;
 pub(crate) use blocking::blocking;
 mod connection_outcomes;

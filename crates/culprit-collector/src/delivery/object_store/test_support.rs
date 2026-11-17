@@ -130,6 +130,7 @@ fn empty_range(contract: crate::delivery::contract::Contract, epoch: u64) -> cra
         source,
         collected_from: "2020-01-01T06:02:00Z".into(),
         collected_until: "2020-01-01T06:02:01Z".into(),
+        source_queries: 0,
         read_metrics: None,
         batches,
         advances: vec![StreamAdvance { stream_key: "db/resource-history".into(), previous: None, next: "1".into() }],

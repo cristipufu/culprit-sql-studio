@@ -42,19 +42,12 @@ impl EvidenceReader {
                 return Err(DeliveryProblem::DestinationChanged.error());
             }
         }
-        range.manifest().validate()?;
+        let catalog = self.admit(range)?;
         if families.is_empty()
             || families.len() > EvidenceFamily::ALL.len()
             || families.iter().enumerate().any(|(index, family)| families[..index].contains(family))
         {
             return Err(DeliveryProblem::InvalidContract.error());
-        }
-        let catalog = self.store.catalog();
-        if range.manifest().contract.destination() != self.store.destination() {
-            return Err(DeliveryProblem::DestinationChanged.error());
-        }
-        if range.manifest().contract.schema_digest() != catalog.digest() {
-            return Err(DeliveryProblem::UnsupportedSchema.error());
         }
         let rows = range
             .manifest()
@@ -100,27 +93,9 @@ impl EvidenceReader {
             metrics: EvidenceReadMetrics::default(),
         };
         let mut state = ReadState { budget, metrics: &mut capture.metrics };
-        state.query()?;
-        let publications = self.store.publication_rows(range, state.byte_limit()?).await?;
-        state.response(&publications)?;
-        if publications.rows.is_empty() {
-            capture.gaps.push(EvidenceGap {
-                stream: None,
-                batch_id: None,
-                row_ordinal: None,
-                reason: EvidenceGapReason::NotPublished,
-            });
+        if !self.publication_matches(range, catalog.as_ref(), &mut state).await? {
+            capture.gaps.push(unpublished());
             return Ok(capture);
-        }
-        if publications.rows.len() > 2 {
-            return Err(invalid());
-        }
-        let schema = catalog.publication();
-        let wanted = super::super::projection::digest(&schema.project(&publication::input(catalog.as_ref(), range)?)?)?;
-        for row in publications.rows {
-            if schema.returned_digest(&row)? != wanted {
-                return Err(invalid());
-            }
         }
         state.query()?;
         let audit_bytes = self.store.audit_membership(range, state.byte_limit()?).await?;
@@ -151,6 +126,89 @@ impl EvidenceReader {
             .records
             .sort_by(|left, right| (&left.batch_id, left.row_ordinal).cmp(&(&right.batch_id, right.row_ordinal)));
         Ok(capture)
+    }
+
+    /// Reads the authenticated completion metadata only. No native row, membership audit, projection proof or SQL/
+    /// plan recovery object is opened, including when the caller's general budget permits payload recovery.
+    pub async fn read_metadata(
+        &self,
+        range: &CommittedRange,
+        budget: EvidenceReadBudget,
+    ) -> Result<EvidenceCaptureMetadata> {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(u64::from(budget.timeout_ms));
+        budget.validate()?;
+        let catalog = self.admit(range)?;
+        let metadata = tokio::time::timeout_at(deadline, self.metadata(range, budget, catalog))
+            .await
+            .map_err(|_| CollectionStop::TimedOut.error())??;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(CollectionStop::TimedOut.error());
+        }
+        Ok(metadata)
+    }
+
+    fn admit(&self, range: &CommittedRange) -> Result<Arc<dyn ProjectionCatalog>> {
+        range.manifest().validate()?;
+        let catalog = self.store.catalog();
+        if range.manifest().contract.destination() != self.store.destination() {
+            return Err(DeliveryProblem::DestinationChanged.error());
+        }
+        if range.manifest().contract.schema_digest() != catalog.digest() {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        Ok(catalog)
+    }
+
+    async fn metadata(
+        &self,
+        range: &CommittedRange,
+        budget: EvidenceReadBudget,
+        catalog: Arc<dyn ProjectionCatalog>,
+    ) -> Result<EvidenceCaptureMetadata> {
+        let manifest = range.manifest();
+        let mut metadata = EvidenceCaptureMetadata {
+            range_id: manifest.range_id.clone(),
+            recovery_manifest_sha256: range.manifest_digest().into(),
+            capture_manifest_sha256: manifest.capture_manifest_sha256.clone(),
+            source: manifest.source.clone(),
+            capture: manifest.capture.clone(),
+            collected_from: manifest.collected_from.clone(),
+            collected_until: manifest.collected_until.clone(),
+            source_queries: manifest.source_queries,
+            source_read_metrics: manifest.read_metrics.clone(),
+            gaps: vec![],
+            metrics: EvidenceReadMetrics::default(),
+        };
+        let mut state = ReadState { budget, metrics: &mut metadata.metrics };
+        if !self.publication_matches(range, catalog.as_ref(), &mut state).await? {
+            metadata.gaps.push(unpublished());
+        }
+        Ok(metadata)
+    }
+
+    async fn publication_matches(
+        &self,
+        range: &CommittedRange,
+        catalog: &dyn ProjectionCatalog,
+        state: &mut ReadState<'_>,
+    ) -> Result<bool> {
+        state.query()?;
+        let publications = self.store.publication_rows(range, state.byte_limit()?).await?;
+        state.response(&publications)?;
+        if publications.rows.is_empty() {
+            return Ok(false);
+        }
+        if publications.rows.len() > 2 {
+            return Err(invalid());
+        }
+        let schema = catalog.publication();
+        let wanted = super::super::projection::digest(&schema.project(&publication::input(catalog, range)?)?)?;
+        for row in publications.rows {
+            if schema.returned_digest(&row)? != wanted {
+                return Err(invalid());
+            }
+        }
+        Ok(true)
     }
 
     async fn batch(
@@ -300,4 +358,8 @@ fn capacity() -> culprit_core::Error {
 }
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()
+}
+
+fn unpublished() -> EvidenceGap {
+    EvidenceGap { stream: None, batch_id: None, row_ordinal: None, reason: EvidenceGapReason::NotPublished }
 }

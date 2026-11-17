@@ -1223,6 +1223,30 @@ Incomplete captures remain local for inspection, do not advance native coverage 
 not silently promoted to complete warehouse data. Inspect repeated failures and retained captures before restarting
 an exhausted source. Unconfirmed source work is never evicted to free space.
 
+Inspect recorded client work for one local attempt with
+`culprit collect outbox overhead /path/to/outbox <observation-id>` (`--json` returns the same typed report).
+The SDK exposes `culprit_engine::inspect_source_overhead(directory, observation_id)`. This read-only path uses
+only the bounded manifest and local journal, so it works while the collector retains its owner lock. It does not
+load result streams, discover credentials, contact the database or verify archive publication. Failed descriptions
+can have no engine identity; unfinished query totals remain unknown. The report withholds SQL previews and retains
+template SHA values, exact decoded rows/charged bytes, client timings and failure/cancellation accounting.
+An allocated attempt without an initial manifest has no report yet. Local inspection never promotes an incomplete
+attempt, clears native debt or authorizes publication.
+
+For a committed capture, use the same report through its archive:
+
+```sh
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis source-overhead --json
+```
+
+This path authenticates the capture manifest and warehouse publication without reading native result rows,
+membership proofs or SQL/plan recovery payloads. Original source-query totals remain separate from the bounded
+per-template task list and archive I/O. Human output shows the five templates with the most client elapsed time;
+JSON retains every recorded template. Client elapsed time includes transport and decoding; it does not measure
+database CPU, physical I/O, memory grants or database execution time. The archive path covers complete committed
+captures; use local inspection for failed or unsettled attempts.
+
 ## Tables and analytical reads
 
 The generated contract has 13 analytical tables and one completion table:
@@ -1236,7 +1260,7 @@ The generated contract has 13 analytical tables and one completion table:
 | `CulpritDeadlocksV1` | Native event position, time, graph identity and recovery references |
 | `CulpritOperationalV1`, `CulpritReplicationV1` | Typed operational facts, including diagnostic revisions that reference original native evidence; native counters and replication observations |
 | `CulpritSettingsV1`, `CulpritTuningV1`, `CulpritObjectsV1` | Settings, tuning state and object/catalog facts with per-source coverage |
-| `CulpritPublishedRangesV1` | Exact capture completion, batch membership, coverage and source-read metrics |
+| `CulpritPublishedRangesV1` | Exact capture completion, batch membership, coverage, original source-query totals and source-read metrics |
 
 Diagnostic working-set checkpoints are recovery-only. They have no analytical table. Multiple logical
 datasets deliberately share a typed physical table; `Dataset`, native source and fact kind identify their meaning.

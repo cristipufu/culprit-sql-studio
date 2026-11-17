@@ -3,6 +3,8 @@ use clap::Subcommand;
 use culprit_collector::outbox::Outbox;
 use culprit_core::{Result, telemetry::OutboxLimits};
 use std::path::PathBuf;
+#[cfg(test)]
+mod tests;
 
 #[derive(Subcommand)]
 pub(crate) enum OutboxCommand {
@@ -26,6 +28,8 @@ pub(crate) enum OutboxCommand {
     Recover { directory: PathBuf },
     #[command(about=culprit_core::t!("outbox.cli.verify"))]
     Verify { directory: PathBuf, observation: String },
+    #[command(about=culprit_core::t!("outbox.cli.overhead"))]
+    Overhead { directory: PathBuf, observation: String },
     #[command(about=culprit_core::t!("outbox.cli.replay"))]
     Replay {
         directory: PathBuf,
@@ -45,6 +49,12 @@ pub(crate) enum OutboxCommand {
 pub(crate) async fn run(command: OutboxCommand, out: &Out) -> Result<u8> {
     use culprit_core::{format, t};
     let (value, message) = match command {
+        OutboxCommand::Overhead { directory, observation } => {
+            let report = culprit_engine::inspect_source_overhead(&directory, &observation).await?.ok_or_else(|| {
+                culprit_core::Error::new(culprit_core::ErrorCode::NotFound, t!("outbox.cli.overhead_pending"))
+            })?;
+            (encode(&report)?, crate::output::observations::source_overhead(&report))
+        }
         OutboxCommand::Init { directory, max_bytes, max_captures } => {
             let outbox = Outbox::create(&directory, OutboxLimits { max_bytes, max_captures })?;
             (

@@ -4,6 +4,8 @@ use culprit_core::{
     Engine, Result, SourceOutcome, SourceState, collected_resource_analysis::CollectedRetainedFailureAnalysis,
     operations::MemoryFailureSnapshot, telemetry::*,
 };
+mod source_overhead;
+pub use source_overhead::source_overhead;
 mod state;
 use state::CapturedState;
 mod activity;

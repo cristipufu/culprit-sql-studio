@@ -1,9 +1,8 @@
 //! Both archived-analysis views retain the same authenticated capture and native-row identity.
-use culprit_collector::analytical::evidence::EvidenceCapture;
+use culprit_collector::analytical::evidence::{EvidenceCapture, EvidenceReadMetrics};
 use culprit_core::collected_analysis::{CollectedAnalysisRecord, CollectedEvidenceContext, CollectedEvidenceMetrics};
 
 pub(crate) fn from_capture(capture: &EvidenceCapture) -> CollectedEvidenceContext {
-    let metrics = capture.metrics();
     CollectedEvidenceContext {
         range_id: capture.range_id().into(),
         recovery_manifest_sha256: capture.recovery_manifest_sha256().into(),
@@ -14,16 +13,7 @@ pub(crate) fn from_capture(capture: &EvidenceCapture) -> CollectedEvidenceContex
         collected_until: capture.collected_until().into(),
         selected_streams: capture.families().iter().map(|family| family.stream()).collect(),
         read_gaps: capture.gaps().to_vec(),
-        metrics: CollectedEvidenceMetrics {
-            selected_rows: metrics.selected_rows,
-            queries: metrics.queries,
-            pages: metrics.pages,
-            returned_rows: metrics.returned_rows,
-            response_bytes: metrics.response_bytes,
-            proof_bytes: metrics.proof_bytes,
-            recovery_objects: metrics.recovery_objects,
-            recovery_bytes: metrics.recovery_bytes,
-        },
+        metrics: read_metrics(capture.metrics()),
         records: capture
             .records()
             .iter()
@@ -34,5 +24,18 @@ pub(crate) fn from_capture(capture: &EvidenceCapture) -> CollectedEvidenceContex
                 row: record.row().clone(),
             })
             .collect(),
+    }
+}
+
+pub(crate) fn read_metrics(metrics: &EvidenceReadMetrics) -> CollectedEvidenceMetrics {
+    CollectedEvidenceMetrics {
+        selected_rows: metrics.selected_rows,
+        queries: metrics.queries,
+        pages: metrics.pages,
+        returned_rows: metrics.returned_rows,
+        response_bytes: metrics.response_bytes,
+        proof_bytes: metrics.proof_bytes,
+        recovery_objects: metrics.recovery_objects,
+        recovery_bytes: metrics.recovery_bytes,
     }
 }

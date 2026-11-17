@@ -69,6 +69,7 @@ pub mod runtime_distribution_report;
 pub mod runtime_population;
 pub mod serialization;
 pub mod signals;
+pub mod source_overhead_report;
 pub mod sql;
 pub mod statement_grant_report;
 pub mod statement_work_report;
@@ -188,6 +189,7 @@ pub use signals::{
     FileKind, FileScope, FileWriteOperation, IndexContention, IndexEscalationCounts, IndexLockCounts, QueryCosts,
     Replica, ReplicaCondition, ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
 };
+pub use source_overhead_report::{CollectedSourceOverheadAnalysis, SourceOverheadEvidence, SourceOverheadReport};
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use statement_grant_report::{StatementGrantExplanation, StatementGrantRead, StatementGrantReport};
 pub use statement_work_report::{StatementOutcomeCounts, StatementWorkEntry, StatementWorkReport};

@@ -178,6 +178,7 @@ impl From<Family> for EvidenceFamily {
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Analysis {
     Queries,
+    SourceOverhead,
     Blocking,
     MemoryFailures,
     NativeFailures,
@@ -207,6 +208,7 @@ enum Analysis {
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
         match self {
+            Self::SourceOverhead => vec![], // Metadata is selected before constructing a row EvidenceRequest.
             Self::Blocking | Self::Maintenance => vec![EvidenceFamily::ActivityObservations],
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
@@ -244,12 +246,25 @@ impl Analysis {
 }
 
 impl CommonArgs {
-    fn request(&self, families: Vec<EvidenceFamily>, output: Format) -> Result<EvidenceRequest> {
+    fn service(&self) -> Result<EvidenceService> {
+        CollectorRuntime::default().evidence(&EvidenceConfig::from_file(&self.config)?)
+    }
+
+    fn validate(&self, output: Format) -> Result<EvidenceReadBudget> {
         if !matches!(output, Format::Text | Format::Json) {
             return Err(culprit_core::Error::invalid(t!("evidence.cli.format")));
         }
         bounded_output::validate_json_limit(self.max_output_bytes)?;
-        let request = EvidenceRequest { range_id: self.range.clone(), families, budget: self.budget.read_budget() };
+        if !valid_digest(&self.range) {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        let budget = self.budget.read_budget();
+        budget.validate()?;
+        Ok(budget)
+    }
+
+    fn request(&self, families: Vec<EvidenceFamily>, output: Format) -> Result<EvidenceRequest> {
+        let request = EvidenceRequest { range_id: self.range.clone(), families, budget: self.validate(output)? };
         request.validate()?;
         Ok(request)
     }
@@ -274,9 +289,11 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
                 )
             }
         };
+    if analysis == Some(Analysis::SourceOverhead) {
+        return source_overhead(&common, out).await;
+    }
     let request = common.request(families, out.format())?;
-    let config = EvidenceConfig::from_file(&common.config)?;
-    let service = CollectorRuntime::default().evidence(&config)?;
+    let service = common.service()?;
     let cancellation = CollectionCancellation::default();
     let reading = read_captures(
         &service,
@@ -293,6 +310,7 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         None => emit(out, &capture, common.max_output_bytes, || {
             read_summary(capture.range_id(), capture.records().len(), capture.gaps().len())
         })?,
+        Some(Analysis::SourceOverhead) => return Err(DeliveryProblem::InvalidContract.error()),
         Some(Analysis::Queries) => {
             let catalog = capture.source().query_history().and_then(|history| history.population_catalog.as_ref());
             let population = resolve_population(catalog, requested_population.as_ref())?;
@@ -401,6 +419,24 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             emit(out, &analysis, common.max_output_bytes, || observations::cleanup(&analysis.report))?;
         }
     }
+    if !complete && out.format() == Format::Text {
+        println!("{}", t!("evidence.cli.read_incomplete"));
+    }
+    Ok(if complete { 0 } else { 2 })
+}
+
+async fn source_overhead(common: &CommonArgs, out: &Out) -> Result<u8> {
+    let budget = common.validate(out.format())?;
+    let service = common.service()?;
+    let cancellation = CollectionCancellation::default();
+    let reading = async {
+        let mut session = service.session(budget, &cancellation)?;
+        session.read_metadata(&common.range).await
+    };
+    let metadata = crate::collection_shutdown::run(&cancellation, reading).await?;
+    let complete = metadata.is_read_complete();
+    let analysis = culprit_engine::collected_resources::source_overhead(&metadata)?;
+    emit(out, &analysis, common.max_output_bytes, || observations::collected_source_overhead(&analysis))?;
     if !complete && out.format() == Format::Text {
         println!("{}", t!("evidence.cli.read_incomplete"));
     }

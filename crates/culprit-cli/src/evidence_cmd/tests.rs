@@ -3,6 +3,7 @@ use clap::Parser;
 mod connection_outcomes;
 mod maintenance_blocking;
 mod page_task_holders;
+mod source_overhead;
 
 #[test]
 fn cli_exposes_every_verified_evidence_family() {

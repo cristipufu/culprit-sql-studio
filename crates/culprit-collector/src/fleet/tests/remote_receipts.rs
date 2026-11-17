@@ -72,6 +72,7 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
             source,
             collected_from: "2026-11-10T12:00:00Z".into(),
             collected_until: "2026-11-10T12:00:01Z".into(),
+            source_queries: 0,
             read_metrics: None,
             batches,
             advances: vec![],

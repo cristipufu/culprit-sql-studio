@@ -232,6 +232,15 @@ impl Outbox {
             .await
             .map_err(|_| problem(OutboxProblem::Storage))?
     }
+    /// Inspect one locally recorded manifest without acquiring the active owner or reading native payloads.
+    /// None means this allocated capture has not published its initial file; it is never a completed empty read.
+    pub async fn inspect_manifest(path: &Path, observation_id: &str) -> Result<Option<CollectionManifest>> {
+        let path = path.to_owned();
+        let observation_id = observation_id.to_owned();
+        tokio::task::spawn_blocking(move || super::attempts::inspect_manifest(&path, &observation_id))
+            .await
+            .map_err(|_| problem(OutboxProblem::Storage))?
+    }
     pub async fn replay(path: &Path, observation_id: &str, destination: &Path) -> Result<OutboxReplay> {
         let path = path.to_owned();
         let observation_id = observation_id.to_owned();
