@@ -81,6 +81,7 @@ pub fn memory_feedback_evidence(case: MemoryFeedbackCase) -> (CollectionDescript
         statement: cached_payload(STATEMENT, DefinitionPayload::sql),
         module_parameters: None,
         relational_input_proof: None,
+        parameter_context_proof: None,
         statement_executions: Some("7".into()),
         last_start_without_offset: Some("2020-01-01T11:59:58.003".into()),
         database_last_query_plan_stats: Some(true),

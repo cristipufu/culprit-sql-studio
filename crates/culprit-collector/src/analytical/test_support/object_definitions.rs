@@ -6,6 +6,8 @@ mod bound_joins;
 pub use bound_joins::object_definition_bound_join_evidence;
 mod memory_feedback;
 pub use memory_feedback::{MemoryFeedbackCase, memory_feedback_evidence, memory_feedback_evidence_cases};
+mod parameters;
+pub use parameters::{ParameterEvidenceCase, parameter_evidence, parameter_evidence_cases};
 mod tvp_loops;
 pub use tvp_loops::{TvpLoopCase, tvp_loop_evidence, tvp_loop_evidence_cases};
 
@@ -42,6 +44,7 @@ pub fn object_definition_evidence_cases() -> Vec<(CollectionDescription, Vec<Tel
     )];
     let retained = MssqlRetainedPlanDefinition {
         relational_input_proof: None,
+        parameter_context_proof: None,
         context: cached.context.clone(),
         statement: missing_payload(PayloadUnavailable::NotCollected),
         module_parameters: None,
@@ -209,6 +212,7 @@ pub fn object_definition_retained_input_evidence() -> (CollectionDescription, Ve
     );
     let retained = MssqlRetainedPlanDefinition {
         relational_input_proof: None,
+        parameter_context_proof: None,
         context,
         statement: cached_payload(SQL, DefinitionPayload::sql),
         module_parameters: Some(module_parameters),

@@ -1,5 +1,6 @@
 use super::*;
 use clap::Parser;
+mod completed_spills;
 mod connection_outcomes;
 mod maintenance_blocking;
 mod page_task_holders;

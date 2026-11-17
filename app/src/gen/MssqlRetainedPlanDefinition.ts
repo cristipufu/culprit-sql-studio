@@ -2,6 +2,7 @@
 import type { CachedStatementContext } from "./CachedStatementContext";
 import type { MssqlCachedPayload } from "./MssqlCachedPayload";
 import type { MssqlModuleParameters } from "./MssqlModuleParameters";
+import type { MssqlParameterContextProof } from "./MssqlParameterContextProof";
 import type { MssqlRelationalInputProof } from "./MssqlRelationalInputProof";
 
 export type MssqlRetainedPlanDefinition = { context: CachedStatementContext, 
@@ -13,6 +14,10 @@ statement: MssqlCachedPayload,
  * Original module declarations, qualified independently against this retained plan's native binding.
  */
 module_parameters?: MssqlModuleParameters, relational_input_proof?: MssqlRelationalInputProof, 
+/**
+ * Scalar comparisons and direct native access bindings observed before literals were redacted.
+ */
+parameter_context_proof?: MssqlParameterContextProof, 
 /**
  * Native statement-cache counter; it is not the number of measured executions in the XML batch.
  */

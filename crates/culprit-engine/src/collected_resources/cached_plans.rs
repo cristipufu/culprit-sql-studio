@@ -51,7 +51,7 @@ fn explain(
     dataset: SnapshotDataset,
     definition: &ObjectDefinitionRecord,
 ) -> Result<CachedPlanEntry> {
-    if !definition.fact.relational_input_proof_matches(capture.source()) {
+    if !definition.fact.native_plan_proofs_match(capture.source()) {
         return Err(invalid());
     }
     let mut entry = CachedPlanEntry {

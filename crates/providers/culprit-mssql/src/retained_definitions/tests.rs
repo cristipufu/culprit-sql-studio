@@ -4,6 +4,7 @@ use crate::{
     resources::test_support::{FakeRead, replace},
     value::Val,
 };
+mod parameters;
 pub(crate) fn feature(visible: i64, present: i64) -> Rec {
     Rec::of(&[
         ("metadata_visibility", Val::Int(visible)),

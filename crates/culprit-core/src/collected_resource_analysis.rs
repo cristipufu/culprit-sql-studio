@@ -167,3 +167,12 @@ pub struct CollectedJobsAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::JobsReport,
 }
+
+/// Each source keeps its own authenticated capture, clocks, read work and warehouse gaps.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedCompletedSpillAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub definition_context: Option<CollectedEvidenceContext>,
+    pub report: crate::CompletedSpillReport,
+}

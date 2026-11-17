@@ -98,6 +98,7 @@ fn output_misestimates(cx: &Cx) -> Vec<Draft> {
             let mysql_histograms = !cx.plan.facts().server_version.as_deref()
                 .is_some_and(|v| !v.contains("MariaDB") && !crate::version_at_least(v, [8, 0, 0]));
             let (fix, sql) = match (input, cx.engine(), &table) {
+                (None, _, _) if parameters::access_mismatch(cx, n).is_some() => (parameters::access_advice(), None),
                 // A copied command cannot refresh session-local inputs; unknown kinds cannot authorize it either.
                 (Some(kind), _, _) => (relational_input_advice(kind, &table_leaf(&subject)), None),
                 (None, Engine::Mssql, Some(t)) => (

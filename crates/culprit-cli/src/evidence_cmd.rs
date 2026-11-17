@@ -48,6 +48,8 @@ pub(crate) struct AnalyzeArgs {
     compilation_baseline: Option<String>,
     #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.blocking_range"))]
     blocking_range: Option<String>,
+    #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.completed_spills.definitions_range"))]
+    definitions_range: Option<String>,
 }
 
 impl AnalyzeArgs {
@@ -85,6 +87,14 @@ impl AnalyzeArgs {
             }
         } else if self.analysis == Analysis::MaintenanceBlocking {
             return Err(culprit_core::Error::invalid(t!("evidence.cli.maintenance_blocking_required")));
+        }
+        if let Some(range) = &self.definitions_range {
+            if self.analysis != Analysis::CompletedSpills {
+                return Err(culprit_core::Error::invalid(t!("evidence.cli.completed_spills.definitions_only")));
+            }
+            if !valid_digest(range) || range == &self.common.range {
+                return Err(DeliveryProblem::InvalidContract.error());
+            }
         }
         Ok(())
     }
@@ -190,6 +200,7 @@ enum Analysis {
     PageTaskHolders,
     TaskSpace,
     StatementWork,
+    CompletedSpills,
     StatementGrants,
     CacheEntryMemory,
     RuntimeDistributions,
@@ -229,6 +240,7 @@ impl Analysis {
             | Self::PageTaskHolders
             | Self::TaskSpace
             | Self::StatementWork
+            | Self::CompletedSpills
             | Self::ConnectionOutcomes
             | Self::StatementGrants
             | Self::CacheEntryMemory
@@ -271,24 +283,33 @@ impl CommonArgs {
 }
 
 pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
-    let (common, families, analysis, requested_population, activity_range, compilation_baseline, blocking_range) =
-        match command {
-            EvidenceCommand::Read(args) => {
-                (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None, None, None)
-            }
-            EvidenceCommand::Analyze(args) => {
-                args.validate_selection()?;
-                (
-                    args.common,
-                    args.analysis.families(),
-                    Some(args.analysis),
-                    args.workload_population,
-                    args.activity_range,
-                    args.compilation_baseline,
-                    args.blocking_range,
-                )
-            }
-        };
+    let (
+        common,
+        families,
+        analysis,
+        requested_population,
+        activity_range,
+        compilation_baseline,
+        blocking_range,
+        definitions_range,
+    ) = match command {
+        EvidenceCommand::Read(args) => {
+            (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None, None, None, None)
+        }
+        EvidenceCommand::Analyze(args) => {
+            args.validate_selection()?;
+            (
+                args.common,
+                args.analysis.families(),
+                Some(args.analysis),
+                args.workload_population,
+                args.activity_range,
+                args.compilation_baseline,
+                args.blocking_range,
+                args.definitions_range,
+            )
+        }
+    };
     if analysis == Some(Analysis::SourceOverhead) {
         return source_overhead(&common, out).await;
     }
@@ -301,11 +322,12 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         activity_range.as_deref(),
         compilation_baseline.as_deref(),
         blocking_range.as_deref(),
+        definitions_range.as_deref(),
         &cancellation,
     );
     let captures = crate::collection_shutdown::run(&cancellation, reading).await?;
     let complete = captures.is_read_complete();
-    let ReadCaptures { capture, activity, baseline, blocking } = captures;
+    let ReadCaptures { capture, activity, baseline, blocking, definitions } = captures;
     match analysis {
         None => emit(out, &capture, common.max_output_bytes, || {
             read_summary(capture.range_id(), capture.records().len(), capture.gaps().len())
@@ -356,6 +378,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::StatementWork) => {
             let analysis = culprit_engine::collected_resources::statement_work(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::statement_work(&analysis.report))?;
+        }
+        Some(Analysis::CompletedSpills) => {
+            let analysis = culprit_engine::collected_resources::completed_spills(&capture, definitions.as_ref())?;
+            emit(out, &analysis, common.max_output_bytes, || observations::completed_spills(&analysis.report))?;
         }
         Some(Analysis::StatementGrants) => {
             let analysis = culprit_engine::collected_resources::statement_grants(&capture)?;
@@ -449,6 +475,7 @@ async fn read_captures(
     activity_range: Option<&str>,
     compilation_baseline: Option<&str>,
     blocking_range: Option<&str>,
+    definitions_range: Option<&str>,
     cancellation: &CollectionCancellation,
 ) -> Result<ReadCaptures> {
     let mut session = service.session(request.budget, cancellation)?;
@@ -482,7 +509,20 @@ async fn read_captures(
     } else {
         None
     };
-    Ok(ReadCaptures { capture, activity, baseline, blocking })
+    let definitions = if let Some(range) = definitions_range {
+        if !capture
+            .source()
+            .observation
+            .snapshot()
+            .is_some_and(|snapshot| snapshot.dataset == culprit_core::telemetry::SnapshotDataset::CachedRuntime)
+        {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        Some(session.read(range, &[EvidenceFamily::ObjectDefinitions]).await?)
+    } else {
+        None
+    };
+    Ok(ReadCaptures { capture, activity, baseline, blocking, definitions })
 }
 
 struct ReadCaptures {
@@ -490,6 +530,7 @@ struct ReadCaptures {
     activity: Option<EvidenceCapture>,
     baseline: Option<EvidenceCapture>,
     blocking: Option<EvidenceCapture>,
+    definitions: Option<EvidenceCapture>,
 }
 
 impl ReadCaptures {
@@ -498,6 +539,7 @@ impl ReadCaptures {
             .chain(self.activity.iter())
             .chain(self.baseline.iter())
             .chain(self.blocking.iter())
+            .chain(self.definitions.iter())
             .all(EvidenceCapture::is_read_complete)
     }
 }

@@ -82,6 +82,7 @@ pub fn tvp_loop_evidence(case: TvpLoopCase) -> (CollectionDescription, Vec<Telem
         statement: cached.statement,
         module_parameters: cached.module_parameters,
         relational_input_proof: None,
+        parameter_context_proof: None,
         statement_executions: Some("9007199254740993".into()),
         last_start_without_offset: Some("2020-01-01T11:59:58.003".into()),
         database_last_query_plan_stats: Some(true),

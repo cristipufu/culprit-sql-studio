@@ -29,6 +29,7 @@ fn bound_join(sql: &str, raw_xml: &str, retained: bool) -> (CollectionDescriptio
             statement: definition.statement,
             module_parameters: definition.module_parameters,
             relational_input_proof: None,
+            parameter_context_proof: None,
             statement_executions: Some("9007199254740993".into()),
             last_start_without_offset: Some("2020-01-01T11:59:00.003".into()),
             database_last_query_plan_stats: Some(true),

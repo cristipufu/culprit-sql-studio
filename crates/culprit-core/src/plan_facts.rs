@@ -10,9 +10,9 @@ mod memory_feedback;
 pub use memory_feedback::{PlanMemoryGrantFeedback, PlanMemoryGrantFeedbackIssue, PlanMemoryGrantFeedbackState};
 mod parameters;
 pub use parameters::{
-    MAX_PARAMETER_NAME_UTF16, MAX_PARAMETER_TYPE_BYTES, MAX_PLAN_PARAMETERS, PlanParameter, PlanParameterComparison,
-    PlanParameterContext, PlanParameterIssue, PlanParameterValueState, parameter_name_is_valid,
-    parameter_type_is_valid,
+    MAX_PARAMETER_NAME_UTF16, MAX_PARAMETER_TYPE_BYTES, MAX_PLAN_PARAMETER_USES, MAX_PLAN_PARAMETERS, PlanParameter,
+    PlanParameterComparison, PlanParameterContext, PlanParameterIssue, PlanParameterUse, PlanParameterUseKind,
+    PlanParameterValueState, parameter_name_is_valid, parameter_type_is_valid,
 };
 mod relational_input;
 pub use relational_input::{RelationalInput, RelationalInputKind, RelationalInputProvenance};

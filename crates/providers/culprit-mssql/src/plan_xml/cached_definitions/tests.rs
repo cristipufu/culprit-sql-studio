@@ -170,6 +170,7 @@ fn cached_module_classification_does_not_manufacture_actual_rows_or_a_tvp_proble
 fn retained_actual_rows_have_no_borrowed_module_kind_cache_population_or_placeholder_time() {
     let definition = MssqlRetainedPlanDefinition {
         relational_input_proof: None,
+        parameter_context_proof: None,
         context: context(),
         statement_executions: Some(u64::MAX.to_string()),
         last_start_without_offset: Some("2026-11-14T11:59:59.997".into()),
@@ -218,6 +219,7 @@ fn unavailable_and_malformed_native_plans_remain_unusable() {
     );
     let retained = MssqlRetainedPlanDefinition {
         relational_input_proof: None,
+        parameter_context_proof: None,
         context: context(),
         statement_executions: Some("0".into()),
         last_start_without_offset: None,

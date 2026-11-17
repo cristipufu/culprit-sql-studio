@@ -75,6 +75,7 @@ fn healthy_large_completed_input_and_parameter_representation_differences_do_not
             runtime: crate::plan_facts::PlanParameterValueState::Recorded,
             comparison: crate::plan_facts::PlanParameterComparison::DifferentRepresentation,
         }],
+        uses: vec![],
         issues: vec![],
     });
     let observed = insights(&plan);

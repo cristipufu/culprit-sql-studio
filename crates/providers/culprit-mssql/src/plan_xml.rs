@@ -220,6 +220,17 @@ pub(crate) fn parse_cached_statement(xml: &str, context: CachedInputContext<'_>)
 }
 
 impl CachedInputContext<'_> {
+    fn matches_original_statement(&self, statement: Node<'_, '_>) -> bool {
+        statement.has_tag_name_local("StmtSimple")
+            && children(statement, "QueryPlan").take(2).count() == 1
+            && statement.attribute("StatementText").map(str::trim) == self.text.map(str::trim)
+            && self.text.is_some()
+            && statement
+                .attribute("QueryHash")
+                .zip(self.statement.query_hash.as_deref())
+                .is_some_and(|(native, observed)| native.eq_ignore_ascii_case(observed))
+    }
+
     fn is_valid(&self) -> bool {
         self.statement.is_valid()
             && self.statement.identity.has_plan_handle()
@@ -240,10 +251,15 @@ impl CachedInputContext<'_> {
 
 /// Optional classification of already-retained native bodies. No source I/O, counters or plan display tree are
 /// acquired here; unsupported/ambiguous native scope keeps the payload but supplies no positive proof.
-pub(crate) fn original_input_bindings(
+pub(crate) struct OriginalStatementEvidence {
+    pub(crate) relational_inputs: Option<Vec<culprit_core::telemetry::MssqlRelationalInputBinding>>,
+    pub(crate) parameter_context: Option<culprit_core::plan_facts::PlanParameterContext>,
+}
+
+pub(crate) fn original_statement_evidence(
     xml: &str,
     context: CachedInputContext<'_>,
-) -> Option<Vec<culprit_core::telemetry::MssqlRelationalInputBinding>> {
+) -> Option<OriginalStatementEvidence> {
     if !context.is_valid() || matches!(context.origin, PlanInputOrigin::StoredRedacted { .. }) {
         return None;
     }
@@ -251,13 +267,20 @@ pub(crate) fn original_input_bindings(
         let doc = doc.ok()?;
         let statement =
             select_statement(&doc, StatementSelection::Native(context.statement.query_hash.as_deref())).ok()?;
-        let bindings = relational_inputs::classify(statement, Some(&context)).ok()?;
-        (!bindings.is_empty()).then(|| {
-            bindings
-                .into_iter()
-                .map(|(node_id, input)| culprit_core::telemetry::MssqlRelationalInputBinding { node_id, input })
-                .collect()
-        })
+        let relational_inputs = relational_inputs::classify(statement, Some(&context))
+            .ok()
+            .filter(|bindings| !bindings.is_empty())
+            .map(|bindings| {
+                bindings
+                    .into_iter()
+                    .map(|(node_id, input)| culprit_core::telemetry::MssqlRelationalInputBinding { node_id, input })
+                    .collect()
+            });
+        let parameter_context = context
+            .matches_original_statement(statement)
+            .then(|| query_plan_of(statement).and_then(parameters::read))
+            .flatten();
+        Some(OriginalStatementEvidence { relational_inputs, parameter_context })
     })
 }
 
@@ -415,8 +438,16 @@ fn read_statement(
         root.flag_misestimates();
     }
 
+    let mut facts = statement_facts(statement, query_plan);
+    if input.as_ref().is_some_and(|context| {
+        !matches!(context.origin, PlanInputOrigin::StoredRedacted { .. })
+            && !context.matches_original_statement(statement)
+    }) && let Some(context) = &mut facts.parameter_context
+    {
+        parameters::withhold_statement_binding(context);
+    }
     let mut plan = Plan {
-        facts: statement_facts(statement, query_plan),
+        facts,
         view: None,
         engine: Engine::Mssql,
         kind: if is_actual { PlanKind::Actual } else { PlanKind::Estimated },

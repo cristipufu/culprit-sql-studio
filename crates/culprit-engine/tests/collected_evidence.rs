@@ -10,6 +10,7 @@ mod cleanup;
 mod cohorts;
 mod compilation;
 mod compiler_admission;
+mod completed_spills;
 mod connection_outcomes;
 mod current_request_work;
 mod file_io;

@@ -6,13 +6,48 @@ use culprit_core::plan_facts::{
 };
 use roxmltree::Node;
 use std::collections::BTreeSet;
+mod uses;
 
 const MAX_PARAMETER_REPRESENTATION_BYTES: usize = 16 * 1024;
+
+pub(super) fn withhold_statement_binding(context: &mut PlanParameterContext) {
+    context.uses.clear();
+    context.issues.push(Issue::UnboundStatement);
+    for parameter in &mut context.parameters {
+        parameter.comparison = Comparison::Unavailable;
+        if parameter.runtime == State::Recorded {
+            parameter.runtime = State::Unqualified;
+        }
+    }
+}
+
+pub(super) fn restore(plan: &mut culprit_core::Plan, context: &PlanParameterContext) -> culprit_core::Result<()> {
+    let invalid = || culprit_core::telemetry::DeliveryProblem::Integrity.error();
+    if !context.is_valid() {
+        return Err(invalid());
+    }
+    if !context.issues.contains(&Issue::MetadataLimit) {
+        let parsed = plan.facts().parameter_context.as_ref().ok_or_else(invalid)?;
+        if context.uses != parsed.uses
+            || context.parameters.len() != parsed.parameters.len()
+            || context
+                .parameters
+                .iter()
+                .zip(&parsed.parameters)
+                .any(|(native, retained)| native.name != retained.name || native.data_type != retained.data_type)
+        {
+            return Err(invalid());
+        }
+    }
+    plan.facts_mut().parameter_context = Some(context.clone());
+    Ok(())
+}
 
 pub(super) fn read(query_plan: Node<'_, '_>) -> Option<PlanParameterContext> {
     child(query_plan, "ParameterList")?;
     let lists = || children(query_plan, "ParameterList");
-    let ambiguous = lists().take(2).count() > 1;
+    let ambiguous = lists().take(2).count() > 1
+        || query_plan.parent().is_some_and(|parent| children(parent, "QueryPlan").take(2).count() > 1);
     let runtime = !ambiguous && query_plan_has_runtime(query_plan);
     let mut issues = BTreeSet::new();
     if ambiguous {
@@ -32,7 +67,16 @@ pub(super) fn read(query_plan: Node<'_, '_>) -> Option<PlanParameterContext> {
             parameter.comparison = Comparison::Unavailable;
         }
     }
-    Some(PlanParameterContext { parameters, issues: issues.into_iter().collect() })
+    let supported_scope = query_plan.parent().is_some_and(super::relational_inputs::direct_statement_scope);
+    if !supported_scope {
+        issues.insert(Issue::UnsupportedUse);
+    }
+    let uses = if ambiguous || !supported_scope || issues.contains(&Issue::ParameterLimit) {
+        vec![]
+    } else {
+        uses::read(query_plan, &parameters, &mut issues)
+    };
+    Some(PlanParameterContext { parameters, uses, issues: issues.into_iter().collect() })
 }
 
 fn parameter(native: Node<'_, '_>, runtime: bool, issues: &mut BTreeSet<Issue>) -> PlanParameter {

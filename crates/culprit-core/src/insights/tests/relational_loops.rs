@@ -119,6 +119,7 @@ fn efficient_seeks_and_healthy_large_tvp_estimates_are_not_loop_faults() {
             runtime: crate::plan_facts::PlanParameterValueState::Recorded,
             comparison: crate::plan_facts::PlanParameterComparison::DifferentRepresentation,
         }],
+        uses: vec![],
         issues: vec![],
     });
     assert_no_loop(&healthy, "a parameter representation difference cannot establish harmful reuse");

@@ -107,7 +107,7 @@ impl AccessComparison {
         }
     }
 
-    fn underestimated(&self) -> bool {
+    pub(super) fn underestimated(&self) -> bool {
         self.actual > self.estimated
             && self.actual >= crate::plan::MISESTIMATE_MIN_ROWS
             && differs_materially(self.estimated, self.actual)

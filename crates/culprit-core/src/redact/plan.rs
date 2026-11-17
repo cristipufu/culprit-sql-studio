@@ -71,42 +71,45 @@ fn redact_plan_expression(text: &str) -> String {
     masked
 }
 
+fn redact_plan_text(text: &str, engine: Engine) -> String {
+    let redacted = if engine.sql_syntax() == crate::SqlSyntax::Postgres {
+        redact_plan_expression(text)
+    } else {
+        redact_sql(text, engine)
+    };
+    if engine == Engine::Mssql { strip_database(&redacted) } else { redacted }
+}
+
 /// The plan with literal values replaced in its statement, predicates and text properties. The original plan text
 /// (`raw`) is dropped; use [`redact_native`] for that.
 pub fn redact_plan(plan: &Plan) -> Plan {
-    fn text(t: &str, engine: Engine) -> String {
-        let t = if engine.sql_syntax() == crate::SqlSyntax::Postgres {
-            redact_plan_expression(t)
-        } else {
-            redact_sql(t, engine)
-        };
-        if engine == Engine::Mssql { strip_database(&t) } else { t }
-    }
     fn node(n: &PlanNode, engine: Engine) -> PlanNode {
         let facts = {
             let mut f = n.facts.clone();
             f.selectivity_guess = f.selectivity_guess.as_deref().map(|v| redact_prose(v, engine));
             f.partition_pruning = f.partition_pruning.as_deref().map(|v| redact_prose(v, engine));
-            f.join_filter = f.join_filter.as_deref().map(|v| text(v, engine));
+            f.join_filter = f.join_filter.as_deref().map(|v| redact_plan_text(v, engine));
             f.storage = f.storage.as_deref().map(|v| redact_strings(v, engine));
             f.join_buffer = f.join_buffer.as_deref().map(|v| redact_strings(v, engine));
             f.join_buffer_join_type = f.join_buffer_join_type.as_deref().map(|v| redact_strings(v, engine));
             f.index_method = f.index_method.as_deref().map(|v| redact_strings(v, engine));
             f.aggregate_strategy = f.aggregate_strategy.as_deref().map(|v| redact_strings(v, engine));
-            f.conditions = f.conditions.iter().map(|v| text(v, engine)).collect();
-            f.columns_without_statistics = f.columns_without_statistics.iter().map(|v| text(v, engine)).collect();
-            f.used_key_parts = f.used_key_parts.iter().map(|v| text(v, engine)).collect();
-            f.output_columns = f.output_columns.as_ref().map(|values| values.iter().map(|v| text(v, engine)).collect());
+            f.conditions = f.conditions.iter().map(|v| redact_plan_text(v, engine)).collect();
+            f.columns_without_statistics =
+                f.columns_without_statistics.iter().map(|v| redact_plan_text(v, engine)).collect();
+            f.used_key_parts = f.used_key_parts.iter().map(|v| redact_plan_text(v, engine)).collect();
+            f.output_columns =
+                f.output_columns.as_ref().map(|values| values.iter().map(|v| redact_plan_text(v, engine)).collect());
             f.user_functions = f
                 .user_functions
                 .iter()
                 .map(|v| {
-                    let value = text(v, engine);
+                    let value = redact_plan_text(v, engine);
                     if engine == Engine::Mssql { strip_parts(&value, 2) } else { value }
                 })
                 .collect();
             for c in &mut f.conversions {
-                c.expression = text(&c.expression, engine);
+                c.expression = redact_plan_text(&c.expression, engine);
                 if let crate::PlanConversionIssue::Other(v) = &mut c.issue {
                     *v = redact_strings(v, engine);
                 }
@@ -123,13 +126,13 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         };
         PlanNode {
             facts,
-            detail: n.detail.as_deref().map(|d| text(d, engine)),
-            seek_predicate: n.seek_predicate.as_deref().map(|p| text(p, engine)),
-            predicate: n.predicate.as_deref().map(|p| text(p, engine)),
+            detail: n.detail.as_deref().map(|d| redact_plan_text(d, engine)),
+            seek_predicate: n.seek_predicate.as_deref().map(|p| redact_plan_text(p, engine)),
+            predicate: n.predicate.as_deref().map(|p| redact_plan_text(p, engine)),
             props: n
                 .props
                 .iter()
-                .map(|(k, v)| (k.clone(), if is_measurement(v) { v.clone() } else { text(v, engine) }))
+                .map(|(k, v)| (k.clone(), if is_measurement(v) { v.clone() } else { redact_plan_text(v, engine) }))
                 .collect(),
             children: n.children.iter().map(|c| node(c, engine)).collect(),
             ..n.clone()
@@ -152,33 +155,12 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         f.flavor = f.flavor.as_deref().map(|v| redact_strings(v, plan.engine));
         f.server_version = f.server_version.as_deref().map(|v| redact_strings(v, plan.engine));
         f.memory_grant_warning = f.memory_grant_warning.as_deref().map(|v| redact_strings(v, plan.engine));
-        f.compiled_parameters = f.compiled_parameters.as_deref().map(|v| text(v, plan.engine));
+        f.compiled_parameters = f.compiled_parameters.as_deref().map(|v| redact_plan_text(v, plan.engine));
         if let Some(context) = &mut f.parameter_context {
-            for parameter in &mut context.parameters {
-                let name = parameter
-                    .name
-                    .as_deref()
-                    .map(|name| text(name, plan.engine))
-                    .filter(|name| crate::plan_facts::parameter_name_is_valid(name));
-                if name.is_none() || name != parameter.name {
-                    parameter.comparison = crate::plan_facts::PlanParameterComparison::Unavailable;
-                }
-                parameter.name = name;
-                parameter.data_type = parameter
-                    .data_type
-                    .as_deref()
-                    .and_then(|data_type| {
-                        if plan.engine.sql_syntax() == crate::SqlSyntax::Mssql {
-                            parameter_types::redact(data_type)
-                        } else {
-                            Some(text(data_type, plan.engine))
-                        }
-                    })
-                    .filter(|data_type| crate::plan_facts::parameter_type_is_valid(data_type));
-            }
+            redact_parameter_context(context, plan.engine);
         }
         for c in &mut f.conversions {
-            c.expression = text(&c.expression, plan.engine);
+            c.expression = redact_plan_text(&c.expression, plan.engine);
             if let crate::PlanConversionIssue::Other(v) = &mut c.issue {
                 *v = redact_strings(v, plan.engine);
             }
@@ -187,7 +169,7 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         f.cost_basis = f.cost_basis.as_deref().map(|v| redact_prose(v, plan.engine));
         f.parallelism_blocker = f.parallelism_blocker.as_deref().map(|v| redact_strings(v, plan.engine));
         f.optimization_early_abort = f.optimization_early_abort.as_deref().map(|v| redact_strings(v, plan.engine));
-        f.statistics_maintenance = f.statistics_maintenance.as_deref().map(|v| text(v, plan.engine));
+        f.statistics_maintenance = f.statistics_maintenance.as_deref().map(|v| redact_plan_text(v, plan.engine));
         f.last_run_at = f.last_run_at.as_deref().map(|v| redact_strings(v, plan.engine));
         f.virtual_indexes = f.virtual_indexes.iter().map(|v| redact_strings(v, plan.engine)).collect();
     }
@@ -226,6 +208,34 @@ pub fn redact_plan(plan: &Plan) -> Plan {
     }
     redacted.render_recorded_messages();
     redacted
+}
+
+/// Redact safe native parameter metadata without re-evaluating or retaining its original literal values.
+pub fn redact_parameter_context(context: &mut crate::plan_facts::PlanParameterContext, engine: Engine) {
+    for parameter in &mut context.parameters {
+        let name = parameter
+            .name
+            .as_deref()
+            .map(|name| redact_plan_text(name, engine))
+            .filter(|name| crate::plan_facts::parameter_name_is_valid(name));
+        if name.is_none() || name != parameter.name {
+            parameter.comparison = crate::plan_facts::PlanParameterComparison::Unavailable;
+        }
+        parameter.name = name;
+        parameter.data_type = parameter
+            .data_type
+            .as_deref()
+            .and_then(|data_type| {
+                if engine.sql_syntax() == crate::SqlSyntax::Mssql {
+                    parameter_types::redact(data_type)
+                } else {
+                    Some(redact_plan_text(data_type, engine))
+                }
+            })
+            .filter(|data_type| crate::plan_facts::parameter_type_is_valid(data_type));
+    }
+    context.uses =
+        std::mem::take(&mut context.uses).into_iter().filter(|usage| context.parameter(usage).is_some()).collect();
 }
 
 /// Showplan XML attributes that carry SQL text or values.

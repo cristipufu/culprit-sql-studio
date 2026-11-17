@@ -16,7 +16,7 @@ mod statement_work;
 #[cfg(test)]
 mod tests;
 
-pub use plan::{redact_native, redact_plan};
+pub use plan::{redact_native, redact_parameter_context, redact_plan};
 pub(crate) use sql::{dollar_tag, skip_quoted_smart};
 pub use sql::{redact_prose, redact_sql, redact_strings, strip_database};
 

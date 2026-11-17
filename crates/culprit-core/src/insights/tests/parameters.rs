@@ -17,7 +17,7 @@ fn parameter(name: &str) -> PlanParameter {
 fn recorded_plan() -> Plan {
     let mut plan = actual(Engine::Mssql, measured(0, "Table Scan", NodeKind::Scan, 1.0, 1.0, 1.0), 400.0);
     plan.facts_mut().parameter_context =
-        Some(PlanParameterContext { parameters: vec![parameter("@customer")], issues: vec![] });
+        Some(PlanParameterContext { parameters: vec![parameter("@customer")], uses: vec![], issues: vec![] });
     plan
 }
 
@@ -143,4 +143,111 @@ fn redaction_that_withholds_an_invalid_parameter_name_also_withholds_its_compari
     assert_eq!(redacted.root.act_rows, plan.root.act_rows);
     assert!(context_insight(&redacted).is_none());
     assert!(!serde_json::to_string(&redacted).unwrap().contains("private-name-canary"));
+}
+
+fn parameterized_seek() -> Plan {
+    use crate::plan_facts::{PlanAccessRows, PlanParameterUse, PlanParameterUseKind};
+    let mut plan = recorded_plan();
+    plan.root.kind = NodeKind::Seek;
+    plan.root.op = "Index Seek".into();
+    plan.root.object = Some("dbo.orders".into());
+    plan.root.index = Some("ix_customer".into());
+    plan.root.seek_predicate = Some("orders.customer = @customer".into());
+    plan.root.est_rows = 100.0;
+    plan.root.act_rows = Some(10_000.0);
+    plan.root.facts_mut().serial_execution_count = Some("1".into());
+    plan.root.facts_mut().access_rows = PlanAccessRows::new(Some(100.0), Some(10_000.0));
+    let node_id = plan.root.id;
+    plan.facts_mut().parameter_context.as_mut().unwrap().uses =
+        vec![PlanParameterUse { parameter_index: 0, node_id, kind: PlanParameterUseKind::EqualitySeek }];
+    plan
+}
+
+#[test]
+fn exact_parameterized_access_mismatch_is_observed_context_with_no_automatic_statistics_or_recompile_advice() {
+    let plan = parameterized_seek();
+    let insight = context_insight(&plan).unwrap();
+    assert_eq!(insight.nodes, vec![plan.root.id]);
+    assert!(insight.detail.contains(&t!(
+        "insight.parameter_context.access",
+        node = "0",
+        parameter = parameter_label_for_test()
+    )));
+    assert!(insight.detail.contains(&t!("insight.relational_input.access_counts", estimated = "100", actual = "10K")));
+    assert_eq!(insight.impact, 0.0);
+    assert!(insight.fix_sql.is_none());
+    let misestimate = insights(&plan).into_iter().find(|insight| insight.rule == "misestimate").unwrap();
+    assert!(misestimate.fix_sql.is_none());
+    assert_eq!(misestimate.fix, t!("insight.parameter_context.access_fix"));
+}
+
+fn parameter_label_for_test() -> String {
+    t!("insight.parameter_context.named_type", parameter = "@customer", data_type = "int")
+}
+
+#[test]
+fn healthy_unbound_ambiguous_parallel_or_incomplete_access_never_acquires_parameterized_mismatch_context() {
+    for case in [
+        "healthy",
+        "overestimate",
+        "unused",
+        "same",
+        "parallel",
+        "serial-unknown",
+        "output-missing",
+        "access-missing",
+        "wrong-node",
+        "duplicate-node",
+        "use-limit",
+        "relational-input",
+    ] {
+        let mut plan = parameterized_seek();
+        match case {
+            "healthy" => {
+                plan.root.est_rows = 10_000.0;
+                plan.root.facts_mut().access_rows.as_mut().unwrap().estimated_per_execution = Some(10_000.0);
+            }
+            "overestimate" => {
+                plan.root.est_rows = 1_000_000.0;
+                plan.root.facts_mut().access_rows.as_mut().unwrap().estimated_per_execution = Some(1_000_000.0);
+            }
+            "unused" => plan.facts_mut().parameter_context.as_mut().unwrap().uses.clear(),
+            "same" => {
+                plan.facts_mut().parameter_context.as_mut().unwrap().parameters[0].comparison =
+                    Comparison::SameRepresentation
+            }
+            "parallel" => plan.root.facts_mut().parallel_threads = Some(2),
+            "serial-unknown" => plan.root.facts_mut().serial_execution_count = None,
+            "output-missing" => plan.root.act_rows = None,
+            "access-missing" => plan.root.facts_mut().access_rows.as_mut().unwrap().actual_total = None,
+            "wrong-node" => plan.facts_mut().parameter_context.as_mut().unwrap().uses[0].node_id = 99,
+            "duplicate-node" => {
+                let mut copy = plan.root.clone();
+                copy.children.clear();
+                plan.root.children.push(copy);
+            }
+            "use-limit" => {
+                let context = plan.facts_mut().parameter_context.as_mut().unwrap();
+                context.uses.clear();
+                context.issues.push(PlanParameterIssue::UseLimit);
+            }
+            "relational-input" => {
+                plan.root.facts_mut().relational_input = Some(crate::plan_facts::RelationalInput {
+                    kind: crate::plan_facts::RelationalInputKind::Unknown,
+                    provenance: crate::plan_facts::RelationalInputProvenance::Unresolved,
+                })
+            }
+            _ => unreachable!(),
+        }
+        if let Some(insight) = context_insight(&plan) {
+            assert!(
+                !insight.detail.contains(&t!(
+                    "insight.parameter_context.access",
+                    node = "0",
+                    parameter = parameter_label_for_test()
+                )),
+                "{case}"
+            );
+        }
+    }
 }

@@ -15,6 +15,7 @@ use culprit_core::{
 use culprit_engine::collected_resources;
 
 mod memory_feedback;
+mod parameters;
 mod tvp_loops;
 
 fn case(index: usize) -> (CollectionDescription, Vec<TelemetryRecord>) {

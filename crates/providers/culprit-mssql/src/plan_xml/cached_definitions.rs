@@ -34,6 +34,9 @@ pub fn parse_retained_definition(
     if definition.relational_input_proof.as_ref().is_some_and(|proof| !proof.matches_retained(source, definition)) {
         return Err(DeliveryProblem::Integrity.error());
     }
+    if definition.parameter_context_proof.as_ref().is_some_and(|proof| !proof.matches_retained(source, definition)) {
+        return Err(DeliveryProblem::Integrity.error());
+    }
     require_source(source, SnapshotDataset::RetainedPlans)?;
     if !definition.is_valid() {
         return Err(crate::read::invalid_data());
@@ -54,6 +57,9 @@ pub fn parse_retained_definition(
             origin: super::PlanInputOrigin::StoredRedacted { proof: definition.relational_input_proof.as_ref() },
         },
     )?;
+    if let Some(proof) = &definition.parameter_context_proof {
+        super::parameters::restore(&mut plan, &proof.context)?;
+    }
     crate::actual::clear_unrecorded_times(&mut plan);
     Ok(plan)
 }

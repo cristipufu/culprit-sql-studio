@@ -28,6 +28,7 @@ impl SnapshotRecipe for RetainedPlans {
             definition.batch_plan.payload = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
             definition.module_parameters = None;
             definition.relational_input_proof = None;
+            definition.parameter_context_proof = None;
         }
         Ok(TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord::new(
             Self::SOURCE.name.into(),

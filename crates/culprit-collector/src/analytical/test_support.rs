@@ -42,6 +42,8 @@ pub use tuning::{
     TuningCase, assert_tuning_capture, assert_tuning_scope_projection, change_tuning_plan_scope, tuning_evidence,
     tuning_evidence_cases, tuning_scope_evidence,
 };
+mod completed_spills;
+pub use completed_spills::{CompletedSpillCase, completed_spill_evidence_cases};
 mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
 mod file_io;
@@ -95,10 +97,11 @@ mod task_space;
 pub use task_space::{assert_task_space_capture, task_space_evidence_cases};
 mod object_definitions;
 pub use object_definitions::{
-    MemoryFeedbackCase, TvpLoopCase, assert_object_definition_capture, memory_feedback_evidence,
+    MemoryFeedbackCase, ParameterEvidenceCase, TvpLoopCase, assert_object_definition_capture, memory_feedback_evidence,
     memory_feedback_evidence_cases, object_definition_bound_join_evidence, object_definition_evidence_cases,
     object_definition_hydration_evidence, object_definition_recovery_only_evidence,
-    object_definition_retained_input_evidence, tvp_loop_evidence, tvp_loop_evidence_cases,
+    object_definition_retained_input_evidence, parameter_evidence, parameter_evidence_cases, tvp_loop_evidence,
+    tvp_loop_evidence_cases,
 };
 mod projection;
 pub use projection::JsonProjection;

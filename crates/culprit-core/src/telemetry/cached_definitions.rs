@@ -1,5 +1,8 @@
 //! Cache definitions retain native compilation identity, raw-content fingerprints and explicit payload availability.
 use super::*;
+pub(super) mod binding;
+mod parameter_context;
+pub use parameter_context::{MAX_MSSQL_PARAMETER_CONTEXT_BYTES, MssqlParameterContextProof};
 mod module_parameters;
 pub use module_parameters::MssqlModuleParameters;
 const MAX_CACHED_TEXT_BYTES: usize = 4 * 1024 * 1024;
@@ -85,6 +88,10 @@ pub struct MssqlRetainedPlanDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub relational_input_proof: Option<MssqlRelationalInputProof>,
+    /// Scalar comparisons and direct native access bindings observed before literals were redacted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parameter_context_proof: Option<MssqlParameterContextProof>,
     /// Native statement-cache counter; it is not the number of measured executions in the XML batch.
     pub statement_executions: Option<String>,
     pub last_start_without_offset: Option<String>,
@@ -103,6 +110,7 @@ impl MssqlRetainedPlanDefinition {
             && self.last_start_without_offset.as_deref().is_none_or(super::catalog::local_time)
             && self.batch_plan.is_valid()
             && self.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_retained_contents(self))
+            && self.parameter_context_proof.as_ref().is_none_or(|proof| proof.matches_retained_contents(self))
     }
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         self.statement.redact(engine, DefinitionPayload::sql);

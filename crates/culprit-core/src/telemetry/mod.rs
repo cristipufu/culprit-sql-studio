@@ -686,7 +686,7 @@ impl TelemetryRecord {
             Self::ObjectDefinition(row) => {
                 *row = row.for_export(source.target.engine())?;
                 source.observation.accepts_snapshot_record(TelemetryStream::ObjectDefinitions, &row.source)
-                    && row.fact.relational_input_proof_matches(source)
+                    && row.fact.native_plan_proofs_match(source)
             }
             Self::WaitCounter(row) => {
                 source.observation.accepts_snapshot_record(TelemetryStream::WaitCounterSamples, &row.source)

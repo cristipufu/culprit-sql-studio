@@ -14,6 +14,7 @@ fn with_parameter(name: &str, data_type: &str) -> crate::Plan {
             runtime: State::Recorded,
             comparison: Comparison::DifferentRepresentation,
         }],
+        uses: vec![],
         issues: vec![],
     });
     plan

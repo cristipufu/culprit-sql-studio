@@ -1,4 +1,5 @@
 //! Positive variable-input classifications retained before native plan privacy removes database namespaces.
+use super::cached_definitions::binding::{PayloadBinding, definition_dataset, definition_scope};
 use super::*;
 use crate::plan_facts::{RelationalInput, RelationalInputKind, RelationalInputProvenance};
 use serde::Deserializer;
@@ -83,13 +84,13 @@ impl MssqlRelationalInputProof {
     }
 
     pub fn matches_cached(&self, source: &CollectionDescription, definition: &MssqlCachedDefinition) -> bool {
-        source_dataset(source) == Some(SnapshotDataset::CachedDefinitions)
+        definition_dataset(source) == Some(SnapshotDataset::CachedDefinitions)
             && scope(source).is_ok_and(|scope| scope == self.source_scope)
             && self.matches_cached_contents(definition)
     }
 
     pub fn matches_retained(&self, source: &CollectionDescription, definition: &MssqlRetainedPlanDefinition) -> bool {
-        source_dataset(source) == Some(SnapshotDataset::RetainedPlans)
+        definition_dataset(source) == Some(SnapshotDataset::RetainedPlans)
             && scope(source).is_ok_and(|scope| scope == self.source_scope)
             && self.matches_retained_contents(definition)
     }
@@ -121,13 +122,14 @@ impl MssqlRelationalInputProof {
 }
 
 impl ObjectDefinitionFact {
-    pub fn relational_input_proof_matches(&self, source: &CollectionDescription) -> bool {
+    pub fn native_plan_proofs_match(&self, source: &CollectionDescription) -> bool {
         match self {
             Self::MssqlCachedDefinition(value) => {
                 value.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_cached(source, value))
             }
             Self::MssqlRetainedPlan(value) => {
                 value.relational_input_proof.as_ref().is_none_or(|proof| proof.matches_retained(source, value))
+                    && value.parameter_context_proof.as_ref().is_none_or(|proof| proof.matches_retained(source, value))
             }
             _ => true,
         }
@@ -135,47 +137,7 @@ impl ObjectDefinitionFact {
 }
 
 fn scope(source: &CollectionDescription) -> Result<String> {
-    if source.target.engine() != crate::Engine::Mssql
-        || source.target.database().is_none()
-        || !source.is_partition_qualified()
-        || !matches!(source.partition, SourcePartition::InstanceLocal { .. })
-    {
-        return Err(invalid());
-    }
-    source.scoped_id(SCOPE_DOMAIN, &())
-}
-fn source_dataset(source: &CollectionDescription) -> Option<SnapshotDataset> {
-    match &source.observation {
-        SourceObservation::Snapshot(snapshot) => Some(snapshot.dataset),
-        SourceObservation::PagedSnapshot(snapshot) => Some(snapshot.dataset),
-        _ => None,
-    }
-}
-
-#[derive(Serialize)]
-struct PayloadBinding<'a> {
-    source_utf16_bytes: Option<&'a str>,
-    native_sha256: Option<&'a str>,
-    representation: Representation<'a>,
-}
-#[derive(Serialize)]
-enum Representation<'a> {
-    Available { sha256: &'a str, redaction_version: u32 },
-    Unavailable(PayloadUnavailable),
-}
-impl<'a> From<&'a MssqlCachedPayload> for PayloadBinding<'a> {
-    fn from(value: &'a MssqlCachedPayload) -> Self {
-        Self {
-            source_utf16_bytes: value.source_utf16_bytes.as_deref(),
-            native_sha256: value.native_sha256.as_deref(),
-            representation: match &value.payload {
-                DefinitionPayload::Available { sha256, redaction_version, .. } => {
-                    Representation::Available { sha256, redaction_version: *redaction_version }
-                }
-                DefinitionPayload::Unavailable { reason } => Representation::Unavailable(*reason),
-            },
-        }
-    }
+    definition_scope(source, SCOPE_DOMAIN)
 }
 
 fn cached_input(

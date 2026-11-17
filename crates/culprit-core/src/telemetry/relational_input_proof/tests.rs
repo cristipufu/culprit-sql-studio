@@ -209,6 +209,7 @@ fn retained_and_cached_proofs_are_distinct_and_missing_payloads_never_reuse_posi
         statement: cached.statement.clone(),
         module_parameters: cached.module_parameters.clone(),
         relational_input_proof: None,
+        parameter_context_proof: None,
         statement_executions: Some("9007199254740993".into()),
         last_start_without_offset: None,
         database_last_query_plan_stats: None,

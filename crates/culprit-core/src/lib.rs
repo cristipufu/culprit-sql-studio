@@ -13,6 +13,7 @@ pub mod collected_resource_analysis;
 pub mod compilation;
 pub mod compilation_report;
 pub mod compiler_admission_report;
+pub mod completed_spill_report;
 pub mod connection;
 pub mod connection_outcome_report;
 pub mod connection_outcomes;
@@ -106,6 +107,9 @@ pub use compilation_report::{
     CompilationReport,
 };
 pub use compiler_admission_report::{CompilerAdmissionReport, CompilerGatewayExplanation, CompilerWaiterExplanation};
+pub use completed_spill_report::{
+    CompletedSpillEntry, CompletedSpillReport, CompletedSpillState, CompletedSpillStatementBinding,
+};
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
     aws_iam_host_allowed, aws_region_valid, entra_host_allowed, expand_home, is_local_host, transport_error,

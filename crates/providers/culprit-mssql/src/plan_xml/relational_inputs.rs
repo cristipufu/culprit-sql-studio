@@ -107,15 +107,7 @@ fn module_parameter(
     name: &str,
 ) -> Option<RelationalInput> {
     let parameters = context.module_parameters?;
-    let native_statement = context.text?;
-    if !parameters.is_valid_for(context.statement)
-        || !statement.has_tag_name_local("StmtSimple")
-        || statement.attribute("StatementText").map(str::trim) != Some(native_statement.trim())
-        || !statement
-            .attribute("QueryHash")
-            .zip(context.statement.query_hash.as_deref())
-            .is_some_and(|(native, observed)| native.eq_ignore_ascii_case(observed))
-    {
+    if !parameters.is_valid_for(context.statement) || !context.matches_original_statement(statement) {
         return None;
     }
     parameters.input(context.statement, name)
@@ -133,7 +125,7 @@ fn apply_inputs(node: &mut PlanNode, inputs: &BTreeMap<u32, RelationalInput>) {
     }
 }
 
-fn direct_statement_scope(statement: Node<'_, '_>) -> bool {
+pub(super) fn direct_statement_scope(statement: Node<'_, '_>) -> bool {
     let function_scope = |node: Node<'_, '_>| {
         matches!(
             node.tag_name().name(),

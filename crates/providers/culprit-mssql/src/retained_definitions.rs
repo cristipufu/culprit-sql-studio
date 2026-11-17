@@ -6,7 +6,8 @@ use crate::{
     value::Rec,
 };
 use culprit_core::{Result, telemetry::*};
-const RECORD_METADATA_BYTES: usize = 16 * 1024 + MAX_MSSQL_RELATIONAL_INPUT_PROOF_BYTES;
+const RECORD_METADATA_BYTES: usize =
+    16 * 1024 + MAX_MSSQL_RELATIONAL_INPUT_PROOF_BYTES + MAX_MSSQL_PARAMETER_CONTEXT_BYTES;
 const JSON_BYTES_PER_UTF16_BYTE: usize = 3;
 pub(crate) struct Layout {
     pub maximum_bytes: usize,
@@ -46,9 +47,9 @@ pub(crate) fn decode(
     source: Option<&CollectionDescription>,
 ) -> Result<MssqlRetainedPlanDefinition> {
     let native = retained::decode(row, layout.maximum_bytes, layout.maximum_statement_bytes)?;
-    let bindings = source.filter(|source| MssqlRelationalInputProof::supports_source(source)).and_then(|source| {
+    let evidence = source.filter(|source| MssqlRelationalInputProof::supports_source(source)).and_then(|source| {
         native.payload.text().and_then(|xml| {
-            crate::plan_xml::original_input_bindings(
+            crate::plan_xml::original_statement_evidence(
                 xml,
                 crate::plan_xml::CachedInputContext {
                     statement: &native.context,
@@ -59,6 +60,8 @@ pub(crate) fn decode(
             )
         })
     });
+    let (bindings, parameter_context) =
+        evidence.map(|evidence| (evidence.relational_inputs, evidence.parameter_context)).unwrap_or_default();
     let measured = native.context.identity.has_plan_handle();
     let mut value = MssqlRetainedPlanDefinition {
         context: native.context,
@@ -73,6 +76,7 @@ pub(crate) fn decode(
         )?,
         module_parameters: native.module_parameters,
         relational_input_proof: None,
+        parameter_context_proof: None,
         batch_plan: cached_payload::from_raw(
             native.payload,
             native.source_utf16_bytes,
@@ -88,6 +92,12 @@ pub(crate) fn decode(
             }))
     {
         value.relational_input_proof = Some(MssqlRelationalInputProof::for_retained(source, &value, bindings)?);
+    }
+    if let Some((source, context)) = source.zip(parameter_context)
+        && value.batch_plan.payload.is_available()
+        && MssqlParameterContextProof::supports_source(source)
+    {
+        value.parameter_context_proof = Some(MssqlParameterContextProof::for_retained(source, &value, context)?);
     }
     if !value.is_valid() {
         return Err(invalid_data());
