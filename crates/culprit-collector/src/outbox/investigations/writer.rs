@@ -198,21 +198,26 @@ impl Files {
                 known.insert(reference.key()?);
             }
         }
+        let paired_original = if let SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } =
+            &current.source.observation
+        {
+            Some(self.verified_page_task_activity(activity)?.0)
+        } else {
+            None
+        };
+        let original_frame = paired_original.as_ref().map(DiagnosticInput::activity_frame).transpose()?;
         for revision in &update.revisions {
             if let Some(event) = &revision.investigation {
                 self.validate_investigation_event(event)?;
             }
-            if revision.previous_revision.is_none()
-                && (revision.episode.scope != DiagnosticScope::from_source(&current.source)?
-                    || !current.rows.iter().any(|row| row.reference == revision.episode.first))
-            {
-                return Err(integrity());
+            if revision.previous_revision.is_none() {
+                validate_new_episode(&current, &revision.episode, original_frame.as_ref())?;
             }
             if !revision.is_valid()
                 || revision.controller_version != input.controller_version
                 || revision.analyzed_at != update.analyzed_at
                 || revision.episode.scope.target.telemetry_id()? != current.controller_target()?.telemetry_id()?
-                || intent.as_ref().is_some_and(|intent| !intent.matches_episode(&revision.episode))
+                || intent.as_ref().is_some_and(|intent| !intent.permits_result_episode(&revision.episode))
             {
                 return Err(integrity());
             }
@@ -257,8 +262,12 @@ impl Files {
                         return Err(integrity());
                     }
                     let focus = source.observation.focus().ok_or_else(integrity)?;
-                    if !matches!(source.observation, SourceObservation::PageWaitWriters { .. }) {
-                        self.verify_focus_parent(focus)?;
+                    match &source.observation {
+                        SourceObservation::PageWaitWriters { .. } => (),
+                        SourceObservation::PageTaskHolders { focus, .. } => {
+                            self.verify_page_task_holder_focus(focus)?
+                        }
+                        _ => self.verify_focus_parent(focus)?,
                     }
                     let report_input =
                         self.diagnostic_input(&report.evidence().capture.observation_id, input.controller_version)?;
@@ -376,6 +385,23 @@ impl Files {
                     return Err(integrity());
                 }
             }
+            DiagnosticReport::PageTaskHolders { .. } => {
+                let SourceObservation::PageTaskHolders { focus, .. } = &source.observation else {
+                    return Err(integrity());
+                };
+                self.verify_page_task_holder_focus(focus)?;
+                let rows = input
+                    .rows
+                    .iter()
+                    .map(|row| match &row.row.record {
+                        TelemetryRecord::Operational(observation) => Ok((&row.reference, observation)),
+                        _ => Err(integrity()),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if !report.matches_task_holder_input(source, rows) {
+                    return Err(integrity());
+                }
+            }
             DiagnosticReport::CompilationAdmission { .. } => {
                 let rows = input
                     .rows
@@ -464,7 +490,6 @@ impl Files {
                     .investigation
                     .as_ref()
                     .is_none_or(|owner| !owner.matches_intent(&event.intent.focus, &event.intent))
-                || input.source.observation.diagnostic_focus().as_ref() != Some(&event.intent.focus)
             {
                 return Err(integrity());
             }
@@ -537,4 +562,31 @@ pub(in crate::outbox) fn checkpoint_parts(
         part.id = part.expected_id()?;
     }
     Ok(output)
+}
+
+fn validate_new_episode(
+    input: &DiagnosticInput,
+    episode: &DiagnosticEpisode,
+    original: Option<&ActivityFrameEvidence<'_>>,
+) -> Result<()> {
+    let row = input.rows.iter().find(|row| row.reference == episode.first).ok_or_else(integrity)?;
+    if matches!(episode.signal, DiagnosticSignal::PageTaskWait { .. }) {
+        let frame = original.ok_or_else(integrity)?;
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =
+            &row.row.record
+        else {
+            return Err(integrity());
+        };
+        let DiagnosticFocusPlan::Ready(focus) =
+            plan_page_task_holder_focus(&input.source, page, &row.reference, frame)?
+        else {
+            return Err(integrity());
+        };
+        if !episode.matches_focus(&focus) || episode.scope != DiagnosticScope::from_source(frame.source())? {
+            return Err(integrity());
+        }
+    } else if episode.scope != DiagnosticScope::from_source(&input.source)? {
+        return Err(integrity());
+    }
+    Ok(())
 }

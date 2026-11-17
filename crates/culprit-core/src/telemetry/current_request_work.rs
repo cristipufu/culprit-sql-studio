@@ -2,6 +2,11 @@
 use super::*;
 use crate::Engine;
 
+mod native;
+mod postgres;
+pub use native::{CurrentRequestWorkNative, CurrentRequestWorkProfile};
+pub use postgres::{PostgresCopyCommand, PostgresCopyIo, PostgresCopyProgress};
+
 pub const MAX_CURRENT_REQUEST_WORK_SQL_BYTES: usize = 16 * 1024;
 const MAX_NATIVE_STAGE_NAME_BYTES: usize = 512;
 
@@ -121,7 +126,7 @@ pub struct CurrentRequestWorkObservation {
     pub scope: ActivityScopeBasis,
     pub statement_identity: NativeIdentity,
     pub statement: DefinitionPayload,
-    pub native: MysqlCurrentRequestWork,
+    pub native: CurrentRequestWorkNative,
 }
 
 impl CurrentRequestWorkObservation {
@@ -134,14 +139,8 @@ impl CurrentRequestWorkObservation {
             && !self.database.chars().any(char::is_control)
             && matches!(self.scope, ActivityScopeBasis::RequestDatabase | ActivityScopeBasis::SessionDatabase)
             && self.native.is_valid()
-            && self.native.matches_actor(&self.actor)
-            && self
-                .actor
-                .request
-                .as_ref()
-                .and_then(|request| crate::engines::mysql_activity_statement_identity(&self.actor.session, request))
-                .as_ref()
-                == Some(&self.statement_identity)
+            && self.native.matches_embedded_actor(&self.actor)
+            && self.native.profile().matches_identity(&self.actor, self.scope, &self.statement_identity)
             && self.statement.is_valid()
             && match &self.statement {
                 DefinitionPayload::Available { text, .. } => text.len() <= MAX_CURRENT_REQUEST_WORK_SQL_BYTES,
@@ -159,20 +158,24 @@ impl CurrentRequestWorkObservation {
     }
 
     pub fn fits_source_scope(&self, source: &CollectionDescription) -> bool {
-        let SourceObservation::CurrentRequestWork { snapshot, result } = &source.observation else { return false };
-        result.is_valid_source(source, snapshot) && self.matches_result(&result.read_context(source, snapshot), result)
+        let SourceObservation::CurrentRequestWork { snapshot, result, profile } = &source.observation else {
+            return false;
+        };
+        self.native.profile() == *profile
+            && result.is_valid_source(source, snapshot)
+            && self.matches_result(&result.read_context(source, snapshot), result)
     }
 
     fn matches_result(&self, context: &NativeReadContext, result: &FocusedRequestResult) -> bool {
         self.is_valid()
-            && context.target.engine() == Engine::Mysql
+            && context.target.engine() == self.native.engine()
             && context.target.database().is_some_and(|database| database.database == self.database)
             && result.matches_point(context, &self.actor, Some(&self.statement_identity), &self.observed_at)
     }
 
     pub fn redact(&mut self) {
         if let DefinitionPayload::Available { text, .. } = &self.statement {
-            self.statement = DefinitionPayload::sql(text, Engine::Mysql);
+            self.statement = DefinitionPayload::sql(text, self.native.engine());
         }
     }
 }
@@ -181,6 +184,7 @@ impl CurrentRequestWorkObservation {
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct CurrentRequestWorkSnapshot {
+    pub profile: CurrentRequestWorkProfile,
     pub source: String,
     pub context: NativeReadContext,
     pub coverage: StateSourceCoverage,
@@ -202,6 +206,8 @@ impl CurrentRequestWorkSnapshot {
             sources: vec![self.coverage.clone()],
         };
         valid_key(&self.source)
+            && self.context.target.engine() == self.profile.engine()
+            && self.result.focus.as_deref().is_none_or(|focus| self.profile.accepts_focus(focus))
             && self.result.is_valid_header(&header)
             && self.result.is_valid_for(&self.context)
             && self.coverage.source == self.source
@@ -209,7 +215,10 @@ impl CurrentRequestWorkSnapshot {
             && (!read_complete || self.coverage.records as usize == self.observations.len())
             && self.observations.len() <= MAX_FOCUSED_REQUEST_OBSERVATIONS
             && focused_request_coverage_fits_context(&self.context, &self.coverage)
-            && self.observations.iter().all(|row| row.matches_result(&self.context, &self.result))
+            && self
+                .observations
+                .iter()
+                .all(|row| row.native.profile() == self.profile && row.matches_result(&self.context, &self.result))
     }
 }
 

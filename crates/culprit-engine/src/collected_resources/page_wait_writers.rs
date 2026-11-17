@@ -10,13 +10,9 @@ pub fn page_wait_writers(capture: &EvidenceCapture) -> Result<CollectedPageWaitW
     if !capture.source().partition_is_consistent() || !capture.source().observation.covers_request() {
         return Err(invalid());
     }
-    let rows = input.rows()?;
-    if rows.len() > 1 {
-        return Err(invalid());
-    }
+    let row = input.single_row()?;
     let context = NativeReadContext::from_snapshot(capture.source()).map_err(|_| invalid())?;
-    let observation = rows
-        .first()
+    let observation = row
         .map(|row| {
             let OperationalFact::PageWaitWriters(observation) = &row.fact else { return Err(invalid()) };
             if !focus.accepts_observation(&context, observation) {
@@ -25,7 +21,7 @@ pub fn page_wait_writers(capture: &EvidenceCapture) -> Result<CollectedPageWaitW
             Ok(observation.as_ref())
         })
         .transpose()?;
-    let source = input.outcome(rows.len())?;
+    let source = input.outcome(usize::from(row.is_some()))?;
     let report = culprit_checks::page_waits::explain_writers(focus, &context, observation, Some(&source))?;
     Ok(CollectedPageWaitWriterAnalysis { context: crate::collected_context::from_capture(capture), report })
 }

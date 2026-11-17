@@ -4,13 +4,15 @@ use crate::{
     capture::CollectionCancellation,
     delivery::recovery::RecoveryStore,
     fleet::{FleetBackend, FleetJournal, journal::FocusedStage, scheduler::FocusedJob},
-    outbox::Outbox,
+    outbox::{DiagnosticInput, Outbox},
 };
 use culprit_core::{ComponentVersion, ErrorCode, Result, telemetry::*};
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
+mod page_tasks;
+mod task_holders;
 mod writers;
 
 const MAX_CHECKPOINTS_PER_PASS: usize = 8;
@@ -30,6 +32,7 @@ struct EvidencePlanner<'a> {
     journal: &'a FleetJournal,
     recovery: Option<&'a dyn RecoveryStore>,
     cancellation: &'a CollectionCancellation,
+    population_frames: BTreeMap<String, DiagnosticInput>,
 }
 
 struct SelectedRoute {
@@ -87,11 +90,12 @@ async fn bounded(
 ) -> Result<Vec<PreparedInvestigation>> {
     let mut prepared = Vec::new();
     let mut seen = BTreeSet::new();
+    let mut populations = BTreeSet::new();
     let mut routes = BTreeMap::new();
     let (mut cursor, mut offset) = bindings.planning_position();
     let mut scanned = 0;
     let mut questions = 0;
-    let evidence = EvidencePlanner { backend, journal, recovery, cancellation };
+    let mut evidence = EvidencePlanner { backend, journal, recovery, cancellation, population_frames: BTreeMap::new() };
     for _ in 0..MAX_CHECKPOINTS_PER_PASS {
         if cancellation.is_cancelled() {
             break;
@@ -111,6 +115,7 @@ async fn bounded(
                 && matches!(
                     episode.signal,
                     DiagnosticSignal::PageWait { .. }
+                        | DiagnosticSignal::PageTaskWait { .. }
                         | DiagnosticSignal::LockWait { .. }
                         | DiagnosticSignal::RequestMemory { .. }
                         | DiagnosticSignal::CompilationAdmission { .. }
@@ -152,7 +157,26 @@ async fn bounded(
                     if available.is_empty() {
                         continue;
                     }
-                    let Some(focus) = evidence.focus(outbox, target, episode).await? else { continue };
+                    let requested = available[0].0;
+                    let population_stage = if requested == RecipeSelector::PageWaitTasks {
+                        let stage = page_wait_tasks_stage_key(&episode.first.capture_ref(), &binding.source.target)?;
+                        if populations.contains(&stage)
+                            || matches!(
+                                journal.focused_stage(&stage).await?,
+                                Some(FocusedStage::Outstanding | FocusedStage::Completed)
+                            )
+                        {
+                            continue;
+                        }
+                        Some(stage)
+                    } else {
+                        None
+                    };
+                    let Some(focus) = evidence.focus(outbox, target, episode, requested).await? else { continue };
+                    // A trigger without its own original token cannot consume a valid sibling's population.
+                    if let Some(stage) = population_stage {
+                        populations.insert(stage);
+                    }
                     let Some((_, route_key)) = available.iter().find(|(selector, _)| *selector == focus.selector())
                     else {
                         continue;
@@ -188,8 +212,9 @@ async fn bounded(
 fn possible_questions(episode: &DiagnosticEpisode) -> Vec<RecipeSelector> {
     match &episode.signal {
         DiagnosticSignal::LockWait { .. } => vec![RecipeSelector::FocusedBlocking],
+        DiagnosticSignal::PageTaskWait { .. } => vec![RecipeSelector::FocusedPageTaskHolders],
         DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. } => {
-            vec![RecipeSelector::CurrentRequestWork]
+            vec![RecipeSelector::CurrentRequestWork, RecipeSelector::PageWaitTasks]
         }
         DiagnosticSignal::RequestMemory { .. } => vec![RecipeSelector::FocusedRequestMemory],
         DiagnosticSignal::CompilationAdmission { .. } => vec![RecipeSelector::FocusedCompilationAdmission],
@@ -213,6 +238,11 @@ fn select_route(
     let Some(recipes) = metadata(backend.telemetry_recipes(&target.connection))? else { return Ok(None) };
     if !recipe_catalog_is_valid(&recipes) {
         return Err(CollectionStop::InvalidPage.error());
+    }
+    if selector == RecipeSelector::PageWaitTasks
+        && crate::diagnostics::long_running_question(&recipes, &target.subject) != Some(selector)
+    {
+        return Ok(None);
     }
     let Some(recipe) = recipes.into_iter().find(|recipe| {
         recipe.purpose == RecipePurpose::Investigation

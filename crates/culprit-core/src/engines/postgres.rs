@@ -3,6 +3,19 @@
 use super::*;
 use crate::dialect::{NewIndex, included, keys, unique};
 
+/// Source-owned token bytes shared by PostgreSQL Activity and selected current-request readers.
+/// The caller validates native PID and generation facts; no SQL text or query hash establishes this token.
+pub fn activity_statement_identity(
+    pid: &str,
+    backend_start: &str,
+    query_start: &str,
+) -> crate::telemetry::NativeIdentity {
+    use crate::telemetry::{NativeIdentity, digest};
+    NativeIdentity::new(digest(format!("{pid}|{backend_start}|{query_start}").as_bytes()))
+        .qualified("source", "pg_stat_activity")
+        .qualified("basis", "backend-query-start")
+}
+
 pub(super) struct Postgres;
 
 pub(super) fn session_reset_advice(command: &str) -> Option<String> {

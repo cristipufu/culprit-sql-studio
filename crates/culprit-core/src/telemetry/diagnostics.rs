@@ -2,11 +2,12 @@
 use super::*;
 use crate::SourceState;
 use std::collections::BTreeSet;
+mod tasks;
 mod transition;
 
 pub const MAX_DIAGNOSTIC_EPISODES: usize = 4_096;
 pub const MAX_DIAGNOSTIC_INPUTS: usize = 256;
-pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 7;
+pub const DIAGNOSTIC_CONTROLLER_VERSION: u32 = 8;
 pub const DIAGNOSTICS_SOURCE: &str = "culprit-diagnostics";
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -220,7 +221,8 @@ impl DiagnosticRecoveryProof {
         source: &CollectionDescription,
         capture: &DiagnosticCaptureRef,
     ) -> bool {
-        if self.capture() != capture
+        if episode.signal.is_task_point()
+            || self.capture() != capture
             || !self.qualifies(&episode.first)
             || !episode.scope.is_valid()
             || source.target.telemetry_id().ok() != episode.scope.target.telemetry_id().ok()
@@ -324,6 +326,15 @@ pub enum DiagnosticSignal {
         statement_identity: Option<NativeIdentity>,
         resource: crate::ObservedWaitResource,
     },
+    /// One actual retained parallel-task wait. Its page receipt, not a reused task address, identifies the point.
+    PageTaskWait {
+        key: ActivityKey,
+        statement_identity: NativeIdentity,
+        parent: Box<DiagnosticEvidenceRef>,
+        page: Box<DiagnosticEvidenceRef>,
+        task: Box<MssqlPageTaskWait>,
+        database_writable: bool,
+    },
 }
 impl DiagnosticSignal {
     pub fn is_valid(&self) -> bool {
@@ -335,6 +346,7 @@ impl DiagnosticSignal {
                 | Self::CompilationAdmission { key, statement_identity } => {
                     key.request.is_some() && statement_identity.as_ref().is_none_or(NativeIdentity::is_valid)
                 }
+                Self::PageTaskWait { .. } => self.is_valid_task_wait(),
                 Self::PageWait { key, statement_identity, resource } => {
                     key.request.is_some()
                         && statement_identity.as_ref().is_none_or(NativeIdentity::is_valid)
@@ -357,12 +369,16 @@ impl DiagnosticSignal {
             Self::Activity { key, .. }
             | Self::LockWait { key }
             | Self::PageWait { key, .. }
+            | Self::PageTaskWait { key, .. }
             | Self::RequestMemory { key, .. }
             | Self::CompilationAdmission { key, .. } => key,
         }
     }
     fn matches_reference(&self, reference: &DiagnosticEvidenceRef) -> bool {
-        matches!(&reference.native_key,NativeRecordIdentity::Activity(key) if key == self.activity_key())
+        match self {
+            Self::PageTaskWait { page, .. } => page.as_ref() == reference,
+            _ => matches!(&reference.native_key, NativeRecordIdentity::Activity(key) if key == self.activity_key()),
+        }
     }
 }
 
@@ -397,6 +413,7 @@ impl DiagnosticEpisode {
             && self.investigation_event.as_deref().is_none_or(valid_digest)
             && self.scope.is_valid()
             && self.signal.is_valid()
+            && self.task_point_is_consistent()
             && [&self.first, &self.latest]
                 .into_iter()
                 .chain(self.peak.iter())
@@ -417,6 +434,7 @@ impl DiagnosticEpisode {
                         (DiagnosticSignal::LockWait { .. }, DiagnosticReport::Blocking { .. })
                             | (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWait { .. })
                             | (DiagnosticSignal::PageWait { .. }, DiagnosticReport::PageWaitWriters { .. })
+                            | (DiagnosticSignal::PageTaskWait { .. }, DiagnosticReport::PageTaskHolders { .. })
                             | (DiagnosticSignal::RequestMemory { .. }, DiagnosticReport::RequestMemory { .. })
                             | (
                                 DiagnosticSignal::CompilationAdmission { .. },
@@ -445,12 +463,14 @@ impl DiagnosticEpisode {
         evidence: DiagnosticEvidenceRef,
     ) -> Result<Self> {
         let id = digest_value(&("diagnostic-episode-v1", scope.key()?, &signal, evidence.key()?))?;
+        let lifecycle =
+            if signal.is_task_point() { DiagnosticLifecycle::Uncertain } else { DiagnosticLifecycle::Active };
         let value = Self {
             id,
             scope,
             signal,
             revision: "1".into(),
-            lifecycle: DiagnosticLifecycle::Active,
+            lifecycle,
             analysis: DiagnosticAnalysisStatus::Pending,
             report: None,
             issue: None,
@@ -492,9 +512,13 @@ impl DiagnosticEpisode {
             DiagnosticFocus::Blocking { focus } => self.matches_blocking_focus(focus),
             DiagnosticFocus::PageWait { focus } => self.matches_page_wait_focus(focus),
             DiagnosticFocus::PageWaitWriters { focus } => self.matches_page_wait_writer_focus(focus),
+            DiagnosticFocus::PageTaskHolders { focus } => self.matches_page_task_holder_focus(focus),
             DiagnosticFocus::RequestMemory { focus } => self.matches_request_memory_focus(focus),
             DiagnosticFocus::CompilationAdmission { focus } => self.matches_compilation_admission_focus(focus),
             DiagnosticFocus::CurrentRequestWork { focus } => self.matches_current_request_work_focus(focus),
+            DiagnosticFocus::PageWaitTasks { focus, original_context, .. } => {
+                self.matches_page_wait_tasks_focus(focus, original_context)
+            }
         }
     }
     pub fn matches_page_wait_writer_focus(&self, focus: &PageWaitWriterFocus) -> bool {
@@ -534,7 +558,11 @@ impl DiagnosticEpisode {
                 .is_some_and(|bounds| bounds.contains(&focus.original_observed_at))
     }
     pub fn retained_in_checkpoint(&self) -> bool {
-        self.lifecycle != DiagnosticLifecycle::Resolved || self.analysis.needs_work()
+        if self.signal.is_task_point() {
+            self.analysis.needs_work()
+        } else {
+            self.lifecycle != DiagnosticLifecycle::Resolved || self.analysis.needs_work()
+        }
     }
 }
 
@@ -556,6 +584,11 @@ pub enum DiagnosticReport {
         page: Box<DiagnosticEvidenceRef>,
         candidates: Vec<DiagnosticEvidenceRef>,
         blocking_contexts: Vec<DiagnosticEvidenceRef>,
+    },
+    PageTaskHolders {
+        observation: DiagnosticEvidenceRef,
+        page: Box<DiagnosticEvidenceRef>,
+        parent: Box<DiagnosticEvidenceRef>,
     },
     RequestMemory {
         observation: DiagnosticEvidenceRef,
@@ -589,7 +622,7 @@ impl DiagnosticReport {
             }
             (
                 Self::CurrentRequestWork { .. },
-                SourceObservation::CurrentRequestWork { snapshot, result },
+                SourceObservation::CurrentRequestWork { snapshot, result, .. },
                 TelemetryRecord::Operational(OperationalObservation {
                     fact: OperationalFact::CurrentRequestWork(point),
                     ..
@@ -612,6 +645,20 @@ impl DiagnosticReport {
                 episode.matches_page_wait_writer_focus(focus)
                     && page.as_ref() == &focus.page
                     && candidates.iter().eq(focus.candidates.iter().map(|candidate| &candidate.parent))
+                    && NativeReadContext::from_snapshot(source)
+                        .is_ok_and(|context| focus.accepts_observation(&context, point))
+            }
+            (
+                Self::PageTaskHolders { page, parent, .. },
+                SourceObservation::PageTaskHolders { focus, .. },
+                TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::PageTaskHolders(point),
+                    ..
+                }),
+            ) => {
+                episode.matches_page_task_holder_focus(focus)
+                    && page.as_ref() == &focus.page
+                    && parent.as_ref() == &focus.participant.parent
                     && NativeReadContext::from_snapshot(source)
                         .is_ok_and(|context| focus.accepts_observation(&context, point))
             }
@@ -654,6 +701,7 @@ impl DiagnosticReport {
             Self::Blocking { observation, .. }
             | Self::PageWait { observation, .. }
             | Self::PageWaitWriters { observation, .. }
+            | Self::PageTaskHolders { observation, .. }
             | Self::RequestMemory { observation, .. }
             | Self::CompilationAdmission { observation, .. }
             | Self::CurrentRequestWork { observation } => observation,
@@ -666,6 +714,9 @@ impl DiagnosticReport {
             Self::PageWait { blocking_contexts, .. } => (None, blocking_contexts.as_slice(), &[][..]),
             Self::PageWaitWriters { page, candidates, blocking_contexts, .. } => {
                 (Some(page.as_ref()), candidates.as_slice(), blocking_contexts.as_slice())
+            }
+            Self::PageTaskHolders { page, parent, .. } => {
+                (Some(page.as_ref()), std::slice::from_ref(parent.as_ref()), &[][..])
             }
             Self::RequestMemory { peers, .. } => (None, peers.as_slice(), &[][..]),
             Self::CompilationAdmission { gateways, .. } => (None, gateways.as_slice(), &[][..]),
@@ -726,6 +777,14 @@ impl DiagnosticReport {
                             && reference.capture_ref() == candidates[0].capture_ref()
                     })
             }
+            Self::PageTaskHolders { page, parent, .. } => {
+                page.stream == TelemetryStream::OperationalSamples
+                    && matches!(page.native_key, NativeRecordIdentity::Operational { .. })
+                    && parent.stream == TelemetryStream::ActivityObservations
+                    && matches!(parent.native_key, NativeRecordIdentity::Activity(_))
+                    && page.as_ref() != self.evidence()
+                    && parent.as_ref() != self.evidence()
+            }
             Self::CompilationAdmission { gateways, .. } => {
                 gateways.len() <= MAX_FOCUSED_COMPILER_GATEWAYS
                     && unique_references(gateways)
@@ -767,6 +826,26 @@ impl DiagnosticReport {
             && page.as_ref() == &focus.page
             && candidates.iter().eq(focus.candidates.iter().map(|candidate| &candidate.parent))
             && matches!(&row.fact, OperationalFact::PageWaitWriters(point) if focus.accepts_observation(&context, point))
+    }
+
+    pub fn matches_task_holder_input<'a>(
+        &self,
+        source: &CollectionDescription,
+        rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a OperationalObservation)>,
+    ) -> bool {
+        let Self::PageTaskHolders { observation, page, parent } = self else { return false };
+        let SourceObservation::PageTaskHolders { snapshot, focus, .. } = &source.observation else { return false };
+        let Ok(context) = NativeReadContext::from_snapshot(source) else { return false };
+        let mut rows = rows.into_iter();
+        let Some((reference, row)) = rows.next() else { return false };
+        self.is_valid()
+            && source.observation.covers_request()
+            && snapshot.records == 1
+            && rows.next().is_none()
+            && reference == observation
+            && page.as_ref() == &focus.page
+            && parent.as_ref() == &focus.participant.parent
+            && matches!(&row.fact, OperationalFact::PageTaskHolders(point) if focus.accepts_observation(&context, point))
     }
 
     pub fn matches_compiler_admission_input<'a>(
@@ -816,7 +895,7 @@ impl DiagnosticReport {
         rows: impl IntoIterator<Item = (&'a DiagnosticEvidenceRef, &'a OperationalObservation)>,
     ) -> bool {
         let Self::CurrentRequestWork { observation } = self else { return false };
-        let SourceObservation::CurrentRequestWork { snapshot, result } = &source.observation else { return false };
+        let SourceObservation::CurrentRequestWork { snapshot, result, .. } = &source.observation else { return false };
         let mut rows = rows.into_iter();
         let Some((reference, row)) = rows.next() else { return false };
         self.is_valid()
@@ -869,6 +948,7 @@ impl DiagnosticRevision {
             && !self.inputs.is_empty()
             && self.inputs.len() <= MAX_DIAGNOSTIC_INPUTS
             && self.inputs.iter().all(|reference| reference.key().is_ok_and(|key| unique.insert(key)))
+            && self.episode.signal.references().all(|reference| self.inputs.contains(reference))
             && self.investigation.as_ref().is_none_or(|event| {
                 event.matches_episode(&self.episode)
                     && event.key().ok().as_deref() == self.episode.investigation_event.as_deref()

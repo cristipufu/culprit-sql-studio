@@ -28,7 +28,7 @@ fn scan(source: &CollectionDescription, rows: &[TelemetryRecord]) -> Snapshot {
     let database = source.target.database().unwrap();
     scan.server.database = database.database.clone();
     scan.identity = Some(database.clone());
-    let SourceObservation::Snapshot(native) = &source.observation else { panic!() };
+    let SourceObservation::PageWaitTargets { snapshot: native, .. } = &source.observation else { panic!() };
     let coverage = &native.sources[0];
     scan.sources.retain(|source| source.source != coverage.source);
     scan.sources.push(SourceOutcome {
@@ -326,7 +326,7 @@ async fn missing_page_rows_and_publication_are_store_gaps_without_rewriting_nati
     assert_eq!(result.report.source_state, Some(SourceState::Partial));
     assert_eq!(result.report.entries.len(), 1);
     assert!(result.report.source_reason.is_some());
-    assert_eq!(result.context.source.observation.snapshot().unwrap().sources[0].state, SourceState::Collected);
+    assert_eq!(result.context.source.observation.snapshot().unwrap().sources[0].state, SourceState::Partial);
     assert!(result.context.read_gaps.iter().any(|gap| gap.reason == EvidenceGapReason::MissingRows));
     fixture.unpublish();
     let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
@@ -356,7 +356,9 @@ fn page_export_rejects_wrong_subject_dataset_database_and_observation_bounds_bef
                 })
             }
             "dataset" => {
-                let SourceObservation::Snapshot(native) = &mut source.observation else { panic!() };
+                let SourceObservation::PageWaitTargets { snapshot: native, .. } = &mut source.observation else {
+                    panic!()
+                };
                 native.dataset = SnapshotDataset::Operational;
             }
             "database" => row.request.database = Some("another-db".into()),
@@ -432,7 +434,7 @@ async fn explicit_shared_snapshots_and_focus_retain_actual_resource_authority_an
                     }
                     "bounds" => {
                         let frame = match &mut wrong.observation {
-                            SourceObservation::Snapshot(frame)
+                            SourceObservation::PageWaitTargets { snapshot: frame, .. }
                             | SourceObservation::FocusedPageWait { snapshot: frame, .. } => frame,
                             _ => panic!(),
                         };

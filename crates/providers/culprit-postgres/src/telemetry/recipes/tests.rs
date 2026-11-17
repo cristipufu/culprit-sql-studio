@@ -40,6 +40,9 @@ fn request(registration: &Registration, budget: CollectionBudget) -> CollectionR
             Route::MaintenanceProgress => CollectionSelection::MaintenanceProgress {
                 focus: Box::new(crate::progress::test_support::original_focus()),
             },
+            Route::CurrentRequestWork => CollectionSelection::CurrentRequestWork {
+                focus: Box::new(crate::progress::test_support::original_focus()),
+            },
             _ => match registration.route.collection() {
                 TelemetryCollection::Activity => CollectionSelection::Activity,
                 TelemetryCollection::Snapshot(dataset) => CollectionSelection::Snapshot { dataset },
@@ -133,6 +136,15 @@ fn focused_sources_preserve_native_profiles_while_generic_recipes_keep_larger_va
             assert_eq!(bounded.budget.max_queries, 8);
             assert_eq!(bounded.budget.statement_timeout_ms, 1_000);
             assert_eq!(bounded.budget.total_timeout_ms, 5_000);
+        } else if matches!(registration.route, Route::CurrentRequestWork) {
+            assert_eq!(bounded.budget, crate::progress::current_work_budget(&maximum));
+            assert_eq!(bounded.budget.max_queries, 8);
+            assert_eq!(bounded.budget.max_snapshot_rows, 1);
+            assert_eq!(bounded.budget.page_rows, 1);
+            assert_eq!(bounded.budget.max_sql_bytes, MAX_CURRENT_REQUEST_WORK_SQL_BYTES as u32);
+            assert_eq!(bounded.budget.statement_timeout_ms, 1_000);
+            assert_eq!(bounded.budget.total_timeout_ms, 5_000);
+            assert_eq!(registration.descriptor().purpose, RecipePurpose::Investigation);
         } else if matches!(registration.route, Route::MaintenanceProgress) {
             assert_eq!(bounded.budget, crate::progress::bounded_budget(&maximum));
             assert_eq!(bounded.budget.max_queries, 11);
@@ -203,4 +215,21 @@ fn maintenance_progress_requires_an_original_focus_before_any_native_constructor
     let error = open(connector.clone(), &request).err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
     assert_eq!(connector.source_shutdown(), SourceShutdown::Quiescent);
+}
+
+#[test]
+fn current_work_cannot_construct_an_unfocused_foreign_or_changed_native_event() {
+    let registration = REGISTRATIONS.iter().find(|entry| matches!(entry.route, Route::CurrentRequestWork)).unwrap();
+    let mut request = request(registration, CollectionBudget::default());
+    let CollectionSelection::CurrentRequestWork { focus } = &mut request.selection else { panic!() };
+    focus.original.key.request.as_mut().unwrap().generation = "2026-11-15T09:00:01Z".into();
+    assert!(open(connector(), &request).is_err());
+    request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::CurrentRequestWork },
+        budget: CollectionBudget::default(),
+    };
+    assert!(request.validate().is_err());
+    assert!(open(connector(), &request).is_err());
+    assert_eq!(connector().source_shutdown(), SourceShutdown::Quiescent);
 }

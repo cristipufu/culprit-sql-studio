@@ -134,7 +134,7 @@ mod tests {
     fn native_current_work_cannot_supply_another_displayed_sessions_report_or_cache() {
         let (source, records) =
             culprit_collector::analytical::test_support::current_request_work_evidence_cases().remove(0);
-        let SourceObservation::CurrentRequestWork { snapshot, result } = &source.observation else { panic!() };
+        let SourceObservation::CurrentRequestWork { profile, snapshot, result } = &source.observation else { panic!() };
         let [
             TelemetryRecord::Operational(OperationalObservation {
                 fact: OperationalFact::CurrentRequestWork(point),
@@ -148,6 +148,7 @@ mod tests {
         let mut input = QueryProgress::unobserved(&session, Engine::Mysql, snapshot.observed_until.clone());
         input.running = Some(true);
         input.current_work = Some(Box::new(CurrentRequestWorkSnapshot {
+            profile: *profile,
             source: source.source.clone(),
             context: result.read_context(&source, snapshot),
             coverage: snapshot.sources[0].clone(),

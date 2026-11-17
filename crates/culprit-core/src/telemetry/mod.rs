@@ -297,11 +297,29 @@ impl CollectionRequest {
                     SnapshotDataset::CacheEntryMemory
                     | SnapshotDataset::MaintenanceProgress
                     | SnapshotDataset::CurrentRequestWork
-                    | SnapshotDataset::PageWaitWriters,
+                    | SnapshotDataset::PageWaitWriters
+                    | SnapshotDataset::PageTaskHolders,
             } => {
                 return Err(CollectionStop::InvalidPage.error());
             }
             CollectionSelection::CacheEntryMemory { focus } => {
+                self.subject.require_database()?;
+                if !focus.is_valid() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::PageWaitTasks { activity, original_context, original_requests } => {
+                self.subject.require_database()?;
+                if !activity.is_valid()
+                    || !ActivityRequestSelector::is_canonical(original_requests)
+                    || !original_context.has_qualified_local_owner()
+                    || original_context.target.database().is_none()
+                    || original_context.database_writable.is_none()
+                {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::PageTaskHolders { focus } => {
                 self.subject.require_database()?;
                 if !focus.is_valid() {
                     return Err(CollectionStop::InvalidPage.error());
@@ -546,7 +564,9 @@ impl From<ActivityObservation> for TelemetryRecord {
 
 impl TelemetryRecord {
     fn for_export(&self, source: &CollectionDescription) -> Result<Self> {
-        if !source.observation.collection().streams().contains(&self.stream()) {
+        if !source.observation.collection().streams().contains(&self.stream())
+            || !self.definition_payloads().all(|field| field.payload.is_valid())
+        {
             return Err(CollectionStop::InvalidPage.error());
         }
         let mut record = self.clone();
@@ -610,6 +630,10 @@ impl TelemetryRecord {
                     (SourceObservation::CurrentRequestWork { .. }, _) | (_, OperationalFact::CurrentRequestWork(_)) => {
                         false
                     }
+                    (SourceObservation::PageTaskHolders { focus, .. }, OperationalFact::PageTaskHolders(point)) => {
+                        accepted && focus.accepts_observation(&NativeReadContext::from_snapshot(source)?, point)
+                    }
+                    (SourceObservation::PageTaskHolders { .. }, _) | (_, OperationalFact::PageTaskHolders(_)) => false,
                     (SourceObservation::PageWaitWriters { focus, .. }, OperationalFact::PageWaitWriters(point)) => {
                         accepted && focus.accepts_observation(&NativeReadContext::from_snapshot(source)?, point)
                     }

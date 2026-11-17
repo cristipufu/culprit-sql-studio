@@ -29,7 +29,9 @@ impl PageWaitSource {
 fn bounded_request(request: &CollectionRequest) -> Result<CollectionRequest> {
     request.validate()?;
     let mut bounded = request.clone();
-    bounded.budget = if matches!(request.selection, CollectionSelection::PageWaitWriters { .. }) {
+    bounded.budget = if matches!(request.selection, CollectionSelection::PageTaskHolders { .. }) {
+        crate::activity::page_targets::holders::bounded_budget(&request.budget)
+    } else if matches!(request.selection, CollectionSelection::PageWaitWriters { .. }) {
         writer_budget(&request.budget)
     } else if request.focus().is_some() {
         focused_budget(&request.budget)
@@ -59,8 +61,12 @@ pub(super) fn focused_budget(requested: &CollectionBudget) -> CollectionBudget {
 impl<R: NativeRead> PageWaitSource<R> {
     pub(super) fn from_reader(reader: ActivityReader<R>, request: &CollectionRequest) -> Result<Self> {
         request.validate()?;
-        if matches!(request.selection, CollectionSelection::PageWaitWriters { .. })
-            && request.subject != CollectionSubject::Database
+        if matches!(
+            request.selection,
+            CollectionSelection::PageWaitWriters { .. }
+                | CollectionSelection::PageTaskHolders { .. }
+                | CollectionSelection::PageWaitTasks { .. }
+        ) && request.subject != CollectionSubject::Database
         {
             return Err(invalid_data());
         }
@@ -80,8 +86,10 @@ impl<R: NativeRead> PageWaitSource<R> {
             request.selection,
             CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }
                 | CollectionSelection::FocusedPageWait { .. }
+                | CollectionSelection::PageWaitTasks { .. }
                 | CollectionSelection::SharedPageWaitFocus { .. }
                 | CollectionSelection::PageWaitWriters { .. }
+                | CollectionSelection::PageTaskHolders { .. }
         ) {
             return Err(invalid_data());
         }
@@ -91,6 +99,9 @@ impl<R: NativeRead> PageWaitSource<R> {
 #[async_trait::async_trait]
 impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
     async fn observe(&mut self, request: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
+        if let CollectionSelection::PageTaskHolders { focus } = &request.selection {
+            return self.observe_task_holders(focus).await;
+        }
         if let CollectionSelection::PageWaitWriters { focus } = &request.selection {
             return self.observe_writers(focus).await;
         }
@@ -104,6 +115,10 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
                 (focused.capture, Some(focused.result))
             }
             (
+                CollectionSelection::PageWaitTasks { original_context, original_requests, .. },
+                CollectionSubject::Database,
+            ) => (self.reader.capture_paired_page_wait_targets(original_context, original_requests).await?, None),
+            (
                 CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets },
                 CollectionSubject::Database,
             ) => (self.reader.capture_page_wait_targets().await?, None),
@@ -113,6 +128,7 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
             ) => (self.reader.capture_shared_tempdb_page_wait_targets(resource).await?, None),
             _ => return Err(invalid_data()),
         };
+        let database_writable = captured.database_writable();
         let task_visibility_unavailable = captured.task_visibility_unavailable();
         let partition = captured.source_partition()?;
         let target = captured.collection_target();
@@ -146,7 +162,14 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
         };
         let observation = match result {
             Some(result) => SourceObservation::FocusedPageWait { snapshot, result: Box::new(result) },
-            None => SourceObservation::Snapshot(snapshot),
+            None => SourceObservation::PageWaitTargets {
+                snapshot,
+                database_writable,
+                original_activity: match &request.selection {
+                    CollectionSelection::PageWaitTasks { activity, .. } => Some(activity.clone()),
+                    _ => None,
+                },
+            },
         };
         let description = CollectionDescription {
             partition,
@@ -173,6 +196,54 @@ impl<R: NativeRead> culprit_read::ObservationReader for PageWaitReader<R> {
 }
 
 impl<R: NativeRead> PageWaitReader<R> {
+    async fn observe_task_holders(&mut self, focus: &PageTaskHolderFocus) -> Result<culprit_read::FrozenObservation> {
+        let captured = self.reader.capture_page_task_holders(focus).await?;
+        let mut coverage = StateSourceCoverage::observed(sources::PAGE_WAIT_TARGETS.name.into(), 1, false);
+        let record = TelemetryRecord::Operational(OperationalObservation {
+            source: sources::PAGE_WAIT_TARGETS.name.into(),
+            key: captured.observation.key()?,
+            fact: OperationalFact::PageTaskHolders(Box::new(captured.observation)),
+        });
+        let mut oversized = false;
+        let mut source_unavailable = false;
+        for field in record.definition_payloads() {
+            oversized |=
+                matches!(field.payload, DefinitionPayload::Unavailable { reason: PayloadUnavailable::Oversized });
+            source_unavailable |= matches!(
+                field.payload,
+                DefinitionPayload::Unavailable { reason: PayloadUnavailable::SourceUnavailable }
+            );
+        }
+        coverage.error_code = captured.optional_sql_error;
+        coverage.stopped = if captured.task_visibility_unavailable || source_unavailable {
+            Some(CollectionStop::SourceUnavailable)
+        } else if oversized {
+            Some(CollectionStop::ByteLimit)
+        } else {
+            None
+        };
+        let snapshot = StateSnapshotDescription {
+            dataset: SnapshotDataset::PageTaskHolders,
+            observed_from: captured.context.observed_from.clone(),
+            observed_until: captured.context.observed_until.clone(),
+            records: 1,
+            sources: vec![coverage],
+        };
+        let records = vec![record];
+        let description = CollectionDescription {
+            target: captured.context.target,
+            partition: captured.context.partition,
+            source: sources::PAGE_WAIT_TARGETS.name.into(),
+            continuity: SourceContinuity::Unverified,
+            observation: SourceObservation::PageTaskHolders {
+                snapshot,
+                focus: Box::new(focus.clone()),
+                database_writable: captured.context.database_writable,
+            },
+        };
+        self.guard = Some(captured.guard);
+        Ok(culprit_read::FrozenObservation { description, records })
+    }
     async fn observe_writers(&mut self, focus: &PageWaitWriterFocus) -> Result<culprit_read::FrozenObservation> {
         let captured = self.reader.capture_page_wait_writers(focus).await?;
         let mut coverage = StateSourceCoverage::observed(sources::PAGE_WAIT_TARGETS.name.into(), 1, false);

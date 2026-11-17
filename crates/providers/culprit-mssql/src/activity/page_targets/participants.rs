@@ -1,8 +1,5 @@
 //! Page-specific wait rechecks use the shared native request/statement qualification.
-use super::super::{
-    ActivityRecord,
-    participants::{Check, RequestState},
-};
+use super::super::participants::{Check, RequestState};
 use super::*;
 use crate::{
     read::{optional_counter, optional_text},
@@ -48,26 +45,55 @@ impl TaskPoint {
         {
             return PageWaitRelation::Unqualified;
         }
+        let original_source = task_waits::resource(&original.wait_type, &original.resource.native.id);
+        if original_source.is_none_or(|resource| !resource.same_sql_server_page(&original.resource)) {
+            return PageWaitRelation::Unqualified;
+        }
         match self.wait_type.as_deref() {
             None => PageWaitRelation::NoLongerObserved,
-            Some(wait) if wait != original.wait_type => PageWaitRelation::Different,
-            Some(_) => match self.resource.as_deref() {
-                Some(resource) if resource == original.resource.native.id => PageWaitRelation::OriginalObserved,
-                Some(_) => PageWaitRelation::Different,
-                None => PageWaitRelation::Unqualified,
-            },
+            Some(wait_type) => {
+                let Some(current) =
+                    self.resource.as_deref().and_then(|resource| task_waits::resource(wait_type, resource))
+                else {
+                    return PageWaitRelation::Unqualified;
+                };
+                if !current.is_valid()
+                    || current.native.qualifiers != original.resource.native.qualifiers
+                    || PageWaitAddress::parse_sql_server_resource(&current.native.id).is_none()
+                {
+                    return PageWaitRelation::Unqualified;
+                }
+                if wait_type == original.wait_type && current.same_sql_server_page(&original.resource) {
+                    PageWaitRelation::OriginalObserved
+                } else {
+                    PageWaitRelation::Different
+                }
+            }
         }
     }
 }
 
 impl CheckedParticipant {
+    pub(super) fn decode(row: &Rec, task_expected: bool) -> Result<Self> {
+        Ok(Self { request: Check::decode(row)?, task: if task_expected { TaskPoint::decode(row)? } else { None } })
+    }
+
     pub(super) fn recheck(
         &self,
         record: &super::super::ActivityRecord,
         resource: &ObservedWaitResource,
         task: Option<&MssqlPageTaskWait>,
     ) -> PageWaitRecheck {
-        let mut checked = self.request.recheck(record, resource);
+        self.recheck_observation(&record.facts, resource, task)
+    }
+
+    pub(super) fn recheck_observation(
+        &self,
+        original: &ActivityObservation,
+        resource: &ObservedWaitResource,
+        task: Option<&MssqlPageTaskWait>,
+    ) -> PageWaitRecheck {
+        let mut checked = self.request.recheck_observation(original, resource);
         if let Some(task) = task
             && checked.request == PageWaitRequestState::SameStatement
         {
@@ -121,10 +147,9 @@ impl<R: NativeRead> ActivityReader<R> {
         }
         let mut checked = BTreeMap::new();
         for row in &rows {
-            let request = Check::decode(row)?;
-            let ordinal = request.ordinal;
-            let task = if tasks.contains_key(&ordinal) { TaskPoint::decode(row)? } else { None };
-            if !indices.contains(&ordinal) || checked.insert(ordinal, CheckedParticipant { request, task }).is_some() {
+            let ordinal = usize::try_from(crate::read::integer(row, "ordinal")?).map_err(|_| invalid_data())?;
+            let participant = CheckedParticipant::decode(row, tasks.contains_key(&ordinal))?;
+            if !indices.contains(&ordinal) || checked.insert(ordinal, participant).is_some() {
                 return Err(invalid_data());
             }
         }
@@ -158,10 +183,6 @@ OPTION(MAXDOP 1,LOOP JOIN)"#,
 }
 
 impl Check {
-    pub(super) fn recheck(&self, record: &ActivityRecord, resource: &ObservedWaitResource) -> PageWaitRecheck {
-        self.recheck_request(self.request_state(record), &record.facts, resource)
-    }
-
     pub(super) fn recheck_observation(
         &self,
         original: &ActivityObservation,

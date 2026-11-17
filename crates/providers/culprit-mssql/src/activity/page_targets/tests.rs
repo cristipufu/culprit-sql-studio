@@ -1,5 +1,6 @@
 use super::*;
 pub(crate) mod index_operations;
+mod paired;
 pub(super) const HEADER_BEFORE: usize = 4;
 pub(super) const HEADER_AFTER: usize = 7;
 pub(super) const CHECK_AFTER: usize = 8;

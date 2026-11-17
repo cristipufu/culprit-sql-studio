@@ -121,6 +121,14 @@ impl PageWaitWriterFocus {
                 .is_none_or(|bounds| !bounds.contains(&row.observed_from) || !bounds.contains(&row.observed_until))
             || ObservationBounds::new(&self.waiter.participant().original_observed_at, &row.observed_from).is_none()
             || row.candidates.len() != self.candidates.len()
+            || row.page.as_ref().is_some_and(|page| {
+                !self
+                    .waiter
+                    .participant()
+                    .target
+                    .database()
+                    .is_some_and(|database| page.fits_database_lookup(&database.database))
+            })
         {
             return false;
         }

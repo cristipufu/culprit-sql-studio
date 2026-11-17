@@ -73,6 +73,69 @@ fn one_original_row_and_native_token_are_required_without_interpreting_provider_
 }
 
 #[test]
+fn retained_request_selections_require_parent_authentication_independently_of_diagnostic_question_support() {
+    let wait = focus();
+    let original = &wait.participant;
+    for selection in [
+        CollectionSelection::FocusedBlocking { focus: Box::new(original.clone()) },
+        CollectionSelection::FocusedPageWait { focus: Box::new(wait.clone()) },
+        CollectionSelection::FocusedRequestMemory { focus: Box::new(original.clone()) },
+        CollectionSelection::MaintenanceProgress { focus: Box::new(original.clone()) },
+        CollectionSelection::CurrentRequestWork { focus: Box::new(original.clone()) },
+        CollectionSelection::FocusedCompilationAdmission { focus: Box::new(original.clone()) },
+        CollectionSelection::SharedCompilationAdmissionFocus {
+            focus: Box::new(original.clone()),
+            partition: original.partition.clone(),
+        },
+        CollectionSelection::SharedPageWaitFocus {
+            focus: Box::new(wait.clone()),
+            partition: original.partition.clone(),
+        },
+    ] {
+        assert_eq!(selection.focus().unwrap().parent, original.parent);
+        assert!(selection.requires_authenticated_parent());
+    }
+}
+
+#[test]
+fn paired_population_and_derived_diagnostics_need_their_capture_parent_without_an_activity_focus() {
+    let parent = focus().participant.parent.capture_ref();
+    for selection in [
+        CollectionSelection::PageWaitTasks {
+            activity: parent.clone(),
+            original_context: Box::new(super::super::native_read_context::tests::read_context()),
+            original_requests: vec![ActivityRequestSelector {
+                key: focus().participant.original.key,
+                statement_identity: focus().participant.statement_identity,
+            }],
+        },
+        CollectionSelection::Diagnostics {
+            parent,
+            controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
+            step_id: digest(b"original-diagnostic-step"),
+        },
+    ] {
+        let request =
+            CollectionRequest { subject: CollectionSubject::Database, selection, budget: CollectionBudget::default() };
+        request.validate().unwrap();
+        assert!(request.selection.focus().is_none());
+        assert!(request.selection.requires_authenticated_parent());
+    }
+}
+
+#[test]
+fn ordinary_raw_page_targets_do_not_require_a_retained_parent() {
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets },
+        budget: CollectionBudget::default(),
+    };
+    request.validate().unwrap();
+    assert!(!request.selection.requires_authenticated_parent());
+    assert!(!CollectionSelection::Activity.requires_authenticated_parent());
+}
+
+#[test]
 fn source_declared_session_database_context_does_not_authorize_request_database_questions() {
     let mut point = focus();
     point.participant.original.scope = ActivityScopeBasis::SessionDatabase;

@@ -12,6 +12,7 @@ mod focused_memory;
 mod maintenance_progress;
 mod memory_feedback;
 mod object_definitions;
+mod page_task_holders;
 mod page_writers;
 mod populations;
 mod queries;

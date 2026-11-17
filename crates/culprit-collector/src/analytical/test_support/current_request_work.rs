@@ -2,6 +2,9 @@
 use super::*;
 use culprit_core::{Engine, MeasurementScope, SourceState};
 
+mod postgres_copy;
+pub use postgres_copy::postgres_copy_evidence_cases;
+
 const SOURCE: &str = "mysql-current-request-work";
 const EPOCH: &str = "private-current-work-native-process";
 const PARENT_AT: &str = "2020-01-01T12:00:00Z";
@@ -57,31 +60,7 @@ fn evidence(case: Case) -> (CollectionDescription, Vec<TelemetryRecord>) {
         "SELECT customer_id FROM orders WHERE customer_id=9264 AND token='private-current-work-sql'".into()
     };
     let (parent_source, original) = original(case, &sql);
-    let recovery = Recovery::capture(
-        "fixture:current-work-parent",
-        &digest(b"current-work-native-schema"),
-        parent_source.clone(),
-        vec![TelemetryRecord::from(original.clone())],
-        830_001,
-    );
-    let exported =
-        ExportedRecord::new(&parent_source, &recovery.manifest.capture, TelemetryRecord::from(original.clone()))
-            .unwrap();
-    let reference =
-        DiagnosticEvidenceRef::from_export(&parent_source, &recovery.manifest.capture_manifest_sha256, &exported, 0)
-            .unwrap();
-    let focus = ActivityRequestFocus {
-        parent: reference,
-        target: parent_source.target.clone(),
-        partition: parent_source.partition.clone(),
-        database_writable: Some(true),
-        source: parent_source.source.clone(),
-        epoch: EPOCH.into(),
-        original_observed_at: PARENT_AT.into(),
-        statement_identity: original.statement_identity.clone().unwrap(),
-        original,
-    };
-    assert!(focus.matches_parent(&parent_source, &focus.original, &focus.parent));
+    let focus = focus_from_original(parent_source.clone(), original);
     let binding = match case {
         Case::LogicalOriginal => FocusedRequestBinding::UnverifiedOriginalScope,
         Case::Missing => FocusedRequestBinding::ParticipantMissing,
@@ -122,17 +101,19 @@ fn evidence(case: Case) -> (CollectionDescription, Vec<TelemetryRecord>) {
             scope: focus.original.scope,
             statement_identity: focus.statement_identity.clone(),
             statement: DefinitionPayload::sql(&sql, Engine::Mysql),
-            native: MysqlCurrentRequestWork {
-                thread_id: "107".into(),
-                statement_event_id: "3".into(),
-                timer_start_ps: "0".into(),
-                timer_wait_ps: Some("18446744073709551615".into()),
-                rows_examined: Some("9007199254740993".into()),
-                rows_sent: Some("0".into()),
-                created_tmp_tables: Some("1".into()),
-                created_tmp_disk_tables: Some("0".into()),
-                sort_merge_passes: None,
-                stage,
+            native: CurrentRequestWorkNative::Mysql {
+                work: Box::new(MysqlCurrentRequestWork {
+                    thread_id: "107".into(),
+                    statement_event_id: "3".into(),
+                    timer_start_ps: "0".into(),
+                    timer_wait_ps: Some("18446744073709551615".into()),
+                    rows_examined: Some("9007199254740993".into()),
+                    rows_sent: Some("0".into()),
+                    created_tmp_tables: Some("1".into()),
+                    created_tmp_disk_tables: Some("0".into()),
+                    sort_merge_passes: None,
+                    stage,
+                }),
             },
         };
         vec![TelemetryRecord::Operational(OperationalObservation {
@@ -168,6 +149,7 @@ fn evidence(case: Case) -> (CollectionDescription, Vec<TelemetryRecord>) {
         source: SOURCE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::CurrentRequestWork {
+            profile: CurrentRequestWorkProfile::MysqlStatementEvent,
             snapshot: StateSnapshotDescription {
                 dataset: SnapshotDataset::CurrentRequestWork,
                 observed_from: FROM.into(),
@@ -199,6 +181,35 @@ fn evidence(case: Case) -> (CollectionDescription, Vec<TelemetryRecord>) {
         assert!(point.fits_source_scope(&source));
     }
     (source, rows)
+}
+
+fn focus_from_original(parent_source: CollectionDescription, original: ActivityObservation) -> ActivityRequestFocus {
+    let recovery = Recovery::capture(
+        "fixture:current-work-parent",
+        &digest(b"current-work-native-schema"),
+        parent_source.clone(),
+        vec![TelemetryRecord::from(original.clone())],
+        830_001,
+    );
+    let exported =
+        ExportedRecord::new(&parent_source, &recovery.manifest.capture, TelemetryRecord::from(original.clone()))
+            .unwrap();
+    let reference =
+        DiagnosticEvidenceRef::from_export(&parent_source, &recovery.manifest.capture_manifest_sha256, &exported, 0)
+            .unwrap();
+    let focus = ActivityRequestFocus {
+        parent: reference,
+        target: parent_source.target.clone(),
+        partition: parent_source.partition.clone(),
+        database_writable: Some(true),
+        source: parent_source.source.clone(),
+        epoch: EPOCH.into(),
+        original_observed_at: PARENT_AT.into(),
+        statement_identity: original.statement_identity.clone().unwrap(),
+        original,
+    };
+    assert!(focus.matches_parent(&parent_source, &focus.original, &focus.parent));
+    focus
 }
 
 fn original(case: Case, sql: &str) -> (CollectionDescription, ActivityObservation) {
@@ -275,7 +286,7 @@ pub fn assert_current_request_work_capture(
     rows: &[TelemetryRecord],
 ) {
     assert_operational_capture(capture, source, rows);
-    let SourceObservation::CurrentRequestWork { snapshot, result } = &source.observation else {
+    let SourceObservation::CurrentRequestWork { snapshot, result, .. } = &source.observation else {
         panic!("current request work header")
     };
     assert_eq!(snapshot.dataset, SnapshotDataset::CurrentRequestWork);
@@ -290,11 +301,21 @@ pub fn assert_current_request_work_capture(
         };
         assert!(point.fits_source_scope(source));
         assert_eq!(&point.actor, result.expected_actor().unwrap());
-        assert_eq!(point.native.rows_examined.as_deref(), Some("9007199254740993"));
-        assert_eq!(point.native.created_tmp_disk_tables.as_deref(), Some("0"));
-        assert!(point.native.sort_merge_passes.is_none());
-        assert!(
-            point.native.stage != MysqlStageObservation::Unlinked || snapshot.sources[0].state == SourceState::Partial
-        );
+        match &point.native {
+            CurrentRequestWorkNative::Mysql { work } => {
+                assert_eq!(work.rows_examined.as_deref(), Some("9007199254740993"));
+                assert_eq!(work.created_tmp_disk_tables.as_deref(), Some("0"));
+                assert!(work.sort_merge_passes.is_none());
+                assert!(
+                    work.stage != MysqlStageObservation::Unlinked || snapshot.sources[0].state == SourceState::Partial
+                );
+            }
+            CurrentRequestWorkNative::PostgresCopy { progress } => {
+                assert_eq!(progress.bytes_processed.as_deref(), Some("9007199254740993"));
+                assert_eq!(progress.bytes_total.as_deref(), Some("0"));
+                assert_eq!(progress.tuples_processed.as_deref(), Some("9007199254740993"));
+                assert_eq!(progress.relation_oid, "0");
+            }
+        }
     }
 }

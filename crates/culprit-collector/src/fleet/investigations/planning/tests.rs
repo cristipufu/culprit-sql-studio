@@ -4,6 +4,7 @@ use crate::fleet::scheduler::{FocusEnrollment, Scheduler};
 use culprit_core::ErrorDetail;
 use std::sync::atomic::Ordering;
 mod optional_evidence;
+mod task_holders;
 mod writers;
 
 #[tokio::test]

@@ -16,6 +16,7 @@ pub mod drift;
 pub mod focused_blocking;
 pub mod jobs;
 pub mod maintenance;
+pub mod maintenance_blocking;
 pub mod maintenance_progress;
 pub mod memory_failures;
 mod memory_participants;

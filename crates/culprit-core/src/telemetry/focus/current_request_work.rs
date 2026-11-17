@@ -3,18 +3,7 @@ use super::*;
 
 impl ActivityRequestFocus {
     pub fn is_current_request_work_focus(&self) -> bool {
-        self.is_valid()
-            && self.target.engine() == crate::Engine::Mysql
-            && self
-                .original
-                .key
-                .request
-                .as_ref()
-                .and_then(|request| {
-                    crate::engines::mysql_activity_statement_identity(&self.original.key.session, request)
-                })
-                .as_ref()
-                == Some(&self.statement_identity)
+        CurrentRequestWorkProfile::ALL.into_iter().any(|profile| profile.accepts_focus(self))
     }
 }
 
@@ -33,7 +22,7 @@ impl DiagnosticEpisode {
         reference: &DiagnosticEvidenceRef,
     ) -> Result<DiagnosticFocusPlan> {
         if !self.analysis.needs_work()
-            || self.scope.target.engine() != crate::Engine::Mysql
+            || !CurrentRequestWorkProfile::ALL.into_iter().any(|profile| profile.engine() == self.scope.target.engine())
             || !matches!(self.signal, DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. })
         {
             return Ok(DiagnosticFocusPlan::NotRequired);

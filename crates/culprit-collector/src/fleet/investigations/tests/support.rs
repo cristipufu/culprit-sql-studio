@@ -118,6 +118,7 @@ pub(in crate::fleet::investigations) struct Backend {
     pub(in crate::fleet::investigations) activity: Frame,
     pub(in crate::fleet::investigations) shared: Option<Frame>,
     pub(in crate::fleet::investigations) current_work: Option<Frame>,
+    pub(in crate::fleet::investigations) page_tasks: Option<Frame>,
     pub(in crate::fleet::investigations) focus_request: PageWaitRequestState,
     pub(in crate::fleet::investigations) focus_resolution: Option<PageWaitResolution>,
     pub(in crate::fleet::investigations) focus_failure: Option<CollectionStop>,
@@ -207,6 +208,24 @@ impl FleetBackend for Backend {
                         focused_frame(focus.as_ref().clone(), self.focus_request, self.focus_resolution)
                     }
                 }
+                CollectionSelection::PageWaitTasks { activity, original_context, .. } => {
+                    let intent =
+                        admission.investigation.as_ref().expect("paired population retains its exact original trigger");
+                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.budget, request.budget);
+                    self.page_tasks.clone().unwrap_or_else(|| {
+                        super::page_tasks::population_frame(activity, original_context, &self.activity)
+                    })
+                }
+                CollectionSelection::PageTaskHolders { focus } => {
+                    let intent = admission
+                        .investigation
+                        .as_ref()
+                        .expect("task-holder work retains both exact original receipts");
+                    assert_eq!(intent.selection(), request.selection);
+                    assert_eq!(intent.budget, request.budget);
+                    super::page_task_holders::focused_frame(focus)
+                }
                 CollectionSelection::PageWaitWriters { focus } => {
                     let intent =
                         admission.investigation.as_ref().expect("writer work retains its exact admitted roster");
@@ -255,13 +274,14 @@ impl FleetBackend for Backend {
                 _ => panic!("runtime fixture only implements its declared activity and focused routes"),
             };
             self.calls.captured.fetch_add(1, Ordering::SeqCst);
+            let investigation = admission.investigation.is_some();
             let factory = Factory {
                 frame,
                 admission: Some(admission.window),
                 intent: admission.investigation,
                 calls: self.calls.clone(),
-                failure: request.focus().is_some().then_some(self.focus_failure).flatten(),
-                auth_failure: request.focus().is_some() && self.focus_auth_failure,
+                failure: investigation.then_some(self.focus_failure).flatten(),
+                auth_failure: investigation && self.focus_auth_failure,
             };
             let mut lease = outbox.reserve(connection, &request).await?;
             let capture = lease.identity().clone();
@@ -305,6 +325,10 @@ impl Harness {
 
     pub(in crate::fleet::investigations) async fn with_activity(activity: Frame) -> Self {
         Self::build(0, None, FixtureRoutes::Database, Some(activity)).await
+    }
+
+    pub(in crate::fleet::investigations) async fn with_archived_activity(activity: Frame, fence: &Fence) -> Self {
+        Self::build(0, Some(fence), FixtureRoutes::Database, Some(activity)).await
     }
 
     pub(in crate::fleet::investigations) async fn shared() -> Self {
@@ -453,6 +477,7 @@ impl Harness {
                 activity,
                 shared,
                 current_work: None,
+                page_tasks: None,
                 focus_request: PageWaitRequestState::Missing,
                 focus_resolution: None,
                 focus_failure: None,
@@ -624,6 +649,21 @@ async fn capture_artifact(outbox: &mut Outbox, frame: Frame) -> (CollectionManif
         },
         selection: match &frame.source.observation {
             SourceObservation::Activity(_) => CollectionSelection::Activity,
+            SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } => {
+                let original = outbox
+                    .diagnostic_input(&activity.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+                    .await
+                    .unwrap();
+                let frame = original.activity_frame().unwrap();
+                CollectionSelection::PageWaitTasks {
+                    original_requests: frame.page_wait_task_requests().unwrap(),
+                    activity: activity.clone(),
+                    original_context: Box::new(frame.context()),
+                }
+            }
+            SourceObservation::PageWaitTargets { .. } => {
+                CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }
+            }
             SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },
             _ => panic!(),
         },

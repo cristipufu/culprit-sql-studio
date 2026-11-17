@@ -18,16 +18,19 @@ async fn a_mapping_receipt_and_original_frame_are_authenticated_before_the_write
     let before = native_calls(&harness);
     let costs = harness.backend.verified.load(Ordering::SeqCst);
     let cancellation = CollectionCancellation::default();
-    let evidence = EvidencePlanner {
+    let mut evidence = EvidencePlanner {
         backend: &harness.backend,
         journal: &harness.journal,
         recovery: None,
         cancellation: &cancellation,
+        population_frames: BTreeMap::new(),
     };
     let mut forged = original.clone();
     let Some(DiagnosticReport::PageWait { observation, .. }) = &mut forged.report else { panic!() };
     observation.payload_sha256 = digest(b"different mapped page receipt");
-    let result = evidence.focus(&mut harness.outbox, &harness.inventory.targets[0], &forged).await;
+    let result = evidence
+        .focus(&mut harness.outbox, &harness.inventory.targets[0], &forged, RecipeSelector::FocusedPageWaitWriters)
+        .await;
     assert!(result.is_err());
     assert_eq!(harness.backend.verified.load(Ordering::SeqCst), costs);
     assert_eq!(native_calls(&harness), before);
@@ -43,14 +46,26 @@ async fn unavailable_archived_page_evidence_withholds_the_optional_stage_without
     observation.batch_id = batch_id(&observation.capture.observation_id, observation.stream).unwrap();
     assert!(episode.is_valid());
     let cancellation = CollectionCancellation::default();
-    let evidence = EvidencePlanner {
+    let mut evidence = EvidencePlanner {
         backend: &harness.backend,
         journal: &harness.journal,
         recovery: None,
         cancellation: &cancellation,
+        population_frames: BTreeMap::new(),
     };
     let before = native_calls(&harness);
-    assert!(evidence.focus(&mut harness.outbox, &harness.inventory.targets[0], &episode).await.unwrap().is_none());
+    assert!(
+        evidence
+            .focus(
+                &mut harness.outbox,
+                &harness.inventory.targets[0],
+                &episode,
+                RecipeSelector::FocusedPageWaitWriters,
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(native_calls(&harness), before);
     assert!(harness.journal.focused_intents().await.unwrap().is_empty());
 }

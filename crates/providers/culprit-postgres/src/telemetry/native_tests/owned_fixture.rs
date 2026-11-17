@@ -43,35 +43,35 @@ pub(super) struct Captured {
     _owner: Option<(Outbox, tempfile::TempDir)>,
 }
 
-pub(super) async fn capture(specification: &ConnectionSpec, request: CollectionRequest) -> Captured {
+pub(super) async fn capture(
+    specification: &ConnectionSpec,
+    request: CollectionRequest,
+    cancellation: &CollectionCancellation,
+) -> Captured {
     let factory = Factory(crate::PostgresProvider::new(specification).unwrap());
     let directory = tempfile::tempdir().unwrap();
     let output = directory.path().join("capture");
-    let result =
-        collect_once(&SourceGate::default(), &factory, request, &output, &CollectionCancellation::default()).await;
+    let result = collect_once(&SourceGate::default(), &factory, request, &output, cancellation).await;
     assert_eq!(factory.0.source_shutdown(), SourceShutdown::Quiescent);
     let manifest = result.expect("native capture");
     completed(&output, manifest)
 }
 
 /// A diagnostic parent must be acquired under an actual durable revision, not relabeled after collection.
-pub(super) async fn capture_parent(specification: &ConnectionSpec, request: CollectionRequest) -> Captured {
+pub(super) async fn capture_parent(
+    specification: &ConnectionSpec,
+    request: CollectionRequest,
+    cancellation: &CollectionCancellation,
+) -> Captured {
     let factory = Factory(crate::PostgresProvider::new(specification).unwrap());
     let directory = tempfile::tempdir().unwrap();
     let mut outbox = Outbox::create(&directory.path().join("outbox"), OutboxLimits::default()).unwrap();
     let mut lease = outbox.reserve("owned-native-parent", &request).await.unwrap();
     let identity = lease.identity().clone();
     let output = lease.directory().to_owned();
-    let result = collect(
-        &SourceGate::default(),
-        &factory,
-        request,
-        &output,
-        identity.clone(),
-        &CollectionCancellation::default(),
-        Some(&mut lease),
-    )
-    .await;
+    let result =
+        collect(&SourceGate::default(), &factory, request, &output, identity.clone(), cancellation, Some(&mut lease))
+            .await;
     assert_eq!(factory.0.source_shutdown(), SourceShutdown::Quiescent);
     let manifest = result.expect("native diagnostic parent capture");
     assert_eq!(manifest.capture, identity);

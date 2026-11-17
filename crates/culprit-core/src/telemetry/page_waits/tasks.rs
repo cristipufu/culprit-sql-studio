@@ -50,8 +50,12 @@ impl MssqlPageTaskWait {
     }
 
     pub(super) fn matches_request(&self, request: &ActivityObservation) -> bool {
-        request.key.session.id.parse::<u32>().ok() == Some(self.session_id)
-            && request.key.request.as_ref().and_then(|key| key.id.parse::<u32>().ok()) == Some(self.request_id)
+        self.matches_activity_key(&request.key)
+    }
+
+    pub(crate) fn matches_activity_key(&self, key: &ActivityKey) -> bool {
+        key.session.id.parse::<u32>().ok() == Some(self.session_id)
+            && key.request.as_ref().and_then(|key| key.id.parse::<u32>().ok()) == Some(self.request_id)
     }
 }
 

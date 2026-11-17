@@ -9,6 +9,7 @@ fn snapshot() -> CurrentRequestWorkSnapshot {
     let request = NativeActivityIdentity { id: "91".into(), generation: "0".into() };
     let statement_identity = crate::engines::mysql_activity_statement_identity(&session, &request).unwrap();
     CurrentRequestWorkSnapshot {
+        profile: CurrentRequestWorkProfile::MysqlStatementEvent,
         source: "mysql-current-request-work".into(),
         context,
         coverage: StateSourceCoverage::observed("mysql-current-request-work".into(), 1, false),
@@ -25,29 +26,31 @@ fn snapshot() -> CurrentRequestWorkSnapshot {
             scope: ActivityScopeBasis::RequestDatabase,
             statement_identity,
             statement: DefinitionPayload::sql("SELECT value FROM sample.items", Engine::Mysql),
-            native: MysqlCurrentRequestWork {
-                thread_id: "73".into(),
-                statement_event_id: "91".into(),
-                timer_start_ps: "0".into(),
-                timer_wait_ps: Some("18446744073709551615".into()),
-                rows_examined: Some("9007199254740993".into()),
-                rows_sent: None,
-                created_tmp_tables: Some("2".into()),
-                created_tmp_disk_tables: Some("0".into()),
-                sort_merge_passes: None,
-                stage: MysqlStageObservation::Observed {
-                    event: Box::new(MysqlStageEvent {
-                        thread_id: "73".into(),
-                        event_id: "92".into(),
-                        nesting_event_id: "91".into(),
-                        nesting_event_type: "STATEMENT".into(),
-                        event_name: "stage/sql/Creating sort index".into(),
-                        timer_start_ps: None,
-                        timer_wait_ps: None,
-                        work_completed: Some("0".into()),
-                        work_estimated: Some("9007199254740993".into()),
-                    }),
-                },
+            native: CurrentRequestWorkNative::Mysql {
+                work: Box::new(MysqlCurrentRequestWork {
+                    thread_id: "73".into(),
+                    statement_event_id: "91".into(),
+                    timer_start_ps: "0".into(),
+                    timer_wait_ps: Some("18446744073709551615".into()),
+                    rows_examined: Some("9007199254740993".into()),
+                    rows_sent: None,
+                    created_tmp_tables: Some("2".into()),
+                    created_tmp_disk_tables: Some("0".into()),
+                    sort_merge_passes: None,
+                    stage: MysqlStageObservation::Observed {
+                        event: Box::new(MysqlStageEvent {
+                            thread_id: "73".into(),
+                            event_id: "92".into(),
+                            nesting_event_id: "91".into(),
+                            nesting_event_type: "STATEMENT".into(),
+                            event_name: "stage/sql/Creating sort index".into(),
+                            timer_start_ps: None,
+                            timer_wait_ps: None,
+                            work_completed: Some("0".into()),
+                            work_estimated: Some("9007199254740993".into()),
+                        }),
+                    },
+                }),
             },
         }],
     }
@@ -60,6 +63,7 @@ fn source(input: &CurrentRequestWorkSnapshot) -> CollectionDescription {
         source: input.source.clone(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::CurrentRequestWork {
+            profile: input.profile,
             snapshot: StateSnapshotDescription {
                 dataset: SnapshotDataset::CurrentRequestWork,
                 observed_from: input.context.observed_from.clone(),
@@ -128,11 +132,13 @@ fn exact_request_counters_and_untimed_linked_stages_roundtrip_without_inventing_
     assert!(input.is_valid());
     let recovered: CurrentRequestWorkSnapshot = serde_json::from_slice(&serde_json::to_vec(&input).unwrap()).unwrap();
     assert_eq!(input, recovered);
-    assert_eq!(recovered.observations[0].native.rows_examined.as_deref(), Some("9007199254740993"));
-    let MysqlStageObservation::Observed { event } = &recovered.observations[0].native.stage else { panic!() };
+    assert_eq!(recovered.observations[0].native.mysql().unwrap().rows_examined.as_deref(), Some("9007199254740993"));
+    let MysqlStageObservation::Observed { event } = &recovered.observations[0].native.mysql().unwrap().stage else {
+        panic!()
+    };
     assert_eq!(event.timer_start_ps, None);
     assert_eq!(event.work_completed.as_deref(), Some("0"));
-    assert_eq!(recovered.observations[0].native.created_tmp_disk_tables.as_deref(), Some("0"));
+    assert_eq!(recovered.observations[0].native.mysql().unwrap().created_tmp_disk_tables.as_deref(), Some("0"));
     assert!(input.observations[0].fits_source_scope(&source(&input)));
 }
 
@@ -142,12 +148,14 @@ fn thread_statement_event_timer_and_native_stage_parent_mismatches_never_attach_
         let mut input = snapshot();
         let point = &mut input.observations[0];
         match case {
-            "thread" => point.native.thread_id = "74".into(),
-            "event" => point.native.statement_event_id = "92".into(),
-            "start" => point.native.timer_start_ps = "1".into(),
+            "thread" => point.native.mysql_mut().unwrap().thread_id = "74".into(),
+            "event" => point.native.mysql_mut().unwrap().statement_event_id = "92".into(),
+            "start" => point.native.mysql_mut().unwrap().timer_start_ps = "1".into(),
             "statement" => point.statement_identity = NativeIdentity::new("another-statement"),
             _ => {
-                let MysqlStageObservation::Observed { event } = &mut point.native.stage else { panic!() };
+                let MysqlStageObservation::Observed { event } = &mut point.native.mysql_mut().unwrap().stage else {
+                    panic!()
+                };
                 match case {
                     "stage-thread" => event.thread_id = "74".into(),
                     "stage-parent" => event.nesting_event_id = "90".into(),
@@ -171,9 +179,9 @@ fn stage_absence_disabled_permissions_and_unlinked_parentage_remain_different_na
         MysqlStageObservation::Unavailable { reason: MysqlStageUnavailable::Unsupported },
     ] {
         let mut input = snapshot();
-        input.observations[0].native.stage = stage;
+        input.observations[0].native.mysql_mut().unwrap().stage = stage;
         assert!(input.is_valid());
-        values.push(serde_json::to_string(&input.observations[0].native.stage).unwrap());
+        values.push(serde_json::to_string(&input.observations[0].native.mysql().unwrap().stage).unwrap());
     }
     values.sort();
     values.dedup();
@@ -253,3 +261,5 @@ fn export_sanitizes_sql_without_changing_exact_work_or_native_event_identity() {
     assert_eq!(point.native, observed.native);
     assert_eq!(point.statement_identity, observed.statement_identity);
 }
+
+mod postgres;

@@ -66,12 +66,19 @@ mod session_memory;
 pub use session_memory::session_memory_evidence_cases;
 mod page_waits;
 pub use page_waits::{page_wait_evidence_cases, page_wait_tamper_cases, shared_page_wait_evidence_cases};
+mod page_task_holders;
 mod page_writers;
+pub use page_task_holders::{
+    PageTaskHolderCase, PageTaskHolderFixture, page_task_holder_evidence, page_task_holder_evidence_cases,
+    page_task_holder_fixture,
+};
 pub use page_writers::{
     PageWriterCase, PageWriterFixture, page_writer_evidence, page_writer_evidence_cases, page_writer_fixture,
 };
 mod current_request_work;
-pub use current_request_work::{assert_current_request_work_capture, current_request_work_evidence_cases};
+pub use current_request_work::{
+    assert_current_request_work_capture, current_request_work_evidence_cases, postgres_copy_evidence_cases,
+};
 mod statement_work;
 pub use statement_work::{
     node_statement_work_evidence_cases, statement_outcome_evidence_cases, statement_work_evidence_cases,
@@ -99,6 +106,8 @@ mod jobs;
 pub use jobs::{JobsCase, assert_jobs_capture, jobs_evidence, jobs_evidence_cases};
 mod maintenance_progress;
 pub use maintenance_progress::maintenance_progress_evidence_cases;
+mod maintenance_blocking;
+pub use maintenance_blocking::{MaintenanceBlockingCase, MaintenanceBlockingFixture, maintenance_blocking_evidence};
 mod replication;
 pub use replication::{ReplicationCase, assert_replication_capture, replication_evidence, replication_evidence_cases};
 

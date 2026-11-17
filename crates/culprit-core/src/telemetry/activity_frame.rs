@@ -14,6 +14,7 @@ pub struct ActivityFrameRow<'a> {
 pub struct ActivityFrameEvidence<'a> {
     source: &'a CollectionDescription,
     native: &'a ActivitySnapshotDescription,
+    context: NativeReadContext,
     index: ActivityIndex<'a>,
     references: BTreeMap<ActivityKey, &'a DiagnosticEvidenceRef>,
     read_complete: bool,
@@ -21,10 +22,10 @@ pub struct ActivityFrameEvidence<'a> {
 
 impl<'a> ActivityFrameEvidence<'a> {
     pub fn new(source: &'a CollectionDescription, rows: &[ActivityFrameRow<'a>], read_complete: bool) -> Result<Self> {
-        let native = validate_header(source, rows.len(), read_complete)?;
+        let (native, context) = validate_header(source, rows.len(), read_complete)?;
         let index = ActivityIndex::new(rows.iter().map(|row| row.observation))?;
         let references = validate_references(source, native, rows)?;
-        Ok(Self { source, native, index, references, read_complete })
+        Ok(Self { source, native, context, index, references, read_complete })
     }
 
     pub fn source(&self) -> &'a CollectionDescription {
@@ -36,7 +37,7 @@ impl<'a> ActivityFrameEvidence<'a> {
     }
 
     pub fn context(&self) -> NativeReadContext {
-        read_context(self.source, self.native)
+        self.context.clone()
     }
 
     pub fn is_qualified(&self) -> bool {
@@ -75,20 +76,16 @@ fn validate_header(
     source: &CollectionDescription,
     rows: usize,
     read_complete: bool,
-) -> Result<&ActivitySnapshotDescription> {
+) -> Result<(&ActivitySnapshotDescription, NativeReadContext)> {
     let native = source.observation.activity().ok_or_else(invalid)?;
-    if !source.target.is_valid()
-        || !source.partition_is_consistent()
-        || !native.is_valid()
-        || !read_context(source, native).is_valid()
-        || native.coverage.source != source.source
-        || rows > MAX_ACTIVITY_FRAME_OBSERVATIONS
+    let context = NativeReadContext::from_activity(source)?;
+    if rows > MAX_ACTIVITY_FRAME_OBSERVATIONS
         || rows > native.observations as usize
         || read_complete && rows != native.observations as usize
     {
         return Err(invalid());
     }
-    Ok(native)
+    Ok((native, context))
 }
 
 fn validate_references<'a>(
@@ -130,16 +127,6 @@ fn validate_references<'a>(
         return Err(invalid());
     }
     Ok(references)
-}
-
-fn read_context(source: &CollectionDescription, native: &ActivitySnapshotDescription) -> NativeReadContext {
-    NativeReadContext {
-        target: source.target.clone(),
-        partition: source.partition.clone(),
-        observed_from: native.observed_from.clone(),
-        observed_until: native.observed_until.clone(),
-        database_writable: native.database_writable,
-    }
 }
 
 fn invalid() -> Error {

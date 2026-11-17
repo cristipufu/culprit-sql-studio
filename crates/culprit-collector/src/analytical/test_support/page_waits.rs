@@ -4,7 +4,7 @@ use culprit_core::{ObservedWaitResource, WaitResourceKind};
 pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRecord>)> {
     let (mut manifest, _) = fixture();
     let source_id = culprit_core::source_id::PAGE_WAIT_TARGETS;
-    manifest.source.source = "page-target-capture".into();
+    manifest.source.source = source_id.into();
     let first = observation("61", "5:1:42", WaitResourceKind::MemoryPage, 42);
     let mut io = observation("62", "5:1:55", WaitResourceKind::PageIo, 55);
     io.request.command = Some("SELECT".into());
@@ -74,21 +74,25 @@ pub fn page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<TelemetryRe
         .into_iter()
         .map(|(records, state)| {
             let mut source = manifest.source.clone();
-            source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::PageWaitTargets,
-                observed_from: "2020-01-01T12:00:00Z".into(),
-                observed_until: "2020-01-01T12:00:01Z".into(),
-                records: records.len() as u32,
-                sources: vec![if state == culprit_core::SourceState::Unavailable {
-                    StateSourceCoverage::unavailable(source_id.into(), culprit_core::ErrorCode::PermissionDenied, None)
-                } else {
-                    StateSourceCoverage::observed(
-                        source_id.into(),
-                        records.len() as u32,
-                        state != culprit_core::SourceState::Partial,
-                    )
-                }],
-            });
+            source.observation = SourceObservation::PageWaitTargets {
+                snapshot: StateSnapshotDescription {
+                    dataset: SnapshotDataset::PageWaitTargets,
+                    observed_from: "2020-01-01T12:00:00Z".into(),
+                    observed_until: "2020-01-01T12:00:01Z".into(),
+                    records: records.len() as u32,
+                    sources: vec![if state == culprit_core::SourceState::Unavailable {
+                        StateSourceCoverage::unavailable(
+                            source_id.into(),
+                            culprit_core::ErrorCode::PermissionDenied,
+                            None,
+                        )
+                    } else {
+                        StateSourceCoverage::observed(source_id.into(), records.len() as u32, false)
+                    }],
+                },
+                database_writable: None,
+                original_activity: None,
+            };
             (source, records)
         })
         .collect::<Vec<_>>();
@@ -145,20 +149,24 @@ pub fn shared_page_wait_evidence_cases() -> Vec<(CollectionDescription, Vec<Tele
     let mut source = manifest.source;
     source.target = CollectionTarget::Shared(resource);
     source.partition = partition;
-    source.source = "shared-page-target-capture".into();
-    source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
-        dataset: SnapshotDataset::PageWaitTargets,
-        observed_from: "2020-01-01T12:00:00Z".into(),
-        observed_until: "2020-01-01T12:00:01Z".into(),
-        records: 1,
-        sources: vec![StateSourceCoverage::observed(culprit_core::source_id::PAGE_WAIT_TARGETS.into(), 1, false)],
-    });
+    source.source = culprit_core::source_id::PAGE_WAIT_TARGETS.into();
+    source.observation = SourceObservation::PageWaitTargets {
+        snapshot: StateSnapshotDescription {
+            dataset: SnapshotDataset::PageWaitTargets,
+            observed_from: "2020-01-01T12:00:00Z".into(),
+            observed_until: "2020-01-01T12:00:01Z".into(),
+            records: 1,
+            sources: vec![StateSourceCoverage::observed(culprit_core::source_id::PAGE_WAIT_TARGETS.into(), 1, false)],
+        },
+        database_writable: None,
+        original_activity: None,
+    };
     let mut empty = source.clone();
-    let SourceObservation::Snapshot(snapshot) = &mut empty.observation else { unreachable!() };
+    let SourceObservation::PageWaitTargets { snapshot, .. } = &mut empty.observation else { unreachable!() };
     snapshot.records = 0;
     snapshot.sources[0] = StateSourceCoverage::observed(culprit_core::source_id::PAGE_WAIT_TARGETS.into(), 0, false);
     let mut unavailable = empty.clone();
-    let SourceObservation::Snapshot(snapshot) = &mut unavailable.observation else { unreachable!() };
+    let SourceObservation::PageWaitTargets { snapshot, .. } = &mut unavailable.observation else { unreachable!() };
     snapshot.sources[0] = StateSourceCoverage::unavailable(
         culprit_core::source_id::PAGE_WAIT_TARGETS.into(),
         culprit_core::ErrorCode::PermissionDenied,

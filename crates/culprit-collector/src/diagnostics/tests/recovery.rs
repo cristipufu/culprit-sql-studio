@@ -99,7 +99,7 @@ impl ColdCapture {
         assert_eq!(self.harness.calls.counts(), [2, 2, 2, 2]);
     }
 }
-async fn archive_capture(
+pub(super) async fn archive_capture(
     outbox: &Outbox,
     store: &dyn RecoveryStore,
     fence: &Fence,

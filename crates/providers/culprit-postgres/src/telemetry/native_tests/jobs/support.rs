@@ -3,6 +3,7 @@ use crate::{
     connect::Connector,
     read::{NativeRead, QueryRead, ReadSession},
 };
+use culprit_collector::capture::CollectionCancellation;
 use culprit_core::{ConnectionSpec, SourceState, telemetry::*};
 use std::{collections::BTreeMap, time::Duration};
 
@@ -57,7 +58,7 @@ pub(super) struct Captured {
 }
 
 pub(super) async fn capture(specification: &ConnectionSpec, request: CollectionRequest) -> Captured {
-    let captured = owned_fixture::capture(specification, request).await;
+    let captured = owned_fixture::capture(specification, request, &CollectionCancellation::default()).await;
     let source = captured.source();
     let observations = captured
         .records

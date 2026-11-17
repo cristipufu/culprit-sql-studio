@@ -1,6 +1,8 @@
 use super::*;
 use clap::Parser;
 mod connection_outcomes;
+mod maintenance_blocking;
+mod page_task_holders;
 
 #[test]
 fn cli_exposes_every_verified_evidence_family() {
@@ -130,6 +132,7 @@ fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_sel
         "session-memory",
         "page-waits",
         "page-wait-writers",
+        "page-task-holders",
         "task-space",
         "statement-work",
         "statement-grants",

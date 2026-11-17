@@ -220,6 +220,7 @@ pub(in crate::outbox) fn checkpoint_references(
         [&episode.first, &episode.latest]
             .into_iter()
             .chain(episode.peak.iter())
+            .chain(episode.signal.references())
             .chain(episode.report.iter().flat_map(DiagnosticReport::references))
     })
 }

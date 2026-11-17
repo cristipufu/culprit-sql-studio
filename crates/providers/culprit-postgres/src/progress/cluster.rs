@@ -8,7 +8,7 @@ pub(super) const SOURCE: &str = "pg_stat_progress_cluster";
 pub(super) fn sql(database_oid: &str, actor: &ActivityKey) -> Result<String> {
     selected::sql(
         SOURCE,
-        "p.command,p.cluster_index_relid::text AS index_oid,\
+        "p.phase,p.command,p.cluster_index_relid::text AS index_oid,\
          p.heap_tuples_scanned::text AS heap_tuples_scanned,p.heap_tuples_written::text AS heap_tuples_written,\
          p.heap_blks_total::text AS heap_blks_total,p.heap_blks_scanned::text AS heap_blks_scanned,\
          p.index_rebuild_count::text AS index_rebuild_count",

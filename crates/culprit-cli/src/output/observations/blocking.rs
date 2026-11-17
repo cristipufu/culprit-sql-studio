@@ -90,7 +90,7 @@ pub(crate) fn blocking(report: &BlockingReport) -> String {
     )
 }
 
-fn request(key: &ActivityKey) -> String {
+pub(super) fn request(key: &ActivityKey) -> String {
     let session = session(&key.session.id, Some(&key.session.generation));
     match &key.request {
         Some(request) => t!(
@@ -127,7 +127,7 @@ fn owner(owner: &ActivityWaitOwner) -> String {
         }
     }
 }
-fn line(text: &mut String, value: &str) {
+pub(super) fn line(text: &mut String, value: &str) {
     text.push('\n');
     text.extend(value.chars().take(OBSERVATION_DETAIL_CHARS));
     if value.chars().count() > OBSERVATION_DETAIL_CHARS {

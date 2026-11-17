@@ -1,5 +1,5 @@
 //! One bounded owner brackets actor, native progress and metadata. Missing rows never prove completion.
-use super::{maintenance, read_copy_phase};
+use super::{copy, maintenance};
 use crate::{
     native::{
         self,
@@ -13,14 +13,105 @@ use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 #[derive(Clone, Copy)]
 pub(super) enum Mode {
     Retained,
+    CurrentWork,
     Live,
 }
 
 pub(super) struct Acquired {
-    pub snapshot: MaintenanceProgressSnapshot,
+    pub progress: CapturedProgress,
     pub actor: Option<ActivityObservation>,
     pub sql: Option<String>,
-    pub other_phase: Option<(String, Option<f64>, &'static str)>,
+}
+
+pub(super) enum CapturedProgress {
+    Maintenance(MaintenanceProgressSnapshot),
+    CurrentWork(CurrentRequestWorkSnapshot),
+}
+impl CapturedProgress {
+    pub fn context(&self) -> &NativeReadContext {
+        match self {
+            Self::Maintenance(snapshot) => &snapshot.context,
+            Self::CurrentWork(snapshot) => &snapshot.context,
+        }
+    }
+}
+
+enum NativeProgress {
+    Maintenance(maintenance::Read),
+    CurrentWork(copy::Read),
+}
+impl NativeProgress {
+    fn empty(mode: Mode) -> Self {
+        match mode {
+            Mode::CurrentWork => Self::CurrentWork(copy::Read { observation: None, unavailable: None }),
+            _ => Self::Maintenance(maintenance::Read {
+                source: maintenance::SOURCE,
+                observation: None,
+                unavailable: None,
+            }),
+        }
+    }
+    fn finish(
+        self,
+        context: NativeReadContext,
+        original: Option<&ActivityRequestFocus>,
+        binding: FocusedRequestBinding,
+    ) -> Result<CapturedProgress> {
+        let (source, unavailable, records) = match &self {
+            Self::Maintenance(read) => (read.source, read.unavailable, u32::from(read.observation.is_some())),
+            Self::CurrentWork(read) => (copy::SOURCE, read.unavailable, u32::from(read.observation.is_some())),
+        };
+        let membership = if records != 0 {
+            FocusedRequestMembership::Observed
+        } else if unavailable.is_some() {
+            FocusedRequestMembership::Unavailable
+        } else {
+            FocusedRequestMembership::NotObserved
+        };
+        let coverage = match unavailable {
+            Some(code) => StateSourceCoverage::unavailable(source.into(), code, None),
+            None => StateSourceCoverage::observed(
+                source.into(),
+                records,
+                matches!(&self, Self::CurrentWork(_)) && records != 0 && context.has_qualified_local_owner(),
+            ),
+        };
+        let result = FocusedRequestResult {
+            focus: original.cloned().map(Box::new),
+            database_writable: context.database_writable,
+            binding,
+            membership,
+        };
+        match self {
+            Self::Maintenance(read) => {
+                let snapshot = MaintenanceProgressSnapshot {
+                    source: source.into(),
+                    context,
+                    coverage,
+                    result,
+                    observations: read.observation.into_iter().collect(),
+                };
+                if !snapshot.is_valid() {
+                    return Err(native::invalid());
+                }
+                Ok(CapturedProgress::Maintenance(snapshot))
+            }
+            Self::CurrentWork(read) => {
+                let snapshot = CurrentRequestWorkSnapshot {
+                    profile: CurrentRequestWorkProfile::PostgresCopy,
+                    source: source.into(),
+                    context,
+                    coverage,
+                    result,
+                    observations: read.observation.into_iter().collect(),
+                };
+                if !snapshot.is_valid() {
+                    return Err(native::invalid());
+                }
+                Ok(CapturedProgress::CurrentWork(snapshot))
+            }
+        }
+    }
 }
 
 struct Actor {
@@ -38,7 +129,10 @@ pub(super) async fn capture<R: QueryRead>(
     mode: Mode,
 ) -> Result<Acquired> {
     validate_original(original)?;
-    if original.is_some_and(|focus| focus.original.key.session.id != pid.to_string()) {
+    if original.is_some_and(|focus| {
+        focus.original.key.session.id != pid.to_string()
+            || matches!(mode, Mode::CurrentWork) && !focus.is_current_request_work_focus()
+    }) {
         return Err(native::invalid());
     }
     let before = metadata::activity(reader, host, port).await?;
@@ -56,56 +150,57 @@ pub(super) async fn capture<R: QueryRead>(
     let binding = binding(original, &initial, first.as_ref());
     let may_read = first.as_ref().is_some_and(|actor| actor.facts.key.request.is_some())
         && original.is_none_or(|expected| actor_matches(first.as_ref(), expected));
-    let mut observations = Vec::new();
-    let mut membership = FocusedRequestMembership::NotObserved;
-    let mut unavailable = None;
-    let mut other_phase = None;
-    let mut source = maintenance::SOURCE;
-    if may_read {
-        let current = first.as_ref().ok_or_else(native::invalid)?;
-        let read = maintenance::read(reader, &before.database_oid, &current.facts.key, before.version).await?;
-        source = read.source;
-        unavailable = read.unavailable;
-        if let Some(row) = read.observation {
-            observations.push(row);
-            membership = FocusedRequestMembership::Observed;
-        } else if unavailable.is_some() {
-            membership = FocusedRequestMembership::Unavailable;
-        }
-        if matches!(mode, Mode::Live) && observations.is_empty() {
-            other_phase = read_copy_phase(reader, &before.database_oid, &current.facts.key, before.version).await?;
-        }
-    }
+    let progress = match first.as_ref().filter(|_| may_read) {
+        Some(current) => read_progress(reader, &before, current, mode).await?,
+        None => NativeProgress::empty(mode),
+    };
     let last = actor(reader, &before, pid, budget, mode).await?;
     if !same_actor(first.as_ref(), last.as_ref()) {
         return Err(CollectionStop::SourceChanged.error());
     }
     let context = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
-    let coverage = match unavailable {
-        Some(code) => StateSourceCoverage::unavailable(source.into(), code, None),
-        None => StateSourceCoverage::observed(source.into(), observations.len() as u32, false),
-    };
-    let snapshot = MaintenanceProgressSnapshot {
-        source: source.into(),
-        result: FocusedRequestResult {
-            focus: original.cloned().map(Box::new),
-            database_writable: context.database_writable,
-            binding,
-            membership,
-        },
-        context,
-        coverage,
-        observations,
-    };
-    if !snapshot.is_valid() {
-        return Err(native::invalid());
-    }
     Ok(Acquired {
-        snapshot,
+        progress: progress.finish(context, original, binding)?,
         sql: first.as_ref().and_then(|actor| actor.sql.clone()),
         actor: first.map(|actor| actor.facts),
-        other_phase,
     })
+}
+
+async fn read_progress<R: QueryRead>(
+    reader: &mut R,
+    before: &metadata::Metadata,
+    current: &Actor,
+    mode: Mode,
+) -> Result<NativeProgress> {
+    if matches!(mode, Mode::CurrentWork) {
+        return Ok(NativeProgress::CurrentWork(
+            copy::read(
+                reader,
+                &before.database_oid,
+                &before.database.database,
+                &current.facts,
+                before.version,
+                current.sql.as_deref(),
+            )
+            .await?,
+        ));
+    }
+    let read = maintenance::read(reader, &before.database_oid, &current.facts.key, before.version).await?;
+    if matches!(mode, Mode::Live) && read.observation.is_none() && before.version >= copy::MINIMUM_VERSION {
+        let copy = copy::read(
+            reader,
+            &before.database_oid,
+            &before.database.database,
+            &current.facts,
+            before.version,
+            current.sql.as_deref(),
+        )
+        .await?;
+        if copy.observation.is_some() || copy.unavailable.is_some() {
+            return Ok(NativeProgress::CurrentWork(copy));
+        }
+    }
+    Ok(NativeProgress::Maintenance(read))
 }
 
 fn validate_original(original: Option<&ActivityRequestFocus>) -> Result<()> {
@@ -141,7 +236,7 @@ async fn actor<R: QueryRead>(
     mode: Mode,
 ) -> Result<Option<Actor>> {
     let extra = match mode {
-        Mode::Retained => String::new(),
+        Mode::Retained | Mode::CurrentWork => String::new(),
         Mode::Live => format!(
             ",CASE WHEN pg_catalog.octet_length(a.query)<={} THEN a.query END AS current_sql",
             budget.max_sql_bytes

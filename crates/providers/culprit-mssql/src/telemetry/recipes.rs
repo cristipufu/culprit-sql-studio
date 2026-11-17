@@ -127,6 +127,10 @@ const REGISTRATIONS: &[Registration] = &[
         |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
     )
     .bounded(crate::page_waits::bounded_budget),
+    Registration::database("mssql.page-wait-tasks", RecipeSelector::PageWaitTasks, |pool, request, host, port| {
+        Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
+    })
+    .bounded(crate::page_waits::bounded_budget),
     Registration::database(
         "mssql.shared-tempdb-page-wait-targets",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)),
@@ -138,6 +142,12 @@ const REGISTRATIONS: &[Registration] = &[
         Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?))
     })
     .bounded(page_waits::focused_budget),
+    Registration::database(
+        "mssql.focused-page-task-holders",
+        RecipeSelector::FocusedPageTaskHolders,
+        |pool, request, host, port| Ok(Box::new(page_waits::PageWaitSource::new(pool, request, host, port)?)),
+    )
+    .bounded(crate::activity::page_targets::holders::bounded_budget),
     Registration::database(
         "mssql.focused-page-wait-writers",
         RecipeSelector::FocusedPageWaitWriters,

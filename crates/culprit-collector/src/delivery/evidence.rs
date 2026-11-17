@@ -233,8 +233,7 @@ impl RangeManifest {
     }
     fn validate_investigation(&self) -> Result<()> {
         let Some(owner) = &self.investigation else { return Ok(()) };
-        let focus = self.source.observation.diagnostic_focus().ok_or_else(|| DeliveryProblem::Integrity.error())?;
-        let intent = owner.reconstruct(&focus).map_err(|_| DeliveryProblem::Integrity.error())?;
+        let intent = owner.intent_for_source(&self.source).map_err(|_| DeliveryProblem::Integrity.error())?;
         let request = CollectionRequest {
             subject: match &self.source.target {
                 CollectionTarget::Database(_) => CollectionSubject::Database,

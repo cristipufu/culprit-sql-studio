@@ -51,6 +51,11 @@ impl DiagnosticRevision {
                 .to_string();
         }
         let mut inputs = vec![next.latest.clone()];
+        for reference in next.signal.references() {
+            if !inputs.contains(reference) {
+                inputs.push(reference.clone());
+            }
+        }
         if let Some(report) = &next.report {
             for reference in report.references() {
                 if !inputs.contains(reference) {

@@ -54,6 +54,13 @@ pub struct CollectedPageWaitWriterAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedPageTaskHolderAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::PageTaskHolderReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedStatementWorkAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: StatementWorkReport,
@@ -116,6 +123,14 @@ pub struct CollectedMaintenanceAnalysis {
 pub struct CollectedMaintenanceProgressAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::MaintenanceProgressReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedMaintenanceBlockingAnalysis {
+    pub maintenance_context: CollectedEvidenceContext,
+    pub blocking_context: CollectedEvidenceContext,
+    pub report: crate::MaintenanceBlockingReport,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]

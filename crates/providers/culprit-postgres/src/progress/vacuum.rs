@@ -22,7 +22,7 @@ pub(super) fn sql(database_oid: &str, actor: &ActivityKey, version: u32) -> Resu
     selected::sql(
         SOURCE,
         &format!(
-            "p.heap_blks_total::text AS heap_blks_total,p.heap_blks_scanned::text AS heap_blks_scanned,\
+            "p.phase,p.heap_blks_total::text AS heap_blks_total,p.heap_blks_scanned::text AS heap_blks_scanned,\
              p.heap_blks_vacuumed::text AS heap_blks_vacuumed,p.index_vacuum_count::text AS index_vacuum_count,\
              {dead_items},{delay} AS cost_delay_ms"
         ),

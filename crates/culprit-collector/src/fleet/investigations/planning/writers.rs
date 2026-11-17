@@ -3,24 +3,31 @@ use super::*;
 
 impl EvidencePlanner<'_> {
     pub(super) async fn focus(
-        &self,
+        &mut self,
         outbox: &mut Outbox,
         target: &FleetTarget,
         episode: &DiagnosticEpisode,
+        requested: RecipeSelector,
     ) -> Result<Option<Box<DiagnosticFocus>>> {
+        if matches!(episode.signal, DiagnosticSignal::PageTaskWait { .. }) {
+            return self.task_holders(outbox, target, episode).await;
+        }
         if let Some(DiagnosticReport::PageWait { observation, .. }) = &episode.report {
             return self.page_writers(outbox, target, episode, observation).await;
         }
+        if requested == RecipeSelector::PageWaitTasks {
+            return self.page_tasks(outbox, target, episode).await;
+        }
+        let reference = &episode.latest;
         let Some((source, row)) =
-            resolve_optional_evidence(outbox, &target.connection, &episode.latest, self.recovery, self.cancellation)
-                .await?
+            resolve_optional_evidence(outbox, &target.connection, reference, self.recovery, self.cancellation).await?
         else {
             return Ok(None);
         };
         let TelemetryRecord::Activity(original) = &row.record else {
             return Err(DeliveryProblem::Integrity.error());
         };
-        Ok(ready(episode.plan_focus(&source, original, &episode.latest)?))
+        Ok(ready(episode.plan_focus(&source, original, reference)?))
     }
 
     async fn page_writers(
@@ -69,7 +76,7 @@ impl EvidencePlanner<'_> {
     }
 }
 
-fn ready(plan: DiagnosticFocusPlan) -> Option<Box<DiagnosticFocus>> {
+pub(super) fn ready(plan: DiagnosticFocusPlan) -> Option<Box<DiagnosticFocus>> {
     match plan {
         DiagnosticFocusPlan::Ready(focus) => Some(focus),
         DiagnosticFocusPlan::NotRequired | DiagnosticFocusPlan::Unavailable(_) => None,

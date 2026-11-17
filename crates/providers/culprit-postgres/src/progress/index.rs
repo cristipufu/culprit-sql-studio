@@ -8,7 +8,7 @@ pub(super) const SOURCE: &str = "pg_stat_progress_create_index";
 pub(super) fn sql(database_oid: &str, actor: &ActivityKey) -> Result<String> {
     selected::sql(
         SOURCE,
-        "p.index_relid::text AS index_oid,p.command,p.blocks_total::text AS blocks_total,p.blocks_done::text AS blocks_done,\
+        "p.phase,p.index_relid::text AS index_oid,p.command,p.blocks_total::text AS blocks_total,p.blocks_done::text AS blocks_done,\
          p.tuples_total::text AS tuples_total,p.tuples_done::text AS tuples_done,\
          p.lockers_total::text AS lockers_total,p.lockers_done::text AS lockers_done,p.current_locker_pid::text AS current_locker_pid",
         database_oid,

@@ -7,11 +7,12 @@ use culprit_core::{Engine, Error, QueryProgress, Result, session_number, t};
 use crate::connect::Connector;
 use crate::{
     native,
-    read::{NativeRead, QueryRead, ReadSession},
+    read::{NativeRead, ReadSession},
 };
 use culprit_core::telemetry::*;
 mod analyze;
 mod cluster;
+mod copy;
 mod index;
 mod maintenance;
 mod reader;
@@ -30,7 +31,9 @@ pub(crate) mod test_support;
 
 // One owned setup, two database/member bounds, two actor points and at most four selected progress views.
 const MAX_PROGRESS_QUERIES: u32 = 11;
-const MAX_LIVE_PROGRESS_QUERIES: u32 = MAX_PROGRESS_QUERIES + 1; // Live can also inspect COPY.
+const MAX_LIVE_PROGRESS_QUERIES: u32 = MAX_PROGRESS_QUERIES + 1;
+// One setup, two native metadata/member bounds, two actor points and one selected COPY read.
+const MAX_CURRENT_WORK_QUERIES: u32 = 8;
 const MAX_PROGRESS_ROWS: u32 = 1;
 const PROGRESS_STATEMENT_TIMEOUT_MS: u32 = 1_000;
 const PROGRESS_TOTAL_TIMEOUT_MS: u32 = 5_000;
@@ -47,13 +50,12 @@ fn ratio(done: Option<f64>, total: Option<f64>) -> Option<f64> {
     }
 }
 
-/// A COPY's step: its command and kind ("COPY FROM FILE"), and the rows it has processed so far.
-fn copy_text(command: Option<String>, kind: Option<String>, rows: Option<f64>) -> String {
-    let what = format!("{} {}", command.unwrap_or_else(|| "COPY".into()), kind.unwrap_or_default());
-    let step = what.trim();
-    match rows.map(|rows| rows as u64) {
+/// A native COPY caption has exact row counts and is not a progress phase.
+fn copy_text(progress: &PostgresCopyProgress) -> String {
+    let step = format!("{} {}", progress.command.as_native(), progress.io_type.as_native());
+    match progress.tuples_processed.as_deref().and_then(|value| value.parse::<u64>().ok()) {
         Some(n) => t!("provider.postgres.progress.copy_rows", step = step, n = n, count = digits(n.to_string())),
-        None => step.to_string(),
+        None => step,
     }
 }
 
@@ -68,6 +70,14 @@ pub(crate) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
     budget
 }
 
+pub(crate) fn current_work_budget(requested: &CollectionBudget) -> CollectionBudget {
+    let mut budget = bounded_budget(requested);
+    budget.max_queries = budget.max_queries.min(MAX_CURRENT_WORK_QUERIES);
+    budget.max_sql_bytes = budget.max_sql_bytes.min(MAX_CURRENT_REQUEST_WORK_SQL_BYTES as u32);
+    budget
+}
+
+#[cfg(test)]
 pub(crate) async fn capture_from<R: NativeRead>(
     reader: &mut R,
     host: &str,
@@ -77,7 +87,10 @@ pub(crate) async fn capture_from<R: NativeRead>(
     budget: &CollectionBudget,
 ) -> Result<MaintenanceProgressSnapshot> {
     let pid = pid(session)?;
-    Ok(reader::capture(reader, host, port, pid, original, budget, reader::Mode::Retained).await?.snapshot)
+    match reader::capture(reader, host, port, pid, original, budget, reader::Mode::Retained).await?.progress {
+        reader::CapturedProgress::Maintenance(snapshot) => Ok(snapshot),
+        reader::CapturedProgress::CurrentWork(_) => Err(native::invalid()),
+    }
 }
 
 pub(crate) async fn query_progress(connector: &Connector, session: &str) -> Result<QueryProgress> {
@@ -94,13 +107,11 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str) -> Resu
 }
 
 fn project(session: &str, captured: reader::Acquired) -> QueryProgress {
+    let context = captured.progress.context();
     let request_key = captured.actor.as_ref().and_then(|actor| {
-        actor
-            .statement_identity
-            .as_ref()
-            .and_then(|identity| captured.snapshot.context.request_key(&actor.key, identity))
+        actor.statement_identity.as_ref().and_then(|identity| context.request_key(&actor.key, identity))
     });
-    let mut progress = QueryProgress::unobserved(session, Engine::Postgres, captured.snapshot.context.observed_until);
+    let mut progress = QueryProgress::unobserved(session, Engine::Postgres, context.observed_until.clone());
     progress.request_key = request_key;
     if let Some(actor) = captured.actor {
         progress.running = actor.key.request.as_ref().map(|_| true).or_else(|| actor.idle.then_some(false));
@@ -109,18 +120,27 @@ fn project(session: &str, captured: reader::Acquired) -> QueryProgress {
         progress.elapsed_ms = actor.elapsed_ms.and_then(|value| value.parse().ok());
         progress.wait = actor.wait.and_then(|wait| wait.native_type);
     }
-    if let Some(point) = captured.snapshot.observations.first() {
-        let fraction = phase_fraction(point);
-        progress.phase = Some(format!("{}: {}", point.command.as_native(), point.phase));
-        progress.phase_percent = fraction;
-        progress.phase_percent_basis =
-            fraction.map(|_| t!("provider.postgres.progress.basis", view = &captured.snapshot.source));
-    } else if let Some((phase, fraction, view)) = captured.other_phase {
-        progress.phase = Some(phase);
-        progress.phase_percent = fraction;
-        progress.phase_percent_basis = fraction.map(|_| t!("provider.postgres.progress.basis", view = view));
+    match captured.progress {
+        reader::CapturedProgress::Maintenance(snapshot) => {
+            if let Some(point) = snapshot.observations.first() {
+                let fraction = phase_fraction(point);
+                progress.phase = Some(format!("{}: {}", point.command.as_native(), point.phase));
+                progress.phase_percent = fraction;
+                progress.phase_percent_basis =
+                    fraction.map(|_| t!("provider.postgres.progress.basis", view = &snapshot.source));
+            }
+        }
+        reader::CapturedProgress::CurrentWork(snapshot) => {
+            if let Some(point) = snapshot.observations.first()
+                && let CurrentRequestWorkNative::PostgresCopy { progress: copy } = &point.native
+            {
+                progress.taken_at = point.observed_at.clone();
+                progress.note = Some(copy_text(copy));
+            }
+            progress.current_work = Some(Box::new(snapshot));
+        }
     }
-    if progress.phase.is_none() {
+    if progress.phase.is_none() && progress.note.is_none() {
         progress.note = Some(no_operator_progress());
     }
     progress
@@ -161,35 +181,6 @@ fn phase_fraction(point: &MaintenanceProgressObservation) -> Option<f64> {
     }
 }
 
-async fn read_copy_phase<R: QueryRead>(
-    reader: &mut R,
-    database_oid: &str,
-    actor: &ActivityKey,
-    version: u32,
-) -> Result<Option<(String, Option<f64>, &'static str)>> {
-    if version < 140_000 {
-        return Ok(None);
-    }
-    let predicate = selected::predicate(database_oid, actor)?;
-    let sql = format!(
-        "SELECT p.command,p.type,p.bytes_processed,p.bytes_total,p.tuples_processed \
-         FROM pg_catalog.pg_stat_progress_copy p JOIN pg_catalog.pg_stat_activity a ON a.pid=p.pid AND a.datid=p.datid \
-         WHERE {predicate} LIMIT 2"
-    );
-    match reader.query(&sql, 2).await {
-        Ok(rows) if rows.len() > 1 => Err(native::invalid()),
-        Ok(rows) => Ok(rows.first().map(|row| {
-            (
-                copy_text(row.text("command"), row.text("type"), row.number("tuples_processed")),
-                ratio(row.number("bytes_processed"), row.number("bytes_total")),
-                "pg_stat_progress_copy",
-            )
-        })),
-        Err(error) if reader::optional(&error) => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,12 +189,18 @@ mod tests {
     // What a running statement's progress says, word for word.
     #[test]
     fn progress_in_english() {
-        assert_eq!(
-            copy_text(Some("COPY FROM".into()), Some("FILE".into()), Some(1200.0)),
-            "COPY FROM FILE · 1200 rows so far"
-        );
-        assert_eq!(copy_text(None, None, None), "COPY");
-        assert_eq!(copy_text(Some("COPY TO".into()), None, Some(0.0)), "COPY TO · 0 rows so far");
+        let copy = PostgresCopyProgress {
+            database_oid: "1".into(),
+            relation_oid: "0".into(),
+            command: PostgresCopyCommand::From,
+            io_type: PostgresCopyIo::File,
+            bytes_processed: None,
+            bytes_total: Some("0".into()),
+            tuples_processed: Some("1200".into()),
+            tuples_excluded: None,
+            tuples_skipped: None,
+        };
+        assert_eq!(copy_text(&copy), "COPY FROM FILE · 1200 rows so far");
         assert_eq!(
             no_operator_progress(),
             "PostgreSQL doesn't report how far a running query has got, operator by operator. Culprit shows the plan \

@@ -14,25 +14,31 @@ impl QueryRead for Read {
     }
 }
 fn metadata(at: &str, started: &str, visible: bool) -> Row {
-    Row::from_fields(
-        [
-            ("build", Some("PostgreSQL 18.6".into())),
-            ("database_oid", Some("42".into())),
-            ("database", Some("shop".into())),
-            ("version", Some("180006".into())),
-            ("block_bytes", Some("8192".into())),
-            ("standby", Some("f".into())),
-            ("started_at", Some(started.into())),
-            ("observed_at", Some(at.into())),
-            ("full_visibility", Some(if visible { "t" } else { "f" }.into())),
-            ("replay_pause_requested_access", Some("f".into())),
-            ("replay_pause_state_access", Some("f".into())),
-            ("pgss_schema", None),
-            ("pgss_columns", None),
-            ("pgss_info", Some("f".into())),
-        ]
-        .map(|(name, value)| (name.into(), value)),
-    )
+    metadata_with_role(at, started, visible, Some(Some("f")))
+}
+fn metadata_with_role(at: &str, started: &str, visible: bool, standby: Option<Option<&str>>) -> Row {
+    let mut fields = [
+        ("build", Some("PostgreSQL 18.6".into())),
+        ("database_oid", Some("42".into())),
+        ("database", Some("shop".into())),
+        ("version", Some("180006".into())),
+        ("block_bytes", Some("8192".into())),
+        ("started_at", Some(started.into())),
+        ("observed_at", Some(at.into())),
+        ("full_visibility", Some(if visible { "t" } else { "f" }.into())),
+        ("replay_pause_requested_access", Some("f".into())),
+        ("replay_pause_state_access", Some("f".into())),
+        ("pgss_schema", None),
+        ("pgss_columns", None),
+        ("pgss_info", Some("f".into())),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.into(), value))
+    .collect::<Vec<_>>();
+    if let Some(standby) = standby {
+        fields.push(("standby".into(), standby.map(str::to_owned)));
+    }
+    Row::from_fields(fields)
 }
 fn actor(pid: &str, state: &str, backend: Option<&str>) -> Row {
     actor_with_wait(pid, state, backend, Some(("Lock", "transactionid")), "100")
@@ -174,6 +180,109 @@ async fn final_source_change_and_terminal_failures_withhold_the_frame_without_op
         reader.replies.pop_back();
         reader.replies.push_back(final_read);
         assert!(capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.is_err());
+        assert_eq!(reader.calls.len(), 3);
+        assert!(reader.replies.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn already_read_primary_or_recovery_role_is_retained_without_inventing_member_authority_or_more_native_work() {
+    for (standby, writable) in [("f", true), ("t", false)] {
+        let mut reader = Read {
+            calls: Vec::new(),
+            replies: vec![
+                Ok(vec![metadata_with_role("2020-01-01T06:00:00Z", "2020-01-01T05:00:00Z", true, Some(Some(standby)))]),
+                Ok(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))]),
+                Ok(vec![metadata_with_role(
+                    "2020-01-01T06:00:00.200000Z",
+                    "2020-01-01T05:00:00Z",
+                    true,
+                    Some(Some(standby)),
+                )]),
+            ]
+            .into(),
+        };
+        let capture = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.unwrap();
+        let native = capture.description.observation.activity().unwrap();
+        assert_eq!(native.database_writable, Some(writable));
+        assert_eq!(capture.description.partition, SourcePartition::Target);
+        assert!(native.epoch.is_some());
+        assert!(capture.description.matches_request(&request(500)));
+        let context = NativeReadContext {
+            target: capture.description.target.clone(),
+            partition: capture.description.partition.clone(),
+            observed_from: native.observed_from.clone(),
+            observed_until: native.observed_until.clone(),
+            database_writable: native.database_writable,
+        };
+        assert!(!context.has_qualified_local_owner(), "role/start time/routing cannot create a physical member");
+        assert_eq!(reader.calls.len(), 3);
+        assert!(reader.replies.is_empty());
+        assert!(reader.calls.iter().all(|(sql, _)| !sql.contains("pg_control_system")
+            && !sql.contains("inet_server_addr")
+            && !sql.contains("pg_blocking_pids")
+            && !sql.contains("pg_locks")));
+        let canonical = ExportedRecord::new(
+            &capture.description,
+            &CaptureIdentity { observation_id: "native-role".into(), revision: None },
+            capture.records[0].clone(),
+        )
+        .unwrap();
+        assert!(canonical.record.is_valid());
+    }
+}
+
+#[tokio::test]
+async fn hidden_activity_does_not_discard_accessible_role_or_turn_it_into_member_or_complete_population() {
+    let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], false);
+    let capture = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.unwrap();
+    let native = capture.description.observation.activity().unwrap();
+    assert_eq!(native.database_writable, Some(true));
+    assert_eq!(native.coverage.state, culprit_core::SourceState::Partial);
+    assert_eq!(native.coverage.error_code, Some(ErrorCode::PermissionDenied));
+    assert!(!native.coverage.complete_scope);
+    assert_eq!(capture.description.partition, SourcePartition::Target);
+    assert_eq!(capture.records.len(), 1);
+    assert_eq!(reader.calls.len(), 3);
+}
+
+#[tokio::test]
+async fn missing_null_or_malformed_native_role_never_defaults_to_primary_or_triggers_fallback_queries() {
+    for role in [None, Some(None), Some(Some("unknown")), Some(Some(""))] {
+        for phase in [0, 2] {
+            let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
+            reader.replies[phase] = Ok(vec![metadata_with_role(
+                if phase == 0 { "2020-01-01T06:00:00Z" } else { "2020-01-01T06:00:00.200000Z" },
+                "2020-01-01T05:00:00Z",
+                true,
+                role,
+            )]);
+            let error = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.err().unwrap();
+            assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage, "{role:?} at {phase}");
+            assert_eq!(reader.calls.len(), phase + 1, "no read or role fallback after invalid native metadata");
+        }
+    }
+}
+
+#[tokio::test]
+async fn promotion_or_recovery_role_flip_on_same_process_retires_all_provisional_baseline_rows() {
+    for (before, after) in [("f", "t"), ("t", "f")] {
+        let mut reader = Read {
+            calls: Vec::new(),
+            replies: vec![
+                Ok(vec![metadata_with_role("2020-01-01T06:00:00Z", "2020-01-01T05:00:00Z", true, Some(Some(before)))]),
+                Ok(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))]),
+                Ok(vec![metadata_with_role(
+                    "2020-01-01T06:00:00.200000Z",
+                    "2020-01-01T05:00:00Z",
+                    true,
+                    Some(Some(after)),
+                )]),
+            ]
+            .into(),
+        };
+        let error = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
         assert_eq!(reader.calls.len(), 3);
         assert!(reader.replies.is_empty());
     }

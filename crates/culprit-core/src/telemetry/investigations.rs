@@ -36,9 +36,11 @@ impl RecipeCostReceipt {
                 RecipeSelector::FocusedPageWait
                     | RecipeSelector::FocusedBlocking
                     | RecipeSelector::FocusedPageWaitWriters
+                    | RecipeSelector::FocusedPageTaskHolders
                     | RecipeSelector::FocusedRequestMemory
                     | RecipeSelector::FocusedCompilationAdmission
                     | RecipeSelector::CurrentRequestWork
+                    | RecipeSelector::PageWaitTasks
             )
             && self.scope.is_valid()
             && self.scope.native_epoch().is_some()
@@ -84,14 +86,17 @@ pub struct DiagnosticInvestigationIntent {
     pub qualification: RecipeCostReceipt,
 }
 
-/// Owner-written provenance retained before source authentication or description. The request already owns its
-/// exact original question; this stores the remaining fields once so failure cannot erase admitted recipe history.
+/// Owner-written provenance retained before source authentication or description. The complete admitted question
+/// stays available even when the request/native header carries only its original capture association.
 /// It records structural provenance, never permission to dispatch or a replacement for the source's verifier.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct DiagnosticInvestigationLineage {
     pub intent_key: String,
+    /// The admitted question stays immutable when a native header contains only a capture-level association.
+    /// Public analytical metadata projects its opaque key, never this private original request or SQL.
+    pub focus: DiagnosticFocus,
     pub episode_id: String,
     pub episode_revision: String,
     pub recipe_id: String,
@@ -105,6 +110,7 @@ impl DiagnosticInvestigationLineage {
     pub fn from_intent(intent: &DiagnosticInvestigationIntent) -> Result<Self> {
         Ok(Self {
             intent_key: intent.key()?,
+            focus: intent.focus.clone(),
             episode_id: intent.episode_id.clone(),
             episode_revision: intent.episode_revision.clone(),
             recipe_id: intent.recipe_id.clone(),
@@ -118,7 +124,7 @@ impl DiagnosticInvestigationLineage {
     /// Reconstruct the exact retired intent using only the request's original question and this provenance.
     /// Parent/cost artifact authentication and selected-source authority remain separate caller-owned checks.
     pub fn reconstruct(&self, focus: &DiagnosticFocus) -> Result<DiagnosticInvestigationIntent> {
-        if !valid_digest(&self.intent_key) {
+        if !valid_digest(&self.intent_key) || *focus != self.focus {
             return Err(invalid());
         }
         let intent = DiagnosticInvestigationIntent {
@@ -142,6 +148,16 @@ impl DiagnosticInvestigationLineage {
         intent.key().is_ok_and(|expected| self.intent_key == expected && self.reconstruct(focus).is_ok())
     }
 
+    /// The source authenticates its actual result scope separately. A capture-level native header cannot
+    /// reconstruct or replace the exact original incident participant retained by this owner.
+    pub fn intent_for_source(&self, source: &CollectionDescription) -> Result<DiagnosticInvestigationIntent> {
+        let intent = self.reconstruct(&self.focus)?;
+        if !intent.matches_result_source(source) {
+            return Err(invalid());
+        }
+        Ok(intent)
+    }
+
     /// Match admitted owner metadata before any source exists. This grants no source or native authority.
     pub fn matches_request(&self, request: &CollectionRequest) -> bool {
         self.intent_for_request(request).is_ok()
@@ -149,8 +165,7 @@ impl DiagnosticInvestigationLineage {
 
     pub(super) fn intent_for_request(&self, request: &CollectionRequest) -> Result<DiagnosticInvestigationIntent> {
         request.validate()?;
-        let focus = DiagnosticFocus::from_selection(&request.selection).ok_or_else(invalid)?;
-        let intent = self.reconstruct(&focus)?;
+        let intent = self.reconstruct(&self.focus)?;
         if intent.budget != request.budget
             || intent.subject() != request.subject
             || intent.selection() != request.selection
@@ -247,6 +262,11 @@ impl DiagnosticInvestigationIntent {
         if !self.is_valid() {
             return Err(invalid());
         }
+        if let DiagnosticFocus::PageWaitTasks { focus, .. } = &self.focus {
+            // One native population belongs to this exact original capture, even if several incident rows
+            // can justify it. Another trigger cannot spend the same population stage again after restart.
+            return page_wait_tasks_stage_key(&focus.parent.capture_ref(), &self.qualification.scope.target());
+        }
         hash(&(
             "diagnostic-question-stage-v3",
             &self.episode_id,
@@ -276,6 +296,23 @@ impl DiagnosticInvestigationIntent {
             && *component == self.qualification.component
             && within(&self.budget, caller_budget)
     }
+}
+
+/// The exact earlier frame and execution resource identify one population stage before its rows are recovered.
+/// This key grants no evidence authentication, source authority or native admission.
+pub fn page_wait_tasks_stage_key(
+    original: &DiagnosticCaptureRef,
+    execution_target: &CollectionTarget,
+) -> Result<String> {
+    if !original.is_valid() {
+        return Err(invalid());
+    }
+    hash(&(
+        "diagnostic-activity-population-stage-v1",
+        original,
+        RecipeSelector::PageWaitTasks,
+        execution_target.telemetry_id()?,
+    ))
 }
 
 /// A package version alone cannot identify native reader changes across private builds.

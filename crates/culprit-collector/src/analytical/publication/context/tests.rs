@@ -2,6 +2,7 @@ mod blocking;
 mod compiler_admission;
 mod maintenance_progress;
 mod memory;
+mod page_task_holders;
 use super::*;
 use crate::{
     analytical::{catalog::PhysicalCatalog, envelope, test_support},

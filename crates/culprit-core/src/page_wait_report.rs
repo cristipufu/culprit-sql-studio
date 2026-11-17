@@ -7,6 +7,8 @@ mod participation;
 pub use participation::*;
 mod writers;
 pub use writers::*;
+mod holders;
+pub use holders::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]

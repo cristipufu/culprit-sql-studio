@@ -102,4 +102,4 @@ fn invalid() -> Error {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -77,17 +77,19 @@ pub(super) fn focused_frame(focus: &ActivityRequestFocus) -> Frame {
         scope: focus.original.scope,
         statement_identity: focus.statement_identity.clone(),
         statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
-        native: MysqlCurrentRequestWork {
-            thread_id: focus.original.key.session.generation.clone(),
-            statement_event_id: request.id.clone(),
-            timer_start_ps: request.generation.clone(),
-            timer_wait_ps: Some("9007199254740993".into()),
-            rows_examined: Some("9007199254740993".into()),
-            rows_sent: Some("1".into()),
-            created_tmp_tables: Some("3".into()),
-            created_tmp_disk_tables: Some("2".into()),
-            sort_merge_passes: Some("7".into()),
-            stage: MysqlStageObservation::NotObserved,
+        native: CurrentRequestWorkNative::Mysql {
+            work: Box::new(MysqlCurrentRequestWork {
+                thread_id: focus.original.key.session.generation.clone(),
+                statement_event_id: request.id.clone(),
+                timer_start_ps: request.generation.clone(),
+                timer_wait_ps: Some("9007199254740993".into()),
+                rows_examined: Some("9007199254740993".into()),
+                rows_sent: Some("1".into()),
+                created_tmp_tables: Some("3".into()),
+                created_tmp_disk_tables: Some("2".into()),
+                sort_merge_passes: Some("7".into()),
+                stage: MysqlStageObservation::NotObserved,
+            }),
         },
     };
     let source = "synthetic-current-request-work".to_owned();
@@ -98,6 +100,7 @@ pub(super) fn focused_frame(focus: &ActivityRequestFocus) -> Frame {
             source: source.clone(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::CurrentRequestWork {
+                profile: CurrentRequestWorkProfile::MysqlStatementEvent,
                 snapshot: StateSnapshotDescription {
                     dataset: SnapshotDataset::CurrentRequestWork,
                     observed_from: observed_at.clone(),
@@ -123,7 +126,9 @@ pub(super) fn focused_frame(focus: &ActivityRequestFocus) -> Frame {
 
 fn missing_frame(focus: &ActivityRequestFocus) -> Frame {
     let mut frame = focused_frame(focus);
-    let SourceObservation::CurrentRequestWork { snapshot, result } = &mut frame.source.observation else { panic!() };
+    let SourceObservation::CurrentRequestWork { snapshot, result, .. } = &mut frame.source.observation else {
+        panic!()
+    };
     snapshot.records = 0;
     snapshot.sources[0] = StateSourceCoverage::observed(frame.source.source.clone(), 0, false);
     result.binding = FocusedRequestBinding::ParticipantMissing;

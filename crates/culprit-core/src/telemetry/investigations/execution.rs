@@ -99,6 +99,21 @@ impl DiagnosticInvestigationIntent {
             }
     }
 
+    /// A paired population may add independently authenticated task-point episodes from the same exact original
+    /// frame. This is structural permission only; its actual raw page receipt and original row must still join.
+    pub fn permits_result_episode(&self, episode: &DiagnosticEpisode) -> bool {
+        if self.matches_episode(episode) {
+            return true;
+        }
+        let DiagnosticFocus::PageWaitTasks { focus, .. } = &self.focus else { return false };
+        let RecipeCostScope::Activity(scope) = &self.qualification.scope else { return false };
+        self.is_valid()
+            && episode.is_valid()
+            && episode.scope == *scope
+            && matches!(&episode.signal, DiagnosticSignal::PageTaskWait { parent, .. }
+                if parent.capture_ref() == focus.parent.capture_ref())
+    }
+
     /// Native result facts must retain this exact question and the separately admitted execution generation.
     pub fn matches_result_source(&self, source: &CollectionDescription) -> bool {
         self.is_valid()

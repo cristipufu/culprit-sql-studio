@@ -245,8 +245,16 @@ impl Files {
         if !self.recovered || !self.journal.unfinished()?.is_empty() {
             self.recover()?;
         }
-        if let CollectionSelection::PageWaitWriters { focus } = &request.selection {
+        if let CollectionSelection::PageWaitTasks { activity, original_context, original_requests } = &request.selection
+        {
+            let (_, verified_context, verified_requests) = self.verified_page_task_activity(activity)?;
+            if verified_context != **original_context || verified_requests != *original_requests {
+                return Err(problem(OutboxProblem::Integrity));
+            }
+        } else if let CollectionSelection::PageWaitWriters { focus } = &request.selection {
             self.verify_page_writer_focus(focus)?;
+        } else if let CollectionSelection::PageTaskHolders { focus } = &request.selection {
+            self.verify_page_task_holder_focus(focus)?;
         } else if let Some(focus) = request.focus() {
             self.verify_focus_parent(focus)?;
         }

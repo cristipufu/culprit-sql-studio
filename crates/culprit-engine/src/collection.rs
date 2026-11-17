@@ -142,8 +142,8 @@ impl Workspace {
         cancellation: &CollectionCancellation,
     ) -> Result<CollectionManifest> {
         request.validate()?;
-        if request.selection.focus().is_some() {
-            // Focus requires the immutable original receipt, which only the outbox/recovery path can resolve.
+        if request.selection.requires_authenticated_parent() {
+            // Retained parents require the outbox/recovery owner before route lookup or native admission.
             return Err(CollectionStop::InvalidPage.error());
         }
         self.connection(name)?;

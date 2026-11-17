@@ -144,6 +144,21 @@ impl OperationalFact {
             Self::PageWait(value) => {
                 Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
             }
+            Self::PageTaskHolders(value) => {
+                let mut fields = Vec::new();
+                if let Some(page) = &value.page {
+                    fields.push(reference("/record/data/fact/data/page/request/statement", &page.request.statement));
+                }
+                for (bound, point) in [("before", &value.before), ("after", &value.after)] {
+                    if let Some(request) = &point.holder.request {
+                        fields.push(reference(
+                            format!("/record/data/fact/data/{bound}/holder/request/statement"),
+                            &request.statement,
+                        ));
+                    }
+                }
+                return fields;
+            }
             Self::PageWaitWriters(value) => {
                 let mut fields = Vec::new();
                 if let Some(page) = &value.page {

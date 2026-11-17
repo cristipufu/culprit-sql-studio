@@ -255,6 +255,38 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis page-wait-writers --with-recovery-payloads --json
 ```
 
+`page-task-holders` explains a separately captured SQL Server task-holder investigation through the same SDK:
+
+```sh
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_HOLDER_RANGE" \
+  --analysis page-task-holders --json
+```
+
+The first and final native task/request points keep their own timestamps, generations and SQL availability. A final
+page-mapping check keeps its own timestamp and remains separate from the original mapping and both holder points.
+SQL Server can append latch diagnostics to its `database:file:page` resource text. The shared native parser extracts
+the page coordinates while retaining the complete original text. Changing diagnostic flags does not change the
+physical page; a `Task` value inside that text does not establish a resource owner.
+Matching endpoints do not establish continuous ownership, latch acquisition or the statement that wrote the page.
+Task addresses alone do not identify a request generation. Text limits displayed entries and SQL excerpts; JSON
+retains the typed report and original archive context within `--max-output-bytes`. Missing native or warehouse
+evidence stays unavailable. Incomplete SQL previews require the same explicit, bounded `--with-recovery-payloads`
+option; recovery cannot replace missing warehouse rows. This command opens no source database.
+
+The SDK's `PageWaitTasks` selection binds a page-task population to an exact earlier Activity capture before native
+work starts. The immutable request and manifest retain that association; outbox and recovery retain both original
+receipts. A follow-up answers only that task's point question and does not resolve its coordinator's incident.
+Ordinary unpaired page captures remain raw evidence. The existing investigation queue can select a paired population
+from a recorded long-running incident's first authenticated Activity capture when the source catalog has no narrower
+current-request reader. Sibling incidents from that frame share one population stage; later baselines do not replace
+its original context. Admission still requires the exact route, original native member/process/role, independent
+source-cost approval and caller budgets. The complete eligible original request roster is authenticated before
+reservation. Current rows must match its database, native session/request generations and statement tokens before
+using page-enrichment slots or reading page headers, SQL and index context. New or recycled requests are excluded;
+a roster exceeding the existing request-size limit is refused without trimming it. The population and holder
+recipes remain cost-unqualified and add no default production reads. Missing task rows leave the original incident
+unexplained; they do not establish recovery.
+
 The SQL Server shared-tempdb reader separately verifies the native instance, process, tempdb and selected files.
 The affected request keeps its application database; the mapped page keeps its shared-resource owner. Scans reuse
 that reader when both page-target and shared-resource collection are selected. One population supplies at most eight
@@ -416,10 +448,28 @@ absent progress row never establishes completion. This investigation adds no ord
 cost-unqualified.
 
 Documented PostgreSQL concurrent-index waiting phases identify maintenance as the affected request: waiting for
-writers, older snapshots or readers. The reported locker PID remains unresolved until independent blocking
-evidence establishes its current generation and relationship. Existing lock-wait investigation handles that
-question; phase text alone cannot authorize a new owner lookup. [Owned native cases](../dev/postgres/maintenance-waits.md)
+writers, older snapshots or readers. The reported locker PID remains a historical numeric reference. A separate
+blocking observation can establish current blocker generations; it cannot identify the historical locker or prove
+that the earlier phase persisted. Existing lock-wait investigation handles that question; phase text alone cannot
+authorize a new owner lookup. [Owned native cases](../dev/postgres/maintenance-waits.md)
 exercise a held writer and a separately acknowledged completion through the same readers.
+
+Use `maintenance-blocking` to explain an original maintenance-progress capture together with an explicitly selected
+later focused-blocking capture:
+
+```sh
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_MAINTENANCE_RANGE" \
+  --analysis maintenance-blocking --blocking-range "$CULPRIT_BLOCKING_RANGE" --json
+```
+
+Both distinct ranges use the same archive configuration, cumulative evidence/recovery budget, cancellation owner
+and deadline. Recovery payloads remain opt-in with `--with-recovery-payloads`; the second read does not receive a
+new allowance. This command opens no source database. The shared SDK requires the exact same original Activity
+focus, including its receipt, request generation and statement token, and verifies the native scope, role and clock
+bindings of both captures. Contradictory or unordered inputs are refused. Text separates the historical progress
+from the later blocking observation; JSON retains both authenticated contexts and their read gaps. Missing archived
+rows remain missing, and original unverified scope is never repaired with the later capture. Neither equal PIDs nor
+current SQL establish historical lock acquisition, maintenance-caused pressure or successful completion.
 
 `current-request-work` explains MySQL/MariaDB current-statement counters and linked native stages using the same
 reader as live progress. The focused capture rechecks the original member, process generation, session, statement
@@ -428,6 +478,13 @@ establish spill duration, memory pressure or the incident's cause. Stage absence
 refusal and unlinked stages remain distinct. The existing long-running incident can retain this evidence and its
 history without treating a later missing request as a resolved explanation. Both warehouses, the SDK and CLI
 `--analysis current-request-work` use the same pure report. The native investigation remains cost-unqualified.
+
+PostgreSQL 14 and later use the same `current-request-work` path for native COPY progress. The existing progress
+reader retains COPY direction and transport, database/relation OIDs and exact byte/tuple counters, bracketed by the
+same native request checks. A zero total is an unknown denominator. COPY TO a query can have relation OID zero;
+neither case supplies a completion percentage, ETA or bottleneck diagnosis. Original unverified scope stays
+unverified, and a missing later progress row does not establish completion. This investigation remains
+cost-unqualified; it does not execute application SQL.
 
 Live progress preserves unavailable request evidence as unknown and continues polling. Only directly observed idle
 state supplies `running: false`. Its bounded process-list fallback carries independent session context, without a
@@ -1089,7 +1146,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **23**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **38**. New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 [pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats

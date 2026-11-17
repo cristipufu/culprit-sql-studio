@@ -103,14 +103,8 @@ fn native_time(row: &Rec, field: &str) -> Result<Option<String>> {
 }
 impl PageAddress {
     pub(super) fn parse(native: &str) -> Option<Self> {
-        let mut parts = native.split(':');
-        let database = positive(parts.next()?, i16::MAX as u32)?;
-        let file = positive(parts.next()?, i32::MAX as u32)?;
-        let page = decimal(parts.next()?, i32::MAX as u32)?;
-        if parts.next().is_some() {
-            return None;
-        }
-        Some(Self { database, file, page })
+        let address = culprit_core::telemetry::PageWaitAddress::parse_sql_server_resource(native)?;
+        Some(Self { database: address.database_id, file: address.file_id, page: address.page_id })
     }
 
     pub(super) fn matches(&self, header: &super::fields::Header) -> Result<bool> {
@@ -125,12 +119,5 @@ impl PageAddress {
         }
     }
 }
-fn positive(value: &str, max: u32) -> Option<u32> {
-    decimal(value, max).filter(|value| *value > 0)
-}
-fn decimal(value: &str, max: u32) -> Option<u32> {
-    if value.is_empty() || value.len() > 10 || !value.bytes().all(|value| value.is_ascii_digit()) {
-        return None;
-    }
-    value.parse::<u32>().ok().filter(|value| *value <= max)
-}
+#[cfg(test)]
+mod tests;

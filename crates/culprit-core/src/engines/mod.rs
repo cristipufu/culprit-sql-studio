@@ -21,6 +21,7 @@ mod yugabyte;
 
 pub use mssql::QueryStoreReadMode;
 pub use mysql::activity_statement_identity as mysql_activity_statement_identity;
+pub use postgres::activity_statement_identity as postgres_activity_statement_identity;
 pub use presentation::{EvidencePresentation, StatisticsFreshness};
 pub use products::{DatabaseProduct, ProductFacts, ProductSpec};
 pub use yugabyte::node_member as ysql_node_member;

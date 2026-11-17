@@ -46,6 +46,8 @@ pub(crate) struct AnalyzeArgs {
     activity_range: Option<String>,
     #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.compilation_baseline"))]
     compilation_baseline: Option<String>,
+    #[arg(long,value_name="SHA256",help=culprit_core::t!("evidence.cli.blocking_range"))]
+    blocking_range: Option<String>,
 }
 
 impl AnalyzeArgs {
@@ -73,6 +75,16 @@ impl AnalyzeArgs {
             if !valid_digest(range) || range == &self.common.range {
                 return Err(DeliveryProblem::InvalidContract.error());
             }
+        }
+        if let Some(range) = &self.blocking_range {
+            if self.analysis != Analysis::MaintenanceBlocking {
+                return Err(culprit_core::Error::invalid(t!("evidence.cli.blocking_range_only")));
+            }
+            if !valid_digest(range) || range == &self.common.range {
+                return Err(DeliveryProblem::InvalidContract.error());
+            }
+        } else if self.analysis == Analysis::MaintenanceBlocking {
+            return Err(culprit_core::Error::invalid(t!("evidence.cli.maintenance_blocking_required")));
         }
         Ok(())
     }
@@ -174,6 +186,7 @@ enum Analysis {
     SessionMemory,
     PageWaits,
     PageWaitWriters,
+    PageTaskHolders,
     TaskSpace,
     StatementWork,
     StatementGrants,
@@ -184,6 +197,7 @@ enum Analysis {
     CompilerAdmission,
     Maintenance,
     MaintenanceProgress,
+    MaintenanceBlocking,
     CurrentRequestWork,
     Replication,
     ConnectionOutcomes,
@@ -210,6 +224,7 @@ impl Analysis {
             | Self::SessionMemory
             | Self::PageWaits
             | Self::PageWaitWriters
+            | Self::PageTaskHolders
             | Self::TaskSpace
             | Self::StatementWork
             | Self::ConnectionOutcomes
@@ -219,6 +234,7 @@ impl Analysis {
             | Self::Compilation
             | Self::CompilerAdmission
             | Self::MaintenanceProgress
+            | Self::MaintenanceBlocking
             | Self::CurrentRequestWork
             | Self::Cleanup => {
                 vec![EvidenceFamily::OperationalSamples]
@@ -240,32 +256,39 @@ impl CommonArgs {
 }
 
 pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
-    let (common, families, analysis, requested_population, activity_range, compilation_baseline) = match command {
-        EvidenceCommand::Read(args) => {
-            (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None, None)
-        }
-        EvidenceCommand::Analyze(args) => {
-            args.validate_selection()?;
-            (
-                args.common,
-                args.analysis.families(),
-                Some(args.analysis),
-                args.workload_population,
-                args.activity_range,
-                args.compilation_baseline,
-            )
-        }
-    };
+    let (common, families, analysis, requested_population, activity_range, compilation_baseline, blocking_range) =
+        match command {
+            EvidenceCommand::Read(args) => {
+                (args.common, args.families.into_iter().map(Into::into).collect(), None, None, None, None, None)
+            }
+            EvidenceCommand::Analyze(args) => {
+                args.validate_selection()?;
+                (
+                    args.common,
+                    args.analysis.families(),
+                    Some(args.analysis),
+                    args.workload_population,
+                    args.activity_range,
+                    args.compilation_baseline,
+                    args.blocking_range,
+                )
+            }
+        };
     let request = common.request(families, out.format())?;
     let config = EvidenceConfig::from_file(&common.config)?;
     let service = CollectorRuntime::default().evidence(&config)?;
     let cancellation = CollectionCancellation::default();
-    let reading =
-        read_captures(&service, &request, activity_range.as_deref(), compilation_baseline.as_deref(), &cancellation);
-    let (capture, activity, baseline) = crate::collection_shutdown::run(&cancellation, reading).await?;
-    let complete = capture.is_read_complete()
-        && activity.as_ref().is_none_or(|capture| capture.is_read_complete())
-        && baseline.as_ref().is_none_or(|capture| capture.is_read_complete());
+    let reading = read_captures(
+        &service,
+        &request,
+        activity_range.as_deref(),
+        compilation_baseline.as_deref(),
+        blocking_range.as_deref(),
+        &cancellation,
+    );
+    let captures = crate::collection_shutdown::run(&cancellation, reading).await?;
+    let complete = captures.is_read_complete();
+    let ReadCaptures { capture, activity, baseline, blocking } = captures;
     match analysis {
         None => emit(out, &capture, common.max_output_bytes, || {
             read_summary(capture.range_id(), capture.records().len(), capture.gaps().len())
@@ -303,6 +326,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::PageWaitWriters) => {
             let analysis = culprit_engine::collected_resources::page_wait_writers(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::page_wait_writers(&analysis.report))?;
+        }
+        Some(Analysis::PageTaskHolders) => {
+            let analysis = culprit_engine::collected_resources::page_task_holders(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::page_task_holders(&analysis.report))?;
         }
         Some(Analysis::TaskSpace) => {
             let analysis = culprit_engine::collected_resources::task_space(&capture)?;
@@ -344,6 +371,11 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             let analysis = culprit_engine::collected_resources::maintenance_progress(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::maintenance_progress(&analysis.report))?;
         }
+        Some(Analysis::MaintenanceBlocking) => {
+            let blocking = blocking.as_ref().ok_or_else(|| DeliveryProblem::InvalidContract.error())?;
+            let analysis = culprit_engine::collected_resources::maintenance_blocking(&capture, blocking)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::maintenance_blocking(&analysis.report))?;
+        }
         Some(Analysis::CurrentRequestWork) => {
             let analysis = culprit_engine::collected_resources::current_request_work(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::current_request_work(&analysis.report))?;
@@ -380,8 +412,9 @@ async fn read_captures(
     request: &EvidenceRequest,
     activity_range: Option<&str>,
     compilation_baseline: Option<&str>,
+    blocking_range: Option<&str>,
     cancellation: &CollectionCancellation,
-) -> Result<(EvidenceCapture, Option<EvidenceCapture>, Option<EvidenceCapture>)> {
+) -> Result<ReadCaptures> {
     let mut session = service.session(request.budget, cancellation)?;
     let capture = session.read(&request.range_id, &request.families).await?;
     let activity = if let Some(range) = activity_range {
@@ -405,7 +438,32 @@ async fn read_captures(
     } else {
         None
     };
-    Ok((capture, activity, baseline))
+    let blocking = if let Some(range) = blocking_range {
+        if !matches!(capture.source().observation, SourceObservation::MaintenanceProgress { .. }) {
+            return Err(DeliveryProblem::UnsupportedSchema.error());
+        }
+        Some(session.read(range, &[EvidenceFamily::ActivityObservations]).await?)
+    } else {
+        None
+    };
+    Ok(ReadCaptures { capture, activity, baseline, blocking })
+}
+
+struct ReadCaptures {
+    capture: EvidenceCapture,
+    activity: Option<EvidenceCapture>,
+    baseline: Option<EvidenceCapture>,
+    blocking: Option<EvidenceCapture>,
+}
+
+impl ReadCaptures {
+    fn is_read_complete(&self) -> bool {
+        std::iter::once(&self.capture)
+            .chain(self.activity.iter())
+            .chain(self.baseline.iter())
+            .chain(self.blocking.iter())
+            .all(EvidenceCapture::is_read_complete)
+    }
 }
 
 /// CLI IDs select an exact captured identity only when its native ID is unambiguous; labels and native properties

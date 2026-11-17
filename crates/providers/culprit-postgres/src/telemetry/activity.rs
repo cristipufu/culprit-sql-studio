@@ -113,7 +113,7 @@ async fn capture<R: crate::read::QueryRead>(
         source: source.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
-            database_writable: None,
+            database_writable: Some(before.writable_role()),
             epoch: Some(before.activity_epoch()),
             observed_from: canonical_time(&before.at)?,
             observed_until: canonical_time(&after.at)?,

@@ -114,6 +114,7 @@ fn description(snapshot: &CurrentRequestWorkSnapshot) -> CollectionDescription {
         source: SOURCE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::CurrentRequestWork {
+            profile: snapshot.profile,
             snapshot: StateSnapshotDescription {
                 dataset: SnapshotDataset::CurrentRequestWork,
                 observed_from: snapshot.context.observed_from.clone(),
@@ -255,7 +256,9 @@ async fn capture_from<R: QueryRead>(
     }
     let mut plan = live::PlanEvidence::default();
     if let Some(current) = &mut point {
-        current.observation.native.stage = read_stage(reader, &before, &current.observation.native).await?;
+        let work = current.observation.native.mysql().ok_or_else(source_native::invalid)?;
+        let stage = read_stage(reader, &before, work).await?;
+        current.observation.native.mysql_mut().ok_or_else(source_native::invalid)?.stage = stage;
         if let PlanRead::Live { with_plan } = plan_read
             && initial.has_qualified_local_owner()
         {
@@ -310,21 +313,22 @@ async fn capture_from<R: QueryRead>(
     } else if let Some(reason) = unavailable_stage(&after)
         && let Some(point) = &mut point
     {
-        point.observation.native.stage = MysqlStageObservation::Unavailable { reason };
+        point.observation.native.mysql_mut().ok_or_else(source_native::invalid)?.stage =
+            MysqlStageObservation::Unavailable { reason };
     }
     let complete = context.has_qualified_local_owner()
         && membership == FocusedRequestMembership::Observed
         && point.as_ref().is_some_and(|point| {
-            !matches!(
-                point.observation.native.stage,
-                MysqlStageObservation::Unavailable { .. } | MysqlStageObservation::Unlinked
-            ) && point.observation.scope == ActivityScopeBasis::RequestDatabase
+            point.observation.native.mysql().is_some_and(|work| {
+                !matches!(work.stage, MysqlStageObservation::Unavailable { .. } | MysqlStageObservation::Unlinked)
+            }) && point.observation.scope == ActivityScopeBasis::RequestDatabase
         });
     let mut coverage = StateSourceCoverage::observed(SOURCE.into(), u32::from(point.is_some()), complete);
     if !complete {
         coverage.stopped = Some(CollectionStop::SourceUnavailable);
     }
     let snapshot = CurrentRequestWorkSnapshot {
+        profile: CurrentRequestWorkProfile::MysqlStatementEvent,
         source: SOURCE.into(),
         context,
         result: FocusedRequestResult {

@@ -413,9 +413,9 @@ pub(super) fn result_matches_intent(
     lineage: Option<&DiagnosticInvestigationLineage>,
     intent: &DiagnosticInvestigationIntent,
 ) -> Result<bool> {
-    let focus = source.observation.diagnostic_focus().ok_or_else(|| DeliveryProblem::Integrity.error())?;
-    Ok(focus.is_valid()
-        && intent.matches_result_source(source)
-        && focus == intent.focus
-        && lineage.is_some_and(|lineage| lineage.matches_intent(&focus, intent)))
+    let Some(lineage) = lineage else { return Ok(false) };
+    let actual = lineage.reconstruct(&lineage.focus).map_err(|_| DeliveryProblem::Integrity.error())?;
+    Ok(actual.key()? == intent.key()?
+        && actual.matches_result_source(source)
+        && lineage.matches_intent(&intent.focus, intent))
 }

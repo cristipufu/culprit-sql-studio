@@ -2,6 +2,8 @@
 use super::*;
 mod writers;
 pub use writers::{plan_page_wait_writer_focus, supports_page_wait_writers};
+mod holders;
+pub use holders::plan_page_task_holder_focus;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PageWaitFocusPlan {
@@ -177,4 +179,30 @@ impl DiagnosticEpisode {
 
 fn invalid() -> Error {
     CollectionStop::InvalidPage.error()
+}
+
+/// Receipt consistency over the exact canonical page row. Its caller authenticates the manifest/storage;
+/// serialization alone cannot grant a native member, original role or a durable capture revision.
+fn verify_page_reference(
+    source: &CollectionDescription,
+    page: &PageWaitObservation,
+    reference: &DiagnosticEvidenceRef,
+) -> Result<()> {
+    if !page.fits_source_scope(source)
+        || !source.observation.snapshot().is_some_and(|snapshot| reference.row_ordinal < snapshot.records)
+    {
+        return Err(invalid());
+    }
+    let row = OperationalObservation {
+        source: page.source.clone(),
+        key: page.key()?,
+        fact: OperationalFact::PageWait(Box::new(page.clone())),
+    };
+    let exported = ExportedRecord::new(source, &reference.capture, TelemetryRecord::Operational(row))?;
+    if DiagnosticEvidenceRef::from_export(source, &reference.manifest_sha256, &exported, reference.row_ordinal)?
+        != *reference
+    {
+        return Err(invalid());
+    }
+    Ok(())
 }

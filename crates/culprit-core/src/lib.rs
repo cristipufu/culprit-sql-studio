@@ -41,6 +41,7 @@ pub mod jobs_report;
 mod label_tests;
 pub mod limits;
 pub mod maintenance;
+pub mod maintenance_blocking_report;
 pub mod maintenance_progress_report;
 pub mod measurement;
 pub mod memory_participants;
@@ -138,6 +139,7 @@ pub use finding_facts::*;
 pub use io_accounting::{FileIoContext, IoAccounting};
 pub use jobs_report::{JobEntry, JobEntryKind, JobsReport};
 pub use maintenance::*;
+pub use maintenance_blocking_report::MaintenanceBlockingReport;
 pub use maintenance_progress_report::{MaintenanceProgressEntry, MaintenanceProgressReport};
 pub use measurement::*;
 pub use memory_participants::{
@@ -151,8 +153,9 @@ pub use operations::{
     MemoryLimit, NodeResource, NodeResources, ProcessMemory, QueryTermination, TerminationHistory, TerminationReason,
 };
 pub use page_wait_report::{
-    PageWaitActivityEvidence, PageWaitActivityReference, PageWaitBlockingBasis, PageWaitBlockingContext,
-    PageWaitBlockingIssue, PageWaitBlockingParticipation, PageWaitExplanation, PageWaitReport, PageWaitTaskReference,
+    PageTaskHolderBound, PageTaskHolderExplanation, PageTaskHolderReport, PageWaitActivityEvidence,
+    PageWaitActivityReference, PageWaitBlockingBasis, PageWaitBlockingContext, PageWaitBlockingIssue,
+    PageWaitBlockingParticipation, PageWaitExplanation, PageWaitReport, PageWaitTaskReference,
     PageWaitWriterExplanation, PageWaitWriterReport, page_wait_blocking_participation,
 };
 pub use plan::*;

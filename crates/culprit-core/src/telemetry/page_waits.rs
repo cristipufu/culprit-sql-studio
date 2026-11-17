@@ -2,10 +2,13 @@
 //! continuous page identity, an allocation's origin or the request that owns a transient latch.
 use super::*;
 use crate::{ObservedWaitResource, WaitResourceKind};
+mod resource;
 use std::collections::BTreeSet;
 
 mod tasks;
 pub use tasks::MssqlPageTaskWait;
+mod holders;
+pub use holders::*;
 mod writers;
 pub use writers::*;
 
@@ -432,6 +435,12 @@ impl PageWaitObservation {
     /// An unresolved request from another scope remains original context, never a mapped database target.
     pub fn fits_database_capture(&self, database: &str) -> bool {
         self.request.database_context_is_consistent(database)
+    }
+
+    /// A database-owned follow-up cannot borrow mapping authority from a separately scoped shared resource.
+    pub fn fits_database_lookup(&self, database: &str) -> bool {
+        self.fits_database_capture(database)
+            && self.target.as_ref().is_none_or(|target| matches!(target.scope, PageTargetScope::RequestDatabase))
     }
 
     pub fn key(&self) -> Result<String> {

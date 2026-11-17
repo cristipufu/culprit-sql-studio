@@ -89,13 +89,17 @@ impl Fixture {
             partition: self.original.partition.clone(),
             source: self.page.source.clone(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::PageWaitTargets,
-                observed_from: self.page.observed_from.clone(),
-                observed_until: self.page.observed_until.clone(),
-                records: 1,
-                sources: vec![StateSourceCoverage::observed(self.page.source.clone(), 1, false)],
-            }),
+            observation: SourceObservation::PageWaitTargets {
+                snapshot: StateSnapshotDescription {
+                    dataset: SnapshotDataset::PageWaitTargets,
+                    observed_from: self.page.observed_from.clone(),
+                    observed_until: self.page.observed_until.clone(),
+                    records: 1,
+                    sources: vec![StateSourceCoverage::observed(self.page.source.clone(), 1, false)],
+                },
+                database_writable: None,
+                original_activity: None,
+            },
         }
     }
 
@@ -215,7 +219,9 @@ fn matching_numeric_actors_on_another_page_source_member_epoch_database_or_windo
                     crate::DatabaseIdentity::server(crate::Engine::Mssql, "other", "fixture.invalid", 1433, None).into()
             }
             _ => {
-                let SourceObservation::Snapshot(native) = &mut source.observation else { unreachable!() };
+                let SourceObservation::PageWaitTargets { snapshot: native, .. } = &mut source.observation else {
+                    unreachable!()
+                };
                 if field == "bounds" {
                     native.observed_from = fixture.page.observed_until.clone();
                 } else if field == "source" {
@@ -252,7 +258,7 @@ fn focused_result_must_name_the_same_original_receipt_and_cannot_precede_it() {
     let frame =
         ActivityFrameEvidence::new(&fixture.source, &borrowed(&fixture.rows, &fixture.references), true).unwrap();
     let mut source = fixture.page_source();
-    let SourceObservation::Snapshot(snapshot) = source.observation else { unreachable!() };
+    let SourceObservation::PageWaitTargets { snapshot, .. } = source.observation else { unreachable!() };
     source.observation = SourceObservation::FocusedPageWait {
         snapshot,
         result: Box::new(ActivityWaitFocusResult {

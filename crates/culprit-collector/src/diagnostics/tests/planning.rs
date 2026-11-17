@@ -1,4 +1,5 @@
 use super::*;
+mod page_tasks;
 mod writers;
 
 fn recipe() -> RecipeDescriptor {

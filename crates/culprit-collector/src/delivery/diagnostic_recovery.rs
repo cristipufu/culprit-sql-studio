@@ -6,6 +6,7 @@ use super::{
 use culprit_core::{Result, telemetry::*};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod task_holders;
 
 const MAX_DIAGNOSTIC_RECOVERY_BYTES: u64 = 16 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -337,16 +338,25 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         {
             return Err(invalid());
         }
-        let focus = native.source.observation.diagnostic_focus().ok_or_else(invalid)?;
+        // Capture-level paired headers retain their full admitted question in immutable owner lineage.
+        // Reuse that exact reconstruction after authenticating the source and complete native body above.
         if !native.source.observation.covers_request()
-            || focus != event.intent.focus
-            || native.investigation.as_ref().is_none_or(|owner| !owner.matches_intent(&focus, &event.intent))
+            || native
+                .investigation
+                .as_ref()
+                .is_none_or(|owner| !owner.matches_intent(&event.intent.focus, &event.intent))
         {
             return Err(invalid());
         }
     }
+    let mut authenticated_tasks = BTreeSet::new();
     for episode in references.diagnostic_revisions.iter().map(|revision| &revision.episode).chain(&checkpoint.episodes)
     {
+        if matches!(episode.signal, DiagnosticSignal::PageTaskWait { .. })
+            && authenticated_tasks.insert(episode.id.clone())
+        {
+            task_holders::authenticate_episode(store, &manifest.contract, episode).await?;
+        }
         let Some(report) = &episode.report else { continue };
         let range_id = range_id_for(&manifest.contract, &report.evidence().capture)?;
         if !manifests.contains_key(&range_id) {
@@ -425,6 +435,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
             .iter()
             .chain([&revision.episode.first, &revision.episode.latest])
             .chain(revision.episode.peak.iter())
+            .chain(revision.episode.signal.references())
             .chain(revision.episode.report.iter().flat_map(DiagnosticReport::references))
         {
             let entry = exact_refs.entry(reference.key()?).or_insert_with(|| (reference.clone(), BTreeSet::new()));
@@ -435,6 +446,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
         for reference in [&episode.first, &episode.latest]
             .into_iter()
             .chain(episode.peak.iter())
+            .chain(episode.signal.references())
             .chain(episode.report.iter().flat_map(DiagnosticReport::references))
         {
             let entry = exact_refs.entry(reference.key()?).or_insert_with(|| (reference.clone(), BTreeSet::new()));
@@ -483,12 +495,7 @@ pub(super) async fn validate_staged(store: &dyn RecoveryStore, manifest: &RangeM
 
 fn native_intent(manifest: &RangeManifest) -> Result<Option<DiagnosticInvestigationIntent>> {
     let Some(owner) = &manifest.investigation else { return Ok(None) };
-    let focus = manifest.source.observation.diagnostic_focus().ok_or_else(invalid)?;
-    let intent = owner.reconstruct(&focus)?;
-    if !intent.matches_result_source(&manifest.source) {
-        return Err(invalid());
-    }
-    Ok(Some(intent))
+    owner.intent_for_source(&manifest.source).map(Some).map_err(|_| invalid())
 }
 
 fn input_rows(input: &RecoveredDiagnosticInput) -> Result<Vec<(DiagnosticEvidenceRef, &ExportedRecord)>> {
@@ -564,6 +571,22 @@ async fn authenticate_report_participants(
             if *blocking_contexts != authenticate_page_writer_focus(store, &manifest.contract, focus).await? {
                 return Err(invalid());
             }
+        }
+        DiagnosticReport::PageTaskHolders { .. } => {
+            let SourceObservation::PageTaskHolders { focus, .. } = &manifest.source.observation else {
+                return Err(invalid());
+            };
+            let observations = rows
+                .iter()
+                .map(|(reference, row)| match &row.record {
+                    TelemetryRecord::Operational(observation) => Ok((reference, observation)),
+                    _ => Err(invalid()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !report.matches_task_holder_input(&manifest.source, observations) {
+                return Err(invalid());
+            }
+            task_holders::authenticate_focus(store, &manifest.contract, focus).await?;
         }
         DiagnosticReport::CompilationAdmission { .. } => {
             let observations = rows
@@ -665,11 +688,21 @@ async fn authenticate_investigation_intent(
         DiagnosticFocus::PageWaitWriters { focus } => Some(focus.as_ref()),
         _ => None,
     };
+    let holder = match &intent.focus {
+        DiagnosticFocus::PageTaskHolders { focus } => Some(focus.as_ref()),
+        _ => None,
+    };
     let shared = match &intent.execution {
         DiagnosticExecutionBinding::Shared { owner } => Some(owner.as_ref()),
         _ => None,
     };
-    if writer.is_none() && shared.is_none() {
+    let population = match &intent.focus {
+        DiagnosticFocus::PageWaitTasks { focus, original_context, original_requests } => {
+            Some((focus.as_ref(), original_context.as_ref(), original_requests.as_slice()))
+        }
+        _ => None,
+    };
+    if writer.is_none() && holder.is_none() && shared.is_none() && population.is_none() {
         return Ok(());
     }
     let key = intent.key()?;
@@ -681,6 +714,26 @@ async fn authenticate_investigation_intent(
     }
     if let Some(focus) = writer {
         authenticate_page_writer_focus(store, contract, focus).await?;
+    }
+    if let Some(focus) = holder {
+        task_holders::authenticate_focus(store, contract, focus).await?;
+    }
+    if let Some((focus, context, requests)) = population {
+        let original = load_diagnostic_input(store, &range_id_for(contract, &focus.parent.capture)?).await?;
+        verify_reference(original.range().manifest(), &focus.parent)?;
+        let source = &original.range().manifest().source;
+        let rows = input_rows(&original)?;
+        let activity = activity_rows(&rows)?;
+        let frame = ActivityFrameEvidence::new(source, &activity, true)?;
+        if !matches!(source.observation, SourceObservation::Activity(_))
+            || frame.context() != *context
+            || frame.page_wait_task_requests()?.as_slice() != requests
+            || !frame.row(&focus.original.key).is_some_and(|row| {
+                row.reference.is_some_and(|reference| intent.focus.matches_parent(source, row.observation, reference))
+            })
+        {
+            return Err(invalid());
+        }
     }
     if let Some(owner) = shared {
         let parent = load_diagnostic_evidence(store, &intent.focus.participant().parent).await?;

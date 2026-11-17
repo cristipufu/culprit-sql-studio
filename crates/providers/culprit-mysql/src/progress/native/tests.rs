@@ -26,9 +26,9 @@ async fn current_statement_counters_use_the_shared_native_actor_projection_and_p
         panic!()
     };
     assert_eq!(point.observation.actor.session.generation, "107");
-    assert_eq!(point.observation.native.rows_examined.as_deref(), Some("9007199254740993"));
-    assert_eq!(point.observation.native.rows_sent.as_deref(), Some("0"));
-    assert!(point.observation.native.sort_merge_passes.is_none());
+    assert_eq!(point.observation.native.mysql().unwrap().rows_examined.as_deref(), Some("9007199254740993"));
+    assert_eq!(point.observation.native.mysql().unwrap().rows_sent.as_deref(), Some("0"));
+    assert!(point.observation.native.mysql().unwrap().sort_merge_passes.is_none());
     assert_eq!(
         point.observation.statement_identity,
         culprit_core::engines::mysql_activity_statement_identity(
@@ -138,7 +138,7 @@ async fn foreign_schema_is_unavailable_and_oversized_sql_does_not_discard_native
         panic!()
     };
     assert_eq!(point.observation.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::Oversized });
-    assert_eq!(point.observation.native.created_tmp_tables.as_deref(), Some("1"));
+    assert_eq!(point.observation.native.mysql().unwrap().created_tmp_tables.as_deref(), Some("1"));
 }
 
 #[tokio::test]
@@ -148,8 +148,8 @@ async fn zero_native_statement_timer_origin_does_not_require_a_duration_or_becom
     let StatementRead::Observed(point) = super::statement(&mut io, 7, "shop", true, 16 * 1024).await.unwrap() else {
         panic!()
     };
-    assert_eq!(point.observation.native.timer_start_ps, "0");
-    assert!(point.observation.native.timer_wait_ps.is_none());
+    assert_eq!(point.observation.native.mysql().unwrap().timer_start_ps, "0");
+    assert!(point.observation.native.mysql().unwrap().timer_wait_ps.is_none());
     assert_eq!(point.observation.actor.request.as_ref().unwrap().generation, "0");
     assert_eq!(point.observation.observed_at, canonical_time(crate::progress::test_support::POINT).unwrap());
     assert!(point.observation.is_valid());

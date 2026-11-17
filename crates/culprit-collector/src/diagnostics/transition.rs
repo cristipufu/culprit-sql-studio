@@ -46,11 +46,32 @@ async fn update_analysis(
     if !episode.analysis.needs_work() && event.is_none() {
         return Ok(());
     }
+    let task_question = if let DiagnosticSignal::PageTaskWait { parent: expected, page, .. } = &episode.signal {
+        if expected.as_ref() != parent {
+            return Err(DeliveryProblem::Integrity.error());
+        }
+        let (source, native) = outbox.diagnostic_evidence(page).await?;
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(point), .. }) =
+            &native.record
+        else {
+            return Err(DeliveryProblem::Integrity.error());
+        };
+        let plan = plan_page_task_holder_focus(&source, point, page, &input.activity_frame()?)?;
+        match plan {
+            DiagnosticFocusPlan::Ready(focus) => Some(focus),
+            _ => return Err(DeliveryProblem::Integrity.error()),
+        }
+    } else {
+        None
+    };
     let matches_parent = match &event {
         Some(event) => {
             event.matches_episode(episode) && event.intent.focus.matches_parent(&input.source, original, parent)
         }
-        None => matches!(episode.plan_focus(&input.source, original, parent)?, DiagnosticFocusPlan::Ready(_)),
+        None => match task_question {
+            Some(focus) => episode.matches_focus(&focus),
+            None => matches!(episode.plan_focus(&input.source, original, parent)?, DiagnosticFocusPlan::Ready(_)),
+        },
     };
     if !matches_parent {
         return Err(DeliveryProblem::Integrity.error());

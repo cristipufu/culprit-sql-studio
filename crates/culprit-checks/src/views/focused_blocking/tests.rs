@@ -2,7 +2,7 @@ use super::*;
 use crate::views::maintenance::tests as native;
 use culprit_core::{Engine, MaintenanceDirection, MeasurementScope};
 
-fn evidence(qualified_original: bool) -> (CollectionDescription, Vec<ActivityObservation>) {
+pub(crate) fn evidence(qualified_original: bool) -> (CollectionDescription, Vec<ActivityObservation>) {
     let mut owner = native::current("43", "VACUUM orders");
     let mut waiter = native::waiting(native::current("42", "SELECT id FROM orders"), &owner);
     for row in [&mut waiter, &mut owner] {

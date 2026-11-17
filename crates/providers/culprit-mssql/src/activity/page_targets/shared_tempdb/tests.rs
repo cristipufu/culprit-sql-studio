@@ -97,6 +97,8 @@ async fn shared_tempdb_headers_keep_the_original_application_request_and_verify_
     let captured = reader.capture_shared_tempdb_page_wait_targets(&resource).await.unwrap();
     assert_eq!(reader.query_count(), 14);
     assert_eq!(captured.collection_target(), CollectionTarget::Shared(resource.clone()));
+    assert_eq!(captured.context.writable, Some(true), "the connected application has its own native role");
+    assert_eq!(captured.database_writable(), None, "that role is not an independently scoped tempdb fact");
     assert!(
         matches!(captured.source_partition().unwrap(),SourcePartition::InstanceLocal{member:Some(member),epoch:Some(_)} if member==resource)
     );

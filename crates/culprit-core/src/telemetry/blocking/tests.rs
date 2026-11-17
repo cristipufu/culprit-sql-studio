@@ -2,6 +2,8 @@ use super::super::activity_frame::tests as frames;
 use super::*;
 use crate::{Engine, MeasurementScope};
 
+mod maintenance;
+
 pub(crate) fn fixture(
     qualified_parent: bool,
 ) -> (CollectionDescription, ActivityBlockingFocusResult, Vec<ActivityObservation>) {

@@ -65,7 +65,7 @@ impl Context {
             },
             observed_from: canonical_time(&self.metadata.at)?,
             observed_until: canonical_time(until)?,
-            database_writable: Some(!self.metadata.standby),
+            database_writable: Some(self.metadata.writable_role()),
         };
         if !context.is_valid() {
             return Err(CollectionStop::SourceChanged.error());
@@ -80,7 +80,7 @@ pub(crate) fn unknown(metadata: &native::metadata::Metadata, until: &str) -> Res
         partition: SourcePartition::InstanceLocal { member: None, epoch: Some(metadata.activity_epoch()) },
         observed_from: canonical_time(&metadata.at)?,
         observed_until: canonical_time(until)?,
-        database_writable: Some(!metadata.standby),
+        database_writable: Some(metadata.writable_role()),
     };
     if !context.is_valid() {
         return Err(CollectionStop::SourceChanged.error());

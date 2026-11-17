@@ -3,7 +3,8 @@ use super::*;
 use culprit_core::collected_resource_analysis::CollectedCurrentRequestWorkAnalysis;
 
 pub fn current_request_work(capture: &EvidenceCapture) -> Result<CollectedCurrentRequestWorkAnalysis> {
-    let SourceObservation::CurrentRequestWork { snapshot: native, result } = &capture.source().observation else {
+    let SourceObservation::CurrentRequestWork { profile, snapshot: native, result } = &capture.source().observation
+    else {
         return Err(DeliveryProblem::UnsupportedSchema.error());
     };
     if !result.is_valid_source(capture.source(), native) || !capture.source().partition_is_consistent() {
@@ -24,6 +25,7 @@ pub fn current_request_work(capture: &EvidenceCapture) -> Result<CollectedCurren
         .collect::<Result<Vec<_>>>()?;
     let outcome = input.outcome(observations.len())?;
     let snapshot = CurrentRequestWorkSnapshot {
+        profile: *profile,
         source: input.coverage.source.clone(),
         context: result.read_context(capture.source(), native),
         coverage: input.coverage.clone(),

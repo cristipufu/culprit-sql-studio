@@ -11,6 +11,7 @@ fn snapshot() -> CurrentRequestWorkSnapshot {
         culprit_core::engines::mysql_activity_statement_identity(&actor.session, actor.request.as_ref().unwrap())
             .unwrap();
     CurrentRequestWorkSnapshot {
+        profile: CurrentRequestWorkProfile::MysqlStatementEvent,
         source: "mysql-current-request-work".into(),
         context: NativeReadContext {
             target: DatabaseIdentity::server(Engine::Mysql, "shop", "fixture.invalid", 3306, None).into(),
@@ -41,29 +42,31 @@ fn snapshot() -> CurrentRequestWorkSnapshot {
             scope: ActivityScopeBasis::RequestDatabase,
             statement_identity,
             statement: DefinitionPayload::sql("SELECT id FROM orders WHERE id=9264", Engine::Mysql),
-            native: MysqlCurrentRequestWork {
-                thread_id: "107".into(),
-                statement_event_id: "3".into(),
-                timer_start_ps: "0".into(),
-                timer_wait_ps: Some("18446744073709551615".into()),
-                rows_examined: Some("9007199254740993".into()),
-                rows_sent: Some("0".into()),
-                created_tmp_tables: Some("1".into()),
-                created_tmp_disk_tables: Some("0".into()),
-                sort_merge_passes: None,
-                stage: MysqlStageObservation::Observed {
-                    event: Box::new(MysqlStageEvent {
-                        thread_id: "107".into(),
-                        event_id: "4".into(),
-                        nesting_event_id: "3".into(),
-                        nesting_event_type: "STATEMENT".into(),
-                        event_name: "stage/sql/copy to tmp table".into(),
-                        timer_start_ps: None,
-                        timer_wait_ps: None,
-                        work_completed: Some("9007199254740993".into()),
-                        work_estimated: Some("42".into()),
-                    }),
-                },
+            native: CurrentRequestWorkNative::Mysql {
+                work: Box::new(MysqlCurrentRequestWork {
+                    thread_id: "107".into(),
+                    statement_event_id: "3".into(),
+                    timer_start_ps: "0".into(),
+                    timer_wait_ps: Some("18446744073709551615".into()),
+                    rows_examined: Some("9007199254740993".into()),
+                    rows_sent: Some("0".into()),
+                    created_tmp_tables: Some("1".into()),
+                    created_tmp_disk_tables: Some("0".into()),
+                    sort_merge_passes: None,
+                    stage: MysqlStageObservation::Observed {
+                        event: Box::new(MysqlStageEvent {
+                            thread_id: "107".into(),
+                            event_id: "4".into(),
+                            nesting_event_id: "3".into(),
+                            nesting_event_type: "STATEMENT".into(),
+                            event_name: "stage/sql/copy to tmp table".into(),
+                            timer_start_ps: None,
+                            timer_wait_ps: None,
+                            work_completed: Some("9007199254740993".into()),
+                            work_estimated: Some("42".into()),
+                        }),
+                    },
+                }),
             },
         }],
     }
@@ -110,7 +113,7 @@ fn temporary_and_sort_mechanisms_are_distinct_and_all_zero_or_missing_is_not_a_h
         (None, None, t!("view.current_request_work.entry.observed")),
     ] {
         let mut input = snapshot();
-        let native = &mut input.observations[0].native;
+        let native = input.observations[0].native.mysql_mut().unwrap();
         native.created_tmp_tables = temporary.map(str::to_owned);
         native.created_tmp_disk_tables = None;
         native.sort_merge_passes = sort.map(str::to_owned);
@@ -151,7 +154,7 @@ fn stage_parent_unknown_disabled_denied_and_not_observed_are_separate_without_bo
         ),
     ] {
         let mut input = snapshot();
-        input.observations[0].native.stage = stage;
+        input.observations[0].native.mysql_mut().unwrap().stage = stage;
         let report = explain(&input, true).unwrap();
         let entry = &report.entries[0];
         assert!(entry.explanation.ends_with(&expected));
@@ -159,7 +162,9 @@ fn stage_parent_unknown_disabled_denied_and_not_observed_are_separate_without_bo
         assert!(metric(entry, "view.current_request_work.metric.created_tmp_tables").is_some());
     }
     let mut input = snapshot();
-    let MysqlStageObservation::Observed { event } = &mut input.observations[0].native.stage else { panic!() };
+    let MysqlStageObservation::Observed { event } = &mut input.observations[0].native.mysql_mut().unwrap().stage else {
+        panic!()
+    };
     event.nesting_event_id = "2".into();
     assert!(explain(&input, true).is_err(), "a mismatched native parent cannot supply stage work");
 }
@@ -193,7 +198,7 @@ fn schema_context_zero_examined_and_unavailable_sql_keep_their_limits() {
     let mut input = snapshot();
     let row = &mut input.observations[0];
     row.scope = ActivityScopeBasis::SessionDatabase;
-    row.native.rows_examined = Some("0".into());
+    row.native.mysql_mut().unwrap().rows_examined = Some("0".into());
     row.statement = DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected };
     let report = explain(&input, true).unwrap();
     for message in [
@@ -219,7 +224,7 @@ fn contradictory_native_schema_event_or_header_is_rejected_before_explanation() 
         let mut input = snapshot();
         match changed {
             "database" => input.observations[0].database = "another_database".into(),
-            "event" => input.observations[0].native.statement_event_id = "5".into(),
+            "event" => input.observations[0].native.mysql_mut().unwrap().statement_event_id = "5".into(),
             "clock" => input.observations[0].observed_at = "2026-11-15T10:00:02Z".into(),
             "source" => input.coverage.source = "another-source".into(),
             _ => input.coverage.records = 0,
@@ -242,8 +247,10 @@ fn unknown_native_member_keeps_positive_partial_work_without_cross_read_authorit
 #[test]
 fn zero_stage_timer_and_unavailable_work_units_do_not_become_an_untimed_or_complete_stage() {
     let mut input = snapshot();
-    input.observations[0].native.timer_wait_ps = None;
-    let MysqlStageObservation::Observed { event } = &mut input.observations[0].native.stage else { panic!() };
+    input.observations[0].native.mysql_mut().unwrap().timer_wait_ps = None;
+    let MysqlStageObservation::Observed { event } = &mut input.observations[0].native.mysql_mut().unwrap().stage else {
+        panic!()
+    };
     event.timer_wait_ps = Some("0".into());
     event.work_completed = None;
     event.work_estimated = None;
@@ -259,3 +266,5 @@ fn zero_stage_timer_and_unavailable_work_units_do_not_become_an_untimed_or_compl
     assert!(!entry.explanation.contains(&t!("view.current_request_work.stage.untimed")));
     assert!(report.limitations.contains(&t!("view.current_request_work.limit.stage")));
 }
+
+mod postgres;

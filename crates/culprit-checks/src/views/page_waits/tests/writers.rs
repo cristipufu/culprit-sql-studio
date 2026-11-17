@@ -22,7 +22,7 @@ fn reference(key: NativeRecordIdentity, stream: TelemetryStream, ordinal: u32) -
         row_ordinal: ordinal,
     }
 }
-fn fixture() -> (PageWaitWriterFocus, NativeReadContext, PageWaitWriterObservation) {
+pub(super) fn fixture() -> (PageWaitWriterFocus, NativeReadContext, PageWaitWriterObservation) {
     let mut page = observation("61", WaitResourceKind::MemoryPage);
     page.request.statement_identity = page.statement_identity.clone();
     let object = page.target.as_mut().unwrap().object.as_mut().unwrap();

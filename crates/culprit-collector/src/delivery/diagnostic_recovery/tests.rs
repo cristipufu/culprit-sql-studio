@@ -12,6 +12,7 @@ use crate::{
 use std::path::Path;
 
 mod page_writers;
+mod task_holders;
 
 struct CapturedInvestigation {
     root: tempfile::TempDir,
@@ -265,6 +266,10 @@ async fn captured_event_rejects_wrong_native_digest_or_absent_or_numerically_equ
                 event.intent.qualification.read_metrics.templates[0].client_elapsed_ms = -0.0;
                 assert_eq!(event.intent.as_ref(), &fixture.intent);
                 assert_ne!(event.intent.key().unwrap(), fixture.intent.key().unwrap());
+                assert!(
+                    !fixture.native.investigation.as_ref().unwrap().matches_intent(&event.intent.focus, &event.intent),
+                    "numerically equal accounting cannot replace the exact admitted intent"
+                );
             }
             "different-native-kind" => {
                 let capture = fixture.original.capture_ref();
@@ -278,7 +283,7 @@ async fn captured_event_rejects_wrong_native_digest_or_absent_or_numerically_equ
         }
         assert!(event.is_valid(), "the event is structurally valid; native archive binding must reject it");
         let prepared = fixture.revision(event);
-        let error = fixture.commit(&prepared).await.err().unwrap();
+        let error = fixture.commit(&prepared).await.err().expect(mismatch);
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)), "{mismatch}");
         assert_eq!(fixture.store.checkpoint_head().await.unwrap(), Some(fixture.native.range_id.clone()));
     }

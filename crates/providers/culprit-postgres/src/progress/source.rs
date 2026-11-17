@@ -12,13 +12,13 @@ struct Reader<R = ReadSession> {
 pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
     request.subject.require_database()?;
-    let CollectionSelection::MaintenanceProgress { focus } = &request.selection else { return Err(native::invalid()) };
-    if focus.target.engine() != Engine::Postgres {
-        return Err(native::invalid());
-    }
+    let (mode, focus) = selection(request)?;
     pid(&focus.original.key.session.id)?;
     let mut request = request.clone();
-    request.budget = bounded_budget(&request.budget);
+    request.budget = match mode {
+        reader::Mode::CurrentWork => current_work_budget(&request.budget),
+        _ => bounded_budget(&request.budget),
+    };
     let reader = Reader {
         host: connector.host.clone(),
         port: connector.port,
@@ -31,50 +31,23 @@ pub(crate) fn source(connector: Connector, request: &CollectionRequest) -> Resul
 #[async_trait::async_trait]
 impl<R: NativeRead> ObservationReader for Reader<R> {
     async fn observe(&mut self, request: &CollectionRequest) -> Result<FrozenObservation> {
-        let CollectionSelection::MaintenanceProgress { focus } = &request.selection else {
-            return Err(native::invalid());
-        };
-        let captured = capture_from(
+        let (mode, focus) = selection(request)?;
+        let captured = reader::capture(
             &mut self.io,
             &self.host,
             self.port,
-            &focus.original.key.session.id,
+            pid(&focus.original.key.session.id)?,
             Some(focus),
             &request.budget,
+            mode,
         )
         .await?;
-        let records = captured
-            .observations
-            .into_iter()
-            .map(|row| {
-                Ok(TelemetryRecord::Operational(OperationalObservation {
-                    source: captured.source.clone(),
-                    key: row.key()?,
-                    fact: OperationalFact::MaintenanceProgress(Box::new(row)),
-                }))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let description = CollectionDescription {
-            target: captured.context.target,
-            partition: captured.context.partition,
-            source: maintenance::SOURCE.into(),
-            continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::MaintenanceProgress {
-                snapshot: StateSnapshotDescription {
-                    dataset: SnapshotDataset::MaintenanceProgress,
-                    observed_from: captured.context.observed_from,
-                    observed_until: captured.context.observed_until,
-                    records: records.len() as u32,
-                    sources: vec![captured.coverage],
-                },
-                result: Box::new(captured.result),
-            },
-        };
-        if !description.matches_request(request) {
+        let frozen = export(captured.progress)?;
+        if !frozen.description.matches_request(request) {
             return Err(CollectionStop::SourceChanged.error());
         }
-        self.verified = Some(description.clone());
-        Ok(FrozenObservation { description, records })
+        self.verified = Some(frozen.description.clone());
+        Ok(frozen)
     }
     async fn verify(&mut self, description: &CollectionDescription) -> Result<bool> {
         Ok(self.verified.as_ref() == Some(description))
@@ -88,6 +61,83 @@ impl<R: NativeRead> ObservationReader for Reader<R> {
     async fn close(&mut self) -> SourceShutdown {
         self.io.close().await
     }
+}
+
+fn selection(request: &CollectionRequest) -> Result<(reader::Mode, &ActivityRequestFocus)> {
+    let (mode, focus) = match &request.selection {
+        CollectionSelection::MaintenanceProgress { focus } => (reader::Mode::Retained, focus),
+        CollectionSelection::CurrentRequestWork { focus } if focus.is_current_request_work_focus() => {
+            (reader::Mode::CurrentWork, focus)
+        }
+        _ => return Err(native::invalid()),
+    };
+    if focus.target.engine() != Engine::Postgres {
+        return Err(native::invalid());
+    }
+    Ok((mode, focus))
+}
+
+fn export(captured: reader::CapturedProgress) -> Result<FrozenObservation> {
+    let (context, coverage, result, native_source, logical_source, dataset, facts) = match captured {
+        reader::CapturedProgress::Maintenance(snapshot) => (
+            snapshot.context,
+            snapshot.coverage,
+            snapshot.result,
+            snapshot.source,
+            maintenance::SOURCE,
+            SnapshotDataset::MaintenanceProgress,
+            snapshot
+                .observations
+                .into_iter()
+                .map(|point| Ok((point.key()?, OperationalFact::MaintenanceProgress(Box::new(point)))))
+                .collect::<Result<Vec<_>>>()?,
+        ),
+        reader::CapturedProgress::CurrentWork(snapshot) => (
+            snapshot.context,
+            snapshot.coverage,
+            snapshot.result,
+            snapshot.source,
+            copy::SOURCE,
+            SnapshotDataset::CurrentRequestWork,
+            snapshot
+                .observations
+                .into_iter()
+                .map(|point| Ok((point.key()?, OperationalFact::CurrentRequestWork(Box::new(point)))))
+                .collect::<Result<Vec<_>>>()?,
+        ),
+    };
+    let records = facts
+        .into_iter()
+        .map(|(key, fact)| {
+            TelemetryRecord::Operational(OperationalObservation { source: native_source.clone(), key, fact })
+        })
+        .collect::<Vec<_>>();
+    let snapshot = StateSnapshotDescription {
+        dataset,
+        observed_from: context.observed_from,
+        observed_until: context.observed_until,
+        records: records.len() as u32,
+        sources: vec![coverage],
+    };
+    let observation = match dataset {
+        SnapshotDataset::CurrentRequestWork => SourceObservation::CurrentRequestWork {
+            profile: CurrentRequestWorkProfile::PostgresCopy,
+            snapshot,
+            result: Box::new(result),
+        },
+        SnapshotDataset::MaintenanceProgress => {
+            SourceObservation::MaintenanceProgress { snapshot, result: Box::new(result) }
+        }
+        _ => return Err(native::invalid()),
+    };
+    let description = CollectionDescription {
+        target: context.target,
+        partition: context.partition,
+        source: logical_source.into(),
+        continuity: SourceContinuity::Unverified,
+        observation,
+    };
+    Ok(FrozenObservation { description, records })
 }
 
 #[cfg(test)]

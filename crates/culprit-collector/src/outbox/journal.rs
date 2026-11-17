@@ -8,7 +8,7 @@ use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 16;
+const JOURNAL_VERSION: i64 = 17;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
 
@@ -185,17 +185,17 @@ impl Journal {
         tx.execute("INSERT INTO captures(observation_id,epoch,sequence,connection,request_json,state,source_work,charged_bytes,collection)
           VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![identity.observation_id,epoch,sequence,connection,request_json,
             encode(&OutboxCaptureState::Capturing)?,encode(&source_work)?,bytes_to_sql(charge)?,encode(&request.collection())?]).map_err(storage)?;
-        if let Some(focus) = request.focus() {
+        let mut prerequisites = std::collections::BTreeSet::new();
+        if let Some(focus) = DiagnosticFocus::from_selection(&request.selection) {
+            prerequisites.extend(focus.references().map(|reference| reference.capture.observation_id.clone()));
+        }
+        if let CollectionSelection::PageWaitTasks { activity, .. } = &request.selection {
+            prerequisites.insert(activity.capture.observation_id.clone());
+        }
+        for parent in prerequisites {
             tx.execute(
                 "INSERT INTO diagnostic_pins VALUES(?1,?2)",
-                params![format!("focus:{}", identity.observation_id), focus.parent.capture.observation_id],
-            )
-            .map_err(storage)?;
-        }
-        if let CollectionSelection::PageWaitWriters { focus } = &request.selection {
-            tx.execute(
-                "INSERT OR IGNORE INTO diagnostic_pins VALUES(?1,?2)",
-                params![format!("focus:{}", identity.observation_id), focus.page.capture.observation_id],
+                params![format!("focus:{}", identity.observation_id), parent],
             )
             .map_err(storage)?;
         }

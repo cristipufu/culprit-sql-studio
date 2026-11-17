@@ -1,7 +1,9 @@
 //! Native qualification only on owned loopback databases. Workloads exist solely inside nonce fixture databases.
 mod contention;
+mod durable_capture;
 mod fixture;
 mod focused;
+mod holders;
 mod workload;
 use super::*;
 use crate::activity::{IdentityDetail, ReadOptions};

@@ -128,18 +128,7 @@ fn verify_page(
     if !source.observation.covers_request() || result.focus != *original || !result.accepts_observation(page) {
         return Err(invalid());
     }
-    let row = OperationalObservation {
-        source: page.source.clone(),
-        key: page.key()?,
-        fact: OperationalFact::PageWait(Box::new(page.clone())),
-    };
-    let exported = ExportedRecord::new(source, &reference.capture, TelemetryRecord::Operational(row))?;
-    if DiagnosticEvidenceRef::from_export(source, &reference.manifest_sha256, &exported, reference.row_ordinal)?
-        != *reference
-    {
-        return Err(invalid());
-    }
-    Ok(())
+    verify_page_reference(source, page, reference)
 }
 
 fn original_candidates(original: &ActivityWaitFocus, frame: &ActivityFrameEvidence<'_>) -> Vec<PageWaitWriterRequest> {

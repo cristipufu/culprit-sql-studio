@@ -3,16 +3,21 @@ use culprit_core::{
     CurrentRequestWorkEntry, CurrentRequestWorkReport, Error, Metric, Result, format, key, t, telemetry::*,
 };
 
+mod postgres;
+
 pub fn explain(snapshot: &CurrentRequestWorkSnapshot, read_complete: bool) -> Result<CurrentRequestWorkReport> {
     if !snapshot.is_valid_read(read_complete) {
         return Err(Error::invalid(t!("view.current_request_work.invalid")));
     }
-    let mut limitations = vec![
-        t!("view.current_request_work.limit.point"),
-        t!("view.current_request_work.limit.temporary"),
-        t!("view.current_request_work.limit.timers"),
-        t!("view.current_request_work.limit.disappearance"),
-    ];
+    let mut limitations = vec![t!("view.current_request_work.limit.point")];
+    if snapshot.profile == CurrentRequestWorkProfile::MysqlStatementEvent {
+        limitations
+            .extend([t!("view.current_request_work.limit.temporary"), t!("view.current_request_work.limit.timers")]);
+    }
+    limitations.push(t!("view.current_request_work.limit.disappearance"));
+    if snapshot.profile == CurrentRequestWorkProfile::PostgresCopy {
+        limitations.extend(postgres::limitations());
+    }
     if !snapshot.context.has_qualified_local_owner() {
         limitations.push(t!("view.current_request_work.limit.current_scope"));
     }
@@ -22,16 +27,28 @@ pub fn explain(snapshot: &CurrentRequestWorkSnapshot, read_complete: bool) -> Re
     if !snapshot.coverage.complete_scope {
         limitations.push(t!("view.current_request_work.limit.sampled"));
     }
-    if snapshot.observations.iter().any(|row| row.scope == ActivityScopeBasis::SessionDatabase) {
+    if snapshot
+        .observations
+        .iter()
+        .any(|row| row.scope == ActivityScopeBasis::SessionDatabase && row.native.mysql().is_some())
+    {
         limitations.push(t!("view.current_request_work.limit.session_database"));
     }
-    if snapshot.observations.iter().any(|row| row.native.rows_examined.as_deref() == Some("0")) {
+    if snapshot
+        .observations
+        .iter()
+        .any(|row| row.native.mysql().is_some_and(|work| work.rows_examined.as_deref() == Some("0")))
+    {
         limitations.push(t!("view.current_request_work.limit.rows_examined"));
     }
     if snapshot.observations.iter().any(|row| matches!(row.statement, DefinitionPayload::Unavailable { .. })) {
         limitations.push(t!("view.current_request_work.limit.statement"));
     }
-    if snapshot.observations.iter().any(|row| matches!(row.native.stage, MysqlStageObservation::Observed { .. })) {
+    if snapshot
+        .observations
+        .iter()
+        .any(|row| row.native.mysql().is_some_and(|work| matches!(work.stage, MysqlStageObservation::Observed { .. })))
+    {
         limitations.push(t!("view.current_request_work.limit.stage"));
     }
     Ok(CurrentRequestWorkReport {
@@ -57,7 +74,10 @@ fn summary(snapshot: &CurrentRequestWorkSnapshot) -> String {
         FocusedRequestBinding::ParticipantChanged => t!("view.current_request_work.summary.changed"),
         _ => match snapshot.result.membership {
             FocusedRequestMembership::Unavailable => t!("view.current_request_work.summary.unavailable"),
-            FocusedRequestMembership::NotObserved => t!("view.current_request_work.summary.not_observed"),
+            FocusedRequestMembership::NotObserved => match snapshot.profile {
+                CurrentRequestWorkProfile::MysqlStatementEvent => t!("view.current_request_work.summary.not_observed"),
+                CurrentRequestWorkProfile::PostgresCopy => t!("view.current_request_work.copy.summary.not_observed"),
+            },
             FocusedRequestMembership::Observed if snapshot.observations.is_empty() => {
                 t!("view.current_request_work.summary.read_gap")
             }
@@ -71,10 +91,10 @@ fn summary(snapshot: &CurrentRequestWorkSnapshot) -> String {
 }
 
 fn entry(row: &CurrentRequestWorkObservation) -> Result<CurrentRequestWorkEntry> {
-    let mut explanation = vec![explain_counters(&row.native), explain_stage(&row.native.stage)];
-    if matches!(&row.native.stage, MysqlStageObservation::Observed { event } if event.timer_wait_ps.is_none()) {
-        explanation.push(t!("view.current_request_work.stage.untimed"));
-    }
+    let details = match &row.native {
+        CurrentRequestWorkNative::Mysql { work } => mysql_details(work),
+        CurrentRequestWorkNative::PostgresCopy { progress } => postgres::details(progress),
+    };
     Ok(CurrentRequestWorkEntry {
         observation_key: row.key()?,
         observed_at: row.observed_at.clone(),
@@ -84,11 +104,31 @@ fn entry(row: &CurrentRequestWorkObservation) -> Result<CurrentRequestWorkEntry>
         statement_identity: row.statement_identity.clone(),
         statement: row.statement.clone(),
         title: t!("view.current_request_work.entry.title", session = &row.actor.session.id),
+        explanation: details.explanation,
+        metrics: details.metrics,
+        investigation: details.investigation,
+        verify: details.verify,
+    })
+}
+
+struct Details {
+    explanation: String,
+    metrics: Vec<Metric>,
+    investigation: String,
+    verify: String,
+}
+
+fn mysql_details(native: &MysqlCurrentRequestWork) -> Details {
+    let mut explanation = vec![explain_counters(native), explain_stage(&native.stage)];
+    if matches!(&native.stage, MysqlStageObservation::Observed { event } if event.timer_wait_ps.is_none()) {
+        explanation.push(t!("view.current_request_work.stage.untimed"));
+    }
+    Details {
         explanation: explanation.join(" "),
-        metrics: metrics(&row.native),
+        metrics: metrics(native),
         investigation: t!("view.current_request_work.investigate"),
         verify: t!("view.current_request_work.verify"),
-    })
+    }
 }
 
 fn explain_counters(native: &MysqlCurrentRequestWork) -> String {

@@ -7,6 +7,7 @@ enum Route {
     Blocking,
     Jobs,
     MaintenanceProgress,
+    CurrentRequestWork,
     Snapshot(Recipe),
 }
 impl Route {
@@ -16,12 +17,14 @@ impl Route {
             Self::Activity => TelemetryCollection::Activity,
             Self::Blocking => TelemetryCollection::Activity,
             Self::MaintenanceProgress => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
+            Self::CurrentRequestWork => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Snapshot(recipe) => TelemetryCollection::Snapshot(recipe.dataset()),
         }
     }
     fn selector(self) -> RecipeSelector {
         match self {
             Self::MaintenanceProgress => RecipeSelector::MaintenanceProgress,
+            Self::CurrentRequestWork => RecipeSelector::CurrentRequestWork,
             Self::Blocking => RecipeSelector::FocusedBlocking,
             _ => RecipeSelector::Collection(self.collection()),
         }
@@ -32,6 +35,7 @@ impl Route {
             Self::Activity => activity::bounded_budget(requested),
             Self::Blocking => blocking::bounded_budget(requested),
             Self::MaintenanceProgress => crate::progress::bounded_budget(requested),
+            Self::CurrentRequestWork => crate::progress::current_work_budget(requested),
             Self::Snapshot(_) => requested.clone(),
         }
     }
@@ -40,7 +44,7 @@ impl Route {
             Self::Jobs => crate::jobs::source(connector, request),
             Self::Activity => activity::source(connector, request),
             Self::Blocking => blocking::source(connector, request),
-            Self::MaintenanceProgress => crate::progress::source(connector, request),
+            Self::MaintenanceProgress | Self::CurrentRequestWork => crate::progress::source(connector, request),
             Self::Snapshot(recipe) => snapshot_source(connector, request, recipe),
         }
     }
@@ -120,6 +124,13 @@ const REGISTRATIONS: &[Registration] = &[
         purpose: RecipePurpose::Investigation,
         subject: RecipeSubject::Database,
         route: Route::MaintenanceProgress,
+    },
+    Registration {
+        id: "postgres.current-request-work",
+        version: 1,
+        purpose: RecipePurpose::Investigation,
+        subject: RecipeSubject::Database,
+        route: Route::CurrentRequestWork,
     },
     Registration {
         id: "postgres.blocking",

@@ -32,6 +32,7 @@ ring.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]
+culprit-checks.workspace = true
 culprit-collector = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(windows)'.dependencies]

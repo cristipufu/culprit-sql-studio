@@ -108,26 +108,20 @@ pub(super) fn project(session: &str, captured: Captured, with_plan: bool) -> Que
         }
         return progress;
     };
+    let CurrentRequestWorkNative::Mysql { work } = &point.observation.native else { return progress };
     progress.taken_at = point.observation.observed_at.clone();
     progress.statement = point.sql.clone();
     progress.state = Some(point.state.clone());
     progress.wait = crate::native::activity::waiting_on_lock(Some(&point.state), false).map(|_| point.state.clone());
-    progress.elapsed_ms = point
-        .observation
-        .native
-        .timer_wait_ps
-        .as_deref()
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(|ps| ps as f64 / 1_000_000_000.0);
-    progress.rows_examined = point
-        .observation
-        .native
+    progress.elapsed_ms =
+        work.timer_wait_ps.as_deref().and_then(|value| value.parse::<u64>().ok()).map(|ps| ps as f64 / 1_000_000_000.0);
+    progress.rows_examined = work
         .rows_examined
         .as_deref()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|rows| *rows > 0)
         .map(|rows| rows as f64);
-    if let MysqlStageObservation::Observed { event } = &point.observation.native.stage {
+    if let MysqlStageObservation::Observed { event } = &work.stage {
         progress.phase = Some(event.event_name.trim_start_matches("stage/").replace('/', ": "));
         if let (Some(done), Some(total)) = (event.work_completed.as_deref(), event.work_estimated.as_deref())
             && let (Ok(done), Ok(total)) = (done.parse::<u64>(), total.parse::<u64>())

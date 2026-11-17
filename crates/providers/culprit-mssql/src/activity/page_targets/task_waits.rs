@@ -25,6 +25,14 @@ pub(super) fn projection() -> String {
     FIELDS.iter().map(|(name, _, expression)| format!("{expression} AS {name}")).collect::<Vec<_>>().join(",")
 }
 
+pub(super) fn gated_projection(predicate: &str) -> String {
+    FIELDS
+        .iter()
+        .map(|(name, _, expression)| format!("CASE WHEN {predicate} THEN {expression} END AS {name}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 pub(super) fn empty_projection() -> String {
     FIELDS.iter().map(|(name, kind, _)| format!("CAST(NULL AS {kind}) AS {name}")).collect::<Vec<_>>().join(",")
 }
@@ -34,6 +42,32 @@ pub(super) struct Population {
     pub tasks: Vec<Option<MssqlPageTaskWait>>,
     pub limited: bool,
     pub task_visibility: Option<bool>,
+}
+
+impl Population {
+    /// The source keeps its original broad-read limit/visibility facts. Unrelated or changed actors cannot
+    /// consume a page slot, SQL payload or index lookup justified by a different original capture.
+    pub(super) fn retain_requests(&mut self, requests: &[ActivityRequestSelector], database_id: u32) {
+        let selectors =
+            requests.iter().map(|request| (&request.key, &request.statement_identity)).collect::<BTreeMap<_, _>>();
+        let records = std::mem::take(&mut self.frame.records);
+        let tasks = std::mem::take(&mut self.tasks);
+        for (record, task) in records.into_iter().zip(tasks) {
+            if record.facts.scope != ActivityScopeBasis::RequestDatabase
+                || selectors.get(&record.facts.key).is_none_or(|identity| {
+                    record.facts.statement_identity.as_ref() != Some(*identity)
+                        || record.current_locator.as_ref().is_none_or(|locator| {
+                            u32::try_from(locator.database).ok() != Some(database_id)
+                                || locator.identity() != **identity
+                        })
+                })
+            {
+                continue;
+            }
+            self.frame.records.push(record);
+            self.tasks.push(task);
+        }
+    }
 }
 
 pub(super) fn decode(row: &Rec, at: &str) -> Result<Option<MssqlPageTaskWait>> {
@@ -126,9 +160,7 @@ impl<R: NativeRead> ActivityReader<R> {
             }
             let identity = (
                 record.facts.key.clone(),
-                task.as_ref().map(|task| {
-                    (task.task_address.clone(), task.execution_context_id, task.resource.native.id.clone())
-                }),
+                task.as_ref().map(|task| (task.task_address.clone(), task.execution_context_id)),
             );
             if !identities.insert(identity) {
                 return Err(invalid_data());
@@ -186,6 +218,7 @@ fn withhold_conflicting_locators(records: &mut [ActivityRecord]) {
     for record in records {
         if conflicting.contains(&record.facts.key) {
             record.current_locator = None;
+            record.facts.statement_identity = None;
             record.current_sql = NativeStatement::Unavailable(PayloadUnavailable::Missing);
         }
     }
@@ -201,3 +234,8 @@ pub(super) fn no_task(row: &Rec) -> Rec {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(super) use tests::{
+    buffer_resource as test_buffer_resource, checked as test_checked, replies as test_replies,
+    task_row as test_task_row,
+};

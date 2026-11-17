@@ -429,6 +429,20 @@ fn allocation_only_attempts_still_require_the_exact_native_focus_and_admitted_bu
 }
 
 #[test]
+fn captured_events_reject_numerically_equal_foreign_admission_before_allocating_history() {
+    let mut harness = Harness::new();
+    harness.intent.qualification.read_metrics.templates[0].client_elapsed_ms = 0.0;
+    let mut event = harness.captured();
+    event.intent.qualification.read_metrics.templates[0].client_elapsed_ms = -0.0;
+    assert_eq!(event.intent.as_ref(), &harness.intent);
+    assert_ne!(event.intent.key().unwrap(), harness.intent.key().unwrap());
+    let before = harness.episode();
+    let revision =
+        DiagnosticRevision::with_investigation(&before, before.clone(), event, ANALYZED_AT).unwrap().unwrap();
+    harness.reject(revision);
+}
+
+#[test]
 fn captured_events_bind_the_actual_local_capture_scope_and_preserve_pending_native_analysis() {
     let mut harness = Harness::new();
     let event = harness.captured();

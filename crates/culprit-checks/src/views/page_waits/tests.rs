@@ -1,6 +1,7 @@
 use super::*;
 use culprit_core::{Engine, ObservedWaitResource, telemetry::*};
 use serde_json::json;
+mod holders;
 mod index_operations;
 mod participation;
 mod writers;

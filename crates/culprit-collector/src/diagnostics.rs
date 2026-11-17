@@ -1,5 +1,7 @@
 //! Offline analysis runs on sealed evidence. This module has no provider, credential or native query dependency.
 mod planning;
+pub(crate) use planning::long_running_question;
+mod tasks;
 mod transition;
 mod writers;
 pub(crate) use transition::{record_investigation, set_analysis};
@@ -112,11 +114,23 @@ pub async fn analyze_pending(
         {
             break;
         }
-        if let SourceObservation::PageWaitWriters { focus, .. } = &input.source.observation
-            && !writers::verify_parents(outbox, &input.connection, focus, recovery, cancellation).await?
+        if !writers::verify_parents(outbox, &input.connection, &input.source.observation, recovery, cancellation)
+            .await?
         {
             break;
         }
+        let original = if let SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } =
+            &input.source.observation
+        {
+            let Some(original) =
+                tasks::resolve_original_activity(outbox, &input.connection, activity, recovery, cancellation).await?
+            else {
+                break;
+            };
+            Some(original)
+        } else {
+            None
+        };
         if let Some(intent) = input.investigation_intent()?
             && let DiagnosticExecutionBinding::Shared { owner } = &intent.execution
         {
@@ -130,7 +144,10 @@ pub async fn analyze_pending(
             }
         }
         let analyzed_at = chrono::Utc::now().to_rfc3339();
-        let mut update = analyze(&input, &policies.for_input(&input)?, &analyzed_at)?;
+        let mut update = match &original {
+            Some(original) => tasks::analyze(&input, original, &analyzed_at)?,
+            None => analyze(&input, &policies.for_input(&input)?, &analyzed_at)?,
+        };
         attach_page_contexts(outbox, &input, &mut update).await?;
         planning::qualify_questions(&input, policies.assignment(&input)?, &mut update)?;
         outbox.commit_diagnostics(input, update).await?;
@@ -426,6 +443,33 @@ fn analyze(input: &DiagnosticInput, policy: &ActivityPolicy, analyzed_at: &str) 
                 previous,
                 analyzed_at,
                 intent.as_ref(),
+            )?;
+            (update.revisions, update.checkpoint)
+        }
+        SourceObservation::PageTaskHolders { .. } => {
+            let rows = input
+                .rows
+                .iter()
+                .map(|row| match &row.row.record {
+                    TelemetryRecord::Operational(observation) => {
+                        Ok(DiagnosticPageTaskHolderRow { reference: &row.reference, observation })
+                    }
+                    _ => Err(CollectionStop::InvalidPage.error()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let empty = DiagnosticCheckpoint {
+                controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
+                target: input.source.target.clone(),
+                input: input.parent.clone(),
+                episodes: vec![],
+            };
+            let update = analyze_diagnostic_page_task_holders(
+                &input.source,
+                &input.parent,
+                &rows,
+                input.checkpoint.as_ref().unwrap_or(&empty),
+                analyzed_at,
+                input.investigation_intent()?.as_ref(),
             )?;
             (update.revisions, update.checkpoint)
         }

@@ -133,8 +133,9 @@ pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             (Some(kind), None) => Some(kind),
             _ => None,
         };
-        let statement_identity =
-            request.as_ref().map(|request| statement_identity(&pid, &backend_start, &request.generation));
+        let statement_identity = request.as_ref().map(|request| {
+            culprit_core::engines::postgres_activity_statement_identity(&pid, &backend_start, &request.generation)
+        });
         let observation = ActivityObservation {
             waiting_on_lock: waiting_on_lock(&row),
             blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
@@ -179,13 +180,6 @@ pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
         None
     };
     Ok(ActivityRecord { facts, row, sql: None })
-}
-
-/// One source-owned token representation for Activity and generation-bound native progress.
-pub fn statement_identity(pid: &str, backend_start: &str, query_start: &str) -> NativeIdentity {
-    NativeIdentity::new(digest(format!("{pid}|{backend_start}|{query_start}").as_bytes()))
-        .qualified("source", "pg_stat_activity")
-        .qualified("basis", "backend-query-start")
 }
 
 /// Match the native SQL projection's UTC microsecond spelling without rounding a finer supplied timestamp.

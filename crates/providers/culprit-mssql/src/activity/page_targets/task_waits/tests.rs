@@ -6,7 +6,7 @@ use crate::{
     resources::test_support::{FakeRead, replace},
 };
 
-fn task_row(address: &str, context: i64) -> Rec {
+pub(in crate::activity::page_targets) fn task_row(address: &str, context: i64) -> Rec {
     replace(
         &support::page_wait(42, "CXCONSUMER", ""),
         &[
@@ -25,7 +25,13 @@ fn task_row(address: &str, context: i64) -> Rec {
     )
 }
 
-fn checked(ordinal: usize, row: &Rec) -> Rec {
+pub(in crate::activity::page_targets) fn buffer_resource(page: u32, task: &str) -> String {
+    format!(
+        "7:1:{page} (LATCH 0x0000000BF6759098: Class: BUFFER KP: 0 SH: 0 UP: 0 EX: 1 DT: 0 Sublatch: 0 HasWaiters: 1 Task: 0x{task} AnyReleasor: 0)"
+    )
+}
+
+pub(in crate::activity::page_targets) fn checked(ordinal: usize, row: &Rec) -> Rec {
     let participant = support::participant(ordinal, row);
     let mut fields = participant.columns().map(|(key, value)| (key, value.clone())).collect::<Vec<_>>();
     for (output, input) in [
@@ -41,7 +47,7 @@ fn checked(ordinal: usize, row: &Rec) -> Rec {
     Rec::of(&fields)
 }
 
-fn replies(rows: Vec<Rec>) -> Vec<ReadResult<Vec<Rec>>> {
+pub(in crate::activity::page_targets) fn replies(rows: Vec<Rec>) -> Vec<ReadResult<Vec<Rec>>> {
     let checks = rows.iter().enumerate().map(|(index, row)| checked(index, row)).collect::<Vec<_>>();
     let mut replies = support::successful_replies(rows);
     replies[2] = Ok(checks.clone());
@@ -86,6 +92,14 @@ async fn a_reused_or_ended_task_tuple_withholds_sql_association_but_retains_its_
         ("checked_task_address", Val::Null, PageWaitRelation::NoLongerObserved),
         ("checked_task_execution_context_id", Val::Int(99), PageWaitRelation::Unqualified),
         ("checked_task_resource", Val::Text("7:1:9999".into()), PageWaitRelation::Different),
+        ("checked_task_resource", Val::Text(buffer_resource(9999, "0000000B96434108")), PageWaitRelation::Different),
+        ("checked_task_wait_type", Val::Text("PAGELATCH_SH".into()), PageWaitRelation::Different),
+        ("checked_task_wait_type", Val::Text("PAGEIOLATCH_EX".into()), PageWaitRelation::Different),
+        (
+            "checked_task_resource",
+            Val::Text("7:1:4144 (unsupported diagnostic data)".into()),
+            PageWaitRelation::Unqualified,
+        ),
         ("checked_request_generation", Val::Text("2020-01-01T07:59:00".into()), PageWaitRelation::Unqualified),
     ] {
         let row = task_row("0000000000000101", 1);
@@ -105,19 +119,60 @@ async fn a_reused_or_ended_task_tuple_withholds_sql_association_but_retains_its_
 
 #[tokio::test]
 async fn conflicting_statement_locators_on_one_request_are_not_borrowed_between_parallel_tasks() {
-    let first = task_row("0000000000000101", 1);
-    let second = replace(&task_row("0000000000000102", 2), &[("sql_handle", Val::Text("EF".repeat(64)))]);
-    let mut replies = replies(vec![first, second]);
-    let _ = replies.remove(SQL_TEXT);
-    let mut native = support::reader(replies);
-    let capture = native.capture_page_wait_targets().await.unwrap();
-    for row in &capture.snapshot.observations {
-        assert_eq!(row.before_check.as_ref().unwrap().request, PageWaitRequestState::Unverified);
-        assert!(row.statement_identity.is_none());
-        assert!(!row.request.statement.is_available());
+    for (field, changed) in [
+        ("sql_handle", Val::Text("EF".repeat(64))),
+        ("statement_start", Val::Int(8)),
+        ("statement_end", Val::Int(12)),
+        ("sql_handle", Val::Null),
+    ] {
+        let first = task_row("0000000000000101", 1);
+        let second = replace(&task_row("0000000000000102", 2), &[(field, changed)]);
+        let mut replies = replies(vec![first, second]);
+        let _ = replies.remove(SQL_TEXT);
+        let mut native = support::reader(replies);
+        let capture = native.capture_page_wait_targets().await.unwrap();
+        assert_eq!(capture.snapshot.observations.len(), 2);
+        for row in &capture.snapshot.observations {
+            for check in [&row.before_check, &row.after_check] {
+                let check = check.as_ref().unwrap();
+                assert_eq!(check.request, PageWaitRequestState::Unverified, "{field}");
+                assert_eq!(check.wait, PageWaitRelation::Unqualified, "{field}");
+            }
+            assert!(row.request.statement_identity.is_none(), "{field}");
+            assert!(row.statement_identity.is_none() && row.plan_identity.is_none(), "{field}");
+            assert!(!row.request.statement.is_available(), "{field}");
+            assert!(
+                row.task_wait.is_some() && row.target.is_some(),
+                "raw waits and independent mapping remain available"
+            );
+        }
+        assert!(native.io.calls.iter().all(|call| !call.sql.contains("dm_exec_sql_text")));
+        assert_eq!(native.query_count(), 9);
+        assert_eq!(native.close().await, SourceShutdown::Quiescent);
+        assert_eq!(native.io.closed, 1);
     }
-    assert!(native.io.calls.iter().all(|call| !call.sql.contains("dm_exec_sql_text")));
-    assert_eq!(native.query_count(), 9);
+}
+
+#[test]
+fn conflicting_request_database_locators_invalidate_both_native_statement_representations() {
+    let first = task_row("0000000000000101", 1);
+    let second = replace(
+        &task_row("0000000000000102", 2),
+        &[
+            ("request_database_id", Val::Int(8)),
+            ("scope_basis", Val::Int(5)),
+            ("session_database", Val::Text("other".into())),
+        ],
+    );
+    let mut records =
+        [first, second].iter().map(|row| crate::activity::rows::record(row).unwrap().unwrap()).collect::<Vec<_>>();
+    assert!(records.iter().all(|record| record.current_locator.is_some() && record.facts.statement_identity.is_some()));
+    withhold_conflicting_locators(&mut records);
+    for record in records {
+        assert!(record.current_locator.is_none());
+        assert!(record.facts.statement_identity.is_none());
+        assert!(matches!(record.current_sql, NativeStatement::Unavailable(PayloadUnavailable::Missing)));
+    }
 }
 
 #[tokio::test]
@@ -264,4 +319,71 @@ async fn task_population_sentinel_preserves_only_the_admitted_point_without_quer
     assert_eq!(native.io.calls[1].limit, 2);
     assert_eq!(native.io.calls[2].limit, 1);
     assert_eq!(native.io.calls[SQL_TEXT].limit, 1);
+}
+
+#[tokio::test]
+async fn changing_buffer_diagnostics_preserves_the_exact_task_page_and_original_raw_observation() {
+    let original = buffer_resource(4144, "0000000B96434108");
+    let current = buffer_resource(4144, "0000000B96434109");
+    let row = replace(&task_row("0000000000000101", 1), &[("task_resource_description", Val::Text(original.clone()))]);
+    let mut supplied = replies(vec![row.clone()]);
+    supplied[CHECK_AFTER] = Ok(vec![replace(&checked(0, &row), &[("checked_task_resource", Val::Text(current))])]);
+    let mut native = support::reader(supplied);
+    let captured = native.capture_page_wait_targets().await.unwrap();
+    let page = &captured.snapshot.observations[0];
+    assert_eq!(page.before_check.as_ref().unwrap().wait, PageWaitRelation::OriginalObserved);
+    assert_eq!(page.after_check.as_ref().unwrap().wait, PageWaitRelation::OriginalObserved);
+    assert_eq!(page.task_wait.as_ref().unwrap().resource.native.id, original);
+    assert_eq!(page.resource.native.id, original);
+    assert_eq!(page.observed_address, Some(PageWaitAddress { database_id: 7, file_id: 1, page_id: 4144 }));
+    assert!(page.statement_identity.is_some() && page.request.statement.is_available());
+    assert!(page.target.is_some());
+    assert_eq!(native.query_count(), 10);
+    assert_eq!(native.close().await, SourceShutdown::Quiescent);
+    assert_eq!(native.io.closed, 1);
+}
+
+#[test]
+fn unsupported_original_page_or_native_provenance_withholds_relation_instead_of_claiming_a_different_wait() {
+    let row = task_row("0000000000000101", 1);
+    let original = crate::activity::rows::record(&row).unwrap().unwrap();
+    let task = decode(&row, &crate::read::text(&row, "observed_at").unwrap()).unwrap().unwrap();
+    let checked = super::super::participants::CheckedParticipant::decode(&checked(0, &row), true).unwrap();
+    for defect in ["unknown-address", "unknown-diagnostics", "different-source", "extra-provenance", "different-kind"] {
+        let mut unqualified = task.clone();
+        match defect {
+            "unknown-address" => unqualified.resource.native.id = "not-a-native-page-address".into(),
+            "unknown-diagnostics" => unqualified.resource.native.id = "7:1:4144 (unsupported diagnostic data)".into(),
+            "different-source" => {
+                unqualified
+                    .resource
+                    .native
+                    .qualifiers
+                    .insert("source".into(), "sys.dm_exec_requests.wait_resource".into());
+            }
+            "extra-provenance" => {
+                unqualified.resource.native.qualifiers.insert("other-reader".into(), "unverified".into());
+            }
+            _ => unqualified.resource.kind = WaitResourceKind::PageIo,
+        }
+        let recheck = checked.recheck_observation(&original.facts, &unqualified.resource, Some(&unqualified));
+        assert_eq!(recheck.request, PageWaitRequestState::SameStatement, "{defect}");
+        assert_eq!(recheck.wait, PageWaitRelation::Unqualified, "{defect}");
+    }
+}
+
+#[tokio::test]
+async fn one_population_cannot_choose_between_duplicate_task_slots_with_different_resource_diagnostics() {
+    let original = task_row("0000000000000101", 1);
+    for page in [4144, 9999] {
+        let duplicate =
+            replace(&original, &[("task_resource_description", Val::Text(buffer_resource(page, "0000000B96434108")))]);
+        let mut native = support::reader(vec![Ok(vec![support::context()]), Ok(vec![original.clone(), duplicate])]);
+        let error = native.capture_page_wait_targets().await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
+        assert_eq!(native.query_count(), 2);
+        assert!(native.io.calls.iter().all(|call| !call.sql.contains("sys.dm_db_page_info(")));
+        assert_eq!(native.close().await, SourceShutdown::Quiescent);
+        assert_eq!(native.io.closed, 1);
+    }
 }

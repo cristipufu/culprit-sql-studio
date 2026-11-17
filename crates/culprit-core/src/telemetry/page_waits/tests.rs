@@ -4,6 +4,7 @@ mod index_operations;
 mod shared;
 mod tasks;
 mod writers;
+pub(super) use writers::{fixture as writer_fixture, shared_target};
 
 const SOURCE: &str = crate::source_id::PAGE_WAIT_TARGETS;
 

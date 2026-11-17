@@ -96,13 +96,17 @@ impl OriginalFrame {
             partition: self.source.partition.clone(),
             source: page.source.clone(),
             continuity: SourceContinuity::Unverified,
-            observation: SourceObservation::Snapshot(StateSnapshotDescription {
-                dataset: SnapshotDataset::PageWaitTargets,
-                observed_from: page.observed_from.clone(),
-                observed_until: page.observed_until.clone(),
-                records: 1,
-                sources: vec![StateSourceCoverage::observed(page.source.clone(), 1, false)],
-            }),
+            observation: SourceObservation::PageWaitTargets {
+                snapshot: StateSnapshotDescription {
+                    dataset: SnapshotDataset::PageWaitTargets,
+                    observed_from: page.observed_from.clone(),
+                    observed_until: page.observed_until.clone(),
+                    records: 1,
+                    sources: vec![StateSourceCoverage::observed(page.source.clone(), 1, false)],
+                },
+                database_writable: None,
+                original_activity: None,
+            },
         }
     }
 }

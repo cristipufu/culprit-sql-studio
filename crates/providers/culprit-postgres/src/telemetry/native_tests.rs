@@ -4,10 +4,13 @@ use culprit_collector::capture::{CollectionCancellation, SourceFactory, collect_
 use culprit_core::{ConnectionSpec, Engine, Provider};
 use culprit_read::admission::SourceGate;
 
+mod case;
+mod copy;
 mod jobs;
 mod maintenance_waits;
 mod owned_fixture;
 mod replication;
+mod retained_activity;
 
 #[test]
 fn task_space_is_explicitly_unsupported_without_connecting_or_starting_a_runtime() {

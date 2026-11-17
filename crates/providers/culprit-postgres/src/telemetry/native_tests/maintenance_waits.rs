@@ -5,7 +5,8 @@ use culprit_core::telemetry::*;
 mod capture;
 mod fixture;
 
-use capture::{original, progress};
+use super::retained_activity::original;
+use capture::progress;
 use fixture::Fixture;
 
 #[tokio::test]
@@ -15,8 +16,8 @@ async fn concurrent_index_wait_is_generation_bound_and_the_reported_locker_remai
         Box::pin(async move {
             fixture.prepare().await;
             fixture.wait_for_writer().await;
-            let parent = original(&fixture.specification, fixture.builder_pid).await;
-            let point = progress(&fixture.specification, &parent).await;
+            let parent = original(&fixture.specification, fixture.builder_pid, &fixture.cancellation).await;
+            let point = progress(&fixture.specification, &parent, &fixture.cancellation).await;
             let source = point.source();
             let SourceObservation::MaintenanceProgress { snapshot, result } = &source.observation else { panic!() };
             assert_eq!(result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
@@ -57,11 +58,11 @@ async fn acknowledged_fixture_completion_does_not_turn_a_missing_native_request_
         Box::pin(async move {
             fixture.prepare().await;
             fixture.wait_for_writer().await;
-            let parent = original(&fixture.specification, fixture.builder_pid).await;
+            let parent = original(&fixture.specification, fixture.builder_pid, &fixture.cancellation).await;
             let expected_key = parent.focus.original.key.clone();
             fixture.release_and_complete().await;
             // Only this owned fixture observed the CREATE command finish. The retained source does not know its outcome.
-            let point = progress(&fixture.specification, &parent).await;
+            let point = progress(&fixture.specification, &parent, &fixture.cancellation).await;
             let SourceObservation::MaintenanceProgress { snapshot, result } = &point.source().observation else {
                 panic!()
             };

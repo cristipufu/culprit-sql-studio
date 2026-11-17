@@ -69,6 +69,10 @@ impl CollectionDescription {
         if !self.partition.is_valid_for(&self.target) {
             return false;
         }
+        if matches!(&self.observation, SourceObservation::Snapshot(snapshot) if snapshot.dataset == SnapshotDataset::PageWaitTargets)
+        {
+            return false;
+        }
         if let SourceObservation::Jobs { snapshot, metadata } = &self.observation {
             return metadata.matches_source(self, snapshot);
         }
@@ -77,9 +81,25 @@ impl CollectionDescription {
                 && matches!(&self.partition, SourcePartition::InstanceLocal { epoch, .. } if epoch == &snapshot.epoch);
         }
         if let SourceObservation::MaintenanceProgress { snapshot, result }
-        | SourceObservation::CurrentRequestWork { snapshot, result } = &self.observation
+        | SourceObservation::CurrentRequestWork { snapshot, result, .. } = &self.observation
         {
             return result.is_valid_source(self, snapshot);
+        }
+        if let SourceObservation::PageWaitTargets { database_writable, original_activity, .. } = &self.observation
+            && (!self.observation.covers_request()
+                || self.target.database().is_none() && (database_writable.is_some() || original_activity.is_some()))
+        {
+            return false;
+        }
+        if let SourceObservation::PageTaskHolders { snapshot, focus, .. } = &self.observation {
+            return self.observation.covers_request()
+                && self.target == focus.participant.target
+                && self.partition == focus.participant.partition
+                && matches!(
+                    (&focus.page.native_key, snapshot.sources.as_slice()),
+                    (NativeRecordIdentity::Operational { source, .. }, [coverage]) if coverage.source == *source
+                )
+                && matches!(self.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) });
         }
         if let SourceObservation::PageWaitWriters { focus, .. } = &self.observation {
             let original = &focus.waiter.participant;
@@ -125,7 +145,9 @@ impl CollectionDescription {
         };
         match &self.observation {
             SourceObservation::Activity(frame) => partial(&frame.coverage),
-            SourceObservation::Snapshot(frame) => frame.sources.iter().all(partial),
+            SourceObservation::Snapshot(frame) | SourceObservation::PageWaitTargets { snapshot: frame, .. } => {
+                frame.sources.iter().all(partial)
+            }
             SourceObservation::PagedSnapshot(_) => true,
             _ => false,
         }

@@ -233,33 +233,45 @@ fn version_projection_never_references_columns_absent_from_that_native_view_vers
 }
 
 #[tokio::test]
-async fn live_copy_stays_live_only_and_uses_the_same_original_actor_guard() {
-    let mut io = progress_reader(180_000, 4, None);
-    io.replies.insert(
-        7,
-        Ok(vec![row(&[
-            ("command", Some("COPY FROM")),
+async fn live_copy_retains_native_current_work_without_a_fake_phase_or_completion_percentage() {
+    let mut io = progress_reader(
+        180_000,
+        4,
+        Some(copy_progress(&[
             ("type", Some("FILE")),
             ("tuples_processed", Some("12")),
             ("bytes_total", Some("100")),
             ("bytes_processed", Some("20")),
-        ])]),
+        ])),
     );
     let captured =
         reader::capture(&mut io, "fixture.invalid", 9, 42, None, &CollectionBudget::default(), reader::Mode::Live)
             .await
             .unwrap();
     assert_eq!(io.calls.len(), 11, "owned session setup is the twelfth and final admitted query");
+    assert_eq!(MAX_LIVE_PROGRESS_QUERIES, 12);
     assert!(io.replies.is_empty());
-    assert!(captured.snapshot.observations.is_empty(), "COPY is not a retained maintenance observation");
-    let copy = &io.calls[7];
-    assert!(copy.contains("pg_stat_progress_copy"));
-    assert!(copy.contains("a.backend_start=") && copy.contains("a.query_start="));
+    let reader::CapturedProgress::CurrentWork(snapshot) = &captured.progress else {
+        panic!("COPY belongs to current work, not maintenance")
+    };
+    assert_eq!(snapshot.profile, CurrentRequestWorkProfile::PostgresCopy);
+    assert_eq!(snapshot.result.membership, FocusedRequestMembership::Observed);
+    let CurrentRequestWorkNative::PostgresCopy { progress: copy } = &snapshot.observations[0].native else { panic!() };
+    assert_eq!(copy.bytes_processed.as_deref(), Some("20"));
+    assert_eq!(copy.bytes_total.as_deref(), Some("100"));
+    assert_eq!(copy.tuples_processed.as_deref(), Some("12"));
+    let query = &io.calls[7];
+    assert!(query.contains("pg_stat_progress_copy"));
+    assert!(query.contains("a.backend_start=") && query.contains("a.query_start="));
     let progress = project("42", captured);
-    assert_eq!(progress.phase_percent, Some(0.2));
-    assert_eq!(progress.percent, None);
-    assert_eq!(progress.phase.as_deref(), Some("COPY FROM FILE · 12 rows so far"));
+    assert!(progress.phase.is_none());
+    assert!(progress.phase_percent.is_none());
+    assert!(progress.percent.is_none());
+    assert_eq!(progress.note.as_deref(), Some("COPY FROM FILE · 12 rows so far"));
+    assert!(progress.current_work.as_ref().unwrap().is_valid());
     let mut no_io = Reader::default();
-    assert!(read_copy_phase(&mut no_io, "16384", &original_focus().original.key, 130_000).await.unwrap().is_none());
+    let unavailable = copy::read(&mut no_io, "16384", "shop", &original_focus().original, 130_000, None).await.unwrap();
+    assert!(unavailable.observation.is_none());
+    assert_eq!(unavailable.unavailable, Some(culprit_core::ErrorCode::Unsupported));
     assert!(no_io.calls.is_empty());
 }

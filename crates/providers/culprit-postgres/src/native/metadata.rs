@@ -23,6 +23,12 @@ pub(crate) struct Metadata {
     pub statements: Option<StatementCatalog>,
 }
 impl Metadata {
+    /// The native primary/recovery role is already read on both bounds. This is not session write permission
+    /// or proof of a physical member; a primary can still have read-only transactions or restricted users.
+    pub(crate) fn writable_role(&self) -> bool {
+        !self.standby
+    }
+
     pub(crate) fn activity_epoch(&self) -> String {
         culprit_core::telemetry::digest(
             format!("{}|{}|{}|pg-activity-v1", self.database_oid, self.started_at, self.version).as_bytes(),

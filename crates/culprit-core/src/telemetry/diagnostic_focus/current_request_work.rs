@@ -14,7 +14,9 @@ pub fn analyze_diagnostic_current_request_work(
     analyzed_at: &str,
     intent: Option<&DiagnosticInvestigationIntent>,
 ) -> Result<DiagnosticFocusUpdate> {
-    let SourceObservation::CurrentRequestWork { snapshot, result } = &source.observation else { return Err(invalid()) };
+    let SourceObservation::CurrentRequestWork { snapshot, result, .. } = &source.observation else {
+        return Err(invalid());
+    };
     let focus = result.focus.as_deref().filter(|focus| focus.is_current_request_work_focus()).ok_or_else(invalid)?;
     if !source.observation.covers_request()
         || !result.is_valid_source(source, snapshot)

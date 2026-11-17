@@ -76,17 +76,19 @@ fn decode(row: &Rec, database: &str, instrumented: bool, sql_bytes: usize) -> Re
         scope: actor.scope,
         statement_identity: actor.statement_identity.clone().ok_or_else(native::invalid)?,
         statement,
-        native: MysqlCurrentRequestWork {
-            thread_id: actor.key.session.generation.clone(),
-            statement_event_id: request.id.clone(),
-            timer_start_ps: request.generation.clone(),
-            timer_wait_ps: counter(row, "elapsed_ps")?,
-            rows_examined: counter(row, "rows_examined")?,
-            rows_sent: counter(row, "rows_sent")?,
-            created_tmp_tables: counter(row, "created_tmp_tables")?,
-            created_tmp_disk_tables: counter(row, "created_tmp_disk_tables")?,
-            sort_merge_passes: counter(row, "sort_merge_passes")?,
-            stage: MysqlStageObservation::Unavailable { reason: MysqlStageUnavailable::NotCollected },
+        native: CurrentRequestWorkNative::Mysql {
+            work: Box::new(MysqlCurrentRequestWork {
+                thread_id: actor.key.session.generation.clone(),
+                statement_event_id: request.id.clone(),
+                timer_start_ps: request.generation.clone(),
+                timer_wait_ps: counter(row, "elapsed_ps")?,
+                rows_examined: counter(row, "rows_examined")?,
+                rows_sent: counter(row, "rows_sent")?,
+                created_tmp_tables: counter(row, "created_tmp_tables")?,
+                created_tmp_disk_tables: counter(row, "created_tmp_disk_tables")?,
+                sort_merge_passes: counter(row, "sort_merge_passes")?,
+                stage: MysqlStageObservation::Unavailable { reason: MysqlStageUnavailable::NotCollected },
+            }),
         },
     };
     if !observation.is_valid() {

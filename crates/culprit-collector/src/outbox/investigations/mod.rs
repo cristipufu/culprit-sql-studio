@@ -118,6 +118,7 @@ pub(crate) fn eligible_source(
     let intent = investigation_intent(source, investigation)?;
     Ok(match (&source.observation, &source.target) {
         (SourceObservation::Activity(_), CollectionTarget::Database(_)) => true,
+        (SourceObservation::PageWaitTargets { original_activity: Some(_), .. }, CollectionTarget::Database(_)) => true,
         (SourceObservation::CurrentRequestWork { result, .. }, CollectionTarget::Database(_)) => {
             result.focus.as_deref().is_some_and(ActivityRequestFocus::is_current_request_work_focus)
         }
@@ -125,6 +126,7 @@ pub(crate) fn eligible_source(
             SourceObservation::FocusedPageWait { .. }
             | SourceObservation::FocusedBlocking { .. }
             | SourceObservation::PageWaitWriters { .. }
+            | SourceObservation::PageTaskHolders { .. }
             | SourceObservation::FocusedRequestMemory { .. }
             | SourceObservation::FocusedCompilationAdmission { .. },
             CollectionTarget::Database(_),
@@ -142,6 +144,11 @@ pub(crate) fn evidence_cache_source(
     source: &CollectionDescription,
     investigation: Option<&DiagnosticInvestigationLineage>,
 ) -> Result<bool> {
+    if matches!(source.observation, SourceObservation::PageWaitTargets { .. }) {
+        return Ok(source.partition_is_consistent()
+            && source.observation.covers_request()
+            && (investigation.is_none() || eligible_source(source, investigation)?));
+    }
     if shared_owner_source(source) {
         return Ok(investigation.is_none());
     }
@@ -153,25 +160,23 @@ fn investigation_intent(
     investigation: Option<&DiagnosticInvestigationLineage>,
 ) -> Result<Option<DiagnosticInvestigationIntent>> {
     let Some(investigation) = investigation else { return Ok(None) };
-    let focus = source.observation.diagnostic_focus().ok_or_else(integrity)?;
-    let intent = investigation.reconstruct(&focus).map_err(|_| integrity())?;
-    if !intent.matches_result_source(source) {
-        return Err(integrity());
-    }
-    Ok(Some(intent))
+    investigation.intent_for_source(source).map(Some).map_err(|_| integrity())
 }
 
 fn controller_target<'a>(
     source: &'a CollectionDescription,
     investigation: Option<&DiagnosticInvestigationLineage>,
 ) -> Result<&'a CollectionTarget> {
-    if !eligible_source(source, investigation)? {
+    if !eligible_source(source, investigation)?
+        && !matches!(source.observation, SourceObservation::PageWaitTargets { .. })
+    {
         return Err(integrity());
     }
     Ok(match &source.observation {
         SourceObservation::FocusedBlocking { result, .. } => &result.focus.target,
         SourceObservation::FocusedPageWait { result, .. } => &result.focus.participant.target,
         SourceObservation::PageWaitWriters { focus, .. } => &focus.waiter.participant.target,
+        SourceObservation::PageTaskHolders { focus, .. } => &focus.participant.target,
         SourceObservation::FocusedRequestMemory { result, .. } => &result.focus.target,
         SourceObservation::FocusedCompilationAdmission { result, .. } => &result.focus.target,
         _ => &source.target,

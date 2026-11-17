@@ -66,6 +66,16 @@ impl<'a> CapturedState<'a> {
             .collect()
     }
 
+    /// A focused aggregate keeps its one native row or its independent read gap, never a selected prefix.
+    pub fn single_row(&self) -> Result<Option<&'a OperationalObservation>> {
+        let rows = self.rows()?;
+        match rows.as_slice() {
+            [] => Ok(None),
+            [row] => Ok(Some(*row)),
+            _ => Err(invalid()),
+        }
+    }
+
     pub fn definitions(&self) -> Result<Vec<&'a ObjectDefinitionRecord>> {
         if self.family != EvidenceFamily::ObjectDefinitions {
             return Err(DeliveryProblem::UnsupportedSchema.error());

@@ -56,6 +56,7 @@ enum Scenario {
     DuplicateResourceSample,
     ResourceCountMismatch,
     ActivitySequence,
+    ActivityQualifiedSequence,
     ActivityConflictingRows,
     ActivityUnconfirmed,
     ActivityRestricted,
@@ -67,6 +68,11 @@ enum Scenario {
     ResourceDiscoveryOversized,
     ResourceDiscoveryDenied,
     ResourceDiscoveryUnconfirmed,
+}
+impl Scenario {
+    fn is_activity_sequence(self) -> bool {
+        matches!(self, Self::ActivitySequence | Self::ActivityQualifiedSequence)
+    }
 }
 struct State {
     scenario: Scenario,
@@ -320,12 +326,13 @@ impl TelemetrySource for TestSource {
         if matches!(
             self.0.scenario,
             Scenario::ActivitySequence
+                | Scenario::ActivityQualifiedSequence
                 | Scenario::ActivityConflictingRows
                 | Scenario::ActivityUnconfirmed
                 | Scenario::ActivityRestricted
                 | Scenario::ActivityLockPoint
         ) {
-            if matches!(self.0.scenario, Scenario::ActivitySequence) && self.1 == 1 {
+            if self.0.scenario.is_activity_sequence() && self.1 == 1 {
                 return Err(CollectionStop::SourceUnavailable.error());
             }
             return Ok(activity_description(self.0.scenario, self.1));
@@ -368,6 +375,7 @@ impl TelemetrySource for TestSource {
         if matches!(
             self.0.scenario,
             Scenario::ActivitySequence
+                | Scenario::ActivityQualifiedSequence
                 | Scenario::ActivityConflictingRows
                 | Scenario::ActivityUnconfirmed
                 | Scenario::ActivityRestricted
@@ -1343,12 +1351,24 @@ fn activity_row() -> culprit_core::telemetry::ActivityObservation {
 }
 fn activity_rows(scenario: Scenario, step: usize) -> Vec<culprit_core::telemetry::ActivityObservation> {
     use culprit_core::telemetry::*;
-    if matches!(scenario, Scenario::ActivitySequence) && step >= 4
-        || matches!(scenario, Scenario::ActivityRestricted) && step > 0
-    {
+    if scenario.is_activity_sequence() && step >= 4 || matches!(scenario, Scenario::ActivityRestricted) && step > 0 {
         return vec![];
     }
     let mut row = activity_row();
+    if matches!(scenario, Scenario::ActivityQualifiedSequence) {
+        row.key.session.generation = "2020-01-01T05:00:00Z".into();
+        let request_start = "2020-01-01T05:58:20Z";
+        row.key.request = Some(NativeActivityIdentity { id: "statement".into(), generation: request_start.into() });
+        row.scope = ActivityScopeBasis::SessionDatabase;
+        row.state = "active".into();
+        row.command = None;
+        row.elapsed_ms = Some((100_000 + step * 60_000).to_string());
+        row.statement_identity = Some(culprit_core::engines::postgres_activity_statement_identity(
+            &row.key.session.id,
+            &row.key.session.generation,
+            request_start,
+        ));
+    }
     if matches!(scenario, Scenario::ActivityConflictingRows) {
         let first = row.clone();
         row.key.session.generation = "recycled-login".into();
@@ -1373,7 +1393,7 @@ fn activity_rows(scenario: Scenario, step: usize) -> Vec<culprit_core::telemetry
 fn activity_description(scenario: Scenario, step: usize) -> CollectionDescription {
     use culprit_core::telemetry::*;
     let count = activity_rows(scenario, step).len() as u32;
-    CollectionDescription {
+    let mut source = CollectionDescription {
         partition: culprit_core::telemetry::SourcePartition::Target,
         target: description().target,
         source: "activity-fixture".into(),
@@ -1394,7 +1414,22 @@ fn activity_description(scenario: Scenario, step: usize) -> CollectionDescriptio
                 !matches!(scenario, Scenario::ActivityRestricted),
             ),
         }),
+    };
+    if matches!(scenario, Scenario::ActivityQualifiedSequence) {
+        source.partition = SourcePartition::InstanceLocal {
+            member: Some(SharedResourceIdentity {
+                engine: Engine::Postgres,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("pg-native-test-namespace"),
+                native: NativeIdentity::new("pg-native-test-member"),
+            }),
+            epoch: Some("native-epoch-1".into()),
+        };
+        let SourceObservation::Activity(frame) = &mut source.observation else { panic!("activity source") };
+        frame.database_writable = Some(true);
+        frame.population = ActivityPopulation::ClientBackends;
     }
+    source
 }
 fn activity_request() -> CollectionRequest {
     use culprit_core::telemetry::*;
@@ -1423,7 +1458,7 @@ async fn sealed_baselines_survive_reopen_and_failed_polls_without_resolving_or_r
     use culprit_collector::outbox::Outbox;
     use culprit_core::telemetry::*;
     let dir = TestDirectory::new();
-    let state = State::new(Scenario::ActivitySequence);
+    let state = State::new(Scenario::ActivityQualifiedSequence);
     let ws = dir.workspace(state.clone());
     let root = dir.0.path().join("activity-outbox");
     let mut outbox = Outbox::create(&root, OutboxLimits::default()).unwrap();
@@ -1446,6 +1481,17 @@ async fn sealed_baselines_survive_reopen_and_failed_polls_without_resolving_or_r
     let original = first_checkpoint.episodes[0].clone();
     assert_eq!(original.lifecycle, DiagnosticLifecycle::Active);
     assert_eq!(original.first.capture, first.capture);
+    assert_eq!(original.analysis, DiagnosticAnalysisStatus::Pending);
+    let (source, row) = outbox.diagnostic_evidence(&original.first).await.unwrap();
+    let TelemetryRecord::Activity(row) = row.record else { panic!("original native Activity") };
+    let DiagnosticFocusPlan::Ready(focus) = original.plan_focus(&source, &row, &original.first).unwrap() else {
+        panic!("pending analysis requires the original native request")
+    };
+    let DiagnosticFocus::CurrentRequestWork { focus } = *focus else { panic!("PostgreSQL request work") };
+    assert_eq!(focus.parent, original.first);
+    assert_eq!(focus.original.key, row.key);
+    assert_eq!(Some(&focus.statement_identity), row.statement_identity.as_ref());
+    assert_eq!(focus.partition, source.partition);
     drop(outbox);
     let mut outbox = Outbox::open(&root).unwrap();
     let failed = ws
@@ -1497,6 +1543,85 @@ async fn sealed_baselines_survive_reopen_and_failed_polls_without_resolving_or_r
         let text = std::fs::read_to_string(replay.join(&file.file)).unwrap();
         assert!(!text.contains("activity-canary-secret"));
     }
+}
+#[tokio::test]
+async fn missing_original_native_identity_retires_only_after_resolution_and_keeps_an_unresolved_history() {
+    use culprit_collector::outbox::Outbox;
+    use culprit_core::telemetry::*;
+    let dir = TestDirectory::new();
+    let ws = dir.workspace(State::new(Scenario::ActivitySequence));
+    let root = dir.0.path().join("activity-outbox");
+    let mut outbox = Outbox::create(&root, OutboxLimits::default()).unwrap();
+    let first = ws
+        .collect_into_outbox("pilot", activity_request(), &mut outbox, &CollectionCancellation::default())
+        .await
+        .unwrap();
+    let checkpoint = analyze_activity_checkpoint(&mut outbox).await;
+    assert_eq!(checkpoint.episodes.len(), 1);
+    let original = checkpoint.episodes[0].clone();
+    assert_eq!(original.first.capture, first.capture);
+    assert_eq!(original.lifecycle, DiagnosticLifecycle::Active);
+    assert_eq!(original.analysis, DiagnosticAnalysisStatus::Unresolved);
+    assert_eq!(original.issue, Some(DiagnosticAnalysisIssue::MissingNativeIdentity));
+    let (source, row) = outbox.diagnostic_evidence(&original.first).await.unwrap();
+    assert_eq!(source.partition, SourcePartition::Target);
+    assert_eq!(source.observation.activity().unwrap().database_writable, None);
+    let TelemetryRecord::Activity(row) = row.record else { panic!("original native Activity") };
+    assert!(row.statement_identity.is_none());
+    assert_eq!(original.plan_focus(&source, &row, &original.first).unwrap(), DiagnosticFocusPlan::NotRequired);
+    drop(outbox);
+    let mut outbox = Outbox::open(&root).unwrap();
+    let mut cleared = None;
+    for step in 1..=4 {
+        let capture = ws
+            .collect_into_outbox("pilot", activity_request(), &mut outbox, &CollectionCancellation::default())
+            .await
+            .unwrap();
+        let next = analyze_activity_checkpoint(&mut outbox).await;
+        if step == 4 {
+            assert_eq!(capture.status, CollectionStatus::Complete);
+            assert!(next.episodes.is_empty(), "terminal analysis belongs to immutable history");
+            cleared = Some(capture.capture);
+        } else {
+            assert_eq!(next.episodes.len(), 1);
+            assert_eq!(next.episodes[0].first, original.first);
+            assert_eq!(next.episodes[0].analysis, DiagnosticAnalysisStatus::Unresolved);
+            assert_eq!(next.episodes[0].issue, Some(DiagnosticAnalysisIssue::MissingNativeIdentity));
+        }
+    }
+    let cleared = cleared.unwrap();
+    let status = outbox.status(50, None).await.unwrap();
+    let history = status
+        .entries
+        .iter()
+        .filter(|entry| {
+            matches!(&entry.request.selection, CollectionSelection::Diagnostics { parent, .. }
+                if parent.capture == cleared)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(history.len(), 1, "the exact absence input has one immutable diagnostic result");
+    let replay = dir.0.path().join("resolved-history");
+    Outbox::replay(&root, &history[0].capture.observation_id, &replay).await.unwrap();
+    let text = std::fs::read_to_string(replay.join(TelemetryStream::OperationalSamples.file_name())).unwrap();
+    let revisions = text
+        .lines()
+        .map(|line| serde_json::from_str::<ExportedRecord>(line).unwrap())
+        .filter_map(|row| match row.record {
+            TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::DiagnosticRevision(revision),
+                ..
+            }) => Some(revision),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(revisions.len(), 1);
+    let resolved = &revisions[0].episode;
+    assert_eq!(resolved.id, original.id);
+    assert_eq!(resolved.first, original.first);
+    assert_eq!(resolved.lifecycle, DiagnosticLifecycle::Resolved);
+    assert_eq!(resolved.analysis, DiagnosticAnalysisStatus::Unresolved);
+    assert_eq!(resolved.issue, Some(DiagnosticAnalysisIssue::MissingNativeIdentity));
+    assert_eq!(resolved.recovery.as_ref().unwrap().capture().capture, cleared);
 }
 #[tokio::test]
 async fn conflicting_native_session_generations_cannot_seal_a_baseline_or_derive_an_episode() {

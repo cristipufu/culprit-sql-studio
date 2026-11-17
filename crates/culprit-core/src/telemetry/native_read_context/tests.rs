@@ -171,3 +171,55 @@ fn a_current_member_and_role_cannot_supply_query_historys_native_population_tupl
         assert!(binding.resolve(&member_qualifiers).is_err(), "read ownership is not the execution's native tuple");
     }
 }
+
+#[test]
+fn activity_header_and_frame_share_one_native_context_without_changing_unknown_ownership() {
+    let source = super::super::activity_frame::tests::source(0);
+    let expected = NativeReadContext::from_activity(&source).unwrap();
+    let frame = ActivityFrameEvidence::new(&source, &[], true).unwrap();
+    assert_eq!(expected, frame.context());
+    assert_eq!(expected.partition, SourcePartition::Target);
+    assert!(!expected.has_qualified_local_owner());
+    let mut changed = source.clone();
+    let SourceObservation::Activity(header) = &mut changed.observation else { panic!() };
+    header.coverage.source = "different-native-source".into();
+    assert!(NativeReadContext::from_activity(&changed).is_err());
+    assert!(ActivityFrameEvidence::new(&changed, &[], true).is_err());
+}
+
+#[test]
+fn an_earlier_scope_requires_exact_known_owner_role_target_and_ordered_native_bounds() {
+    let original = read_context();
+    let current = NativeReadContext {
+        observed_from: "2020-01-01T12:00:02Z".into(),
+        observed_until: "2020-01-01T12:00:03Z".into(),
+        ..original.clone()
+    };
+    assert!(current.matches_earlier_scope(&original));
+    for field in ["target", "member", "epoch", "role", "unknown-role", "unknown-owner", "clock"] {
+        let mut changed = current.clone();
+        match field {
+            "target" => {
+                let CollectionTarget::Database(database) = &mut changed.target else { panic!() };
+                database.database = "other".into();
+            }
+            "member" => {
+                let SourcePartition::InstanceLocal { member: Some(member), .. } = &mut changed.partition else {
+                    panic!()
+                };
+                member.native.id = "another-member".into();
+            }
+            "epoch" => {
+                let SourcePartition::InstanceLocal { epoch, .. } = &mut changed.partition else { panic!() };
+                *epoch = Some("new-native-epoch".into());
+            }
+            "role" => changed.database_writable = Some(false),
+            "unknown-role" => changed.database_writable = None,
+            "unknown-owner" => changed.partition = SourcePartition::Target,
+            _ => changed.observed_from = "2020-01-01T12:00:00Z".into(),
+        }
+        assert!(!changed.matches_earlier_scope(&original), "{field}");
+    }
+    let unknown = NativeReadContext { database_writable: None, ..original };
+    assert!(!current.matches_earlier_scope(&unknown));
+}

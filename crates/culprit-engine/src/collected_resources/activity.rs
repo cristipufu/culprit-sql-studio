@@ -14,29 +14,19 @@ impl<'a> CapturedActivity<'a> {
         {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
-        if !valid_digest(capture.range_id())
-            || !valid_digest(capture.recovery_manifest_sha256())
-            || !valid_digest(capture.capture_manifest_sha256())
-            || ObservationBounds::new(capture.collected_from(), capture.collected_until()).is_none()
-        {
-            return Err(invalid());
-        }
+        super::references::validate_capture(capture)?;
         let mut positions = BTreeSet::new();
         let references = capture
             .records()
             .iter()
             .map(|record| {
-                let row = record.row();
-                let ordinal = record.row_ordinal().checked_sub(1).ok_or_else(invalid)?;
-                if !matches!(row.record, TelemetryRecord::Activity(_))
-                    || row.capture != *capture.capture()
-                    || row.batch_id != record.batch_id()
-                    || !positions.insert((record.batch_id(), ordinal))
-                    || row.payload_sha256()? != record.native_payload_sha256()
+                let reference = super::references::from_record(capture, record)?;
+                if !matches!(record.row().record, TelemetryRecord::Activity(_))
+                    || !positions.insert((record.batch_id(), reference.row_ordinal))
                 {
                     return Err(invalid());
                 }
-                DiagnosticEvidenceRef::from_export(capture.source(), capture.capture_manifest_sha256(), row, ordinal)
+                Ok(reference)
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self { capture, references })

@@ -29,6 +29,9 @@ pub(super) fn qualify_questions(
     if matches!(input.source.observation, SourceObservation::FocusedPageWait { .. }) {
         return qualify_writer_question(input, assignment, recipes, update);
     }
+    if matches!(input.source.observation, SourceObservation::PageWaitTargets { original_activity: Some(_), .. }) {
+        return qualify_task_questions(input, assignment, recipes, update);
+    }
     if !matches!(input.source.observation, SourceObservation::Activity(_)) {
         return Ok(());
     }
@@ -54,6 +57,23 @@ pub(super) fn qualify_questions(
         {
             continue;
         }
+        let population =
+            matches!(episode.signal, DiagnosticSignal::Activity { condition: ActivityCondition::LongRunning, .. })
+                && long_running_question(recipes, &assignment.subject) == Some(RecipeSelector::PageWaitTasks);
+        if population && episode.first.capture_ref() != input.parent {
+            // This input can update symptom/lifecycle facts. It cannot replace the first frame's question or
+            // erase its pending authority because a later point has different token visibility.
+            if let Some(original) = input
+                .checkpoint
+                .iter()
+                .flat_map(|checkpoint| &checkpoint.episodes)
+                .find(|original| original.id == episode.id && original.first == episode.first)
+            {
+                episode.analysis = original.analysis;
+                episode.issue = original.issue.clone();
+            }
+            continue;
+        }
         let row = rows.get(episode.signal.activity_key()).ok_or_else(|| CollectionStop::InvalidPage.error())?;
         if row.reference != episode.latest {
             return Err(CollectionStop::InvalidPage.error());
@@ -61,7 +81,12 @@ pub(super) fn qualify_questions(
         let TelemetryRecord::Activity(original) = &row.row.record else {
             return Err(CollectionStop::InvalidPage.error());
         };
-        let issue = match episode.plan_focus(&input.source, original, &row.reference)? {
+        let plan = if population {
+            episode.plan_page_wait_tasks_focus(&input.activity_frame()?)?
+        } else {
+            episode.plan_focus(&input.source, original, &row.reference)?
+        };
+        let issue = match plan {
             DiagnosticFocusPlan::NotRequired => continue,
             DiagnosticFocusPlan::Unavailable(issue) => {
                 episode.analysis = DiagnosticAnalysisStatus::Unresolved;
@@ -79,6 +104,21 @@ pub(super) fn qualify_questions(
             .map_err(|_| CollectionStop::InvalidPage.error())?,
     );
     rebuild_revisions(input, update)
+}
+
+/// A declared narrower request reader is not bypassed because its cost is unqualified or its evidence is
+/// temporarily absent. Only explicit catalog absence permits the supported task-population question.
+pub(crate) fn long_running_question(
+    recipes: &[RecipeDescriptor],
+    subject: &CollectionSubject,
+) -> Option<RecipeSelector> {
+    [RecipeSelector::CurrentRequestWork, RecipeSelector::PageWaitTasks].into_iter().find(|selector| {
+        recipes.iter().any(|recipe| {
+            recipe.purpose == RecipePurpose::Investigation
+                && recipe.selector == *selector
+                && recipe.subjects.iter().any(|declared| declared.accepts(subject))
+        })
+    })
 }
 
 fn qualification_issue(
@@ -153,12 +193,25 @@ fn rebuild_revisions(input: &DiagnosticInput, update: &mut DiagnosticUpdate) -> 
         .map(|revision| (revision.episode.id.clone(), revision))
         .collect::<BTreeMap<_, _>>();
     for episode in &mut update.checkpoint.episodes {
-        revisions.remove(&episode.id);
-        if let Some(revision) = DiagnosticRevision::between(
+        let observed_revision = revisions.remove(&episode.id);
+        if let Some(mut revision) = DiagnosticRevision::between(
             previous.get(episode.id.as_str()).copied(),
             episode.clone(),
             &update.analyzed_at,
         )? {
+            // Recipe wording/status changes do not remove the authenticated native prerequisites already used
+            // by the observer, including a paired population's exact first Activity receipt.
+            if let Some(observed) = observed_revision {
+                for reference in observed.inputs {
+                    if !revision.inputs.contains(&reference) {
+                        revision.inputs.push(reference);
+                    }
+                }
+            }
+            revision.id = revision.expected_id()?;
+            if !revision.is_valid() {
+                return Err(DeliveryProblem::Integrity.error());
+            }
             *episode = revision.episode.clone();
             revisions.insert(episode.id.clone(), revision);
         }
@@ -170,4 +223,31 @@ fn rebuild_revisions(input: &DiagnosticInput, update: &mut DiagnosticUpdate) -> 
         return Err(CollectionStop::InvalidPage.error());
     }
     Ok(())
+}
+
+fn qualify_task_questions(
+    input: &DiagnosticInput,
+    assignment: &DiagnosticAssignment,
+    recipes: &[RecipeDescriptor],
+    update: &mut DiagnosticUpdate,
+) -> Result<()> {
+    let recipe = recipes.iter().find(|recipe| {
+        recipe.purpose == RecipePurpose::Investigation
+            && recipe.selector == RecipeSelector::FocusedPageTaskHolders
+            && recipe.subjects.iter().any(|subject| subject.accepts(&assignment.subject))
+    });
+    for episode in &mut update.checkpoint.episodes {
+        if episode.analysis.needs_work()
+            && episode.latest.capture_ref() == input.parent
+            && matches!(episode.signal, DiagnosticSignal::PageTaskWait { .. })
+        {
+            episode.analysis = DiagnosticAnalysisStatus::Deferred;
+            episode.issue = Some(declared_issue(recipe));
+        }
+    }
+    update.step_id = digest(
+        &serde_json::to_vec(&("diagnostic-task-recipe-policy-v1", &update.step_id, recipes))
+            .map_err(|_| CollectionStop::InvalidPage.error())?,
+    );
+    rebuild_revisions(input, update)
 }

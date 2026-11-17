@@ -52,18 +52,22 @@ pub(super) fn observation(identity: IdentityDetail) -> String {
     // the general function documentation says it can return 0 there. Only a positive result grants admission;
     // 0/NULL never establish task absence. No virtual-master, service-objective or owner-name probe is made.
     // https://learn.microsoft.com/azure/azure-sql/database/security-server-roles#c-complete-example-add-a-login-to-a-server-level-role-retrieve-metadata-for-role-membership-and-permissions-and-run-a-test-query
-    let permission = r#"CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int)=5 THEN
- CASE WHEN DB_NAME()<>'master' AND IS_SRVROLEMEMBER('##MS_ServerStateReader##')=1
-  AND HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE STATE')=1 THEN 1 ELSE 0 END
- ELSE CASE WHEN CAST(PARSENAME(CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')),4) AS int)>=16
-  THEN CASE WHEN HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER PERFORMANCE STATE')=1 THEN 1 ELSE 0 END
-  ELSE CASE WHEN HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE')=1 THEN 1 ELSE 0 END END END"#;
+    let permission = task_visibility();
     format!(
         "{clock}DECLARE /* culprit */ @task_visibility bit={permission};\nIF @task_visibility=1\nBEGIN\n{tasks}\nEND\nELSE\nBEGIN\n{requests}\nEND",
         clock = super::super::sql::FRAME_CLOCK,
         tasks = select(&rows),
         requests = select(&requests),
     )
+}
+
+pub(super) fn task_visibility() -> &'static str {
+    r#"CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int)=5 THEN
+ CASE WHEN DB_NAME()<>'master' AND IS_SRVROLEMEMBER('##MS_ServerStateReader##')=1
+  AND HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','VIEW DATABASE STATE')=1 THEN 1 ELSE 0 END
+ ELSE CASE WHEN CAST(PARSENAME(CONVERT(varchar(128),SERVERPROPERTY('ProductVersion')),4) AS int)>=16
+  THEN CASE WHEN HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER PERFORMANCE STATE')=1 THEN 1 ELSE 0 END
+  ELSE CASE WHEN HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE')=1 THEN 1 ELSE 0 END END END"#
 }
 
 /// A durable focus admits only its original native request. It never selects a replacement population.

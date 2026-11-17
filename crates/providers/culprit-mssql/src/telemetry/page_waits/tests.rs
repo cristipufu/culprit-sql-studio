@@ -1,4 +1,5 @@
 use super::*;
+mod holders;
 mod writers;
 use crate::{
     activity::page_targets::tests::{context, page_wait, reader, reader_with_native, successful_replies},
@@ -321,4 +322,139 @@ async fn outer_caller_timeout_cannot_turn_unconfirmed_native_shutdown_into_a_ver
     assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
     assert!(source.finish().await.is_err());
     assert_eq!(source.query_count(), queries, "no authority recheck after a closed uncertain native owner");
+}
+
+#[tokio::test]
+async fn original_page_source_retains_only_the_already_read_native_database_role_without_more_queries() {
+    for (value, expected) in
+        [(Val::Text("READ_WRITE".into()), Some(true)), (Val::Text("READ_ONLY".into()), Some(false)), (Val::Null, None)]
+    {
+        let native = replace(&context(), &[("updateability", value)]);
+        let replies =
+            vec![Ok(vec![native.clone()]), Ok(vec![native.clone()]), Ok(vec![native.clone()]), Ok(vec![native])];
+        let mut source = PageWaitSource::from_reader(reader(replies), &request()).unwrap();
+        assert_eq!(source.query_count(), 0);
+        let description = source.describe().await.unwrap_or_else(|error| {
+            panic!("empty native role {expected:?}, queries {}: {error:?}", source.query_count())
+        });
+        let SourceObservation::PageWaitTargets { snapshot, database_writable, .. } = &description.observation else {
+            panic!("native page role header")
+        };
+        assert_eq!(*database_writable, expected);
+        assert_eq!(NativeReadContext::from_snapshot(&description).unwrap().database_writable, expected);
+        assert!(description.matches_request(&request()));
+        assert_eq!(snapshot.records, 0);
+        assert!(!snapshot.sources[0].complete_scope);
+        assert_eq!(source.query_count(), 3);
+        let CollectionRead::Page { records, next_cursor } =
+            source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+        else {
+            panic!("the empty native stream must still be drained")
+        };
+        assert!(records.is_empty());
+        assert!(next_cursor.is_none());
+        assert_eq!(source.finish().await.unwrap(), SourceCompletion::verified_if(expected.is_some()));
+        assert_eq!(source.query_count(), 4, "only the original final guard owns one existing query");
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn original_mapped_page_body_and_its_native_role_share_the_existing_final_guard_and_close() {
+    let mut replies = successful_replies(vec![page_wait(42, "PAGELATCH_EX", "7:1:4144")]);
+    replies.push(Ok(vec![context()]));
+    let mut source = PageWaitSource::from_reader(reader(replies), &request()).unwrap();
+    let description = source.describe().await.unwrap();
+    assert!(matches!(
+        description.observation,
+        SourceObservation::PageWaitTargets { database_writable: Some(true), .. }
+    ));
+    let CollectionRead::Page { records, next_cursor: None } =
+        source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+    else {
+        panic!("native mapped page")
+    };
+    assert_eq!(records.len(), 1);
+    assert_eq!(source.query_count(), 10);
+    for record in records {
+        ExportedRecord::new(
+            &description,
+            &CaptureIdentity { observation_id: "actual-native-page-role".into(), revision: None },
+            record,
+        )
+        .unwrap();
+    }
+    assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+    assert_eq!(source.query_count(), 11);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn paired_task_population_echoes_the_original_capture_in_the_same_reader_without_more_native_calls() {
+    let CollectionSelection::FocusedPageWait { focus } = focused_request().selection else { panic!() };
+    let activity = focus.participant.parent.capture_ref();
+    let request = CollectionRequest {
+        subject: CollectionSubject::Database,
+        selection: CollectionSelection::PageWaitTasks {
+            activity: activity.clone(),
+            original_requests: vec![ActivityRequestSelector {
+                key: focus.participant.original.key.clone(),
+                statement_identity: focus.participant.statement_identity.clone(),
+            }],
+            original_context: Box::new(NativeReadContext {
+                target: focus.participant.target.clone(),
+                partition: focus.participant.partition.clone(),
+                observed_from: focus.participant.original_observed_at.clone(),
+                observed_until: focus.participant.original_observed_at.clone(),
+                database_writable: focus.participant.database_writable,
+            }),
+        },
+        budget: CollectionBudget::default(),
+    };
+    let mut source =
+        PageWaitSource::from_reader(reader((0..4).map(|_| Ok(vec![context()])).collect()), &request).unwrap();
+    assert_eq!(source.query_count(), 0);
+    let description = source.describe().await.unwrap();
+    assert!(
+        matches!(&description.observation, SourceObservation::PageWaitTargets { original_activity: Some(original), .. } if original == &activity)
+    );
+    assert!(description.matches_request(&request));
+    assert!(matches!(description.observation.range().unwrap(), TelemetryRange::Focused { .. }));
+    assert!(!description.matches_request(&super::tests::request()));
+    let mut other = request.clone();
+    let CollectionSelection::PageWaitTasks { activity, .. } = &mut other.selection else { panic!() };
+    activity.manifest_sha256 = digest(b"different-original-capture");
+    assert!(!description.matches_request(&other));
+    assert_eq!(source.query_count(), 3);
+    let CollectionRead::Page { records, next_cursor } =
+        source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap()
+    else {
+        panic!("the empty paired stream must still be drained")
+    };
+    assert!(records.is_empty());
+    assert!(next_cursor.is_none());
+    assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
+    assert_eq!(source.query_count(), 4);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    let recipe =
+        crate::telemetry_recipes().into_iter().find(|recipe| recipe.selector == RecipeSelector::PageWaitTasks).unwrap();
+    assert_eq!(recipe.purpose, RecipePurpose::Investigation);
+    assert_eq!(recipe.cost, RecipeCostQualification::Unqualified);
+    assert_eq!(recipe.subjects, [RecipeSubject::Database]);
+}
+
+#[tokio::test]
+async fn known_empty_native_population_has_a_valid_partial_header_before_frozen_paging() {
+    let mut owner = PageWaitReader { reader: reader((0..4).map(|_| Ok(vec![context()])).collect()), guard: None };
+    let frame = culprit_read::ObservationReader::observe(&mut owner, &request())
+        .await
+        .unwrap_or_else(|error| panic!("empty native population, queries {}: {error:?}", owner.reader.query_count()));
+    assert!(frame.records.is_empty());
+    assert!(frame.description.partition_is_consistent(), "{:?}", frame.description);
+    assert!(frame.description.observation.covers_request(), "{:?}", frame.description);
+    assert!(frame.description.matches_request(&request()), "{:?}", frame.description);
+    assert_eq!(owner.reader.query_count(), 3);
+    assert!(culprit_read::ObservationReader::verify(&mut owner, &frame.description).await.unwrap());
+    assert_eq!(owner.reader.query_count(), 4);
+    assert_eq!(owner.reader.close().await, SourceShutdown::Quiescent);
 }

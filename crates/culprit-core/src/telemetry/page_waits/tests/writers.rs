@@ -1,5 +1,35 @@
 use super::*;
 
+/// Structurally valid controlled shared authority; no actual native read or production qualification is claimed.
+pub(in crate::telemetry::page_waits) fn shared_target(
+    target: &MappedPageTarget,
+    from: &str,
+    until: &str,
+) -> MappedPageTarget {
+    let resource = SharedResourceIdentity {
+        engine: Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("private-unrelated-shared-machine"),
+        native: NativeIdentity::new("private-unrelated-shared-instance"),
+    };
+    let scope = PageTargetScope::SharedResource {
+        context: Box::new(NativeReadContext {
+            target: CollectionTarget::Shared(resource.clone()),
+            partition: SourcePartition::InstanceLocal {
+                member: Some(resource),
+                epoch: Some("controlled-shared-native-epoch".into()),
+            },
+            observed_from: from.into(),
+            observed_until: until.into(),
+            database_writable: None,
+        }),
+    };
+    let (database, file) = scope.bind_identities(target.database.clone(), target.file.clone()).unwrap();
+    let target = MappedPageTarget { scope, database, file, ..target.clone() };
+    assert!(target.is_valid(), "the counterexample retains genuine bound shared context");
+    target
+}
+
 fn reference(key: NativeRecordIdentity, stream: TelemetryStream, ordinal: u32) -> DiagnosticEvidenceRef {
     let capture = CaptureIdentity {
         observation_id: "original-roster".into(),
@@ -23,7 +53,8 @@ fn reference(key: NativeRecordIdentity, stream: TelemetryStream, ordinal: u32) -
     }
 }
 
-fn fixture() -> (PageWaitWriterFocus, NativeReadContext, PageWaitWriterObservation) {
+pub(in crate::telemetry::page_waits) fn fixture() -> (PageWaitWriterFocus, NativeReadContext, PageWaitWriterObservation)
+{
     let mut page = observation();
     let target = page.target.as_mut().unwrap();
     let object = target.object.as_mut().unwrap();
@@ -247,6 +278,94 @@ fn unavailable_payload_and_changed_targets_withhold_writer_verdicts_without_inve
     assert!(!focus.accepts_observation(&context, &row), "missing payload is not a read-only plan");
 }
 
+fn with_target_state(mut row: PageWaitWriterObservation, state: PageWriterTargetState) -> PageWaitWriterObservation {
+    row.target_state = state;
+    if state != PageWriterTargetState::CurrentMapped {
+        for candidate in &mut row.candidates {
+            candidate.relation = PageWriterRelation::Unavailable;
+            candidate.binding = None;
+            candidate.plan_identity = None;
+            candidate.plan = DefinitionPayload::Unavailable { reason: PayloadUnavailable::SourceUnavailable };
+        }
+    }
+    row
+}
+
+#[test]
+fn every_writer_target_state_checks_the_retained_requests_database_without_inventing_unknown_labels() {
+    let (focus, context, original) = fixture();
+    for state in [
+        PageWriterTargetState::CurrentMapped,
+        PageWriterTargetState::NoLongerObserved,
+        PageWriterTargetState::ChangedTarget,
+        PageWriterTargetState::Unavailable,
+    ] {
+        let mut row = with_target_state(original.clone(), state);
+        assert!(focus.accepts_observation(&context, &row), "{state:?}");
+        row.page.as_mut().unwrap().request.database = None;
+        assert!(focus.accepts_observation(&context, &row), "missing labels remain unknown: {state:?}");
+        row.page.as_mut().unwrap().request.database = Some("foreign-database".into());
+        assert!(row.is_valid(), "the point is structurally valid: {state:?}");
+        assert!(!focus.accepts_observation(&context, &row), "{state:?}");
+    }
+}
+
+#[test]
+fn no_writer_target_state_can_borrow_a_valid_shared_mapping() {
+    let (focus, context, original) = fixture();
+    for state in [
+        PageWriterTargetState::CurrentMapped,
+        PageWriterTargetState::NoLongerObserved,
+        PageWriterTargetState::ChangedTarget,
+        PageWriterTargetState::Unavailable,
+    ] {
+        let mut row = with_target_state(original.clone(), state);
+        assert!(focus.accepts_observation(&context, &row), "{state:?}");
+        let page = row.page.as_mut().unwrap();
+        page.target =
+            Some(Box::new(shared_target(page.target.as_ref().unwrap(), &page.observed_from, &page.observed_until)));
+        assert!(page.is_valid(), "the shared page is independently valid: {state:?}");
+        assert!(row.is_valid(), "raw native fields alone do not establish the database lookup scope: {state:?}");
+        assert!(!focus.accepts_observation(&context, &row), "{state:?}");
+    }
+}
+
+#[test]
+fn a_shared_page_keeps_its_independent_capture_scope_after_database_lookup_is_refused() {
+    let (_, _, row) = fixture();
+    let mut page = *row.page.unwrap();
+    page.target =
+        Some(Box::new(shared_target(page.target.as_ref().unwrap(), &page.observed_from, &page.observed_until)));
+    let PageTargetScope::SharedResource { context } = &page.target.as_ref().unwrap().scope else { panic!() };
+    let source = CollectionDescription {
+        target: context.target.clone(),
+        partition: context.partition.clone(),
+        source: "independent-shared-page-recipe".into(),
+        continuity: SourceContinuity::Unverified,
+        observation: SourceObservation::PageWaitTargets {
+            snapshot: StateSnapshotDescription {
+                dataset: SnapshotDataset::PageWaitTargets,
+                observed_from: context.observed_from.clone(),
+                observed_until: context.observed_until.clone(),
+                records: 1,
+                sources: vec![StateSourceCoverage::observed(page.source.clone(), 1, false)],
+            },
+            database_writable: None,
+            original_activity: None,
+        },
+    };
+    assert!(page.fits_database_capture("sample"));
+    assert!(!page.fits_database_lookup("sample"));
+    assert!(page.fits_source_scope(&source));
+    let record = TelemetryRecord::Operational(OperationalObservation {
+        source: page.source.clone(),
+        key: page.key().unwrap(),
+        fact: OperationalFact::PageWait(Box::new(page)),
+    });
+    let capture = CaptureIdentity { observation_id: "independently-qualified-shared-page".into(), revision: None };
+    assert!(ExportedRecord::new(&source, &capture, record).is_ok());
+}
+
 #[test]
 fn proof_node_bound_and_exact_coverage_do_not_silently_drop_writers() {
     let (focus, context, row) = fixture();
@@ -296,13 +415,17 @@ fn a_parallel_task_page_cannot_be_reconstructed_as_a_coordinator_writer_question
         partition: context.partition,
         source: page.source.clone(),
         continuity: SourceContinuity::Unverified,
-        observation: SourceObservation::Snapshot(StateSnapshotDescription {
-            dataset: SnapshotDataset::PageWaitTargets,
-            observed_from: page.observed_from.clone(),
-            observed_until: page.observed_until.clone(),
-            records: 1,
-            sources: vec![StateSourceCoverage::observed(page.source.clone(), 1, false)],
-        }),
+        observation: SourceObservation::PageWaitTargets {
+            snapshot: StateSnapshotDescription {
+                dataset: SnapshotDataset::PageWaitTargets,
+                observed_from: page.observed_from.clone(),
+                observed_until: page.observed_until.clone(),
+                records: 1,
+                sources: vec![StateSourceCoverage::observed(page.source.clone(), 1, false)],
+            },
+            database_writable: context.database_writable,
+            original_activity: None,
+        },
     };
     focus.page.source_scope_id = source.captured_range().unwrap().scope_id;
     focus.page.native_key = NativeRecordIdentity::Operational { source: page.source.clone(), key: page.key().unwrap() };

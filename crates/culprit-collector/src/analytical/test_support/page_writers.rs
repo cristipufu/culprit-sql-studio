@@ -93,7 +93,7 @@ pub fn page_writer_fixture(case: PageWriterCase) -> PageWriterFixture {
         statement_identity: page.statement_identity.clone().unwrap(),
     };
     let page_record = operational(page.clone());
-    let SourceObservation::Snapshot(snapshot) = &mut page_source.observation else { unreachable!() };
+    let SourceObservation::PageWaitTargets { snapshot, .. } = &mut page_source.observation else { unreachable!() };
     snapshot.records = 1;
     snapshot.sources = vec![StateSourceCoverage::observed(page.source.clone(), 1, false)];
     let page_recovery = retained(&page_source, std::slice::from_ref(&page_record), PAGE_SEQUENCE);
@@ -363,7 +363,7 @@ fn operational(page: PageWaitObservation) -> TelemetryRecord {
     })
 }
 
-fn retained(source: &CollectionDescription, rows: &[TelemetryRecord], sequence: u64) -> Recovery {
+pub(super) fn retained(source: &CollectionDescription, rows: &[TelemetryRecord], sequence: u64) -> Recovery {
     Recovery::capture(
         "fixture:page-writers",
         &digest(b"page-writer-native-schema"),
@@ -373,7 +373,7 @@ fn retained(source: &CollectionDescription, rows: &[TelemetryRecord], sequence: 
     )
 }
 
-fn reference(recovery: &Recovery, record: &TelemetryRecord, ordinal: usize) -> DiagnosticEvidenceRef {
+pub(super) fn reference(recovery: &Recovery, record: &TelemetryRecord, ordinal: usize) -> DiagnosticEvidenceRef {
     let source = &recovery.manifest.source;
     let row = ExportedRecord::new(source, &recovery.manifest.capture, record.clone()).unwrap();
     DiagnosticEvidenceRef::from_export(source, &recovery.manifest.capture_manifest_sha256, &row, ordinal as u32)

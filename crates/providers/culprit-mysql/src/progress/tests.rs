@@ -26,13 +26,13 @@ async fn one_held_native_profile_retains_exact_current_request_temp_and_parent_l
     assert_eq!(point.actor, focus.original.key);
     assert_eq!(point.statement_identity, focus.statement_identity);
     assert_eq!(point.scope, ActivityScopeBasis::RequestDatabase);
-    assert_eq!(point.native.rows_examined.as_deref(), Some("9007199254740993"));
-    assert_eq!(point.native.created_tmp_tables.as_deref(), Some("1"));
-    assert_eq!(point.native.created_tmp_disk_tables.as_deref(), Some("0"));
-    assert!(point.native.sort_merge_passes.is_none());
-    let MysqlStageObservation::Observed { event } = &point.native.stage else { panic!() };
+    assert_eq!(point.native.mysql().unwrap().rows_examined.as_deref(), Some("9007199254740993"));
+    assert_eq!(point.native.mysql().unwrap().created_tmp_tables.as_deref(), Some("1"));
+    assert_eq!(point.native.mysql().unwrap().created_tmp_disk_tables.as_deref(), Some("0"));
+    assert!(point.native.mysql().unwrap().sort_merge_passes.is_none());
+    let MysqlStageObservation::Observed { event } = &point.native.mysql().unwrap().stage else { panic!() };
     assert_eq!(event.nesting_event_type, "STATEMENT");
-    assert_eq!(event.nesting_event_id, point.native.statement_event_id);
+    assert_eq!(event.nesting_event_id, point.native.mysql().unwrap().statement_event_id);
     assert!(event.timer_start_ps.is_none(), "an untimed stage can retain native parentage/work");
     assert_eq!(event.work_completed.as_deref(), Some("9007199254740993"));
     assert!(point.fits_source_scope(&description(&captured.snapshot)));
@@ -94,9 +94,9 @@ async fn stage_denial_preserves_request_temp_counters_and_terminal_errors_issue_
     let mut io = reader(after(), Err(Error::new(ErrorCode::PermissionDenied, "native stage denied")), statement(&[]));
     let captured = collect(&mut io, Some(&original_focus())).await.unwrap();
     let point = &captured.snapshot.observations[0];
-    assert_eq!(point.native.created_tmp_disk_tables.as_deref(), Some("0"));
+    assert_eq!(point.native.mysql().unwrap().created_tmp_disk_tables.as_deref(), Some("0"));
     assert_eq!(
-        point.native.stage,
+        point.native.mysql().unwrap().stage,
         MysqlStageObservation::Unavailable { reason: MysqlStageUnavailable::PermissionDenied }
     );
     assert_eq!(captured.snapshot.coverage.state, SourceState::Partial);
@@ -160,7 +160,10 @@ async fn maria_stage_events_keep_parent_identity_but_never_project_mysql_only_wo
         &io.queries.iter().find(|(sql, _, _)| sql.contains("FROM performance_schema.events_stages_current")).unwrap().0;
     assert!(sql.contains("NULL AS work_completed, NULL AS work_estimated"));
     assert!(!sql.contains("WORK_COMPLETED AS"));
-    let MysqlStageObservation::Observed { event } = &captured.snapshot.observations[0].native.stage else { panic!() };
+    let MysqlStageObservation::Observed { event } = &captured.snapshot.observations[0].native.mysql().unwrap().stage
+    else {
+        panic!()
+    };
     assert!(event.work_completed.is_none() && event.work_estimated.is_none());
     assert_eq!(event.nesting_event_type, "STATEMENT");
 }
@@ -279,15 +282,18 @@ async fn disabled_stage_consumers_skip_that_read_and_changed_stage_configuration
     let mut io = Read::with(replies);
     let captured = collect(&mut io, Some(&original_focus())).await.unwrap();
     assert_eq!(
-        captured.snapshot.observations[0].native.stage,
+        captured.snapshot.observations[0].native.mysql().unwrap().stage,
         MysqlStageObservation::Unavailable { reason: MysqlStageUnavailable::InstrumentationDisabled }
     );
     assert!(!io.queries.iter().any(|(sql, _, _)| sql.contains("FROM performance_schema.events_stages_current")));
     let mut io = reader(bound(AFTER, "8.4.0", Some(UUID), false, 100, false), Ok(vec![stage(&[])]), statement(&[]));
     let captured = collect(&mut io, Some(&original_focus())).await.unwrap();
-    assert_eq!(captured.snapshot.observations[0].native.created_tmp_tables.as_deref(), Some("1"));
+    assert_eq!(captured.snapshot.observations[0].native.mysql().unwrap().created_tmp_tables.as_deref(), Some("1"));
     assert_eq!(captured.snapshot.coverage.state, SourceState::Partial);
-    assert!(matches!(captured.snapshot.observations[0].native.stage, MysqlStageObservation::Unavailable { .. }));
+    assert!(matches!(
+        captured.snapshot.observations[0].native.mysql().unwrap().stage,
+        MysqlStageObservation::Unavailable { .. }
+    ));
 }
 
 #[tokio::test]
@@ -304,17 +310,17 @@ async fn an_absent_stage_consumer_is_unknown_at_either_bound_instead_of_explicit
     let mut io = Read::with(rows);
     let captured = collect(&mut io, Some(&original_focus())).await.unwrap();
     assert_eq!(
-        captured.snapshot.observations[0].native.stage,
+        captured.snapshot.observations[0].native.mysql().unwrap().stage,
         MysqlStageObservation::Unavailable { reason: MysqlStageUnavailable::NotCollected }
     );
     assert!(!io.queries.iter().any(|(sql, _, _)| sql.contains("FROM performance_schema.events_stages_current")));
     let mut io = reader(unknown(AFTER), Ok(vec![stage(&[])]), statement(&[]));
     let captured = collect(&mut io, Some(&original_focus())).await.unwrap();
     assert_eq!(
-        captured.snapshot.observations[0].native.stage,
+        captured.snapshot.observations[0].native.mysql().unwrap().stage,
         MysqlStageObservation::Unavailable { reason: MysqlStageUnavailable::NotCollected }
     );
-    assert_eq!(captured.snapshot.observations[0].native.created_tmp_tables.as_deref(), Some("1"));
+    assert_eq!(captured.snapshot.observations[0].native.mysql().unwrap().created_tmp_tables.as_deref(), Some("1"));
     assert_eq!(captured.snapshot.coverage.state, SourceState::Partial);
 }
 

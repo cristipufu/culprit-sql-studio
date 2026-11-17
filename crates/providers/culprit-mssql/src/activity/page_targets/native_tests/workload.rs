@@ -8,8 +8,12 @@ use std::{
 use tokio::sync::Barrier;
 
 pub(super) const WRITERS_PER_PATTERN: usize = 8;
+pub(super) const HOLDER_ROWS_PER_WORKER: usize = 8192;
+pub(super) const WRITER_APPLICATIONS: [&str; 2] = ["page-fixture-write-a", "page-fixture-write-b"];
+const HOLDER_LOCK_TIMEOUT_MS: u32 = 5000;
 const MAX_INSERTS: usize = 16_384;
 const RUN_MS: u32 = 4000;
+const COMPLETION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub(super) struct CompletedWorker {
@@ -17,27 +21,55 @@ pub(super) struct CompletedWorker {
     pub inserts: u64,
 }
 
+struct WorkerStatement {
+    pattern: u8,
+    sql: String,
+}
+
 impl Fixture {
     pub async fn start_workload(&mut self, split_second: bool, unrelated_select: bool) -> Result<Instant> {
+        let count = WRITERS_PER_PATTERN * 2 + usize::from(unrelated_select);
+        let workers = (0..count)
+            .map(|index| {
+                let pattern = if index == WRITERS_PER_PATTERN * 2 { 0 } else { (index % 2 + 1) as u8 };
+                WorkerStatement { pattern, sql: statement(pattern, split_second) }
+            })
+            .collect();
+        self.start_workers(workers).await
+    }
+
+    /// One bounded INSERT per actor keeps its native statement locator stable throughout the actual write.
+    /// It does not force the engine to expose a holder or change the independent timed A/B workload.
+    pub async fn start_holder_workload(&mut self) -> Result<Instant> {
+        if !self.holder_gate_active() {
+            return Err(invalid("owned single-INSERT actors require their retained seed gate"));
+        }
+        let workers = (0..WRITERS_PER_PATTERN * 2)
+            .map(|index| {
+                let pattern = (index % 2 + 1) as u8;
+                WorkerStatement { pattern, sql: holder_statement(pattern) }
+            })
+            .collect();
+        self.start_workers(workers).await
+    }
+
+    async fn start_workers(&mut self, workers: Vec<WorkerStatement>) -> Result<Instant> {
         if !self.workers.is_empty() {
             return Err(invalid("previous fixture workers were not joined"));
         }
-        let count = WRITERS_PER_PATTERN * 2 + usize::from(unrelated_select);
-        let barrier = Arc::new(Barrier::new(count + 1));
+        let barrier = Arc::new(Barrier::new(workers.len() + 1));
         // Establish every connection before starting the comparable native work window.
         let mut clients = Vec::new();
-        for index in 0..count {
-            let pattern = if index == WRITERS_PER_PATTERN * 2 { 0 } else { (index % 2 + 1) as u8 };
-            let application = match pattern {
-                1 => "page-fixture-write-a",
-                2 => "page-fixture-write-b",
+        for worker in workers {
+            let application = match worker.pattern {
+                1 => WRITER_APPLICATIONS[0],
+                2 => WRITER_APPLICATIONS[1],
                 _ => "page-fixture-unrelated-select",
             };
-            clients.push((self.client(application).await?, pattern));
+            clients.push((self.client(application).await?, worker));
         }
-        for (mut client, pattern) in clients {
+        for (mut client, WorkerStatement { pattern, sql }) in clients {
             let barrier = barrier.clone();
-            let sql = statement(pattern, split_second);
             self.workers.push(Some(tokio::spawn(async move {
                 barrier.wait().await;
                 let rows =
@@ -59,21 +91,29 @@ impl Fixture {
     }
     pub async fn finish_workload(&mut self) -> Result<Vec<CompletedWorker>> {
         let mut completed = Vec::new();
+        let deadline = tokio::time::Instant::now() + COMPLETION_TIMEOUT;
         for slot in &mut self.workers {
-            let mut task = slot.take().ok_or_else(|| invalid("owned worker was already joined"))?;
-            match tokio::time::timeout(Duration::from_secs(10), &mut task).await {
-                Ok(result) => completed.push(result.map_err(|_| invalid("owned worker task failed"))??),
-                Err(_) => {
-                    // Keep the pending owner for fixture cleanup; a completed handle is never polled twice.
-                    *slot = Some(task);
-                    return Err(invalid("owned worker exceeded finite workload deadline"));
-                }
-            }
+            let task = slot.as_mut().ok_or_else(|| invalid("owned worker was already joined"))?;
+            let result = tokio::time::timeout_at(deadline, task)
+                .await
+                .map_err(|_| invalid("owned workers exceeded their shared completion deadline"))?;
+            // Cancellation leaves the pending handle in its fixture; completed handles are removed before errors.
+            slot.take();
+            completed.push(result.map_err(|_| invalid("owned worker task failed"))??);
         }
         self.workers.clear();
         Ok(completed)
     }
 }
+
+fn holder_statement(pattern: u8) -> String {
+    // Two fixed 100-row seed inputs bound the row population. The source-side locking hint only gates the
+    // same INSERT for its original Activity capture; it does not identify or hold the target page's latch.
+    format!(
+        "SET NOCOUNT ON; SET LOCK_TIMEOUT {HOLDER_LOCK_TIMEOUT_MS}; INSERT dbo.page_fixture_hot(marker) SELECT TOP ({HOLDER_ROWS_PER_WORKER}) {pattern} FROM dbo.page_fixture_select a WITH(READCOMMITTEDLOCK) CROSS JOIN dbo.page_fixture_select b; SELECT CONVERT(bigint,@@ROWCOUNT) AS completed;"
+    )
+}
+
 fn statement(pattern: u8, split_second: bool) -> String {
     let work=match pattern {
         1=>"INSERT dbo.page_fixture_hot(marker) VALUES(1)".to_string(),

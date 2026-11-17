@@ -34,6 +34,26 @@ async fn selection(selector: RecipeSelector) -> CollectionSelection {
                 &crate::activity::page_targets::tests::page_wait(42, "PAGELATCH_EX", "7:1:4144"),
             )),
         },
+        RecipeSelector::PageWaitTasks => {
+            let focus = crate::activity::page_targets::holders::test_focus().await.participant;
+            CollectionSelection::PageWaitTasks {
+                activity: focus.parent.capture_ref(),
+                original_requests: vec![ActivityRequestSelector {
+                    key: focus.original.key.clone(),
+                    statement_identity: focus.statement_identity.clone(),
+                }],
+                original_context: Box::new(NativeReadContext {
+                    target: focus.target,
+                    partition: focus.partition,
+                    observed_from: focus.original_observed_at.clone(),
+                    observed_until: focus.original_observed_at,
+                    database_writable: focus.database_writable,
+                }),
+            }
+        }
+        RecipeSelector::FocusedPageTaskHolders => CollectionSelection::PageTaskHolders {
+            focus: Box::new(crate::activity::page_targets::holders::test_focus().await),
+        },
         RecipeSelector::FocusedPageWaitWriters => CollectionSelection::PageWaitWriters {
             focus: Box::new(crate::activity::page_targets::writers::test_focus().await),
         },

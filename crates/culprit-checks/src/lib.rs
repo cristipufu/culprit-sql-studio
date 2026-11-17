@@ -29,9 +29,9 @@ pub(crate) use checks::{config, deadlocks, index_health, indexes, pressure, quer
 pub(crate) use views::{advisor, brief, digest};
 pub use views::{
     cache_entry_memory, cleanup, compilation, compiler_admission, connection_outcomes, current_request_work, dashboard,
-    drift, focused_blocking, jobs, maintenance, maintenance_progress, memory_failures, native_failures, page_waits,
-    replication, request_memory, runtime_distributions, session_memory, statement_grants, statement_work, task_space,
-    temporary_work, waits,
+    drift, focused_blocking, jobs, maintenance, maintenance_blocking, maintenance_progress, memory_failures,
+    native_failures, page_waits, replication, request_memory, runtime_distributions, session_memory, statement_grants,
+    statement_work, task_space, temporary_work, waits,
 };
 
 use std::sync::Arc;

@@ -5,11 +5,16 @@ use crate::{ObservedWaitResource, WaitResourceKind};
 mod blocking;
 mod compiler_admission;
 mod current_request_work;
+mod page_tasks;
+pub use page_tasks::ActivityRequestSelector;
 mod plan;
 mod question;
 mod request_memory;
 pub use compiler_admission::{ActivityCompilationAdmissionFocusResult, CompilationAdmissionMembership};
-pub use plan::{DiagnosticFocusPlan, PageWaitFocusPlan, plan_page_wait_writer_focus, supports_page_wait_writers};
+pub use plan::{
+    DiagnosticFocusPlan, PageWaitFocusPlan, plan_page_task_holder_focus, plan_page_wait_writer_focus,
+    supports_page_wait_writers,
+};
 pub use question::DiagnosticFocus;
 pub use request_memory::{ActivityRequestMemoryFocusResult, RequestMemoryMembership};
 

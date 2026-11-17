@@ -10,6 +10,10 @@ mod blocking;
 pub(crate) use blocking::blocking;
 mod connection_outcomes;
 pub(crate) use connection_outcomes::connection_outcomes;
+mod maintenance_blocking;
+pub(crate) use maintenance_blocking::maintenance_blocking;
+mod page_task_holders;
+pub(crate) use page_task_holders::page_task_holders;
 
 struct Summary<'a> {
     title: &'a str,

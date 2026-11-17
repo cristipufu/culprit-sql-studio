@@ -211,6 +211,77 @@ fn assert_no_source(state: &Boundaries) {
     assert_eq!(state.secret_accesses.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn standalone_parent_dependent_selections_stop_before_route_authentication_admission_or_output() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_outbox, focus, native_calls) = retained_parent(&directory.path().join("retained-original")).await;
+    let state = Arc::new(Boundaries::default());
+    let workspace = configured(&directory.path().join("workspace"), &state);
+    let parent = focus.participant.parent.capture_ref();
+    for selection in [
+        CollectionSelection::PageWaitTasks {
+            activity: parent.clone(),
+            original_requests: vec![ActivityRequestSelector {
+                key: focus.participant.original.key.clone(),
+                statement_identity: focus.participant.statement_identity.clone(),
+            }],
+            // Standalone collection must refuse even a structurally qualified context before authenticating it.
+            original_context: Box::new(
+                NativeReadContext::from_activity(
+                    &culprit_collector::analytical::test_support::page_task_holder_fixture(
+                        culprit_collector::analytical::test_support::PageTaskHolderCase::QualifiedBoth,
+                    )
+                    .activity_source,
+                )
+                .unwrap(),
+            ),
+        },
+        CollectionSelection::Diagnostics {
+            parent,
+            controller_version: DIAGNOSTIC_CONTROLLER_VERSION,
+            step_id: digest(b"parent-dependent-step"),
+        },
+    ] {
+        let request = CollectionRequest { selection, ..baseline_request() };
+        request.validate().unwrap();
+        assert!(request.selection.focus().is_none(), "a capture prerequisite need not have an Activity focus");
+        for name in ["pilot", "missing-route"] {
+            let output = directory.path().join(format!("unadmitted-{name}"));
+            let error = workspace
+                .collect_once(name, request.clone(), &output, &CollectionCancellation::default())
+                .await
+                .unwrap_err();
+            assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::InvalidPage)));
+            assert_no_workspace_work(&workspace, &output);
+        }
+    }
+    assert_eq!(state.authentication.load(Ordering::SeqCst), 0);
+    assert_eq!(state.closes.load(Ordering::SeqCst), 0);
+    assert_no_source(&state);
+    assert_eq!(native_calls.load(Ordering::SeqCst), 2, "standalone collection must not reopen the original source");
+}
+
+#[tokio::test]
+async fn standalone_raw_page_targets_reach_normal_route_validation_without_a_parent_resolver() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = Arc::new(Boundaries::default());
+    let workspace = configured(&directory.path().join("workspace"), &state);
+    let request = CollectionRequest {
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets },
+        ..baseline_request()
+    };
+    request.validate().unwrap();
+    let output = directory.path().join("raw-page-output");
+    let error = workspace
+        .collect_once("missing-route", request, &output, &CollectionCancellation::default())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::NotFound, "ordinary raw pages still pass the standalone selection policy");
+    assert_eq!(state.authentication.load(Ordering::SeqCst), 0);
+    assert_no_source(&state);
+    assert_no_workspace_work(&workspace, &output);
+}
+
 #[test]
 fn native_route_revision_reads_only_saved_metadata_with_hostile_authentication_and_ssh() {
     let directory = tempfile::tempdir().unwrap();

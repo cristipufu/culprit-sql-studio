@@ -40,12 +40,26 @@ enum PublicObservation<'a> {
         membership: CompilationAdmissionMembership,
     },
     MaintenanceProgressContext(FocusedRequestContext<'a>),
-    CurrentRequestWorkContext(FocusedRequestContext<'a>),
+    CurrentRequestWorkContext {
+        profile: CurrentRequestWorkProfile,
+        #[serde(flatten)]
+        context: FocusedRequestContext<'a>,
+    },
     CacheEntryMemoryContext {
         snapshot: &'a StateSnapshotDescription,
         focus_key: String,
     },
     PageWaitWritersContext {
+        snapshot: &'a StateSnapshotDescription,
+        focus_key: String,
+        database_writable: Option<bool>,
+    },
+    PageWaitTargetsContext {
+        snapshot: &'a StateSnapshotDescription,
+        database_writable: Option<bool>,
+        original_activity_key: Option<String>,
+    },
+    PageTaskHoldersContext {
         snapshot: &'a StateSnapshotDescription,
         focus_key: String,
         database_writable: Option<bool>,
@@ -107,12 +121,26 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
             closure: &result.closure,
         },
         SourceObservation::Snapshot(value) => PublicObservation::Snapshot(value),
+        SourceObservation::PageWaitTargets { snapshot, database_writable, original_activity } => {
+            PublicObservation::PageWaitTargetsContext {
+                snapshot,
+                database_writable: *database_writable,
+                original_activity_key: original_activity.as_ref().map(DiagnosticCaptureRef::key).transpose()?,
+            }
+        }
         SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
         SourceObservation::CacheEntryMemory { snapshot, focus } => {
             PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }
         }
         SourceObservation::PageWaitWriters { snapshot, focus, database_writable } => {
             PublicObservation::PageWaitWritersContext {
+                snapshot,
+                focus_key: focus.key()?,
+                database_writable: *database_writable,
+            }
+        }
+        SourceObservation::PageTaskHolders { snapshot, focus, database_writable } => {
+            PublicObservation::PageTaskHoldersContext {
                 snapshot,
                 focus_key: focus.key()?,
                 database_writable: *database_writable,
@@ -137,8 +165,11 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
         SourceObservation::MaintenanceProgress { snapshot, result } => {
             PublicObservation::MaintenanceProgressContext(FocusedRequestContext::new(snapshot, result)?)
         }
-        SourceObservation::CurrentRequestWork { snapshot, result } => {
-            PublicObservation::CurrentRequestWorkContext(FocusedRequestContext::new(snapshot, result)?)
+        SourceObservation::CurrentRequestWork { profile, snapshot, result } => {
+            PublicObservation::CurrentRequestWorkContext {
+                profile: *profile,
+                context: FocusedRequestContext::new(snapshot, result)?,
+            }
         }
         SourceObservation::FocusedPageWait { snapshot, result } => PublicObservation::FocusedPageWaitContext {
             snapshot,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::rows::Row;
+use crate::{read::QueryRead, rows::Row};
 use std::collections::{BTreeMap, VecDeque};
 
 pub(crate) const BACKEND: &str = "2026-11-15T08:00:00.000001Z";
@@ -129,6 +129,20 @@ pub(crate) fn cluster_progress(command: &str, changes: &[(&str, Option<&str>)]) 
         ("heap_blks_total", None),
         ("heap_blks_scanned", None),
         ("index_rebuild_count", Some("1")),
+    ];
+    fields.extend_from_slice(changes);
+    native_progress(&fields)
+}
+
+pub(crate) fn copy_progress(changes: &[(&str, Option<&str>)]) -> Row {
+    let mut fields = vec![
+        ("command", Some("COPY FROM")),
+        ("type", Some("PIPE")),
+        ("bytes_processed", Some("9007199254740993")),
+        ("bytes_total", Some("0")),
+        ("tuples_processed", Some("9007199254740993")),
+        ("tuples_excluded", Some("0")),
+        ("tuples_skipped", None),
     ];
     fields.extend_from_slice(changes);
     native_progress(&fields)

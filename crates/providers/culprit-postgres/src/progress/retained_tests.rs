@@ -172,13 +172,15 @@ async fn postgres_11_live_capture_uses_one_compatible_clock_projection_and_only_
         assert!(!io.calls.iter().any(|sql| sql.contains(absent)), "{absent}");
     }
     assert_eq!(captured.actor.as_ref().unwrap().key, original_focus().original.key);
-    assert!(captured.snapshot.context.has_qualified_local_owner());
-    assert!(captured.other_phase.is_none());
-    assert_eq!(captured.snapshot.source, vacuum::SOURCE);
-    assert_eq!(phase_fraction(&captured.snapshot.observations[0]), Some(0.2));
-    assert_eq!(captured.snapshot.result.membership, FocusedRequestMembership::Observed);
-    assert_eq!(captured.snapshot.coverage.state, culprit_core::SourceState::Partial);
-    assert!(captured.snapshot.is_valid());
+    let reader::CapturedProgress::Maintenance(snapshot) = &captured.progress else {
+        panic!("VACUUM retains its maintenance family")
+    };
+    assert!(snapshot.context.has_qualified_local_owner());
+    assert_eq!(snapshot.source, vacuum::SOURCE);
+    assert_eq!(phase_fraction(&snapshot.observations[0]), Some(0.2));
+    assert_eq!(snapshot.result.membership, FocusedRequestMembership::Observed);
+    assert_eq!(snapshot.coverage.state, culprit_core::SourceState::Partial);
+    assert!(snapshot.is_valid());
     let progress = project("42", captured);
     assert_eq!(progress.phase.as_deref(), Some("VACUUM: scanning heap"));
     assert_eq!(progress.phase_percent, Some(0.2));

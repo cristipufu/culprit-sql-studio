@@ -2,6 +2,8 @@
 use super::*;
 use crate::WaitResourceKind;
 use std::collections::{BTreeMap, BTreeSet};
+mod tasks;
+pub use tasks::observe_diagnostic_page_task;
 
 pub struct DiagnosticActivityRow<'a> {
     pub reference: &'a DiagnosticEvidenceRef,
@@ -126,6 +128,7 @@ pub fn observe_diagnostic_activity(
     let can_resolve = diagnostic_baseline_can_resolve(&scope, native.coverage.state, native.coverage.complete_scope);
     for episode in episodes.values_mut() {
         if !scope.partition.is_qualified()
+            || episode.signal.is_task_point()
             || observed.contains(&episode.id)
             || episode.lifecycle == DiagnosticLifecycle::Resolved
         {

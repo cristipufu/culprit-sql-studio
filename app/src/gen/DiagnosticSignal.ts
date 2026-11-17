@@ -2,10 +2,12 @@
 import type { ActivityCondition } from "./ActivityCondition";
 import type { ActivityKey } from "./ActivityKey";
 import type { ActivityPolicy } from "./ActivityPolicy";
+import type { DiagnosticEvidenceRef } from "./DiagnosticEvidenceRef";
+import type { MssqlPageTaskWait } from "./MssqlPageTaskWait";
 import type { NativeIdentity } from "./NativeIdentity";
 import type { ObservedWaitResource } from "./ObservedWaitResource";
 
 /**
  * The implemented native questions retain typed evidence; hashes are storage indexes, never diagnostic policy.
  */
-export type DiagnosticSignal = { "kind": "activity", key: ActivityKey, condition: ActivityCondition, policy: ActivityPolicy, } | { "kind": "lock-wait", key: ActivityKey, } | { "kind": "request-memory", key: ActivityKey, statement_identity: NativeIdentity | null, } | { "kind": "compilation-admission", key: ActivityKey, statement_identity: NativeIdentity | null, } | { "kind": "page-wait", key: ActivityKey, statement_identity: NativeIdentity | null, resource: ObservedWaitResource, };
+export type DiagnosticSignal = { "kind": "activity", key: ActivityKey, condition: ActivityCondition, policy: ActivityPolicy, } | { "kind": "lock-wait", key: ActivityKey, } | { "kind": "request-memory", key: ActivityKey, statement_identity: NativeIdentity | null, } | { "kind": "compilation-admission", key: ActivityKey, statement_identity: NativeIdentity | null, } | { "kind": "page-wait", key: ActivityKey, statement_identity: NativeIdentity | null, resource: ObservedWaitResource, } | { "kind": "page-task-wait", key: ActivityKey, statement_identity: NativeIdentity, parent: DiagnosticEvidenceRef, page: DiagnosticEvidenceRef, task: MssqlPageTaskWait, database_writable: boolean, };

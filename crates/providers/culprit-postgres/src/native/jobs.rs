@@ -59,15 +59,16 @@ pub(crate) async fn capture<R: NativeRead>(
     if catalog != final_catalog {
         return Err(CollectionStop::SourceChanged.error());
     }
+    let database_writable = Some(before.writable_role());
     let snapshot = TimescaleJobsSnapshot {
         context: NativeReadContext {
             target: before.database.into(),
             partition: SourcePartition::Target,
             observed_from: before.at,
             observed_until: after.at,
-            database_writable: Some(!before.standby),
+            database_writable,
         },
-        metadata: catalog.metadata(Some(!before.standby)),
+        metadata: catalog.metadata(database_writable),
         sources,
         observations,
     };

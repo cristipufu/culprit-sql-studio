@@ -74,7 +74,14 @@ impl FocusedRequestResult {
     pub fn is_valid_source(&self, source: &CollectionDescription, snapshot: &StateSnapshotDescription) -> bool {
         let expected = match &source.observation {
             SourceObservation::MaintenanceProgress { .. } => SnapshotDataset::MaintenanceProgress,
-            SourceObservation::CurrentRequestWork { .. } => SnapshotDataset::CurrentRequestWork,
+            SourceObservation::CurrentRequestWork { profile, .. } => {
+                if source.target.engine() != profile.engine()
+                    || self.focus.as_deref().is_some_and(|focus| !profile.accepts_focus(focus))
+                {
+                    return false;
+                }
+                SnapshotDataset::CurrentRequestWork
+            }
             _ => return false,
         };
         snapshot.dataset == expected

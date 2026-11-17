@@ -3,6 +3,7 @@ mod blocking;
 mod partitions;
 mod planning;
 mod recovery;
+mod task_holders;
 mod transition;
 use crate::{
     analytical::test_support::{activity_evidence_cases, activity_observation},
@@ -133,6 +134,25 @@ impl Harness {
             }
             SourceObservation::FocusedPageWait { result, .. } => {
                 CollectionSelection::FocusedPageWait { focus: Box::new(result.focus.clone()) }
+            }
+            SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } => {
+                let original = self
+                    .outbox
+                    .diagnostic_input(&activity.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)
+                    .await
+                    .unwrap();
+                let frame = original.activity_frame().unwrap();
+                CollectionSelection::PageWaitTasks {
+                    original_requests: frame.page_wait_task_requests().unwrap(),
+                    activity: activity.clone(),
+                    original_context: Box::new(frame.context()),
+                }
+            }
+            SourceObservation::PageWaitTargets { .. } => {
+                CollectionSelection::Snapshot { dataset: SnapshotDataset::PageWaitTargets }
+            }
+            SourceObservation::PageTaskHolders { focus, .. } => {
+                CollectionSelection::PageTaskHolders { focus: focus.clone() }
             }
             SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },
             _ => panic!("the controller fixture captures frozen observations only"),

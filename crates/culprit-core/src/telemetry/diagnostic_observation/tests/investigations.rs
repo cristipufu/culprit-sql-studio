@@ -1,6 +1,7 @@
 use super::*;
 use crate::ComponentVersion;
 
+mod page_tasks;
 mod page_writers;
 mod request_memory;
 
@@ -485,7 +486,15 @@ fn initial_owner_lineage_reconstructs_the_exact_intent_without_a_native_source_d
     assert_eq!(lineage.intent_key, intent.key().unwrap());
     assert_eq!(lineage.budget, intent.budget);
     assert_eq!(lineage.qualification, intent.qualification);
-    assert!(serde_json::to_value(lineage).unwrap().get("focus").is_none());
+    assert_eq!(serde_json::to_value(lineage).unwrap()["focus"], serde_json::to_value(&intent.focus).unwrap());
+
+    let mut missing_focus = serde_json::to_value(&manifest).unwrap();
+    missing_focus["investigation"].as_object_mut().unwrap().remove("focus").expect("the required saved focus");
+    assert!(serde_json::from_value::<CollectionManifest>(missing_focus).is_err());
+
+    let mut replaced_focus = manifest;
+    replaced_focus.investigation.as_mut().unwrap().focus.participant_mut().parent.row_ordinal += 1;
+    assert!(replaced_focus.investigation_intent().is_err());
 }
 
 #[test]
@@ -616,4 +625,32 @@ mod shared;
 fn activity_scope(receipt: &mut RecipeCostReceipt) -> &mut DiagnosticScope {
     let RecipeCostScope::Activity(scope) = &mut receipt.scope else { panic!() };
     scope
+}
+
+#[test]
+fn task_holder_cost_receipts_share_the_existing_scoped_identity_and_settled_accounting_requirements() {
+    let mut case = scenario();
+    case.recipe.id = "fixture.page-task-holder-cost".into();
+    case.recipe.selector = RecipeSelector::FocusedPageTaskHolders;
+    let id = case.recipe.id.clone();
+    let receipt = case.receipt();
+    receipt.recipe_id = id;
+    receipt.selector = RecipeSelector::FocusedPageTaskHolders;
+    assert!(receipt.is_valid(), "bounded structural evidence alone never grants native admission");
+    assert!(case.recipe.is_valid());
+    let RecipeCostQualification::Measured(receipt) = &case.recipe.cost else { panic!() };
+    assert!(receipt.matches_recipe(&case.recipe));
+    for defect in ["epoch", "reference", "active-work", "query-limit"] {
+        let mut invalid = (**receipt).clone();
+        match defect {
+            "epoch" => activity_scope(&mut invalid).native_epoch = None,
+            "reference" => invalid.evidence.payload_sha256 = "unverified".into(),
+            "active-work" => invalid.read_metrics.active_tasks = 1,
+            _ => invalid.tested_budget.max_queries = 1,
+        }
+        assert!(!invalid.is_valid(), "{defect}");
+    }
+    let mut unsupported = (**receipt).clone();
+    unsupported.selector = RecipeSelector::CacheEntryMemory;
+    assert!(!unsupported.is_valid(), "a cache lookup has no incident-triggered focused-intent cost contract");
 }

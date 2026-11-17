@@ -73,17 +73,19 @@ fn result(
         scope: focus.original.scope,
         statement_identity: focus.statement_identity.clone(),
         statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
-        native: MysqlCurrentRequestWork {
-            thread_id: focus.original.key.session.generation.clone(),
-            statement_event_id: request.id.clone(),
-            timer_start_ps: request.generation.clone(),
-            timer_wait_ps: Some("9007199254740993".into()),
-            rows_examined: Some("9007199254740993".into()),
-            rows_sent: Some("1".into()),
-            created_tmp_tables: Some("3".into()),
-            created_tmp_disk_tables: Some("2".into()),
-            sort_merge_passes: Some("7".into()),
-            stage: MysqlStageObservation::NotObserved,
+        native: CurrentRequestWorkNative::Mysql {
+            work: Box::new(MysqlCurrentRequestWork {
+                thread_id: focus.original.key.session.generation.clone(),
+                statement_event_id: request.id.clone(),
+                timer_start_ps: request.generation.clone(),
+                timer_wait_ps: Some("9007199254740993".into()),
+                rows_examined: Some("9007199254740993".into()),
+                rows_sent: Some("1".into()),
+                created_tmp_tables: Some("3".into()),
+                created_tmp_disk_tables: Some("2".into()),
+                sort_merge_passes: Some("7".into()),
+                stage: MysqlStageObservation::NotObserved,
+            }),
         },
     };
     let count = u32::from(membership == FocusedRequestMembership::Observed);
@@ -97,6 +99,7 @@ fn result(
         source: "synthetic-current-request-work".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::CurrentRequestWork {
+            profile: CurrentRequestWorkProfile::MysqlStatementEvent,
             snapshot: StateSnapshotDescription {
                 dataset: SnapshotDataset::CurrentRequestWork,
                 observed_from: point.observed_at.clone(),
@@ -336,7 +339,7 @@ fn altered_raw_points_or_receipts_fail_and_partial_evidence_cannot_claim_complet
     let (first, focus) = original();
     let mut captured = result(&focus, FocusedRequestBinding::Matched, FocusedRequestMembership::Observed, true);
     let OperationalFact::CurrentRequestWork(point) = &mut captured.2[0].1.fact else { panic!() };
-    point.native.created_tmp_disk_tables = Some("999".into());
+    point.native.mysql_mut().unwrap().created_tmp_disk_tables = Some("999".into());
     let rows = captured
         .2
         .iter()

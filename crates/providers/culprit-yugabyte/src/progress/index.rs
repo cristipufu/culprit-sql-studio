@@ -58,7 +58,10 @@ fn decode(row: &Row, database: u32, node: &str, expected: &ActivityKey) -> Resul
     let point = MaintenanceProgressObservation {
         observed_at: canonical_time(&native::text(row, "observed_at")?)?,
         actor,
-        statement: Some(activity::statement_identity(&pid, &backend, &request).qualified("node", node)),
+        statement: Some(
+            culprit_core::engines::postgres_activity_statement_identity(&pid, &backend, &request)
+                .qualified("node", node),
+        ),
         database_oid: database.to_string(),
         relation_oid: native::text(row, "relation_oid")?,
         index_oid: Some(native::text(row, "index_oid")?),

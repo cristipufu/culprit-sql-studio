@@ -5,12 +5,34 @@ use super::*;
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 #[ts(export)]
 pub enum DiagnosticFocus {
-    Blocking { focus: Box<ActivityRequestFocus> },
-    PageWait { focus: Box<ActivityWaitFocus> },
-    PageWaitWriters { focus: Box<PageWaitWriterFocus> },
-    RequestMemory { focus: Box<ActivityRequestFocus> },
-    CompilationAdmission { focus: Box<ActivityRequestFocus> },
-    CurrentRequestWork { focus: Box<ActivityRequestFocus> },
+    Blocking {
+        focus: Box<ActivityRequestFocus>,
+    },
+    PageWait {
+        focus: Box<ActivityWaitFocus>,
+    },
+    PageWaitWriters {
+        focus: Box<PageWaitWriterFocus>,
+    },
+    PageTaskHolders {
+        focus: Box<PageTaskHolderFocus>,
+    },
+    RequestMemory {
+        focus: Box<ActivityRequestFocus>,
+    },
+    CompilationAdmission {
+        focus: Box<ActivityRequestFocus>,
+    },
+    CurrentRequestWork {
+        focus: Box<ActivityRequestFocus>,
+    },
+    /// The incident participant justifies a bounded population lookup. It never makes other task rows this
+    /// request's exclusive population; every result still names the exact earlier Activity capture.
+    PageWaitTasks {
+        focus: Box<ActivityRequestFocus>,
+        original_context: Box<NativeReadContext>,
+        original_requests: Vec<ActivityRequestSelector>,
+    },
 }
 
 impl DiagnosticFocus {
@@ -18,20 +40,24 @@ impl DiagnosticFocus {
         match self {
             Self::PageWait { focus } => &focus.participant,
             Self::PageWaitWriters { focus } => &focus.waiter.participant,
+            Self::PageTaskHolders { focus } => &focus.participant,
             Self::Blocking { focus }
             | Self::RequestMemory { focus }
             | Self::CompilationAdmission { focus }
-            | Self::CurrentRequestWork { focus } => focus,
+            | Self::CurrentRequestWork { focus }
+            | Self::PageWaitTasks { focus, .. } => focus,
         }
     }
     pub fn participant_mut(&mut self) -> &mut ActivityRequestFocus {
         match self {
             Self::PageWait { focus } => &mut focus.participant,
             Self::PageWaitWriters { focus } => &mut focus.waiter.participant,
+            Self::PageTaskHolders { focus } => &mut focus.participant,
             Self::Blocking { focus }
             | Self::RequestMemory { focus }
             | Self::CompilationAdmission { focus }
-            | Self::CurrentRequestWork { focus } => focus,
+            | Self::CurrentRequestWork { focus }
+            | Self::PageWaitTasks { focus, .. } => focus,
         }
     }
     pub fn page_wait(&self) -> Option<&ActivityWaitFocus> {
@@ -53,9 +79,11 @@ impl DiagnosticFocus {
             Self::Blocking { .. } => RecipeSelector::FocusedBlocking,
             Self::PageWait { .. } => RecipeSelector::FocusedPageWait,
             Self::PageWaitWriters { .. } => RecipeSelector::FocusedPageWaitWriters,
+            Self::PageTaskHolders { .. } => RecipeSelector::FocusedPageTaskHolders,
             Self::RequestMemory { .. } => RecipeSelector::FocusedRequestMemory,
             Self::CompilationAdmission { .. } => RecipeSelector::FocusedCompilationAdmission,
             Self::CurrentRequestWork { .. } => RecipeSelector::CurrentRequestWork,
+            Self::PageWaitTasks { .. } => RecipeSelector::PageWaitTasks,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -63,9 +91,17 @@ impl DiagnosticFocus {
             Self::Blocking { focus } => focus.is_blocking_focus(),
             Self::PageWait { focus } => focus.is_valid(),
             Self::PageWaitWriters { focus } => focus.is_valid(),
+            Self::PageTaskHolders { focus } => focus.is_valid(),
             Self::RequestMemory { focus } => focus.is_request_memory_focus(),
             Self::CompilationAdmission { focus } => focus.is_compilation_admission_focus(),
             Self::CurrentRequestWork { focus } => focus.is_current_request_work_focus(),
+            Self::PageWaitTasks { focus, original_context, original_requests } => {
+                focus.is_page_wait_tasks_focus(original_context)
+                    && ActivityRequestSelector::is_canonical(original_requests)
+                    && original_requests.iter().any(|request| {
+                        request.key == focus.original.key && request.statement_identity == focus.statement_identity
+                    })
+            }
         }
     }
     pub fn from_selection(selection: &CollectionSelection) -> Option<Self> {
@@ -75,6 +111,7 @@ impl DiagnosticFocus {
                 Some(Self::PageWait { focus: focus.clone() })
             }
             CollectionSelection::PageWaitWriters { focus } => Some(Self::PageWaitWriters { focus: focus.clone() }),
+            CollectionSelection::PageTaskHolders { focus } => Some(Self::PageTaskHolders { focus: focus.clone() }),
             CollectionSelection::FocusedRequestMemory { focus } => Some(Self::RequestMemory { focus: focus.clone() }),
             CollectionSelection::CurrentRequestWork { focus } => {
                 Some(Self::CurrentRequestWork { focus: focus.clone() })
@@ -92,7 +129,14 @@ impl DiagnosticFocus {
         original: &ActivityObservation,
         reference: &DiagnosticEvidenceRef,
     ) -> bool {
-        self.is_valid() && self.participant().matches_parent(source, original, reference)
+        self.is_valid()
+            && self.participant().matches_parent(source, original, reference)
+            && match self {
+                Self::PageWaitTasks { original_context, .. } => {
+                    NativeReadContext::from_activity(source).is_ok_and(|context| context == **original_context)
+                }
+                _ => true,
+            }
     }
 
     /// Immutable prerequisites are authenticated and pinned before admission, including every original writer
@@ -100,6 +144,7 @@ impl DiagnosticFocus {
     pub fn references(&self) -> impl Iterator<Item = &DiagnosticEvidenceRef> {
         let (page, candidates) = match self {
             Self::PageWaitWriters { focus } => (Some(&focus.page), focus.candidates.as_slice()),
+            Self::PageTaskHolders { focus } => (Some(&focus.page), &[][..]),
             _ => (None, &[][..]),
         };
         let mut seen = Vec::new();
@@ -122,11 +167,17 @@ impl DiagnosticFocus {
             Self::Blocking { focus } => CollectionSelection::FocusedBlocking { focus: focus.clone() },
             Self::PageWait { focus } => CollectionSelection::FocusedPageWait { focus: focus.clone() },
             Self::PageWaitWriters { focus } => CollectionSelection::PageWaitWriters { focus: focus.clone() },
+            Self::PageTaskHolders { focus } => CollectionSelection::PageTaskHolders { focus: focus.clone() },
             Self::RequestMemory { focus } => CollectionSelection::FocusedRequestMemory { focus: focus.clone() },
             Self::CompilationAdmission { focus } => {
                 CollectionSelection::FocusedCompilationAdmission { focus: focus.clone() }
             }
             Self::CurrentRequestWork { focus } => CollectionSelection::CurrentRequestWork { focus: focus.clone() },
+            Self::PageWaitTasks { focus, original_context, original_requests } => CollectionSelection::PageWaitTasks {
+                activity: focus.parent.capture_ref(),
+                original_context: original_context.clone(),
+                original_requests: original_requests.clone(),
+            },
         }
     }
 }

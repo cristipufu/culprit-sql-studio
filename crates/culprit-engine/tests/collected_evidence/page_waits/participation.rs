@@ -49,7 +49,7 @@ impl Investigation {
         page.request.statement =
             DefinitionPayload::sql("SELECT later_waiter_current_sql_canary", culprit_core::Engine::Mssql);
         page_source.partition = local_partition();
-        let SourceObservation::Snapshot(mut snapshot) = page_source.observation else { unreachable!() };
+        let SourceObservation::PageWaitTargets { mut snapshot, .. } = page_source.observation else { unreachable!() };
         snapshot.records = 1;
         snapshot.sources = vec![StateSourceCoverage::observed(page.source.clone(), 1, false)];
         page_source.observation = SourceObservation::FocusedPageWait {

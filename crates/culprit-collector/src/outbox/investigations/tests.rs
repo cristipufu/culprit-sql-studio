@@ -4,6 +4,7 @@ mod page_writers;
 mod request_memory;
 mod retirement;
 mod shared;
+mod task_holders;
 use super::*;
 use crate::{
     collection_files::ObservationFiles,

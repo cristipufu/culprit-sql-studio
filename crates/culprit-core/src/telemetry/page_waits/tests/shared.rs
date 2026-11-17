@@ -50,13 +50,17 @@ fn source(row: &PageWaitObservation) -> CollectionDescription {
         partition: context.partition.clone(),
         source: SOURCE.into(),
         continuity: SourceContinuity::Unverified,
-        observation: SourceObservation::Snapshot(StateSnapshotDescription {
-            dataset: SnapshotDataset::PageWaitTargets,
-            observed_from: context.observed_from.clone(),
-            observed_until: context.observed_until.clone(),
-            records: 1,
-            sources: vec![StateSourceCoverage::observed(SOURCE.into(), 1, false)],
-        }),
+        observation: SourceObservation::PageWaitTargets {
+            snapshot: StateSnapshotDescription {
+                dataset: SnapshotDataset::PageWaitTargets,
+                observed_from: context.observed_from.clone(),
+                observed_until: context.observed_until.clone(),
+                records: 1,
+                sources: vec![StateSourceCoverage::observed(SOURCE.into(), 1, false)],
+            },
+            database_writable: None,
+            original_activity: None,
+        },
     }
 }
 
@@ -100,7 +104,9 @@ fn export_binds_a_valid_shared_page_to_its_own_authenticated_owner_and_native_ep
                 *epoch = Some("another-native-epoch".into());
             }
             "bounds" => {
-                let SourceObservation::Snapshot(snapshot) = &mut description.observation else { panic!() };
+                let SourceObservation::PageWaitTargets { snapshot, .. } = &mut description.observation else {
+                    panic!()
+                };
                 snapshot.observed_from = row.observed_from.clone();
             }
             _ => unreachable!(),
@@ -158,7 +164,7 @@ fn shared_scope_and_original_native_bounds_must_match_the_actual_capture_not_an_
     }
     assert!(!row.fits_source_scope(&description));
     let mut description = source(&row);
-    let SourceObservation::Snapshot(frame) = &mut description.observation else { panic!() };
+    let SourceObservation::PageWaitTargets { snapshot: frame, .. } = &mut description.observation else { panic!() };
     frame.observed_from = row.observed_from.clone();
     assert!(
         !row.fits_source_scope(&description),

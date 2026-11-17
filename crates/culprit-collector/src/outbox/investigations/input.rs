@@ -255,6 +255,58 @@ impl Files {
         self.page_writer_contexts(focus).map(|_| ())
     }
 
+    /// The original frame is authenticated before native page capture. Its member/role are never filled later.
+    pub(in crate::outbox) fn verified_page_task_activity(
+        &mut self,
+        activity: &DiagnosticCaptureRef,
+    ) -> Result<(DiagnosticInput, NativeReadContext, Vec<ActivityRequestSelector>)> {
+        if !activity.is_valid() {
+            return Err(integrity());
+        }
+        let original = self.diagnostic_input(&activity.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
+        if original.parent != *activity || !matches!(original.source.observation, SourceObservation::Activity(_)) {
+            return Err(integrity());
+        }
+        let frame = original.activity_frame()?;
+        let context = frame.context();
+        if !context.has_qualified_local_owner()
+            || frame.native().database_writable.is_none()
+            || frame.native().scope != culprit_core::MeasurementScope::Database
+            || original.source.target.database().is_none()
+            || original.source.target.engine() != culprit_core::Engine::Mssql
+            || original.source.source != culprit_core::source_id::SESSIONS
+        {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::message!("collection.unsupported"),
+            ));
+        }
+        let requests = frame.page_wait_task_requests()?;
+        Ok((original, context, requests))
+    }
+
+    pub(in crate::outbox) fn verify_page_task_holder_focus(&mut self, focus: &PageTaskHolderFocus) -> Result<()> {
+        if !focus.is_valid() {
+            return Err(integrity());
+        }
+        let parent =
+            self.diagnostic_input(&focus.participant.parent.capture.observation_id, DIAGNOSTIC_CONTROLLER_VERSION)?;
+        let frame = parent.activity_frame()?;
+        if !focus.matches_activity_frame(&frame) {
+            return Err(integrity());
+        }
+        let (source, row) = self.diagnostic_reference(&focus.page)?;
+        let TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::PageWait(page), .. }) =
+            &row.record
+        else {
+            return Err(integrity());
+        };
+        if !focus.matches_page(&source, page, &focus.page) {
+            return Err(integrity());
+        }
+        Ok(())
+    }
+
     pub(super) fn page_writer_contexts(&mut self, focus: &PageWaitWriterFocus) -> Result<Vec<DiagnosticEvidenceRef>> {
         if !focus.is_valid() {
             return Err(integrity());
@@ -286,6 +338,19 @@ impl Files {
         }
         match &intent.focus {
             DiagnosticFocus::PageWaitWriters { focus } => self.verify_page_writer_focus(focus)?,
+            DiagnosticFocus::PageTaskHolders { focus } => self.verify_page_task_holder_focus(focus)?,
+            DiagnosticFocus::PageWaitTasks { focus, original_context, original_requests } => {
+                let (original, context, requests) = self.verified_page_task_activity(&focus.parent.capture_ref())?;
+                if context != **original_context
+                    || requests != *original_requests
+                    || !original.rows.iter().any(|row| {
+                        matches!(&row.row.record, TelemetryRecord::Activity(observation)
+                        if intent.focus.matches_parent(&original.source, observation, &row.reference))
+                    })
+                {
+                    return Err(integrity());
+                }
+            }
             _ => self.verify_focus_parent(intent.focus.participant())?,
         }
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
@@ -499,6 +564,12 @@ impl Files {
 }
 
 fn pin_restored_focus(tx: &Transaction<'_>, input: &RestoredInput) -> Result<()> {
+    if let SourceObservation::PageWaitTargets { original_activity: Some(activity), .. } = &input.source.observation {
+        tx.execute(
+            "INSERT OR IGNORE INTO diagnostic_pins SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM diagnostic_inputs WHERE observation_id=?3 AND acknowledged=0)",
+            params![format!("focus:{}",input.parent.capture.observation_id),activity.capture.observation_id,input.parent.capture.observation_id],
+        ).map_err(storage)?;
+    }
     if let Some(focus) = input.source.observation.diagnostic_focus() {
         let captures = focus.references().map(|reference| &reference.capture.observation_id).collect::<BTreeSet<_>>();
         for capture in captures {

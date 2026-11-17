@@ -1,8 +1,10 @@
 use super::*;
+use crate::telemetry::native_tests::case;
 use crate::{
     connect::Connector,
     rows::{quote_ident, tagged},
 };
+use culprit_collector::capture::CollectionCancellation;
 use culprit_core::ConnectionSpec;
 use futures_util::{FutureExt, future::LocalBoxFuture};
 use std::{panic::AssertUnwindSafe, time::Duration};
@@ -15,6 +17,7 @@ type BuildResult = (Client, std::result::Result<(), tokio_postgres::Error>);
 
 pub(super) struct Fixture {
     pub specification: ConnectionSpec,
+    pub cancellation: CollectionCancellation,
     pub builder_pid: i32,
     pub holder_pid: i32,
     connector: Connector,
@@ -31,21 +34,18 @@ pub(super) struct Fixture {
 impl Fixture {
     pub(super) async fn run(case: &str, body: for<'a> fn(&'a mut Self) -> LocalBoxFuture<'a, ()>) {
         let mut fixture = Self::open(case).await;
-        let result = tokio::time::timeout(
-            CASE_TIMEOUT,
-            AssertUnwindSafe(async {
-                body(&mut fixture).await;
-            })
-            .catch_unwind(),
-        )
-        .await;
+        let cancellation = fixture.cancellation.clone();
+        let completed =
+            case::finish(CASE_TIMEOUT, &cancellation, AssertUnwindSafe(body(&mut fixture)).catch_unwind()).await;
         let settled = fixture.cleanup().await;
         eprintln!("owned maintenance fixture cleanup_confirmed={settled}; source cost remains unqualified");
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(panic)) => std::panic::resume_unwind(panic),
-            Err(_) => panic!("owned maintenance fixture exceeded its absolute deadline; cleanup_confirmed={settled}"),
+        if let Err(panic) = completed.value {
+            std::panic::resume_unwind(panic);
         }
+        assert!(
+            !completed.deadline_reached,
+            "owned maintenance fixture exceeded its absolute deadline; cleanup_confirmed={settled}"
+        );
         assert!(settled, "owned maintenance fixture cleanup must be confirmed");
     }
 
@@ -58,6 +58,7 @@ impl Fixture {
             tokio::time::timeout(CONTROL_TIMEOUT, connector.connect_unconfigured()).await.unwrap().unwrap().client;
         Self {
             specification,
+            cancellation: CollectionCancellation::default(),
             connector,
             schema: format!("culprit_maintenance_{}_{}", owned_fixture::owner(), case),
             builder_pid: 0,
@@ -205,7 +206,7 @@ impl Fixture {
             settled = false;
         }
         self.idle_builder.take();
-        if self.admin_in_flight {
+        if !settled || self.admin_in_flight {
             self.admin.take();
             return false;
         }

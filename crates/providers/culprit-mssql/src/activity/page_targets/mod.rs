@@ -6,6 +6,7 @@
 mod context;
 mod fields;
 mod focus;
+pub(crate) mod holders;
 #[cfg(test)]
 pub(crate) use focus::tests::focus as test_focus;
 mod index_context;
@@ -49,6 +50,10 @@ impl PageWaitCapture {
             Some(shared) if self.guard.0.shared_only => Ok(shared.partition()),
             _ => self.guard.0.authority.source_partition(),
         }
+    }
+    /// The connected application's updateability is not the role of an independently scoped shared tempdb.
+    pub(crate) fn database_writable(&self) -> Option<bool> {
+        self.collection_target().database().and(self.context.writable)
     }
     pub(crate) fn task_visibility_unavailable(&self) -> bool {
         self.guard.0.task_visibility == Some(false)
@@ -98,15 +103,62 @@ impl<R: NativeRead> ActivityReader<R> {
     }
 
     pub(crate) async fn capture_scan_page_wait_targets(&mut self, include_shared: bool) -> Result<PageWaitCapture> {
+        self.capture_page_population(include_shared, None).await
+    }
+
+    pub(crate) async fn capture_paired_page_wait_targets(
+        &mut self,
+        original: &NativeReadContext,
+        requests: &[ActivityRequestSelector],
+    ) -> Result<PageWaitCapture> {
+        if !ActivityRequestSelector::is_canonical(requests)
+            || !original.has_qualified_local_owner()
+            || original.target.database().is_none()
+            || original.database_writable.is_none()
+        {
+            return Err(invalid_data());
+        }
+        self.capture_page_population(false, Some((original, requests))).await
+    }
+
+    async fn capture_page_population(
+        &mut self,
+        include_shared: bool,
+        original: Option<(&NativeReadContext, &[ActivityRequestSelector])>,
+    ) -> Result<PageWaitCapture> {
         if !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
             return Err(invalid_data());
         }
         let initial = context::initial_scan(self, include_shared).await?;
-        let population = self.page_population().await?;
+        if let Some((original, _)) = original {
+            let current = initial.capture_context()?;
+            let context = NativeReadContext {
+                target: current.database.into(),
+                partition: initial.authority.source_partition()?,
+                observed_from: current.at.clone(),
+                observed_until: current.at,
+                database_writable: current.writable,
+            };
+            if !context.has_qualified_local_owner() || context.database_writable.is_none() {
+                return Err(CollectionStop::SourceUnavailable.error());
+            }
+            if !context.matches_earlier_scope(original) {
+                return Err(CollectionStop::SourceChanged.error());
+            }
+        }
+        let mut population = self.page_population().await?;
         if !initial.matches_initial(&population.frame) {
             return Err(CollectionStop::SourceChanged.error());
         }
-        self.capture_selected_page_wait_targets(population, initial, LookupAdmission::ObservedPopulation).await
+        let admission = if let Some((_, requests)) = original {
+            population.retain_requests(requests, initial.authority.database_id);
+            // The existing participant/wait recheck still precedes deep work. Original Activity need not
+            // have had this wait; this guards the currently selected point without borrowing old wait facts.
+            LookupAdmission::OriginalFocus
+        } else {
+            LookupAdmission::ObservedPopulation
+        };
+        self.capture_selected_page_wait_targets(population, initial, admission).await
     }
 
     /// Caller admission must independently own this actual shared resource. The reader verifies that native
