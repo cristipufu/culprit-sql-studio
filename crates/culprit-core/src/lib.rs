@@ -14,7 +14,10 @@ pub mod compilation;
 pub mod compilation_report;
 pub mod compiler_admission_report;
 pub mod connection;
+pub mod connection_outcome_report;
+pub mod connection_outcomes;
 pub mod connection_security;
+pub mod counter_rates;
 pub mod coverage;
 pub mod current_request_work_report;
 pub mod dashboard;
@@ -33,6 +36,7 @@ pub mod i18n;
 pub mod index_filter;
 pub mod insights;
 pub mod io_accounting;
+pub mod jobs_report;
 #[cfg(test)]
 mod label_tests;
 pub mod limits;
@@ -104,6 +108,8 @@ pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
     aws_iam_host_allowed, aws_region_valid, entra_host_allowed, expand_home, is_local_host, transport_error,
 };
+pub use connection_outcome_report::*;
+pub use connection_outcomes::*;
 pub use connection_security::{
     ConnectionSecurity, ConnectionSecurityInfo, ConnectionSecurityMode, ConnectionSecuritySpec,
     apply_connection_security, connection_security,
@@ -130,6 +136,7 @@ pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
 pub use io_accounting::{FileIoContext, IoAccounting};
+pub use jobs_report::{JobEntry, JobEntryKind, JobsReport};
 pub use maintenance::*;
 pub use maintenance_progress_report::{MaintenanceProgressEntry, MaintenanceProgressReport};
 pub use measurement::*;

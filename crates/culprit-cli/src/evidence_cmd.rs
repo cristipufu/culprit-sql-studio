@@ -169,6 +169,7 @@ enum Analysis {
     Blocking,
     MemoryFailures,
     NativeFailures,
+    Jobs,
     RequestMemory,
     SessionMemory,
     PageWaits,
@@ -185,6 +186,7 @@ enum Analysis {
     MaintenanceProgress,
     CurrentRequestWork,
     Replication,
+    ConnectionOutcomes,
     Cleanup,
     Tuning,
 }
@@ -201,7 +203,8 @@ impl Analysis {
                 EvidenceFamily::QueryRuntime,
                 EvidenceFamily::QueryWaits,
             ],
-            Self::MemoryFailures
+            Self::Jobs
+            | Self::MemoryFailures
             | Self::NativeFailures
             | Self::RequestMemory
             | Self::SessionMemory
@@ -209,6 +212,7 @@ impl Analysis {
             | Self::PageWaitWriters
             | Self::TaskSpace
             | Self::StatementWork
+            | Self::ConnectionOutcomes
             | Self::StatementGrants
             | Self::CacheEntryMemory
             | Self::RuntimeDistributions
@@ -344,9 +348,17 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             let analysis = culprit_engine::collected_resources::current_request_work(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::current_request_work(&analysis.report))?;
         }
+        Some(Analysis::Jobs) => {
+            let analysis = culprit_engine::collected_resources::jobs(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::jobs(&analysis.report))?;
+        }
         Some(Analysis::Replication) => {
             let analysis = culprit_engine::collected_resources::replication(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::replication(&analysis.report))?;
+        }
+        Some(Analysis::ConnectionOutcomes) => {
+            let analysis = culprit_engine::collected_resources::connection_outcomes(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::connection_outcomes(&analysis.report))?;
         }
         Some(Analysis::Tuning) => {
             let analysis = culprit_engine::collected_resources::tuning(&capture)?;

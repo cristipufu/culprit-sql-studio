@@ -77,6 +77,26 @@ impl CollectionTarget {
         }
     }
 
+    /// Compare one declared database namespace with its enclosing scan. Unknown identity establishes neither
+    /// attribution nor source continuity; independent archive analysis does not require an enclosing scan.
+    pub fn snapshot_namespace_comparison(&self, snapshot: &crate::Snapshot) -> crate::Comparison {
+        use crate::{Comparison, ComparisonReason};
+        if self.engine() != snapshot.server.engine {
+            return Comparison::Incompatible(ComparisonReason::DifferentEngine);
+        }
+        let Some(database) = self.database() else {
+            return Comparison::Incompatible(ComparisonReason::UnknownIdentity);
+        };
+        if database.database != snapshot.server.database {
+            return Comparison::Incompatible(ComparisonReason::DifferentDatabase);
+        }
+        snapshot
+            .identity
+            .as_ref()
+            .map(|identity| identity.comparison(database))
+            .unwrap_or(Comparison::Incompatible(ComparisonReason::UnknownIdentity))
+    }
+
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Database(database) => !database.database.trim().is_empty(),

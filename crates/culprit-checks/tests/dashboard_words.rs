@@ -551,7 +551,7 @@ Health Watch Health: Reads served from shared_buffers: 55.29%.
   metric Watch: 1
   metric Healthy: 0
   item Reads served from shared_buffers: 55.29%
-Health Info Health: 13 signals recorded; none has a threshold to grade.
+Health Info Health: 10 signals recorded; none has a threshold to grade.
   detail: Each signal states the period it measures.
   metric Bad: 0
   metric Watch: 0
@@ -1034,11 +1034,13 @@ fn storage_connections_replication_failures_and_statistics_say_what_they_said() 
     // New connections a second, and none counted.
     let mysql = snapshot("mysql-demo.report.json");
     let mut s = mysql.clone();
-    if let Some(sig) =
-        s.pressure.as_mut().unwrap().signals.iter_mut().find(|g| g.key == culprit_core::signal_id::NEW_CONNECTIONS)
-    {
-        sig.value = 12.5;
-    }
+    s.pressure.as_mut().unwrap().signals.push(Signal::new(
+        culprit_core::signal_id::NEW_CONNECTIONS,
+        "Provided native connection rate",
+        12.5,
+        culprit_core::SignalUnit::PerSecond,
+        culprit_core::SignalScope::SinceStartup,
+    ));
     out.push(said(s.clone(), TileKey::Connections));
     s.pressure.as_mut().unwrap().signals.retain(|g| g.key != culprit_core::signal_id::NEW_CONNECTIONS);
     out.push(said(s, TileKey::Connections));

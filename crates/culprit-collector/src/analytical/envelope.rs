@@ -129,6 +129,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
             context["observed_until"] = json!(snapshot.observed_until);
         }
         SourceObservation::Snapshot(snapshot)
+        | SourceObservation::Jobs { snapshot, .. }
         | SourceObservation::FocusedPageWait { snapshot, .. }
         | SourceObservation::PageWaitWriters { snapshot, .. }
         | SourceObservation::FocusedRequestMemory { snapshot, .. }

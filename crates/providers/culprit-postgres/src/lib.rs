@@ -5,6 +5,7 @@ mod collect;
 mod connect;
 pub mod deadlocks;
 mod generic;
+mod jobs;
 mod memory;
 mod native;
 mod operations;

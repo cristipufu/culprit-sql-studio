@@ -185,7 +185,7 @@ pub async fn snapshot(
         connector.port,
         None,
     ));
-    let replication = crate::signals::collect(&mut reader, &probe, &mut snapshot).await;
+    let readings = crate::signals::collect(&mut reader, &probe, &mut snapshot).await;
     let ordinary_shutdown = reader.close().await;
     if ordinary_shutdown != culprit_core::telemetry::SourceShutdown::Quiescent {
         snapshot.operations.statement_work =
@@ -195,7 +195,7 @@ pub async fn snapshot(
                 Some(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed),
             )));
     }
-    crate::signals::settle_replication(&mut snapshot, replication, ordinary_shutdown);
+    crate::signals::settle(&mut snapshot, readings, ordinary_shutdown);
     // The optional source has its own observation bounds and ownership. Never start a new native operation
     // after the ordinary scan left uncertain work on this connector.
     if ordinary_shutdown == culprit_core::telemetry::SourceShutdown::Quiescent {

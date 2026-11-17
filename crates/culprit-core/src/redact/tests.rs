@@ -1,6 +1,7 @@
 use super::plan::is_measurement;
 use super::*;
 
+mod jobs;
 mod native_context;
 mod parameter_context;
 mod replication;

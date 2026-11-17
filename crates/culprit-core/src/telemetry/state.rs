@@ -27,6 +27,7 @@ pub enum SnapshotDataset {
     TaskSpace,
     MemoryFailures,
     NativeFailures,
+    Jobs,
     IndexOperations,
     Tables,
     ForeignKeys,
@@ -67,6 +68,7 @@ impl SnapshotDataset {
             | Self::TaskSpace
             | Self::MemoryFailures
             | Self::NativeFailures
+            | Self::Jobs
             | Self::IndexOperations
             | Self::Tables
             | Self::Statistics
@@ -452,6 +454,8 @@ pub enum OperationalFact {
     MssqlOutOfMemory(Box<MssqlOutOfMemoryObservation>),
     MysqlErrorLog(Box<MysqlErrorLogObservation>),
     PostgresLog(Box<PostgresLogFailureObservation>),
+    TimescaleJobState(Box<TimescaleJobState>),
+    TimescaleJobRun(Box<TimescaleJobRun>),
     StatementCounters(Box<StatementCounterSample>),
     RuntimeDistribution(Box<StatementRuntimeDistribution>),
     DiagnosticRevision(Box<DiagnosticRevision>),
@@ -492,6 +496,8 @@ impl OperationalFact {
             Self::MssqlOutOfMemory(observation) => observation.key(),
             Self::MysqlErrorLog(observation) => observation.key(),
             Self::PostgresLog(observation) => observation.key(),
+            Self::TimescaleJobState(point) => point.key(),
+            Self::TimescaleJobRun(point) => point.key(),
             Self::StatementCounters(counters) => counters.key(),
             Self::RuntimeDistribution(observation) => observation.key(),
             Self::DiagnosticRevision(revision) => Ok(revision.id.clone()),
@@ -549,6 +555,8 @@ impl OperationalFact {
             | Self::StatementCounters(_)
             | Self::RuntimeDistribution(_)
             | Self::MaintenanceProgress(_)
+            | Self::TimescaleJobState(_)
+            | Self::TimescaleJobRun(_)
             | Self::DiagnosticRevision(_)
             | Self::CounterSet(_)
             | Self::Retention(_)
@@ -607,6 +615,8 @@ impl OperationalFact {
             Self::MssqlOutOfMemory(observation) => observation.is_valid(),
             Self::MysqlErrorLog(observation) => observation.is_valid(),
             Self::PostgresLog(observation) => observation.is_valid(),
+            Self::TimescaleJobState(point) => point.is_valid(),
+            Self::TimescaleJobRun(point) => point.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),
@@ -647,6 +657,8 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::TimescaleJobState(_) => self.source == TIMESCALE_JOBS_SOURCE,
+                OperationalFact::TimescaleJobRun(_) => self.source == TIMESCALE_JOB_RUNS_SOURCE,
                 OperationalFact::CompilerWaiter(_) => self.source == crate::source_id::COMPILATION_GATEWAYS,
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,

@@ -860,15 +860,12 @@ pub fn counter_rate_per_day(snapshot: &Snapshot, total: f64) -> Option<f64> {
 
 /// A counter's own declared reset, without borrowing the server or workload clock.
 pub fn counter_days_since(snapshot: &Snapshot, reset: &culprit_core::ResetMarker) -> Option<f64> {
-    days_between(reset.at()?, &snapshot.taken_at).filter(|days| *days >= 0.0)
+    culprit_core::counter_rates::counter_span_seconds(reset, &snapshot.taken_at).map(|seconds| seconds / 86400.0)
 }
 pub fn counter_rate_per_day_since(snapshot: &Snapshot, total: f64, reset: &culprit_core::ResetMarker) -> Option<f64> {
-    if !total.is_finite() || total < 0.0 {
-        return None;
-    }
     counter_days_since(snapshot, reset)
-        .filter(|days| days * 24.0 >= culprit_core::RATE_MIN_HOURS)
-        .map(|days| total / days)
+        .and_then(|days| culprit_core::counter_rates::AdmittedCounterRate::new(total, days * 86400.0))
+        .map(culprit_core::counter_rates::AdmittedCounterRate::per_day)
 }
 
 pub fn lower_set(items: &[String]) -> Vec<String> {

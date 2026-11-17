@@ -66,6 +66,19 @@ async fn every_static_declaration_selects_one_real_native_constructor_without_op
 }
 
 #[test]
+fn expanded_status_allowlist_revises_only_its_recipe_identity_without_qualifying_cost() {
+    let declarations = declarations();
+    let operational = declarations.iter().find(|recipe| recipe.id == "mysql.operational").unwrap();
+    assert_eq!(operational.version, 2);
+    assert_eq!(
+        operational.selector,
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Operational))
+    );
+    assert!(declarations.iter().filter(|recipe| recipe.id != "mysql.operational").all(|recipe| recipe.version == 1));
+    assert!(declarations.iter().all(|recipe| recipe.cost == RecipeCostQualification::Unqualified));
+}
+
+#[test]
 fn baseline_and_investigation_meaning_is_explicit_without_qualifying_native_cost() {
     let declarations = declarations();
     for id in ["mysql.activity", "mysql.statement-counters", "mysql.operational", "mysql.native-failures"] {

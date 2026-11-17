@@ -1,4 +1,4 @@
-import cardinals from "../../../locales/.cldr/cardinals.json";
+import cardinals from "../../../locales/.cldr/cardinals.json" with { type: "json" };
 
 export type PluralCategory = "zero" | "one" | "two" | "few" | "many" | "other";
 type Relation = [string, number, boolean, [number, number][]];

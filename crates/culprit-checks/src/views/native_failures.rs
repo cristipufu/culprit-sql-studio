@@ -140,7 +140,10 @@ fn render(case: NativeFailureCase) -> RetainedFailureExplanation {
     }
 }
 
-fn postgres_explanation(kind: PostgresFailureKind, pattern: Option<DeadlockPattern>) -> (String, String, String) {
+pub(super) fn postgres_explanation(
+    kind: PostgresFailureKind,
+    pattern: Option<DeadlockPattern>,
+) -> (String, String, String) {
     match kind {
         PostgresFailureKind::AllocationFailure => (
             t!("view.native_failures.cause.allocation.title"),

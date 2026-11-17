@@ -66,7 +66,7 @@ REPLICATION_FIXTURES = (
 )
 POSTGRES_REPLICATION_IMAGES = {"postgres-replication": "postgres:18.6", "postgres-16-replication": "postgres:16"}
 OPTIONAL_NATIVE_MODULES = {
-    "culprit-postgres": ("telemetry::native_tests::replication::",),
+    "culprit-postgres": ("telemetry::native_tests::replication::", "jobs::"),
     "culprit-mysql": ("telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::"),
     "culprit-mssql": ("telemetry::replication::native_tests::",),
 }
@@ -237,8 +237,10 @@ class Database:
         fixture = self.fixture
         if fixture.engine == "postgres":
             preload = "timescaledb,pg_stat_statements" if fixture.name == "timescale" else "pg_stat_statements"
-            return ({"POSTGRES_PASSWORD": self.password, "POSTGRES_DB": fixture.database},
-                    ["-c", f"shared_preload_libraries={preload}", "-c", "track_io_timing=on"])
+            command = ["-c", f"shared_preload_libraries={preload}", "-c", "track_io_timing=on"]
+            if fixture.name in ("timescale", "postgres"):
+                command += ["-c", f"cluster_name=culprit_jobs_{self.owner}"]
+            return ({"POSTGRES_PASSWORD": self.password, "POSTGRES_DB": fixture.database}, command)
         if fixture.engine == "mysql":
             explicit_options = {option.partition("=")[0] for option in self.options}
             defaults = [option for option in ("--performance-schema=ON", "--server-id=1")
@@ -308,6 +310,18 @@ class Database:
         self.sql("\n".join(f"SELECT sum(value) FROM {table} WHERE id > {i};" for i in range(20)))
         if fixture.engine == "mssql":
             self.sql("EXEC sys.sp_query_store_flush_db;")
+        if fixture.name == "timescale":
+            self.prepare_timescale_jobs()
+
+    def prepare_timescale_jobs(self):
+        if self.fixture.name != "timescale" or self.fixture.engine != "postgres":
+            raise RuntimeError("job setup requires the dedicated Timescale fixture")
+        if not re.fullmatch(r"[0-9a-f]{24}", self.owner):
+            raise RuntimeError("job setup requires this run's fixture ownership nonce")
+        if not self.owns_container():
+            raise RuntimeError("the owned fixture disappeared before job setup")
+        # The script independently checks the native cluster marker, database, extension and fresh job schema.
+        self.sql((ROOT / "dev" / "timescale" / "jobs.sql").read_text())
 
     def prepare_hypopg(self):
         status, _ = self.commands.run(["docker", "exec", self.name, "test", "-f",
@@ -383,8 +397,12 @@ class Database:
             self.test("culprit-postgres", "wire::tests::live_table_preview")
             if fixture.name == "timescale":
                 self.test("culprit-postgres", "timescale::tests::live_")
+                self.test("culprit-postgres", "telemetry::native_tests::jobs::compatibility::")
+                self.test("culprit-postgres", "telemetry::native_tests::jobs::limits::")
             else:
                 self.test("culprit-postgres", "wire::tests::live_postgres_hypothetical_")
+                if fixture.name == "postgres":
+                    self.test("culprit-postgres", "telemetry::native_tests::jobs::absent::")
         elif fixture.engine == "mysql":
             self.test("culprit-engine", "live_providers::native_telemetry_", library=False)
             self.test("culprit-mysql", "telemetry::native_tests::")

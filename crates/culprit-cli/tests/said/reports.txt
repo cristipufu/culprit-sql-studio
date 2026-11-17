@@ -387,7 +387,7 @@ Needs a look: 13 opportunities; the top ones touch 2 min of database time over t
                     The app reads them every few seconds; `culprit live` reads them once.
                     → culprit live pg-demo
 
-○ Health            12 signals recorded; none has a threshold to grade.
+○ Health            9 signals recorded; none has a threshold to grade.
                     Each signal states the period it measures.
                     Bad 0 · Watch 0 · Healthy 0
                     ○ Oldest open transaction  4.2 s · idle in transaction
@@ -420,11 +420,8 @@ Needs a look: 13 opportunities; the top ones touch 2 min of database time over t
                     ○ tables and indexes (whole server)  3 µs per read
                     → culprit waits pg-demo
 
-○ Connections       1 new connections a minute over the recorded counter history.
-                    New per minute 1
+○ Connections       This scan has no count of new connections; the ones in use are below.
                     ○ Connections in use (whole server)  6.19%
-                    ○ Average session length  1.3 s
-                    ○ Sessions the client abandoned  1.09%
                     → culprit waits pg-demo
 
 ○ Replication       Replication state recorded for 1 copy.
@@ -465,9 +462,6 @@ Health ("since start" covers 6 h 59 min)
     Checkpoints forced early (whole server)     15.62%  since start Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
     Connections in use (whole server)         6.19%  when scanned under 80% of max_connections is healthy
     Oldest transaction holding cleanup        4.2 s  when scanned A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
-    New connections                         1.0/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
-    Average session length                    1.3 s  since start Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
-    Sessions the client abandoned             1.09%  since start The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
 
 Storage (average per operation, since start)
   WAL                                reads   untimed × 11      writes   untimed × 1.4K  
@@ -581,7 +575,7 @@ Needs a look: 13 opportunities; the top ones touch 4 min of database time over t
                     The app reads them every few seconds; `culprit live` reads them once.
                     → culprit live mysql-demo
 
-○ Health            14 signals recorded; none has a threshold to grade.
+○ Health            11 signals recorded; none has a threshold to grade.
                     Each signal states the period it measures.
                     Bad 0 · Watch 0 · Healthy 0
                     ○ Oldest open transaction  5.0 s · idle in transaction
@@ -613,8 +607,7 @@ Needs a look: 13 opportunities; the top ones touch 4 min of database time over t
                     ○ sys/sys_config.ibd (whole server)  225 µs per read
                     → culprit waits mysql-demo
 
-○ Connections       4 new connections a minute over the recorded counter history.
-                    New per minute 4
+○ Connections       This scan has no count of new connections; the ones in use are below.
                     ○ Connections in use (whole server)  4.64%
                     → culprit waits mysql-demo
 
@@ -662,9 +655,6 @@ Health ("since start" covers 1 h 20 min)
     Busiest moment (whole server)             4.64%  since start The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
     Undo logs not yet purged (whole server)          0  when scanned Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
     Oldest transaction to inspect for locks or a retained read view      5.0 s  when scanned A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
-    New connections (whole server)          3.7/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
-    Failed connection attempts (whole server)      1.2/h  since start
-    Connections dropped without closing (whole server)     22.9/h  since start
 
 Storage (average per operation, since start)
   #innodb_temp/temp_10.ibt           reads      5 µs × 1.0M    writes     16 µs × 1.0M  
@@ -1087,7 +1077,7 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
   - Disk reads — 100%
 - **Right now** (for context): Sessions weren't read for this dashboard.
   The app reads them every few seconds; `culprit live` reads them once.
-- **Health** (for context): 12 signals recorded; none has a threshold to grade.
+- **Health** (for context): 9 signals recorded; none has a threshold to grade.
   Each signal states the period it measures.
   - Oldest open transaction — 4.2 s · idle in transaction
   - Reads served from shared_buffers — 55.29%
@@ -1105,10 +1095,8 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
 - **Storage** (for context): Recorded storage averages: reads average 3 µs.
   tables and indexes: whole server, over an unknown statistics period Native accounting: reads count storage operations; writes count storage operations.
   - tables and indexes (whole server) — 3 µs per read
-- **Connections** (for context): 1 new connections a minute over the recorded counter history.
+- **Connections** (for context): This scan has no count of new connections; the ones in use are below.
   - Connections in use (whole server) — 6.19%
-  - Average session length — 1.3 s
-  - Sessions the client abandoned — 1.09%
 - **Replication** (for context): Replication state recorded for 1 copy.
   - analytics_slot (slot) — 1.1 GB of log
 - **Failing queries** (not available here): PostgreSQL doesn't count failed runs per statement; its log does (log_min_error_statement).

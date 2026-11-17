@@ -134,7 +134,21 @@ pub struct CollectedReplicationAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedConnectionOutcomeAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::ConnectionOutcomeReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedTuningAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::TuningReport,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedJobsAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: crate::JobsReport,
 }

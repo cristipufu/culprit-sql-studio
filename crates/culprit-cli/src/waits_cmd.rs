@@ -91,12 +91,17 @@ fn print_snapshot(name: &str, snapshot: &Snapshot, out: &Out) {
             if let Some(history) = &snapshot.operations.termination_history {
                 value["terminations"] = json!(history);
             }
-            if let Some(reason) = snapshot.source_problem(&[
-                culprit_core::source_id::DOCDB_ACTIVITY_HISTORY,
-                culprit_core::source_id::DOCDB_TERMINATIONS,
-                culprit_core::source_id::DOCDB_NODE_RESOURCES,
-            ]) {
-                value["notes"] = json!([reason]);
+            let mut notes = snapshot
+                .source_problem(&[
+                    culprit_core::source_id::DOCDB_ACTIVITY_HISTORY,
+                    culprit_core::source_id::DOCDB_TERMINATIONS,
+                    culprit_core::source_id::DOCDB_NODE_RESOURCES,
+                ])
+                .into_iter()
+                .collect::<Vec<_>>();
+            notes.extend(snapshot.source_problem(&[culprit_core::source_id::SESSIONS]));
+            if !notes.is_empty() {
+                value["notes"] = json!(notes);
             }
             println!("{}", serde_json::to_string_pretty(&value).unwrap_or_default());
         }
@@ -189,6 +194,9 @@ fn print_report(name: &str, snapshot: &Snapshot, waits: Option<&WaitsReport>) {
             }
             println!("{}", t!("cli.waits.sample_now", command = format!("culprit waits {name} --now")));
         }
+    }
+    if let Some(reason) = snapshot.source_problem(&[culprit_core::source_id::SESSIONS]) {
+        println!("\n{}", t!("cli.note", note = reason));
     }
     if let Some(history) = &snapshot.operations.termination_history {
         let n = history.events.len();

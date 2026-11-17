@@ -332,6 +332,10 @@ pub enum SourceObservation {
         snapshot: ActivitySnapshotDescription,
         result: Box<ActivityBlockingFocusResult>,
     },
+    Jobs {
+        snapshot: StateSnapshotDescription,
+        metadata: Box<TimescaleJobsMetadata>,
+    },
     CacheEntryMemory {
         snapshot: StateSnapshotDescription,
         focus: Box<CacheEntryMemoryFocus>,
@@ -415,6 +419,7 @@ impl SourceObservation {
             Self::MaintenanceProgress { .. } => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
             Self::CurrentRequestWork { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Diagnostics(_) => TelemetryCollection::Diagnostics,
+            Self::Jobs { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
             Self::Snapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
             Self::PagedSnapshot(snapshot) => TelemetryCollection::Snapshot(snapshot.dataset),
         }
@@ -445,7 +450,7 @@ impl SourceObservation {
             }
             Self::FocusedCompilationAdmission { result, .. } => TelemetryRange::Focused { key: result.focus.key()? },
             Self::Diagnostics(description) => TelemetryRange::Focused { key: description.work_key()? },
-            Self::Snapshot(_) | Self::PagedSnapshot(_) => TelemetryRange::Current,
+            Self::Jobs { .. } | Self::Snapshot(_) | Self::PagedSnapshot(_) => TelemetryRange::Current,
         })
     }
     pub fn accepts_sample(&self, at: &str) -> bool {
@@ -461,6 +466,7 @@ impl SourceObservation {
             Self::RetainedSamples(history) => history.covers_request(),
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
+            Self::Jobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
             Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
             Self::CacheEntryMemory { snapshot, focus } => {
@@ -504,7 +510,8 @@ impl SourceObservation {
             Self::Snapshot(snapshot) => {
                 !matches!(
                     snapshot.dataset,
-                    SnapshotDataset::CacheEntryMemory
+                    SnapshotDataset::Jobs
+                        | SnapshotDataset::CacheEntryMemory
                         | SnapshotDataset::MaintenanceProgress
                         | SnapshotDataset::CurrentRequestWork
                         | SnapshotDataset::PageWaitWriters
@@ -528,6 +535,7 @@ impl SourceObservation {
     pub fn snapshot(&self) -> Option<&StateSnapshotDescription> {
         match self {
             Self::Snapshot(snapshot)
+            | Self::Jobs { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
             | Self::FocusedRequestMemory { snapshot, .. }
@@ -541,6 +549,7 @@ impl SourceObservation {
     pub fn accepts_snapshot_record(&self, stream: TelemetryStream, source: &str) -> bool {
         match self {
             Self::Snapshot(snapshot)
+            | Self::Jobs { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
             | Self::FocusedRequestMemory { snapshot, .. }
@@ -573,7 +582,7 @@ impl SourceObservation {
             Self::MaintenanceProgress { snapshot, .. } | Self::CurrentRequestWork { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
-            Self::CacheEntryMemory { snapshot, .. } => {
+            Self::Jobs { snapshot, .. } | Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
             Self::Diagnostics(description) => {
@@ -757,10 +766,17 @@ impl CollectionDescription {
                 && snapshot.dataset == SnapshotDataset::CacheEntryMemory
                 && snapshot.records <= request.budget.max_snapshot_rows;
         }
+        if let (
+            SourceObservation::Jobs { snapshot, metadata },
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs },
+        ) = (&self.observation, &request.selection)
+        {
+            return metadata.matches_source(self, snapshot) && snapshot.records <= request.budget.max_snapshot_rows;
+        }
         if let (SourceObservation::Snapshot(snapshot), CollectionSelection::Snapshot { dataset }) =
             (&self.observation, &request.selection)
         {
-            return snapshot.is_valid()
+            return self.observation.covers_request()
                 && snapshot.dataset == *dataset
                 && snapshot.records <= request.budget.max_snapshot_rows;
         }

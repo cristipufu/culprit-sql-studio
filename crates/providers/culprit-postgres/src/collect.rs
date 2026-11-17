@@ -37,7 +37,17 @@ pub async fn snapshot(
         },
         async {
             let client = connector.connect(COLLECTOR).await?;
-            Ok::<_, culprit_core::Error>((settings(&client).await, crate::pressure::collect(&client, &probe).await))
+            let target = culprit_core::DatabaseIdentity::server(
+                Engine::Postgres,
+                &probe.database,
+                &connector.host,
+                connector.port,
+                None,
+            );
+            Ok::<_, culprit_core::Error>((
+                settings(&client).await,
+                crate::pressure::collect(&client, &probe, target).await,
+            ))
         },
         async {
             if options.collect_shared_resources {
@@ -223,6 +233,9 @@ pub async fn snapshot(
     ));
     crate::signals::collect(&primary, &probe, &mut snapshot).await;
     crate::timescale::collect(&primary, &probe, &mut snapshot).await;
+    if options.collect_native_failures {
+        crate::jobs::collect(connector, &mut snapshot).await;
+    }
     snapshot.duration_ms = started.elapsed().as_secs_f64() * 1000.0;
     Ok(snapshot)
 }

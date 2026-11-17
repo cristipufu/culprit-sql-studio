@@ -1073,36 +1073,6 @@
           "status": "info",
           "unit": "percent",
           "value": 0.0
-        },
-        {
-          "healthy": "Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.",
-          "key": "session-length",
-          "label": "Average session length",
-          "label_message": {
-            "arguments": {},
-            "key": "provider.postgres.signal.session_length",
-            "kind": "catalog"
-          },
-          "measurement_scope": "database",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "seconds",
-          "value": 0.2601548709677419
-        },
-        {
-          "healthy": "The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.",
-          "key": "sessions-abandoned",
-          "label": "Sessions the client abandoned",
-          "label_message": {
-            "arguments": {},
-            "key": "provider.postgres.signal.sessions_abandoned",
-            "kind": "catalog"
-          },
-          "measurement_scope": "database",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "percent",
-          "value": 0.0
         }
       ],
       "uptime_hours": 0.56440812

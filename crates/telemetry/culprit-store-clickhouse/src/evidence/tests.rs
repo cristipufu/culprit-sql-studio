@@ -604,3 +604,6 @@ async fn retained_memory_failures_use_exact_operational_readback_without_inventi
     let error = reader.read_capture(&range, &[EvidenceFamily::OperationalSamples], budget, None).await.unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
 }
+
+mod connection_outcomes;
+mod jobs;

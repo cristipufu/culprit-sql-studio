@@ -169,6 +169,8 @@ impl OperationalFact {
             Self::MssqlQueryCompilation(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::Space(_)
             | Self::MaintenanceProgress(_)
+            | Self::TimescaleJobState(_)
+            | Self::TimescaleJobRun(_)
             | Self::SessionMemory(_)
             | Self::Sequence(_)
             | Self::FileIo(_)

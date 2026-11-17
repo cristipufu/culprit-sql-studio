@@ -163,6 +163,8 @@ pub mod source_id {
         TIMESCALE_HYPERTABLES,
         TIMESCALE_CHUNKS,
         TIMESCALE_INDEXES,
+        crate::telemetry::TIMESCALE_JOBS_SOURCE,
+        crate::telemetry::TIMESCALE_JOB_RUNS_SOURCE,
         DOCDB_EPOCHS,
         DOCDB_INDEX_USAGE,
         DOCDB_PLAN_HISTORY,
@@ -284,6 +286,27 @@ impl SourceOutcome {
             };
             self.reason = Some(message.render());
             self.reason_message = message.is_translatable().then_some(message);
+        }
+    }
+}
+
+impl crate::Snapshot {
+    /// Withheld or uninterpretable evidence remains an explicit gap rather than an empty successful read.
+    pub fn record_unavailable_evidence(&mut self, source_id: &str, message: crate::i18n::Message) {
+        let outcome = SourceOutcome {
+            source: source_id.into(),
+            state: SourceState::Unavailable,
+            reason: Some(message.render()),
+            reason_message: Some(message.clone()),
+        };
+        if let Some(source) = self.sources.iter_mut().find(|source| source.source == source_id) {
+            *source = outcome;
+        } else {
+            self.sources.push(outcome);
+        }
+        if !self.notes.iter().any(|note| note.collector == source_id && note.message_source.as_ref() == Some(&message))
+        {
+            self.notes.push(CollectorNote::recorded(source_id, message));
         }
     }
 }

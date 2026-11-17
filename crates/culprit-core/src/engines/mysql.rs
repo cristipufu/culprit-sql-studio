@@ -4,6 +4,8 @@ use super::*;
 use crate::dialect::{NewIndex, keys, unique};
 use crate::model::Capability;
 
+mod connection_outcomes;
+
 pub(super) struct Mysql;
 
 /// One Performance Schema event belongs to a physical thread and its native timer generation.
@@ -115,6 +117,14 @@ impl EngineSpec for Mysql {
     }
     fn signal_scope(&self, _server: &ServerInfo, key: &str) -> crate::MeasurementScope {
         if key == "oldest-transaction" { crate::MeasurementScope::Database } else { crate::MeasurementScope::Server }
+    }
+
+    fn connection_outcome_profile(
+        &self,
+        source: &str,
+        counters: &crate::telemetry::NativeCounterSet,
+    ) -> Option<crate::ConnectionOutcomeProfile> {
+        connection_outcomes::profile(source, counters)
     }
 
     fn scoped_signal_label(&self, signal: &crate::Signal) -> Option<crate::i18n::Message> {

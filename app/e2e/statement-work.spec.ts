@@ -90,6 +90,5 @@ test("statement source failures and a changed native schema cannot turn into bor
   const withheld = page.getByRole("region", { name: english["view.statement_work.title"], exact: true });
   await expect(withheld).toBeVisible();
   await expect(withheld).not.toContainText(english["ui.health.empty"]);
-  await withheld.getByText(english["ui.memory_failures.limitations"], { exact: true }).click();
-  await expect(withheld).toContainText(english["view.statement_work.invalid"]);
+  await expect(withheld.getByText(english["view.statement_work.invalid"], { exact: true })).toBeVisible();
 });

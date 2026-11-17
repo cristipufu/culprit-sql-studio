@@ -231,7 +231,11 @@ fn record_unreported_optional_sources(snapshot: &mut Snapshot, options: &Snapsho
         (options.collect_page_wait_targets, snapshot.operations.page_waits.is_some(), source_id::PAGE_WAIT_TARGETS),
         (options.collect_task_space, snapshot.operations.task_space.is_some(), source_id::TASK_SPACE),
         (options.collect_memory_failures, snapshot.operations.memory_failures.is_some(), source_id::MEMORY_FAILURES),
-        (options.collect_native_failures, snapshot.operations.native_failures.is_some(), source_id::NATIVE_FAILURES),
+        (
+            options.collect_native_failures,
+            snapshot.operations.native_failure_diagnostics_assessed(&snapshot.sources),
+            source_id::NATIVE_FAILURES,
+        ),
     ];
     for (requested, has_evidence, source) in requested_sources {
         if !requested || has_evidence || snapshot.sources.iter().any(|outcome| outcome.source == source) {
@@ -354,6 +358,47 @@ mod tests {
         record_unreported_optional_sources(&mut snapshot, &options);
         assert_eq!(snapshot.sources, expected, "qualification is recorded only once");
         assert_eq!(snapshot.notes.len(), note_count, "repeated qualification must not duplicate notes");
+    }
+
+    #[test]
+    fn job_native_failure_assessments_do_not_invent_a_log_gap_or_hide_an_explicit_log_source_failure() {
+        use culprit_core::{
+            SourceOutcome, SourceState,
+            telemetry::{TIMESCALE_JOB_RUNS_SOURCE, TIMESCALE_JOBS_SOURCE},
+        };
+        let options = SnapshotOptions { collect_native_failures: true, ..Default::default() };
+        for state in
+            [SourceState::Collected, SourceState::Partial, SourceState::Unavailable, SourceState::NotApplicable]
+        {
+            let mut snapshot = recorded();
+            for source in [TIMESCALE_JOBS_SOURCE, TIMESCALE_JOB_RUNS_SOURCE] {
+                snapshot.sources.push(SourceOutcome {
+                    source: source.into(),
+                    state,
+                    reason: Some("provider job assessment".into()),
+                    reason_message: None,
+                });
+            }
+            let original = snapshot.sources.clone();
+            record_unreported_optional_sources(&mut snapshot, &options);
+            assert_eq!(snapshot.sources, original, "an assessed category cannot gain an unreported log placeholder");
+            let explicit = SourceOutcome {
+                source: culprit_core::source_id::NATIVE_FAILURES.into(),
+                state: SourceState::Unavailable,
+                reason: Some("explicit retained-log source failure".into()),
+                reason_message: None,
+            };
+            snapshot.sources.push(explicit.clone());
+            record_unreported_optional_sources(&mut snapshot, &options);
+            assert_eq!(
+                snapshot
+                    .sources
+                    .iter()
+                    .filter(|source| source.source == culprit_core::source_id::NATIVE_FAILURES)
+                    .collect::<Vec<_>>(),
+                vec![&explicit]
+            );
+        }
     }
 
     #[test]

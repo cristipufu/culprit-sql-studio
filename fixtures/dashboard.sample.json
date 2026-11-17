@@ -378,7 +378,7 @@
         ],
         "next": "culprit waits mariadb-demo",
         "status": "info",
-        "takeaway": "13 signals recorded; none has a threshold to grade.",
+        "takeaway": "10 signals recorded; none has a threshold to grade.",
         "title": "Health"
       },
       {
@@ -574,17 +574,10 @@
           }
         ],
         "key": "connections",
-        "metrics": [
-          {
-            "key": "per-minute",
-            "label": "New per minute",
-            "text": "1",
-            "value": 1.0
-          }
-        ],
+        "metrics": [],
         "next": "culprit waits mariadb-demo",
         "status": "info",
-        "takeaway": "1 new connections a minute over the recorded counter history.",
+        "takeaway": "This scan has no count of new connections; the ones in use are below.",
         "title": "Connections"
       },
       {
@@ -2267,7 +2260,7 @@
         ],
         "next": "culprit waits mysql-demo",
         "status": "info",
-        "takeaway": "14 signals recorded; none has a threshold to grade.",
+        "takeaway": "11 signals recorded; none has a threshold to grade.",
         "title": "Health"
       },
       {
@@ -2451,17 +2444,10 @@
           }
         ],
         "key": "connections",
-        "metrics": [
-          {
-            "key": "per-minute",
-            "label": "New per minute",
-            "text": "4",
-            "value": 4.0
-          }
-        ],
+        "metrics": [],
         "next": "culprit waits mysql-demo",
         "status": "info",
-        "takeaway": "4 new connections a minute over the recorded counter history.",
+        "takeaway": "This scan has no count of new connections; the ones in use are below.",
         "title": "Connections"
       },
       {
@@ -2930,7 +2916,7 @@
         ],
         "next": "culprit waits pg-demo",
         "status": "info",
-        "takeaway": "12 signals recorded; none has a threshold to grade.",
+        "takeaway": "9 signals recorded; none has a threshold to grade.",
         "title": "Health"
       },
       {
@@ -3123,42 +3109,13 @@
             "share": null,
             "status": "info",
             "value": "6.19%"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "session-length",
-            "kind": "signal",
-            "label": "Average session length",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "1.3 s"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "sessions-abandoned",
-            "kind": "signal",
-            "label": "Sessions the client abandoned",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "1.09%"
           }
         ],
         "key": "connections",
-        "metrics": [
-          {
-            "key": "per-minute",
-            "label": "New per minute",
-            "text": "1",
-            "value": 1.0
-          }
-        ],
+        "metrics": [],
         "next": "culprit waits pg-demo",
         "status": "info",
-        "takeaway": "1 new connections a minute over the recorded counter history.",
+        "takeaway": "This scan has no count of new connections; the ones in use are below.",
         "title": "Connections"
       },
       {
@@ -3947,7 +3904,7 @@
         ],
         "next": "culprit waits timescale-demo",
         "status": "info",
-        "takeaway": "11 signals recorded; none has a threshold to grade.",
+        "takeaway": "9 signals recorded; none has a threshold to grade.",
         "title": "Health"
       },
       {
@@ -4049,28 +4006,6 @@
             "id": "connections",
             "kind": "signal",
             "label": "Connections in use (whole server)",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "0%"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "session-length",
-            "kind": "signal",
-            "label": "Average session length",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "260 ms"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "sessions-abandoned",
-            "kind": "signal",
-            "label": "Sessions the client abandoned",
             "query_id": null,
             "share": null,
             "status": "info",

@@ -1,5 +1,6 @@
 use super::*;
 use clap::Parser;
+mod connection_outcomes;
 
 #[test]
 fn cli_exposes_every_verified_evidence_family() {

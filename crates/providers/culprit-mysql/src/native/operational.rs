@@ -4,6 +4,8 @@ use crate::{connect::Flavor, vars::VariableSet};
 use culprit_core::{MeasurementScope, ResetMarker, telemetry::*};
 use std::collections::BTreeMap;
 
+pub(crate) mod connections;
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Kind {
     Status,
@@ -214,20 +216,30 @@ struct Status {
     name: &'static str,
     unit: CounterUnit,
     nature: CounterNature,
+    connection_outcome: bool,
 }
 macro_rules! status {
     ($name:literal, $unit:ident, $nature:ident) => {
-        Status { name: $name, unit: CounterUnit::$unit, nature: CounterNature::$nature }
+        Status { name: $name, unit: CounterUnit::$unit, nature: CounterNature::$nature, connection_outcome: false }
+    };
+    ($name:literal, $unit:ident, $nature:ident, Connection) => {
+        Status { connection_outcome: true, ..status!($name, $unit, $nature) }
     };
 }
 const STATUS: &[Status] = &[
     status!("Uptime", Seconds, Gauge),
-    status!("Connections", Count, Cumulative),
-    status!("Aborted_connects", Count, Cumulative),
-    status!("Aborted_clients", Count, Cumulative),
-    status!("Threads_created", Count, Cumulative),
-    status!("Threads_running", Count, Gauge),
-    status!("Threads_connected", Count, Gauge),
+    status!("Connections", Count, Cumulative, Connection),
+    status!("Aborted_connects", Count, Cumulative, Connection),
+    status!("Aborted_clients", Count, Cumulative, Connection),
+    status!("Connection_errors_accept", Count, Cumulative, Connection),
+    status!("Connection_errors_internal", Count, Cumulative, Connection),
+    status!("Connection_errors_max_connections", Count, Cumulative, Connection),
+    status!("Connection_errors_peer_address", Count, Cumulative, Connection),
+    status!("Connection_errors_select", Count, Cumulative, Connection),
+    status!("Connection_errors_tcpwrap", Count, Cumulative, Connection),
+    status!("Threads_created", Count, Cumulative, Connection),
+    status!("Threads_running", Count, Gauge, Connection),
+    status!("Threads_connected", Count, Gauge, Connection),
     status!("Max_used_connections", Count, Gauge),
     status!("Questions", Count, Cumulative),
     status!("Slow_queries", Count, Cumulative),

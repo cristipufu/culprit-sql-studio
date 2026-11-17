@@ -22,6 +22,8 @@ use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot,
 
 mod cleanup;
 mod compiler_admission;
+mod connection_outcomes;
+mod jobs;
 mod maintenance_progress;
 mod replication;
 mod statement_work;
@@ -266,6 +268,8 @@ impl Pipeline {
         let compiler_admission = compiler_admission::explain(&mut snapshot);
         let maintenance_progress = maintenance_progress::explain(&mut snapshot);
         let replication = replication::explain(&mut snapshot);
+        let connection_outcomes = connection_outcomes::explain(&mut snapshot);
+        let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
@@ -379,7 +383,9 @@ impl Pipeline {
             query_compilation,
             compiler_admission,
             maintenance_progress,
+            jobs,
             replication,
+            connection_outcomes,
             statement_work,
             cleanup,
         }
@@ -498,24 +504,7 @@ fn admit_explanation<R>(
     match explained {
         Ok(report) => Some(report),
         Err(_) => {
-            if let Some(source) = snapshot.sources.iter_mut().find(|source| source.source == source_id) {
-                source.state = culprit_core::SourceState::Unavailable;
-                source.reason = Some(message.render());
-                source.reason_message = Some(message.clone());
-            } else {
-                snapshot.sources.push(culprit_core::SourceOutcome {
-                    source: source_id.clone(),
-                    state: culprit_core::SourceState::Unavailable,
-                    reason: Some(message.render()),
-                    reason_message: Some(message.clone()),
-                });
-            }
-            snapshot.notes.push(CollectorNote {
-                message_source: Some(message.clone()),
-                collector: source_id,
-                message: message.render(),
-                table: None,
-            });
+            snapshot.record_unavailable_evidence(&source_id, message);
             None
         }
     }

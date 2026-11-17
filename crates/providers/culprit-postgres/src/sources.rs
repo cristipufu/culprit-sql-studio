@@ -128,6 +128,17 @@ pub const REPLICATION: Source = Source {
     delivers: &[],
 };
 
+pub const JOBS: Source = Source {
+    name: culprit_core::telemetry::TIMESCALE_JOBS_SOURCE,
+    reads: culprit_core::key!("provider.postgres.source.jobs"),
+    delivers: &[],
+};
+pub const JOB_RUNS: Source = Source {
+    name: culprit_core::telemetry::TIMESCALE_JOB_RUNS_SOURCE,
+    reads: culprit_core::key!("provider.postgres.source.job_runs"),
+    delivers: &[],
+};
+
 pub const HYPERTABLES: Source = Source {
     name: source_id::TIMESCALE_HYPERTABLES,
     reads: culprit_core::key!("provider.postgres.source.hypertables"),
@@ -150,6 +161,8 @@ pub const MISC: &[Source] =
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    JOBS,
+    JOB_RUNS,
     HYPERTABLES,
     CHUNKS,
     HYPERTABLE_INDEXES,

@@ -108,6 +108,14 @@ impl SessionIdFormat {
 
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
+    /// Only the native source owner defines connection-counter populations and optional same-read clocks.
+    fn connection_outcome_profile(
+        &self,
+        _source: &str,
+        _counters: &crate::telemetry::NativeCounterSet,
+    ) -> Option<crate::ConnectionOutcomeProfile> {
+        None
+    }
     fn evidence_presentation(&self) -> EvidencePresentation;
     /// TLS policy and native option names; file engines have no network security settings.
     fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {

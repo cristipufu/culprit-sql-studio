@@ -188,6 +188,8 @@ SQL Server
   file latency              file latency · adds detail
   logins                    login counters · adds detail
 PostgreSQL
+  timescale-jobs            Installed TimescaleDB job definitions and reported scheduler statistics · adds detail
+  timescale-job-runs        Bounded retained TimescaleDB job execution records and SQLSTATEs · adds detail
   timescale-hypertables     TimescaleDB hypertables, dimensions and aggregate storage sizes · Table statistics, Optimizer statistics, Index usage statistics
   timescale-chunks          TimescaleDB managed chunks and compressed storage sizes · adds detail
   timescale-indexes         TimescaleDB logical hypertable index sizes · adds detail

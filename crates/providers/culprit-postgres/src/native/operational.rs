@@ -65,7 +65,8 @@ pub(crate) fn selected_query(
         if *name==super::memory::SOURCE_NAME { return super::memory::branch_sql(); }
         let values=if *name=="pg_database" {
             "pg_catalog.jsonb_build_object('datname',s.datname,'xid_age',pg_catalog.age(s.datfrozenxid),'mxid_age',pg_catalog.mxid_age(s.datminmxid))".to_owned()
-        } else {"pg_catalog.to_jsonb(s)".to_owned()};
+        } else if *name==super::sessions::SOURCE { super::sessions::values_sql("s") }
+        else {"pg_catalog.to_jsonb(s)".to_owned()};
         let filter=match *name {
             "pg_stat_database"|"pg_stat_database_conflicts"=>format!(" WHERE s.datid={}",meta.database_oid),
             "pg_database"=>format!(" WHERE s.oid={}",meta.database_oid),
@@ -87,6 +88,26 @@ pub(crate) fn decode(row: &Row, meta: &Metadata, selection: Selection) -> Result
         return OperationalObservation::from_counters(&source, counters).map(TelemetryRecord::Operational);
     }
     let values: Value = serde_json::from_str(&text(row, "native_values")?).map_err(|_| invalid())?;
+    decode_values(
+        source,
+        values,
+        CounterReadContext {
+            database_oid: &meta.database_oid,
+            started_at: &meta.started_at,
+            block_bytes: meta.block_bytes,
+            version: meta.version,
+        },
+    )
+}
+
+pub(crate) struct CounterReadContext<'a> {
+    pub database_oid: &'a str,
+    pub started_at: &'a str,
+    pub block_bytes: u32,
+    pub version: u32,
+}
+
+pub(crate) fn decode_values(source: String, values: Value, meta: CounterReadContext<'_>) -> Result<TelemetryRecord> {
     let fields = values.as_object().ok_or_else(invalid)?;
     let scope = source_scope(&source);
     let reset = values
@@ -95,8 +116,26 @@ pub(crate) fn decode(row: &Row, meta: &Metadata, selection: Selection) -> Result
         .map(|value| canonical_time(value).map(ResetMarker::At))
         .transpose()?
         .unwrap_or(ResetMarker::Unknown);
-    let mut identity = NativeIdentity::new(&source).qualified("postmaster_started_at", &meta.started_at);
+    let mut identity =
+        NativeIdentity::new(&source).qualified("postmaster_started_at", canonical_time(meta.started_at)?);
     let mut properties = BTreeMap::new();
+    if source == super::sessions::SOURCE {
+        properties.insert("server_version_num".into(), meta.version.to_string());
+        for key in [
+            "sessions",
+            "sessions_abandoned",
+            "sessions_fatal",
+            "sessions_killed",
+            "session_time",
+            "active_time",
+            "idle_in_transaction_time",
+        ] {
+            properties.insert(format!("has_{key}"), fields.contains_key(key).to_string());
+        }
+        if let Some(at) = values.get("counter_observed_at").and_then(Value::as_str) {
+            properties.insert("counter_observed_at".into(), canonical_time(at)?);
+        }
+    }
     for name in [
         "datname",
         "backend_type",
@@ -117,7 +156,7 @@ pub(crate) fn decode(row: &Row, meta: &Metadata, selection: Selection) -> Result
         }
     }
     if scope == MeasurementScope::Database {
-        identity = identity.qualified("dbid", &meta.database_oid);
+        identity = identity.qualified("dbid", meta.database_oid);
     }
     if let Some(id) = values.get("subid").and_then(Value::as_u64) {
         identity = identity.qualified("subid", id.to_string());

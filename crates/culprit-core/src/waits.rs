@@ -476,6 +476,11 @@ impl OpenTransaction {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
 #[ts(export)]
 pub struct Pressure {
+    /// Original native connection/session counters, separate populations and source coverage. Client acquisition
+    /// clocks or a configured database route never qualify a physical member or a counter's lifetime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection_outcomes: Option<Box<crate::ConnectionOutcomeSnapshot>>,
     /// How long the "since startup" signals cover.
     pub uptime_hours: Option<f64>,
     pub signals: Vec<Signal>,

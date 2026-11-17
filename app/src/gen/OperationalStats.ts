@@ -20,9 +20,10 @@ import type { SqliteFileHealth } from "./SqliteFileHealth";
 import type { StatementCounterSnapshot } from "./StatementCounterSnapshot";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
+import type { TimescaleJobsSnapshot } from "./TimescaleJobsSnapshot";
 
 export type OperationalStats = { statement_work?: StatementCounterSnapshot, 
 /**
  * None means that the native usage population was not established.
  */
-index_usage_scope?: IndexUsageScope, log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, task_space?: TaskSpaceSnapshot, query_compilation?: CompilationSnapshot, compiler_admission?: CompilerAdmissionSnapshot, maintenance_progress?: MaintenanceProgressSnapshot, cleanup?: Array<CleanupSnapshot>, node_resources?: NodeResources, };
+index_usage_scope?: IndexUsageScope, log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, jobs?: TimescaleJobsSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, task_space?: TaskSpaceSnapshot, query_compilation?: CompilationSnapshot, compiler_admission?: CompilerAdmissionSnapshot, maintenance_progress?: MaintenanceProgressSnapshot, cleanup?: Array<CleanupSnapshot>, node_resources?: NodeResources, };

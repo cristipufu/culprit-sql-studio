@@ -772,6 +772,18 @@ pub fn explain_replication(
     culprit_checks::replication::explain_bounded(snapshot, read_complete, max_entries)
 }
 
+/// Explain original job observations under the same scan namespace policy as the dashboard.
+pub fn explain_jobs(snapshot: &culprit_core::Snapshot) -> Result<Option<culprit_core::JobsReport>> {
+    culprit_checks::jobs::explain_snapshot(snapshot)
+}
+
+/// Reword original connection/session counter evidence from a snapshot without credentials, source or archive I/O.
+pub fn explain_connection_outcomes(
+    snapshot: &culprit_core::Snapshot,
+) -> Result<Option<culprit_core::ConnectionOutcomeReport>> {
+    culprit_checks::connection_outcomes::explain_snapshot(snapshot)
+}
+
 /// Explain a supplied focused Activity frame without I/O. Receipt consistency is checked here; the caller owns
 /// archive authentication. This base API introduces no collector, credential or warehouse dependency.
 pub fn explain_blocking(

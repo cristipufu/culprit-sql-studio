@@ -221,6 +221,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     }
                     SnapshotDataset::MemoryFailures
                     | SnapshotDataset::NativeFailures
+                    | SnapshotDataset::Jobs
                     | SnapshotDataset::SessionMemory
                     | SnapshotDataset::PageWaitTargets
                     | SnapshotDataset::TaskSpace

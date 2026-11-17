@@ -60,7 +60,10 @@ fn every_public_declaration_has_one_actual_offline_constructor_and_no_native_cos
         let request = request(registration, CollectionBudget::default());
         assert_eq!(descriptor, registration.descriptor());
         assert_eq!(descriptor.cost, RecipeCostQualification::Unqualified);
-        assert_eq!(descriptor.version, 1);
+        assert_eq!(
+            descriptor.version,
+            if matches!(registration.route, Route::Snapshot(Recipe::Operational)) { 2 } else { 1 }
+        );
         assert!(descriptor.accepts(&request));
         assert_eq!(REGISTRATIONS.iter().filter(|route| route.accepts(&request)).count(), 1);
         let source = super::super::source(connector.clone(), &request).unwrap();
@@ -123,6 +126,13 @@ fn focused_sources_preserve_native_profiles_while_generic_recipes_keep_larger_va
             assert!(bounded.budget.max_queries < maximum.max_queries);
             assert!(bounded.budget.max_snapshot_rows < maximum.max_snapshot_rows);
             assert_eq!(bounded.budget.page_bytes, bounded.budget.total_bytes);
+        } else if matches!(registration.route, Route::Jobs) {
+            assert_eq!(bounded.budget, crate::native::jobs::bounded_budget(&maximum));
+            assert_eq!(registration.descriptor().purpose, RecipePurpose::Investigation);
+            assert_eq!(bounded.budget.max_snapshot_rows, MAX_TIMESCALE_JOB_OBSERVATIONS as u32);
+            assert_eq!(bounded.budget.max_queries, 8);
+            assert_eq!(bounded.budget.statement_timeout_ms, 1_000);
+            assert_eq!(bounded.budget.total_timeout_ms, 5_000);
         } else if matches!(registration.route, Route::MaintenanceProgress) {
             assert_eq!(bounded.budget, crate::progress::bounded_budget(&maximum));
             assert_eq!(bounded.budget.max_queries, 11);

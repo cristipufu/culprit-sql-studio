@@ -159,6 +159,10 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis native-failures
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis jobs --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis connection-outcomes --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis request-memory --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis session-memory --json
@@ -435,6 +439,22 @@ MCP use the same explanation. A stopped channel without a recorded error does no
 promotion. Slot guidance uses read-only inspection; Culprit does not offer slot-drop SQL or an arbitrary retention
 cap. This does not establish an application query responsible for replication delay. Source query shapes still
 require native work-cost and cancellation qualification before automatic production admission.
+
+`evidence analyze ... --analysis connection-outcomes` reads `operational-samples` and uses the scan's pure
+connection/session report. PostgreSQL database sessions, lost-client connections, fatal/operator terminations and
+recorded state times remain separate from MySQL/MariaDB server-wide attempts, aborted connections, error categories
+and thread gauges. Exact counts, NULL/absent fields, native resets, original read bounds and unrelated source rows
+survive archive readback. Server uptime cannot supply a counter lifetime. These aggregates do not identify a failed
+query, login or service, and recorded session time is not completed-session latency. Analysis opens no database or
+recovery payload. The CLI bounds printed details; MCP's existing `waits` response uses the same retained facts and
+keeps native counts and incomplete coverage visible.
+
+`jobs` explains a PostgreSQL/Timescale `--collection jobs` capture from `operational-samples`, using the same
+public-view reader and pure explanation as scan diagnostics. Installed view/column identities, native read bounds,
+owner visibility, logging and selected run-window limitations survive both stores. State totals remain distinct
+from individual retained runs. Missing history never establishes that no job failed, and a recorded running state
+does not identify the process or query responsible. Current job labels cannot establish historical ownership.
+Read [Timescale job coverage](providers/timescale.md#background-jobs) before scheduling this unqualified source.
 
 `cleanup` explains retained cleanup horizons and version-store observations through the scan's pure view.
 PostgreSQL `cleanup` captures retain sessions, prepared transactions and replication slots, their separate data

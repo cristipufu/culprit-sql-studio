@@ -378,6 +378,9 @@ pub struct SeverityCount {
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub jobs: Option<Box<crate::JobsReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub statement_work: Option<Box<crate::StatementWorkReport>>,
     /// A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -419,6 +422,9 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub replication: Option<Box<crate::ReplicationReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection_outcomes: Option<Box<crate::ConnectionOutcomeReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cleanup: Option<crate::CleanupReport>,

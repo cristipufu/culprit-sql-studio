@@ -29,6 +29,7 @@ const THREAD_CACHE: f64 = 64.0;
 pub struct ConnectionChurn {
     rate: f64,
     uptime_hours: f64,
+    native_period: Option<culprit_core::ConnectionOutcomeRate>,
     /// PostgreSQL: how long its sessions last, in seconds.
     session_length: Option<f64>,
     /// SQL Server: resets against resets plus new logins, as a percentage.
@@ -45,8 +46,19 @@ pub struct ConnectionChurn {
 
 fn new_connections(snapshot: &Snapshot) -> Vec<ConnectionChurn> {
     let Some(p) = snapshot.pressure.as_ref() else { return Vec::new() };
-    let Some(rate) = p.signal(culprit_core::signal_id::NEW_CONNECTIONS).map(|s| s.value) else { return Vec::new() };
-    let Some(uptime_hours) = p.uptime_hours.filter(|h| *h >= 1.0) else { return Vec::new() };
+    let (rate, uptime_hours, native_period) = if let Some(read) = &p.connection_outcomes {
+        if !read.target.snapshot_namespace_comparison(snapshot).allows_comparison() {
+            return Vec::new();
+        }
+        let Some(rate) = read.rate(culprit_core::ConnectionOutcomeMetricKind::SessionsEstablished) else {
+            return Vec::new();
+        };
+        (rate.per_second, rate.seconds / 3600.0, Some(rate))
+    } else {
+        let Some(rate) = p.signal(culprit_core::signal_id::NEW_CONNECTIONS).map(|s| s.value) else { return Vec::new() };
+        let Some(hours) = p.uptime_hours.filter(|hours| *hours >= 1.0) else { return Vec::new() };
+        (rate, hours, None)
+    };
     let engine = snapshot.server.engine;
     // On Azure SQL Database the login counters belong to the server process behind the database, shared by its
     // elastic pool: another database's logins aren't this one's to fix.
@@ -57,7 +69,8 @@ fn new_connections(snapshot: &Snapshot) -> Vec<ConnectionChurn> {
     if rate < limit {
         return Vec::new();
     }
-    let session_length = p.signal(culprit_core::signal_id::SESSION_LENGTH).map(|s| s.value);
+    let session_length =
+        if native_period.is_none() { p.signal(culprit_core::signal_id::SESSION_LENGTH).map(|s| s.value) } else { None };
     let pooled_reuse = p.signal(culprit_core::signal_id::POOLED_REUSE).map(|s| s.value);
     // A large pool can legitimately open many long-lived sessions. Neither a rate nor a thread-cache miss ratio
     // establishes one connection per request. Known long-lived sessions / frequent pooled resets contradict it.
@@ -79,6 +92,7 @@ fn new_connections(snapshot: &Snapshot) -> Vec<ConnectionChurn> {
     vec![ConnectionChurn {
         rate,
         uptime_hours,
+        native_period,
         session_length,
         pooled_reuse,
         thread_cache_misses: p.signal(culprit_core::signal_id::THREAD_CACHE_MISSES).map(|s| s.value),
@@ -106,13 +120,17 @@ fn connection_churn_finding(snapshot: &Snapshot, churn: ConnectionChurn) -> Find
     } else {
         t!("check.connection_churn.title.server", n = churn.rate, rate = &rate)
     };
-    let mut summary = vec![t!(
-        "check.connection_churn.summary.accepted",
-        engine = engine_name(snapshot),
-        ago = format::duration(churn.uptime_hours * 3_600_000.0),
-        rate = &rate,
-        scope = culprit_core::wire_name(&engine)
-    )];
+    let mut summary = vec![if let Some(period) = &churn.native_period {
+        t!("view.connection_outcomes.churn_period", rate = &rate, reset = &period.reset_at, at = &period.observed_at)
+    } else {
+        t!(
+            "check.connection_churn.summary.accepted",
+            engine = engine_name(snapshot),
+            ago = format::duration(churn.uptime_hours * 3_600_000.0),
+            rate = &rate,
+            scope = culprit_core::wire_name(&engine)
+        )
+    }];
     match engine {
         Engine::Yugabyte => summary.push(t!("check.connection_churn.detail.yugabyte")),
         Engine::Sqlite => summary.push(t!("check.connection_churn.detail.sqlite")),
@@ -160,6 +178,88 @@ fn connection_churn_finding(snapshot: &Snapshot, churn: ConnectionChurn) -> Find
         },
     });
     f.verify = vec![t!("check.connection_churn.verify")];
-    f.caveats.push(t!("check.connection_churn.caveat.since_startup"));
+    f.caveats.push(if churn.native_period.is_some() {
+        t!("view.connection_outcomes.limit.current")
+    } else {
+        t!("check.connection_churn.caveat.since_startup")
+    });
     f
+}
+
+#[cfg(test)]
+mod native_period_tests {
+    use super::*;
+    use culprit_core::{Pressure, Signal, SignalScope, SignalUnit};
+
+    fn snapshot() -> Snapshot {
+        let read = crate::connection_outcomes::tests::snapshot(180000);
+        let mut snapshot = crate::waits::snapshot_with(Engine::Postgres);
+        snapshot.server.database = "fixture".into();
+        snapshot.bind_identity(read.target.database().unwrap().clone());
+        snapshot.pressure = Some(Pressure {
+            uptime_hours: Some(10000.0),
+            signals: vec![Signal::new(
+                culprit_core::signal_id::NEW_CONNECTIONS,
+                "controlled-legacy-rate",
+                999.0,
+                SignalUnit::PerSecond,
+                SignalScope::SinceStartup,
+            )],
+            connection_outcomes: Some(Box::new(read)),
+            ..Default::default()
+        });
+        snapshot
+    }
+
+    #[test]
+    fn a_native_reset_period_controls_churn_without_a_server_age_or_completed_session_latency() {
+        let mut snapshot = snapshot();
+        snapshot.pressure.as_mut().unwrap().signals.push(Signal::new(
+            culprit_core::signal_id::SESSION_LENGTH,
+            "controlled-other-mean",
+            60000.0,
+            SignalUnit::Seconds,
+            SignalScope::SinceStartup,
+        ));
+        let cases = new_connections(&snapshot);
+        let [case] = cases.as_slice() else { panic!("one own-period session-rate observation") };
+        assert_eq!(case.rate, 9007199254740993u64 as f64 / 86400.0);
+        assert_eq!(case.uptime_hours, 24.0);
+        assert!(case.session_length.is_none(), "recorded state time is not completed-session latency");
+        assert_eq!(case.severity, Severity::Low);
+        let finding = connection_churn_finding(&snapshot, new_connections(&snapshot).remove(0));
+        assert!(finding.summary.contains("2020-01-01T00:00:00Z"));
+        assert!(!finding.caveats.contains(&t!("check.connection_churn.caveat.since_startup")));
+    }
+
+    #[test]
+    fn unknown_or_invalid_native_evidence_never_borrows_legacy_rate_age_or_another_database() {
+        for change in ["reset", "clock", "header", "identity", "database", "engine", "incarnation"] {
+            let mut snapshot = snapshot();
+            let read = snapshot.pressure.as_mut().unwrap().connection_outcomes.as_mut().unwrap();
+            match change {
+                "reset" => {
+                    for counter in &mut read.observations[0].counters.counters {
+                        counter.reset = culprit_core::ResetMarker::Unknown;
+                    }
+                }
+                "clock" => {
+                    read.observations[0].counters.properties.remove("counter_observed_at");
+                }
+                "header" => read.sources[0].records = 0,
+                "identity" => snapshot.identity = None,
+                "database" => snapshot.server.database = "other".into(),
+                "engine" => snapshot.server.engine = Engine::Mysql,
+                "incarnation" => {
+                    let culprit_core::telemetry::CollectionTarget::Database(database) = &mut read.target else {
+                        unreachable!()
+                    };
+                    database.incarnation = Some("replacement-native-db".into());
+                    snapshot.identity.as_mut().unwrap().incarnation = Some("original-native-db".into());
+                }
+                _ => unreachable!(),
+            }
+            assert!(new_connections(&snapshot).is_empty(), "{change}");
+        }
+    }
 }

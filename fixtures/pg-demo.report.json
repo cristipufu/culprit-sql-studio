@@ -3048,51 +3048,6 @@
           "status": "info",
           "unit": "seconds",
           "value": 4.189612
-        },
-        {
-          "healthy": "The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.",
-          "key": "new-connections",
-          "label": "New connections",
-          "label_message": {
-            "arguments": {},
-            "key": "provider.postgres.signal.new_connections",
-            "kind": "catalog"
-          },
-          "measurement_scope": "database",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "per-second",
-          "value": 0.01695059363378647
-        },
-        {
-          "healthy": "Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.",
-          "key": "session-length",
-          "label": "Average session length",
-          "label_message": {
-            "arguments": {},
-            "key": "provider.postgres.signal.session_length",
-            "kind": "catalog"
-          },
-          "measurement_scope": "database",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "seconds",
-          "value": 1.2576956309090908
-        },
-        {
-          "healthy": "The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.",
-          "key": "sessions-abandoned",
-          "label": "Sessions the client abandoned",
-          "label_message": {
-            "arguments": {},
-            "key": "provider.postgres.signal.sessions_abandoned",
-            "kind": "catalog"
-          },
-          "measurement_scope": "database",
-          "scope": "since-startup",
-          "status": "info",
-          "unit": "percent",
-          "value": 1.090909090909091
         }
       ],
       "uptime_hours": 6.9806711

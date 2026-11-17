@@ -36,7 +36,8 @@ pub struct SnapshotOptions {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_memory_failures: bool,
-    /// Explicit opt-in to retained native error metadata; free-form diagnostic messages remain omitted.
+    /// Explicit opt-in to bounded native failure diagnostics, including supported Timescale job state/history.
+    /// Free-form diagnostic messages remain omitted; each source retains its own scope and coverage.
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_native_failures: bool,

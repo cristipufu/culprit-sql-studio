@@ -10,6 +10,8 @@ const CLEANUP_BOUNDARY_REFERENCES: usize = 5;
 const PARTICIPANT_ENTRIES: usize = 5;
 const REPLICATION_ENTRIES: usize = 16;
 
+mod connection_outcomes;
+mod jobs;
 mod statement_work;
 
 #[cfg(test)]
@@ -101,6 +103,8 @@ pub fn report(report: &Report) -> Value {
         })),
     });
     statement_work::attach(&mut response, report);
+    jobs::attach(&mut response, report);
+    connection_outcomes::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
         match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {
             Ok(evidence) => {

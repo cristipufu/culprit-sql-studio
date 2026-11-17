@@ -31,6 +31,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         memory_failures: &'a Option<culprit_core::RetainedFailureReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        jobs: &'a Option<Box<culprit_core::JobsReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         native_failures: &'a Option<culprit_core::RetainedFailureReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         request_memory: &'a Option<culprit_core::MemoryParticipantsReport>,
@@ -51,6 +53,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         statement_work: &'a Option<Box<culprit_core::StatementWorkReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        connection_outcomes: &'a Option<Box<culprit_core::ConnectionOutcomeReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
@@ -62,6 +66,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         refinement,
         provenance,
         memory_failures,
+        jobs,
         native_failures,
         request_memory,
         session_memory,
@@ -72,6 +77,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         maintenance_progress,
         replication,
         statement_work,
+        connection_outcomes,
         evidence: _,
         cleanup,
     } = report;
@@ -84,6 +90,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         refinement,
         provenance,
         memory_failures,
+        jobs,
         native_failures,
         request_memory,
         session_memory,
@@ -94,6 +101,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         maintenance_progress,
         replication,
         statement_work,
+        connection_outcomes,
         cleanup,
     }
 }

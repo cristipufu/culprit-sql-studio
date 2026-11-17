@@ -33,7 +33,8 @@ collect_request_memory?: boolean,
  */
 collect_memory_failures?: boolean, 
 /**
- * Explicit opt-in to retained native error metadata; free-form diagnostic messages remain omitted.
+ * Explicit opt-in to bounded native failure diagnostics, including supported Timescale job state/history.
+ * Free-form diagnostic messages remain omitted; each source retains its own scope and coverage.
  */
 collect_native_failures?: boolean, 
 /**

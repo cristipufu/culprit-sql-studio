@@ -10,26 +10,13 @@ use mysql_async::Value;
 
 pub async fn collect(conn: &mut impl crate::read::QueryRead, probe: &Probe, snapshot: &mut Snapshot) {
     let mut coverage = Coverage::default();
-    if let Some(status) =
-        coverage.read(&sources::REDO_PRESSURE, vars::status(conn, &["Innodb_log_waits", "Aborted_connects"]).await)
-    {
+    if let Some(status) = coverage.read(&sources::REDO_PRESSURE, vars::status(conn, &["Innodb_log_waits"]).await) {
         // A counter's subject is part of its finding's id (`<check>:<subject>`), so it reads the same in every
         // language.
         if let Some(count) = status.get("Innodb_log_waits") {
             snapshot.operations.counters.push(OperationalCounter {
                 kind: OperationalCounterKind::RedoLogWaits,
                 subject: "InnoDB redo buffer (whole server)".into(),
-                scope: FileScope::Server,
-                count: *count,
-                since: probe.started_at.clone(),
-                last_event_at: None,
-                before: None,
-            });
-        }
-        if let Some(count) = status.get("Aborted_connects") {
-            snapshot.operations.counters.push(OperationalCounter {
-                kind: OperationalCounterKind::ConnectionFailures,
-                subject: "Client connection handshakes (whole server)".into(),
                 scope: FileScope::Server,
                 count: *count,
                 since: probe.started_at.clone(),

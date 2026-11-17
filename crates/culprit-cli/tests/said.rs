@@ -290,3 +290,53 @@ fn everything_else_says_what_it_said() {
     said.push(run(&h.0, &["--format", "sarif", "drift", &mssql, &staging], None));
     pin("rest", &said.join("\n"));
 }
+
+fn snapshot_with_sessions_issue(directory: &Path, also_docdb: bool) -> PathBuf {
+    let mut snapshot: culprit_core::Snapshot =
+        serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
+    snapshot.workload = None;
+    snapshot.pressure = None;
+    snapshot.operations = Default::default();
+    snapshot.sources.clear();
+    snapshot.notes.clear();
+    snapshot.record_unavailable_evidence(
+        culprit_core::source_id::SESSIONS,
+        culprit_core::message!("view.connection_outcomes.invalid"),
+    );
+    if also_docdb {
+        snapshot.record_unavailable_evidence(
+            culprit_core::source_id::DOCDB_ACTIVITY_HISTORY,
+            culprit_core::i18n::Message::Text { text: "Independent native activity source gap.".into() },
+        );
+    }
+    let path = directory.join("snapshot-with-withheld-session-evidence.json");
+    std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    path
+}
+
+#[test]
+fn waits_file_text_keeps_a_withheld_sessions_source_visible_without_a_raw_carrier() {
+    let h = home("waits-sessions-source-text");
+    let path = snapshot_with_sessions_issue(&h.0, false);
+    let output = run(&h.0, &["--format", "text", "waits", "--file", path.to_str().unwrap()], None);
+    assert!(!output.contains("[exit"), "{output}");
+    assert!(output.contains(&culprit_core::t!("view.connection_outcomes.invalid")), "{output}");
+    assert!(!output.contains("9007199254740993"));
+    assert!(!output.contains("Retained outcome rows: 0"));
+}
+
+#[test]
+fn waits_file_json_keeps_both_sessions_and_existing_native_source_gaps_without_fabricating_counts() {
+    let h = home("waits-sessions-source-json");
+    let path = snapshot_with_sessions_issue(&h.0, true);
+    let output = run(&h.0, &["--format", "json", "waits", "--file", path.to_str().unwrap()], None);
+    assert!(!output.contains("[exit"), "{output}");
+    let (_, body) = output.split_once('\n').unwrap();
+    let body: serde_json::Value = serde_json::from_str(body).unwrap();
+    let notes = body["notes"].as_array().unwrap();
+    assert!(notes.contains(&serde_json::json!(culprit_core::t!("view.connection_outcomes.invalid"))));
+    assert!(notes.contains(&serde_json::json!("Independent native activity source gap.")));
+    assert!(body["pressure"].is_null());
+    assert!(body.get("connection_outcomes").is_none());
+    assert!(!body.to_string().contains("native_rows"));
+}

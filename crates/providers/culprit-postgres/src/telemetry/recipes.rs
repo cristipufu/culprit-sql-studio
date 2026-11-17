@@ -5,12 +5,14 @@ use super::*;
 enum Route {
     Activity,
     Blocking,
+    Jobs,
     MaintenanceProgress,
     Snapshot(Recipe),
 }
 impl Route {
     fn collection(self) -> TelemetryCollection {
         match self {
+            Self::Jobs => TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
             Self::Activity => TelemetryCollection::Activity,
             Self::Blocking => TelemetryCollection::Activity,
             Self::MaintenanceProgress => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
@@ -26,6 +28,7 @@ impl Route {
     }
     fn bounded_budget(self, requested: &CollectionBudget) -> CollectionBudget {
         match self {
+            Self::Jobs => crate::native::jobs::bounded_budget(requested),
             Self::Activity => activity::bounded_budget(requested),
             Self::Blocking => blocking::bounded_budget(requested),
             Self::MaintenanceProgress => crate::progress::bounded_budget(requested),
@@ -34,6 +37,7 @@ impl Route {
     }
     fn open(self, connector: Connector, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
         match self {
+            Self::Jobs => crate::jobs::source(connector, request),
             Self::Activity => activity::source(connector, request),
             Self::Blocking => blocking::source(connector, request),
             Self::MaintenanceProgress => crate::progress::source(connector, request),
@@ -44,6 +48,7 @@ impl Route {
 
 struct Registration {
     id: &'static str,
+    version: u32,
     purpose: RecipePurpose,
     subject: RecipeSubject,
     route: Route,
@@ -52,6 +57,7 @@ impl Registration {
     const fn snapshot(id: &'static str, recipe: Recipe) -> Self {
         Self {
             id,
+            version: 1,
             purpose: RecipePurpose::Investigation,
             subject: RecipeSubject::Database,
             route: Route::Snapshot(recipe),
@@ -61,6 +67,10 @@ impl Registration {
         self.purpose = RecipePurpose::Baseline;
         self
     }
+    const fn version(mut self, version: u32) -> Self {
+        self.version = version;
+        self
+    }
     const fn shared(mut self, kind: SharedResourceKind) -> Self {
         self.subject = RecipeSubject::Shared(kind);
         self
@@ -68,7 +78,7 @@ impl Registration {
     fn descriptor(&self) -> RecipeDescriptor {
         RecipeDescriptor {
             id: self.id.into(),
-            version: 1,
+            version: self.version,
             purpose: self.purpose,
             selector: self.route.selector(),
             subjects: vec![self.subject],
@@ -91,26 +101,36 @@ impl Registration {
 
 const REGISTRATIONS: &[Registration] = &[
     Registration {
+        id: "postgres.timescale-jobs",
+        version: 1,
+        purpose: RecipePurpose::Investigation,
+        subject: RecipeSubject::Database,
+        route: Route::Jobs,
+    },
+    Registration {
         id: "postgres.activity",
+        version: 1,
         purpose: RecipePurpose::Baseline,
         subject: RecipeSubject::Database,
         route: Route::Activity,
     },
     Registration {
         id: "postgres.maintenance-progress",
+        version: 1,
         purpose: RecipePurpose::Investigation,
         subject: RecipeSubject::Database,
         route: Route::MaintenanceProgress,
     },
     Registration {
         id: "postgres.blocking",
+        version: 1,
         purpose: RecipePurpose::Investigation,
         subject: RecipeSubject::Database,
         route: Route::Blocking,
     },
     Registration::snapshot("postgres.statement-counters", Recipe::Statements).baseline(),
     Registration::snapshot("postgres.statement-definitions", Recipe::Definitions),
-    Registration::snapshot("postgres.operational", Recipe::Operational).baseline(),
+    Registration::snapshot("postgres.operational", Recipe::Operational).version(2).baseline(),
     Registration::snapshot("postgres.instance-operational", Recipe::InstanceOperational)
         .shared(SharedResourceKind::Instance)
         .baseline(),

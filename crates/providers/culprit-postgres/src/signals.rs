@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use culprit_core::{
     ConstraintIssue, Coverage, FileIo, FileKind, Pressure, QueryStat, Setting, Signal, SignalScope, SignalUnit,
-    Snapshot, TableStorage, t,
+    Snapshot, TableStorage,
 };
 use tokio_postgres::Client;
 
@@ -48,9 +48,6 @@ pub async fn collect(client: &Client, probe: &Probe, snapshot: &mut Snapshot) {
     let pressure = snapshot.pressure.get_or_insert_with(Pressure::default);
     if let Some(files) = coverage.read(&sources::FILE_LATENCY, files(client, probe.version_num).await) {
         pressure.files = files;
-    }
-    if probe.version_num >= 140_000 {
-        pressure.signals.extend(coverage.read(&sources::SESSIONS, sessions(client).await).unwrap_or_default());
     }
     let mut replication_io = client;
     if probe.version_num >= 100_000
@@ -497,74 +494,32 @@ async fn files(client: &Client, version_num: u32) -> culprit_core::Result<Vec<Fi
     Ok(out)
 }
 
-/// Sessions opened per second, how long they last and how many the client abandoned (PostgreSQL 14+).
-async fn sessions(client: &Client) -> culprit_core::Result<Vec<Signal>> {
-    // The counts run from the last statistics reset and outlive a clean restart. PostgreSQL 15+ leaves stats_reset
-    // empty until the first reset: then how long they have counted is unknown, and the server's start time would turn
-    // days of sessions into a rate many times too high. No rate then; the shares below need no time.
-    let Some(r) = query_one(
-        client,
-        "SELECT sessions, session_time, sessions_abandoned, extract(epoch FROM now() - stats_reset) AS seconds
-           FROM pg_stat_database WHERE datname = current_database()",
-    )
-    .await?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(sessions) = r.number("sessions").filter(|n| *n > 0.0) else {
-        return Ok(Vec::new());
-    };
-    let seconds = r.number("seconds").filter(|s| *s > 0.0);
-    Ok(session_signals(sessions, seconds, r.number("session_time"), r.number("sessions_abandoned")))
-}
-
-/// The session signals from pg_stat_database's counts; `seconds` is how long they have counted, when known.
-fn session_signals(
-    sessions: f64,
-    seconds: Option<f64>,
-    session_ms: Option<f64>,
-    abandoned: Option<f64>,
-) -> Vec<Signal> {
-    let rate = seconds.map(|s| sessions / s);
+/// Only a same-read native reset and clock qualify the rate. Raw session time is not completed-session latency.
+pub(crate) fn session_signals(read: &culprit_core::ConnectionOutcomeSnapshot) -> Vec<Signal> {
     let mut out = Vec::new();
-    if let Some(rate) = rate {
-        out.push(
-            Signal::new(
-                culprit_core::signal_id::NEW_CONNECTIONS,
-                culprit_core::message!("provider.postgres.signal.new_connections"),
-                rate,
-                SignalUnit::PerSecond,
-                SignalScope::SinceStartup,
-            )
-            .graded(&t!("provider.postgres.signal.new_connections_healthy"), 2.0, 10.0, true),
-        );
+    if let Some(rate) = read.rate(culprit_core::ConnectionOutcomeMetricKind::SessionsEstablished) {
+        out.push(Signal::new(
+            culprit_core::signal_id::NEW_CONNECTIONS,
+            culprit_core::message!("provider.postgres.signal.new_connections"),
+            rate.per_second,
+            SignalUnit::PerSecond,
+            SignalScope::Cumulative,
+        ));
     }
-    if let Some(ms) = session_ms {
-        let length = Signal::new(
-            culprit_core::signal_id::SESSION_LENGTH,
-            culprit_core::message!("provider.postgres.signal.session_length"),
-            ms / sessions / 1000.0,
-            SignalUnit::Seconds,
-            SignalScope::SinceStartup,
-        );
-        // Short sessions only matter when there are many of them.
-        out.push(if rate.is_some_and(|r| r >= 1.0) {
-            length.graded(&t!("provider.postgres.signal.session_length_healthy"), 60.0, 1.0, false)
-        } else {
-            length
-        });
-    }
-    if let Some(abandoned) = abandoned {
-        out.push(
-            Signal::new(
-                culprit_core::signal_id::SESSIONS_ABANDONED,
-                culprit_core::message!("provider.postgres.signal.sessions_abandoned"),
-                abandoned / sessions * 100.0,
-                SignalUnit::Percent,
-                SignalScope::SinceStartup,
-            )
-            .graded(&t!("provider.postgres.signal.sessions_abandoned_healthy"), 1.0, 10.0, true),
-        );
+    let Some(row) = read.observations.first() else { return out };
+    let integer = |key: &str| {
+        row.counters.counters.iter().find(|counter| counter.key == key).and_then(|counter| counter.value.integer())
+    };
+    if let (Some(sessions), Some(abandoned)) =
+        (integer("sessions").filter(|value| *value > 0), integer("sessions_abandoned"))
+    {
+        out.push(Signal::new(
+            culprit_core::signal_id::SESSIONS_ABANDONED,
+            culprit_core::message!("view.connection_outcomes.metric.sessions_lost_client"),
+            abandoned as f64 / sessions as f64 * 100.0,
+            SignalUnit::Percent,
+            SignalScope::Cumulative,
+        ));
     }
     out
 }
@@ -623,33 +578,25 @@ mod tests {
     // shares that need no time stay.
     #[test]
     fn sessions_without_a_known_age_have_no_rate() {
-        let unknown = session_signals(400_000.0, None, Some(4.0e8), Some(4_000.0));
+        let mut values = crate::native::sessions::tests::values();
+        values["stats_reset"] = serde_json::Value::Null;
+        let unknown = session_signals(&crate::native::sessions::tests::snapshot(values));
         assert!(unknown.iter().all(|s| s.key != "new-connections"));
-        assert!(
-            unknown.iter().any(|s| s.key == "session-length") && unknown.iter().any(|s| s.key == "sessions-abandoned")
-        );
-        let known = session_signals(400_000.0, Some(200_000.0), None, None);
-        assert_eq!(known[0].value, 2.0);
+        assert!(unknown.iter().any(|s| s.key == "sessions-abandoned"));
+        assert!(unknown.iter().all(|s| s.key != "session-length" && s.scope == SignalScope::Cumulative));
+        let known =
+            session_signals(&crate::native::sessions::tests::snapshot(crate::native::sessions::tests::values()));
+        assert_eq!(known[0].value, 9007199254740993u64 as f64 / 86400.0);
     }
 
     // What the session signals are called and what healthy looks like, word for word.
     #[test]
     fn session_signals_in_english() {
-        let said: Vec<(String, Option<String>)> = session_signals(400_000.0, Some(200_000.0), Some(4.0e8), Some(4.0))
-            .into_iter()
-            .map(|s| (s.label, s.healthy))
-            .collect();
-        let pair = |label: &str, healthy: &str| (label.to_string(), Some(healthy.to_string()));
-        assert_eq!(
-            said,
-            [
-                pair("New connections", "under 1 a second: pooled connections are opened once"),
-                pair(
-                    "Average session length",
-                    "minutes: a session that lasts under a second pays more to connect than to work"
-                ),
-                pair("Sessions the client abandoned", "under 1%: clients close their connections"),
-            ]
-        );
+        let said: Vec<(String, Option<String>)> =
+            session_signals(&crate::native::sessions::tests::snapshot(crate::native::sessions::tests::values()))
+                .into_iter()
+                .map(|s| (s.label, s.healthy))
+                .collect();
+        assert_eq!(said, [("New connections".into(), None), ("Sessions with a lost client connection".into(), None),]);
     }
 }

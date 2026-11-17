@@ -474,3 +474,6 @@ async fn an_oversized_decoded_response_is_rejected_even_if_a_transport_ignores_i
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].byte_limit, 1024 * 1024);
 }
+
+mod connection_outcomes;
+mod jobs;

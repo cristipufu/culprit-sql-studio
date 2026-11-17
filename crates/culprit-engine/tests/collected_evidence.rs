@@ -10,6 +10,7 @@ mod cleanup;
 mod cohorts;
 mod compilation;
 mod compiler_admission;
+mod connection_outcomes;
 mod current_request_work;
 mod file_io;
 mod fixture;
@@ -484,3 +485,5 @@ async fn native_large_counts_and_unknown_units_are_retained_without_rounded_anal
         RuntimeMetricUnit::Pages { bytes_per_page: 16384 }
     );
 }
+
+mod jobs;

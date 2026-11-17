@@ -80,6 +80,13 @@ export function ObservationSourceIssue(props: { title: string } & ({ source: Sou
   </section>;
 }
 
+/** Explanation admission is separate from the original source's collection outcome. */
+export function ObservationExplanationIssue({ title, reason }: { title: string; reason: string }) {
+  return <section className="operational-health observation-list" aria-label={title}>
+    <h3>{title}</h3><p className="muted">{reason}</p>
+  </section>;
+}
+
 function ReadQualifications({ sources }: { sources: ReadSource[] }) {
   return sources.map((source) => {
     const qualification = readQualification(source.state);

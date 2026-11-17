@@ -19,6 +19,10 @@ enum PublicObservation<'a> {
         closure: &'a BlockingClosureDescription,
     },
     Snapshot(&'a StateSnapshotDescription),
+    Jobs {
+        snapshot: &'a StateSnapshotDescription,
+        metadata: &'a TimescaleJobsMetadata,
+    },
     FocusedPageWaitContext {
         snapshot: &'a StateSnapshotDescription,
         result: Box<FocusResult<'a>>,
@@ -103,6 +107,7 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
             closure: &result.closure,
         },
         SourceObservation::Snapshot(value) => PublicObservation::Snapshot(value),
+        SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
         SourceObservation::CacheEntryMemory { snapshot, focus } => {
             PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }
         }

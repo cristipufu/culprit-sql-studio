@@ -43,6 +43,45 @@ const USER_SETTINGS: &[&str] = &[
 ];
 
 impl EngineSpec for Postgres {
+    fn connection_outcome_profile(
+        &self,
+        source: &str,
+        counters: &crate::telemetry::NativeCounterSet,
+    ) -> Option<crate::ConnectionOutcomeProfile> {
+        use crate::{
+            ConnectionOutcomeAvailability as Availability, ConnectionOutcomeMetricKind as Kind,
+            ConnectionOutcomeMetricSpec as Metric,
+        };
+        const METRICS: &[(&str, Kind)] = &[
+            ("sessions", Kind::SessionsEstablished),
+            ("sessions_abandoned", Kind::SessionsLostClient),
+            ("sessions_fatal", Kind::SessionsFatal),
+            ("sessions_killed", Kind::SessionsOperatorTerminated),
+            ("session_time", Kind::SessionTime),
+            ("active_time", Kind::ActiveTime),
+            ("idle_in_transaction_time", Kind::IdleInTransactionTime),
+        ];
+        if source != "pg_stat_database" || counters.identity.id != "pg_stat_database" {
+            return None;
+        }
+        let metrics = METRICS
+            .iter()
+            .map(|(native_key, kind)| {
+                let availability = match counters.properties.get(&format!("has_{native_key}")).map(String::as_str) {
+                    Some("true") => Availability::Supported,
+                    Some("false") => Availability::Unsupported,
+                    _ if counters.counters.iter().any(|counter| counter.key == *native_key) => Availability::Supported,
+                    _ => Availability::Unknown,
+                };
+                Metric { native_key, kind: *kind, availability }
+            })
+            .collect();
+        Some(crate::ConnectionOutcomeProfile {
+            scope: crate::MeasurementScope::Database,
+            metrics,
+            observed_at: counters.properties.get("counter_observed_at").cloned(),
+        })
+    }
     fn session_id_format(&self) -> SessionIdFormat {
         SessionIdFormat::NativeId
     }

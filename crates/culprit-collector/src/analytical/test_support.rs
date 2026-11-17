@@ -44,6 +44,8 @@ mod cached_runtime;
 pub use cached_runtime::cached_runtime_evidence_cases;
 mod file_io;
 pub use file_io::file_io_evidence_cases;
+mod connection_outcomes;
+pub use connection_outcomes::{assert_connection_outcome_capture, connection_outcome_evidence_cases};
 mod cache_entry_memory;
 pub use cache_entry_memory::{
     CacheEntryMemoryCase, assert_cache_entry_memory_capture, cache_entry_memory_evidence,
@@ -93,6 +95,8 @@ mod projection;
 pub use projection::JsonProjection;
 mod native_failures;
 pub use native_failures::native_failure_evidence_cases;
+mod jobs;
+pub use jobs::{JobsCase, assert_jobs_capture, jobs_evidence, jobs_evidence_cases};
 mod maintenance_progress;
 pub use maintenance_progress::maintenance_progress_evidence_cases;
 mod replication;

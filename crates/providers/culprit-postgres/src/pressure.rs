@@ -40,108 +40,122 @@ pub(crate) fn statement_io_waits(statements_io_ms: f64) -> Vec<WaitStat> {
     }]
 }
 
+fn database_signals(read: &culprit_core::ConnectionOutcomeSnapshot, p: &mut Pressure) {
+    use culprit_core::telemetry::{CounterNature, MeasurementValue};
+    let Some(row) = read.observations.first() else { return };
+    let number = |key: &str| {
+        row.counters.counters.iter().find(|counter| counter.key == key).and_then(|counter| match &counter.value {
+            MeasurementValue::Integer(value) => value.parse::<u64>().ok().map(|value| value as f64),
+            MeasurementValue::Real(value) => Some(*value),
+        })
+    };
+    let hours = read
+        .profile(row)
+        .and_then(|profile| profile.observed_at)
+        .and_then(|at| {
+            row.counters
+                .counters
+                .iter()
+                .find(|counter| counter.nature == CounterNature::Cumulative)
+                .and_then(|counter| culprit_core::counter_rates::counter_span_seconds(&counter.reset, &at))
+        })
+        .map(|seconds| seconds / 3600.0);
+    if let (Some(hit), Some(misses)) = (number("blks_hit"), number("blks_read"))
+        && hit + misses > 0.0
+    {
+        p.signals.push(Signal::new(
+            culprit_core::signal_id::CACHE_HIT,
+            culprit_core::message!("provider.postgres.signal.cache_hit"),
+            hit / (hit + misses) * 100.0,
+            SignalUnit::Percent,
+            SignalScope::Cumulative,
+        ));
+    }
+    if let Some(temp) = number("temp_bytes") {
+        let rate = hours.and_then(|hours| culprit_core::counter_rates::AdmittedCounterRate::new(temp, hours * 3600.0));
+        let (value, label) = match (rate, hours) {
+            (Some(rate), _) => {
+                (rate.per_second() * 3600.0, culprit_core::message!("provider.postgres.signal.temp_per_hour"))
+            }
+            (None, Some(_)) => (temp, culprit_core::message!("provider.postgres.signal.temp_since_reset")),
+            (None, None) => (temp, culprit_core::message!("provider.postgres.signal.temp_since_began")),
+        };
+        p.signals.push(Signal::new(
+            culprit_core::signal_id::TEMP_BYTES,
+            label,
+            value,
+            SignalUnit::Bytes,
+            SignalScope::Cumulative,
+        ));
+    }
+    if let (Some(commits), Some(hours)) = (number("xact_commit"), hours)
+        && let Some(rate) = culprit_core::counter_rates::AdmittedCounterRate::new(commits, hours * 3600.0)
+    {
+        p.signals.push(Signal::new(
+            "commits",
+            culprit_core::message!("provider.postgres.signal.commits"),
+            rate.per_second(),
+            SignalUnit::PerSecond,
+            SignalScope::Cumulative,
+        ));
+    }
+    if let (Some(commits), Some(rollbacks)) = (number("xact_commit"), number("xact_rollback"))
+        && commits + rollbacks > 0.0
+    {
+        p.signals.push(Signal::new(
+            "rollbacks",
+            culprit_core::message!("provider.postgres.signal.rollbacks"),
+            rollbacks / (commits + rollbacks) * 100.0,
+            SignalUnit::Percent,
+            SignalScope::Cumulative,
+        ));
+    }
+    if let Some(deadlocks) = number("deadlocks") {
+        p.signals.push(Signal::new(
+            "deadlocks",
+            culprit_core::message!("provider.postgres.signal.deadlocks"),
+            deadlocks,
+            SignalUnit::Count,
+            SignalScope::Cumulative,
+        ));
+    }
+}
+
 /// The pressure counters, each source read through `Coverage::read` (`crate::sources`).
-pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
+pub async fn collect(client: &Client, probe: &Probe, target: culprit_core::DatabaseIdentity) -> (Pressure, Coverage) {
     let mut p = Pressure::default();
     let mut coverage = Coverage::default();
-    // How long the counters have counted. PostgreSQL keeps statistics across a clean restart, so the server's start
-    // time says nothing about it. A reset (of the database's counters or of one table's) stamps the database's
-    // stats_reset. Until then it is empty: the counters run from when PostgreSQL last discarded its statistics (a
-    // crash, a restore, the first start), which also stamps the shared counters' stats_reset (pg_stat_bgwriter,
-    // pg_stat_archiver) with that moment. A later reset of one of those moves only its own stamp, so the earlier of the
-    // two is the closer one: still never older than the counters (no "unused" claim stretches past them), and a rate
-    // isn't inflated by a span cut short.
-    let database = query_one(
-        client,
-        "SELECT blks_hit, blks_read, temp_bytes, xact_commit, xact_rollback, deadlocks,
-                extract(epoch FROM now() - coalesce(stats_reset,
-                    (SELECT least(b.stats_reset, a.stats_reset) FROM pg_stat_bgwriter b, pg_stat_archiver a))) / 3600 AS hours
-           FROM pg_stat_database WHERE datname = current_database()",
-    )
-    .await;
-    if let Some(Some(r)) = coverage.read(&sources::DATABASE_STATS, database) {
-        let hours = r.number("hours").filter(|h| *h > 0.0);
-        p.uptime_hours = hours;
-        let (hit, read) = (r.number("blks_hit").unwrap_or(0.0), r.number("blks_read").unwrap_or(0.0));
-        if hit + read > 0.0 {
-            p.signals.push(
-                Signal::new(
-                    culprit_core::signal_id::CACHE_HIT,
-                    // shared_buffers only: a read the operating system's cache serves counts as a miss here.
-                    culprit_core::message!("provider.postgres.signal.cache_hit"),
-                    hit / (hit + read) * 100.0,
-                    SignalUnit::Percent,
-                    SignalScope::SinceStartup,
-                )
-                .graded(&t!("provider.postgres.signal.cache_hit_healthy"), 99.0, 95.0, false),
-            );
+    // One existing database-counter statement also retains session outcomes. A database reset belongs to this
+    // point; it is never replaced by a shared writer/archiver reset or published as table/index counter authority.
+    let from = std::time::SystemTime::now();
+    let mut reader = client;
+    let acquired = crate::native::sessions::acquire(&mut reader, target.clone()).await;
+    match acquired {
+        Ok(read) => {
+            coverage.completed(&sources::DATABASE_STATS, read.observations.len());
+            coverage.completed(&sources::SESSIONS, read.observations.len());
+            database_signals(&read, &mut p);
+            p.signals.extend(crate::signals::session_signals(&read));
+            p.connection_outcomes = Some(Box::new(read));
         }
-        let temp = r.number("temp_bytes").unwrap_or(0.0);
-        match hours {
-            // Over an hour of known counting: a rate, graded.
-            Some(h) if h >= 1.0 => p.signals.push(
-                Signal::new(
-                    culprit_core::signal_id::TEMP_BYTES,
-                    culprit_core::message!("provider.postgres.signal.temp_per_hour"),
-                    temp / h,
-                    SignalUnit::Bytes,
-                    SignalScope::SinceStartup,
-                )
-                .graded(
-                    &t!("provider.postgres.signal.temp_per_hour_healthy"),
-                    100.0 * 1024.0 * 1024.0,
-                    1024.0 * 1024.0 * 1024.0,
-                    true,
-                ),
-            ),
-            // Under an hour, or since an unknown time: the total, which no rate threshold applies to.
-            Some(_) => p.signals.push(Signal::new(
-                culprit_core::signal_id::TEMP_BYTES,
-                culprit_core::message!("provider.postgres.signal.temp_since_reset"),
-                temp,
-                SignalUnit::Bytes,
-                SignalScope::SinceStartup,
-            )),
-            None => p.signals.push(Signal::new(
-                culprit_core::signal_id::TEMP_BYTES,
-                culprit_core::message!("provider.postgres.signal.temp_since_began"),
-                temp,
-                SignalUnit::Bytes,
-                SignalScope::SinceStartup,
-            )),
+        Err(error) => {
+            coverage.source_failed(&sources::DATABASE_STATS, &error);
+            coverage.source_failed(&sources::SESSIONS, &error);
+            if let Ok(context) =
+                culprit_core::telemetry::ObservationReadContext::collector(from, std::time::SystemTime::now())
+            {
+                p.connection_outcomes = Some(Box::new(culprit_core::ConnectionOutcomeSnapshot {
+                    target: target.into(),
+                    context,
+                    sources: vec![culprit_core::telemetry::StateSourceCoverage::unavailable(
+                        crate::native::sessions::SOURCE.into(),
+                        error.code,
+                        error.detail.as_ref().map(|_| culprit_core::telemetry::CollectionStop::from_error(&error)),
+                    )],
+                    observations: Vec::new(),
+                }));
+            }
         }
-        if let Some(h) = hours {
-            p.signals.push(Signal::new(
-                "commits",
-                culprit_core::message!("provider.postgres.signal.commits"),
-                r.number("xact_commit").unwrap_or(0.0) / (h * 3600.0),
-                SignalUnit::PerSecond,
-                SignalScope::SinceStartup,
-            ));
-        }
-        let (commits, rollbacks) = (r.number("xact_commit").unwrap_or(0.0), r.number("xact_rollback").unwrap_or(0.0));
-        if commits + rollbacks > 0.0 {
-            p.signals.push(
-                Signal::new(
-                    "rollbacks",
-                    culprit_core::message!("provider.postgres.signal.rollbacks"),
-                    rollbacks / (commits + rollbacks) * 100.0,
-                    SignalUnit::Percent,
-                    SignalScope::SinceStartup,
-                )
-                .graded(&t!("provider.postgres.signal.rollbacks_healthy"), 5.0, 20.0, true),
-            );
-        }
-        p.signals.push(
-            Signal::new(
-                "deadlocks",
-                culprit_core::message!("provider.postgres.signal.deadlocks"),
-                r.number("deadlocks").unwrap_or(0.0),
-                SignalUnit::Count,
-                SignalScope::SinceStartup,
-            )
-            .graded(&t!("provider.postgres.signal.deadlocks_healthy"), 1.0, 10.0, true),
-        );
     }
     let checkpoints_sql = if probe.version_num >= 170_000 {
         "SELECT num_timed AS timed, num_requested AS requested FROM pg_stat_checkpointer"
@@ -437,6 +451,40 @@ pub async fn sample(client: &Client, seconds: u32) -> Result<WaitSample> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_counter_period_does_not_become_a_global_or_index_counter_epoch() {
+        let mut values = crate::native::sessions::tests::values();
+        values["stats_reset"] = serde_json::Value::Null;
+        let read = crate::native::sessions::tests::snapshot(values);
+        let mut pressure = Pressure::default();
+        database_signals(&read, &mut pressure);
+        assert!(pressure.uptime_hours.is_none());
+        assert!(pressure.signals.iter().all(|signal| signal.scope == SignalScope::Cumulative));
+        assert!(pressure.signal("commits").is_none());
+        assert_eq!(pressure.signal(culprit_core::signal_id::TEMP_BYTES).unwrap().value, 512.0);
+        assert_eq!(pressure.signal(culprit_core::signal_id::CACHE_HIT).unwrap().value, 100.0);
+        assert_eq!(pressure.signal("deadlocks").unwrap().value, 0.0, "actual measured zero remains a fact");
+        let read = crate::native::sessions::tests::snapshot(crate::native::sessions::tests::values());
+        let mut pressure = Pressure::default();
+        database_signals(&read, &mut pressure);
+        assert!(pressure.uptime_hours.is_none(), "the source period is not an index/shared counter lifetime");
+        assert_eq!(pressure.signal("commits").unwrap().value, 10.0 / 86400.0);
+    }
+
+    #[test]
+    fn unavailable_database_counters_are_omitted_not_healthy_zeros() {
+        let mut values = crate::native::sessions::tests::values();
+        for key in ["blks_hit", "blks_read", "temp_bytes", "deadlocks", "xact_commit", "xact_rollback"] {
+            values[key] = serde_json::Value::Null;
+        }
+        let read = crate::native::sessions::tests::snapshot(values);
+        let mut pressure = Pressure::default();
+        database_signals(&read, &mut pressure);
+        assert!(pressure.signals.is_empty());
+        assert!(pressure.uptime_hours.is_none());
+        assert!(!read.observations[0].counters.counters.is_empty(), "independent native session measurements survive");
+    }
 
     #[test]
     fn events_fold_into_shared_categories() {

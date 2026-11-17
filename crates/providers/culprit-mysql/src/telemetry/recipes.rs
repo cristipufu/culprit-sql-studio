@@ -68,20 +68,21 @@ impl Acquisition {
 
 struct Registration {
     id: &'static str,
+    version: u32,
     purpose: RecipePurpose,
     acquisition: Acquisition,
 }
 impl Registration {
     const fn baseline(id: &'static str, acquisition: Acquisition) -> Self {
-        Self { id, purpose: RecipePurpose::Baseline, acquisition }
+        Self { id, version: 1, purpose: RecipePurpose::Baseline, acquisition }
     }
     const fn investigation(id: &'static str, acquisition: Acquisition) -> Self {
-        Self { id, purpose: RecipePurpose::Investigation, acquisition }
+        Self { id, version: 1, purpose: RecipePurpose::Investigation, acquisition }
     }
     fn descriptor(&self) -> RecipeDescriptor {
         RecipeDescriptor {
             id: self.id.into(),
-            version: 1,
+            version: self.version,
             purpose: self.purpose,
             selector: self.selector(),
             subjects: vec![self.acquisition.subject()],
@@ -109,10 +110,13 @@ const REGISTRATIONS: &[Registration] = &[
     Registration::baseline("mysql.activity", Acquisition::Activity),
     Registration::baseline("mysql.deadlock-history", Acquisition::Deadlocks),
     Registration::baseline("mysql.statement-counters", Acquisition::Snapshot(Recipe::Statements)),
-    Registration::baseline(
-        "mysql.operational",
-        Acquisition::Snapshot(Recipe::Operational(native::operational::Kind::Status)),
-    ),
+    Registration {
+        version: 2,
+        ..Registration::baseline(
+            "mysql.operational",
+            Acquisition::Snapshot(Recipe::Operational(native::operational::Kind::Status)),
+        )
+    },
     Registration::baseline("mysql.replication", Acquisition::Snapshot(Recipe::Replication)),
     Registration::baseline("mysql.settings", Acquisition::Snapshot(Recipe::Settings)),
     Registration::baseline("mysql.native-failures", Acquisition::NativeFailures),

@@ -2,15 +2,15 @@
 //! recent failed runs raised), file I/O latency (performance_schema), connections opened and threads created, replica
 //! status, and column histograms. Lock time per statement is already part of the digest's waits. Neither engine keeps
 //! redo bytes per statement or row-lock waits per table. Each read is independent and cheap; a failure becomes a note.
+mod connection_outcomes;
 mod replication;
-pub(crate) use replication::settle as settle_replication;
 
 use std::collections::HashMap;
 
 use culprit_core::telemetry::NativeReplicationSample;
 use culprit_core::{
     ColumnHistogram, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaCondition, ReplicaRole, Setting,
-    Signal, SignalScope, SignalUnit, Snapshot, key, t,
+    Snapshot, t,
 };
 use mysql_async::Value;
 
@@ -20,13 +20,23 @@ use crate::sources;
 
 const PICOS_PER_MS: f64 = 1_000_000_000.0;
 
-/// Collect signals on the caller-owned reader. Replication remains provisional until that owner confirms
-/// shutdown; the other independent sources publish their own coverage and failure notes.
+pub(crate) struct Readings {
+    replication: culprit_core::Result<replication::Reading>,
+    connections: culprit_core::Result<connection_outcomes::Reading>,
+}
+
+pub(crate) fn settle(snapshot: &mut Snapshot, readings: Readings, shutdown: culprit_core::telemetry::SourceShutdown) {
+    replication::settle(snapshot, readings.replication, shutdown);
+    connection_outcomes::settle(snapshot, readings.connections, shutdown);
+}
+
+/// Collect on the caller-owned reader. Replication and connection outcomes remain provisional until that owner
+/// confirms shutdown; the other independent sources publish their own coverage and failure notes.
 pub(crate) async fn collect(
     conn: &mut impl crate::read::QueryRead,
     probe: &Probe,
     snapshot: &mut Snapshot,
-) -> culprit_core::Result<replication::Reading> {
+) -> Readings {
     let mut coverage = Coverage::default();
     let mariadb = probe.version.to_ascii_lowercase().contains("mariadb");
     crate::operations::collect(conn, probe, snapshot).await;
@@ -40,13 +50,14 @@ pub(crate) async fn collect(
         snapshot.histograms = found;
     }
     attach_table_metadata(conn, &probe.database, snapshot).await;
+    let target = snapshot.database_identity().into();
     let pressure = snapshot.pressure.get_or_insert_with(Pressure::default);
     if probe.performance_schema
         && let Some(files) = coverage.read(&sources::FILE_LATENCY, files(conn).await)
     {
         pressure.files = files;
     }
-    pressure.signals.extend(coverage.read(&sources::CONNECTIONS, connections(conn).await).unwrap_or_default());
+    let connections = connection_outcomes::read(conn, target).await;
     // What replication and connection advice depend on: whether this server takes writes, and its thread cache.
     let variables =
         coverage.read(&sources::SERVER_VARIABLES, server_variables(conn).await).unwrap_or_else(HashMap::new);
@@ -74,7 +85,7 @@ pub(crate) async fn collect(
         });
     }
     coverage.append_to(snapshot);
-    replicas
+    Readings { replication: replicas, connections }
 }
 
 /// The server's `message` on failing to read replica status, and the privilege that reading it needs on this product
@@ -258,96 +269,6 @@ async fn files(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<V
         .collect())
 }
 
-/// Connections opened per second since startup, how many needed a new thread, and failed connection attempts.
-async fn connections(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<Vec<Signal>> {
-    let rows = query(
-        conn,
-        "SHOW GLOBAL STATUS WHERE Variable_name IN
-           ('Connections', 'Threads_created', 'Aborted_connects', 'Aborted_clients', 'Uptime')",
-    )
-    .await?;
-    let status: HashMap<String, f64> = rows
-        .iter()
-        .filter_map(|r| Some((r.string("variable_name"), r.text("value")?.trim().parse::<f64>().ok()?)))
-        .collect();
-    Ok(connection_signals(&status))
-}
-
-/// The connection signals from SHOW GLOBAL STATUS. `Connections` counts every attempt, the ones that failed
-/// (Aborted_connects: a wrong password, a timeout, a scanner) included; a pool only cuts the ones that log in.
-fn connection_signals(status: &HashMap<String, f64>) -> Vec<Signal> {
-    let get = |k: &str| status.get(k).copied();
-    let Some(uptime) = get("Uptime").filter(|u| *u > 0.0) else { return Vec::new() };
-    let mut out = Vec::new();
-    if let Some(attempts) = get("Connections") {
-        let connections = (attempts - get("Aborted_connects").unwrap_or(0.0)).max(0.0);
-        let rate = connections / uptime;
-        out.push(
-            Signal::new(
-                culprit_core::signal_id::NEW_CONNECTIONS,
-                culprit_core::message!("provider.mysql.signal.new_connections"),
-                rate,
-                SignalUnit::PerSecond,
-                SignalScope::SinceStartup,
-            )
-            .graded(&t!("provider.mysql.signal.new_connections.healthy"), 5.0, 25.0, true),
-        );
-        if let Some(created) = get("Threads_created")
-            && connections >= 1_000.0
-        {
-            out.push(
-                Signal::new(
-                    culprit_core::signal_id::THREAD_CACHE_MISSES,
-                    culprit_core::message!("provider.mysql.signal.thread_cache_misses"),
-                    created / connections * 100.0,
-                    SignalUnit::Percent,
-                    SignalScope::SinceStartup,
-                )
-                .graded(&t!("provider.mysql.signal.thread_cache_misses.healthy"), 10.0, 50.0, true),
-            );
-        }
-    }
-    let hours = uptime / 3600.0;
-    for (key, name, per_hour, since_start) in [
-        (
-            "aborted-connects",
-            "Aborted_connects",
-            key!("provider.mysql.signal.aborted_connects"),
-            key!("provider.mysql.signal.aborted_connects_since_start"),
-        ),
-        (
-            "aborted-clients",
-            "Aborted_clients",
-            key!("provider.mysql.signal.aborted_clients"),
-            key!("provider.mysql.signal.aborted_clients_since_start"),
-        ),
-    ] {
-        if let Some(n) = get(name) {
-            // Under an hour of uptime, a rate per hour would be an extrapolation: report the count.
-            let signal = if hours >= 1.0 {
-                Signal::new(
-                    key,
-                    culprit_core::i18n::Message::catalog(per_hour, &[]),
-                    n / hours,
-                    SignalUnit::PerHour,
-                    SignalScope::SinceStartup,
-                )
-            } else {
-                Signal::new(
-                    key,
-                    culprit_core::i18n::Message::catalog(since_start, &[]),
-                    n,
-                    SignalUnit::Count,
-                    SignalScope::SinceStartup,
-                )
-            };
-            out.push(signal);
-        }
-    }
-    out
-}
-
-/// The server variables advice depends on: read_only (does it take writes) and thread_cache_size.
 async fn server_variables(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<HashMap<String, String>> {
     let rows = query(conn, "SHOW GLOBAL VARIABLES WHERE Variable_name IN ('read_only', 'thread_cache_size')").await?;
     Ok(rows.iter().filter_map(|r| Some((r.string("variable_name").to_ascii_lowercase(), r.text("value")?))).collect())
@@ -584,24 +505,6 @@ mod tests {
         }
     }
 
-    // Connections counts failed attempts too; the rate a pool would cut is the successful ones.
-    #[test]
-    fn failed_connection_attempts_are_not_new_connections() {
-        let status: HashMap<String, f64> = [
-            ("Uptime", 1_000.0),
-            ("Connections", 30_000.0),
-            ("Aborted_connects", 20_000.0),
-            ("Threads_created", 5_000.0),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect();
-        let signals = connection_signals(&status);
-        let rate = signals.iter().find(|s| s.key == "new-connections").unwrap();
-        assert_eq!(rate.value, 10.0);
-        assert_eq!(signals.iter().find(|s| s.key == "thread-cache-misses").unwrap().value, 50.0);
-    }
-
     #[test]
     fn error_codes_have_fixed_names() {
         assert_eq!(error_name(1205).as_deref(), Some("lock wait timeout"));
@@ -609,50 +512,9 @@ mod tests {
         assert_eq!(error_name(4242), None);
     }
 
-    // What the connection signals, the errors' names and a replica's status say, word for word: their messages come
-    // from locales/en.json.
+    // Native error-code labels stay word for word when connection outcomes move to their shared view.
     #[test]
-    fn signals_and_errors_say_what_they_are_in_english() {
-        let status = |uptime: f64| -> HashMap<String, f64> {
-            [
-                ("Uptime", uptime),
-                ("Connections", 30_000.0),
-                ("Aborted_connects", 20.0),
-                ("Aborted_clients", 5.0),
-                ("Threads_created", 5_000.0),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect()
-        };
-        let words = |signals: Vec<Signal>| -> Vec<(String, String, Option<String>)> {
-            signals.into_iter().map(|s| (s.key, s.label, s.healthy)).collect()
-        };
-        assert_eq!(
-            words(connection_signals(&status(7_200.0))),
-            [
-                (
-                    "new-connections".into(),
-                    "New connections".into(),
-                    Some("under 5 a second: pooled connections are opened once".into())
-                ),
-                (
-                    "thread-cache-misses".into(),
-                    "Connections that needed a new thread".into(),
-                    Some("under 10%: thread_cache_size covers new connections".into())
-                ),
-                ("aborted-connects".into(), "Failed connection attempts".into(), None),
-                ("aborted-clients".into(), "Connections dropped without closing".into(), None),
-            ]
-        );
-        let early = words(connection_signals(&status(600.0)));
-        assert_eq!(
-            early[2..],
-            [
-                ("aborted-connects".into(), "Failed connection attempts since start".into(), None),
-                ("aborted-clients".into(), "Connections dropped without closing since start".into(), None),
-            ]
-        );
+    fn native_error_codes_say_what_they_are_in_english() {
         let names: Vec<(u32, String)> =
             [1205, 1213, 3024, 1969, 1317, 3572, 1062, 1451, 1452, 1048, 1406, 1264, 1690, 1292, 1366, 1064, 1054]
                 .into_iter()

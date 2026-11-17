@@ -30,6 +30,23 @@ Sessions, blocking chains, cancellation, live session sampling and PostgreSQL pr
 
 A deadlock counter remains PostgreSQL's database counter; reconstructing a deadlock pattern requires the relevant server-log records. Managed-service restrictions can make individual sources unavailable.
 
+## Background jobs
+
+`culprit scan metrics --collect-native-failures` also reads supported job diagnostics. Scans and
+`culprit collect once metrics --collection jobs` share one bounded reader of the installed public
+`timescaledb_information.jobs`, `job_stats`, `job_history` and `job_errors` views. Culprit discovers available
+columns and permissions before selecting a view; it never runs jobs or changes history logging.
+
+The result retains schedules, reported state, exact run/failure totals and recent retained runs or error codes.
+It reads at most 256 job-state rows and 256 run rows, with a one-second statement timeout and five-second total
+budget. A successful bounded read can still have incomplete native history because of owner visibility,
+retention or disabled success logging. `pg_monitor` alone does not grant database-owner visibility.
+
+Health shows folded job details. CLI archive analysis uses `--analysis jobs`; MCP includes a bounded summary in
+`waits`. A reported running state does not identify a worker or query, and historical procedure labels do not
+establish today's job definition or owner. The new reader remains cost-unqualified for automatic production
+scheduling; the limits above bound collection, without proving its server-side cost.
+
 ## Schema and indexes
 
 Culprit reads the extension's public `timescaledb_information.hypertables`, `dimensions`, and `chunks` views, plus `approximate_row_count`, `hypertable_detailed_size`, `chunks_detailed_size`, and `hypertable_index_size` in the extension's installed schema. Each source has its own coverage result; a permission or version error becomes a visible note.
@@ -59,6 +76,11 @@ The shared [evidence rules](coverage.md) apply to PostgreSQL sources and extensi
 ## Verification
 
 Local verification used TimescaleDB **2.31.0** on PostgreSQL **17.11**, including real hypertables, compressed chunks and an ordinary table. Tiger Cloud hostnames are recognized, but a hosted Tiger Cloud account has not been tested. [Reproduce the local database and workload](../../dev/timescale/README.md).
+
+Job-reader conformance also covers real retained failures, owner-filtered visibility, missing extension,
+row/query/byte limits and confirmed reader shutdown on disposable fixtures. These checks establish native
+compatibility; representative production work-cost qualification remains outstanding.
+[Run the native job cases](../../dev/timescale/jobs.md).
 
 The captured example has `public.sensor_readings` with **120,000 rows, 14 chunks and seven compressed chunks**, plus `public.devices`. `fixtures/timescale-demo.report.json` contains the actual collected input and today's analysis. The development browser renders this saved report without a database connection.
 

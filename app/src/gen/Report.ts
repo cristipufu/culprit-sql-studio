@@ -4,7 +4,9 @@ import type { CheckAssessment } from "./CheckAssessment";
 import type { CleanupReport } from "./CleanupReport";
 import type { CompilationReport } from "./CompilationReport";
 import type { CompilerAdmissionReport } from "./CompilerAdmissionReport";
+import type { ConnectionOutcomeReport } from "./ConnectionOutcomeReport";
 import type { Finding } from "./Finding";
+import type { JobsReport } from "./JobsReport";
 import type { LockedCheck } from "./LockedCheck";
 import type { MaintenanceProgressReport } from "./MaintenanceProgressReport";
 import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
@@ -21,7 +23,7 @@ import type { TaskSpaceReport } from "./TaskSpaceReport";
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { statement_work?: StatementWorkReport, 
+export type Report = { jobs?: JobsReport, statement_work?: StatementWorkReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */
@@ -61,4 +63,4 @@ maintenance_progress?: MaintenanceProgressReport,
 /**
  * Native replication points retain original scope, clocks and availability independently of legacy summaries.
  */
-replication?: ReplicationReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+replication?: ReplicationReport, connection_outcomes?: ConnectionOutcomeReport, cleanup?: CleanupReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

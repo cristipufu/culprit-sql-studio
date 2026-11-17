@@ -60,6 +60,9 @@ pub struct OperationalStats {
     pub native_failures: Option<crate::telemetry::NativeFailureSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub jobs: Option<Box<crate::telemetry::TimescaleJobsSnapshot>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub session_memory: Option<crate::telemetry::SessionMemorySnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -84,6 +87,20 @@ pub struct OperationalStats {
 }
 
 impl OperationalStats {
+    /// Native job diagnostics and retained error buffers are independent source-owned assessments of the opt-in.
+    /// An explicit unavailable/not-applicable source still counts as assessed; it never becomes successful evidence.
+    pub fn native_failure_diagnostics_assessed(&self, sources: &[crate::SourceOutcome]) -> bool {
+        self.native_failures.is_some()
+            || self.jobs.is_some()
+            || sources.iter().any(|source| {
+                matches!(
+                    source.source.as_str(),
+                    crate::source_id::NATIVE_FAILURES
+                        | crate::telemetry::TIMESCALE_JOBS_SOURCE
+                        | crate::telemetry::TIMESCALE_JOB_RUNS_SOURCE
+                )
+            })
+    }
     pub fn render_recorded_messages(&mut self) {
         if let Some(resources) = &mut self.node_resources {
             crate::i18n::render_text(&mut resources.source, resources.source_message.as_ref());
@@ -154,6 +171,7 @@ impl OperationalStats {
             termination_history: _,
             memory_failures: _,
             native_failures: _,
+            jobs: _,
             session_memory: _,
             page_waits: _,
             task_space: _,

@@ -178,6 +178,96 @@ class ReplicationOwnership(unittest.TestCase):
         self.assertEqual(events, ["standby", "primary", "network"])
 
 
+class TimescaleJobsOwnership(unittest.TestCase):
+    def database(self):
+        fixture = next(fixture for fixture in smoke.FIXTURES if fixture.name == "timescale")
+        database = smoke.Database(fixture)
+        database.commands = Mock()
+        database.commands.run.return_value = (0, database.owner + "\n")
+        database.sql = Mock(return_value=(0, ""))
+        return database
+
+    def test_only_dedicated_timescale_and_plain_postgres_start_with_the_exact_jobs_nonce(self):
+        for fixture in smoke.FIXTURES:
+            database = smoke.Database(fixture)
+            environment, command = database.configuration()
+            markers = [argument for argument in command if argument.startswith("cluster_name=")]
+            expected = [f"cluster_name=culprit_jobs_{database.owner}"] if fixture.name in ("timescale", "postgres") else []
+            with self.subTest(fixture=fixture.name):
+                self.assertEqual(markers, expected)
+                if fixture.engine == "postgres":
+                    self.assertEqual(environment["POSTGRES_DB"], fixture.database)
+                    self.assertIn("track_io_timing=on", command)
+                if fixture.name == "timescale":
+                    self.assertIn("shared_preload_libraries=timescaledb,pg_stat_statements", command)
+
+    def test_owned_setup_runs_the_exact_fixture_script_without_new_variables_or_credentials(self):
+        database = self.database()
+        script = "-- exact bounded native job fixture setup\n"
+        with patch.object(smoke.Path, "read_text", autospec=True, return_value=script) as read:
+            database.prepare_timescale_jobs()
+        self.assertEqual(read.call_args.args[0], smoke.ROOT / "dev" / "timescale" / "jobs.sql")
+        database.sql.assert_called_once_with(script)
+        self.assertEqual(database.commands.run.call_count, 1)
+        inspection = database.commands.run.call_args.args[0]
+        self.assertEqual(inspection[:2], ["docker", "inspect"])
+        self.assertEqual(inspection[-1], database.name)
+        self.assertIn(smoke.OWNER_LABEL, inspection[3])
+
+    def test_missing_or_foreign_container_refuses_setup_before_reading_or_running_sql(self):
+        for result in [(1, "missing"), (0, "another-owner\n")]:
+            database = self.database()
+            database.commands.run.return_value = result
+            with self.subTest(result=result), patch.object(smoke.Path, "read_text") as read:
+                with self.assertRaises(RuntimeError):
+                    database.prepare_timescale_jobs()
+                read.assert_not_called()
+                database.sql.assert_not_called()
+                self.assertEqual(database.commands.run.call_count, 1)
+
+    def test_an_invalid_nonce_or_other_fixture_cannot_reach_job_setup(self):
+        invalid_nonce = self.database()
+        invalid_nonce.owner = "not-a-native-owner;SELECT 1"
+        other_fixture = smoke.Database(smoke.FIXTURES[0])
+        other_fixture.commands = Mock()
+        other_fixture.sql = Mock()
+        for database in (invalid_nonce, other_fixture):
+            with self.subTest(fixture=database.fixture.name), patch.object(smoke.Path, "read_text") as read:
+                with self.assertRaises(RuntimeError):
+                    database.prepare_timescale_jobs()
+                read.assert_not_called()
+                database.sql.assert_not_called()
+                database.commands.run.assert_not_called()
+
+    def test_timescale_seed_creates_the_limited_role_before_owned_job_setup(self):
+        database = self.database()
+        scripts = {"seed.sql": "-- base Timescale seed", "workload.sql": "-- base Timescale workload",
+                   "jobs.sql": "-- bounded owned jobs"}
+        with patch.object(smoke.Path, "read_text", autospec=True,
+                          side_effect=lambda path: scripts[path.name]):
+            database.seed()
+        statements = [call.args[0] for call in database.sql.call_args_list]
+        reader = next(index for index, statement in enumerate(statements) if "CREATE ROLE smoke_reader" in statement)
+        jobs = statements.index(scripts["jobs.sql"])
+        self.assertGreater(jobs, reader)
+        self.assertEqual(statements.count(scripts["jobs.sql"]), 1)
+        self.assertEqual(statements[:2], [scripts["seed.sql"], scripts["workload.sql"]])
+
+    def test_cancelled_job_setup_removes_only_the_same_owned_container_and_volumes(self):
+        database = self.database()
+        database.start = Mock()
+        database.sql.side_effect = KeyboardInterrupt
+        with patch.object(smoke.Path, "read_text", return_value="-- owned jobs"), redirect_stdout(io.StringIO()):
+            with self.assertRaises(KeyboardInterrupt):
+                with database:
+                    database.prepare_timescale_jobs()
+        database.sql.assert_called_once()
+        removal = database.commands.run.call_args_list[-1].args[0]
+        self.assertEqual(removal, ["docker", "rm", "--force", "--volumes", database.name])
+        inspections = [call for call in database.commands.run.call_args_list if call.args[0][:2] == ["docker", "inspect"]]
+        self.assertEqual(len(inspections), 2)
+
+
 class NativeSelection(unittest.TestCase):
     def test_broad_selection_excludes_optional_topologies_without_their_environment(self):
         database = smoke.Database(smoke.FIXTURES[1])
@@ -196,6 +286,44 @@ class NativeSelection(unittest.TestCase):
         with patch.object(smoke, "run_tests") as run_tests:
             database.test("culprit-mysql", "telemetry::native_tests::replication_movement::")
         self.assertEqual(run_tests.call_args.kwargs["skip"], ["telemetry::native_tests::replication::"])
+
+    def test_generic_postgres_selections_skip_jobs_even_on_a_timescale_fixture(self):
+        for name in ("postgres", "timescale"):
+            database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == name))
+            database.test_environment = Mock(return_value={})
+            for selection in ("telemetry::native_tests::", "native_tests::", ""):
+                with self.subTest(fixture=name, selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                    database.test("culprit-postgres", selection)
+                    self.assertEqual(run_tests.call_args.kwargs["skip"], [
+                        "telemetry::native_tests::replication::", "jobs::",
+                    ])
+
+    def test_explicit_short_and_qualified_jobs_filters_run_without_unrelated_optional_fixtures(self):
+        database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == "timescale"))
+        database.test_environment = Mock(return_value={})
+        for selection in ("jobs::compatibility::", "telemetry::native_tests::jobs::limits::"):
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-postgres", selection)
+                self.assertEqual(run_tests.call_args.kwargs["skip"], ["telemetry::native_tests::replication::"])
+
+    def test_default_verification_keeps_installed_and_absent_job_cases_on_their_own_fixtures(self):
+        for fixture in smoke.FIXTURES:
+            database = smoke.Database(fixture)
+            database.test = Mock()
+            database.verify()
+            selections = [call.args[1] for call in database.test.call_args_list if "jobs::" in call.args[1]]
+            expected = {
+                "timescale": ["telemetry::native_tests::jobs::compatibility::", "telemetry::native_tests::jobs::limits::"],
+                "postgres": ["telemetry::native_tests::jobs::absent::"],
+            }.get(fixture.name, [])
+            with self.subTest(fixture=fixture.name):
+                self.assertEqual(selections, expected)
+
+    def test_explicit_fixture_selection_does_not_add_a_second_default_jobs_run(self):
+        database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == "timescale"))
+        database.test = Mock()
+        database.verify([("culprit-postgres", "jobs::limits::")])
+        database.test.assert_called_once_with("culprit-postgres", "jobs::limits::", library=True, skip=None)
 
 
 class ChildProcesses(unittest.TestCase):

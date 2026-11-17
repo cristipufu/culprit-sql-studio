@@ -17,13 +17,15 @@ import { OperationalHealth, hasOperationalHealth } from "./OperationalHealth";
 import { MemoryFailureSourceIssue, RetainedMemoryFailures, memoryFailureReadIssue } from "./RetainedMemoryFailures";
 import { NativeFailureSourceIssue, RetainedNativeFailures, nativeFailureReadIssue } from "./RetainedNativeFailures";
 import { RequestMemoryParticipants, SessionMemoryParticipants } from "./MemoryParticipants";
-import { ObservationSourceIssue, observationReadIssue } from "./ObservationList";
+import { ObservationExplanationIssue, ObservationSourceIssue, observationReadIssue } from "./ObservationList";
 import { PageWaitTargets } from "./PageWaitTargets";
 import { TaskSpace } from "./TaskSpace";
 import { QueryCompilation } from "./QueryCompilation";
 import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
 import { StatementWork } from "./StatementWork";
+import { ConnectionOutcomes } from "./ConnectionOutcomes";
+import { Jobs, JOBS_SOURCES } from "./Jobs";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
@@ -93,7 +95,11 @@ export function HealthTab({
   const memoryIssue = memoryFailureReadIssue(memoryFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_memory_failures === true);
   const nativeFailures = report.snapshot.operations.native_failures;
   const nativeReport = report.native_failures;
-  const nativeIssue = nativeFailureReadIssue(nativeFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_native_failures === true);
+  const jobs = report.snapshot.operations.jobs;
+  const jobsReport = report.jobs;
+  const jobsAssessed = Boolean(jobs) || (report.snapshot.sources ?? []).some((outcome) => JOBS_SOURCES.some((source) => source === outcome.source));
+  const explicitNativeFailureSource = (report.snapshot.sources ?? []).some((outcome) => outcome.source === (nativeFailures?.source ?? "native failures"));
+  const nativeIssue = nativeFailureReadIssue(nativeFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_native_failures === true && (!jobsAssessed || explicitNativeFailureSource));
   const requests = report.snapshot.pressure?.request_memory;
   const requestReport = report.request_memory;
   const requestIssue = observationReadIssue(requests?.source ?? "current request memory", report.snapshot.sources ?? [], report.snapshot.options?.collect_request_memory === true);
@@ -112,9 +118,13 @@ export function HealthTab({
   const compilerAdmission = report.snapshot.operations.compiler_admission;
   const compilerAdmissionReport = report.compiler_admission;
   const compilerAdmissionIssue = observationReadIssue(compilerAdmission?.source ?? "compilation gateways", report.snapshot.sources ?? []);
+  const jobsIssues = JOBS_SOURCES.map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const statementWork = report.snapshot.operations.statement_work;
   const statementWorkReport = report.statement_work;
   const statementWorkUnexplained = Boolean(statementWork && !statementWorkReport);
+  const connectionOutcomes = report.connection_outcomes;
+  const connectionOutcomesRead = report.snapshot.pressure?.connection_outcomes;
+  const connectionOutcomesIssue = observationReadIssue("sessions", report.snapshot.sources ?? []);
   const cleanup = report.cleanup;
   const cleanupReads = report.snapshot.operations.cleanup ?? [];
   const retention = pressure?.retention ?? null;
@@ -122,8 +132,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, compilerAdmission && compilerAdmissionReport, statementWork, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, compilerAdmissionIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, compilerAdmission && compilerAdmissionReport, statementWork, connectionOutcomes, connectionOutcomesRead, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, compilerAdmissionIssue, connectionOutcomesIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -180,14 +190,17 @@ export function HealthTab({
       {!(compilation && compilationReport) && compilationIssue && <ObservationSourceIssue source={compilationIssue} title={t("view.compilation.title")} />}
       {compilerAdmission && compilerAdmissionReport && <CompilerAdmission key={report.snapshot.id} evidence={compilerAdmission} report={compilerAdmissionReport} />}
       {!(compilerAdmission && compilerAdmissionReport) && compilerAdmissionIssue && <ObservationSourceIssue source={compilerAdmissionIssue} title={t("view.compiler_admission.title")} />}
+      {jobs && jobsReport && <Jobs key={report.snapshot.id} evidence={jobs} report={jobsReport} />}
+      {!(jobs && jobsReport) && jobsIssues.length > 0 && <ObservationSourceIssue sources={jobsIssues} title={t("view.jobs.title")} />}
+      {jobs && !jobsReport && jobsIssues.length === 0 && <ObservationSourceIssue source={{ source: "timescale-jobs", state: "unavailable", reason: t("view.jobs.invalid") }} title={t("view.jobs.title")} />}
       {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
-      {statementWorkUnexplained && statementWork && <ObservationSourceIssue
-        source={{ source: statementWork.source, state: "unavailable", reason: t("view.statement_work.invalid") }} title={t("view.statement_work.title")} />}
+      {statementWorkUnexplained && <ObservationExplanationIssue title={t("view.statement_work.title")} reason={t("view.statement_work.invalid")} />}
+      {connectionOutcomes && <ConnectionOutcomes key={report.snapshot.id} report={connectionOutcomes} />}
+      {!connectionOutcomes && connectionOutcomesIssue && <ObservationSourceIssue source={connectionOutcomesIssue} title={t("view.connection_outcomes.title")} />}
+      {connectionOutcomesRead && !connectionOutcomes && !connectionOutcomesIssue && <ObservationExplanationIssue title={t("view.connection_outcomes.title")} reason={t("view.connection_outcomes.invalid")} />}
       {cleanup && <CleanupEvidence key={report.snapshot.id} reads={cleanupReads} retention={retention} report={cleanup} />}
       {!cleanup && cleanupIssues.length > 0 && <ObservationSourceIssue sources={cleanupIssues} title={t("view.cleanup.title")} />}
-      {cleanupUnexplained && cleanupIssues.length === 0 && <section className="operational-health observation-list" aria-label={t("view.cleanup.title")}>
-        <h3>{t("view.cleanup.title")}</h3><p>{t("view.cleanup.invalid")}</p>
-      </section>}
+      {cleanupUnexplained && cleanupIssues.length === 0 && <ObservationExplanationIssue title={t("view.cleanup.title")} reason={t("view.cleanup.invalid")} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
     </div>
   );

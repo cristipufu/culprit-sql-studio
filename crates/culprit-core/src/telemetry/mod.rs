@@ -40,6 +40,7 @@ mod indexes;
 mod investigation_events;
 mod investigations;
 mod io;
+mod jobs;
 mod maintenance_progress;
 mod memory_failures;
 mod missing_indexes;
@@ -118,6 +119,7 @@ pub use indexes::*;
 pub use investigation_events::*;
 pub use investigations::*;
 pub use io::*;
+pub use jobs::*;
 pub use maintenance_progress::*;
 pub use memory_failures::*;
 pub use missing_indexes::*;
@@ -289,6 +291,7 @@ impl CollectionRequest {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs } => self.subject.require_database()?,
             CollectionSelection::Snapshot {
                 dataset:
                     SnapshotDataset::CacheEntryMemory
@@ -599,6 +602,8 @@ impl TelemetryRecord {
                 row.fact.redact(source.target.engine());
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
+                    (SourceObservation::Jobs { snapshot, metadata }, _) => accepted && metadata.accepts(snapshot, row),
+                    (_, OperationalFact::TimescaleJobState(_) | OperationalFact::TimescaleJobRun(_)) => false,
                     (SourceObservation::CurrentRequestWork { .. }, OperationalFact::CurrentRequestWork(point)) => {
                         accepted && point.fits_source_scope(source)
                     }

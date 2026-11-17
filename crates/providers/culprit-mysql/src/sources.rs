@@ -109,7 +109,7 @@ pub const FILE_LATENCY: Source = Source {
     reads: culprit_core::key!("provider.mysql.source.file_latency"),
     delivers: &[],
 };
-/// Connections opened, aborted and served from the thread cache.
+/// Native instance connection attempts, aborted clients, connection-error buckets and thread counts.
 pub const CONNECTIONS: Source = Source {
     name: source_id::CONNECTIONS,
     reads: culprit_core::key!("provider.mysql.source.connections"),

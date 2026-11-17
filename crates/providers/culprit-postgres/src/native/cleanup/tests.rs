@@ -237,7 +237,20 @@ async fn live_native_cleanup_preserves_lifecycles_and_effective_permissions() {
     let client = limited.connector.connect(COLLECTOR).await.unwrap();
     let probe = crate::probe::probe(&client, "127.0.0.1").await;
     let pressure = match &probe {
-        Ok(probe) => Some(crate::pressure::collect(&client, probe).await),
+        Ok(probe) => Some(
+            crate::pressure::collect(
+                &client,
+                probe,
+                culprit_core::DatabaseIdentity::server(
+                    culprit_core::Engine::Postgres,
+                    &probe.database,
+                    &limited.connector.host,
+                    limited.connector.port,
+                    None,
+                ),
+            )
+            .await,
+        ),
         Err(_) => None,
     };
     admin.batch_execute("REVOKE pg_read_all_stats FROM smoke_reader; ALTER ROLE smoke_reader INHERIT").await.unwrap();

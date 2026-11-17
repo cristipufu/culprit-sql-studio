@@ -8,6 +8,8 @@ use culprit_core::{
 const OBSERVATION_DETAIL_CHARS: usize = 1024;
 mod blocking;
 pub(crate) use blocking::blocking;
+mod connection_outcomes;
+pub(crate) use connection_outcomes::connection_outcomes;
 
 struct Summary<'a> {
     title: &'a str,
@@ -275,6 +277,22 @@ pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
             limitations: &report.limitations,
         },
         report.entries.iter().map(|entry| (entry.title.as_str(), entry.explanation.as_str())),
+    )
+}
+
+pub(crate) fn jobs(report: &culprit_core::JobsReport) -> String {
+    native_work_summary(
+        Summary {
+            title: &report.title,
+            summary: &report.summary,
+            source: SourceQualification::Multiple(&report.sources),
+            limitations: &report.limitations,
+        },
+        report.entries.iter().map(|entry| {
+            let mut details = vec![entry.explanation.clone()];
+            details.extend(native_metrics(&entry.metrics));
+            (entry.title.as_str(), details)
+        }),
     )
 }
 

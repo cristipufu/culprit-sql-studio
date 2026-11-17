@@ -7,6 +7,8 @@
 use crate::finding::Finding;
 use crate::model::{Engine, Snapshot};
 
+mod connection_outcomes;
+mod jobs;
 mod plan;
 mod replication;
 mod sql;
@@ -185,6 +187,32 @@ pub fn redact_baseline(reference: &mut crate::BaselineReference) {
     }
 }
 
+/// Only fixed, argument-free evidence rejection messages may survive sharing unchanged.
+fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -> bool {
+    let Some(crate::i18n::Message::Catalog { key, arguments }) = message else { return false };
+    arguments.is_empty()
+        && matches!(
+            (source, key.as_str()),
+            (crate::source_id::SESSIONS, "view.connection_outcomes.invalid")
+                | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
+        )
+}
+
+fn admit_shared_evidence<T>(
+    snapshot: &mut Snapshot,
+    source: &str,
+    message: crate::i18n::Message,
+    result: crate::Result<T>,
+) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(_) => {
+            snapshot.record_unavailable_evidence(source, message);
+            None
+        }
+    }
+}
+
 /// A snapshot to build text that leaves the machine from (an export, a digest posted to chat): statements, plans,
 /// query samples and deadlock statements go through the SQL lexer, so their literals become placeholders, and the
 /// parameter values plans were compiled for are dropped. Findings checked from it can only quote what is left, so
@@ -202,10 +230,18 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         redact_native_identity(population);
     }
     for note in &mut s.notes {
+        if note.table.is_none() && public_evidence_issue(&note.collector, note.message_source.as_ref()) {
+            note.refresh_language();
+            continue;
+        }
         note.message_source = None;
         note.message = "Collection details omitted from shared data.".into();
     }
     for source in &mut s.sources {
+        if public_evidence_issue(&source.source, source.reason_message.as_ref()) {
+            source.refresh_language();
+            continue;
+        }
         source.reason_message = None;
         if source.reason.is_some() {
             source.reason = Some("Collection details omitted from shared data.".into());
@@ -223,6 +259,26 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     }
     if let Some(resource) = s.operations.memory_failures.as_mut().and_then(|evidence| evidence.resource.as_mut()) {
         redact_resource_identity(resource);
+    }
+    if let Some(evidence) = s.operations.jobs.take() {
+        s.operations.jobs = admit_shared_evidence(
+            &mut s,
+            crate::telemetry::TIMESCALE_JOBS_SOURCE,
+            crate::message!("view.jobs.invalid"),
+            jobs::redact(evidence),
+        );
+    }
+    let connections = s.pressure.as_mut().and_then(|pressure| pressure.connection_outcomes.take());
+    if let Some(evidence) = connections {
+        let redacted = admit_shared_evidence(
+            &mut s,
+            crate::source_id::SESSIONS,
+            crate::message!("view.connection_outcomes.invalid"),
+            connection_outcomes::redact(evidence),
+        );
+        if let Some(pressure) = &mut s.pressure {
+            pressure.connection_outcomes = redacted;
+        }
     }
     if let Some(evidence) = &mut s.operations.native_failures {
         evidence.redact();
