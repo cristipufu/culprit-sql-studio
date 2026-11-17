@@ -45,6 +45,13 @@ not select a latest head, resolve references across captures, merge epochs or cr
 `is_read_complete()` confirms retrieval of the selected capture's evidence. Native source coverage remains
 independent: a fully retrieved capture can still contain partial or unavailable native sources.
 
+Acquisition integrity and statement-reference resolution are separate. A sealed, rechecked capture may contain
+original runtime/wait rows whose query or plan definition could not be resolved. They retain no semantic `RecordId`;
+physical receipts bind their exact batch, one-based ordinal and original payload digest. Such captures can finish,
+advance collection and retire normally after verified delivery. Every supplied definition ID still has to resolve,
+and incomplete source reads or unconfirmed shutdown cannot take this route. Informational readback preserves these
+facts and uncertainty without granting trusted query totals or diagnostic escalation.
+
 Reads need warehouse query access, without an ingestion identity, plus the independently configured recovery
 identity for the committed manifest and immutable projection indexes. Reopening the manifest and checking those indexes does not reread every native
 payload. Keep validation indexes for as long as these warehouse investigations are required. Missing publication,
@@ -88,10 +95,13 @@ compiled context remain unknown; fragment standard deviations are not pooled wit
 Recorded variation can justify investigating inputs, estimates, waits and resource demand. It does not prove
 parameter sniffing, current plan use, overlapping plan lifetimes or a safe plan to force. Unobserved forcing status
 is unknown rather than false. Waits join only the exact plan population with positive runtime in that cohort.
-Missing runtime rows withhold the workload denominator. Available statements can still be analyzed when unrelated
-definitions are missing, using the complete captured runtime totals for their selected group. Unsupported metrics remain in the native context.
-Known monitoring and engine-internal statements are excluded from application totals as well as application
-recommendations. Unresolved definitions keep their known runtime in the conservative denominator.
+Missing runtime rows withhold the workload denominator. Within each selected execution group, unresolved original
+runtime query/plan references also withhold its denominator; another group's unresolved references do not erase
+that group's independently qualified totals. Native counters
+remain available in the original context and focused explanations. When the original references closed but some
+definition bodies were not retrieved, known runtime stays in the conservative denominator rather than overstating
+the share of the remaining statements. Unsupported metrics remain in the native context. Proven monitoring and
+engine-internal statements are excluded from application totals and recommendations.
 
 Sources can declare a bounded native wait vocabulary in the authenticated capture description. Both warehouses
 preserve the same declaration; the analysis consumer never chooses a dictionary by engine or source name. Known
@@ -405,7 +415,10 @@ per-query selection cannot erase separately collected database-wide compilation 
 Binding and optimization duration/CPU measurements stay separate. Native averages retain floating-point precision;
 last measurements remain exact microsecond counts. They are not summed into total CPU or concurrent memory use.
 Compilation-only reads inspect the native profile without discovering runtime replica groups. Runtime reads
-independently require their actual native population catalog; an empty catalog does not establish an unpartitioned workload.
+independently retain their native membership authority. A successful empty catalog can use execution-group IDs
+positively observed by the same fully drained bounded runtime summary, with unknown roles and incomplete inventory.
+This `ObservedWindow` route uses seven source dispatches, including final native guards. It does not authorize
+history-wide absence, an unpartitioned workload, tuning management or fallback after a failed catalog read.
 
 Use `--compilation-baseline RANGE_SHA256` with `evidence analyze --analysis compilation` to compare two original
 captures. Scans reuse an eligible saved baseline through the same pure comparison. Comparisons require matching
@@ -436,6 +449,19 @@ Scans, Health and MCP reuse that explanation when a provider supplies an exact c
 acquisition still requires native cost and execution-owner qualification; an unavailable read is not a measured zero.
 Retained actual plans also preserve separate per-operator page-server demand, read-ahead and LOB counters. Their
 original runtime population does not identify a current request or establish page-server latency.
+
+`page-server-reads` explains selected original Query Store runtime fragments through the same pure counter policy
+as scans. It retains exact last/minimum/maximum page counts, native float averages/deviations, outcomes and replica
+groups. Multiple fragments never acquire a representative last execution or combined deviation. Missing fields,
+native NULL, zero and an unavailable Hyperscale capability remain distinct. These facts establish neither a current
+owner nor remote-read latency or local-cache hit rate.
+
+Its optional `--definitions-range` links independently authenticated Query Store SQL by exact logical database and
+native query incarnation. For this analysis, the primary range may also supply its own QueryDefinitions family;
+both family reads share one cumulative budget and deadline. Previews are explicitly shortened, and incomplete
+payloads require the existing bounded recovery option. Unresolved statement identities remain inspectable as
+original capture positions, with no invented query ID. SQL and detailed qualifications stay folded in the UI.
+The ordinary MCP scan view reanalyzes retained plan facts; an informational archive intake action remains separate.
 
 `compiler-admission` explains an exact affected request and independently captured optimizer gateways. It preserves
 native resource-pool identities, active/waiting counts and admission policy. The request's pool membership and
@@ -1169,7 +1195,7 @@ not part of background telemetry; base relation observations must not be interpr
 SQL Server profile availability and authority remain native-source decisions. Local boxed-server fixture coverage
 does not qualify Azure topology, managed permissions or production overhead.
 
-The current export format is **39**. New contracts require new collector/recovery state; there is no migration of
+The current export format is **41** (delivery schema **2**, preparation **19**). New contracts require new collector/recovery state; there is no migration of
 old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
 
 [pvs-fields]: https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-tran-persistent-version-store-stats
@@ -1333,6 +1359,11 @@ native measurement-time filters separately. Current activity and snapshot functi
 Native epoch changes replace the same logical activity source. Revisions use owner epoch and capture sequence,
 not ingestion arrival order. These warehouse head rules do not resolve diagnostic episodes from a different native
 epoch or population. Raw tables include unpublished and duplicated physical attempts and are not totals.
+
+Generated semantic `...Rows` functions require both a present semantic `RecordId` and the published
+`ReferencesComplete` flag before revision grouping. Physical eligibility/readback keeps unresolved rows and checks
+that each row's flag matches its completion record. Nullable IDs therefore cannot collapse unrelated observations
+into one revision. Original reference counts remain in the publication's `ReferenceCoverage` value.
 
 Runtime rows expose a `Metrics` array with a typed key, unit, average and optional distribution statistics.
 Filter the duration metric and its unit before calculating execution-weighted time

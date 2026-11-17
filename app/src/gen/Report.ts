@@ -11,6 +11,7 @@ import type { JobsReport } from "./JobsReport";
 import type { LockedCheck } from "./LockedCheck";
 import type { MaintenanceProgressReport } from "./MaintenanceProgressReport";
 import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
+import type { PageServerReadReport } from "./PageServerReadReport";
 import type { PageWaitReport } from "./PageWaitReport";
 import type { RefinementDecision } from "./RefinementDecision";
 import type { ReplicationReport } from "./ReplicationReport";
@@ -24,7 +25,7 @@ import type { TaskSpaceReport } from "./TaskSpaceReport";
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, 
+export type Report = { completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */

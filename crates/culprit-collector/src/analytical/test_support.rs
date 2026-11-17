@@ -34,11 +34,15 @@ pub use investigations::{
 
 mod queries;
 pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_cases, wait_semantics};
+mod informational;
+pub use informational::{assert_informational_capture, informational_query_evidence};
 mod query_populations;
 pub use query_populations::{
     assert_query_population_capture, query_population_evidence, query_population_evidence_cases,
 };
+mod page_server_reads;
 mod query_cohorts;
+pub use page_server_reads::{PageServerReadCase, assert_page_server_read_capture, page_server_read_evidence_cases};
 pub use query_cohorts::{
     QueryCohortCase, assert_query_cohort_capture, query_cohort_evidence, query_cohort_evidence_cases,
 };
@@ -276,7 +280,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
         object: format!("payloads/{sha256}.ndjson"),
         sha256,
         bytes: bytes.len() as u64,
-        rows: vec![RowReceipt::from_export(&row).unwrap()],
+        rows: vec![RowReceipt::from_export(&row, 1).unwrap()],
         delivery_required: true,
     };
     let contract =
@@ -288,6 +292,8 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
         contract,
         range_id,
         capture,
+        reference_coverage: crate::collection_references::ObservationReferences::default()
+            .coverage(true, Some(&source)),
         source,
         collected_from: "2020-01-01T12:00:00Z".into(),
         collected_until: "2020-01-01T12:00:01Z".into(),
@@ -420,13 +426,26 @@ impl Recovery {
         records: Vec<TelemetryRecord>,
         sequence: u64,
     ) -> Self {
+        Self::try_capture(destination, schema, source, records, sequence).unwrap()
+    }
+    pub fn try_capture(
+        destination: &str,
+        schema: &str,
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        sequence: u64,
+    ) -> Result<Self> {
         let (mut manifest, _) = fixture();
         manifest.source = source;
         manifest.capture.observation_id = format!("native-observation-{sequence}");
         manifest.capture.revision.as_mut().unwrap().sequence = sequence.to_string();
-        manifest.contract =
-            Contract::new("pipeline".into(), "shard-0".into(), destination.into(), schema.into()).unwrap();
+        manifest.contract = Contract::new("pipeline".into(), "shard-0".into(), destination.into(), schema.into())?;
         manifest.range_id = digest(&serde_json::to_vec(&(&manifest.contract, &manifest.capture)).unwrap());
+        let mut references = crate::collection_references::ObservationReferences::default();
+        for record in &records {
+            references.record(record);
+        }
+        manifest.reference_coverage = references.coverage(true, Some(&manifest.source));
         let mut objects = BTreeMap::new();
         manifest.batches = manifest
             .source
@@ -434,13 +453,13 @@ impl Recovery {
             .collection()
             .streams()
             .iter()
-            .map(|stream| {
+            .map(|stream| -> Result<BatchManifest> {
                 let mut bytes = Vec::new();
                 let mut rows = Vec::new();
                 for record in records.iter().filter(|record| record.stream() == *stream) {
-                    let exported = ExportedRecord::new(&manifest.source, &manifest.capture, record.clone()).unwrap();
-                    rows.push(RowReceipt::from_export(&exported).unwrap());
-                    serde_json::to_writer(&mut bytes, &exported).unwrap();
+                    let exported = ExportedRecord::new(&manifest.source, &manifest.capture, record.clone())?;
+                    rows.push(RowReceipt::from_export(&exported, u32::try_from(rows.len() + 1).unwrap())?);
+                    serde_json::to_writer(&mut bytes, &exported).map_err(|_| DeliveryProblem::Integrity.error())?;
                     bytes.push(b'\n');
                 }
                 let sha256 = digest(&bytes);
@@ -455,11 +474,11 @@ impl Recovery {
                     delivery_required: stream.delivery_required(),
                 };
                 objects.insert(object, bytes);
-                batch
+                Ok(batch)
             })
-            .collect();
-        manifest.validate().unwrap();
-        Self { manifest, objects, fault: Mutex::new(Fault::None), object_reads: AtomicUsize::new(0) }
+            .collect::<Result<Vec<_>>>()?;
+        manifest.validate()?;
+        Ok(Self { manifest, objects, fault: Mutex::new(Fault::None), object_reads: AtomicUsize::new(0) })
     }
 }
 #[async_trait]
@@ -585,6 +604,7 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
                 7.0,
             ),
         ],
+        page_server_reads: None,
         first_execution_at: None,
         last_execution_at: None,
     });
@@ -954,3 +974,6 @@ pub async fn released_spool(
     .await
     .expect("native completion did not release its spool owner")
 }
+
+mod page_server_definitions;
+pub use page_server_definitions::{QueryStoreStatementCase, query_store_statement_evidence_cases};

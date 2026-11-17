@@ -2,15 +2,18 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod origin;
+pub use origin::{CachedRuntimeCapturedPosition, CachedRuntimeReadOrigin};
+
 pub const CACHED_RUNTIME_READ_SOURCE: &str = "statement-runtime-cache";
 
-/// One completed native read. The caller owns source admission and shutdown; this type creates neither.
+/// One completed per-entry source read. The caller owns source admission and shutdown; this type creates neither.
 /// Native detail variants establish counter semantics. The database label or query hash never does.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
+#[serde(deny_unknown_fields)]
 pub struct CachedRuntimeRead {
-    /// Opaque identity issued by the original read owner; not a native epoch or an archive authentication proof.
-    pub read_id: String,
+    pub origin: CachedRuntimeReadOrigin,
     pub description: CollectionDescription,
     pub observations: Vec<OperationalObservation>,
     /// Whether this carrier reconstructed every selected original row; native scope remains in the descriptor.
@@ -19,7 +22,8 @@ pub struct CachedRuntimeRead {
 
 impl CachedRuntimeRead {
     pub fn is_valid(&self) -> bool {
-        valid_digest(&self.read_id) && Self::accepts_rows(&self.description, &self.observations, self.read_complete)
+        Self::accepts_rows(&self.description, &self.observations, self.read_complete)
+            && self.origin.matches(&self.description, &self.observations, self.read_complete)
     }
 
     pub fn accepts_rows<'a>(
@@ -60,7 +64,40 @@ impl CachedRuntimeRead {
 
     /// An opaque reference to this original read, not a native incarnation or an authenticated archive receipt.
     pub fn read_key(&self) -> Result<String> {
-        cached_statement_read_key(&self.read_id, &self.description)
+        cached_statement_read_key(&self.read_id()?, &self.description)
+    }
+
+    /// Derive the opaque owner identity from the recorded original; it grants no authentication by itself.
+    pub fn read_id(&self) -> Result<String> {
+        self.origin.read_id()
+    }
+
+    /// A native database incarnation may survive a rename or endpoint alias. Labels and routes alone never
+    /// authorize attaching an independent captured population to a scan; body/provenance validation is separate.
+    pub fn matches_native_database(&self, snapshot: &crate::Snapshot) -> bool {
+        let (Some(original), Some(current)) = (self.description.target.database(), snapshot.identity.as_ref()) else {
+            return false;
+        };
+        if !snapshot.identity_names_this_database()
+            || original.engine != current.engine
+            || current.database.trim().is_empty()
+            || !original.incarnation.as_deref().is_some_and(|value| !value.trim().is_empty())
+            || !current.incarnation.as_deref().is_some_and(|value| !value.trim().is_empty())
+        {
+            return false;
+        }
+        match (original.telemetry_id(), current.telemetry_id()) {
+            (Ok(original), Ok(current)) => original == current,
+            _ => false,
+        }
+    }
+
+    /// Structural matching of an original captured row. The input owner must authenticate the manifest separately.
+    pub fn captured_references(&self) -> Result<Option<Vec<DiagnosticEvidenceRef>>> {
+        if !Self::accepts_rows(&self.description, &self.observations, self.read_complete) {
+            return Err(invalid());
+        }
+        self.origin.references(&self.description, &self.observations, self.read_complete)
     }
 }
 

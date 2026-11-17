@@ -510,6 +510,7 @@ fn population_selection_remains_correlated_without_sharing_native_replica_metada
     let workload = snapshot.workload.as_mut().unwrap();
     workload.population = Some(selected.clone());
     workload.population_catalog = Some(RuntimePopulationCatalog {
+        membership: crate::RuntimePopulationMembership::NativeCatalog,
         source: "fixture-statistics".into(),
         partitioned: true,
         requires_selection: false,

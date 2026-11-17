@@ -16,7 +16,7 @@ pub(super) fn redact(snapshot: &mut Snapshot, mut read: Box<CachedRuntimeRead>) 
         }
     }
     drop(labels);
-    if !valid {
+    if !valid || matches!(read.origin, CachedRuntimeReadOrigin::Captured { .. }) {
         return Err(CollectionStop::InvalidPage.error());
     }
     redact_target(&mut read.description.target);

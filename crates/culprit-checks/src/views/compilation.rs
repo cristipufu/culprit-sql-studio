@@ -12,7 +12,7 @@ mod comparison;
 pub use comparison::compare;
 mod definitions;
 mod timings;
-pub use definitions::{CompilationDefinitionEvidence, CompilationDefinitionRecord};
+pub use super::query_store_definitions::{QueryStoreDefinitionEvidence, QueryStoreDefinitionRecord};
 
 /// Native compiler history and an optional independently authenticated definition selection. Definition intervals
 /// remain runtime history; only the original compiler context supplies native compiler read bounds.
@@ -21,7 +21,7 @@ pub struct CompilationEvidence<'a> {
     pub context: Option<&'a culprit_core::telemetry::NativeReadContext>,
     pub observations: &'a [&'a OperationalObservation],
     pub source: Option<&'a SourceOutcome>,
-    pub definitions: Option<CompilationDefinitionEvidence<'a>>,
+    pub definitions: Option<QueryStoreDefinitionEvidence<'a>>,
 }
 
 pub fn explain(input: CompilationEvidence<'_>) -> Result<CompilationReport> {

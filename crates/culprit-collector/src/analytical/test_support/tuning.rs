@@ -102,7 +102,7 @@ pub fn assert_tuning_scope_projection(row: &ExportedRecord, logical: &Map<String
     assert_eq!(logical["DetailSha256"], digest(&serde_json::to_vec(&expected_details).unwrap()));
     let record_id = row.record_id.as_deref().expect("a native tuning point has a record identity");
     assert_eq!(logical["RecordId"], record_id);
-    assert_eq!(logical["NativePayloadDigest"], RowReceipt::from_export(row).unwrap().payload_digest);
+    assert_eq!(logical["NativePayloadDigest"], RowReceipt::from_export(row, 1).unwrap().payload_digest);
 }
 
 pub fn change_tuning_plan_scope(row: &mut ExportedRecord) {
@@ -244,6 +244,9 @@ pub fn assert_tuning_capture(
         let actual = &capture.records()[index];
         assert_eq!(serde_json::to_value(actual.row()).unwrap(), serde_json::to_value(&expected).unwrap());
         assert_eq!(actual.row_ordinal(), u32::try_from(index + 1).unwrap());
-        assert_eq!(actual.native_payload_sha256(), RowReceipt::from_export(&expected).unwrap().payload_digest);
+        assert_eq!(
+            actual.native_payload_sha256(),
+            RowReceipt::from_export(&expected, actual.row_ordinal()).unwrap().payload_digest
+        );
     }
 }

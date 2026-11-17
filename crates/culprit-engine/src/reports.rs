@@ -21,6 +21,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
     struct View<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_server_reads: &'a Option<Box<culprit_core::page_server_read_report::PageServerReadReport>>,
         snapshot: &'a culprit_core::Snapshot,
         findings: &'a [culprit_core::Finding],
         locked: &'a [culprit_core::LockedCheck],
@@ -61,6 +63,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
     }
     let Report {
         completed_spills,
+        page_server_reads,
         snapshot,
         findings,
         locked,
@@ -86,6 +89,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
     } = report;
     View {
         completed_spills,
+        page_server_reads,
         snapshot,
         findings,
         locked,

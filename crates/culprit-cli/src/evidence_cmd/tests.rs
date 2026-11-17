@@ -4,6 +4,7 @@ mod compilation_definitions;
 mod completed_spills;
 mod connection_outcomes;
 mod maintenance_blocking;
+mod page_server_reads;
 mod page_task_holders;
 mod source_overhead;
 
@@ -571,6 +572,7 @@ async fn unrelated_or_invalid_activity_ranges_fail_before_configuration_and_cred
 
 fn population_catalog(identities: Vec<NativeIdentity>) -> NativeRuntimePopulationCatalog {
     NativeRuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: "native-query-history".into(),
         partitioned: true,
         requires_selection: identities.len() > 1,
@@ -690,6 +692,7 @@ fn archive_group_resolution_rejects_missing_unknown_and_ambiguous_identities_wit
         assert_eq!(error.message, t!("evidence.cli.population_missing", id = "17"));
     }
     let catalog = NativeRuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: "native-query-history".into(),
         partitioned: false,
         requires_selection: false,

@@ -1,5 +1,5 @@
 CREATE VIEW IF NOT EXISTS $TABLERows AS
-WITH Rows AS (SELECT * FROM $TABLEEligible($ARGS)),
+WITH Rows AS (SELECT * FROM $TABLEEligible($ARGS) WHERE isNotNull(RecordId) AND ReferencesComplete),
 Epochs AS (SELECT *,max(OwnerEpoch) OVER (PARTITION BY SourceId,RecordId) AS HeadEpoch FROM Rows),
 Owned AS (SELECT * FROM Epochs WHERE OwnerEpoch=HeadEpoch),
 Sequences AS (SELECT *,max(CaptureSequence) OVER (PARTITION BY SourceId,RecordId) AS HeadSequence FROM Owned),

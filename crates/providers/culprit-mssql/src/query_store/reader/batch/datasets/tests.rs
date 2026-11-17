@@ -51,7 +51,7 @@ fn reader(mut replies: Vec<crate::read::ReadResult<Vec<Rec>>>) -> Reader<FakeRea
 }
 
 async fn start(reader: &mut Reader<FakeRead>, group: &str) {
-    reader.prepare_population_batch(1).await.unwrap();
+    reader.prepare_population_batch(1, 60).await.unwrap();
     reader.select_batch_population(Some(&NativeIdentity::new(group))).await.unwrap();
 }
 
@@ -200,7 +200,7 @@ async fn unpartitioned_batches_reuse_native_datasets_without_inventing_replica_c
         Ok(vec![bucket(&original, 4.0)]),
         Ok(vec![bucket(&original, 4.0)]),
     ]));
-    reader.prepare_population_batch(1).await.unwrap();
+    reader.prepare_population_batch(1, 60).await.unwrap();
     reader.select_batch_population(None).await.unwrap();
     reader.summary(60).await.unwrap();
     assert_eq!(reader.waits(60, None).await.unwrap()[0].total_ms, 20);

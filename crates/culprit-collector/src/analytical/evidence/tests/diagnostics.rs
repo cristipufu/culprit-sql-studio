@@ -28,7 +28,7 @@ async fn diagnostic_warehouse_details_restore_only_authenticated_scopes_and_matc
             panic!("the exact target is reconstructed from authenticated private recovery authority")
         };
         assert_eq!(*decoded, original);
-        assert_eq!(RowReceipt::from_export(&decoded).unwrap(), batch.rows[0]);
+        assert_eq!(RowReceipt::from_export(&decoded, 1).unwrap(), batch.rows[0]);
         for target in [serde_json::to_value(&source.target).unwrap(), json!({"kind":"database","database":"forged"})] {
             let mut injected = values.clone();
             injected.get_mut("Details").unwrap()["episode"]["scope"]["target"] = target;

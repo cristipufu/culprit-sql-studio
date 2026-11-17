@@ -8,6 +8,7 @@ pub(super) fn source() -> CollectionDescription {
     manifest.source.source = "native-history-fixture".into();
     manifest.source.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
         population_catalog: Some(culprit_core::NativeRuntimePopulationCatalog {
+            membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
             source: "native-history-fixture".into(),
             partitioned: false,
             requires_selection: false,
@@ -102,6 +103,7 @@ pub fn query_evidence() -> (CollectionDescription, Vec<TelemetryRecord>) {
                     1.25,
                 ),
             ],
+            page_server_reads: None,
             first_execution_at: Some("2020-01-01T06:00:00.123456000Z".into()),
             last_execution_at: Some("2020-01-01T06:59:59.999999000Z".into()),
         }));

@@ -26,6 +26,7 @@ import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
 import { StatementWork } from "./StatementWork";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
+import { PageServerReads, pageServerReadIssue } from "./PageServerReads";
 import { Jobs, JOBS_SOURCES } from "./Jobs";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
@@ -130,6 +131,9 @@ export function HealthTab({
   const connectionOutcomes = report.connection_outcomes;
   const connectionOutcomesRead = report.snapshot.pressure?.connection_outcomes;
   const connectionOutcomesIssue = observationReadIssue("sessions", report.snapshot.sources ?? []);
+  const pageServerReads = report.page_server_reads;
+  const pageServerCarrier = report.snapshot.workload?.queries.some((query) => query.plans?.some((plan) => Boolean(plan.page_server_reads))) ?? false;
+  const pageServerIssue = pageServerReadIssue(report.snapshot.sources ?? []);
   const cleanup = report.cleanup;
   const cleanupReads = report.snapshot.operations.cleanup ?? [];
   const retention = pressure?.retention ?? null;
@@ -137,8 +141,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, connectionOutcomes, connectionOutcomesRead, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, connectionOutcomesIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -204,6 +208,9 @@ export function HealthTab({
       {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
       {statementWorkUnexplained && <ObservationExplanationIssue title={t("view.statement_work.title")} reason={t("view.statement_work.invalid")} />}
       {connectionOutcomes && <ConnectionOutcomes key={report.snapshot.id} report={connectionOutcomes} />}
+      {pageServerReads && <PageServerReads key={report.snapshot.id} report={pageServerReads} />}
+      {!pageServerReads && pageServerIssue && <ObservationSourceIssue source={pageServerIssue} title={t("view.page_server_reads.title")} />}
+      {!pageServerReads && !pageServerIssue && pageServerCarrier && <ObservationExplanationIssue title={t("view.page_server_reads.title")} reason={t("view.page_server_reads.invalid")} />}
       {!connectionOutcomes && connectionOutcomesIssue && <ObservationSourceIssue source={connectionOutcomesIssue} title={t("view.connection_outcomes.title")} />}
       {connectionOutcomesRead && !connectionOutcomes && !connectionOutcomesIssue && <ObservationExplanationIssue title={t("view.connection_outcomes.title")} reason={t("view.connection_outcomes.invalid")} />}
       {cleanup && <CleanupEvidence key={report.snapshot.id} reads={cleanupReads} retention={retention} report={cleanup} />}

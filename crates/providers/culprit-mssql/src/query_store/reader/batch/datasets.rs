@@ -10,78 +10,12 @@ pub(super) struct PlanWait {
 }
 
 impl<R: NativeRead> Reader<R> {
-    pub(in crate::query_store::reader) async fn batch_summary(&mut self, minutes: u32) -> Result<Vec<PlanSummary>> {
-        self.load_batch_summaries(minutes).await?;
-        let population = self.population().await?;
-        Ok(self.batch_summaries()?.iter().filter(|row| row.population == population).cloned().collect())
-    }
-
-    async fn load_batch_summaries(&mut self, minutes: u32) -> Result<()> {
-        self.admit()?;
-        if let Some(result) = self.batch.as_ref().and_then(|batch| batch.summaries.as_ref()) {
-            return result.as_ref().map(|_| ()).map_err(Clone::clone);
-        }
-        let window = self.window(minutes).await?;
-        let layout = self.native_layout.ok_or_else(invalid_data)?;
-        let population = self.acquisition_population()?;
-        let result = self
-            .read(
-                &runtime::summary_sql(layout.tempdb, layout.log_bytes, population),
-                vec![window.parameter()],
-                MAX_RESULT_ROWS,
-            )
-            .await
-            .and_then(|rows| {
-                let summaries = rows.iter().map(PlanSummary::decode).collect::<Result<Vec<_>>>()?;
-                self.validate_batch_summaries(&summaries)?;
-                Ok(summaries)
-            });
-        if let Some(batch) = &mut self.batch {
-            batch.summaries = Some(result.clone());
-        }
-        if let Err(error) = &result {
-            self.observe_failure(error);
-        }
-        result.map(|_| ())
-    }
-
-    fn batch_summaries(&self) -> Result<&[PlanSummary]> {
-        self.batch
-            .as_ref()
-            .and_then(|batch| batch.summaries.as_ref())
-            .ok_or_else(invalid_data)?
-            .as_deref()
-            .map_err(Clone::clone)
-    }
-
-    fn validate_batch_summaries(&mut self, summaries: &[PlanSummary]) -> Result<()> {
-        let mut queries = HashMap::new();
-        let mut plans = HashMap::new();
-        let mut observed = BTreeSet::new();
-        for summary in summaries {
-            if !self.batch_population_is_known(summary.population)
-                || !summary.identity.is_valid()
-                || !summary.plan_identity.is_valid()
-                || !observed.insert((summary.population, summary.plan_id.clone()))
-                || queries
-                    .insert(summary.identity.query_id.clone(), &summary.identity)
-                    .is_some_and(|identity| identity != &summary.identity)
-                || plans
-                    .insert(summary.plan_id.clone(), &summary.plan_identity)
-                    .is_some_and(|identity| identity != &summary.plan_identity)
-            {
-                return Err(self.source_changed());
-            }
-        }
-        Ok(())
-    }
-
     pub(in crate::query_store::reader) async fn batch_waits(
         &mut self,
         minutes: u32,
         plan_ids: Option<&[String]>,
     ) -> Result<Vec<waits::Summary>> {
-        self.load_batch_summaries(minutes).await?;
+        self.load_summaries(minutes).await?;
         let window = self.window(minutes).await?;
         if window.capture == culprit_core::telemetry::WaitCaptureState::Unavailable {
             return Err(culprit_core::Error::new(
@@ -106,7 +40,7 @@ impl<R: NativeRead> Reader<R> {
         let batch = self.batch.as_ref().ok_or_else(invalid_data)?;
         let measurements = batch.waits.as_ref().ok_or_else(invalid_data)?.as_ref().map_err(Clone::clone)?;
         let plans = self
-            .batch_summaries()?
+            .summaries()?
             .iter()
             .filter(|summary| summary.population == population)
             .map(|summary| (summary.plan_id.as_str(), &summary.plan_identity))
@@ -149,7 +83,7 @@ impl<R: NativeRead> Reader<R> {
     }
 
     fn batch_waits_are_consistent(&self, waits: &[PlanWait]) -> Result<bool> {
-        let summaries = self.batch_summaries()?;
+        let summaries = self.summaries()?;
         let queries = summaries
             .iter()
             .map(|summary| (summary.identity.query_id.as_str(), &summary.identity))
@@ -233,7 +167,7 @@ impl<R: NativeRead> Reader<R> {
     }
 
     async fn load_batch_series(&mut self, window_minutes: u32, bucket_minutes: u32) -> Result<()> {
-        self.load_batch_summaries(window_minutes).await?;
+        self.load_summaries(window_minutes).await?;
         let batch = self.batch.as_ref().ok_or_else(invalid_data)?;
         if batch.series_minutes.is_some_and(|minutes| minutes != bucket_minutes) {
             return Err(invalid_data());
@@ -241,8 +175,7 @@ impl<R: NativeRead> Reader<R> {
         if batch.series_minutes.is_none() {
             let askers =
                 batch.askers.as_ref().and_then(|result| result.as_ref().ok()).map(Vec::as_slice).unwrap_or_default();
-            let queries =
-                crate::workload::population_trend_queries(self.batch_summaries()?, batch.top_queries, askers)?;
+            let queries = crate::workload::population_trend_queries(self.summaries()?, batch.top_queries, askers)?;
             let batch = self.batch.as_mut().ok_or_else(invalid_data)?;
             batch.series_minutes = Some(bucket_minutes);
             batch.trend_queries = queries;
@@ -298,7 +231,7 @@ impl<R: NativeRead> Reader<R> {
     fn validate_batch_series_queries(&mut self, rows: Vec<Rec>, ids: &[String]) -> Result<Vec<Rec>> {
         self.validate_series_populations(&rows, self.acquisition_population()?)?;
         let queries = self
-            .batch_summaries()?
+            .summaries()?
             .iter()
             .map(|summary| ((summary.population, summary.identity.query_id.clone()), summary.identity.clone()))
             .collect::<HashMap<_, _>>();
@@ -336,11 +269,8 @@ impl<R: NativeRead> Reader<R> {
 
     fn batch_population_is_known(&self, population: Population) -> bool {
         match population {
-            Population::ReplicaGroup(_) => self.replica_catalog.as_ref().is_some_and(|catalog| {
-                population
-                    .identity()
-                    .ok()
-                    .is_some_and(|identity| catalog.select(identity.as_ref()).ok() == Some(population))
+            Population::ReplicaGroup(_) => self.population_catalog.as_ref().is_some_and(|catalog| {
+                population.identity().ok().flatten().is_some_and(|identity| catalog.contains(&identity))
             }),
             Population::Unpartitioned => self.native_layout.is_some_and(|layout| !layout.partitioned),
             Population::AllGroups => false,

@@ -25,6 +25,7 @@ fn scoped(snapshot: &mut Snapshot, group: Option<(&str, bool)>) {
     let workload = snapshot.workload.as_mut().unwrap();
     workload.population = group.map(|(id, _)| NativeIdentity::new(id));
     workload.population_catalog = Some(RuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: source_id::QUERY_STORE.into(),
         partitioned: group.is_some(),
         requires_selection: group.is_some_and(|(_, automatic)| !automatic),

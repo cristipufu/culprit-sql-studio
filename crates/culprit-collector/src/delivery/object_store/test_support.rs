@@ -127,6 +127,8 @@ fn empty_range(contract: crate::delivery::contract::Contract, epoch: u64) -> cra
         contract,
         range_id,
         capture,
+        reference_coverage: crate::collection_references::ObservationReferences::default()
+            .coverage(true, Some(&source)),
         source,
         collected_from: "2020-01-01T06:02:00Z".into(),
         collected_until: "2020-01-01T06:02:01Z".into(),

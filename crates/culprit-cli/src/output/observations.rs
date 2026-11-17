@@ -10,6 +10,8 @@ const OBSERVATION_DETAIL_CHARS: usize = 1024;
 mod compilation_tests;
 mod completed_spills;
 pub(crate) use completed_spills::completed_spills;
+mod page_server_reads;
+pub(crate) use page_server_reads::collected_page_server_reads;
 mod source_overhead;
 pub(crate) use source_overhead::{collected_source_overhead, source_overhead};
 mod blocking;

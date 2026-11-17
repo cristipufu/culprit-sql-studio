@@ -18,7 +18,8 @@ pub fn range_id_for(contract: &Contract, capture: &CaptureIdentity) -> Result<St
 #[serde(deny_unknown_fields)]
 pub struct RecordKey {
     pub batch_id: String,
-    pub record_id: String,
+    /// One-based position in the original sealed stream, independent of semantic resolution.
+    pub row_ordinal: u32,
     pub observation_id: String,
     pub owner_epoch: u64,
     pub sequence: u64,
@@ -28,37 +29,38 @@ pub struct RecordKey {
 #[serde(deny_unknown_fields)]
 pub struct RowReceipt {
     pub key: RecordKey,
+    pub record_id: Option<String>,
     pub payload_digest: String,
     pub native_key: NativeRecordIdentity,
     pub critical_fields_valid: bool,
 }
 impl RowReceipt {
-    pub fn from_export(row: &ExportedRecord) -> Result<Self> {
+    pub fn from_export(row: &ExportedRecord, row_ordinal: u32) -> Result<Self> {
         let revision = row.capture.revision.as_ref().ok_or_else(|| DeliveryProblem::Integrity.error())?;
         if row.format_version != EXPORT_FORMAT_VERSION
             || row.representation_version != REPRESENTATION_VERSION
             || !row.record.is_valid()
             || row.batch_id != batch_id(&row.capture.observation_id, row.record.stream())?
+            || row_ordinal == 0
+            || row.record_id.as_deref().is_some_and(|id| !valid_digest(id))
+            || row.record.measurement_key().is_some_and(|key| key.references.is_resolved() != row.record_id.is_some())
+            || row.record_id.is_none() && row.record.measurement_key().is_none_or(|key| key.references.is_resolved())
         {
             return Err(DeliveryProblem::Integrity.error());
         }
         let positive = |value: &str| {
             value.parse::<u64>().ok().filter(|value| *value > 0).ok_or_else(|| DeliveryProblem::Integrity.error())
         };
-        let record_id = row
-            .record_id
-            .clone()
-            .filter(|value| valid_digest(value))
-            .ok_or_else(|| DeliveryProblem::NotReady.error())?;
         Ok(Self {
             key: RecordKey {
                 batch_id: row.batch_id.clone(),
-                record_id,
+                row_ordinal,
                 observation_id: row.capture.observation_id.clone(),
                 owner_epoch: positive(&revision.owner_epoch)?,
                 sequence: positive(&revision.sequence)?,
                 representation_version: row.representation_version,
             },
+            record_id: row.record_id.clone(),
             native_key: row.record.native_identity(),
             payload_digest: row.payload_sha256().map_err(|_| DeliveryProblem::Integrity.error())?,
             critical_fields_valid: true,
@@ -87,7 +89,7 @@ impl BatchManifest {
     ) -> Result<RowReceipt> {
         let invalid = || DeliveryProblem::Integrity.error();
         let expected = ordinal.checked_sub(1).and_then(|index| self.rows.get(index)).ok_or_else(invalid)?;
-        let receipt = RowReceipt::from_export(row)?;
+        let receipt = RowReceipt::from_export(row, ordinal.try_into().map_err(|_| invalid())?)?;
         if row.capture != *capture
             || row.batch_id != self.batch_id
             || row.record.stream() != self.stream
@@ -117,6 +119,8 @@ pub struct RangeManifest {
     /// Admitted investigation ownership survives native failure and is independent of the native source result.
     pub investigation: Option<DiagnosticInvestigationLineage>,
     pub source: CollectionDescription,
+    /// Original acquisition integrity and semantic definition coverage; neither is inferred from row IDs.
+    pub reference_coverage: ReferenceCoverage,
     /// Collector clock readings, separate from native measurement and observation times.
     pub collected_from: String,
     pub collected_until: String,
@@ -176,12 +180,16 @@ impl RangeManifest {
             || self.batches.len() != self.source.observation.collection().streams().len()
             || !self.source.observation.covers_request()
             || !self.source.partition_is_consistent()
+            || !self.reference_coverage.is_valid()
+            || !self.reference_coverage.integrity_complete
         {
             return Err(DeliveryProblem::Integrity.error());
         }
         self.source.captured_range()?;
         let mut batches = BTreeSet::new();
         let mut rows = BTreeSet::new();
+        let mut native_rows = std::collections::HashSet::new();
+        let mut semantic_rows = BTreeSet::new();
         let mut bytes = 0u64;
         for batch in &self.batches {
             bytes = bytes.checked_add(batch.bytes).ok_or_else(|| DeliveryProblem::Capacity.error())?;
@@ -195,18 +203,27 @@ impl RangeManifest {
             {
                 return Err(DeliveryProblem::Integrity.error());
             }
-            for row in &batch.rows {
+            for (index, row) in batch.rows.iter().enumerate() {
                 if row.key.batch_id != batch.batch_id
+                    || row.key.row_ordinal as usize != index + 1
                     || row.key.observation_id != self.capture.observation_id
                     || row.key.owner_epoch != epoch
                     || row.key.sequence != sequence
-                    || !valid_digest(&row.key.record_id)
+                    || row.record_id.as_deref().is_some_and(|id| !valid_digest(id))
+                    || row.record_id.is_none()
+                        && (self.reference_coverage.complete
+                            || !matches!(
+                                &row.native_key,
+                                NativeRecordIdentity::Runtime(_) | NativeRecordIdentity::Waits { .. }
+                            ))
+                    || row.record_id.as_ref().is_some_and(|id| !semantic_rows.insert(id))
                     || !valid_digest(&row.payload_digest)
                     || !row.critical_fields_valid
                     || row.key.representation_version == 0
                     || row.key.representation_version != REPRESENTATION_VERSION
                     || !row.native_key.is_valid()
                     || row.native_key.stream() != batch.stream
+                    || !native_rows.insert(&row.native_key)
                     || !rows.insert(&row.key)
                 {
                     return Err(DeliveryProblem::Integrity.error());
@@ -274,7 +291,10 @@ impl PreparedRange {
         contract: Contract,
         advances: Vec<StreamAdvance>,
     ) -> Result<Self> {
-        if manifest.status != CollectionStatus::Complete || !manifest.references.complete {
+        if manifest.status != CollectionStatus::Complete
+            || !manifest.references.is_valid()
+            || !manifest.references.integrity_complete
+        {
             return Err(DeliveryProblem::NotReady.error());
         }
         manifest.request.validate().map_err(|_| DeliveryProblem::Integrity.error())?;
@@ -319,7 +339,8 @@ impl PreparedRange {
                 if row.batch_id != file.batch_id || row.capture != manifest.capture || !row.record.is_valid() {
                     return Err(DeliveryProblem::Integrity.error());
                 }
-                rows.push(RowReceipt::from_export(&row)?);
+                let ordinal = u32::try_from(rows.len() + 1).map_err(|_| DeliveryProblem::Capacity.error())?;
+                rows.push(RowReceipt::from_export(&row, ordinal)?);
                 total_rows += 1;
                 if total_rows > MAX_RANGE_RECORDS {
                     return Err(DeliveryProblem::Capacity.error());
@@ -347,6 +368,7 @@ impl PreparedRange {
             capture_manifest_sha256: digest(&native_manifest_bytes),
             investigation: manifest.investigation.clone(),
             source: manifest.description.clone().ok_or_else(|| DeliveryProblem::Integrity.error())?,
+            reference_coverage: manifest.references.clone(),
             collected_from: manifest.started_at.clone(),
             collected_until: manifest.finished_at.clone().ok_or_else(|| DeliveryProblem::NotReady.error())?,
             source_queries: manifest.source_queries,

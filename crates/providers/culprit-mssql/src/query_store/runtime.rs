@@ -70,6 +70,7 @@ pub(crate) struct PlanSummary {
     pub plan_id: String,
     pub moments: Moments,
     pub costs: ExecutionCosts,
+    pub page_server_reads: culprit_core::telemetry::PageServerReadSummary,
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
     pub forced: Option<bool>,
@@ -84,13 +85,21 @@ impl PlanSummary {
             .ok_or_else(|| culprit_core::telemetry::CollectionStop::SourceChanged.error())?;
         let moments = Moments::decode(row)?;
         let costs = ExecutionCosts::decode(row, moments.executions)?;
+        let population = super::replicas::Population::from_row(row)?;
+        let group = match population {
+            super::replicas::Population::ReplicaGroup(group) => Some(group.to_string()),
+            _ => None,
+        };
+        let page_server_reads =
+            super::page_server::decode_summary(row, &plan_identity.plan_id, group.as_deref(), moments.executions)?;
         Ok(Self {
-            population: super::replicas::Population::from_row(row)?,
+            population,
             identity,
             plan_identity,
             plan_id: integer(row, "plan_id")?.to_string(),
             moments,
             costs,
+            page_server_reads,
             first_seen: timestamp(row, "first_seen")?,
             last_seen: timestamp(row, "last_seen")?,
             forced: crate::read::optional_boolean(row, "is_forced")?,
@@ -183,7 +192,12 @@ impl ExecutionCosts {
     }
 }
 
-pub(crate) fn summary_sql(with_tempdb: bool, with_log: bool, population: super::replicas::Population) -> String {
+pub(crate) fn summary_sql(
+    with_tempdb: bool,
+    with_log: bool,
+    page_server_reads: super::page_server::Availability,
+    population: super::replicas::Population,
+) -> String {
     let relation = relation(with_tempdb);
     // The global plan flag does not establish forcing on this particular replica group. Its native forcing
     // locations are an independent catalog; keep them unknown without issuing another source read.
@@ -212,6 +226,7 @@ SELECT /* culprit */ {identity},{plan_identity}, {population_projection},rs.plan
  SUM(CASE WHEN rs.execution_type=3 THEN rs.culprit_duration_us ELSE 0 END) AS aborted_us,
  SUM(CASE WHEN rs.execution_type=4 THEN rs.count_executions ELSE 0 END) AS failed,
  {log} AS log_bytes,{log_complete} AS log_complete,
+ {page_server_columns},
  CONVERT(varchar(40),MIN(rs.first_execution_time),127) AS first_seen,
  CONVERT(varchar(40),MAX(rs.last_execution_time),127) AS last_seen,
  {forcing} AS is_forced
@@ -231,6 +246,7 @@ GROUP BY p.query_id,rs.plan_id,q.context_settings_id,q.object_id,q.query_hash,q.
         population = population.predicate("rs"),
         population_projection = population.projection("rs"),
         population_group = population.group_by("rs"),
+        page_server_columns = super::page_server::summary_columns(page_server_reads),
     )
 }
 
@@ -244,6 +260,8 @@ pub(crate) const LAYOUT: &str = concat!(
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_log_bytes_used') THEN 1 ELSE 0 END AS log_bytes,
  CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'replica_group_id') THEN 1 ELSE 0 END AS replicas,
  "#,
+    super::page_server::availability!(),
+    " AS page_server_read_availability,",
     super::variants_sql::readable!(),
     r#" AS variants,
  CASE WHEN OBJECT_ID(N'sys.query_store_wait_stats') IS NOT NULL AND EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.database_query_store_options') AND name=N'wait_stats_capture_mode_desc') THEN 1 ELSE 0 END AS waits,

@@ -114,6 +114,12 @@ fn workload_matches(
     if workload.population_catalog.as_ref().is_some_and(|recorded| Some(recorded) != catalog) {
         return false;
     }
+    if catalog.is_some_and(|catalog| {
+        workload.kind() == Some(crate::WorkloadKind::QueryStore)
+            && !catalog.membership.matches_window(workload.window_start.as_deref(), workload.window_end.as_deref())
+    }) {
+        return false;
+    }
     match selected {
         Some(selected) => {
             workload.population.as_ref() == Some(selected) && catalog.is_some_and(|catalog| catalog.contains(selected))

@@ -34,11 +34,21 @@ fn native_outcomes_and_abort_mean_use_the_same_exact_execution_population() {
 
 #[test]
 fn unsupported_log_column_never_appears_in_the_native_statement() {
-    let sql = summary_sql(false, false, crate::query_store::replicas::Population::Unpartitioned);
+    let sql = summary_sql(
+        false,
+        false,
+        crate::query_store::page_server::Availability::NotApplicable,
+        crate::query_store::replicas::Population::Unpartitioned,
+    );
     assert!(!sql.contains("rs.avg_log_bytes_used"));
     assert!(sql.contains("CAST(NULL AS float) AS log_bytes"));
     assert!(sql.contains(super::super::window_sql::MEMBERSHIP));
-    let supported = summary_sql(false, true, crate::query_store::replicas::Population::Unpartitioned);
+    let supported = summary_sql(
+        false,
+        true,
+        crate::query_store::page_server::Availability::NotApplicable,
+        crate::query_store::replicas::Population::Unpartitioned,
+    );
     assert!(supported.contains("rs.count_executions>0 AND rs.avg_log_bytes_used IS NULL"));
     assert!(!supported.contains("total_log_bytes"), "no second global runtime relation/denominator read");
     let unknown = costs(&summary_row());

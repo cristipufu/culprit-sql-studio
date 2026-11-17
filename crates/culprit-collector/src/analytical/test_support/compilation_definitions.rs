@@ -1,13 +1,13 @@
 //! Independent native compiler and original Query Store definition selections retain their own capture proofs.
 use super::*;
-use culprit_core::compilation_report::CompilationStatementBinding;
+use culprit_core::query_store_statement_report::QueryStoreStatementBinding;
 
 pub struct CompilationDefinitionCase {
     pub name: &'static str,
     pub baseline: (CollectionDescription, Vec<TelemetryRecord>),
     pub current: (CollectionDescription, Vec<TelemetryRecord>),
     pub definitions: Option<(CollectionDescription, Vec<TelemetryRecord>)>,
-    pub binding: Option<CompilationStatementBinding>,
+    pub binding: Option<QueryStoreStatementBinding>,
     pub expensive_directive: bool,
 }
 
@@ -41,7 +41,7 @@ fn case(name: &'static str) -> CompilationDefinitionCase {
     native(&mut current.1[0]).compilations = "12".into();
     native(&mut current.1[0]).average_duration_us = 1_000_000.0;
     let mut definitions = definitions(&current);
-    let mut binding = Some(CompilationStatementBinding::Matched);
+    let mut binding = Some(QueryStoreStatementBinding::Matched);
     let mut expensive_directive = true;
     match name {
         "matched" => {}
@@ -79,12 +79,12 @@ fn case(name: &'static str) -> CompilationDefinitionCase {
         }
         "missing_namespace" => {
             database(&mut current.0).incarnation = None;
-            binding = Some(CompilationStatementBinding::SourceUnverified);
+            binding = Some(QueryStoreStatementBinding::SourceUnverified);
             expensive_directive = false;
         }
         "changed_namespace" => {
             database(&mut definitions.0).incarnation = Some("another-original-native-query-store".into());
-            binding = Some(CompilationStatementBinding::SourceChanged);
+            binding = Some(QueryStoreStatementBinding::SourceChanged);
             expensive_directive = false;
         }
         "changed_context" | "reused_query_number" => {
@@ -95,7 +95,7 @@ fn case(name: &'static str) -> CompilationDefinitionCase {
                 ("initial_compile_at", "2020-01-01T07:00:00Z")
             };
             identity.qualifiers.insert(field.into(), value.into());
-            binding = Some(CompilationStatementBinding::NotObserved);
+            binding = Some(QueryStoreStatementBinding::NotObserved);
             expensive_directive = false;
         }
         "restricted_sql" => {

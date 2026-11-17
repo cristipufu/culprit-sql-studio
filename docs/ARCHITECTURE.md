@@ -260,10 +260,30 @@ summary rows. A reset can preserve native identity, interval and execution count
 later rows cannot replace that original cost population. Mutable open intervals are still separate native
 observations, not an atomic snapshot. Compilation history retains its independent lifetime.
 
+A successful empty replica catalog does not establish an unpartitioned workload. When the existing bounded,
+fully drained all-group summary positively observes native execution-group IDs, the reader can retain those IDs
+as `ObservedWindow` membership. Roles, physical members and complete inventory remain unknown. Every selected
+group reuses that one summary, with final database, window, layout and catalog checks before results become usable.
+The empty-catalog route uses seven source dispatches; failed catalog reads and empty runtime observations do not
+authorize this route. Preparation preserves incomplete coverage rather than treating an unreturned group as idle.
+
 The bounded compilation reader also retains its exact native records in `CompilationSnapshot` after confirmed
 native shutdown. `culprit_checks::compilation::explain` serves scans, archive analysis, CLI, MCP and the Health
 panel. Read clocks, native lifetimes and source outcomes remain separate. Counts and compile-memory measurements
 do not identify a current compiler or allocation owner; invalid evidence cannot produce a derived report.
+
+Query Store page-server statistics reuse the same native metadata, runtime projection and decoder for scans and
+capture. Native fragment means/deviations remain floats; last/minimum/maximum retain exact bigint counts of 8-KiB
+pages. A derived plan summary never invents a representative last execution or pooled deviation. These counters
+establish neither local-cache misses nor page-server latency. A shared definition index links compilation and
+runtime evidence only by the original logical database and full query incarnation; missing or changed identity
+withholds SQL without discarding independently valid counters.
+
+Local completed-capture attachment uses the existing Outbox owner and one canonical manifest/journal/body
+verification pass. `CompletedRuntimeScanInput` has an independent row/byte/deadline budget; cancellation joins any
+started worker. The SDK authenticates the capture before creating a scan provider and attaches its unchanged
+originals after native shutdown, before analysis and persistence. This explicit action does not schedule source
+collection or grant native cost approval.
 
 Cleanup explanations consume existing typed retention populations or native operational facts. SQL Server retains
 PVS and oldest-transaction facts through separate `CleanupSnapshot` reads, with independent acquisition bounds;
@@ -912,10 +932,19 @@ differences for retained input and collection. Loading restores the full report.
 in memory across these snapshots. Report lists read small summary sidecars, without deserializing plans and retained
 evidence. Culprit reads only what the current version writes: a snapshot records its format (`SNAPSHOT_FORMAT`), and one
 in another format is refused, never half-read with missing fields filled in.
-Snapshot format **9** carries exact cache-entry reads and native per-operator page-server counters. Collector export
-format **40** carries independent native compilation-stage timings. Retained parameter proofs and private source-session
-work observations keep their existing boundaries; analytical publication exposes only the numerical work summary and
-opaque proof reference. Both formats require fresh state, without migration.
+Snapshot format **10** retains captured cache-entry origins and query-level page-server evidence. Collector export
+format **41** separates physical acquisition integrity from resolved statement references. Delivery schema **2**,
+preparation **19**, Outbox **19** and fleet **13** bind the resulting receipt/publication contracts. Diagnostic controller
+**9**, native representation **2** and projection normalization **3** keep their existing meanings. These formats
+require fresh state, without aliases or migrations.
+
+A physically complete capture can retain explicitly unresolved native query/plan references. Every supplied
+definition ID must still resolve exactly, and native source rechecks, rosters and file integrity remain mandatory.
+Transport membership uses the original batch and one-based stream ordinal; semantic `RecordId` stays absent when
+unresolved. Published reference coverage is authenticated. Trusted revision views and totals exclude unresolved
+coverage, while raw readback retains original facts. Compact informational positions preserve capture/manifest,
+source digest, original stream counts and payload digest; they cannot become diagnostic references or dispatch
+permission. Retained parameter proofs and private source-session work keep their existing boundaries.
 
 Consumers request only what they need. `latest_snapshot` and scan-to-scan comparisons read the prepared snapshot
 directly, skipping derived views and retained evidence. Analysis readers reconstruct retained input and collection

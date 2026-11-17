@@ -85,6 +85,13 @@ impl EvidenceReader {
             capture_manifest_sha256: manifest.capture_manifest_sha256.clone(),
             source: manifest.source.clone(),
             capture: manifest.capture.clone(),
+            reference_coverage: manifest.reference_coverage.clone(),
+            captured_rows: manifest
+                .batches
+                .iter()
+                .filter(|batch| families.iter().any(|family| family.stream() == batch.stream))
+                .map(|batch| Ok((batch.stream, u32::try_from(batch.rows.len()).map_err(|_| capacity())?)))
+                .collect::<Result<_>>()?,
             collected_from: manifest.collected_from.clone(),
             collected_until: manifest.collected_until.clone(),
             families: families.to_vec(),

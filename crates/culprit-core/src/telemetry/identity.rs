@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 40;
+pub const EXPORT_FORMAT_VERSION: u32 = 41;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -320,6 +320,10 @@ impl ObservationBounds {
     pub fn contains(&self, instant: &str) -> bool {
         parse_utc_instant(instant).is_ok_and(|instant| self.from <= instant && instant <= self.until)
     }
+
+    pub fn has_positive_duration(&self) -> bool {
+        self.from < self.until
+    }
 }
 
 pub(super) fn valid_utc_instant(value: &str) -> bool {
@@ -346,6 +350,17 @@ fn parse_utc_instant(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn positive_duration_uses_strict_instants_without_rejecting_point_observations() {
+        let point = ObservationBounds::new("2026-11-17T08:00:00+02:00", "2026-11-17T06:00:00Z").unwrap();
+        assert!(!point.has_positive_duration());
+        assert!(point.contains("2026-11-17T06:00:00Z"));
+        let span = ObservationBounds::new("2026-11-17T06:00:00.000000001Z", "2026-11-17T06:00:00.000000002Z").unwrap();
+        assert!(span.has_positive_duration());
+        assert!(ObservationBounds::new("2026-11-17T06:00:00.0000000001Z", "2026-11-17T06:00:01Z").is_none());
+    }
+
     #[test]
     fn database_resource_id_uses_native_incarnation_and_preserves_endpoint_uncertainty() {
         let mut original = DatabaseIdentity::server(crate::Engine::Mssql, "db", "old.invalid", 1433, None);
@@ -462,6 +477,7 @@ mod tests {
                     crate::telemetry::RuntimeMetricUnit::Milliseconds,
                     1.25,
                 )],
+                page_server_reads: None,
                 first_execution_at: first.map(str::to_owned),
                 last_execution_at: last.map(str::to_owned),
             }),

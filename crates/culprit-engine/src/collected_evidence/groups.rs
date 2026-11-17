@@ -14,13 +14,16 @@ pub(super) struct CapturedTotals {
     pub queries: usize,
 }
 
-/// Missing definitions do not erase their known time from the denominator. Missing native runtime itself cannot
-/// establish any denominator; shares of the remaining rows would silently turn a lower bound into the whole.
+/// Unresolved original references or missing runtime withhold the denominator. If original references closed but
+/// a definition body was not retrieved, keep its known cost so the remaining queries cannot claim the whole.
 pub(super) fn captured_totals(
     capture: &EvidenceCapture,
     definitions: &validation::Definitions<'_>,
     rows: &super::populations::NativeRows<'_>,
 ) -> Result<Option<CapturedTotals>> {
+    if rows.runtime.iter().any(|(_, row)| !row.key.references.is_resolved()) {
+        return Ok(None);
+    }
     if capture.gaps().iter().any(|gap| gap.stream.is_none_or(|stream| stream == TelemetryStream::QueryRuntime)) {
         return Ok(None);
     }
@@ -72,8 +75,8 @@ enum QueryInclusion {
     Excluded,
 }
 
-/// Unknown or missing definitions retain their measured cost in the denominator. Only a proven non-application
-/// origin excludes a statement from both application analysis and its totals.
+/// With original reference closure established, unknown origin or an unread definition body retains measured cost.
+/// Only proven non-application origin excludes a statement from application analysis and its totals.
 fn inclusion(query: Option<&QueryDefinition>) -> QueryInclusion {
     match query.map(|query| query.origin) {
         Some(StatementOrigin::Application) => QueryInclusion::Application,
@@ -214,6 +217,34 @@ struct RuntimeSummary {
 
 type RuntimeRow<'a> = (&'a ExportedRecord, &'a RuntimeMeasurement);
 
+fn page_server_summary(
+    group: &NativeGroup<'_>,
+    limitations: &mut Vec<CollectedAnalysisLimitation>,
+) -> Option<Box<PageServerReadSummary>> {
+    if !group.rows.iter().any(|(_, row)| row.page_server_reads.is_some()) {
+        return None;
+    }
+    // Native fragment statistics survive an exact one-row plan binding. The generic workload aggregator has
+    // no established policy for choosing a last execution or combining native page-server distributions.
+    let [(record, row)] = group.rows.as_slice() else {
+        limitations.push(limit(
+            group.rows.first().and_then(|(record, _)| record.record_id.clone()),
+            CollectedAnalysisLimit::MetricNotProjected,
+        ));
+        return None;
+    };
+    let summary = PageServerReadSummary::NativeFragment {
+        native: Some(row.key.native.clone()),
+        executions: row.executions.clone(),
+        statistics: row.page_server_reads.clone()?,
+    };
+    if !summary.is_valid() {
+        limitations.push(limit(record.record_id.clone(), CollectedAnalysisLimit::MetricNotProjected));
+        return None;
+    }
+    Some(Box::new(summary))
+}
+
 fn query(
     capture: &EvidenceCapture,
     id: &str,
@@ -245,6 +276,7 @@ fn query(
             compiled: parsed.as_ref().and_then(|plan| plan.facts().compiled_parameters.clone()),
             cpu_time_ms: part.cpu,
             logical_reads: None,
+            page_server_reads: page_server_summary(group, limitations),
         });
         if captured.as_ref().is_none_or(|(time, id, _)| {
             part.stats.total_ms > *time || part.stats.total_ms == *time && definition.id < *id

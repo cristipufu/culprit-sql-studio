@@ -46,6 +46,8 @@ mod session_memory;
 pub use session_memory::session_memory;
 mod page_waits;
 pub use page_waits::page_waits;
+mod page_server_reads;
+pub use page_server_reads::page_server_reads;
 mod page_wait_writers;
 pub use page_wait_writers::page_wait_writers;
 mod page_task_holders;
@@ -123,3 +125,5 @@ pub fn native_failures(capture: &EvidenceCapture) -> Result<CollectedRetainedFai
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()
 }
+
+mod query_store_definitions;

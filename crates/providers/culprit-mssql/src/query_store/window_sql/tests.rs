@@ -6,6 +6,7 @@ pub(crate) fn row() -> Rec {
     Rec::of(&[
         ("database_name", Val::Text("culprit_demo".into())),
         ("engine_edition", Val::Int(3)),
+        ("page_server_read_availability", Val::Int(0)),
         ("updateability", Val::Text("READ_WRITE".into())),
         ("native_identity_rows", Val::Int(0)),
         ("incarnation", Val::Null),
@@ -27,6 +28,7 @@ pub(crate) fn layout_row() -> Rec {
         ("log_bytes", Val::Int(0)),
         ("waits", Val::Int(1)),
         ("variants", Val::Int(1)),
+        ("page_server_read_availability", Val::Int(0)),
         ("replicas", Val::Int(0)),
         ("actual_state_desc", Val::Text("READ_WRITE".into())),
     ])

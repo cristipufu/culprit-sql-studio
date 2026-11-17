@@ -68,14 +68,39 @@ impl Fixture {
         Self::with_sequence(source, records, 100_000).await
     }
     pub async fn with_sequence(source: CollectionDescription, records: Vec<TelemetryRecord>, sequence: u64) -> Self {
+        Self::from_original(source, records, sequence, None).await.unwrap()
+    }
+    /// Both clocks are supplied before the first immutable recovery digest, projection or publication exists.
+    pub async fn with_collector_bounds(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        collected_from: &str,
+        collected_until: &str,
+    ) -> Result<Self> {
+        Self::from_original(source, records, 100_000, Some((collected_from, collected_until))).await
+    }
+    async fn from_original(
+        source: CollectionDescription,
+        records: Vec<TelemetryRecord>,
+        sequence: u64,
+        collector_bounds: Option<(&str, &str)>,
+    ) -> Result<Self> {
         let catalog = Arc::new(PhysicalCatalog::<Schema>::new().unwrap());
         let mut recovery = Recovery::capture("fixture:offline-analysis", catalog.digest(), source, records, sequence);
-        if let Some(history) = recovery.manifest.source.query_history() {
-            recovery.manifest.collected_from = history.interval.until.clone();
-            recovery.manifest.collected_until = history.interval.until.clone();
+        let collector_bounds =
+            collector_bounds.map(|(from, until)| (from.to_owned(), until.to_owned())).or_else(|| {
+                recovery
+                    .manifest
+                    .source
+                    .query_history()
+                    .map(|history| (history.interval.until.clone(), history.interval.until.clone()))
+            });
+        if let Some((from, until)) = collector_bounds {
+            recovery.manifest.collected_from = from;
+            recovery.manifest.collected_until = until;
         }
         let recovery = Arc::new(recovery);
-        let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
+        let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await?;
         let indexes = Arc::new(ProjectionIndexes::new(Arc::new(Blobs::default())));
         let scratch = tempfile::tempdir().unwrap();
         let encoder = BatchEncoder::new(catalog.clone(), recovery.clone(), scratch.path()).unwrap();
@@ -99,7 +124,7 @@ impl Fixture {
         let store = Arc::new(Store { catalog, rows: Mutex::new(rows), publication: Mutex::new(Some(publication)) });
         let reader = EvidenceReader::new(store.clone(), indexes);
         *recovery.fault.lock().unwrap() = Fault::Stall;
-        Self { range, store, reader, recovery, _scratch: scratch }
+        Ok(Self { range, store, reader, recovery, _scratch: scratch })
     }
     pub fn remove_family(&self, stream: TelemetryStream) {
         let batch = self.range.manifest().batches.iter().find(|batch| batch.stream == stream).unwrap();
@@ -109,8 +134,11 @@ impl Fixture {
         self.remove_first_row(TelemetryStream::QueryRuntime);
     }
     pub fn remove_first_row(&self, stream: TelemetryStream) {
+        self.remove_row(stream, 0);
+    }
+    pub fn remove_row(&self, stream: TelemetryStream, index: usize) {
         let batch = self.range.manifest().batches.iter().find(|batch| batch.stream == stream).unwrap();
-        self.store.rows.lock().unwrap().get_mut(&batch.batch_id).unwrap().remove(0);
+        self.store.rows.lock().unwrap().get_mut(&batch.batch_id).unwrap().remove(index);
     }
     pub fn unpublish(&self) {
         self.store.publication.lock().unwrap().take();
@@ -135,6 +163,13 @@ impl Fixture {
         families: &[EvidenceFamily],
         recovery_budget: RecoveryPayloadBudget,
     ) -> EvidenceCapture {
+        self.try_read_families_with_recovery(families, recovery_budget).await.unwrap()
+    }
+    pub async fn try_read_families_with_recovery(
+        &self,
+        families: &[EvidenceFamily],
+        recovery_budget: RecoveryPayloadBudget,
+    ) -> Result<EvidenceCapture> {
         *self.recovery.fault.lock().unwrap() = Fault::None;
         self.reader
             .read_capture(
@@ -144,7 +179,6 @@ impl Fixture {
                 Some(self.recovery.as_ref()),
             )
             .await
-            .unwrap()
     }
 }
 

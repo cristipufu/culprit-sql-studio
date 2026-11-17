@@ -134,7 +134,7 @@ impl Evidence {
             })
             .collect();
         CachedRuntimeRead {
-            read_id: self.read_id.clone(),
+            origin: CachedRuntimeReadOrigin::NativeRead { read_id: self.read_id.clone() },
             description: self.source.clone(),
             observations,
             read_complete: self.complete,

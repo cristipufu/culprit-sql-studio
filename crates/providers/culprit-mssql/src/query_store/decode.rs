@@ -86,6 +86,7 @@ pub(crate) fn record(row: &Rec, stream: TelemetryStream, references: StatementRe
             key,
             executions: integer(row, "count_executions")?.to_string(),
             metrics: runtime_metrics(row)?,
+            page_server_reads: Some(Box::new(super::page_server::decode(row)?)),
             first_execution_at: Some(text(row, "first_execution_at")?),
             last_execution_at: Some(text(row, "last_execution_at")?),
         }),

@@ -1,4 +1,6 @@
 //! Batch scans acquire native inputs once, then analyze and cache exact populations after dropping that owner.
+#[cfg(feature = "collector")]
+mod completed_runtime;
 use async_trait::async_trait;
 use culprit_core::{
     AuthKind, Category, Check, CheckEvidence, CheckInfo, DatabaseIdentity, Engine, Error, ExplainMode, Finding,
@@ -10,17 +12,20 @@ use culprit_core::{
 use culprit_engine::{NewConnection, ProviderRegistration, Workspace};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 struct NativeState {
     snapshots: PopulationSnapshots,
     active: AtomicUsize,
     acquisitions: AtomicUsize,
+    factories: AtomicUsize,
     deadlocks: AtomicUsize,
     events: AtomicUsize,
     analyzed: Mutex<Vec<Option<NativeIdentity>>>,
     shutdown: SourceShutdown,
+    block_snapshots: AtomicBool,
+    snapshot_entered: tokio::sync::Notify,
 }
 
 struct NativeProvider(Arc<NativeState>);
@@ -45,6 +50,10 @@ impl Provider for NativeProvider {
     }
     async fn snapshot_populations(&self, _: &str, options: &SnapshotOptions) -> Result<PopulationSnapshots> {
         self.0.acquisitions.fetch_add(1, Ordering::SeqCst);
+        if self.0.block_snapshots.load(Ordering::SeqCst) {
+            self.0.snapshot_entered.notify_one();
+            return std::future::pending().await;
+        }
         if let Some(selected) = &options.workload_population {
             let requested = self
                 .0
@@ -122,6 +131,7 @@ fn snapshots() -> PopulationSnapshots {
     let mut requested: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
     let identity = DatabaseIdentity::server(Engine::Mssql, &requested.server.database, "fixture.invalid", 1433, None);
     let catalog = RuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: culprit_core::source_id::QUERY_STORE.into(),
         partitioned: true,
         requires_selection: true,
@@ -169,8 +179,11 @@ fn workspace(
     let state = Arc::new(NativeState {
         snapshots,
         shutdown,
+        block_snapshots: AtomicBool::new(false),
+        snapshot_entered: tokio::sync::Notify::new(),
         active: AtomicUsize::new(0),
         acquisitions: AtomicUsize::new(0),
+        factories: AtomicUsize::new(0),
         deadlocks: AtomicUsize::new(0),
         events: AtomicUsize::new(0),
         analyzed: Mutex::new(vec![]),
@@ -181,6 +194,7 @@ fn workspace(
             Engine::Mssql,
             ProviderRegistration::new(
                 Arc::new(move |_| {
+                    source.factories.fetch_add(1, Ordering::SeqCst);
                     source.active.fetch_add(1, Ordering::SeqCst);
                     Ok(Box::new(NativeProvider(source.clone())) as Box<dyn Provider>)
                 }),

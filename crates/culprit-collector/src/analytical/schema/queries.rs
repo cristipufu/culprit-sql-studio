@@ -13,6 +13,7 @@ const KEY: &[Field] = &[
 const RUNTIME: &[Field] = &[
     Field::required("Executions", "/record/data/executions", ExactCounter),
     Field::required("Metrics", "/record/data/metrics", JsonContainer),
+    Field::optional("PageServerReads", "/record/data/page_server_reads", JsonContainer),
     Field::optional("FirstExecutionAt", "/record/data/first_execution_at", Timestamp),
     Field::optional("LastExecutionAt", "/record/data/last_execution_at", Timestamp),
 ];

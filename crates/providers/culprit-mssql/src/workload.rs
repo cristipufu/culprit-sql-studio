@@ -49,6 +49,7 @@ struct PlanAgg {
     last_seen: Option<String>,
     forced: Option<bool>,
     runtime_costs: Option<crate::query_store::runtime::ExecutionCosts>,
+    page_server_reads: Option<Box<culprit_core::telemetry::PageServerReadSummary>>,
 }
 
 impl PlanAgg {
@@ -92,6 +93,7 @@ impl PlanAgg {
             last_seen: value.last_seen,
             forced: value.forced,
             runtime_costs: Some(value.costs),
+            page_server_reads: Some(Box::new(value.page_server_reads)),
         }
     }
 
@@ -240,6 +242,7 @@ pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
     result.workload.window_start = window.start;
     result.workload.window_end = window.end;
     result.workload.window_hours = window.hours;
+    result.workload.population_catalog = reader.population_catalog().cloned();
     if let Some(timeline) = &mut result.workload.timeline {
         timeline.end = result.workload.window_end.clone().ok_or_else(crate::read::invalid_data)?;
     }
@@ -510,6 +513,7 @@ fn to_query_stat(
             compiled: None,
             cpu_time_ms: Some(p.cpu_ms),
             logical_reads: Some(p.reads),
+            page_server_reads: p.page_server_reads.clone(),
         })
         .collect();
     variants.sort_by(|a, b| b.total_time_ms.total_cmp(&a.total_time_ms));

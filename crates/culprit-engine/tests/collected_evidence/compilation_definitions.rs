@@ -3,7 +3,7 @@ use culprit_collector::analytical::{
     evidence::{EvidenceFamily, RecoveryPayloadBudget},
     test_support::compilation_definition_evidence_cases,
 };
-use culprit_core::{compilation_report::CompilationStatementBinding, telemetry::*};
+use culprit_core::{query_store_statement_report::QueryStoreStatementBinding, telemetry::*};
 use culprit_engine::collected_resources;
 
 const COUNTERS: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
@@ -121,7 +121,7 @@ async fn missing_definition_rows_preserve_original_counters_and_read_gaps_withou
     let capture = current.read_families(COUNTERS).await;
     let definitions = definition.read_families(DEFINITIONS).await;
     let result = collected_resources::compilation(&capture, None, Some(&definitions)).unwrap();
-    assert_eq!(result.report.entries[0].statement.as_ref().unwrap().binding, CompilationStatementBinding::NotObserved);
+    assert_eq!(result.report.entries[0].statement.as_ref().unwrap().binding, QueryStoreStatementBinding::NotObserved);
     assert!(result.report.entries[0].statement.as_ref().unwrap().preview.is_none());
     let selected = result.report.definition_read.unwrap();
     assert_eq!((selected.selected_rows, selected.observed_rows), (1, 0));
@@ -146,7 +146,7 @@ async fn short_unicode_previews_cannot_supply_policy_before_exact_native_definit
     let preview = fixture.read_families(DEFINITIONS).await;
     assert!(!preview.is_read_complete() && preview.records().is_empty());
     let result = collected_resources::compilation(&capture, None, Some(&preview)).unwrap();
-    assert_eq!(result.report.entries[0].statement.as_ref().unwrap().binding, CompilationStatementBinding::NotObserved);
+    assert_eq!(result.report.entries[0].statement.as_ref().unwrap().binding, QueryStoreStatementBinding::NotObserved);
     assert!(
         !result.report.entries[0].metrics.iter().any(|metric| metric.is("view.compilation.metric.lifetime_duration"))
     );
@@ -163,7 +163,7 @@ async fn short_unicode_previews_cannot_supply_policy_before_exact_native_definit
         .await;
     let result = collected_resources::compilation(&capture, None, Some(&hydrated)).unwrap();
     let statement = result.report.entries[0].statement.as_ref().unwrap();
-    assert_eq!(statement.binding, CompilationStatementBinding::Matched);
+    assert_eq!(statement.binding, QueryStoreStatementBinding::Matched);
     assert!(!statement.preview_truncated);
     assert!(statement.preview.as_ref().unwrap().contains("OPTION(RECOMPILE)"));
     assert_eq!(fixture.recovery_object_reads(), opens + 1);

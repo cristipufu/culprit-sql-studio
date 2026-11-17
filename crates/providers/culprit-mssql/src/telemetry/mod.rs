@@ -172,8 +172,8 @@ impl<R: crate::read::NativeRead> Source<R> {
             None
         };
         let sql = match (stream, range.is_some()) {
-            (TelemetryStream::QueryRuntime, false) => sql::runtime(false),
-            (TelemetryStream::QueryRuntime, true) => sql::runtime(true),
+            (TelemetryStream::QueryRuntime, false) => sql::runtime(false, description.page_server_reads),
+            (TelemetryStream::QueryRuntime, true) => sql::runtime(true, description.page_server_reads),
             (TelemetryStream::QueryWaits, false) => sql::waits(false),
             (TelemetryStream::QueryWaits, true) => sql::waits(true),
             _ => return Err(decode::malformed()),
@@ -210,7 +210,13 @@ impl<R: crate::read::NativeRead> Source<R> {
         let mut records = Vec::with_capacity(rows.len());
         for row in &rows {
             let definition = self.definitions.reference(row, &description.value)?;
-            records.push(decode::record(row, stream, definition)?);
+            let record = decode::record(row, stream, definition)?;
+            if matches!(&record, culprit_core::telemetry::TelemetryRecord::QueryRuntime(runtime)
+                if runtime.page_server_reads.as_ref().is_none_or(|statistics| statistics.availability != description.page_server_reads))
+            {
+                return Ok(CollectionRead::Stopped(CollectionStop::SourceChanged));
+            }
+            records.push(record);
         }
         if records.iter().any(|record| {
             record.measurement_key().is_none_or(|key| {

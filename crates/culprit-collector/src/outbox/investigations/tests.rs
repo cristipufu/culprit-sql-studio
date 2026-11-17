@@ -1,3 +1,4 @@
+mod canonical_rows;
 mod events;
 mod focus;
 mod page_writers;

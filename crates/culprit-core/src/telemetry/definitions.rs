@@ -8,6 +8,11 @@ use ts_rs::TS;
 #[path = "definitions/variant_tests.rs"]
 mod variant_tests;
 
+mod query_store;
+pub use query_store::{
+    query_store_database_namespace, query_store_query_identity_is_complete, query_store_query_incarnation_key,
+};
+
 pub const REDACTION_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -213,8 +218,20 @@ pub struct ReferenceCoverage {
     pub queries: DefinitionCoverage,
     pub plans: DefinitionCoverage,
     pub unavailable_payloads: u32,
+    /// The source was rechecked, its roster is exact, and every supplied definition ID closes exactly.
+    /// Explicitly unresolved native references do not prevent physical retention or transport.
+    pub integrity_complete: bool,
+    /// All required native query and plan references are resolved. This is independent of file membership.
     pub complete: bool,
     pub activity: Option<super::ActivityReferenceCoverage>,
+}
+impl ReferenceCoverage {
+    pub fn is_valid(&self) -> bool {
+        self.queries.is_valid()
+            && self.plans.is_valid()
+            && self.complete == (self.integrity_complete && self.queries.complete() && self.plans.complete())
+            && (!self.integrity_complete || self.activity.as_ref().is_none_or(|activity| activity.complete))
+    }
 }
 
 /// Counts definition references; an unresolved query with no native identity is counted per native measurement.
@@ -226,7 +243,43 @@ pub struct DefinitionCoverage {
     pub unresolved: u32,
 }
 impl DefinitionCoverage {
+    pub fn is_valid(&self) -> bool {
+        self.resolved.checked_add(self.unresolved) == Some(self.required)
+    }
     pub fn complete(&self) -> bool {
         self.required == self.resolved && self.unresolved == 0
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn informational_integrity_cannot_be_promoted_to_resolved_coverage() {
+        let mut coverage = ReferenceCoverage {
+            queries: DefinitionCoverage { required: 1, resolved: 0, unresolved: 1 },
+            integrity_complete: true,
+            ..Default::default()
+        };
+        assert!(coverage.is_valid());
+        assert!(!coverage.complete);
+        coverage.complete = true;
+        assert!(!coverage.is_valid());
+        coverage.queries = DefinitionCoverage { required: 1, resolved: 1, unresolved: 0 };
+        assert!(coverage.is_valid());
+        coverage.activity = Some(super::super::ActivityReferenceCoverage { observations: 1, complete: false });
+        assert!(!coverage.is_valid(), "informational reference handling never bypasses the native Activity roster");
+    }
+
+    #[test]
+    fn inconsistent_or_overflowed_reference_counts_cannot_attest_integrity() {
+        for queries in [
+            DefinitionCoverage { required: 1, resolved: 1, unresolved: 1 },
+            DefinitionCoverage { required: 0, resolved: u32::MAX, unresolved: 1 },
+        ] {
+            let coverage = ReferenceCoverage { queries, integrity_complete: true, ..Default::default() };
+            assert!(!coverage.is_valid());
+        }
     }
 }

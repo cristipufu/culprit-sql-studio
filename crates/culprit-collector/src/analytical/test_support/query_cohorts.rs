@@ -108,7 +108,14 @@ pub fn query_cohort_evidence(case: QueryCohortCase) -> (CollectionDescription, V
         QueryCohortCase::OtherReplica => replace_fast_dimension(&mut records, "replica_group_id", "1"),
         QueryCohortCase::OtherNativeDimension => replace_fast_dimension(&mut records, "native-shard", "secondary"),
         QueryCohortCase::MissingPlan => {
-            records.retain(|row| !matches!(row, TelemetryRecord::PlanDefinition(plan) if plan.identity.plan_id == "8"))
+            records.retain(|row| !matches!(row, TelemetryRecord::PlanDefinition(plan) if plan.identity.plan_id == "8"));
+            for key in records.iter_mut().filter_map(measurement_key) {
+                if let Some(plan) = &mut key.references.plan
+                    && plan.native.id == "8"
+                {
+                    plan.definition_id = None;
+                }
+            }
         }
         QueryCohortCase::RestrictedStatement => {
             let TelemetryRecord::QueryDefinition(query) = &mut records[0] else { unreachable!() };
@@ -186,6 +193,7 @@ fn runtime(query: &QueryDefinition, plan: &PlanDefinition, id: &str, count: &str
             },
             RuntimeMetric::average(RuntimeMetricKey::CpuTime, RuntimeMetricUnit::Milliseconds, mean_ms / 2.0),
         ],
+        page_server_reads: None,
         first_execution_at: Some("2020-01-01T06:01:00Z".into()),
         last_execution_at: Some("2020-01-01T06:59:00Z".into()),
     })

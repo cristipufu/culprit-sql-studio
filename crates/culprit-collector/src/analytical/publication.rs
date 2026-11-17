@@ -85,6 +85,7 @@ pub fn input(catalog: &dyn ProjectionCatalog, range: &CommittedRange) -> Result<
         "receipts_sha256":receipts,"publication_id":publication_id,"capture":manifest.capture,
         "source":{"source":manifest.source.source,"continuity":manifest.source.continuity,
             "observation":observation},
+        "reference_coverage":manifest.reference_coverage,
         "source_queries":manifest.source_queries,"read_metrics":read_metrics,"batches":batches}))
 }
 

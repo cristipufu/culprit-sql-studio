@@ -10,6 +10,7 @@ fn snapshot() -> Snapshot {
         serde_json::from_str(include_str!("../../../../../../fixtures/mssql-demo.json")).unwrap();
     // This synthetic native source explicitly reports an unpartitioned runtime layout.
     snapshot.workload.as_mut().unwrap().population_catalog = Some(RuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: culprit_core::source_id::QUERY_STORE.into(),
         partitioned: false,
         requires_selection: false,
@@ -23,6 +24,7 @@ fn select(snapshot: &mut Snapshot, group: &str) {
     let workload = snapshot.workload.as_mut().unwrap();
     workload.population = Some(NativeIdentity::new(group));
     workload.population_catalog = Some(RuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: culprit_core::source_id::QUERY_STORE.into(),
         partitioned: true,
         requires_selection: true,
@@ -254,4 +256,25 @@ fn native_drop_recommendation_cannot_bypass_all_read_member_usage_coverage() {
             assert!(!native.verify.iter().any(|line| line.contains("after disabling")));
         }
     }
+}
+
+#[test]
+fn observed_window_group_keeps_positive_runtime_but_cannot_supply_plan_management_authority() {
+    let mut snapshot = force_snapshot();
+    select(&mut snapshot, "7");
+    snapshot.tuning.as_mut().unwrap().plan_scope = QueryStoreScope::ReplicaGroup { id: "7".into() };
+    assert!(can_change_plan(&snapshot), "native-catalog control owns this exact management scope");
+    let workload = snapshot.workload.as_mut().unwrap();
+    workload.population_catalog.as_mut().unwrap().membership =
+        culprit_core::RuntimePopulationMembership::ObservedWindow {
+            from: workload.window_start.clone().unwrap(),
+            until: workload.window_end.clone().unwrap(),
+        };
+    assert!(plan_workload(&snapshot).is_some(), "same-group positive runtime is retained");
+    assert!(!can_change_plan(&snapshot));
+    assert!(plan_command(&snapshot, PlanCommand::Unforce, "9", "9").is_none());
+    let scan = findings(&snapshot).into_iter().find(|finding| finding.id == "tuning-advice:forced-scan:9").unwrap();
+    assert!(scan.impact.db_time_share.is_some());
+    assert!(scan.fix.as_ref().unwrap().sql.is_none());
+    assert!(!scan.verify.iter().any(|line| line.contains("EXEC ")));
 }

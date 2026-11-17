@@ -23,6 +23,9 @@ impl RequiredDefinitions {
         let required = (self.0.len() + unidentified) as u32;
         DefinitionCoverage { required, resolved, unresolved: required - resolved }
     }
+    fn declared_references_resolve(&self, available: impl Fn(&NativeIdentity, &str) -> bool) -> bool {
+        self.0.iter().all(|(native, id)| id.as_deref().is_none_or(|id| available(native, id)))
+    }
 }
 struct ObservedPlan {
     native: NativeIdentity,
@@ -182,20 +185,25 @@ impl ObservationReferences {
         let plans = self.required_plans.coverage(|native, id| self.plan_is_resolved(native, id), 0);
         let activity =
             source.and_then(|source| source.observation.activity()).map(|snapshot| self.activity.coverage(snapshot));
+        let integrity_complete = source_rechecked
+            && self.diagnostics_complete(source)
+            && self.memory.complete(source)
+            && self.compiler_admission.complete(source)
+            && self.required_queries.declared_references_resolve(|native, id| self.queries.get(id) == Some(native))
+            && self.required_plans.declared_references_resolve(|native, id| self.plan_is_resolved(native, id))
+            && self.plans.values().all(|plan| {
+                plan.query_definition_id.as_ref().is_none_or(|id| self.queries.get(id) == Some(&plan.query_native))
+            })
+            && source.and_then(|source| source.observation.snapshot()).is_none_or(|snapshot| {
+                snapshot
+                    .sources
+                    .iter()
+                    .all(|source| self.state_rows.get(&source.source).copied().unwrap_or(0) == source.records)
+            })
+            && activity.as_ref().is_none_or(|activity| activity.complete);
         ReferenceCoverage {
-            complete: source_rechecked
-                && self.diagnostics_complete(source)
-                && self.memory.complete(source)
-                && self.compiler_admission.complete(source)
-                && queries.complete()
-                && plans.complete()
-                && source.and_then(|source| source.observation.snapshot()).is_none_or(|snapshot| {
-                    snapshot
-                        .sources
-                        .iter()
-                        .all(|source| self.state_rows.get(&source.source).copied().unwrap_or(0) == source.records)
-                })
-                && activity.as_ref().is_none_or(|activity| activity.complete),
+            complete: integrity_complete && queries.complete() && plans.complete(),
+            integrity_complete,
             queries,
             plans,
             unavailable_payloads: self.unavailable_payloads,
@@ -233,6 +241,7 @@ mod tests {
             },
             executions: "1".into(),
             metrics: vec![],
+            page_server_reads: None,
             first_execution_at: None,
             last_execution_at: None,
         })
@@ -313,5 +322,67 @@ mod tests {
         assert!(!coverage.complete);
         let changed = measurement(&other, Some(required));
         assert!(!references.accepts_page(&[changed]), "a native plan cannot change its parent during a capture");
+    }
+
+    #[test]
+    fn explicit_unresolved_native_references_preserve_integrity_without_semantic_closure() {
+        let mut row = measurement(&query("original"), None);
+        let TelemetryRecord::QueryRuntime(runtime) = &mut row else { unreachable!() };
+        runtime.key.references = StatementReferences {
+            query: Some(NativeDefinitionReference {
+                native: NativeIdentity::new("known-native-query"),
+                definition_id: None,
+            }),
+            plan: Some(NativeDefinitionReference {
+                native: NativeIdentity::new("known-native-plan"),
+                definition_id: None,
+            }),
+        };
+        let mut references = ObservationReferences::default();
+        references.record(&row);
+        let coverage = references.coverage(true, None);
+        assert!(coverage.is_valid());
+        assert!(coverage.integrity_complete);
+        assert!(!coverage.complete);
+        assert_eq!(coverage.queries.unresolved, 1);
+        assert_eq!(coverage.plans.unresolved, 1);
+        assert!(!references.coverage(false, None).integrity_complete);
+    }
+
+    #[test]
+    fn an_informational_row_cannot_cover_a_dangling_declared_definition() {
+        let required = query("required");
+        let mut unidentified = measurement(&query("unidentified"), None);
+        let TelemetryRecord::QueryRuntime(runtime) = &mut unidentified else { unreachable!() };
+        runtime.key.native = NativeIdentity::new("another-native-runtime");
+        runtime.key.references = StatementReferences::default();
+        let mut references = ObservationReferences::default();
+        references.record(&unidentified);
+        references.record(&measurement(&required, None));
+        assert!(!references.coverage(true, None).integrity_complete);
+        references.record(&TelemetryRecord::QueryDefinition(required));
+        let coverage = references.coverage(true, None);
+        assert!(coverage.integrity_complete);
+        assert!(!coverage.complete);
+    }
+
+    #[test]
+    fn a_plan_definition_cannot_claim_an_absent_query_even_without_runtime() {
+        let query = query("absent-query");
+        let mut references = ObservationReferences::default();
+        references.record(&TelemetryRecord::PlanDefinition(PlanDefinition {
+            id: digest(b"plan-with-dangling-query"),
+            identity: NativePlanIdentity {
+                plan_id: "plan".into(),
+                query: query.identity,
+                qualifiers: Default::default(),
+            },
+            query_definition_id: Some(query.id),
+            engine_version: None,
+            native_properties: Default::default(),
+            source_text_bytes: None,
+            plan: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+        }));
+        assert!(!references.coverage(true, None).integrity_complete);
     }
 }

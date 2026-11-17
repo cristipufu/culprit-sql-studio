@@ -202,9 +202,11 @@ async fn collect_workload(
             }
             drop(participants);
             match workload::finish_query_store(&mut reader, &mut part.outcome, options.window_in_minutes()).await {
-                Ok(window) => {
-                    part.finish_window(&window, crate::query_store::window_sql::WindowVerification::Unchanged)
-                }
+                Ok(window) => part.finish_window(
+                    &window,
+                    crate::query_store::window_sql::WindowVerification::Unchanged,
+                    reader.population_catalog(),
+                ),
                 Err(error) => {
                     stop_followup = true;
                     part = populations::failed_part(&error, part.catalog.clone());

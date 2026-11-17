@@ -80,6 +80,8 @@ pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
 pub use provider_registration::{ProviderRegistration, RecipeCostVerifier};
 pub use reports::ReportSummary;
+#[cfg(feature = "collector")]
+pub use scan::CompletedRuntimeScanInput;
 pub use scan::PopulationReports;
 use secrets::SecretStore;
 pub use share::{export_diff, export_plan};
@@ -432,13 +434,13 @@ impl Workspace {
     ) -> Result<Report> {
         // The owned observation retains provider, snapshot and analysis state. Keep that state off callers'
         // async frames so nested consumers (verification, MCP and desktop tasks) retain decoding stack space.
-        Box::pin(self.scan_observation(name, options, query_log)).await.map(|reports| *reports.requested)
+        Box::pin(self.scan_observation(name, options, query_log, None)).await.map(|reports| *reports.requested)
     }
 
     /// Analyze each native execution population from one provider acquisition and save its own exact report.
     /// The requested overview is independent of those reports; their execution totals are never pooled.
     pub async fn scan_populations(&self, name: &str, options: &SnapshotOptions) -> Result<PopulationReports> {
-        Box::pin(self.scan_observation(name, options, None)).await
+        Box::pin(self.scan_observation(name, options, None, None)).await
     }
 
     async fn scan_observation(
@@ -446,6 +448,7 @@ impl Workspace {
         name: &str,
         options: &SnapshotOptions,
         query_log: Option<&std::path::Path>,
+        cached_runtime: Option<Box<culprit_core::telemetry::CachedRuntimeRead>>,
     ) -> Result<PopulationReports> {
         let saved = self.store.get(name)?.query_log.map(std::path::PathBuf::from);
         let found = if query_log.is_none() && saved.is_none() { self.discover_query_log(name) } else { None };
@@ -461,7 +464,10 @@ impl Workspace {
             scan.collect_inputs(provider, snapshots, name, options, log).await
         }
         .await;
-        let collected = observed.finish(result).await?;
+        let mut collected = observed.finish(result).await?;
+        if let Some(cached_runtime) = cached_runtime {
+            collected.attach_cached_runtime(cached_runtime)?;
+        }
         collected.finish().await
     }
 
@@ -791,6 +797,13 @@ pub fn explain_connection_outcomes(
     snapshot: &culprit_core::Snapshot,
 ) -> Result<Option<culprit_core::ConnectionOutcomeReport>> {
     culprit_checks::connection_outcomes::explain_snapshot(snapshot)
+}
+
+/// Reword retained page-server runtime facts without provider, credential, archive or definition reads.
+pub fn explain_page_server_reads(
+    snapshot: &culprit_core::Snapshot,
+) -> Result<Option<culprit_core::page_server_read_report::PageServerReadReport>> {
+    culprit_checks::page_server_reads::explain_snapshot(snapshot)
 }
 
 /// Explain a supplied focused Activity frame without I/O. Receipt consistency is checked here; the caller owns

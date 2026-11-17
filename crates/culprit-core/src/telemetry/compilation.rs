@@ -69,17 +69,7 @@ fn native_context_fits_database(context: &NativeReadContext, database: &crate::D
 /// This source's durable namespace is Query Store's logical database. Neither a compute epoch, endpoint alias
 /// nor a selected runtime replica group can substitute for a missing native database incarnation.
 pub fn compilation_namespace(context: &NativeReadContext) -> Option<String> {
-    context.is_valid().then(|| compilation_database_namespace(&context.target, &context.partition)).flatten()
-}
-
-/// Query Store's logical namespace needs no invented acquisition context from a runtime interval.
-pub fn compilation_database_namespace(target: &CollectionTarget, partition: &SourcePartition) -> Option<String> {
-    let database = target.database()?;
-    (*partition == SourcePartition::Target
-        && database.engine == crate::Engine::Mssql
-        && database.incarnation.as_ref().is_some_and(|id| !id.is_empty()))
-    .then(|| target.telemetry_id().ok())
-    .flatten()
+    context.is_valid().then(|| query_store_database_namespace(&context.target, &context.partition)).flatten()
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -122,15 +112,7 @@ impl MssqlQueryCompilation {
 
     /// A compilation counter belongs to the complete native query incarnation, including its initial compile.
     pub fn identity_key(identity: &NativeQueryIdentity) -> Result<String> {
-        if !valid_identity(identity) {
-            return Err(CollectionStop::InvalidPage.error());
-        }
-        let mut identity = identity.clone();
-        let first = canonical_time(
-            identity.qualifiers.get("initial_compile_at").ok_or_else(|| CollectionStop::InvalidPage.error())?,
-        )?;
-        identity.qualifiers.insert("initial_compile_at".into(), first);
-        serde_json::to_vec(&identity).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
+        query_store_query_incarnation_key(identity)
     }
     pub fn is_valid(&self) -> bool {
         valid_identity(&self.identity)
@@ -147,18 +129,7 @@ impl MssqlQueryCompilation {
 }
 
 fn valid_identity(identity: &NativeQueryIdentity) -> bool {
-    identity.is_valid()
-        && valid_counter(&identity.query_id)
-        && identity.qualifiers.get("context_settings_id").is_some_and(|value| valid_counter(value))
-        && identity.qualifiers.get("object_id").is_some_and(|value| value.parse::<i64>().is_ok())
-        && identity
-            .qualifiers
-            .get("query_hash")
-            .is_some_and(|value| value.len() == 16 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        && identity
-            .qualifiers
-            .get("initial_compile_at")
-            .is_some_and(|value| value.len() <= 64 && canonical_time(value).is_ok())
+    query_store_query_identity_is_complete(identity)
 }
 
 #[cfg(test)]

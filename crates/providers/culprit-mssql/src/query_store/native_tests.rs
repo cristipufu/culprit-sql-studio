@@ -153,7 +153,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     for interval in intervals {
         let rows = reader
             .read(
-                &catalog_sql::runtime(false),
+                &catalog_sql::runtime(false, crate::query_store::page_server::Availability::NotApplicable),
                 vec![Parameter::Integer(1000), Parameter::Integer(crate::read::integer(&interval, "id").unwrap())],
                 1000,
             )

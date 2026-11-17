@@ -211,15 +211,26 @@ async fn zero_execution_rows_do_not_authorize_a_plans_independent_waits() {
 }
 
 #[tokio::test]
-async fn a_missing_plan_definition_keeps_its_runtime_without_inventing_a_variant_or_reference() {
+async fn an_unresolved_native_plan_keeps_its_runtime_without_inventing_a_variant_or_denominator() {
     let (source, records) = query_cohort_evidence(QueryCohortCase::MissingPlan);
     let fixture = Fixture::new(source, records).await;
     let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
-    let query = one(&analysis);
-    assert_eq!(query.executions, 50.0);
-    assert_eq!(query.total_time_ms, 9500.0);
-    assert_eq!(query.plans.len(), 1);
-    assert_eq!(query.plans[0].executions, 10.0);
+    assert!(analysis.analyses[0].workload.is_none());
+    assert!(
+        analysis.analyses[0]
+            .limitations
+            .iter()
+            .any(|limit| limit.reason == CollectedAnalysisLimit::RuntimeDenominatorUnavailable)
+    );
+    assert_eq!(
+        analysis
+            .context
+            .records
+            .iter()
+            .filter(|row| matches!(row.row.record, TelemetryRecord::QueryRuntime(_)))
+            .count(),
+        3
+    );
     assert!(
         analysis.analyses[0]
             .limitations

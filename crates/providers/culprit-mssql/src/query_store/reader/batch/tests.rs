@@ -39,7 +39,7 @@ async fn definitions_are_shared_only_for_the_same_native_incarnation_and_payload
         Ok(vec![lengths(&changed)]),
         Ok(vec![changed.clone()]),
     ]);
-    reader.prepare_population_batch(1).await.unwrap();
+    reader.prepare_population_batch(1, 60).await.unwrap();
     reader.select_batch_population(Some(&NativeIdentity::new("1"))).await.unwrap();
     let first = reader.query_definitions(&["3".into()], &identities(&original), 256).await.unwrap();
     assert_eq!(first[0].payload.text(), Some("SELECT 1"));
@@ -62,7 +62,7 @@ async fn a_conflicting_native_definition_retires_all_cached_rows_before_any_foll
     let original = definition_row("SELECT 1");
     let changed = replace(&original, &[("context_settings_id", Val::Int(6))]);
     let mut reader = reader(vec![Ok(vec![lengths(&changed)]), Ok(vec![changed])]);
-    reader.prepare_population_batch(1).await.unwrap();
+    reader.prepare_population_batch(1, 60).await.unwrap();
     reader.select_batch_population(Some(&NativeIdentity::new("1"))).await.unwrap();
     let error = reader.query_definitions(&["3".into()], &identities(&original), 256).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
@@ -101,7 +101,7 @@ async fn a_transport_reconnect_after_native_authority_does_not_inherit_cached_po
         Ok(vec![lengths(&definition)]),
     ]);
     let mut reader = Reader::new(ReconnectingRead { native });
-    let catalog = reader.prepare_population_batch(1).await.unwrap();
+    let catalog = reader.prepare_population_batch(1, 60).await.unwrap();
     reader.select_batch_population(Some(&NativeIdentity::new("7"))).await.unwrap();
     let error = reader.query_definitions(&["3".into()], &identities(&definition), 256).await.err().unwrap();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
@@ -116,7 +116,7 @@ async fn a_transport_reconnect_after_native_authority_does_not_inherit_cached_po
 #[tokio::test]
 async fn the_shared_byte_budget_retires_cached_and_native_paths_without_a_per_population_reset() {
     let mut reader = reader(vec![Ok(vec![Rec::of(&[("payload", Val::Text("more than four bytes".into()))])])]);
-    reader.prepare_population_batch(1).await.unwrap();
+    reader.prepare_population_batch(1, 60).await.unwrap();
     reader.batch.as_mut().unwrap().budget = culprit_read::ReadBudget::new(MAX_BATCH_ROWS, 4);
     reader.select_batch_population(Some(&NativeIdentity::new("1"))).await.unwrap();
     let error = reader.read_rows("SELECT /* culprit */ bounded payload").await.unwrap_err();

@@ -128,7 +128,7 @@ fn query_quiet(snapshot: &Snapshot, q: &QueryStat) -> Option<(f64, String)> {
     const DAILY_SECONDS: f64 = 26.0 * 3600.0;
     // One run has no rhythm to stop: that's `ran_once`, not a deploy. The slow query log keeps only slow runs: one
     // not logged since may still run, faster than long_query_time.
-    if ran_once(q) || crate::queries::slow_log_only(snapshot) {
+    if ran_once(q) || crate::queries::slow_log_only(snapshot) || snapshot.workload_absence_problem().is_some() {
         return None;
     }
     let workload = snapshot.workload.as_ref()?;
@@ -556,3 +556,6 @@ mod prose_tests {
         assert_eq!(without_database("[other].[dbo].[t]", "shop_db"), "[other].[dbo].[t]");
     }
 }
+
+#[cfg(test)]
+mod population_tests;

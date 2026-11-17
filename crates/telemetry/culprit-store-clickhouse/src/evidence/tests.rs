@@ -11,10 +11,12 @@ mod current_request_work;
 mod diagnostics;
 mod file_io;
 mod focused_memory;
+mod informational;
 mod maintenance_progress;
 mod memory_feedback;
 mod object_definitions;
 mod page_server_io;
+mod page_server_reads;
 mod page_task_holders;
 mod page_writers;
 mod parameters;
@@ -625,3 +627,5 @@ async fn retained_memory_failures_use_exact_operational_readback_without_inventi
 
 mod connection_outcomes;
 mod jobs;
+
+mod query_store_statements;

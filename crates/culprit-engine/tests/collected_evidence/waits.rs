@@ -87,6 +87,28 @@ fn has_limit(analysis: &CollectedQueryAnalysis, reason: CollectedAnalysisLimit) 
 }
 
 #[tokio::test]
+async fn an_unresolved_wait_preserves_known_runtime_totals_without_establishing_wait_absence() {
+    let (source, mut records) = history();
+    let mut wait = integer_wait(&records, "native-lock", "900", "unresolved-wait");
+    wait.key.references.query.as_mut().unwrap().definition_id = None;
+    records.push(TelemetryRecord::QueryWaits(wait));
+    let fixture = Fixture::new(source, records).await;
+    let capture = fixture.read().await;
+    assert!(capture.is_read_complete());
+    assert!(!capture.reference_coverage().complete);
+
+    let analysis = collected_evidence::analyze(&capture, None).unwrap();
+    let workload = analysis.analyses[0].workload.as_ref().unwrap();
+    assert_eq!(workload.total_executions, 100.0);
+    assert_eq!(workload.total_time_ms, 100_000.0);
+    assert!(!has_limit(&analysis, CollectedAnalysisLimit::RuntimeDenominatorUnavailable));
+    let projected = query(&analysis);
+    assert!(!projected.waits_coverage.as_ref().unwrap().complete);
+    assert_eq!(projected.observed_wait_ms(WaitClass::Lock), None);
+    assert_eq!(analysis.context.records.len(), 3, "the unresolved observation remains in the original context");
+}
+
+#[tokio::test]
 async fn authenticated_dictionary_projects_every_class_and_keeps_native_names_and_totals() {
     let (source, mut records) = history();
     for (index, class) in WaitClass::ALL.iter().enumerate() {

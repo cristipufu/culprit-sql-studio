@@ -22,6 +22,7 @@ pub mod maintenance_progress;
 pub mod memory_failures;
 mod memory_participants;
 pub mod native_failures;
+pub mod page_server_reads;
 pub mod page_waits;
 pub(crate) mod plan_advice;
 pub mod plan_view;
@@ -38,3 +39,5 @@ pub mod task_space;
 pub mod temporary_work;
 pub mod tuning;
 pub mod waits;
+
+pub mod query_store_definitions;

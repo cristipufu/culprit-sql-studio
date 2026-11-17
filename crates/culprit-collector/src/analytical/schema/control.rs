@@ -21,6 +21,8 @@ pub fn published_ranges() -> Result<LogicalSchema> {
             Field::required("RangeKind", "/_culprit/range_kind", String),
             Field::optional("Dataset", "/_culprit/dataset", String),
             Field::required("SourceContinuity", "/_culprit/continuity", String),
+            Field::required("ReferencesComplete", "/_culprit/references_complete", Bool),
+            Field::required("ReferenceCoverage", "/reference_coverage", JsonContainer),
             Field::required("ObservationId", "/capture/observation_id", String),
             Field::required("OutboxId", "/capture/revision/outbox_id", String),
             Field::required("OwnerEpoch", "/capture/revision/owner_epoch", Long),

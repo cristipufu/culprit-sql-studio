@@ -145,6 +145,11 @@ impl<'a> AdmittedBackend<'a> {
             return Err(DeliveryProblem::Integrity.error());
         }
         if let Ok(manifest) = &outcome.result {
+            if manifest.status == CollectionStatus::Complete
+                && (!manifest.references.is_valid() || !manifest.references.integrity_complete)
+            {
+                return Err(CollectionStop::InvalidPage.error());
+            }
             let actual = manifest.investigation_intent()?.map(|intent| intent.key()).transpose()?;
             if actual != expected || outcome.attempt.as_ref().is_some_and(|attempt| attempt.capture != manifest.capture)
             {

@@ -61,7 +61,7 @@
       "reason": null
     }
   ],
-  "format": 9,
+  "format": 10,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",
@@ -93,6 +93,7 @@
   },
   "workload": {
     "population_catalog": {
+      "membership": { "kind": "native-catalog" },
       "source": "query_store",
       "partitioned": false,
       "requires_selection": false,

@@ -93,7 +93,9 @@ impl AnalyzeArgs {
             if selection::DefinitionKind::for_analysis(self.analysis).is_none() {
                 return Err(culprit_core::Error::invalid(t!("evidence.cli.definitions_only")));
             }
-            if !valid_digest(range) || range == &self.common.range || self.compilation_baseline.as_ref() == Some(range)
+            if !valid_digest(range)
+                || range == &self.common.range && self.analysis != Analysis::PageServerReads
+                || self.compilation_baseline.as_ref() == Some(range)
             {
                 return Err(DeliveryProblem::InvalidContract.error());
             }
@@ -203,6 +205,7 @@ enum Analysis {
     TaskSpace,
     StatementWork,
     CompletedSpills,
+    PageServerReads,
     StatementGrants,
     CacheEntryMemory,
     RuntimeDistributions,
@@ -226,6 +229,7 @@ impl Analysis {
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
             Self::Replication => vec![EvidenceFamily::ReplicationSamples],
+            Self::PageServerReads => vec![EvidenceFamily::QueryRuntime],
             Self::Queries => vec![
                 EvidenceFamily::QueryDefinitions,
                 EvidenceFamily::PlanDefinitions,
@@ -351,6 +355,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::CompletedSpills) => {
             let analysis = culprit_engine::collected_resources::completed_spills(&capture, definitions.as_ref())?;
             emit(out, &analysis, common.max_output_bytes, || observations::completed_spills(&analysis.report))?;
+        }
+        Some(Analysis::PageServerReads) => {
+            let analysis = culprit_engine::collected_resources::page_server_reads(&capture, definitions.as_ref())?;
+            emit(out, &analysis, common.max_output_bytes, || observations::collected_page_server_reads(&analysis))?;
         }
         Some(Analysis::StatementGrants) => {
             let analysis = culprit_engine::collected_resources::statement_grants(&capture)?;

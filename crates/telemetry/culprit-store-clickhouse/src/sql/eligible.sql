@@ -5,7 +5,8 @@ WITH Published AS (
     SELECT RangeId, JSONExtractString(Batch,'batch_id') AS BatchId, JSONExtractInt(Batch,'rows') AS ExpectedRows,
         1 AS BatchKnown, ContractId AS PublishedContract, ResourceId AS PublishedResource, ResourceKind AS PublishedKind,
         ManifestSha256 AS PublishedManifest, SchemaDigest AS PublishedSchema,
-        OutboxId AS PublishedOutbox, OwnerEpoch AS PublishedEpoch, CaptureSequence AS PublishedSequence
+        OutboxId AS PublishedOutbox, OwnerEpoch AS PublishedEpoch, CaptureSequence AS PublishedSequence,
+        ReferencesComplete AS PublishedReferencesComplete
     FROM Published ARRAY JOIN JSONExtractArrayRaw(Batches) AS Batch
     WHERE JSONExtractString(Batch,'table')='$TABLE' AND JSONExtractBool(Batch,'delivery_required')
 ), Rows AS (
@@ -18,6 +19,7 @@ WITH Published AS (
         OR R.ContractId!=M.PublishedContract OR R.ResourceId!=M.PublishedResource OR R.ResourceKind!=M.PublishedKind
         OR R.ManifestSha256!=M.PublishedManifest OR R.SchemaDigest!=M.PublishedSchema
         OR R.OutboxId!=M.PublishedOutbox OR R.OwnerEpoch!=M.PublishedEpoch OR R.CaptureSequence!=M.PublishedSequence
+        OR R.ReferencesComplete!=M.PublishedReferencesComplete
 ), Conflicts AS (
     SELECT RangeId FROM Candidates GROUP BY RangeId,BatchId,RowOrdinal HAVING count()!=1
 ), Complete AS (

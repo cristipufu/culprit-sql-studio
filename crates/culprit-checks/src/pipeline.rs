@@ -26,7 +26,9 @@ mod completed_spills;
 mod connection_outcomes;
 mod jobs;
 mod maintenance_progress;
+mod page_server_reads;
 mod replication;
+mod runtime_populations;
 mod statement_work;
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
@@ -88,6 +90,7 @@ fn preparation() -> Vec<Arc<dyn Prepare>> {
             snapshot.render_recorded_messages();
         }),
         step("measurement context identifies this database and its clock", measurement_context),
+        step("observed runtime groups do not establish complete membership", runtime_populations::qualify),
         step("index availability and maintenance follow the engine", |s| {
             for i in &mut s.indexes {
                 i.state = Some(if i.is_disabled {
@@ -272,6 +275,7 @@ impl Pipeline {
         let connection_outcomes = connection_outcomes::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
+        let page_server_reads = page_server_reads::explain(&mut snapshot);
         let completed_spills = completed_spills::explain(&mut snapshot);
         let cleanup = cleanup::explain(&mut snapshot);
         let mut findings = Vec::new();
@@ -389,6 +393,7 @@ impl Pipeline {
             replication,
             connection_outcomes,
             statement_work,
+            page_server_reads,
             completed_spills,
             cleanup,
         }

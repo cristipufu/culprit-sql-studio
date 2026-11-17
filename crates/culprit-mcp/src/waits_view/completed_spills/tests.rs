@@ -63,7 +63,10 @@ fn data(count: usize) -> Box<Report> {
         })
         .collect();
     let read = CachedRuntimeRead {
-        read_id: cached_statement_read_id(&CaptureIdentity { observation_id: "a".repeat(32), revision: None }).unwrap(),
+        origin: CachedRuntimeReadOrigin::NativeRead {
+            read_id: cached_statement_read_id(&CaptureIdentity { observation_id: "a".repeat(32), revision: None })
+                .unwrap(),
+        },
         read_complete: true,
         description: CollectionDescription {
             target: database.into(),

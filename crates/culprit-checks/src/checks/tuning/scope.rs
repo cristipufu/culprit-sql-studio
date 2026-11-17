@@ -36,7 +36,10 @@ pub(crate) fn unpartitioned_workload(snapshot: &Snapshot) -> Option<&Workload> {
 
 fn management_scope(snapshot: &Snapshot) -> Option<&QueryStoreScope> {
     let tuning = snapshot.tuning.as_ref()?;
-    plan_workload(snapshot)?;
+    let workload = plan_workload(snapshot)?;
+    if !workload.population_catalog.as_ref()?.has_complete_membership() {
+        return None;
+    }
     let mode = snapshot
         .setting("query_store_options.actual_state_desc")
         .and_then(|setting| QueryStoreReadMode::from_native(&setting.value));

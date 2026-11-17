@@ -29,6 +29,7 @@ struct Interval {
 #[derive(Clone)]
 pub(crate) struct FrozenWindow {
     pub database: crate::database_identity::Context,
+    pub page_server_reads: super::page_server::Availability,
     minutes: u32,
     clock: String,
     initial_clock: String,
@@ -44,6 +45,7 @@ pub(crate) struct FrozenWindow {
 impl FrozenWindow {
     pub(crate) fn decode(row: &Rec, minutes: u32, waits_supported: bool) -> Result<Self> {
         let database = crate::database_identity::Context::from_window(row)?;
+        let page_server_reads = super::page_server::decode_availability(row)?;
         let clock = text(row, "window_clock")?;
         parse_time(&clock)?;
         let native_xml = text(row, "native_intervals")?;
@@ -118,6 +120,7 @@ impl FrozenWindow {
         };
         Ok(Self {
             database,
+            page_server_reads,
             minutes,
             initial_clock: clock.clone(),
             clock,
@@ -160,6 +163,7 @@ impl FrozenWindow {
     pub(crate) fn verify(&mut self, row: &Rec) -> Result<WindowVerification> {
         let current = Self::decode(row, self.minutes, self.waits_supported)?;
         if self.database != current.database
+            || self.page_server_reads != current.page_server_reads
             || self.intervals != current.intervals
             || parse_time(&current.clock)? < parse_time(&self.clock)?
         {
@@ -227,11 +231,13 @@ SELECT /* culprit */ {identity_columns},CONVERT(varchar(40),@at,127) AS window_c
  CASE WHEN @selected.value('count(/intervals/interval)','int')={bounds}.value('count(/intervals/interval)','int') THEN 1 ELSE 0 END AS intervals_retained,
  {start} AS window_start,{end} AS window_end,
  DATEDIFF_BIG(nanosecond,b.starts,{CAPPED_END})/CAST(3600000000000 AS float) AS window_hours,
- {capture} AS wait_stats_capture_mode_desc
+ {capture} AS wait_stats_capture_mode_desc,
+ {page_server_availability} AS page_server_read_availability
 FROM sys.database_query_store_options o
 CROSS JOIN (SELECT MIN(CONVERT(datetimeoffset,x.value('@starts[1]','varchar(40)'),127)) AS starts,
  MAX(CONVERT(datetimeoffset,x.value('@ends[1]','varchar(40)'),127)) AS ends
- FROM {bounds}.nodes('/intervals/interval') n(x)) b OPTION(MAXDOP 1,LOOP JOIN)"#
+ FROM {bounds}.nodes('/intervals/interval') n(x)) b OPTION(MAXDOP 1,LOOP JOIN)"#,
+        page_server_availability = super::page_server::availability!(),
     )
 }
 

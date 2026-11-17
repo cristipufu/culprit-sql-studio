@@ -1,5 +1,7 @@
 //! Interval aggregates carry their actual units. Missing measurements remain absent.
 use super::*;
+mod page_server_reads;
+pub use page_server_reads::{PageServerReadAvailability, PageServerReadStatistics, PageServerReadSummary};
 #[cfg(test)]
 mod cohort_tests;
 
@@ -157,6 +159,11 @@ pub struct RuntimeMeasurement {
     pub key: NativeMeasurementKey,
     pub executions: String,
     pub metrics: Vec<RuntimeMetric>,
+    /// Source-qualified remote 8-KiB page reads for this exact native runtime fragment. Native integer
+    /// statistics remain exact and independent from physical/local-cache reads and execution time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_server_reads: Option<Box<PageServerReadStatistics>>,
     /// UTC instants, normalized at the shared export boundary without changing their nanosecond precision.
     pub first_execution_at: Option<String>,
     pub last_execution_at: Option<String>,
@@ -172,12 +179,25 @@ impl RuntimeMeasurement {
     pub fn metric(&self, key: &RuntimeMetricKey) -> Option<&RuntimeMetric> {
         self.metrics.iter().find(|metric| &metric.key == key)
     }
+    pub fn page_server_reads_match_source(&self, source: &CollectionDescription) -> bool {
+        let declared = source.query_history().and_then(|history| {
+            history.native_properties.get(PageServerReadAvailability::PROPERTY).map(String::as_str)
+        });
+        match (declared, self.page_server_reads.as_deref()) {
+            (None, None) => true,
+            (Some(declared), Some(statistics)) => {
+                PageServerReadAvailability::from_native_property(declared) == Some(statistics.availability)
+            }
+            _ => false,
+        }
+    }
     pub fn is_valid(&self) -> bool {
         let mut keys = std::collections::BTreeSet::new();
         self.key.is_valid()
             && valid_counter(&self.executions)
             && self.metrics.len() <= MAX_STATEMENT_METRICS
             && self.metrics.iter().all(|metric| metric.is_valid() && keys.insert(&metric.key))
+            && self.page_server_reads.as_ref().is_none_or(|statistics| statistics.is_valid())
             && [&self.first_execution_at, &self.last_execution_at]
                 .into_iter()
                 .flatten()

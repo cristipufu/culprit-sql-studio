@@ -10,6 +10,7 @@ use crate::model::{Engine, Snapshot};
 mod cached_runtime;
 mod connection_outcomes;
 mod jobs;
+mod page_server_reads;
 mod plan;
 mod replication;
 mod sql;
@@ -197,6 +198,7 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
             (crate::source_id::SESSIONS, "view.connection_outcomes.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
                 | (crate::telemetry::CACHED_RUNTIME_READ_SOURCE, "view.completed_spills.invalid")
+                | (crate::source_id::QUERY_STORE, "view.page_server_reads.invalid")
         )
 }
 
@@ -222,6 +224,9 @@ fn admit_shared_evidence<T>(
 pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     let engine = snapshot.server.engine;
     let mut s = snapshot.clone();
+    if page_server_reads::redact(&mut s).is_err() {
+        s.record_unavailable_evidence(crate::source_id::QUERY_STORE, crate::message!("view.page_server_reads.invalid"));
+    }
     if !s.runtime_populations.as_ref().is_some_and(|catalog| catalog.is_valid() && !catalog.partitioned) {
         s.runtime_populations = None;
     }

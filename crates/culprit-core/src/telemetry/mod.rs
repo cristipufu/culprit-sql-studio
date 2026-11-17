@@ -15,9 +15,14 @@ mod cache_entry_memory;
 mod cached_definitions;
 mod cached_runtime_read;
 pub use cached_runtime_read::{
-    CACHED_RUNTIME_READ_SOURCE, CachedRuntimeRead, cached_statement_read_id, cached_statement_read_key,
+    CACHED_RUNTIME_READ_SOURCE, CachedRuntimeCapturedPosition, CachedRuntimeRead, CachedRuntimeReadOrigin,
+    cached_statement_read_id, cached_statement_read_key,
 };
 mod cached_statements;
+mod captured_reference;
+pub use captured_reference::{
+    CapturedPosition, CapturedReadBinding, CapturedReadRef, CapturedRecordReference, CapturedStreamRows,
+};
 mod catalog;
 mod check_constraints;
 mod cleanup;
@@ -707,7 +712,7 @@ impl TelemetryRecord {
             }
             Self::QueryRuntime(row) => {
                 row.canonicalize_instants()?;
-                source.accepts_measurement(&row.key)
+                source.accepts_measurement(&row.key) && row.page_server_reads_match_source(source)
             }
             Self::QueryWaits(row) => source.accepts_measurement(&row.key),
         };

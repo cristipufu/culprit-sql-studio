@@ -2,4 +2,13 @@
 import type { ActivityReferenceCoverage } from "./ActivityReferenceCoverage";
 import type { DefinitionCoverage } from "./DefinitionCoverage";
 
-export type ReferenceCoverage = { queries: DefinitionCoverage, plans: DefinitionCoverage, unavailable_payloads: number, complete: boolean, activity: ActivityReferenceCoverage | null, };
+export type ReferenceCoverage = { queries: DefinitionCoverage, plans: DefinitionCoverage, unavailable_payloads: number, 
+/**
+ * The source was rechecked, its roster is exact, and every supplied definition ID closes exactly.
+ * Explicitly unresolved native references do not prevent physical retention or transport.
+ */
+integrity_complete: boolean, 
+/**
+ * All required native query and plan references are resolved. This is independent of file membership.
+ */
+complete: boolean, activity: ActivityReferenceCoverage | null, };

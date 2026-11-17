@@ -12,6 +12,7 @@ fn runtime() -> RuntimeMeasurement {
         },
         executions: "9007199254740993".into(),
         metrics: vec![RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, 1.25)],
+        page_server_reads: None,
         first_execution_at: None,
         last_execution_at: None,
     }

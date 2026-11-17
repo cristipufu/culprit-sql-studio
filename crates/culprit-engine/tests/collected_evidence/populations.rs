@@ -166,7 +166,7 @@ async fn source_declared_empty_unknown_and_unpartitioned_populations_do_not_subs
 }
 
 #[tokio::test]
-async fn missing_definitions_in_another_population_do_not_change_the_selected_denominator() {
+async fn unresolved_native_queries_in_another_population_do_not_withhold_selected_totals() {
     let (source, mut records) = query_population_evidence();
     let populations = identities(&source);
     let mut missing = records
@@ -180,10 +180,7 @@ async fn missing_definitions_in_another_population_do_not_change_the_selected_de
     let identity = NativeQueryIdentity { query_id: "missing-native-query".into(), qualifiers: Default::default() };
     missing.key.native.id = "later-missing-query-runtime".into();
     missing.key.references = StatementReferences {
-        query: Some(NativeDefinitionReference {
-            native: identity.native(),
-            definition_id: Some(identity.definition_id(&source).unwrap()),
-        }),
+        query: Some(NativeDefinitionReference { native: identity.native(), definition_id: None }),
         plan: None,
     };
     missing.executions = "100".into();
@@ -195,10 +192,14 @@ async fn missing_definitions_in_another_population_do_not_change_the_selected_de
     let east = result(&analysis, &populations[1]);
     assert_eq!(west.workload.as_ref().unwrap().total_time_ms, 20.0);
     assert!(!has_limit(west, CollectedAnalysisLimit::MissingQueryDefinition));
-    let workload = east.workload.as_ref().unwrap();
-    assert_eq!((workload.total_executions, workload.total_time_ms), (105.0, 10_500.0));
-    assert_eq!(workload.queries[0].total_time_ms, 500.0);
+    assert!(east.workload.is_none());
     assert!(has_limit(east, CollectedAnalysisLimit::MissingQueryDefinition));
+    assert!(has_limit(east, CollectedAnalysisLimit::RuntimeDenominatorUnavailable));
+    assert!(capture.is_read_complete() && !capture.reference_coverage().complete);
+    let selected = collected_evidence::analyze(&capture, Some(&populations[0])).unwrap();
+    assert_eq!(selected.analyses[0].workload.as_ref().unwrap().total_time_ms, 20.0);
+    assert!(analysis.context.records.iter().any(|record| matches!(&record.row.record,
+        TelemetryRecord::QueryRuntime(row) if row.key.native.id == "later-missing-query-runtime" && row.executions == "100")));
 }
 
 #[tokio::test]

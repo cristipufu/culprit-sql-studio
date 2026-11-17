@@ -33,6 +33,7 @@ fn malformed_cohort_invalidates_both_runtime_and_wait_measurements() {
         key: native.clone(),
         executions: "1".into(),
         metrics: vec![RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, 1.0)],
+        page_server_reads: None,
         first_execution_at: None,
         last_execution_at: None,
     };

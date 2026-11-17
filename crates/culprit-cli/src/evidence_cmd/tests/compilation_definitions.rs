@@ -34,7 +34,7 @@ fn compilation_companions_select_query_definitions_and_share_the_original_action
     assert_eq!(request.budget.recovery_payloads.unwrap().max_objects, 1);
     assert_eq!(selection.plan.companions.compilation_baseline.as_deref(), Some(baseline.as_str()));
     let companion = selection.plan.companions.definitions.as_ref().unwrap();
-    assert_eq!(companion.kind, DefinitionKind::QueryStore);
+    assert_eq!(companion.kind, DefinitionKind::QueryStoreCompilation);
     assert_eq!(companion.kind.family(), EvidenceFamily::QueryDefinitions);
     assert_eq!(companion.range, definitions);
     assert!(selection.plan.companions.activity.is_none() && selection.plan.companions.blocking.is_none());
@@ -43,13 +43,13 @@ fn compilation_companions_select_query_definitions_and_share_the_original_action
 #[test]
 fn definition_read_profiles_require_their_actual_native_primary_dataset_and_engine() {
     let case = culprit_collector::analytical::test_support::compilation_definition_evidence_cases().remove(0);
-    assert!(DefinitionKind::QueryStore.accepts_primary(&case.current.0));
+    assert!(DefinitionKind::QueryStoreCompilation.accepts_primary(&case.current.0));
     assert!(!DefinitionKind::CachedStatement.accepts_primary(&case.current.0));
-    assert!(!DefinitionKind::QueryStore.accepts_primary(&case.definitions.unwrap().0));
+    assert!(!DefinitionKind::QueryStoreCompilation.accepts_primary(&case.definitions.unwrap().0));
     let mut foreign = case.current.0;
     let culprit_core::telemetry::CollectionTarget::Database(database) = &mut foreign.target else { panic!() };
     database.engine = culprit_core::Engine::Postgres;
-    assert!(!DefinitionKind::QueryStore.accepts_primary(&foreign));
+    assert!(!DefinitionKind::QueryStoreCompilation.accepts_primary(&foreign));
     assert!(!DefinitionKind::CachedStatement.accepts_primary(&foreign));
 }
 

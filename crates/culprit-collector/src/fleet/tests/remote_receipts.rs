@@ -69,6 +69,8 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
             contract,
             range_id,
             capture,
+            reference_coverage: crate::collection_references::ObservationReferences::default()
+                .coverage(true, Some(&source)),
             source,
             collected_from: "2026-11-10T12:00:00Z".into(),
             collected_until: "2026-11-10T12:00:01Z".into(),

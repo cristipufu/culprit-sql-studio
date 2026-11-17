@@ -389,13 +389,7 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
     if matches!(measure, QueryMeasure::Timeline) && !w.timeline.as_ref().is_some_and(|t| t.len() >= 4) {
         return insufficient(t!("evidence.timeline_short"));
     }
-    let source = match w.kind() {
-        Some(culprit_core::WorkloadKind::QueryStore) => source_id::QUERY_STORE,
-        Some(culprit_core::WorkloadKind::PlanCache) => source_id::PLAN_CACHE,
-        Some(culprit_core::WorkloadKind::QueryLog) => source_id::QUERY_LOG,
-        _ => source_id::WORKLOAD,
-    };
-    if let Some(reason) = source_failed(s, &[source]) {
+    if let Some(reason) = s.workload_absence_problem() {
         return Insufficient(reason);
     }
     let detail_sources: &[&str] = match measure {

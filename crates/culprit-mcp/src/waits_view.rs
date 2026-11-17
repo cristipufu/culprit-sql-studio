@@ -13,6 +13,7 @@ const REPLICATION_ENTRIES: usize = 16;
 mod completed_spills;
 mod connection_outcomes;
 mod jobs;
+mod page_server_reads;
 mod statement_work;
 
 #[cfg(test)]
@@ -106,6 +107,7 @@ pub fn report(report: &Report) -> Value {
     statement_work::attach(&mut response, report);
     jobs::attach(&mut response, report);
     completed_spills::attach(&mut response, report);
+    page_server_reads::attach(&mut response, report);
     connection_outcomes::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
         match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {

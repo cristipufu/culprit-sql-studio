@@ -33,7 +33,7 @@ function observation(index: number): OperationalObservation {
 export function completedSpillFixture(count = 12): { read: CachedRuntimeRead; report: CompletedSpillReport } {
   const native = context();
   const rows = Array.from({ length: count }, (_, index) => observation(index));
-  const read: CachedRuntimeRead = { read_id: "c".repeat(64), read_complete: true, observations: rows,
+  const read: CachedRuntimeRead = { origin: { kind: "native-read", read_id: "c".repeat(64) }, read_complete: true, observations: rows,
     description: { target: native.target, partition: native.partition, source: "private-logical-reader", continuity: "unverified",
       observation: { kind: "snapshot", data: { dataset: "cached-runtime", observed_from: SPILL_FROM, observed_until: SPILL_UNTIL,
         records: count, sources: [{ source: COMPLETED_SPILL_SOURCE, state: count === 0 ? "empty" : "collected", records: count,

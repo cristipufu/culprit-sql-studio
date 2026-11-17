@@ -16,6 +16,7 @@ pub fn query_population_evidence() -> (CollectionDescription, Vec<TelemetryRecor
     ];
     let SourceObservation::QueryHistory(history) = &mut source.observation else { panic!("history fixture") };
     history.population_catalog = Some(culprit_core::NativeRuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: source.source.clone(),
         partitioned: true,
         requires_selection: true,
@@ -63,6 +64,7 @@ pub fn query_population_evidence() -> (CollectionDescription, Vec<TelemetryRecor
                 metric,
                 RuntimeMetric::average(RuntimeMetricKey::CpuTime, RuntimeMetricUnit::Milliseconds, duration / 2.0),
             ],
+            page_server_reads: None,
             first_execution_at: Some("2020-01-01T06:10:00Z".into()),
             last_execution_at: Some("2020-01-01T06:50:00Z".into()),
         }));
@@ -104,6 +106,7 @@ pub fn query_population_evidence_cases() -> Vec<(CollectionDescription, Vec<Tele
     let (mut source, mut records) = empty_group.clone();
     let SourceObservation::QueryHistory(history) = &mut source.observation else { panic!("history fixture") };
     history.population_catalog = Some(culprit_core::NativeRuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: source.source.clone(),
         partitioned: false,
         requires_selection: false,

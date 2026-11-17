@@ -18,6 +18,7 @@ fn row(executions: &str, average: Option<f64>) -> RuntimeMeasurement {
             })
             .into_iter()
             .collect(),
+        page_server_reads: None,
         first_execution_at: None,
         last_execution_at: None,
     }

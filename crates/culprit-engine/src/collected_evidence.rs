@@ -84,7 +84,13 @@ fn analyze_population(
         let (queries, inputs, partial) = groups::project(capture, definitions, &population, rows, &mut limitations)?;
         (workload(capture, definitions, &population, rows, queries, &mut limitations)?, inputs, partial)
     };
-    let mut report = culprit_checks::analyze(snapshot(capture, database.clone(), workload, partial));
+    let membership_incomplete = capture
+        .source()
+        .query_history()
+        .and_then(|history| history.population_catalog.as_ref())
+        .is_some_and(|catalog| !catalog.has_complete_membership());
+    let mut report =
+        culprit_checks::analyze(snapshot(capture, database.clone(), workload, partial || membership_incomplete));
     if let Some(provenance) = &mut report.provenance {
         provenance.origin = culprit_core::AnalysisOrigin::ArchivedTelemetry;
     }

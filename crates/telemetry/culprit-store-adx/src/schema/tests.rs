@@ -140,6 +140,7 @@ fn runtime_projection_covers_the_native_contract_and_preserves_counts_units_and_
                 29.5,
             ),
         ],
+        page_server_reads: None,
         first_execution_at: Some("2026-11-11T06:00:00Z".into()),
         last_execution_at: Some("2026-11-11T06:01:00Z".into()),
     };

@@ -86,7 +86,7 @@ fn logical_database_namespace_is_shared_without_inventing_acquisition_bounds() {
         database: "app".into(),
         incarnation: Some("native-logical-db".into()),
     });
-    let expected = compilation_database_namespace(&target, &SourcePartition::Target).unwrap();
+    let expected = query_store_database_namespace(&target, &SourcePartition::Target).unwrap();
     let context = NativeReadContext {
         target: target.clone(),
         partition: SourcePartition::Target,
@@ -101,9 +101,9 @@ fn logical_database_namespace_is_shared_without_inventing_acquisition_bounds() {
     let mut unknown = target.clone();
     let CollectionTarget::Database(database) = &mut unknown else { panic!("database") };
     database.incarnation = None;
-    assert!(compilation_database_namespace(&unknown, &SourcePartition::Target).is_none());
+    assert!(query_store_database_namespace(&unknown, &SourcePartition::Target).is_none());
     assert!(
-        compilation_database_namespace(&target, &SourcePartition::InstanceLocal { member: None, epoch: None })
+        query_store_database_namespace(&target, &SourcePartition::InstanceLocal { member: None, epoch: None })
             .is_none()
     );
 }

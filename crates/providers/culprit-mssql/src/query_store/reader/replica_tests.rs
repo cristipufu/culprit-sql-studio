@@ -171,8 +171,10 @@ async fn a_native_reply_from_another_group_never_gets_relabelled_or_attached() {
 }
 
 #[tokio::test]
-async fn missing_or_failed_catalog_is_unknown_and_cannot_become_unpartitioned_or_healthy() {
-    for catalog in [Ok(vec![]), Err(ReadError::Stopped(CollectionStop::QueryLimit))] {
+async fn malformed_or_failed_catalog_is_unknown_and_cannot_become_unpartitioned_or_healthy() {
+    for catalog in
+        [Ok(vec![Rec::of(&[("replica_group_id", Val::Null)])]), Err(ReadError::Stopped(CollectionStop::QueryLimit))]
+    {
         let mut reader = Reader::new(FakeRead::new(vec![Ok(vec![layout()]), catalog]));
         assert!(reader.summary(60).await.is_err());
         assert!(reader.population_catalog().is_none());
@@ -219,11 +221,17 @@ fn period_comparisons_and_unpartitioned_layouts_use_the_same_native_population_r
         super::super::period_sql::coverage_sql("'2020-01-01'", "'2020-01-02'", Population::Unpartitioned).unwrap();
     assert!(!unpartitioned_coverage.contains("sys.query_store_runtime_stats rs"));
     assert!(super::super::period_sql::coverage_sql("'2020-01-01'", "'2020-01-02'", Population::AllGroups).is_err());
-    let unpartitioned = runtime::summary_sql(false, false, Population::Unpartitioned);
+    let unpartitioned = runtime::summary_sql(
+        false,
+        false,
+        crate::query_store::page_server::Availability::NotApplicable,
+        Population::Unpartitioned,
+    );
     assert!(unpartitioned.contains("CAST(NULL AS bigint) AS replica_group_id"));
     assert!(!unpartitioned.contains("rs.replica_group_id"));
     assert!(unpartitioned.contains("MAX(CAST(p.is_forced_plan AS int))"));
-    let replica = runtime::summary_sql(false, false, population);
+    let replica =
+        runtime::summary_sql(false, false, crate::query_store::page_server::Availability::NotApplicable, population);
     assert!(replica.contains("CAST(NULL AS int) AS is_forced"));
     assert!(!replica.contains("p.is_forced_plan"));
 }

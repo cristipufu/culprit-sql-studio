@@ -1,7 +1,10 @@
 //! Streaming proof of the exact files a journal commit or replay will reference.
 use super::{MANIFEST_LIMIT, journal::Capture, problem, storage};
+mod read;
 use crate::{collection_references::ObservationReferences, durable_fs};
 use culprit_core::{Result, telemetry::*};
+pub(super) use read::{CanonicalRows, MAX_CANONICAL_ROWS, NoObservation, VerificationObserver};
+use read::{ObservedFile, read_error};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -17,6 +20,17 @@ pub(super) struct ValidatedCapture {
     pub diagnostic_checkpoint: Option<DiagnosticCheckpoint>,
     pub diagnostic_revisions: Vec<DiagnosticRevision>,
 }
+#[derive(Default)]
+struct RecordIdentities {
+    native: HashSet<NativeRecordIdentity>,
+    semantic: HashSet<String>,
+}
+impl RecordIdentities {
+    fn insert(&mut self, row: &ExportedRecord) -> bool {
+        self.native.insert(row.record.native_identity())
+            && row.record_id.as_ref().is_none_or(|id| self.semantic.insert(id.clone()))
+    }
+}
 impl ValidatedCapture {
     pub fn range(&self) -> Result<CapturedRange> {
         let source = self.manifest.description.as_ref().ok_or_else(integrity)?;
@@ -29,16 +43,27 @@ pub(super) fn manifest(directory: &Path) -> Result<(CollectionManifest, Vec<u8>)
 }
 
 pub(super) fn manifest_if_present(directory: &Path) -> Result<Option<(CollectionManifest, Vec<u8>)>> {
+    manifest_observed(directory, &mut NoObservation)
+}
+
+fn manifest_observed(
+    directory: &Path,
+    observer: &mut dyn VerificationObserver,
+) -> Result<Option<(CollectionManifest, Vec<u8>)>> {
+    observer.check()?;
     let input = match durable_fs::regular_file(&directory.join("manifest.json")) {
         Ok(input) => input,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(integrity()),
     };
-    let mut bytes = Vec::new();
-    input.take(MANIFEST_LIMIT as u64 + 1).read_to_end(&mut bytes).map_err(storage)?;
-    if bytes.len() > MANIFEST_LIMIT {
+    let length = input.metadata().map_err(storage)?.len();
+    if length > MANIFEST_LIMIT as u64 {
         return Err(integrity());
     }
+    let mut input = ObservedFile::new(input, length, observer);
+    let mut bytes = Vec::new();
+    input.read_to_end(&mut bytes).map_err(read_error)?;
+    input.finish()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| integrity())?;
     let manifest: CollectionManifest = serde_json::from_value(value.clone()).map_err(|_| integrity())?;
     if serde_json::to_value(&manifest).map_err(|_| integrity())? != value {
@@ -48,6 +73,16 @@ pub(super) fn manifest_if_present(directory: &Path) -> Result<Option<(Collection
 }
 
 pub(super) fn validate(directory: &Path, capture: &Capture, destination: Option<&Path>) -> Result<ValidatedCapture> {
+    validate_observed(directory, capture, destination, &mut NoObservation)
+}
+
+pub(super) fn validate_observed(
+    directory: &Path,
+    capture: &Capture,
+    destination: Option<&Path>,
+    observer: &mut dyn VerificationObserver,
+) -> Result<ValidatedCapture> {
+    observer.check()?;
     if !std::fs::symlink_metadata(directory).map_err(|_| integrity())?.file_type().is_dir() {
         return Err(integrity());
     }
@@ -65,14 +100,16 @@ pub(super) fn validate(directory: &Path, capture: &Capture, destination: Option<
     if !names.is_empty() {
         return Err(integrity());
     }
-    let (manifest, manifest_bytes) = manifest(directory)?;
+    let (manifest, manifest_bytes) = manifest_observed(directory, observer)?.ok_or_else(integrity)?;
+    observer.manifest(&manifest)?;
     if manifest.format_version != EXPORT_FORMAT_VERSION {
         return Err(problem(OutboxProblem::UnsupportedFormat));
     }
     if manifest.capture != capture.identity
         || manifest.request != capture.request
         || !matches!(manifest.status, CollectionStatus::Complete)
-        || !manifest.references.complete
+        || !manifest.references.is_valid()
+        || !manifest.references.integrity_complete
         || manifest.files.len() != streams.len()
         || manifest.finished_at.is_none()
         || capture.source_work != SourceWorkState::Quiescent
@@ -98,7 +135,7 @@ pub(super) fn validate(directory: &Path, capture: &Capture, destination: Option<
         return Err(integrity());
     }
     let mut references = ObservationReferences::default();
-    let mut ids = HashSet::new();
+    let mut ids = RecordIdentities::default();
     let mut bytes = 0;
     for (file, stream) in manifest.files.iter().zip(streams.iter().copied()) {
         if file.stream != stream
@@ -115,11 +152,12 @@ pub(super) fn validate(directory: &Path, capture: &Capture, destination: Option<
         if bytes > u64::from(manifest.request.budget.total_bytes) {
             return Err(integrity());
         }
-        verify_file(directory, file, &manifest, destination, &mut references, &mut ids)?;
+        verify_file(directory, file, &manifest, destination, &mut references, &mut ids, observer)?;
     }
     if references.coverage(true, Some(source)) != manifest.references {
         return Err(integrity());
     }
+    observer.check()?;
     let manifest_sha = digest(&manifest_bytes);
     bytes += manifest_bytes.len() as u64;
     Ok(ValidatedCapture {
@@ -138,14 +176,16 @@ fn verify_file(
     manifest: &CollectionManifest,
     destination: Option<&Path>,
     references: &mut ObservationReferences,
-    ids: &mut HashSet<String>,
+    ids: &mut RecordIdentities,
+    observer: &mut dyn VerificationObserver,
 ) -> Result<()> {
     let source = manifest.description.as_ref().ok_or_else(integrity)?;
+    observer.check()?;
     let input = durable_fs::regular_file(&directory.join(&file.file)).map_err(|_| integrity())?;
     if input.metadata().map_err(storage)?.len() != u64::from(file.bytes) {
         return Err(integrity());
     }
-    let mut input = BufReader::new(input.take(u64::from(file.bytes) + 1));
+    let mut input = BufReader::new(ObservedFile::new(input, u64::from(file.bytes), observer));
     let mut output =
         destination.map(|path| durable_fs::create_file(&path.join(&file.file)).map_err(storage)).transpose()?;
     let mut digest = Sha256::new();
@@ -157,7 +197,7 @@ fn verify_file(
         let read = (&mut input)
             .take(u64::from(manifest.request.budget.page_bytes) + 1)
             .read_until(b'\n', &mut line)
-            .map_err(storage)?;
+            .map_err(read_error)?;
         if read == 0 {
             break;
         }
@@ -183,15 +223,17 @@ fn verify_file(
             return Err(integrity());
         }
         let expected = ExportedRecord::new(source, &manifest.capture, row.record.clone()).map_err(|_| integrity())?;
-        if expected != row || !row.record_id.as_ref().is_some_and(|id| ids.insert(id.clone())) {
+        if expected != row || expected.payload_sha256()? != row.payload_sha256()? || !ids.insert(&row) {
             return Err(integrity());
         }
+        input.get_mut().observer.row(&row, count - 1)?;
         references.record(&row.record);
         digest.update(&line);
         if let Some(output) = &mut output {
             output.write_all(&line).map_err(storage)?;
         }
     }
+    input.get_mut().finish()?;
     let actual = digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     if bytes != u64::from(file.bytes) || count != file.rows || file.sha256.as_deref() != Some(&actual) {
         return Err(integrity());

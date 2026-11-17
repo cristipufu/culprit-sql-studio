@@ -2,7 +2,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 #[test]
-fn expanded_compilation_projection_retires_only_its_registered_source_version() {
+fn changed_query_projections_revise_only_their_registered_source_versions() {
     let recipes = declarations();
     let revised = recipes
         .iter()
@@ -11,12 +11,20 @@ fn expanded_compilation_projection_retires_only_its_registered_source_version() 
         .collect::<Vec<_>>();
     assert_eq!(
         revised,
-        vec![(
-            "mssql.query-compilation",
-            2,
-            RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::QueryCompilation)),
-            RecipeCostQualification::Unqualified
-        )]
+        vec![
+            (
+                "mssql.query-history",
+                2,
+                RecipeSelector::Collection(TelemetryCollection::QueryHistory),
+                RecipeCostQualification::Unqualified
+            ),
+            (
+                "mssql.query-compilation",
+                2,
+                RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::QueryCompilation)),
+                RecipeCostQualification::Unqualified
+            )
+        ]
     );
 }
 

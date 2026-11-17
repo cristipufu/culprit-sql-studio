@@ -13,6 +13,7 @@ fn history() -> QueryHistoryDescription {
             until: "2026-11-01T01:00:00Z".into(),
         },
         population_catalog: Some(NativeRuntimePopulationCatalog {
+            membership: crate::RuntimePopulationMembership::NativeCatalog,
             source: "arbitrary-native-source".into(),
             partitioned: true,
             requires_selection: true,
@@ -90,6 +91,7 @@ fn admissible_individual_values_do_not_authorize_an_undeclared_native_tuple() {
         },
         executions: "1".into(),
         metrics: vec![RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, 1.0)],
+        page_server_reads: None,
         first_execution_at: None,
         last_execution_at: None,
     };
@@ -110,6 +112,7 @@ fn unknown_and_positively_unpartitioned_membership_remain_distinct() {
     history.population_binding = QueryHistoryPopulationBinding::Unpartitioned;
     assert!(!history.is_valid(), "missing metadata cannot establish an unpartitioned workload");
     history.population_catalog = Some(NativeRuntimePopulationCatalog {
+        membership: crate::RuntimePopulationMembership::NativeCatalog,
         source: "arbitrary-native-source".into(),
         partitioned: false,
         requires_selection: false,
@@ -196,4 +199,16 @@ fn required_bindings_round_trip_and_are_not_invented_for_older_metadata() {
     assert_eq!(serde_json::from_value::<QueryHistoryDescription>(value.clone()).unwrap(), original);
     value.as_object_mut().unwrap().remove("population_binding");
     assert!(serde_json::from_value::<QueryHistoryDescription>(value).is_err());
+}
+
+#[test]
+fn observed_native_population_membership_cannot_be_transferred_to_another_history_interval() {
+    let mut history = history();
+    history.population_catalog.as_mut().unwrap().membership = crate::RuntimePopulationMembership::ObservedWindow {
+        from: history.interval.from.clone(),
+        until: history.interval.until.clone(),
+    };
+    assert!(history.is_valid());
+    history.interval.until = "2026-11-01T02:00:00Z".into();
+    assert!(!history.is_valid());
 }

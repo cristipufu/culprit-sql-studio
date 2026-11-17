@@ -18,6 +18,7 @@ pub(super) struct Description {
     pub plan_upper_bound: i64,
     pub replica_group_ids: Vec<String>,
     pub variant_families: crate::query_store::variants_sql::Availability,
+    pub page_server_reads: crate::query_store::page_server::Availability,
 }
 impl Description {
     pub fn waits_supported(&self) -> bool {
@@ -75,6 +76,10 @@ pub(super) async fn read<R: NativeRead>(
                         ("actual_state".into(), settings.actual_state),
                         ("local_capture_permitted".into(), settings.mode.accepts_local_capture().to_string()),
                         ("variant_families".into(), settings.variant_families.native_property().into()),
+                        (
+                            culprit_core::telemetry::PageServerReadAvailability::PROPERTY.into(),
+                            settings.page_server_reads.native_property().into(),
+                        ),
                     ]
                     .into(),
                     waits: Some(waits::semantics(settings.wait_capture)),
@@ -86,6 +91,7 @@ pub(super) async fn read<R: NativeRead>(
         plan_upper_bound,
         replica_group_ids,
         variant_families: settings.variant_families,
+        page_server_reads: settings.page_server_reads,
     })
 }
 
@@ -95,6 +101,7 @@ pub(super) struct Settings {
     mode: crate::query_store::mode::ReadMode,
     wait_capture: WaitCaptureState,
     variant_families: crate::query_store::variants_sql::Availability,
+    page_server_reads: crate::query_store::page_server::Availability,
 }
 
 pub(super) async fn settings<R: NativeRead>(session: &mut R) -> Result<Settings> {
@@ -110,6 +117,7 @@ pub(super) async fn settings<R: NativeRead>(session: &mut R) -> Result<Settings>
         capture_mode: text(row, "query_capture_mode_desc")?,
         wait_capture: waits::capture_state(row)?,
         variant_families,
+        page_server_reads: crate::query_store::page_server::decode_availability(row)?,
     })
 }
 
@@ -168,6 +176,7 @@ mod tests {
             ("query_capture_mode_desc", Val::Text("AUTO".into())),
             ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
             ("variant_families", Val::Int(1)),
+            ("page_server_read_availability", Val::Int(0)),
         ])
     }
 

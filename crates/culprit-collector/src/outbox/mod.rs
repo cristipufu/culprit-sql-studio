@@ -1,5 +1,7 @@
 //! One local owner, immutable capture artifacts and a transactional commit boundary.
 mod archive;
+mod completed_snapshot;
+pub use completed_snapshot::{CompletedSnapshot, CompletedSnapshotBudget};
 mod artifacts;
 mod attempts;
 mod eviction;
@@ -169,16 +171,26 @@ impl Files {
         self.validated(observation_id).map(|validated| validated.manifest)
     }
     fn validated(&mut self, observation_id: &str) -> Result<artifacts::ValidatedCapture> {
+        self.validated_observed(observation_id, &mut artifacts::NoObservation)
+    }
+    fn validated_observed(
+        &mut self,
+        observation_id: &str,
+        observer: &mut dyn artifacts::VerificationObserver,
+    ) -> Result<artifacts::ValidatedCapture> {
         let capture = self.journal.capture(observation_id)?;
         if capture.state != OutboxCaptureState::Ready {
             return Err(problem(OutboxProblem::Integrity));
         }
-        let verified = artifacts::validate(&self.directory(observation_id), &capture, None).and_then(|validated| {
-            self.journal.check_receipt(&capture, &validated)?;
-            Ok(validated)
-        });
+        let verified = artifacts::validate_observed(&self.directory(observation_id), &capture, None, observer)
+            .and_then(|validated| {
+                self.journal.check_receipt(&capture, &validated)?;
+                observer.check()?;
+                Ok(validated)
+            });
         match verified {
             Ok(validated) => Ok(validated),
+            Err(error) if observer.caller_refused(&error) => Err(error),
             Err(error) => {
                 self.journal.fail(
                     &capture,

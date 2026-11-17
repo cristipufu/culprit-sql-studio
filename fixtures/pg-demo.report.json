@@ -1640,6 +1640,7 @@
       "prepare": [
         "retained observations are worded for this reader",
         "measurement context identifies this database and its clock",
+        "observed runtime groups do not establish complete membership",
         "index availability and maintenance follow the engine",
         "CTE writes named for their base table",
         "plans captured before a column changed type",
@@ -2368,7 +2369,7 @@
         "table": "order_items"
       }
     ],
-    "format": 9,
+    "format": 10,
     "histograms": null,
     "id": "20261011T115421.485Z",
     "identity": {

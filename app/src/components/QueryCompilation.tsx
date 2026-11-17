@@ -6,6 +6,7 @@ import { nativeIdentityKey } from "../lib/native-identity";
 import { observationRows } from "../lib/observation-rows";
 import { NativeReference, NativeValue } from "./NativeObservationFields";
 import { ObservationList } from "./ObservationList";
+import { QueryStoreStatement } from "./QueryStoreStatement";
 
 /** The explanation must name this exact native observation; a reused query number cannot supply another row. */
 export function QueryCompilation({ evidence, report }: { evidence: CompilationSnapshot; report: CompilationReport }) {
@@ -27,6 +28,7 @@ export function QueryCompilation({ evidence, report }: { evidence: CompilationSn
       const changeMatched = change && nativeIdentityKey(identity) === nativeIdentityKey({ id: change.identity.query_id, qualifiers: change.identity.qualifiers });
       return matched ? <article className="operational-card" key={entry.observation_key}>
         <h4>{entry.title}</h4><p>{entry.explanation}</p>
+        {entry.statement && <QueryStoreStatement statement={entry.statement} />}
         {changeMatched && <p>{change.explanation}</p>}
         <dl>{entry.metrics.map((metric, index) => <NativeValue key={metric.key ?? index} label={metric.label} value={findingMetric(metric)} />)}</dl>
         <details>

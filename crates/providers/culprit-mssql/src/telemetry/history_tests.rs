@@ -5,6 +5,7 @@ use crate::{
     value::Val,
 };
 use culprit_core::telemetry::*;
+mod page_server;
 
 #[test]
 fn runtime_distributions_are_unsupported_at_the_provider_boundary_without_native_work() {
@@ -70,6 +71,7 @@ pub(super) fn description_rows() -> Vec<crate::read::ReadResult<Vec<Rec>>> {
             ("actual_state_desc", Val::Text("READ_WRITE".into())),
             ("query_capture_mode_desc", Val::Text("AUTO".into())),
             ("variant_families", Val::Int(1)),
+            ("page_server_read_availability", Val::Int(0)),
             ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
         ])]),
         Ok(vec![Rec::of(&[
@@ -219,7 +221,10 @@ async fn native_group_binding_reuses_the_catalog_read_and_keeps_query_runtime_an
         source.session.calls.iter().filter(|call| call.sql == crate::query_store::catalog_sql::REPLICAS).count(),
         1
     );
-    assert_eq!(source.session.calls[8].sql, crate::query_store::catalog_sql::runtime(false));
+    assert_eq!(
+        source.session.calls[8].sql,
+        crate::query_store::catalog_sql::runtime(false, crate::query_store::page_server::Availability::NotApplicable)
+    );
     assert_eq!(source.session.calls[10].sql, crate::query_store::catalog_sql::waits(false));
     assert!(source.finish().await.is_err(), "unread definitions still cannot establish a complete capture");
     assert_eq!(source.close().await, SourceShutdown::Quiescent);

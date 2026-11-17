@@ -10,10 +10,7 @@ mod writer;
 use super::{Files, artifacts::ValidatedCapture, problem, storage};
 use culprit_core::{Result, telemetry::*};
 use rusqlite::{OptionalExtension, Transaction, params};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::{BufRead, BufReader, Read},
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_CHECKPOINT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RESTORED_INPUT_BYTES: usize = 4 * 1024 * 1024;

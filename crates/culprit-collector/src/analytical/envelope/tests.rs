@@ -77,7 +77,7 @@ fn a_valid_receipt_cannot_bind_a_foreign_database_or_a_forged_native_record_id()
 
     let (mut manifest, _) = fixture();
     row.record_id = Some("a".repeat(64));
-    manifest.batches[0].rows[0] = crate::delivery::evidence::RowReceipt::from_export(&row).unwrap();
+    manifest.batches[0].rows[0] = crate::delivery::evidence::RowReceipt::from_export(&row, 1).unwrap();
     let envelope = Envelope::new(&manifest, &row.batch_id).unwrap();
     assert!(envelope.input(1, &row).is_err(), "rebuilding receipts cannot authorize a non-native record id");
 }

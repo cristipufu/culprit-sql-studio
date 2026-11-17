@@ -376,7 +376,7 @@ async fn a_whole_batch_row_cap_keeps_its_original_reason_and_cannot_restart_as_a
     let mut script = vec![Ok(vec![layout_row()])];
     script.extend((0..10).map(|_| Ok(vec![Rec::of(&[]); 10_000])));
     let mut reader = Reader::new(FakeRead::new(script));
-    reader.prepare_population_batch(1).await.unwrap();
+    reader.prepare_population_batch(1, 60).await.unwrap();
     for _ in 0..9 {
         reader.read_rows("SELECT /* culprit */ bounded test rows").await.unwrap();
     }
@@ -409,4 +409,48 @@ async fn failed_final_native_verification_preserves_unconfirmed_closure_without_
     assert!(!workloads.allows_cache_fallback());
     assert_eq!(reader.queries(), 12, "no layout/catalog SQL follows the failed owner check");
     assert_eq!(reader.close().await, SourceShutdown::Unconfirmed);
+}
+
+#[tokio::test]
+async fn successful_empty_catalog_retains_independent_observed_workloads_through_final_source_verification() {
+    let mut script = replies(Ok(vec![window()]), vec![]);
+    script[1] = Ok(vec![]);
+    let mut reader = Reader::new(FakeRead::new(script));
+    let workloads = acquire(&mut reader, &options()).await;
+    assert_eq!(workloads.populations.len(), 2);
+    assert!(!workloads.catalog.as_ref().unwrap().has_complete_membership());
+    assert!(matches!(
+        workloads.catalog.as_ref().unwrap().membership,
+        culprit_core::RuntimePopulationMembership::ObservedWindow { .. }
+    ));
+    assert_eq!(workloads.populations[0].1.workload.as_ref().unwrap().total_time_ms, 4.0);
+    assert_eq!(workloads.populations[1].1.workload.as_ref().unwrap().total_time_ms, 40.0);
+    for (population, part) in &workloads.populations {
+        let workload = part.workload.as_ref().unwrap();
+        let catalog = workload.population_catalog.as_ref().unwrap();
+        assert!(catalog.contains(population));
+        assert!(!catalog.has_complete_membership());
+        assert!(catalog.membership.matches_window(workload.window_start.as_deref(), workload.window_end.as_deref()));
+    }
+    assert!(workloads.requested.workload.is_none());
+    assert!(!workloads.allows_cache_fallback());
+    assert_eq!(reader.queries(), 14, "the same summary and existing final batch checks are reused");
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+}
+
+#[tokio::test]
+async fn empty_catalog_without_observed_rows_never_starts_fresh_cache_or_claims_healthy_empty() {
+    let mut reader = Reader::new(FakeRead::new(vec![Ok(vec![layout()]), Ok(vec![]), Ok(vec![window()]), Ok(vec![])]));
+    let workloads = acquire(&mut reader, &options()).await;
+    assert!(workloads.requested.workload.is_none());
+    assert!(workloads.populations.is_empty());
+    assert!(workloads.catalog.is_none());
+    assert!(!workloads.allows_cache_fallback());
+    let outcome = workloads.requested.outcome.outcomes();
+    assert_eq!(
+        outcome.iter().find(|row| row.source == sources::QUERY_STORE.name).unwrap().state,
+        culprit_core::SourceState::Unavailable
+    );
+    assert_eq!(reader.queries(), 4);
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }

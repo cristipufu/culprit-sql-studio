@@ -2,7 +2,7 @@
 //! on a boxed fixture, or promotes a source from Unqualified.
 use super::*;
 use crate::{
-    query_store::{costs, decode},
+    query_store::costs,
     read::measurement::{MeasuredRead, assert_no_followup, shutdown_state},
     test_support::{OwnedSourceFixture, receipt_directory, save_cost_receipt},
 };

@@ -1,6 +1,6 @@
 //! Exact database compilation history remains independent of runtime intervals and current compiler admission.
 use super::*;
-use culprit_checks::compilation::{CompilationDefinitionEvidence, CompilationDefinitionRecord, CompilationEvidence};
+use culprit_checks::{compilation::CompilationEvidence, query_store_definitions::QueryStoreDefinitionEvidence};
 use culprit_core::collected_resource_analysis::CollectedCompilationAnalysis;
 
 pub fn compilation(
@@ -24,9 +24,9 @@ pub fn compilation(
     let rows = input.rows()?;
     let source = input.outcome(rows.len())?;
     let context = NativeReadContext::from_snapshot(capture.source())?;
-    let definition_rows = definitions.map(definition_rows).transpose()?;
+    let definition_rows = definitions.map(super::query_store_definitions::rows).transpose()?;
     let definition_evidence =
-        definitions.zip(definition_rows.as_deref()).map(|(capture, rows)| CompilationDefinitionEvidence {
+        definitions.zip(definition_rows.as_deref()).map(|(capture, rows)| QueryStoreDefinitionEvidence {
             source: capture.source(),
             rows,
             selected_rows: capture.metrics().selected_rows,
@@ -62,22 +62,4 @@ pub fn compilation(
         definition_context: definitions.map(|capture| Box::new(crate::collected_context::from_capture(capture))),
         report,
     })
-}
-
-fn definition_rows(capture: &EvidenceCapture) -> Result<Vec<CompilationDefinitionRecord<'_>>> {
-    references::validate_capture(capture)?;
-    if capture.families() != [EvidenceFamily::QueryDefinitions]
-        || capture.source().query_history().is_none()
-        || capture.source().target.engine() != Engine::Mssql
-    {
-        return Err(DeliveryProblem::UnsupportedSchema.error());
-    }
-    capture
-        .records()
-        .iter()
-        .map(|record| {
-            let TelemetryRecord::QueryDefinition(definition) = &record.row().record else { return Err(invalid()) };
-            Ok(CompilationDefinitionRecord { reference: references::from_record(capture, record)?, definition })
-        })
-        .collect()
 }

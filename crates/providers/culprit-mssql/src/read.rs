@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod fixture_dispatch_tests;
+#[cfg(test)]
 pub(crate) mod measurement;
 #[cfg(test)]
 mod native_tests;
@@ -77,6 +79,29 @@ struct ReadQuery {
     row_limit: usize,
     byte_limit: usize,
     output: Output,
+}
+
+enum QueryDispatch {
+    Monitoring,
+    #[cfg(test)]
+    OwnedApplication,
+}
+impl ReadQuery {
+    fn new(
+        sql: &str,
+        parameters: Vec<Parameter>,
+        row_limit: usize,
+        byte_limit: usize,
+        output: Output,
+        dispatch: QueryDispatch,
+    ) -> Self {
+        let sql = match dispatch {
+            QueryDispatch::Monitoring => crate::statement_origin::monitoring_batch(sql),
+            #[cfg(test)]
+            QueryDispatch::OwnedApplication => sql.into(),
+        };
+        Self { sql, parameters, row_limit, byte_limit, output }
+    }
 }
 
 #[async_trait::async_trait]
@@ -177,7 +202,28 @@ impl ReadSession {
         parameters: Vec<Parameter>,
         row_limit: usize,
     ) -> std::result::Result<Vec<Rec>, ReadError> {
-        let owner = self.start(sql, parameters, row_limit, self.budget.page_bytes as usize, Output::buffered()).await?;
+        self.query_with_dispatch(sql, parameters, row_limit, QueryDispatch::Monitoring).await
+    }
+    #[cfg(test)]
+    pub(crate) async fn owned_application_probe(
+        &mut self,
+        probe: &crate::test_support::query_store_probes::OwnedApplicationProbe,
+    ) -> ReadResult<Vec<Rec>> {
+        if !probe.authorizes_pool(&self.pool) {
+            return Err(ReadError::Stopped(CollectionStop::InvalidPage));
+        }
+        self.query_with_dispatch(probe.sql(), vec![], 1, QueryDispatch::OwnedApplication).await
+    }
+    async fn query_with_dispatch(
+        &mut self,
+        sql: &str,
+        parameters: Vec<Parameter>,
+        row_limit: usize,
+        dispatch: QueryDispatch,
+    ) -> ReadResult<Vec<Rec>> {
+        let owner = self
+            .start(sql, parameters, row_limit, self.budget.page_bytes as usize, Output::buffered(), dispatch)
+            .await?;
         let result = self.finish_active().await;
         drop(owner);
         result
@@ -192,7 +238,9 @@ impl ReadSession {
             return Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed));
         }
         let (output, receiver) = Output::streaming(self.budget.page_rows as usize, self.budget.page_bytes as usize);
-        let owner = self.start(sql, parameters, row_limit, self.budget.total_bytes as usize, output).await?;
+        let owner = self
+            .start(sql, parameters, row_limit, self.budget.total_bytes as usize, output, QueryDispatch::Monitoring)
+            .await?;
         self.streaming = Some(StreamingRead { _owner: owner, receiver });
         Ok(())
     }
@@ -222,6 +270,7 @@ impl ReadSession {
         row_limit: usize,
         byte_limit: usize,
         output: Output,
+        dispatch: QueryDispatch,
     ) -> ReadResult<tokio::sync::oneshot::Sender<()>> {
         let timeout = self.admit()?;
         let client = match self.client.take() {
@@ -232,13 +281,7 @@ impl ReadSession {
         let (owner, cancelled) = tokio::sync::oneshot::channel::<()>();
         // The task owns the socket until result completion or Attention acknowledgement/disconnect. Dropping the
         // caller requests cancellation instead of dropping a future while leaving SQL work running on the server.
-        let query = ReadQuery {
-            sql: crate::statement_origin::monitoring_batch(sql),
-            parameters,
-            row_limit,
-            byte_limit,
-            output,
-        };
+        let query = ReadQuery::new(sql, parameters, row_limit, byte_limit, output, dispatch);
         let transport = self.pool.transport_owner();
         let template = self.metrics.begin(sql);
         self.active = Some(tokio::spawn(read_owned(

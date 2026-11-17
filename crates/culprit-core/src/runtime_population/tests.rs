@@ -2,6 +2,7 @@ use super::*;
 
 fn catalog() -> RuntimePopulationCatalog {
     RuntimePopulationCatalog {
+        membership: crate::RuntimePopulationMembership::NativeCatalog,
         source: "native-statistics".into(),
         partitioned: true,
         requires_selection: true,
@@ -44,6 +45,25 @@ fn sources_without_population_selection_reject_explicit_requests() {
 }
 
 #[test]
+fn observed_window_membership_is_positive_bounded_and_never_complete() {
+    let mut observed = catalog();
+    observed.membership = RuntimePopulationMembership::ObservedWindow {
+        from: "2026-11-17T06:00:00Z".into(),
+        until: "2026-11-17T07:00:00Z".into(),
+    };
+    assert!(observed.is_valid());
+    assert!(observed.contains(&observed.populations[0].identity));
+    assert!(!observed.has_complete_membership());
+    assert!(!observed.native_facts().has_complete_membership());
+    assert!(!observed.contains(&NativeIdentity::new("an-unreturned-group")));
+    assert!(observed.membership.matches_window(Some("2026-11-17T06:00:00Z"), Some("2026-11-17T07:00:00Z")));
+    assert!(!observed.membership.matches_window(Some("2026-11-16T06:00:00Z"), Some("2026-11-16T07:00:00Z")));
+    observed.populations.clear();
+    observed.requires_selection = false;
+    assert!(!observed.is_valid(), "no observed group is not healthy empty or complete membership");
+}
+
+#[test]
 fn duplicate_unknown_and_oversized_population_metadata_cannot_authorize_a_selection() {
     let original = catalog();
     for invalid in ["duplicate", "empty identity", "metadata budget", "unpartitioned alternatives"] {
@@ -60,6 +80,7 @@ fn duplicate_unknown_and_oversized_population_metadata_cannot_authorize_a_select
         assert!(!source.contains(&original.populations[0].identity), "{invalid}");
     }
     let source = RuntimePopulationCatalog {
+        membership: crate::RuntimePopulationMembership::NativeCatalog,
         source: "unpartitioned-native-statistics".into(),
         partitioned: false,
         requires_selection: false,
@@ -67,4 +88,31 @@ fn duplicate_unknown_and_oversized_population_metadata_cannot_authorize_a_select
     };
     assert!(source.is_valid());
     assert!(!source.contains(&NativeIdentity::new("0")), "an unpartitioned layout never invents a native group");
+}
+
+#[test]
+fn observed_window_reuses_strict_native_instants_and_retains_original_precision_and_offsets() {
+    for (from, until) in [
+        ("2026-11-17T06:00:00.0000001Z", "2026-11-17T06:00:00.0000002Z"),
+        ("2026-11-17T06:00:00.000000001Z", "2026-11-17T06:00:00.000000002Z"),
+        ("2026-11-17T08:00:00+02:00", "2026-11-17T06:00:00.000000001Z"),
+        ("2026-11-17T06:00:00Z", "2026-11-17T06:00:01Z"),
+    ] {
+        let membership = RuntimePopulationMembership::ObservedWindow { from: from.into(), until: until.into() };
+        assert!(membership.is_valid(), "{from}..{until}");
+        assert!(membership.matches_window(Some(from), Some(until)));
+        let restored: RuntimePopulationMembership =
+            serde_json::from_value(serde_json::to_value(&membership).unwrap()).unwrap();
+        assert_eq!(restored, membership, "validation never normalizes the original source bounds");
+    }
+    for (from, until) in [
+        ("2026-11-17T06:00:00.0000000001Z", "2026-11-17T06:00:01Z"),
+        ("2026-11-17T06:00:00Z", "2026-11-17T06:00:00.1000000001Z"),
+        ("2026-11-17T08:00:00+02:00", "2026-11-17T06:00:00Z"),
+        ("2026-11-17T08:00:00+01:00", "2026-11-17T06:00:00Z"),
+    ] {
+        let membership = RuntimePopulationMembership::ObservedWindow { from: from.into(), until: until.into() };
+        assert!(!membership.is_valid(), "{from}..{until}");
+        assert!(!membership.matches_window(Some(from), Some(until)));
+    }
 }

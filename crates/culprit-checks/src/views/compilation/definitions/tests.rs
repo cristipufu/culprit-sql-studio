@@ -65,7 +65,7 @@ impl Fixture {
         }
     }
 
-    fn rows(&self) -> Vec<CompilationDefinitionRecord<'_>> {
+    fn rows(&self) -> Vec<QueryStoreDefinitionRecord<'_>> {
         let capture = CaptureIdentity {
             observation_id: "original-compiler-definition-capture".into(),
             revision: Some(CaptureRevision {
@@ -81,7 +81,7 @@ impl Fixture {
                 let record = TelemetryRecord::QueryDefinition(definition.clone());
                 let exported = ExportedRecord::new(&self.source, &capture, record.clone()).unwrap();
                 assert_eq!(exported.record, record, "the original fixture must already be canonical");
-                CompilationDefinitionRecord {
+                QueryStoreDefinitionRecord {
                     reference: DiagnosticEvidenceRef::from_export(
                         &self.source,
                         &digest(b"original-compiler-definition-manifest"),
@@ -111,7 +111,7 @@ fn explained(
     row: &OperationalObservation,
     context: Option<&NativeReadContext>,
     source: &CollectionDescription,
-    definitions: &[CompilationDefinitionRecord<'_>],
+    definitions: &[QueryStoreDefinitionRecord<'_>],
     selected_rows: u32,
     read_complete: bool,
 ) -> Result<CompilationReport> {
@@ -121,7 +121,7 @@ fn explained(
         context,
         observations: &[row],
         source: Some(&outcome),
-        definitions: Some(CompilationDefinitionEvidence { source, rows: definitions, selected_rows, read_complete }),
+        definitions: Some(QueryStoreDefinitionEvidence { source, rows: definitions, selected_rows, read_complete }),
     })
 }
 
@@ -134,7 +134,7 @@ fn an_exact_original_definition_supplies_policy_without_rewriting_counter_origin
     let report = fixture.explain(&row);
     let entry = &report.entries[0];
     let statement = entry.statement.as_ref().unwrap();
-    assert_eq!(statement.binding, CompilationStatementBinding::Matched);
+    assert_eq!(statement.binding, QueryStoreStatementBinding::Matched);
     assert_eq!(statement.definition.as_ref(), Some(&expected_ref));
     assert_eq!(statement.origin, StatementOrigin::Application);
     assert!(statement.preview.as_ref().unwrap().contains("OPTION(RECOMPILE)"));
@@ -142,7 +142,7 @@ fn an_exact_original_definition_supplies_policy_without_rewriting_counter_origin
     assert!(entry.title.contains("OPTION(RECOMPILE)"));
     assert!(entry.metrics.iter().any(|metric| metric.is("view.compilation.metric.lifetime_duration")));
     let selection = report.definition_read.unwrap();
-    assert_eq!(selection.namespace, CompilationDefinitionNamespace::Matched);
+    assert_eq!(selection.namespace, QueryStoreDefinitionNamespace::Matched);
     assert_eq!((selection.selected_rows, selection.observed_rows), (1, 1));
     assert!(selection.read_complete);
     assert_eq!(row, before);
@@ -171,7 +171,7 @@ fn the_same_query_number_hash_or_sql_cannot_replace_any_native_incarnation_field
         let report = fixture.explain(&row);
         assert_eq!(
             report.entries[0].statement.as_ref().unwrap().binding,
-            CompilationStatementBinding::NotObserved,
+            QueryStoreStatementBinding::NotObserved,
             "{name}"
         );
         assert!(report.entries[0].statement.as_ref().unwrap().preview.is_none());
@@ -182,11 +182,11 @@ fn the_same_query_number_hash_or_sql_cannot_replace_any_native_incarnation_field
 #[test]
 fn only_native_database_identity_accepts_an_endpoint_alias_and_unknown_or_changed_namespaces_withhold_sql() {
     for (case, expected) in [
-        ("alias", CompilationStatementBinding::Matched),
-        ("renamed", CompilationStatementBinding::Matched),
-        ("unknown", CompilationStatementBinding::SourceUnverified),
-        ("incarnation", CompilationStatementBinding::SourceChanged),
-        ("database", CompilationStatementBinding::SourceUnverified),
+        ("alias", QueryStoreStatementBinding::Matched),
+        ("renamed", QueryStoreStatementBinding::Matched),
+        ("unknown", QueryStoreStatementBinding::SourceUnverified),
+        ("incarnation", QueryStoreStatementBinding::SourceChanged),
+        ("database", QueryStoreStatementBinding::SourceUnverified),
     ] {
         let row = expensive();
         let mut fixture = Fixture::new(&row);
@@ -211,7 +211,7 @@ fn only_native_database_identity_accepts_an_endpoint_alias_and_unknown_or_change
         fixture.seal();
         let report = fixture.explain(&row);
         assert_eq!(report.entries[0].statement.as_ref().unwrap().binding, expected, "{case}");
-        if expected != CompilationStatementBinding::Matched {
+        if expected != QueryStoreStatementBinding::Matched {
             assert!(report.entries[0].statement.as_ref().unwrap().preview.is_none());
         }
     }
@@ -248,7 +248,7 @@ fn warehouse_gaps_and_recorded_payload_restrictions_remain_distinct_from_zero_or
     let row = expensive();
     let fixture = Fixture::new(&row);
     let partial = explained(&row, Some(&fixture.context), &fixture.source, &[], 1, false).unwrap();
-    assert_eq!(partial.entries[0].statement.as_ref().unwrap().binding, CompilationStatementBinding::NotObserved);
+    assert_eq!(partial.entries[0].statement.as_ref().unwrap().binding, QueryStoreStatementBinding::NotObserved);
     assert!(partial.limitations.contains(&t!("view.compilation.statement.limit.partial")));
     assert!(!partial.definition_read.unwrap().read_complete);
     assert!(explained(&row, Some(&fixture.context), &fixture.source, &[], 1, true).is_err());
@@ -256,7 +256,7 @@ fn warehouse_gaps_and_recorded_payload_restrictions_remain_distinct_from_zero_or
     restricted.definitions[0].sql = DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted };
     let report = restricted.explain(&row);
     let statement = report.entries[0].statement.as_ref().unwrap();
-    assert_eq!(statement.binding, CompilationStatementBinding::Matched);
+    assert_eq!(statement.binding, QueryStoreStatementBinding::Matched);
     assert_eq!(statement.unavailable, Some(PayloadUnavailable::Restricted));
     assert!(statement.preview.is_none());
     assert!(report.limitations.contains(&t!("view.compilation.limit.statement")));
@@ -269,7 +269,7 @@ fn receipt_body_tampering_and_conflicting_original_complete_sql_are_integrity_fa
     let rows = fixture.rows();
     let mut changed = fixture.definitions[0].clone();
     changed.sql = DefinitionPayload::sql("SELECT unrelated FROM dbo.other_table OPTION(RECOMPILE)", Engine::Mssql);
-    let tampered = [CompilationDefinitionRecord { reference: rows[0].reference.clone(), definition: &changed }];
+    let tampered = [QueryStoreDefinitionRecord { reference: rows[0].reference.clone(), definition: &changed }];
     assert!(explained(&row, Some(&fixture.context), &fixture.source, &tampered, 1, true).is_err());
     native(&mut row).statement = changed.sql;
     native(&mut row).origin = StatementOrigin::Application;
@@ -298,7 +298,7 @@ fn a_valid_noncanonical_body_cannot_be_repaired_into_a_redacted_receipt_then_ren
         rows[0].reference,
         "the attack retains the original canonical receipt"
     );
-    let supplied = [CompilationDefinitionRecord { reference: rows[0].reference.clone(), definition: &noncanonical }];
+    let supplied = [QueryStoreDefinitionRecord { reference: rows[0].reference.clone(), definition: &noncanonical }];
     assert!(explained(&row, Some(&fixture.context), &fixture.source, &supplied, 1, true).is_err());
 }
 

@@ -11,7 +11,6 @@ pub(super) struct Batch {
     budget: culprit_read::ReadBudget,
     definitions: BTreeMap<String, Definition>,
     askers: Option<Result<Vec<Rec>>>,
-    summaries: Option<Result<Vec<PlanSummary>>>,
     waits: Option<Result<Vec<datasets::PlanWait>>>,
     interval: Option<Result<u32>>,
     totals: Option<Result<Vec<Rec>>>,
@@ -27,7 +26,6 @@ impl Batch {
             budget: culprit_read::ReadBudget::new(MAX_BATCH_ROWS, CollectionBudget::default().total_bytes as usize),
             definitions: BTreeMap::new(),
             askers: None,
-            summaries: None,
             waits: None,
             interval: None,
             totals: None,
@@ -73,7 +71,11 @@ impl ExpectedDefinition {
 
 impl<R: NativeRead> Reader<R> {
     /// Discovery uses the same initial layout/catalog read as a selected workload. It does not choose a group.
-    pub(crate) async fn prepare_population_batch(&mut self, top_queries: usize) -> Result<RuntimePopulationCatalog> {
+    pub(crate) async fn prepare_population_batch(
+        &mut self,
+        top_queries: usize,
+        window_minutes: u32,
+    ) -> Result<RuntimePopulationCatalog> {
         self.admit()?;
         if self.batch.is_some() || self.native_layout.is_some() || self.layout.is_some() || self.window.is_some() {
             return Err(invalid_data());
@@ -81,6 +83,9 @@ impl<R: NativeRead> Reader<R> {
         self.batch = Some(Batch::new(top_queries));
         let native = self.native_layout().await?;
         self.prepare_population_catalog(native).await?;
+        if self.empty_replica_catalog {
+            self.load_summaries(window_minutes).await?;
+        }
         self.population_catalog.clone().ok_or_else(invalid_data)
     }
 
@@ -98,10 +103,20 @@ impl<R: NativeRead> Reader<R> {
                 catalog.select(population)?;
             }
             None if population.is_some() => {
-                return Err(culprit_core::Error::new(
-                    culprit_core::ErrorCode::Unsupported,
-                    culprit_core::t!("provider.mssql.query_store.population_missing"),
-                ));
+                if self.empty_replica_catalog {
+                    let catalog = self.population_catalog.as_ref().ok_or_else(invalid_data)?;
+                    if !population.is_some_and(|population| catalog.contains(population)) {
+                        return Err(culprit_core::Error::new(
+                            culprit_core::ErrorCode::Unsupported,
+                            culprit_core::t!("provider.mssql.query_store.population_missing"),
+                        ));
+                    }
+                } else {
+                    return Err(culprit_core::Error::new(
+                        culprit_core::ErrorCode::Unsupported,
+                        culprit_core::t!("provider.mssql.query_store.population_missing"),
+                    ));
+                }
             }
             None => (),
         }

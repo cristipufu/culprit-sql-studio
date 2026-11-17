@@ -1,4 +1,6 @@
 use super::*;
+mod rows;
+use rows::{RowSelection, referenced_rows};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InputInstallation {
@@ -109,9 +111,9 @@ impl Files {
             {
                 return Err(integrity());
             }
-            decode(&restored)?
+            row_references(&parent, &source, decode(&restored)?)?
         } else {
-            let validated = self.validated(id)?;
+            let (validated, rows) = self.validated_rows(id, RowSelection::All)?;
             if validated.manifest_sha != parent.manifest_sha256
                 || validated.manifest.description.as_ref() != Some(&source)
                 || encode_investigation(validated.manifest.investigation.as_ref())?
@@ -119,7 +121,7 @@ impl Files {
             {
                 return Err(integrity());
             }
-            self.exported_rows(&validated)?
+            referenced_rows(&parent, &source, rows)?
         };
         let key = controller_key(&parent, controller_target(&source, investigation.as_ref())?, controller_version)?;
         let head: Option<(String, String)> = self
@@ -147,42 +149,11 @@ impl Files {
             source: source.clone(),
             investigation,
             connection: stored.connection,
-            rows: row_references(&parent, &source, rows)?,
+            rows,
             controller_version,
             checkpoint,
             expected_head,
         })
-    }
-
-    fn exported_rows(&self, validated: &ValidatedCapture) -> Result<Vec<ExportedRecord>> {
-        let mut output = Vec::new();
-        for file in &validated.manifest.files {
-            let input = crate::durable_fs::regular_file(
-                &self.directory(&validated.manifest.capture.observation_id).join(&file.file),
-            )
-            .map_err(storage)?;
-            let mut input = BufReader::new(input.take(u64::from(file.bytes) + 1));
-            let mut line = Vec::new();
-            loop {
-                line.clear();
-                if (&mut input)
-                    .take(u64::from(validated.manifest.request.budget.page_bytes) + 1)
-                    .read_until(b'\n', &mut line)
-                    .map_err(storage)?
-                    == 0
-                {
-                    break;
-                }
-                if line.len() > validated.manifest.request.budget.page_bytes as usize || line.last() != Some(&b'\n') {
-                    return Err(integrity());
-                }
-                output.push(serde_json::from_slice(&line).map_err(|_| integrity())?);
-                if output.len() > 100_000 {
-                    return Err(integrity());
-                }
-            }
-        }
-        Ok(output)
     }
 
     pub(in crate::outbox) fn diagnostic_reference(
@@ -217,27 +188,23 @@ impl Files {
             {
                 return Err(integrity());
             }
-            (parent, source, decode::<Vec<ExportedRecord>>(restored)?)
+            let rows = row_references(&parent, &source, decode::<Vec<ExportedRecord>>(restored)?)?;
+            (parent, source, rows)
         } else {
-            let validated = self.validated(id)?;
-            (
-                DiagnosticCaptureRef {
-                    capture: validated.manifest.capture.clone(),
-                    manifest_sha256: validated.manifest_sha.clone(),
-                    source_scope_id: validated.range()?.scope_id,
-                },
-                validated.manifest.description.clone().ok_or_else(integrity)?,
-                self.exported_rows(&validated)?,
-            )
+            let (validated, rows) = self.validated_rows(id, RowSelection::All)?;
+            let parent = DiagnosticCaptureRef {
+                capture: validated.manifest.capture.clone(),
+                manifest_sha256: validated.manifest_sha.clone(),
+                source_scope_id: validated.range()?.scope_id,
+            };
+            let source = validated.manifest.description.ok_or_else(integrity)?;
+            let rows = referenced_rows(&parent, &source, rows)?;
+            (parent, source, rows)
         };
         if parent != reference.capture_ref() {
             return Err(integrity());
         }
-        row_references(&parent, &source, rows)?
-            .into_iter()
-            .find(|row| row.reference == *reference)
-            .map(|row| (source, row.row))
-            .ok_or_else(integrity)
+        rows.into_iter().find(|row| row.reference == *reference).map(|row| (source, row.row)).ok_or_else(integrity)
     }
 
     pub(in crate::outbox) fn verify_focus_parent(&mut self, focus: &ActivityRequestFocus) -> Result<()> {
@@ -366,7 +333,7 @@ impl Files {
         &mut self,
         identity: &CaptureIdentity,
     ) -> Result<Option<(DiagnosticEvidenceRef, CollectionDescription, ExportedRecord)>> {
-        let validated = self.validated(&identity.observation_id)?;
+        let (validated, rows) = self.validated_rows(&identity.observation_id, RowSelection::SharedOwner)?;
         if validated.manifest.capture != *identity {
             return Err(integrity());
         }
@@ -382,7 +349,7 @@ impl Files {
             manifest_sha256: validated.manifest_sha.clone(),
             source_scope_id: source.captured_range()?.scope_id,
         };
-        let rows = row_references(&parent, &source, self.exported_rows(&validated)?)?;
+        let rows = referenced_rows(&parent, &source, rows)?;
         Ok(rows.into_iter().find_map(|row| {
             let TelemetryRecord::Operational(observation) = &row.row.record else { return None };
             let positive = source.observation.snapshot()?.sources.iter().any(|coverage| {

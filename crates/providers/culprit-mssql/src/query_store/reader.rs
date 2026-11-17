@@ -11,6 +11,7 @@ use culprit_core::{
 };
 use std::sync::Arc;
 mod batch;
+mod summaries;
 const MAX_RESULT_ROWS: usize = 10_000;
 const SNAPSHOT_BYTES: u32 = 8 * 1024 * 1024;
 const SNAPSHOT_TIMEOUT_MS: u32 = 120_000;
@@ -27,6 +28,8 @@ pub(crate) struct Reader<R = ReadSession> {
     population_catalog: Option<RuntimePopulationCatalog>,
     native_layout: Option<NativeLayout>,
     replica_catalog: Option<super::replicas::Catalog>,
+    empty_replica_catalog: bool,
+    summaries: Option<Result<Vec<PlanSummary>>>,
     connection_generation: Option<u64>,
     batch: Option<batch::Batch>,
 }
@@ -35,6 +38,7 @@ struct NativeLayout {
     edition: i64,
     tempdb: bool,
     log_bytes: bool,
+    page_server_reads: super::page_server::Availability,
     waits: bool,
     variants: super::variants_sql::Availability,
     mode: super::mode::ReadMode,
@@ -42,10 +46,6 @@ struct NativeLayout {
 }
 #[derive(Clone, Copy)]
 struct RuntimeLayout {
-    edition: i64,
-    tempdb: bool,
-    log_bytes: bool,
-    waits: bool,
     variants: super::variants_sql::Availability,
     population: super::replicas::Population,
     mode: super::mode::ReadMode,
@@ -71,6 +71,7 @@ impl NativeLayout {
             edition: integer(row, "engine_edition")?,
             tempdb: flag("tempdb")?,
             log_bytes: flag("log_bytes")?,
+            page_server_reads: super::page_server::decode_availability(row)?,
             waits: super::window_sql::waits_supported(row)?,
             variants: super::variants_sql::Availability::decode(row, "variants")?,
             mode,
@@ -99,6 +100,8 @@ impl<R: NativeRead> Reader<R> {
             population_catalog: None,
             native_layout: None,
             replica_catalog: None,
+            empty_replica_catalog: false,
+            summaries: None,
             connection_generation: None,
             batch: None,
         }
@@ -171,6 +174,7 @@ impl<R: NativeRead> Reader<R> {
             self.stopped = Some(error.clone());
             // Cached rows are provisional until the one owning native window/catalog check succeeds.
             self.batch = None;
+            self.summaries = None;
             if let Some(window) = &mut self.window {
                 window.invalidate_endpoint();
             }
@@ -196,11 +200,16 @@ impl<R: NativeRead> Reader<R> {
         Ok(rows)
     }
     pub(crate) async fn window(&mut self, window_minutes: u32) -> Result<super::window_sql::FrozenWindow> {
+        self.runtime_layout().await?;
+        self.native_window(window_minutes).await
+    }
+    /// Freeze native database/interval authority independently of runtime population discovery.
+    async fn native_window(&mut self, window_minutes: u32) -> Result<super::window_sql::FrozenWindow> {
         self.admit()?;
         if let Some(window) = &self.window {
             return if window.matches_request(window_minutes) { Ok(window.clone()) } else { Err(invalid_data()) };
         }
-        let layout = self.runtime_layout().await?;
+        let layout = self.native_layout().await?;
         let rows = self
             .read(
                 &super::window_sql::metadata_sql(layout.waits, false, layout.edition),
@@ -216,7 +225,10 @@ impl<R: NativeRead> Reader<R> {
                 return Err(error);
             }
         };
-        if !window.retained || window.database.edition != layout.edition {
+        if !window.retained
+            || window.database.edition != layout.edition
+            || window.page_server_reads != layout.page_server_reads
+        {
             return Err(self.source_changed());
         }
         self.window = Some(window.clone());
@@ -229,6 +241,10 @@ impl<R: NativeRead> Reader<R> {
         }
         let native = self.native_layout().await?;
         self.prepare_population_catalog(native).await?;
+        if self.empty_replica_catalog && self.population_catalog.is_none() {
+            // A population-only call has no authenticated runtime window or rows to establish bounded membership.
+            return Err(self.source_changed());
+        }
         let population = match &self.replica_catalog {
             Some(catalog) => match catalog.select(self.requested_population.as_ref()) {
                 Ok(population) => population,
@@ -238,24 +254,21 @@ impl<R: NativeRead> Reader<R> {
                 }
             },
             None if self.requested_population.is_some() => {
-                let error = culprit_core::Error::new(
-                    culprit_core::ErrorCode::Unsupported,
-                    culprit_core::t!("provider.mssql.query_store.population_missing"),
-                );
-                self.stopped = Some(error.clone());
-                return Err(error);
+                if self.empty_replica_catalog {
+                    self.select_observed_population()?
+                } else {
+                    let error = culprit_core::Error::new(
+                        culprit_core::ErrorCode::Unsupported,
+                        culprit_core::t!("provider.mssql.query_store.population_missing"),
+                    );
+                    self.stopped = Some(error.clone());
+                    return Err(error);
+                }
             }
+            None if self.empty_replica_catalog => self.select_observed_population()?,
             None => super::replicas::Population::Unpartitioned,
         };
-        let layout = RuntimeLayout {
-            edition: native.edition,
-            tempdb: native.tempdb,
-            log_bytes: native.log_bytes,
-            waits: native.waits,
-            variants: native.variants,
-            mode: native.mode,
-            population,
-        };
+        let layout = RuntimeLayout { variants: native.variants, mode: native.mode, population };
         self.layout = Some(layout);
         Ok(layout)
     }
@@ -275,7 +288,7 @@ impl<R: NativeRead> Reader<R> {
     /// Runtime membership has its own authority. Query-global compiler facts need only the native layout.
     async fn prepare_population_catalog(&mut self, layout: NativeLayout) -> Result<()> {
         self.admit()?;
-        if self.population_catalog.is_some() {
+        if self.population_catalog.is_some() || self.empty_replica_catalog {
             return Ok(());
         }
         match layout.partitioned {
@@ -293,6 +306,10 @@ impl<R: NativeRead> Reader<R> {
             true => {
                 let rows =
                     self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
+                if rows.is_empty() {
+                    self.empty_replica_catalog = true;
+                    return Ok(());
+                }
                 let catalog = super::replicas::Catalog::decode(&rows).map_err(|_| self.source_changed())?;
                 self.population_catalog = Some(catalog.population_catalog()?);
                 self.replica_catalog = Some(catalog);
@@ -324,6 +341,7 @@ impl<R: NativeRead> Reader<R> {
         if let Err(error) = charged {
             self.stopped = Some(error.clone());
             self.batch = None;
+            self.summaries = None;
             return Err(ReadError::Source(error));
         }
         Ok(rows)
@@ -344,11 +362,12 @@ impl<R: NativeRead> Reader<R> {
             return result;
         }
         self.verify_population().await?;
+        self.refresh_observed_window()?;
         result
     }
     pub(crate) async fn verify_population(&mut self) -> Result<()> {
         self.admit()?;
-        if self.is_population_batch() {
+        if self.is_population_batch() || self.empty_replica_catalog {
             return self.verify_batch_catalog().await;
         }
         let layout = self.layout.ok_or_else(invalid_data)?;
@@ -367,7 +386,12 @@ impl<R: NativeRead> Reader<R> {
         if NativeLayout::decode(row).ok() != self.native_layout {
             return Err(self.source_changed());
         }
-        if let Some(original) = self.replica_catalog.clone() {
+        if self.empty_replica_catalog {
+            let rows = self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
+            if !rows.is_empty() {
+                return Err(self.source_changed());
+            }
+        } else if let Some(original) = self.replica_catalog.clone() {
             let rows = self.read(super::catalog_sql::REPLICAS, vec![], super::replicas::MAX_REPLICA_GROUP_ROWS).await?;
             let current = super::replicas::Catalog::decode(&rows).map_err(|_| self.source_changed())?;
             if current != original {
@@ -390,31 +414,17 @@ impl<R: NativeRead> Reader<R> {
         Ok((self.window.as_ref().ok_or_else(invalid_data)?.clone(), verification))
     }
     pub(crate) async fn summary(&mut self, window_minutes: u32) -> Result<Vec<PlanSummary>> {
-        if self.batch.is_some() {
-            return self.batch_summary(window_minutes).await;
+        let native = self.native_layout().await?;
+        self.prepare_population_catalog(native).await?;
+        if !self.empty_replica_catalog {
+            self.runtime_layout().await?;
         }
-        let window = self.window(window_minutes).await?;
-        let layout = self.layout.ok_or_else(invalid_data)?;
-        let result = self
-            .read(
-                &runtime::summary_sql(layout.tempdb, layout.log_bytes, layout.population),
-                vec![window.parameter()],
-                MAX_RESULT_ROWS,
-            )
-            .await?
-            .iter()
-            .map(|row| {
-                let summary = PlanSummary::decode(row)?;
-                if summary.population != layout.population {
-                    return Err(self.source_changed());
-                }
-                Ok(summary)
-            })
-            .collect();
-        if let Err(error) = &result {
-            self.observe_failure(error);
+        if self.batch.is_none() && !self.empty_replica_catalog {
+            self.summaries = None;
         }
-        result
+        self.load_summaries(window_minutes).await?;
+        let population = self.population().await?;
+        Ok(self.summaries()?.iter().filter(|row| row.population == population).cloned().collect())
     }
     pub(crate) async fn waits(
         &mut self,
@@ -527,6 +537,14 @@ pub(crate) fn ids_parameter(ids: &[String]) -> Result<Parameter> {
 mod compilation_profile_tests;
 #[cfg(test)]
 mod native_compilation;
+#[cfg(test)]
+mod native_observed_populations;
+#[cfg(test)]
+mod native_page_server;
+#[cfg(test)]
+mod native_population_profile;
+#[cfg(test)]
+mod observed_tests;
 #[cfg(test)]
 mod replica_tests;
 #[cfg(test)]

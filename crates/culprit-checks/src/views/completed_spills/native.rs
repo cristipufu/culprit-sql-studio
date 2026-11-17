@@ -1,17 +1,27 @@
 use super::*;
 
-/// Native source reads and archive reads use the same classification. The source owner supplies the former;
-/// an archive adapter additionally authenticates each immutable receipt before entering `explain`.
+/// Native and captured reads use the same classification. The native owner supplies its read identity;
+/// captured adapters authenticate each immutable receipt before entering `explain`.
 pub fn explain_read(read: &CachedRuntimeRead) -> Result<CompletedSpillReport> {
     if !read.is_valid() {
         return Err(invalid());
     }
     let read_complete = read.read_complete;
+    let read_id = read.read_id()?;
     let read_key = read.read_key()?;
+    let references = read.captured_references()?;
     let rows = read
         .observations
         .iter()
-        .map(|row| CompletedSpillRecord::native_runtime(read_key.clone(), row))
+        .enumerate()
+        .map(|(index, row)| match references.as_ref() {
+            Some(references) => references
+                .get(index)
+                .cloned()
+                .map(|reference| CompletedSpillRecord::captured_runtime(reference, row))
+                .ok_or_else(invalid),
+            None => CompletedSpillRecord::native_runtime(read_key.clone(), row),
+        })
         .collect::<Result<Vec<_>>>()?;
     let snapshot = read.description.observation.snapshot().ok_or_else(invalid)?;
     let mut counts = BTreeMap::<&str, usize>::new();
@@ -40,7 +50,7 @@ pub fn explain_read(read: &CachedRuntimeRead) -> Result<CompletedSpillReport> {
         .collect::<Vec<_>>();
     explain(
         CompletedSpillEvidence {
-            read_id: &read.read_id,
+            read_id: &read_id,
             source: &read.description,
             rows: &rows,
             sources: &sources,
@@ -54,6 +64,9 @@ pub fn explain_read(read: &CachedRuntimeRead) -> Result<CompletedSpillReport> {
 /// A known database/engine/endpoint/incarnation conflict cannot borrow the scan's namespace.
 pub fn explain_snapshot(snapshot: &culprit_core::Snapshot) -> Result<Option<CompletedSpillReport>> {
     let Some(read) = snapshot.operations.cached_runtime.as_deref() else { return Ok(None) };
+    if matches!(read.origin, CachedRuntimeReadOrigin::Captured { .. }) {
+        return if read.matches_native_database(snapshot) { explain_read(read).map(Some) } else { Err(invalid()) };
+    }
     match read.description.target.snapshot_namespace_comparison(snapshot) {
         culprit_core::Comparison::Compatible => explain_read(read).map(Some),
         culprit_core::Comparison::Incompatible(culprit_core::ComparisonReason::UnknownIdentity) => explain_read(read)

@@ -7,6 +7,7 @@ export const GROUP_B: NativeIdentity = { id: "18", qualifiers: {} };
 export const GROUP_B_LABEL = 'Read group <img id="population-html" src=x onerror="window.populationHtml=true">';
 
 export const POPULATIONS: RuntimePopulationCatalog = {
+  membership: { kind: "native-catalog" },
   source: "fixture.runtime",
   partitioned: true,
   requires_selection: true,

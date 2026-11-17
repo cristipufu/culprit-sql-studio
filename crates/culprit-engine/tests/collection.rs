@@ -283,6 +283,7 @@ fn measurement(id: usize) -> TelemetryRecord {
                 0.0,
             ),
         ],
+        page_server_reads: None,
         first_execution_at: Some("2020-01-01T06:01:00Z".into()),
         last_execution_at: Some("2020-01-01T06:59:00Z".into()),
     })

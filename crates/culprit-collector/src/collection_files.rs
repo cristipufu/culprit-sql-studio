@@ -285,7 +285,7 @@ impl ObservationFiles {
                 _ => None,
             })
             .unwrap_or(CollectionStatus::Complete);
-        if matches!(self.manifest.status, CollectionStatus::Complete) && !self.manifest.references.complete {
+        if matches!(self.manifest.status, CollectionStatus::Complete) && !self.manifest.references.integrity_complete {
             self.manifest.status = CollectionStatus::Incomplete(if !self.source_rechecked {
                 CollectionStop::SourceChanged
             } else if matches!(

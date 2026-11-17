@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn capture(capture: &EvidenceCapture) -> Result<DatabaseIdentity> {
     let source = capture.source();
-    let CollectionTarget::Database(database) = &source.target else { return Err(invalid()) };
+    let CollectionTarget::Database(database) = &source.target else {
+        return Err(invalid());
+    };
     if !source.target.is_valid()
         || !valid_digest(capture.range_id())
         || !valid_digest(capture.recovery_manifest_sha256())
@@ -17,9 +19,9 @@ pub(super) fn capture(capture: &EvidenceCapture) -> Result<DatabaseIdentity> {
     if !history.is_valid() || hours(&history.interval.from, &history.interval.until)? <= 0.0 {
         return Err(invalid());
     }
-    if time(capture.collected_from())? > time(capture.collected_until())?
-        || time(&history.interval.until)? > time(capture.collected_until())?
-    {
+    // Native history bounds and collector acquisition bounds belong to independent clocks. Validate each
+    // interval internally; a native window cannot be contained by the collector's wall clock.
+    if ObservationBounds::new(capture.collected_from(), capture.collected_until()).is_none() {
         return Err(invalid());
     }
     let mut rows = BTreeSet::new();
@@ -29,7 +31,7 @@ pub(super) fn capture(capture: &EvidenceCapture) -> Result<DatabaseIdentity> {
             || record.row_ordinal() == 0
             || !valid_digest(record.native_payload_sha256())
             || !rows.insert((record.batch_id(), record.row_ordinal()))
-            || culprit_collector::delivery::evidence::RowReceipt::from_export(row)?.payload_digest
+            || culprit_collector::delivery::evidence::RowReceipt::from_export(row, record.row_ordinal())?.payload_digest
                 != record.native_payload_sha256()
             || ExportedRecord::new(source, capture.capture(), row.record.clone())? != *row
         {
@@ -80,12 +82,16 @@ impl<'a> Definitions<'a> {
     }
 
     pub fn join(&self, references: &StatementReferences) -> Result<Joined<'a>> {
-        let Some(query_reference) = &references.query else { return Ok(Joined { query: None, plan: None }) };
+        let Some(query_reference) = &references.query else {
+            return Ok(Joined { query: None, plan: None });
+        };
         let query_identity = NativeQueryIdentity {
             query_id: query_reference.native.id.clone(),
             qualifiers: query_reference.native.qualifiers.clone(),
         };
-        let Some(query_id) = &query_reference.definition_id else { return Ok(Joined { query: None, plan: None }) };
+        let Some(query_id) = &query_reference.definition_id else {
+            return Ok(Joined { query: None, plan: None });
+        };
         if query_identity.definition_id(self.source)? != *query_id {
             return Err(invalid());
         }
@@ -93,8 +99,12 @@ impl<'a> Definitions<'a> {
         if query.is_some_and(|query| query.identity != query_identity) {
             return Err(invalid());
         }
-        let Some(plan_reference) = &references.plan else { return Ok(Joined { query, plan: None }) };
-        let Some(plan_id) = &plan_reference.definition_id else { return Ok(Joined { query, plan: None }) };
+        let Some(plan_reference) = &references.plan else {
+            return Ok(Joined { query, plan: None });
+        };
+        let Some(plan_id) = &plan_reference.definition_id else {
+            return Ok(Joined { query, plan: None });
+        };
         let identity = NativePlanIdentity {
             plan_id: plan_reference.native.id.clone(),
             query: query_identity,

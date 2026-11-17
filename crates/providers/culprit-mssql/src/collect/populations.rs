@@ -143,8 +143,11 @@ impl WorkloadPart {
         &mut self,
         window: &crate::query_store::window_sql::FrozenWindow,
         verification: crate::query_store::window_sql::WindowVerification,
+        catalog: Option<&RuntimePopulationCatalog>,
     ) {
+        self.catalog = catalog.cloned();
         let Some(workload) = &mut self.workload else { return };
+        workload.population_catalog = catalog.cloned();
         self.database = Some(window.database.clone());
         workload.window_start = window.start.clone();
         workload.window_end = window.end.clone();
@@ -196,7 +199,8 @@ pub(super) async fn collect(
 }
 
 async fn acquire<R: NativeRead>(reader: &mut crate::query_store::Reader<R>, options: &SnapshotOptions) -> Workloads {
-    let catalog = match reader.prepare_population_batch(options.top_queries as usize).await {
+    let catalog = match reader.prepare_population_batch(options.top_queries as usize, options.window_in_minutes()).await
+    {
         Ok(catalog) => catalog,
         Err(error) => {
             let mut workloads = Workloads::single(failed_part(&error, reader.population_catalog().cloned()));
@@ -267,14 +271,16 @@ async fn acquire<R: NativeRead>(reader: &mut crate::query_store::Reader<R>, opti
     };
     match verification {
         Ok((window, verification)) => {
-            workloads.requested.finish_window(&window, verification);
+            workloads.catalog = reader.population_catalog().cloned();
+            workloads.requested.finish_window(&window, verification, workloads.catalog.as_ref());
             for (_, part) in &mut workloads.populations {
-                part.finish_window(&window, verification);
+                part.finish_window(&window, verification, workloads.catalog.as_ref());
             }
         }
         Err(error) => workloads.fail_provisional(&error),
     }
     workloads.stop_followup |= reader.retirement_reason().is_some();
+    let catalog = workloads.catalog.clone().unwrap_or(catalog);
     if catalog.partitioned && !workloads.stop_followup {
         if catalog.requires_selection {
             workloads.requested = failed_part(

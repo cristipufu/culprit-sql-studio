@@ -14,6 +14,36 @@ pub(super) fn validate_capture(capture: &EvidenceCapture) -> Result<()> {
 }
 
 pub(super) fn from_record(capture: &EvidenceCapture, record: &VerifiedEvidenceRecord) -> Result<DiagnosticEvidenceRef> {
+    let ordinal = original_ordinal(capture, record)?;
+    DiagnosticEvidenceRef::from_export(capture.source(), capture.capture_manifest_sha256(), record.row(), ordinal)
+}
+
+pub(super) fn captured_read(capture: &EvidenceCapture) -> Result<CapturedReadRef> {
+    validate_capture(capture)?;
+    let streams = capture
+        .families()
+        .iter()
+        .map(|family| {
+            let stream = family.stream();
+            let rows = capture.captured_rows(stream).ok_or_else(invalid)?;
+            Ok(CapturedStreamRows { stream, rows })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    CapturedReadRef::new(capture.source(), capture.capture().clone(), capture.capture_manifest_sha256().into(), streams)
+}
+
+pub(super) fn analysis_reference(
+    original: &CapturedReadBinding<'_>,
+    record: &culprit_core::collected_analysis::CollectedAnalysisRecord,
+) -> Result<CapturedRecordReference> {
+    let ordinal = record.row_ordinal.checked_sub(1).ok_or_else(invalid)?;
+    if record.batch_id != record.row.batch_id || record.native_payload_sha256 != record.row.payload_sha256()? {
+        return Err(invalid());
+    }
+    original.reference(&record.row, ordinal)
+}
+
+fn original_ordinal(capture: &EvidenceCapture, record: &VerifiedEvidenceRecord) -> Result<u32> {
     let row = record.row();
     let ordinal = record.row_ordinal().checked_sub(1).ok_or_else(invalid)?;
     if row.capture != *capture.capture()
@@ -22,5 +52,5 @@ pub(super) fn from_record(capture: &EvidenceCapture, record: &VerifiedEvidenceRe
     {
         return Err(invalid());
     }
-    DiagnosticEvidenceRef::from_export(capture.source(), capture.capture_manifest_sha256(), row, ordinal)
+    Ok(ordinal)
 }

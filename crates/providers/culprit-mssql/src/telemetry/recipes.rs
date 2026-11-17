@@ -100,7 +100,8 @@ const REGISTRATIONS: &[Registration] = &[
         RecipeSelector::Collection(TelemetryCollection::QueryHistory),
         |pool, request, host, port| Ok(Box::new(Source::new(pool, request, host, port)?)),
     )
-    .baseline(),
+    .baseline()
+    .version(2),
     Registration::database(
         "mssql.resource-history",
         RecipeSelector::Collection(TelemetryCollection::ResourceHistory),

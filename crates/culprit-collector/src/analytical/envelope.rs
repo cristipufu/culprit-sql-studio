@@ -32,7 +32,8 @@ pub const COMMON: &[Field] = &[
     Field::required("NativePayloadDigest", "/_culprit/native_digest", String),
     Field::required("RowOrdinal", "/_culprit/row_ordinal", Long),
     Field::required("BatchId", "/batch_id", String),
-    Field::required("RecordId", "/record_id", String),
+    Field::optional("RecordId", "/record_id", String),
+    Field::required("ReferencesComplete", "/_culprit/references_complete", Bool),
     Field::required("ObservationId", "/capture/observation_id", String),
     Field::required("OutboxId", "/capture/revision/outbox_id", String),
     Field::required("OwnerEpoch", "/capture/revision/owner_epoch", Long),
@@ -97,6 +98,7 @@ pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Resul
         "logical_source_id": source.logical_source_id()?,
         "source_name": source.source, "engine": source.target.engine(), "range_id": manifest.range_id,
         "continuity": source.continuity,
+        "references_complete": manifest.reference_coverage.complete,
         "collected_from": manifest.collected_from, "collected_until": manifest.collected_until
     });
     if let Some(investigation) = &manifest.investigation {

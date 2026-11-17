@@ -591,7 +591,7 @@ mod tests {
             assert_eq!(batch.rows.len(), records.len());
             for (record, receipt) in records.into_iter().zip(&batch.rows) {
                 let original = ExportedRecord::new(&source, &recovery.manifest.capture, record).unwrap();
-                assert_eq!(RowReceipt::from_export(&original).unwrap(), *receipt);
+                assert_eq!(RowReceipt::from_export(&original, receipt.key.row_ordinal).unwrap(), *receipt);
             }
         }
     }

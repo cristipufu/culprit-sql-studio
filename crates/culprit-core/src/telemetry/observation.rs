@@ -251,6 +251,9 @@ impl QueryHistoryDescription {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.interval.native_id)
             && self.population_binding.is_valid(self.population_catalog.as_ref(), &self.dimensions)
+            && self.population_catalog.as_ref().is_none_or(|catalog| {
+                catalog.membership.matches_window(Some(&self.interval.from), Some(&self.interval.until))
+            })
             && self.waits.as_ref().is_none_or(QueryWaitSemantics::is_valid)
             && self.dimensions.len() <= MAX_NATIVE_QUALIFIERS
             && super::native_identity::native_properties_valid(&self.native_properties)

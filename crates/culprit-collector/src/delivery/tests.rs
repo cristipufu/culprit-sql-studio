@@ -226,7 +226,7 @@ async fn equal_counts_with_substituted_or_conflicting_rows_cannot_authorize_publ
     let committed = stage_and_commit(&store, owner.fence(), None, &prepared).await.unwrap();
     let receipts = committed.manifest().expected_receipts().cloned().collect::<Vec<_>>();
     let mut substituted = receipts.clone();
-    substituted[0].key.record_id = digest(b"unexpected");
+    substituted[0].record_id = Some(digest(b"unexpected"));
     assert_eq!(
         problem(verify(&sink(substituted), &committed, VerificationBudget::default()).await.err().unwrap()),
         DeliveryProblem::Integrity

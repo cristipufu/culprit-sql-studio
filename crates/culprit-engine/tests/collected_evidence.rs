@@ -21,6 +21,8 @@ mod maintenance_blocking;
 mod maintenance_progress;
 mod memory_failures;
 mod native_failures;
+mod observed_membership;
+mod page_server_reads;
 mod page_task_holders;
 mod page_waits;
 mod page_writers;
@@ -50,6 +52,7 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
             population_binding: QueryHistoryPopulationBinding::Unpartitioned,
             population_catalog: Some(culprit_core::NativeRuntimePopulationCatalog {
+                membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
                 source: culprit_core::source_id::QUERY_STORE.into(),
                 partitioned: false,
                 requires_selection: false,
@@ -113,6 +116,7 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
             },
             executions: format!("{:.0}", query.executions),
             metrics,
+            page_server_reads: None,
             first_execution_at: query.first_seen.as_deref().map(canonical_time).transpose().unwrap(),
             last_execution_at: query.last_seen.as_deref().map(canonical_time).transpose().unwrap(),
         }));
@@ -269,13 +273,13 @@ async fn application_totals_exclude_proven_monitoring_but_keep_unknown_and_missi
             RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, duration_ms),
             RuntimeMetric::average(RuntimeMetricKey::CpuTime, RuntimeMetricUnit::Milliseconds, cpu_ms),
         ];
-        if let Some(origin) = origin {
-            definition.origin = origin;
-            records.push(TelemetryRecord::QueryDefinition(definition));
-        }
+        definition.origin = origin.unwrap_or(StatementOrigin::Unknown);
+        records.push(TelemetryRecord::QueryDefinition(definition));
         records.push(TelemetryRecord::QueryRuntime(runtime));
     }
     let fixture = Fixture::new(source, records).await;
+    // Every original reference closes; only the later archive read loses the final definition body.
+    fixture.remove_row(TelemetryStream::QueryDefinitions, 5);
     let analysis = collected_evidence::analyze(&fixture.read().await, None).unwrap();
     let workload = analysis.analyses[0].workload.as_ref().unwrap();
     assert_eq!(workload.queries.len(), 1);
@@ -360,11 +364,16 @@ async fn a_competing_native_generation_cannot_be_joined_by_query_number_or_displ
         .native
         .qualifiers
         .insert("native-generation".into(), "recycled".into());
-    let fixture = Fixture::new(source, records).await;
-    let capture = fixture.read().await;
-    assert!(capture.is_read_complete());
-    let error = collected_evidence::analyze(&capture, None).unwrap_err();
-    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+    let result = culprit_collector::analytical::test_support::Recovery::try_capture(
+        "fixture:offline-analysis",
+        &digest(b"original-schema"),
+        source,
+        records,
+        100_000,
+    );
+    assert!(
+        matches!(result, Err(error) if error.detail == Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)))
+    );
 }
 
 #[tokio::test]
@@ -491,3 +500,7 @@ async fn native_large_counts_and_unknown_units_are_retained_without_rounded_anal
 }
 
 mod jobs;
+
+mod query_store_statements;
+
+mod clock_boundaries;

@@ -139,6 +139,7 @@ pub(crate) async fn collect(
             compiled: None,
             cpu_time_ms: None,
             logical_reads: None,
+            page_server_reads: None,
         });
     }
     for q in &mut workload.queries {

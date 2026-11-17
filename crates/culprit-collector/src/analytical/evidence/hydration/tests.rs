@@ -145,6 +145,12 @@ fn gaps(range: &CommittedRange) -> EvidenceCapture {
         capture_manifest_sha256: manifest.capture_manifest_sha256.clone(),
         source: manifest.source.clone(),
         capture: manifest.capture.clone(),
+        reference_coverage: manifest.reference_coverage.clone(),
+        captured_rows: manifest
+            .batches
+            .iter()
+            .map(|batch| (batch.stream, u32::try_from(batch.rows.len()).unwrap()))
+            .collect(),
         collected_from: manifest.collected_from.clone(),
         collected_until: manifest.collected_until.clone(),
         families: manifest
@@ -226,7 +232,7 @@ async fn opt_in_restores_exact_long_payloads_while_projection_only_reads_never_o
     assert_eq!(recovered.source(), projection.source());
     assert_eq!(recovered.records().len(), 1);
     assert_eq!(
-        RowReceipt::from_export(recovered.records()[0].row()).unwrap(),
+        RowReceipt::from_export(recovered.records()[0].row(), recovered.records()[0].row_ordinal()).unwrap(),
         fixture.range.manifest().batches[0].rows[0]
     );
 }
@@ -251,14 +257,14 @@ async fn one_native_batch_repairs_multiple_rows_once_with_original_one_based_ord
     assert_eq!(fixture.reads(), 1);
     assert_eq!(capture.metrics().recovery_objects, 1);
     for (row, receipt) in capture.records().iter().zip(&fixture.range.manifest().batches[0].rows) {
-        assert_eq!(&RowReceipt::from_export(row.row()).unwrap(), receipt);
+        assert_eq!(&RowReceipt::from_export(row.row(), row.row_ordinal()).unwrap(), receipt);
     }
 }
 
 #[tokio::test]
 async fn native_representation_recovery_is_shared_by_scalar_wait_families() {
     let (source, records) = test_support::query_evidence();
-    let mut record = records.into_iter().find(|row| matches!(row, TelemetryRecord::QueryWaits(_))).unwrap();
+    let mut record = records.iter().find(|row| matches!(row, TelemetryRecord::QueryWaits(_))).cloned().unwrap();
     let TelemetryRecord::QueryWaits(wait) = &mut record else { panic!() };
     // AverageWait is an actual scalar Real column. Its shared normalizer maps -0 to +0, while the native receipt
     // still binds the original representation. Nested metric JSON would preserve signed zero and prove no loss.
@@ -266,7 +272,12 @@ async fn native_representation_recovery_is_shared_by_scalar_wait_families() {
     wait.total = MeasurementValue::Integer("0".into());
     wait.minimum = Some(MeasurementValue::Integer("0".into()));
     wait.maximum = Some(MeasurementValue::Integer("0".into()));
-    let fixture = Fixture::new(source, vec![record]).await;
+    let mut original = records
+        .into_iter()
+        .filter(|row| matches!(row, TelemetryRecord::QueryDefinition(_) | TelemetryRecord::PlanDefinition(_)))
+        .collect::<Vec<_>>();
+    original.push(record);
+    let fixture = Fixture::new(source, original).await;
     let batch =
         fixture.range.manifest().batches.iter().find(|batch| batch.stream == TelemetryStream::QueryWaits).unwrap();
     let average = fixture
@@ -291,7 +302,10 @@ async fn native_representation_recovery_is_shared_by_scalar_wait_families() {
     assert!(recovered.is_read_complete());
     let TelemetryRecord::QueryWaits(wait) = &recovered.records()[0].row().record else { panic!() };
     assert_eq!(wait.average.unwrap().to_bits(), (-0.0f64).to_bits());
-    assert_eq!(RowReceipt::from_export(recovered.records()[0].row()).unwrap(), batch.rows[0]);
+    assert_eq!(
+        RowReceipt::from_export(recovered.records()[0].row(), recovered.records()[0].row_ordinal()).unwrap(),
+        batch.rows[0]
+    );
     assert_eq!(recovered.metrics().recovery_objects, 1);
     assert_eq!(recovered.metrics().recovery_bytes, batch.bytes);
     assert_eq!(fixture.reads(), 1);

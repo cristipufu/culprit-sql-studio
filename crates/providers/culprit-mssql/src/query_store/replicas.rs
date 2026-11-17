@@ -34,7 +34,7 @@ pub(crate) enum Population {
 }
 
 impl Population {
-    /// IDs come only from the strictly decoded native catalog. Keep one predicate for every scan aggregate;
+    /// IDs come only from native catalog rows or a fully drained window summary. Keep one predicate per aggregate;
     /// the group never becomes a query/plan identity or a physical compute-member identity.
     pub(crate) fn predicate(self, alias: &str) -> String {
         match self {
@@ -144,6 +144,7 @@ impl Catalog {
             })
             .collect::<Result<Vec<_>>>()?;
         let catalog = RuntimePopulationCatalog {
+            membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
             source: culprit_core::source_id::QUERY_STORE.into(),
             partitioned: true,
             requires_selection: populations.len() > 1,
@@ -187,8 +188,49 @@ impl ReplicaGroup {
     }
 }
 
+/// A runtime summary supplies positive group membership only. Roles and replica names require native metadata.
+pub(super) fn observed_catalog(
+    populations: impl Iterator<Item = Population>,
+    from: &str,
+    until: &str,
+) -> Result<RuntimePopulationCatalog> {
+    let mut ids = BTreeSet::new();
+    for population in populations {
+        let Population::ReplicaGroup(id) = population else { return Err(invalid_data()) };
+        if id < 0 {
+            return Err(invalid_data());
+        }
+        ids.insert(id);
+        if ids.len() > culprit_core::MAX_RUNTIME_POPULATIONS {
+            return Err(invalid_data());
+        }
+    }
+    if ids.is_empty() {
+        return Err(Error::new(ErrorCode::Unsupported, t!("provider.mssql.query_store.population_unobserved")));
+    }
+    let catalog = RuntimePopulationCatalog {
+        source: culprit_core::source_id::QUERY_STORE.into(),
+        membership: culprit_core::RuntimePopulationMembership::ObservedWindow {
+            from: from.into(),
+            until: until.into(),
+        },
+        partitioned: true,
+        requires_selection: ids.len() > 1,
+        populations: ids
+            .into_iter()
+            .map(|id| RuntimePopulation {
+                identity: NativeIdentity::new(id.to_string()),
+                label: culprit_core::message!("provider.mssql.query_store.population_observed", group = id.to_string()),
+                native_properties: [("replica_group_id".into(), id.to_string())].into(),
+            })
+            .collect(),
+    };
+    if catalog.is_valid() { Ok(catalog) } else { Err(invalid_data()) }
+}
+
 pub(crate) fn unpartitioned_catalog() -> RuntimePopulationCatalog {
     RuntimePopulationCatalog {
+        membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
         source: culprit_core::source_id::QUERY_STORE.into(),
         partitioned: false,
         requires_selection: false,

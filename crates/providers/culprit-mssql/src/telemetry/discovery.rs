@@ -194,6 +194,7 @@ mod tests {
                 ("actual_state_desc", Val::Text("READ_WRITE".into())),
                 ("query_capture_mode_desc", Val::Text("AUTO".into())),
                 ("variant_families", Val::Int(1)),
+                ("page_server_read_availability", Val::Int(0)),
                 ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
             ])]),
             Ok(vec![identity()]),

@@ -265,6 +265,16 @@ impl Workload {
         self.kind
     }
 
+    /// The coverage namespace declared by collection semantics, independent of the source's display name.
+    pub fn evidence_source(&self) -> &'static str {
+        match self.kind() {
+            Some(WorkloadKind::QueryStore) => crate::source_id::QUERY_STORE,
+            Some(WorkloadKind::PlanCache) => crate::source_id::PLAN_CACHE,
+            Some(WorkloadKind::QueryLog) => crate::source_id::QUERY_LOG,
+            _ => crate::source_id::WORKLOAD,
+        }
+    }
+
     /// Hours an entry of this workload has counted: from its first run (a cached plan's compile) to the window's end,
     /// at least a minute. `None` without both times.
     pub fn entry_hours(&self, first_seen: Option<&str>) -> Option<f64> {
@@ -1287,6 +1297,11 @@ pub struct PlanVariant {
     /// slower plan does more work, or only waited longer while it ran.
     pub cpu_time_ms: Option<f64>,
     pub logical_reads: Option<f64>,
+    /// Remote-page statistics for this native plan and execution population, independent from local/physical
+    /// reads and runtime timing. Multiple fragments retain only explicitly derived statistics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_server_reads: Option<Box<crate::telemetry::PageServerReadSummary>>,
 }
 
 /// Native query-variant metadata within the captured database/source namespace. A dispatcher can have no runtime

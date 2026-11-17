@@ -3,7 +3,9 @@ pub(crate) const EDITION: &str = "SELECT /* culprit */ CAST(SERVERPROPERTY('Engi
 pub(crate) const OPTIONS: &str = concat!(
     "SELECT /* culprit */ *, ",
     super::variants_sql::readable!(),
-    " AS variant_families FROM sys.database_query_store_options"
+    " AS variant_families,",
+    super::page_server::availability!(),
+    " AS page_server_read_availability FROM sys.database_query_store_options"
 );
 pub(crate) const REPLICAS: &str = "SELECT TOP (101) /* culprit */ replica_group_id,role_type,replica_name FROM sys.query_store_replicas ORDER BY replica_group_id,role_type,replica_name OPTION (MAXDOP 1)";
 pub(crate) const MAX_PLAN: &str =
@@ -74,16 +76,19 @@ macro_rules! definition_columns {
     };
 }
 
-pub(crate) fn runtime(range: bool) -> String {
+pub(crate) fn runtime(range: bool, page_server_reads: super::page_server::Availability) -> String {
     let filter = if range { " AND r.replica_group_id=@P3 AND r.plan_id>=@P4 AND r.plan_id<@P5" } else { "" };
     format!(
-        "{}{}{}{}",
+        "{}{}{},{}{}{}",
         super::runtime::relation(false),
-        concat!(
-            r#"
+        r#"
 SELECT TOP (@P1) /* culprit */ r.runtime_stats_id AS row_id,r.plan_id,r.replica_group_id,r.execution_type,
  count_executions,avg_duration,stdev_duration,min_duration,max_duration,avg_cpu_time,avg_logical_io_reads,avg_physical_io_reads,
  avg_logical_io_writes,avg_rowcount,avg_dop,avg_query_max_used_memory,avg_clr_time,avg_log_bytes_used,avg_tempdb_space_used,
+"#,
+        super::page_server::columns(page_server_reads, "r"),
+        concat!(
+            r#"
  CONVERT(varchar(40),first_execution_time,127) AS first_execution_at,
  CONVERT(varchar(40),r.last_execution_time,127) AS last_execution_at,
 "#,

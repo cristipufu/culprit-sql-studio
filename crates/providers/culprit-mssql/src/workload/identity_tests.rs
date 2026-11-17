@@ -62,6 +62,7 @@ pub(super) fn runtime_replies(summary: Vec<Rec>) -> Vec<ReadResult<Vec<Rec>>> {
             ("log_bytes", Val::Int(0)),
             ("waits", Val::Int(0)),
             ("variants", Val::Int(1)),
+            ("page_server_read_availability", Val::Int(0)),
         ])]),
         Ok(vec![unavailable_waits_window()]),
         Ok(summary),
@@ -300,6 +301,7 @@ fn with_log_capability(mut replies: Vec<ReadResult<Vec<Rec>>>) -> Vec<ReadResult
         ("log_bytes", Val::Int(1)),
         ("waits", Val::Int(0)),
         ("variants", Val::Int(1)),
+        ("page_server_read_availability", Val::Int(0)),
     ])]);
     replies
 }

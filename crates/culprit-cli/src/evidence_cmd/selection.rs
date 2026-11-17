@@ -28,14 +28,16 @@ pub(super) struct DefinitionRead {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DefinitionKind {
-    QueryStore,
+    QueryStoreCompilation,
+    QueryStoreRuntime,
     CachedStatement,
 }
 
 impl DefinitionKind {
     pub fn for_analysis(analysis: Analysis) -> Option<Self> {
         match analysis {
-            Analysis::Compilation => Some(Self::QueryStore),
+            Analysis::Compilation => Some(Self::QueryStoreCompilation),
+            Analysis::PageServerReads => Some(Self::QueryStoreRuntime),
             Analysis::CompletedSpills => Some(Self::CachedStatement),
             _ => None,
         }
@@ -43,19 +45,29 @@ impl DefinitionKind {
 
     pub fn family(self) -> EvidenceFamily {
         match self {
-            Self::QueryStore => EvidenceFamily::QueryDefinitions,
+            Self::QueryStoreCompilation | Self::QueryStoreRuntime => EvidenceFamily::QueryDefinitions,
             Self::CachedStatement => EvidenceFamily::ObjectDefinitions,
         }
     }
 
     pub fn accepts_primary(self, source: &culprit_core::telemetry::CollectionDescription) -> bool {
-        let dataset = match self {
-            Self::QueryStore => culprit_core::telemetry::SnapshotDataset::QueryCompilation,
-            Self::CachedStatement => culprit_core::telemetry::SnapshotDataset::CachedRuntime,
-        };
-        source.target.engine() == culprit_core::Engine::Mssql
-            && source.target.database().is_some()
-            && source.observation.snapshot().is_some_and(|snapshot| snapshot.dataset == dataset)
+        if source.target.engine() != culprit_core::Engine::Mssql || source.target.database().is_none() {
+            return false;
+        }
+        match self {
+            Self::QueryStoreRuntime => {
+                source.partition == culprit_core::telemetry::SourcePartition::Target
+                    && source.query_history().is_some_and(|history| history.is_valid())
+            }
+            Self::QueryStoreCompilation | Self::CachedStatement => {
+                let dataset = if self == Self::QueryStoreCompilation {
+                    culprit_core::telemetry::SnapshotDataset::QueryCompilation
+                } else {
+                    culprit_core::telemetry::SnapshotDataset::CachedRuntime
+                };
+                source.observation.snapshot().is_some_and(|snapshot| snapshot.dataset == dataset)
+            }
+        }
     }
 }
 

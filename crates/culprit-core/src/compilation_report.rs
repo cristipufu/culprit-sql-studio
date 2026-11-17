@@ -1,7 +1,8 @@
 //! Query compilation explanations reference the retained native facts, independently of execution or current memory.
 use crate::{
     Metric, SourceState,
-    telemetry::{DiagnosticEvidenceRef, NativeQueryIdentity, PayloadUnavailable, StatementOrigin},
+    query_store_statement_report::{QueryStoreDefinitionRead, QueryStoreStatementExplanation},
+    telemetry::NativeQueryIdentity,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -19,7 +20,7 @@ pub struct CompilationReport {
     /// acquisition clock or a compilation population; the SDK retains the complete original capture context.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub definition_read: Option<Box<CompilationDefinitionRead>>,
+    pub definition_read: Option<Box<QueryStoreDefinitionRead>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub comparison: Option<CompilationComparisonReport>,
@@ -84,49 +85,5 @@ pub struct CompilationExplanation {
     /// Derived statement authority, separate from the immutable native compiler counters and their origin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub statement: Option<Box<CompilationStatementExplanation>>,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Debug)]
-#[ts(export)]
-pub struct CompilationDefinitionRead {
-    pub namespace: CompilationDefinitionNamespace,
-    /// Selected authenticated manifest rows, never the entire Query Store query population.
-    pub selected_rows: u32,
-    pub observed_rows: u32,
-    pub read_complete: bool,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-#[ts(export)]
-pub enum CompilationDefinitionNamespace {
-    Matched,
-    Unverified,
-    Changed,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-#[ts(export)]
-pub enum CompilationStatementBinding {
-    Captured,
-    Matched,
-    NotObserved,
-    SourceUnverified,
-    SourceChanged,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Debug)]
-#[ts(export)]
-pub struct CompilationStatementExplanation {
-    pub binding: CompilationStatementBinding,
-    pub definition: Option<DiagnosticEvidenceRef>,
-    pub origin: StatementOrigin,
-    pub monitoring_template_id: Option<String>,
-    pub preview: Option<String>,
-    /// Presentation truncation of a complete verified body. A warehouse prefix never supplies this authority.
-    pub preview_truncated: bool,
-    pub unavailable: Option<PayloadUnavailable>,
-    pub explanation: String,
+    pub statement: Option<Box<QueryStoreStatementExplanation>>,
 }

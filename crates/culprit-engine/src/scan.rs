@@ -16,6 +16,11 @@ use ts_rs::TS;
 
 use crate::{analysis, history, query_log, reports, trends};
 
+#[cfg(feature = "collector")]
+mod completed_runtime;
+#[cfg(feature = "collector")]
+pub use completed_runtime::CompletedRuntimeScanInput;
+
 pub(crate) struct QueryLog<'a> {
     pub path: &'a Path,
     pub discovered: bool,
@@ -207,6 +212,25 @@ pub(crate) struct CollectedPopulationScan {
 }
 
 impl CollectedPopulationScan {
+    /// The caller must settle the scan's native owner before attaching independently captured evidence.
+    pub(crate) fn attach_cached_runtime(
+        &mut self,
+        read: Box<culprit_core::telemetry::CachedRuntimeRead>,
+    ) -> Result<()> {
+        use culprit_core::telemetry::{CachedRuntimeReadOrigin, DeliveryProblem};
+        if self.requested.snapshot.operations.cached_runtime.is_some() {
+            return Err(DeliveryProblem::Conflict.error());
+        }
+        if !matches!(read.origin, CachedRuntimeReadOrigin::Captured { .. })
+            || !read.is_valid()
+            || !read.matches_native_database(&self.requested.snapshot)
+        {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        self.requested.snapshot.operations.cached_runtime = Some(read);
+        Ok(())
+    }
+
     pub async fn finish(self) -> Result<PopulationReports> {
         let requested = self.requested.finish().await?;
         let mut populations = Vec::with_capacity(self.populations.len());

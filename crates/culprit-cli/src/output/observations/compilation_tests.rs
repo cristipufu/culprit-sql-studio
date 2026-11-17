@@ -1,5 +1,5 @@
 use super::*;
-use culprit_checks::compilation::{CompilationDefinitionEvidence, CompilationDefinitionRecord, CompilationEvidence};
+use culprit_checks::compilation::{CompilationEvidence, QueryStoreDefinitionEvidence, QueryStoreDefinitionRecord};
 use culprit_collector::analytical::test_support::{Recovery, compilation_definition_evidence_cases};
 use culprit_core::telemetry::*;
 
@@ -31,7 +31,7 @@ fn report_for(name: &str, missing_definition: bool) -> CompilationReport {
             .map(|(index, record)| {
                 let TelemetryRecord::QueryDefinition(definition) = record else { panic!() };
                 let row = ExportedRecord::new(&source, &recovery.manifest.capture, record.clone()).unwrap();
-                CompilationDefinitionRecord {
+                QueryStoreDefinitionRecord {
                     reference: DiagnosticEvidenceRef::from_export(
                         &source,
                         &recovery.manifest.capture_manifest_sha256,
@@ -48,7 +48,7 @@ fn report_for(name: &str, missing_definition: bool) -> CompilationReport {
         context: Some(&context),
         observations: &observations,
         source: Some(&outcome),
-        definitions: Some(CompilationDefinitionEvidence {
+        definitions: Some(QueryStoreDefinitionEvidence {
             source: &source,
             rows: &definitions,
             selected_rows: records.len() as u32,

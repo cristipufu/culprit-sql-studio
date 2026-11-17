@@ -220,7 +220,7 @@ fn a_native_position_from_another_read_cannot_authorize_the_same_cache_entry() {
     assert!(
         explain(
             CompletedSpillEvidence {
-                read_id: &read.read_id,
+                read_id: &read.read_id().unwrap(),
                 source: &read.description,
                 rows: std::slice::from_ref(&row),
                 sources: &sources,
@@ -237,7 +237,7 @@ fn a_native_position_from_another_read_cannot_authorize_the_same_cache_entry() {
     assert!(
         explain(
             CompletedSpillEvidence {
-                read_id: &read.read_id,
+                read_id: &read.read_id().unwrap(),
                 source: &read.description,
                 rows: &[row],
                 sources: &sources,
@@ -304,13 +304,15 @@ fn identical_unqualified_metadata_from_a_different_original_read_cannot_supply_a
     let mut first = input.runtime_read();
     first.description.partition = SourcePartition::Target;
     let mut second = first.clone();
-    second.read_id =
-        cached_statement_read_id(&CaptureIdentity { observation_id: "3".repeat(32), revision: None }).unwrap();
+    second.origin = CachedRuntimeReadOrigin::NativeRead {
+        read_id: cached_statement_read_id(&CaptureIdentity { observation_id: "3".repeat(32), revision: None }).unwrap(),
+    };
     assert_eq!(first.description, second.description);
     assert_ne!(first.read_key().unwrap(), second.read_key().unwrap());
     let rows = vec![CompletedSpillRecord::native_runtime(first.read_key().unwrap(), &second.observations[0]).unwrap()];
+    let second_read_id = second.read_id().unwrap();
     let input = CompletedSpillEvidence {
-        read_id: &second.read_id,
+        read_id: &second_read_id,
         source: &second.description,
         rows: &rows,
         sources: &input.sources,
@@ -352,3 +354,5 @@ fn optional_definitions_keep_their_independent_captured_owner_and_cannot_claim_n
     };
     assert!(explain(runtime.view(&runtime_rows), Some(definitions.view(&definition_rows))).is_err());
 }
+
+mod captured_read;

@@ -96,7 +96,7 @@ async fn unverified_visibility_keeps_raw_capability_and_positive_runtime_without
 #[tokio::test]
 async fn a_parent_definition_with_identical_sql_cannot_replace_the_missing_child_definition() {
     let (source, mut records) = history(true);
-    let TelemetryRecord::QueryDefinition(child) = records.remove(0) else { panic!() };
+    let TelemetryRecord::QueryDefinition(child) = records[0].clone() else { panic!() };
     let parent = child.variant_family.as_ref().unwrap().parent.clone();
     records.push(TelemetryRecord::QueryDefinition(QueryDefinition {
         id: parent.definition_id(&source).unwrap(),
@@ -105,8 +105,10 @@ async fn a_parent_definition_with_identical_sql_cannot_replace_the_missing_child
         ..child
     }));
     let fixture = Fixture::new(source, records).await;
+    fixture.remove_first_row(TelemetryStream::QueryDefinitions);
     let capture = fixture.read().await;
-    assert!(capture.is_read_complete(), "all provided native rows were retrieved");
+    assert!(!capture.is_read_complete(), "the original child definition was not retrieved");
+    assert!(capture.reference_coverage().complete, "the original source did resolve the child");
     let analysis = collected_evidence::analyze(&capture, None).unwrap();
     assert!(analysis.analyses[0].workload.is_none());
     assert!(

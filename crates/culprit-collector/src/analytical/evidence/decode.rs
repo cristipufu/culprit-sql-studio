@@ -18,7 +18,10 @@ pub(super) fn record(
     expected: &RowReceipt,
 ) -> Result<Decoded<ExportedRecord>> {
     if text(values, "BatchId")? != expected.key.batch_id
-        || text(values, "RecordId")? != expected.key.record_id
+        || optional_text(values, "RecordId")? != expected.record_id.as_deref()
+        || values.get("RowOrdinal").and_then(Value::as_u64) != Some(u64::from(expected.key.row_ordinal))
+        || values.get("ReferencesComplete").and_then(Value::as_bool)
+            != Some(range.manifest().reference_coverage.complete)
         || text(values, "NativePayloadDigest")? != expected.payload_digest
     {
         return Err(invalid());
@@ -68,7 +71,7 @@ pub(super) fn record(
     };
     payloads::validate_inventory(&payloads, &record)?;
     let row = ExportedRecord::new(&range.manifest().source, &range.manifest().capture, record)?;
-    if RowReceipt::from_export(&row)? != *expected {
+    if RowReceipt::from_export(&row, expected.key.row_ordinal)? != *expected {
         // Projection proof was checked first. A native precision/representation unavailable in that projection
         // requires the private native payload, rather than inventing an exact row from its rounded values.
         return Ok(Decoded::Unavailable(EvidenceGapReason::NativeRepresentationRequired));
@@ -145,6 +148,13 @@ fn activity(values: &Map<String, Value>, references: &payloads::References<'_>) 
 
 fn text<'a>(values: &'a Map<String, Value>, key: &str) -> Result<&'a str> {
     values.get(key).and_then(Value::as_str).ok_or_else(invalid)
+}
+fn optional_text<'a>(values: &'a Map<String, Value>, key: &str) -> Result<Option<&'a str>> {
+    match values.get(key) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text)),
+        _ => Err(invalid()),
+    }
 }
 fn invalid() -> culprit_core::Error {
     DeliveryProblem::Integrity.error()

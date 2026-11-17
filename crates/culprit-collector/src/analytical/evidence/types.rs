@@ -225,6 +225,8 @@ pub struct EvidenceCapture {
     pub(super) capture_manifest_sha256: String,
     pub(super) source: CollectionDescription,
     pub(super) capture: CaptureIdentity,
+    pub(super) reference_coverage: ReferenceCoverage,
+    pub(super) captured_rows: Vec<(TelemetryStream, u32)>,
     pub(super) collected_from: String,
     pub(super) collected_until: String,
     pub(super) families: Vec<EvidenceFamily>,
@@ -247,6 +249,14 @@ impl EvidenceCapture {
     }
     pub fn capture(&self) -> &CaptureIdentity {
         &self.capture
+    }
+    pub fn reference_coverage(&self) -> &ReferenceCoverage {
+        &self.reference_coverage
+    }
+    /// Original selected stream count, independent of reconstructed bodies and warehouse read gaps.
+    /// None means this stream has no selected original batch; Some(0) is an authenticated empty batch.
+    pub fn captured_rows(&self, stream: TelemetryStream) -> Option<u32> {
+        self.captured_rows.iter().find_map(|(captured, rows)| (*captured == stream).then_some(*rows))
     }
     pub fn collected_from(&self) -> &str {
         &self.collected_from

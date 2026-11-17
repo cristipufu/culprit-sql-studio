@@ -11,6 +11,7 @@ pub(super) fn record(
             "key": measurement_key(values)?,
             "executions": field(values, "Executions")?,
             "metrics": field(values, "Metrics")?,
+            "page_server_reads": field(values, "PageServerReads")?,
             "first_execution_at": field(values, "FirstExecutionAt")?,
             "last_execution_at": field(values, "LastExecutionAt")?,
         }),

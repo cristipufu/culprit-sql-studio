@@ -12,6 +12,7 @@ fn batch() -> PopulationSnapshots {
         None,
     ));
     let catalog = RuntimePopulationCatalog {
+        membership: crate::RuntimePopulationMembership::NativeCatalog,
         source: crate::source_id::QUERY_STORE.into(),
         partitioned: true,
         requires_selection: true,
@@ -120,4 +121,27 @@ fn the_requested_native_window_must_match_its_other_population_inputs() {
     batch.validate(&options).unwrap();
     batch.requested.workload.as_mut().unwrap().window_start = Some("2026-10-11T10:59:00Z".into());
     assert!(batch.validate(&options).is_err());
+}
+
+#[test]
+fn observed_membership_is_bound_to_each_original_workload_window() {
+    let mut input = batch();
+    let membership = RuntimePopulationMembership::ObservedWindow {
+        from: "2026-10-11T11:00:00Z".into(),
+        until: "2026-10-11T12:00:00Z".into(),
+    };
+    input.catalog.as_mut().unwrap().membership = membership;
+    for snapshot in std::iter::once(&mut input.requested).chain(&mut input.populations) {
+        snapshot.runtime_populations = input.catalog.clone();
+        if let Some(workload) = &mut snapshot.workload {
+            workload.population_catalog = input.catalog.clone();
+        }
+    }
+    let options = input.requested.options.clone().unwrap();
+    input.validate(&options).unwrap();
+    assert!(!input.catalog.as_ref().unwrap().has_complete_membership());
+    // Even a caller that omits the redundant workload catalog cannot borrow membership from another window.
+    input.populations[0].workload.as_mut().unwrap().population_catalog = None;
+    input.populations[0].workload.as_mut().unwrap().window_start = Some("2026-10-10T11:00:00Z".into());
+    assert!(input.validate(&options).is_err());
 }

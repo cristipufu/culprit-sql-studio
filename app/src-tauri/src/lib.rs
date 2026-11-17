@@ -1050,6 +1050,7 @@ mod report_projection_tests {
         );
         let rendered = label.render();
         let catalog = RuntimePopulationCatalog {
+            membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
             source: "fixture.runtime".into(),
             partitioned: true,
             requires_selection: false,

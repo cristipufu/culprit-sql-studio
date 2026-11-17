@@ -244,6 +244,7 @@ mod scope_tests {
         let mut snapshot: Snapshot =
             serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         snapshot.workload.as_mut().unwrap().population_catalog = Some(RuntimePopulationCatalog {
+            membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
             source: culprit_core::source_id::QUERY_STORE.into(),
             partitioned: false,
             requires_selection: false,

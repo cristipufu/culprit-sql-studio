@@ -20,11 +20,13 @@ mod current_request_work;
 mod diagnostics;
 mod file_io;
 mod focused_memory;
+mod informational;
 mod maintenance_progress;
 mod memory_feedback;
 mod object_definitions;
 mod observations;
 mod page_server_io;
+mod page_server_reads;
 mod page_task_holders;
 mod page_writers;
 mod parameters;
@@ -494,3 +496,5 @@ async fn an_oversized_decoded_response_is_rejected_even_if_a_transport_ignores_i
 
 mod connection_outcomes;
 mod jobs;
+
+mod query_store_statements;

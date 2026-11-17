@@ -118,28 +118,25 @@ async fn unknown_populations_and_distinct_context_outcome_replica_or_future_dime
 }
 
 #[tokio::test]
-async fn missing_definition_payloads_retain_native_costs_without_fabricated_plan_or_clean_analysis() {
+async fn an_unresolved_native_plan_retains_original_counters_without_qualifying_a_workload() {
     let analysis = analyze_case(QueryCohortCase::MissingPlan).await;
-    let workload = analysis.analyses[0].workload.as_ref().unwrap();
-    assert_eq!((workload.total_executions, workload.total_time_ms), (50.0, 9500.0));
-    assert!(
-        analysis.analyses[0]
-            .limitations
-            .iter()
-            .any(|limit| limit.reason == CollectedAnalysisLimit::MissingPlanDefinition)
-    );
-    let missing_plan = analysis
+    assert!(analysis.analyses[0].workload.is_none());
+    for reason in [CollectedAnalysisLimit::MissingPlanDefinition, CollectedAnalysisLimit::RuntimeDenominatorUnavailable]
+    {
+        assert!(analysis.analyses[0].limitations.iter().any(|limit| limit.reason == reason));
+    }
+    let native = analysis
         .context
         .records
         .iter()
-        .find_map(|row| match &row.row.record {
-            TelemetryRecord::QueryRuntime(row) if row.key.native.qualifiers["plan_id"] == "8" => {
-                row.key.references.plan.as_ref().and_then(|plan| plan.definition_id.as_ref())
-            }
+        .filter_map(|row| match &row.row.record {
+            TelemetryRecord::QueryRuntime(runtime) => Some(runtime),
             _ => None,
         })
-        .unwrap();
-    assert!(workload.queries.iter().flat_map(|query| &query.plans).all(|plan| &plan.id != missing_plan));
+        .collect::<Vec<_>>();
+    assert_eq!(native.iter().map(|row| row.executions.as_str()).collect::<Vec<_>>(), ["1", "9", "40"]);
+    let unresolved = native.iter().find(|row| row.key.native.qualifiers["plan_id"] == "8").unwrap();
+    assert!(unresolved.key.references.plan.as_ref().unwrap().definition_id.is_none());
 
     let restricted = analyze_case(QueryCohortCase::RestrictedStatement).await;
     assert!(restricted.analyses[0].workload.is_none());

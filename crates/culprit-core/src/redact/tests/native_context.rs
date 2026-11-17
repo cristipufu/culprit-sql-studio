@@ -173,6 +173,7 @@ fn new_native_lookup_references_and_private_read_contexts_cannot_escape_in_share
         compiled: None,
         cpu_time_ms: Some(2000.0),
         logical_reads: Some(400.0),
+        page_server_reads: None,
     });
     let plan = query.plan.as_mut().unwrap();
     plan.facts.elapsed_ms = Some(123.0);

@@ -6,6 +6,7 @@ use crate::fleet::{
 };
 use culprit_core::{DatabaseIdentity, Engine};
 use std::sync::Mutex;
+mod completion;
 mod remote_receipts;
 mod scheduler_persistence;
 
@@ -18,6 +19,7 @@ struct Backend {
     resource_bounds: Mutex<Option<(String, String)>>,
     status: Mutex<CollectionStatus>,
     state_sources: Mutex<Option<Vec<StateSourceCoverage>>>,
+    reference_coverage: Mutex<ReferenceCoverage>,
 }
 impl Backend {
     fn new() -> Self {
@@ -30,6 +32,9 @@ impl Backend {
             resource_bounds: Mutex::new(None),
             status: Mutex::new(CollectionStatus::Complete),
             state_sources: Mutex::new(None),
+            reference_coverage: Mutex::new(
+                crate::collection_references::ObservationReferences::default().coverage(true, None),
+            ),
         }
     }
 }
@@ -147,7 +152,7 @@ impl FleetBackend for Backend {
                 read_metrics: None,
                 directory_synced: true,
                 files: vec![],
-                references: ReferenceCoverage::default(),
+                references: self.reference_coverage.lock().unwrap().clone(),
             })
         }
         .await;

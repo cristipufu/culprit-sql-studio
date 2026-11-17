@@ -799,7 +799,8 @@ pub fn verify_reference(manifest: &RangeManifest, reference: &DiagnosticEvidence
         .find(|batch| batch.stream == reference.stream && batch.batch_id == reference.batch_id)
         .ok_or_else(invalid)?;
     let receipt = batch.rows.get(reference.row_ordinal as usize).ok_or_else(invalid)?;
-    if receipt.key.record_id != reference.record_id
+    if receipt.record_id.as_ref() != Some(&reference.record_id)
+        || receipt.key.row_ordinal.checked_sub(1) != Some(reference.row_ordinal)
         || receipt.payload_digest != reference.payload_sha256
         || receipt.key.representation_version != reference.representation_version
         || receipt.native_key != reference.native_key

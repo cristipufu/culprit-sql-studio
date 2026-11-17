@@ -656,6 +656,19 @@ impl crate::Snapshot {
         self.sources.iter().find(|s| same_source(&s.source, name))
     }
 
+    /// Positive statement measurements do not establish absence when their source or population coverage is partial.
+    /// A missing source outcome retains its existing unknown policy; it does not create a new failure.
+    pub fn workload_absence_problem(&self) -> Option<String> {
+        let workload = self.workload.as_ref()?;
+        self.source_problem(&[workload.evidence_source()]).or_else(|| {
+            workload
+                .population_catalog
+                .as_ref()
+                .filter(|catalog| catalog.is_valid() && !catalog.has_complete_membership())
+                .map(|_| crate::t!("pipeline.note.runtime_population_observed"))
+        })
+    }
+
     /// Why one of these sources didn't deliver in full: its recorded outcome, partial or unavailable. Notes are prose,
     /// never read as a failure; a source the scan didn't record has no problem to report (and no clean result either).
     pub fn source_problem(&self, names: &[&str]) -> Option<String> {
@@ -912,3 +925,6 @@ mod tests {
         assert_eq!(notes.len(), 2);
     }
 }
+
+#[cfg(test)]
+mod workload_tests;

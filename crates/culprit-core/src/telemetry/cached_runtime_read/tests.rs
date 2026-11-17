@@ -53,7 +53,10 @@ fn read() -> CachedRuntimeRead {
         }),
     };
     CachedRuntimeRead {
-        read_id: cached_statement_read_id(&CaptureIdentity { observation_id: "1".repeat(32), revision: None }).unwrap(),
+        origin: CachedRuntimeReadOrigin::NativeRead {
+            read_id: cached_statement_read_id(&CaptureIdentity { observation_id: "1".repeat(32), revision: None })
+                .unwrap(),
+        },
         read_complete: true,
         description,
         observations: vec![OperationalObservation {
@@ -279,17 +282,18 @@ fn private_source_label_masking_collisions_withhold_the_carrier_instead_of_overw
 fn original_read_owner_is_independent_from_scope_body_completeness_and_counters() {
     let original = read();
     let mut other = original.clone();
-    other.read_id =
-        cached_statement_read_id(&CaptureIdentity { observation_id: "2".repeat(32), revision: None }).unwrap();
+    other.origin = CachedRuntimeReadOrigin::NativeRead {
+        read_id: cached_statement_read_id(&CaptureIdentity { observation_id: "2".repeat(32), revision: None }).unwrap(),
+    };
     assert!(other.is_valid());
     assert_eq!(other.description, original.description);
     assert_ne!(other.read_key().unwrap(), original.read_key().unwrap());
-    let id = other.read_id.clone();
+    let id = other.read_id().unwrap();
     other.read_complete = false;
-    assert_eq!(other.read_id, id);
+    assert_eq!(other.read_id().unwrap(), id);
     assert_eq!(other.read_key().unwrap(), cached_statement_read_key(&id, &other.description).unwrap());
     for invalid in [String::new(), "A".repeat(64), "0".repeat(63), "0".repeat(65)] {
-        other.read_id = invalid;
+        other.origin = CachedRuntimeReadOrigin::NativeRead { read_id: invalid };
         assert!(!other.is_valid());
         assert!(other.read_key().is_err());
     }
@@ -309,3 +313,6 @@ fn even_an_incomplete_body_cannot_declare_more_than_the_protocol_roster_limit() 
     header.sources[0] = StateSourceCoverage::observed("native-plan-cache".into(), limit + 1, false);
     assert!(!read.is_valid());
 }
+
+mod captured;
+mod scan_namespace;

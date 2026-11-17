@@ -75,7 +75,22 @@ impl<'a> CapturedSpills<'a> {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let read = CachedRuntimeRead {
-                read_id: read_id.clone(),
+                origin: CachedRuntimeReadOrigin::captured(
+                    capture.source(),
+                    DiagnosticCaptureRef {
+                        capture: capture.capture().clone(),
+                        manifest_sha256: capture.capture_manifest_sha256().into(),
+                        source_scope_id: capture.source().captured_range()?.scope_id,
+                    },
+                    capture
+                        .records()
+                        .iter()
+                        .map(|record| {
+                            let ordinal = record.row_ordinal().checked_sub(1).ok_or_else(invalid)?;
+                            CachedRuntimeCapturedPosition::from_export(record.row(), ordinal)
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                )?,
                 description: capture.source().clone(),
                 observations,
                 read_complete: capture.is_read_complete(),

@@ -1,6 +1,9 @@
 //! Outbox transactions retain file ownership on a blocking worker while async source cancellation remains runnable.
 use super::{Files, Reservation, problem};
-use crate::{blocking_state::BlockingState, delivery};
+use crate::{
+    blocking_state::{BlockingAccess, BlockingState},
+    delivery,
+};
 use culprit_core::{Result, telemetry::*};
 use std::path::Path;
 
@@ -292,6 +295,10 @@ impl Outbox {
     }
 }
 impl OutboxDelivery {
+    pub(super) async fn acquire_files(&self) -> BlockingAccess<Files> {
+        self.files.acquire().await
+    }
+
     pub(crate) async fn next_archive(&self) -> Result<Option<String>> {
         self.files.run(|| |files| files.next_archive()).await
     }

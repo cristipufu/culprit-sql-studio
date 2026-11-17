@@ -385,6 +385,9 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub statement_work: Option<Box<crate::StatementWorkReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_server_reads: Option<Box<crate::page_server_read_report::PageServerReadReport>>,
     /// A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
