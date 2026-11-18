@@ -8,6 +8,13 @@ use ts_rs::TS;
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedStorageAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::StorageReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedDatabasePropertiesAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::DatabasePropertiesReport>,

@@ -16,7 +16,7 @@ mod connection_outcomes;
 mod counter_ratios;
 mod jobs;
 pub(crate) mod page_server_reads;
-mod performance_counters;
+pub(crate) mod performance_counters;
 mod statement_work;
 
 #[cfg(test)]

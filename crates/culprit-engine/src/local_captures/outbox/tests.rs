@@ -1,6 +1,7 @@
 use super::*;
 use culprit_collector::analytical::test_support::{LocalCaptureFixture, page_server_read_evidence_cases};
 use culprit_core::{ErrorDetail, limits::OperationGuard, query_store_statement_report::QueryStoreStatementBinding};
+mod snapshots;
 
 async fn read(reader: &OutboxCaptureReader, id: &str) -> Result<LocalPageServerReads> {
     let guard = OperationGuard::new(reader.timeout()).unwrap();

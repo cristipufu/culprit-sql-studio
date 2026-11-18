@@ -420,17 +420,20 @@ pub enum SpaceAllocationKind {
 #[ts(export)]
 pub struct SpaceAllocation {
     pub kind: SpaceAllocationKind,
-    pub bytes: Option<f64>,
+    pub bytes: Option<String>,
 }
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct OperationalSpace {
     pub kind: FileKind,
+    pub population: StoragePopulation,
+    pub observed_at: String,
+    pub database: Option<String>,
     pub scope: FileScope,
     pub native_name: Option<String>,
-    pub total_bytes: Option<f64>,
-    pub used_bytes: Option<f64>,
-    pub limit_bytes: Option<f64>,
+    pub total_bytes: Option<String>,
+    pub used_bytes: Option<String>,
+    pub limit_bytes: Option<String>,
     pub growth_enabled: Option<bool>,
     pub reuse_wait: Option<String>,
     pub parts: Vec<SpaceAllocation>,
@@ -440,6 +443,7 @@ pub struct OperationalSpace {
 #[ts(export)]
 pub enum OperationalFact {
     Space(OperationalSpace),
+    MssqlDatabaseFile(Box<MssqlDatabaseFile>),
     Sequence(SequenceCapacity),
     FileIo(Box<FileIoCounters>),
     Counter(NativeCounterSample),
@@ -519,6 +523,7 @@ impl OperationalFact {
             Self::MssqlMissingIndex(index) => index.key(),
             Self::MssqlQueryCompilation(compilation) => compilation.key(),
             Self::ConfiguredLogRateLimits(point) => point.key(),
+            Self::MssqlDatabaseFile(file) => file.key(),
             Self::HyperscaleLogComponent(point) => point.key(),
             Self::DatabaseProperties(point) => point.key(),
             Self::MssqlCachedRuntime(runtime) => runtime.context.identity.key(),
@@ -562,7 +567,8 @@ impl OperationalFact {
                     compilation.statement = DefinitionPayload::sql(text, engine);
                 }
             }
-            Self::Space(_)
+            Self::MssqlDatabaseFile(_)
+            | Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
             | Self::Counter(_)
@@ -587,15 +593,25 @@ impl OperationalFact {
         }
     }
     pub fn is_valid(&self) -> bool {
-        let number = |value: f64| value.is_finite() && value >= 0.0;
         let name = |value: &str| value.len() <= 2048;
         match self {
+            Self::MssqlDatabaseFile(file) => file.is_valid(),
             Self::Space(space) => {
-                space.native_name.as_deref().is_none_or(name)
+                space.population.matches(space.kind, space.scope)
+                    && storage::storage_time(&space.observed_at)
+                    && space.database.as_deref().is_none_or(storage::storage_name)
+                    && space.native_name.as_deref().is_none_or(name)
                     && space.reuse_wait.as_deref().is_none_or(name)
-                    && [space.total_bytes, space.used_bytes, space.limit_bytes].into_iter().flatten().all(number)
+                    && [&space.total_bytes, &space.used_bytes, &space.limit_bytes]
+                        .into_iter()
+                        .all(|value| value.as_deref().is_none_or(valid_counter))
                     && space.parts.len() <= 16
-                    && space.parts.iter().all(|part| part.bytes.is_none_or(number))
+                    && space.parts.iter().all(|part| part.bytes.as_deref().is_none_or(valid_counter))
+                    && space
+                        .parts
+                        .iter()
+                        .enumerate()
+                        .all(|(index, part)| !space.parts[..index].iter().any(|previous| previous.kind == part.kind))
             }
             Self::Sequence(sequence) => {
                 name(&sequence.name)
@@ -681,6 +697,7 @@ impl OperationalObservation {
                 OperationalFact::ConfiguredLogRateLimits(_) => self.source == CONFIGURED_LOG_RATES_SOURCE,
                 OperationalFact::HyperscaleLogComponent(_) => self.source == HYPERSCALE_LOG_COMPONENTS_SOURCE,
                 OperationalFact::DatabaseProperties(_) => self.source == DATABASE_PROPERTIES_SOURCE,
+                OperationalFact::MssqlDatabaseFile(_) => self.source == crate::source_id::FILE_CAPACITY,
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,

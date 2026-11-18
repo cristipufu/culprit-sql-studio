@@ -237,7 +237,7 @@ pub(in crate::outbox) fn checkpoint_references(
             .chain(episode.report.iter().flat_map(DiagnosticReport::references))
     })
 }
-fn pin(tx: &Transaction<'_>, owner: &str, observation_id: &str) -> Result<()> {
+pub(in crate::outbox) fn pin(tx: &Transaction<'_>, owner: &str, observation_id: &str) -> Result<()> {
     tx.execute("INSERT OR IGNORE INTO diagnostic_pins VALUES(?1,?2)", params![owner, observation_id])
         .map_err(storage)?;
     Ok(())

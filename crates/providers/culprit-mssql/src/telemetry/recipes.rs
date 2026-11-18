@@ -232,11 +232,11 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(crate::task_space::bounded_budget)
     .version(2),
-    state!("mssql.operational", Operational).baseline().version(4),
+    state!("mssql.operational", Operational).baseline().version(5),
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
-        .version(3),
+        .version(4),
     state!("mssql.memory-failures", MemoryFailures)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance), RecipeSubject::Shared(SharedResourceKind::Pool)])
         .bounded(state::memory_failure_budget)

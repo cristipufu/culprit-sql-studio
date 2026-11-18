@@ -21,11 +21,12 @@ import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
 import type { SqliteFileHealth } from "./SqliteFileHealth";
 import type { StatementCounterSnapshot } from "./StatementCounterSnapshot";
+import type { StorageRead } from "./StorageRead";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
 import type { TimescaleJobsSnapshot } from "./TimescaleJobsSnapshot";
 
-export type OperationalStats = { cached_runtime?: CachedRuntimeRead, 
+export type OperationalStats = { storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
 /**
  * An independent original capture; its shared target and receipts are never current database ownership.
  */

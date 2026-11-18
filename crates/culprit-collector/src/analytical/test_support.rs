@@ -51,7 +51,7 @@ pub use queries::{query_evidence, query_variant_evidence, query_wait_evidence_ca
 mod informational;
 pub use informational::{assert_informational_capture, informational_query_evidence};
 mod local_capture;
-pub use local_capture::LocalCaptureFixture;
+pub use local_capture::{LocalCaptureFixture, LocalSnapshotCase, local_snapshot_evidence_cases};
 mod query_populations;
 pub use query_populations::{
     assert_query_population_capture, query_population_evidence, query_population_evidence_cases,
@@ -869,15 +869,18 @@ pub fn shared_operational() -> (CollectionDescription, Vec<TelemetryRecord>) {
         key: "tempdb:data".into(),
         fact: OperationalFact::Space(OperationalSpace {
             kind: culprit_core::FileKind::Temp,
+            population: StoragePopulation::SharedTempdbDataFiles,
+            observed_at: "2020-01-01T12:00:00Z".into(),
+            database: None,
             scope: culprit_core::FileScope::Server,
             native_name: Some("tempdb".into()),
-            total_bytes: Some(1024.0),
+            total_bytes: Some("1024".into()),
             used_bytes: None,
             limit_bytes: None,
             growth_enabled: Some(true),
             reuse_wait: None,
             parts: vec![
-                SpaceAllocation { kind: SpaceAllocationKind::InternalObjects, bytes: Some(0.0) },
+                SpaceAllocation { kind: SpaceAllocationKind::InternalObjects, bytes: Some("0".into()) },
                 SpaceAllocation { kind: SpaceAllocationKind::VersionStore, bytes: None },
             ],
         }),
@@ -1002,3 +1005,8 @@ pub async fn released_spool(
 
 mod page_server_definitions;
 pub use page_server_definitions::{QueryStoreStatementCase, query_store_statement_evidence_cases};
+
+mod storage;
+pub use storage::{StorageCase, storage_evidence};
+mod qualification;
+pub use qualification::{QualificationFixture, QualificationFixtureCase};

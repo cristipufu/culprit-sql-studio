@@ -620,7 +620,20 @@ async fn acquire(
     if client.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
     }
-    operations::collect(provider.pool.clone(), &probe, &mut snapshot).await;
+    operations::collect(
+        provider.pool.clone(),
+        &probe,
+        culprit_core::DatabaseIdentity::server(
+            Engine::Mssql,
+            &probe.database,
+            &provider.endpoint_host,
+            provider.endpoint_port,
+            None,
+        )
+        .into(),
+        &mut snapshot,
+    )
+    .await;
     let (memory_failures, memory_failure_coverage) =
         crate::memory_failures::collect(provider.pool.clone(), options.collect_memory_failures, probe.engine_edition)
             .await;

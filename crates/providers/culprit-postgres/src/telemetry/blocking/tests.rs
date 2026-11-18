@@ -201,6 +201,60 @@ async fn request_reuse_missing_participants_and_native_scope_changes_never_borro
 }
 
 #[tokio::test]
+async fn missing_selected_visibility_or_initial_native_owner_stops_before_optional_blocker_and_sql_reads() {
+    let focus = qualified_focus().await;
+    for missing in ["actor", "member"] {
+        let mut reader = scripted();
+        if missing == "actor" {
+            reader.replies[2] = Ok(vec![fixture::row(&[
+                ("observed_at", Some(AT)),
+                ("pid", Some("42")),
+                ("database_oid", Some("16384")),
+                ("database", Some("shop")),
+                // The real projection coalesces hidden a.state to a.backend_type, never SQL NULL.
+                ("state", Some("client backend")),
+                ("backend_start", None),
+            ])]);
+        } else {
+            reader.replies[1] =
+                Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source")));
+        }
+        let error = capture(&mut reader, "fixture.invalid", 9, &request(focus.clone())).await.err().unwrap();
+        if missing == "actor" {
+            assert_eq!(error.code, ErrorCode::PermissionDenied);
+            assert_eq!(reader.calls.len(), 3);
+        } else {
+            assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceUnavailable);
+            assert_eq!(reader.calls.len(), 2);
+        }
+        assert!(reader.calls.iter().all(|sql| !sql.contains("pg_blocking_pids") && !sql.contains("AS query,")));
+    }
+}
+
+#[tokio::test]
+async fn final_statistics_visibility_loss_is_explicit_in_the_retained_focused_report() {
+    let mut reader = scripted();
+    reader.replies[8] = Ok(vec![fixture::metadata_with_visibility(180_000, "f", PROCESS, false)]);
+    let captured = capture(&mut reader, "fixture.invalid", 9, &request(qualified_focus().await)).await.unwrap();
+    let rows = captured
+        .records
+        .iter()
+        .map(|row| {
+            let TelemetryRecord::Activity(observation) = row else { panic!() };
+            ActivityFrameRow { observation, reference: None }
+        })
+        .collect::<Vec<_>>();
+    let report = culprit_checks::focused_blocking::explain(&captured.description, &rows, true).unwrap();
+    let SourceObservation::FocusedBlocking { snapshot, .. } = &captured.description.observation else { panic!() };
+    assert_eq!(snapshot.coverage.error_code, Some(ErrorCode::PermissionDenied));
+    assert_eq!(report.binding, FocusedRequestBinding::Matched, "the independently observed original key stays exact");
+    assert_eq!(report.source_state, culprit_core::SourceState::Partial);
+    assert!(
+        report.limitations.iter().any(|limitation| limitation == &culprit_core::t!("view.blocking.limit.visibility"))
+    );
+}
+
+#[tokio::test]
 async fn ending_during_enrichment_retains_earlier_facts_and_its_explicit_final_boundary() {
     let focus = qualified_focus().await;
     for (last, expected) in [

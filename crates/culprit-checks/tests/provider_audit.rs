@@ -86,6 +86,7 @@ fn native_deadlock_history_is_unavailable_without_promising_a_rescan_or_reportin
 fn file_capacity_separates_growth_room_hard_limits_and_shared_context() {
     let mut s = snapshot(Engine::Mssql);
     let space = SpaceUsage {
+        origin: None,
         parts: vec![],
         name: "log".into(),
         kind: FileKind::Log,

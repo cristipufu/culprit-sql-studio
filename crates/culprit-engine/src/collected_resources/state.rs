@@ -146,7 +146,7 @@ impl<'a> CapturedState<'a> {
 }
 
 /// One read qualification policy for authenticated archive selections and original local snapshots.
-pub(super) fn read_outcome(coverage: &StateSourceCoverage, rows: usize, read_complete: bool) -> Result<SourceOutcome> {
+pub(crate) fn read_outcome(coverage: &StateSourceCoverage, rows: usize, read_complete: bool) -> Result<SourceOutcome> {
     if rows > coverage.records as usize {
         return Err(invalid());
     }

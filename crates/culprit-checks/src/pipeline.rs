@@ -36,6 +36,7 @@ mod performance_counters;
 mod replication;
 mod runtime_populations;
 mod statement_work;
+mod storage;
 mod wait_counters;
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
@@ -287,6 +288,7 @@ impl Pipeline {
         let hyperscale_log_components = hyperscale_log_components::explain(&mut snapshot);
         let memory_clerks = memory_clerks::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
+        let storage = storage::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
@@ -386,6 +388,7 @@ impl Pipeline {
             }
         }
         Report {
+            storage,
             snapshot,
             findings,
             locked,

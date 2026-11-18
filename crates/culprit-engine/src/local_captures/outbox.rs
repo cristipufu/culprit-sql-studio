@@ -11,6 +11,7 @@ use culprit_collector::outbox::{
 use culprit_core::telemetry::*;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+mod reports;
 
 enum LocalOutbox {
     Directory(PathBuf),
@@ -103,8 +104,8 @@ impl OutboxCaptureReader {
         #[cfg(test)]
         let boundary = self.projection_boundary.clone();
         let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
-        match request.analysis {
-            LocalCaptureAnalysisKind::PageServerReads => {
+        match request.analysis.snapshot_dataset() {
+            None => {
                 delivery
                     .with_completed_query_history(lookup, self.budget, request.operation, permit, move |capture| {
                         let result = explain_page_server_reads(capture).map(LocalCapturedAnalysis::PageServerReads);
@@ -116,43 +117,16 @@ impl OutboxCaptureReader {
                     })
                     .await
             }
-            LocalCaptureAnalysisKind::HyperscaleLogComponents => {
+            Some(dataset) => {
                 delivery
-                    .with_completed_snapshot(
-                        lookup,
-                        SnapshotDataset::HyperscaleLogComponents,
-                        self.budget,
-                        request.operation,
-                        permit,
-                        move |capture| {
-                            let result = explain_hyperscale_log_components(capture)
-                                .map(LocalCapturedAnalysis::HyperscaleLogComponents);
-                            #[cfg(test)]
-                            if let Some(boundary) = boundary {
-                                boundary()?;
-                            }
-                            result
-                        },
-                    )
-                    .await
-            }
-            LocalCaptureAnalysisKind::MemoryClerks => {
-                delivery
-                    .with_completed_snapshot(
-                        lookup,
-                        SnapshotDataset::Operational,
-                        self.budget,
-                        request.operation,
-                        permit,
-                        move |capture| {
-                            let result = explain_memory_clerks(capture).map(LocalCapturedAnalysis::MemoryClerks);
-                            #[cfg(test)]
-                            if let Some(boundary) = boundary {
-                                boundary()?;
-                            }
-                            result
-                        },
-                    )
+                    .with_completed_snapshot(lookup, dataset, self.budget, request.operation, permit, move |capture| {
+                        let result = explain_operational(capture, request.analysis);
+                        #[cfg(test)]
+                        if let Some(boundary) = boundary {
+                            boundary()?;
+                        }
+                        result
+                    })
                     .await
             }
         }
@@ -235,37 +209,32 @@ fn explain_page_server_reads(capture: CompletedQueryHistory) -> Result<LocalPage
     })
 }
 
-fn explain_hyperscale_log_components(capture: CompletedSnapshot) -> Result<LocalHyperscaleLogComponents> {
+fn explain_operational(capture: CompletedSnapshot, kind: LocalCaptureAnalysisKind) -> Result<LocalCapturedAnalysis> {
     let connection = capture.connection().into();
     let collected_from = capture.collected_from().into();
     let collected_until = capture.collected_until().into();
     let bytes_read = capture.bytes_read();
-    let read = capture.into_operational_read()?;
-    let report = culprit_checks::hyperscale_log_components::explain_captured(&read)?;
-    Ok(LocalHyperscaleLogComponents {
+    let original = LocalOperationalCapture {
         connection,
-        read: Box::new(read),
-        report: Box::new(report),
+        read: Box::new(capture.into_operational_read()?),
         collected_from,
         collected_until,
         bytes_read,
-    })
-}
-fn explain_memory_clerks(capture: CompletedSnapshot) -> Result<LocalMemoryClerks> {
-    let connection = capture.connection().into();
-    let collected_from = capture.collected_from().into();
-    let collected_until = capture.collected_until().into();
-    let bytes_read = capture.bytes_read();
-    let read = capture.into_operational_read()?;
-    let report = culprit_checks::memory_clerks::explain_captured(&read)?;
-    Ok(LocalMemoryClerks {
-        connection,
-        read: Box::new(read),
-        report: Box::new(report),
-        collected_from,
-        collected_until,
-        bytes_read,
-    })
+    };
+    match kind {
+        LocalCaptureAnalysisKind::MemoryClerks => {
+            let report = Box::new(culprit_checks::memory_clerks::explain_captured(original.read())?);
+            Ok(LocalCapturedAnalysis::MemoryClerks(LocalMemoryClerks { original, report }))
+        }
+        LocalCaptureAnalysisKind::HyperscaleLogComponents => {
+            let report = Box::new(culprit_checks::hyperscale_log_components::explain_captured(original.read())?);
+            Ok(LocalCapturedAnalysis::HyperscaleLogComponents(LocalHyperscaleLogComponents { original, report }))
+        }
+        _ => {
+            let report = reports::explain(kind, original.read())?;
+            Ok(LocalCapturedAnalysis::Snapshot(LocalSnapshotAnalysis { original, report }))
+        }
+    }
 }
 
 fn check(operation: &OperationHandle) -> Result<()> {

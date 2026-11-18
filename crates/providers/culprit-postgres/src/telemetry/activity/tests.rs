@@ -43,6 +43,17 @@ fn metadata_with_role(at: &str, started: &str, visible: bool, standby: Option<Op
 fn actor(pid: &str, state: &str, backend: Option<&str>) -> Row {
     actor_with_wait(pid, state, backend, Some(("Lock", "transactionid")), "100")
 }
+fn member(address: Option<&str>, at: &str) -> Row {
+    Row::from_fields(
+        [
+            ("address", address.map(str::to_owned)),
+            ("port", Some("5432".into())),
+            ("system_identifier", Some("42".into())),
+            ("observed_at", Some(at.into())),
+        ]
+        .map(|(name, value)| (name.into(), value)),
+    )
+}
 fn actor_with_wait(pid: &str, state: &str, backend: Option<&str>, wait: Option<(&str, &str)>, elapsed_ms: &str) -> Row {
     Row::from_fields(
         [
@@ -76,8 +87,10 @@ fn reader(rows: Vec<Row>, visible: bool) -> Read {
     Read {
         replies: vec![
             Ok(vec![metadata("2020-01-01T06:00:00Z", "2020-01-01T05:00:00Z", visible)]),
+            Ok(vec![member(Some("192.0.2.8"), "2020-01-01T06:00:00.050000Z")]),
             Ok(rows),
             Ok(vec![metadata("2020-01-01T06:00:00.200000Z", "2020-01-01T05:00:00Z", visible)]),
+            Ok(vec![member(Some("192.0.2.8"), "2020-01-01T06:00:00.250000Z")]),
         ]
         .into(),
         calls: vec![],
@@ -94,7 +107,12 @@ async fn metadata_baseline_keeps_short_waits_and_ordinary_backends_before_any_op
     assert!(native.is_valid() && native.coverage.complete_scope);
     assert_eq!(native.observations, 2);
     assert_eq!(native.population, ActivityPopulation::ClientBackends);
-    assert_eq!(reader.calls.len(), 3);
+    assert_eq!(reader.calls.len(), 5);
+    assert_eq!(reader.calls.iter().filter(|(sql, _)| sql.contains("pg_control_system")).count(), 2);
+    let context = NativeReadContext::from_activity(&capture.description).unwrap();
+    assert!(context.has_qualified_local_owner());
+    assert_eq!(context.observed_from, "2020-01-01T06:00:00.000000000Z");
+    assert_eq!(context.observed_until, "2020-01-01T06:00:00.250000000Z");
     assert!(reader.calls.iter().all(|(sql, _)| !sql.contains("pg_blocking_pids")
         && !sql.contains("pg_locks")
         && !sql.contains("a.query ELSE")));
@@ -119,7 +137,7 @@ async fn a_native_lock_point_at_forty_seconds_needs_neither_an_owner_walk_nor_an
     assert!(row.wait.as_ref().unwrap().owners.is_empty());
     assert_eq!(row.blocking_status, ActivityBlockingStatus::Unknown);
     assert!(!row.conditions(&ActivityPolicy::default()).contains(&ActivityCondition::Blocked));
-    assert_eq!(reader.calls.len(), 3);
+    assert_eq!(reader.calls.len(), 5);
     assert!(reader.calls.iter().all(|(sql, _)| !sql.contains("pg_blocking_pids")
         && !sql.contains("pg_locks")
         && !sql.contains("a.query ELSE")));
@@ -134,7 +152,7 @@ async fn unknown_extension_and_other_native_waits_are_not_a_proven_negative_lock
         let TelemetryRecord::Activity(row) = &capture.records[0] else { panic!() };
         assert_eq!(row.waiting_on_lock, None, "{wait:?}");
         assert!(row.wait.as_ref().is_none_or(|wait| wait.elapsed_ms.is_none()));
-        assert_eq!(reader.calls.len(), 3);
+        assert_eq!(reader.calls.len(), 5);
     }
 }
 #[tokio::test]
@@ -150,8 +168,8 @@ async fn a_drained_row_witness_retains_the_prefix_with_partial_native_coverage()
     assert_eq!(native.native_rows, 2);
     assert_eq!(native.coverage.stopped, Some(CollectionStop::RowLimit));
     assert!(!native.coverage.complete_scope);
-    assert_eq!(reader.calls[1].1, 2);
-    assert_eq!(reader.calls.len(), 3, "no optional lock or payload work precedes the baseline");
+    assert_eq!(reader.calls[2].1, 2);
+    assert_eq!(reader.calls.len(), 5, "only the bounded database/member checks bracket the baseline");
 }
 #[tokio::test]
 async fn hidden_or_disabled_rows_cannot_become_fabricated_idle_sessions_or_complete_absence() {
@@ -177,35 +195,36 @@ async fn final_source_change_and_terminal_failures_withhold_the_frame_without_op
         Err(CollectionStop::CancellationUnconfirmed.error()),
     ] {
         let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
-        reader.replies.pop_back();
-        reader.replies.push_back(final_read);
+        reader.replies[3] = final_read;
         assert!(capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.is_err());
-        assert_eq!(reader.calls.len(), 3);
-        assert!(reader.replies.is_empty());
+        assert_eq!(reader.calls.len(), 4);
+        assert_eq!(reader.replies.len(), 1, "no member, closure or payload read after a terminal metadata failure");
     }
 }
 
 #[tokio::test]
-async fn already_read_primary_or_recovery_role_is_retained_without_inventing_member_authority_or_more_native_work() {
+async fn native_member_process_and_updateability_are_retained_from_both_original_read_bounds() {
     for (standby, writable) in [("f", true), ("t", false)] {
-        let mut reader = Read {
-            calls: Vec::new(),
-            replies: vec![
-                Ok(vec![metadata_with_role("2020-01-01T06:00:00Z", "2020-01-01T05:00:00Z", true, Some(Some(standby)))]),
-                Ok(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))]),
-                Ok(vec![metadata_with_role(
-                    "2020-01-01T06:00:00.200000Z",
-                    "2020-01-01T05:00:00Z",
-                    true,
-                    Some(Some(standby)),
-                )]),
-            ]
-            .into(),
-        };
+        let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
+        for phase in [0, 3] {
+            reader.replies[phase] = Ok(vec![metadata_with_role(
+                if phase == 0 { "2020-01-01T06:00:00Z" } else { "2020-01-01T06:00:00.200000Z" },
+                "2020-01-01T05:00:00Z",
+                true,
+                Some(Some(standby)),
+            )]);
+        }
         let capture = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.unwrap();
         let native = capture.description.observation.activity().unwrap();
         assert_eq!(native.database_writable, Some(writable));
-        assert_eq!(capture.description.partition, SourcePartition::Target);
+        let SourcePartition::InstanceLocal { member: Some(member), epoch: Some(epoch) } =
+            &capture.description.partition
+        else {
+            panic!("the exact native member and process must survive the original acquisition")
+        };
+        assert_eq!(member.native.id, "192.0.2.8");
+        assert_eq!(member.namespace.id, "42");
+        assert_eq!(native.epoch.as_ref(), Some(epoch));
         assert!(native.epoch.is_some());
         assert!(capture.description.matches_request(&request(500)));
         let context = NativeReadContext {
@@ -215,13 +234,10 @@ async fn already_read_primary_or_recovery_role_is_retained_without_inventing_mem
             observed_until: native.observed_until.clone(),
             database_writable: native.database_writable,
         };
-        assert!(!context.has_qualified_local_owner(), "role/start time/routing cannot create a physical member");
-        assert_eq!(reader.calls.len(), 3);
+        assert!(context.has_qualified_local_owner());
+        assert_eq!(reader.calls.len(), 5);
         assert!(reader.replies.is_empty());
-        assert!(reader.calls.iter().all(|(sql, _)| !sql.contains("pg_control_system")
-            && !sql.contains("inet_server_addr")
-            && !sql.contains("pg_blocking_pids")
-            && !sql.contains("pg_locks")));
+        assert!(reader.calls.iter().all(|(sql, _)| !sql.contains("pg_blocking_pids") && !sql.contains("pg_locks")));
         let canonical = ExportedRecord::new(
             &capture.description,
             &CaptureIdentity { observation_id: "native-role".into(), revision: None },
@@ -233,7 +249,7 @@ async fn already_read_primary_or_recovery_role_is_retained_without_inventing_mem
 }
 
 #[tokio::test]
-async fn hidden_activity_does_not_discard_accessible_role_or_turn_it_into_member_or_complete_population() {
+async fn hidden_activity_retains_independent_native_owner_without_claiming_complete_population() {
     let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], false);
     let capture = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.unwrap();
     let native = capture.description.observation.activity().unwrap();
@@ -241,15 +257,15 @@ async fn hidden_activity_does_not_discard_accessible_role_or_turn_it_into_member
     assert_eq!(native.coverage.state, culprit_core::SourceState::Partial);
     assert_eq!(native.coverage.error_code, Some(ErrorCode::PermissionDenied));
     assert!(!native.coverage.complete_scope);
-    assert_eq!(capture.description.partition, SourcePartition::Target);
+    assert!(NativeReadContext::from_activity(&capture.description).unwrap().has_qualified_local_owner());
     assert_eq!(capture.records.len(), 1);
-    assert_eq!(reader.calls.len(), 3);
+    assert_eq!(reader.calls.len(), 5);
 }
 
 #[tokio::test]
 async fn missing_null_or_malformed_native_role_never_defaults_to_primary_or_triggers_fallback_queries() {
     for role in [None, Some(None), Some(Some("unknown")), Some(Some(""))] {
-        for phase in [0, 2] {
+        for phase in [0, 3] {
             let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
             reader.replies[phase] = Ok(vec![metadata_with_role(
                 if phase == 0 { "2020-01-01T06:00:00Z" } else { "2020-01-01T06:00:00.200000Z" },
@@ -258,7 +274,8 @@ async fn missing_null_or_malformed_native_role_never_defaults_to_primary_or_trig
                 role,
             )]);
             let error = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.err().unwrap();
-            assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage, "{role:?} at {phase}");
+            let expected = if phase == 0 { CollectionStop::InvalidPage } else { CollectionStop::SourceChanged };
+            assert_eq!(CollectionStop::from_error(&error), expected, "{role:?} at {phase}");
             assert_eq!(reader.calls.len(), phase + 1, "no read or role fallback after invalid native metadata");
         }
     }
@@ -267,23 +284,82 @@ async fn missing_null_or_malformed_native_role_never_defaults_to_primary_or_trig
 #[tokio::test]
 async fn promotion_or_recovery_role_flip_on_same_process_retires_all_provisional_baseline_rows() {
     for (before, after) in [("f", "t"), ("t", "f")] {
-        let mut reader = Read {
-            calls: Vec::new(),
-            replies: vec![
-                Ok(vec![metadata_with_role("2020-01-01T06:00:00Z", "2020-01-01T05:00:00Z", true, Some(Some(before)))]),
-                Ok(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))]),
-                Ok(vec![metadata_with_role(
-                    "2020-01-01T06:00:00.200000Z",
-                    "2020-01-01T05:00:00Z",
-                    true,
-                    Some(Some(after)),
-                )]),
-            ]
-            .into(),
-        };
+        let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
+        for (phase, role) in [(0, before), (3, after)] {
+            reader.replies[phase] = Ok(vec![metadata_with_role(
+                if phase == 0 { "2020-01-01T06:00:00Z" } else { "2020-01-01T06:00:00.200000Z" },
+                "2020-01-01T05:00:00Z",
+                true,
+                Some(Some(role)),
+            )]);
+        }
         let error = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged);
-        assert_eq!(reader.calls.len(), 3);
-        assert!(reader.replies.is_empty());
+        assert_eq!(reader.calls.len(), 4);
+        assert_eq!(reader.replies.len(), 1);
     }
+}
+
+#[tokio::test]
+async fn denied_or_unavailable_initial_native_identity_stays_partial_after_a_later_success() {
+    for initial in [
+        Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source"))),
+        Ok(vec![member(None, "2020-01-01T06:00:00.050000Z")]),
+        Ok(vec![member(Some("not-a-native-address"), "2020-01-01T06:00:00.050000Z")]),
+    ] {
+        let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
+        reader.replies[1] = initial;
+        let captured = capture(&mut reader, "a-configured-route-is-not-a-member", 5432, &request(500)).await.unwrap();
+        let frame = captured.description.observation.activity().unwrap();
+        let context = NativeReadContext::from_activity(&captured.description).unwrap();
+        assert!(!context.has_qualified_local_owner());
+        assert!(matches!(context.partition, SourcePartition::InstanceLocal { member: None, epoch: Some(_) }));
+        assert_eq!(frame.coverage.state, culprit_core::SourceState::Partial);
+        assert_eq!(frame.coverage.stopped, Some(CollectionStop::SourceUnavailable));
+        assert!(!frame.coverage.complete_scope);
+        assert_eq!(captured.records.len(), 1, "the accessible native lock point remains useful context");
+        assert_eq!(reader.calls.len(), 5);
+        let exported = ExportedRecord::new(
+            &captured.description,
+            &CaptureIdentity { observation_id: "unknown-original-member".into(), revision: None },
+            captured.records[0].clone(),
+        )
+        .unwrap();
+        assert!(exported.record.is_valid());
+    }
+}
+
+#[tokio::test]
+async fn changed_or_lost_final_member_and_reversed_native_clocks_withhold_all_provisional_rows() {
+    for (phase, final_read, expected) in [
+        (4, Ok(vec![member(Some("192.0.2.9"), "2020-01-01T06:00:00.250000Z")]), CollectionStop::SourceChanged),
+        (
+            4,
+            Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source"))),
+            CollectionStop::SourceChanged,
+        ),
+        (4, Ok(vec![member(Some("192.0.2.8"), "2020-01-01T05:59:59Z")]), CollectionStop::SourceChanged),
+        (4, Err(CollectionStop::Cancelled.error()), CollectionStop::Cancelled),
+        (4, Err(CollectionStop::CancellationUnconfirmed.error()), CollectionStop::CancellationUnconfirmed),
+        (3, Ok(vec![metadata("2020-01-01T05:59:59Z", "2020-01-01T05:00:00Z", true)]), CollectionStop::SourceChanged),
+    ] {
+        let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
+        reader.replies[phase] = final_read;
+        let error = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), expected);
+        assert_eq!(reader.calls.len(), phase + 1);
+    }
+}
+
+#[tokio::test]
+async fn lost_final_statistics_visibility_retains_the_owner_and_positive_rows_with_partial_coverage() {
+    let mut reader = reader(vec![actor("11", "active", Some("2020-01-01T05:30:00Z"))], true);
+    reader.replies[3] = Ok(vec![metadata("2020-01-01T06:00:00.200000Z", "2020-01-01T05:00:00Z", false)]);
+    let captured = capture(&mut reader, "fixture.invalid", 5432, &request(500)).await.unwrap();
+    let frame = captured.description.observation.activity().unwrap();
+    assert!(NativeReadContext::from_activity(&captured.description).unwrap().has_qualified_local_owner());
+    assert_eq!(frame.coverage.error_code, Some(ErrorCode::PermissionDenied));
+    assert_eq!(frame.coverage.state, culprit_core::SourceState::Partial);
+    assert!(!frame.coverage.complete_scope);
+    assert_eq!(captured.records.len(), 1);
 }

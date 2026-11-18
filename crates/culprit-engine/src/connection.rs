@@ -32,6 +32,8 @@ pub(crate) struct Connections<'a> {
     pub providers: &'a [(Engine, ProviderRegistration)],
     pub ssh: &'a crate::ssh::Manager,
     pub source_gate: &'a culprit_read::admission::SourceGate,
+    #[cfg(feature = "collector")]
+    pub qualification_bindings: &'a crate::qualification_bindings::QualificationBindings,
 }
 
 impl Connections<'_> {
@@ -46,16 +48,29 @@ impl Connections<'_> {
         self.selected_registration(registry::engine(spec)?).and_then(|registration| registration.open(spec))
     }
 
-    fn selected_registration(&self, engine: Engine) -> Result<ProviderRegistration> {
+    pub(crate) fn selected_registration(&self, engine: Engine) -> Result<ProviderRegistration> {
         match self.providers.iter().find(|(selected, _)| *selected == engine) {
             Some((_, registration)) => Ok(registration.clone()),
             None => registry::registration(engine),
         }
     }
 
+    fn connection_registration(&self, name: &str) -> Result<ProviderRegistration> {
+        let stored = self.store.get(name)?;
+        let registration = self.selected_registration(stored.engine)?;
+        #[cfg(feature = "collector")]
+        let registration =
+            registration.with_installed(self.qualification_bindings.receipts(name, &route::revision(&stored)?)?)?;
+        Ok(registration)
+    }
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn native_route_revision(&self, name: &str) -> Result<String> {
+        route::revision(&self.store.get(name)?)
+    }
+
     pub(crate) fn telemetry_recipes(&self, name: &str) -> Result<Vec<culprit_core::telemetry::RecipeDescriptor>> {
-        let engine = self.store.get(name)?.engine;
-        Ok(self.selected_registration(engine)?.telemetry_recipes().to_vec())
+        Ok(self.connection_registration(name)?.telemetry_recipes().to_vec())
     }
 
     pub(crate) fn qualification_component(&self, name: &str) -> Result<Option<culprit_core::ComponentVersion>> {
@@ -70,8 +85,7 @@ impl Connections<'_> {
         source: &culprit_core::telemetry::CollectionDescription,
         record: &culprit_core::telemetry::ExportedRecord,
     ) -> Result<bool> {
-        let engine = self.store.get(name)?.engine;
-        self.selected_registration(engine)?.verify_cost(receipt, source, record)
+        self.connection_registration(name)?.verify_cost(receipt, source, record)
     }
 
     pub(crate) fn connections(&self) -> Result<Vec<ConnectionInfo>> {
@@ -546,12 +560,15 @@ impl Connections<'_> {
     }
 
     pub(crate) fn route_revision(&self, name: &str) -> Result<String> {
-        route::revision(&self.store.get(name)?)
+        let route = route::revision(&self.store.get(name)?)?;
+        #[cfg(feature = "collector")]
+        let route = self.qualification_bindings.route_revision(name, &route)?;
+        Ok(route)
     }
 
     pub(crate) fn saved_route(&self, name: &str) -> Result<SavedRoute> {
         let stored = self.store.get(name)?;
-        Ok(SavedRoute { name: name.to_owned(), revision: route::revision(&stored)?, stored })
+        Ok(SavedRoute { name: name.to_owned(), revision: self.route_revision(name)?, stored })
     }
 
     pub(crate) fn require_current_route(&self, route: &SavedRoute) -> Result<()> {
@@ -561,13 +578,23 @@ impl Connections<'_> {
         Ok(())
     }
 
-    pub(crate) async fn provider_at_route(&self, route: &SavedRoute) -> Result<Box<dyn Provider>> {
-        // Authentication and construction both use this immutable snapshot. Never re-read a replacement route
-        // after validating a prior one, including while credentials or an SSH tunnel are being resolved.
+    async fn spec_at_route(&self, route: &SavedRoute) -> Result<ConnectionSpec> {
         self.require_current_route(route)?;
         let spec = self.saved_spec(&route.name, &route.stored, route.stored.ssh.clone()).await?;
         self.require_current_route(route)?;
-        self.open_provider(&spec)
+        Ok(spec)
+    }
+    pub(crate) async fn provider_at_route(&self, route: &SavedRoute) -> Result<Box<dyn Provider>> {
+        self.open_provider(&self.spec_at_route(route).await?)
+    }
+    #[cfg(feature = "collector")]
+    pub(crate) async fn qualification_source_at_route(
+        &self,
+        route: &SavedRoute,
+        registration: &ProviderRegistration,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        registration.qualification_source(&self.spec_at_route(route).await?, request)
     }
 
     /// Validate the same immutable saved metadata that will supply authentication and native construction.
@@ -579,7 +606,7 @@ impl Connections<'_> {
     ) -> Result<Box<dyn Provider>> {
         admission.window.check_start()?;
         let stored = self.store.get(name)?;
-        let current = route::revision(&stored)?;
+        let current = self.route_revision(name)?;
         if admission.route_revision.as_deref().is_some_and(|expected| expected != current) {
             return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
         }

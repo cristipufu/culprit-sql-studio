@@ -30,6 +30,7 @@ import { CounterRatios } from "./CounterRatios";
 import { MemoryClerks } from "./MemoryClerks";
 import { HyperscaleLogComponents } from "./HyperscaleLogComponents";
 import { DatabaseProperties } from "./DatabaseProperties";
+import { StorageEvidence } from "./StorageEvidence";
 import { ConfiguredLogRates } from "./ConfiguredLogRates";
 import { WaitCounters } from "./WaitCounters";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
@@ -144,6 +145,9 @@ export function HealthTab({
   const counterRatios = report.counter_ratios;
   const counterRatioRead = pressure?.resource_counters?.some((sample) => sample.ratios.length > 0) ?? false;
   const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
+  const storage = report.storage;
+  const storageRead = report.snapshot.operations.storage;
+  const storageIssue = observationReadIssue("file_capacity", report.snapshot.sources ?? [], Boolean(storageRead));
   const databaseProperties = report.database_properties;
   const databasePropertiesRead = report.snapshot.operations.database_properties;
   const databasePropertiesRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "database-properties");
@@ -171,8 +175,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, databasePropertiesIssue, memoryClerkIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, storage, storageRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, storageIssue, databasePropertiesIssue, memoryClerkIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -252,6 +256,9 @@ export function HealthTab({
       {!performanceCounters?.ratios && counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
       {!performanceCounters && !counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
       {!performanceCounters && !counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
+      {storage && <StorageEvidence key={report.snapshot.id} report={storage} />}
+      {!storage && storageIssue && <ObservationSourceIssue source={storageIssue} title={t("view.storage.title")} />}
+      {!storage && storageRead && !storageIssue && <ObservationExplanationIssue title={t("view.storage.title")} reason={t("view.storage.invalid")} />}
       {databaseProperties && <DatabaseProperties key={report.snapshot.id} report={databaseProperties} />}
       {!databaseProperties && databasePropertiesIssue && <ObservationSourceIssue source={databasePropertiesIssue} title={t("view.database_properties.title")} />}
       {!databaseProperties && (databasePropertiesRead || databasePropertiesRecorded) && !databasePropertiesIssue && <ObservationExplanationIssue title={t("view.database_properties.title")} reason={t("view.database_properties.invalid")} />}

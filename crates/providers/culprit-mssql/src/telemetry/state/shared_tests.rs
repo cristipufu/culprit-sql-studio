@@ -24,7 +24,7 @@ fn source(final_identity: Rec, shutdown: SourceShutdown) -> StateSource<FakeRead
         Ok(vec![metadata()]),
         Ok(vec![epoch(100)]),
         Ok(vec![super::tests::clock(false, "2020-01-01T06:02:00Z")]),
-        Ok(vec![super::tests::space_row()]),
+        Ok(vec![super::tests::temp_space_row()]),
         Ok(vec![crate::memory_clerks::tests::row()]),
         Ok(crate::schedulers::fixture_columns()),
         Ok(vec![crate::schedulers::tests::row()]),

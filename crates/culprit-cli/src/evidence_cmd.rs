@@ -226,6 +226,7 @@ enum Analysis {
     PerformanceCounters,
     MemoryClerks,
     DatabaseProperties,
+    Storage,
     WaitCounters,
     Cleanup,
     Tuning,
@@ -261,6 +262,7 @@ impl Analysis {
             | Self::PerformanceCounters
             | Self::MemoryClerks
             | Self::DatabaseProperties
+            | Self::Storage
             | Self::ConnectionOutcomes
             | Self::ConfiguredLogRates
             | Self::HyperscaleLogComponents
@@ -429,6 +431,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::WaitCounters) => {
             let analysis = culprit_engine::collected_resources::wait_counters(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::wait_counters(&analysis.report))?;
+        }
+        Some(Analysis::Storage) => {
+            let analysis = culprit_engine::collected_resources::storage(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::storage(&analysis.report))?;
         }
         Some(Analysis::DatabaseProperties) => {
             let analysis = culprit_engine::collected_resources::database_properties(&capture)?;

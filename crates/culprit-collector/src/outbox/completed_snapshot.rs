@@ -93,9 +93,12 @@ impl CompletedSnapshot {
 
     /// Retain the whole original Operational dataset, including unrelated source rows and coverage.
     pub fn into_operational_read(self) -> Result<CapturedOperationalRead> {
-        if !self.source.observation.snapshot().is_some_and(|header| {
-            matches!(header.dataset, SnapshotDataset::Operational | SnapshotDataset::HyperscaleLogComponents)
-        }) {
+        if !self
+            .source
+            .observation
+            .snapshot()
+            .is_some_and(|header| header.dataset.stream() == TelemetryStream::OperationalSamples)
+        {
             return Err(DeliveryProblem::UnsupportedSchema.error());
         }
         self.validate_original_positions()?;

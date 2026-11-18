@@ -1,4 +1,4 @@
-//! Canonical OperationalSamples positions for the two implemented snapshot datasets; independent of live observations.
+//! Canonical OperationalSamples snapshot positions; independent of live observations and native read rights.
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -51,19 +51,12 @@ impl CapturedOperationalRead {
     }
 
     fn accepts_rows(&self) -> bool {
-        let header = match &self.description.observation {
-            SourceObservation::Snapshot(header) => header,
-            SourceObservation::SourceRead { snapshot, .. }
-                if snapshot.dataset == SnapshotDataset::HyperscaleLogComponents =>
-            {
-                snapshot
-            }
-            _ => return false,
-        };
-        if !matches!(header.dataset, SnapshotDataset::Operational | SnapshotDataset::HyperscaleLogComponents)
+        let Some(header) = self.description.observation.snapshot() else { return false };
+        if header.dataset.stream() != TelemetryStream::OperationalSamples
             || !header.is_valid()
             || !self.description.target.is_valid()
             || !self.description.partition_is_consistent()
+            || !self.description.observation.covers_request()
             || !valid_key(&self.description.source)
             || header.records > CollectionBudget::upper_limits().max_snapshot_rows
         {

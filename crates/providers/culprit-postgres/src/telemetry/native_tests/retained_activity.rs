@@ -5,7 +5,27 @@ use culprit_core::{ConnectionSpec, telemetry::*};
 
 pub(super) struct Original {
     pub focus: ActivityRequestFocus,
-    _capture: owned_fixture::Captured,
+    capture: owned_fixture::Captured,
+}
+
+impl Original {
+    pub(super) async fn blocking(
+        &mut self,
+        specification: &ConnectionSpec,
+        cancellation: &CollectionCancellation,
+    ) -> owned_fixture::Captured {
+        self.capture
+            .followup(
+                specification,
+                CollectionRequest {
+                    subject: CollectionSubject::Database,
+                    selection: CollectionSelection::FocusedBlocking { focus: Box::new(self.focus.clone()) },
+                    budget: crate::telemetry::blocking::bounded_budget(&CollectionBudget::default()),
+                },
+                cancellation,
+            )
+            .await
+    }
 }
 
 pub(super) async fn original(
@@ -48,6 +68,7 @@ pub(super) async fn original(
         statement_identity: row.statement_identity.clone().unwrap(),
     };
     assert!(focus.matches_parent(source, row, &captured.reference(index)));
-    assert_eq!(focus.partition, SourcePartition::Target);
-    Original { focus, _capture: captured }
+    assert!(matches!(focus.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) }));
+    assert_eq!(captured.manifest.source_queries, 6, "one setup plus original database/member bounds and Activity");
+    Original { focus, capture: captured }
 }

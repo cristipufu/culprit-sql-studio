@@ -1,0 +1,878 @@
+{
+  "exact": {
+    "target": {
+      "scope": "database",
+      "identity": {
+        "engine": "mssql",
+        "database": "sample",
+        "location": {
+          "kind": "server",
+          "host": "fixture.invalid",
+          "port": 1433,
+          "instance": "native-logical-database"
+        },
+        "incarnation": null
+      }
+    },
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "sample",
+            "location": {
+              "kind": "server",
+              "host": "fixture.invalid",
+              "port": 1433,
+              "instance": "native-logical-database"
+            },
+            "incarnation": null
+          }
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": null
+      }
+    },
+    "native_sources": [
+      {
+        "source": "file_capacity",
+        "state": "collected",
+        "records": 2,
+        "complete_scope": true,
+        "error_code": null,
+        "stopped": null
+      }
+    ],
+    "sources": [
+      {
+        "source": "file_capacity",
+        "state": "collected",
+        "reason": null
+      }
+    ],
+    "source_state": "collected",
+    "read_complete": true,
+    "native_rows": 2,
+    "observed_rows": 2,
+    "presented_rows": 2,
+    "entries_limited": false,
+    "title": "Storage allocations and files",
+    "summary": "Recorded allocation populations and visible database files retain their own native meaning.",
+    "limitations": [
+      "Log, writable online data-filegroup capacity and shared temporary allocation are separate populations. They are not added into a database total.",
+      "The file list contains visible catalog rows, including read-only and offline files. File type, sparse-file and snapshot size meanings remain distinct; missing used space is unknown.",
+      "Configured growth and maximum-size values do not measure filesystem headroom, physical disk use or a verified usable restore."
+    ],
+    "entries": [
+      {
+        "source": "file_capacity",
+        "observation_key": "filegroup:1",
+        "scope": "database",
+        "title": "PRIMARY",
+        "explanation": "Capacity of writable online data files in this filegroup.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "total_bytes",
+            "label": "Allocated size (bytes)",
+            "value": "9007199254740993"
+          },
+          {
+            "key": "used_bytes",
+            "label": "Used size (bytes)",
+            "value": "0"
+          },
+          {
+            "key": "limit_bytes",
+            "label": "Configured capacity (bytes)",
+            "value": null
+          },
+          {
+            "key": "growth_enabled",
+            "label": "Configured growth enabled",
+            "value": "Yes"
+          },
+          {
+            "key": "reuse_wait",
+            "label": "Native log-reuse wait",
+            "value": null
+          }
+        ]
+      },
+      {
+        "source": "file_capacity",
+        "observation_key": "file:1",
+        "scope": "database",
+        "title": "sample-data",
+        "explanation": "Native file allocation in the source page unit.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "file_id",
+            "label": "Native file ID (local)",
+            "value": "1"
+          },
+          {
+            "key": "native_type",
+            "label": "Native file-type code",
+            "value": "0"
+          },
+          {
+            "key": "native_state",
+            "label": "Native file-state code",
+            "value": "0"
+          },
+          {
+            "key": "type_description",
+            "label": "Native type description",
+            "value": "ROWS"
+          },
+          {
+            "key": "state_description",
+            "label": "Native state description",
+            "value": "ONLINE"
+          },
+          {
+            "key": "size_pages",
+            "label": "Native size (pages)",
+            "value": "128"
+          },
+          {
+            "key": "page_size_bytes",
+            "label": "Source page size (bytes)",
+            "value": "8192"
+          },
+          {
+            "key": "used_pages",
+            "label": "Used space (pages)",
+            "value": "0"
+          },
+          {
+            "key": "maximum_size_pages",
+            "label": "Native maximum-size value (pages)",
+            "value": "-1"
+          },
+          {
+            "key": "growth",
+            "label": "Native growth value",
+            "value": "64"
+          },
+          {
+            "key": "growth_is_percent",
+            "label": "Growth unit is percent",
+            "value": "No"
+          },
+          {
+            "key": "is_read_only",
+            "label": "File read-only flag",
+            "value": "No"
+          },
+          {
+            "key": "filegroup_read_only",
+            "label": "Filegroup read-only flag",
+            "value": "No"
+          },
+          {
+            "key": "is_sparse",
+            "label": "Sparse file",
+            "value": "No"
+          },
+          {
+            "key": "database_is_snapshot",
+            "label": "Database snapshot",
+            "value": "No"
+          }
+        ]
+      }
+    ]
+  },
+  "partial": {
+    "target": {
+      "scope": "database",
+      "identity": {
+        "engine": "mssql",
+        "database": "sample",
+        "location": {
+          "kind": "server",
+          "host": "fixture.invalid",
+          "port": 1433,
+          "instance": "native-logical-database"
+        },
+        "incarnation": null
+      }
+    },
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "sample",
+            "location": {
+              "kind": "server",
+              "host": "fixture.invalid",
+              "port": 1433,
+              "instance": "native-logical-database"
+            },
+            "incarnation": null
+          }
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": null
+      }
+    },
+    "native_sources": [
+      {
+        "source": "file_capacity",
+        "state": "partial",
+        "records": 2,
+        "complete_scope": false,
+        "error_code": null,
+        "stopped": null
+      }
+    ],
+    "sources": [
+      {
+        "source": "file_capacity",
+        "state": "partial",
+        "reason": null
+      }
+    ],
+    "source_state": "partial",
+    "read_complete": true,
+    "native_rows": 2,
+    "observed_rows": 2,
+    "presented_rows": 2,
+    "entries_limited": false,
+    "title": "Storage allocations and files",
+    "summary": "Recorded allocation populations and visible database files retain their own native meaning.",
+    "limitations": [
+      "Log, writable online data-filegroup capacity and shared temporary allocation are separate populations. They are not added into a database total.",
+      "The file list contains visible catalog rows, including read-only and offline files. File type, sparse-file and snapshot size meanings remain distinct; missing used space is unknown.",
+      "Configured growth and maximum-size values do not measure filesystem headroom, physical disk use or a verified usable restore."
+    ],
+    "entries": [
+      {
+        "source": "file_capacity",
+        "observation_key": "filegroup:1",
+        "scope": "database",
+        "title": "PRIMARY",
+        "explanation": "Capacity of writable online data files in this filegroup.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "total_bytes",
+            "label": "Allocated size (bytes)",
+            "value": "9007199254740993"
+          },
+          {
+            "key": "used_bytes",
+            "label": "Used size (bytes)",
+            "value": "0"
+          },
+          {
+            "key": "limit_bytes",
+            "label": "Configured capacity (bytes)",
+            "value": null
+          },
+          {
+            "key": "growth_enabled",
+            "label": "Configured growth enabled",
+            "value": "Yes"
+          },
+          {
+            "key": "reuse_wait",
+            "label": "Native log-reuse wait",
+            "value": null
+          }
+        ]
+      },
+      {
+        "source": "file_capacity",
+        "observation_key": "file:1",
+        "scope": "database",
+        "title": "sample-data",
+        "explanation": "Native file allocation in the source page unit.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "file_id",
+            "label": "Native file ID (local)",
+            "value": "1"
+          },
+          {
+            "key": "native_type",
+            "label": "Native file-type code",
+            "value": "0"
+          },
+          {
+            "key": "native_state",
+            "label": "Native file-state code",
+            "value": "0"
+          },
+          {
+            "key": "type_description",
+            "label": "Native type description",
+            "value": "ROWS"
+          },
+          {
+            "key": "state_description",
+            "label": "Native state description",
+            "value": "ONLINE"
+          },
+          {
+            "key": "size_pages",
+            "label": "Native size (pages)",
+            "value": "128"
+          },
+          {
+            "key": "page_size_bytes",
+            "label": "Source page size (bytes)",
+            "value": "8192"
+          },
+          {
+            "key": "used_pages",
+            "label": "Used space (pages)",
+            "value": "0"
+          },
+          {
+            "key": "maximum_size_pages",
+            "label": "Native maximum-size value (pages)",
+            "value": "-1"
+          },
+          {
+            "key": "growth",
+            "label": "Native growth value",
+            "value": "64"
+          },
+          {
+            "key": "growth_is_percent",
+            "label": "Growth unit is percent",
+            "value": "No"
+          },
+          {
+            "key": "is_read_only",
+            "label": "File read-only flag",
+            "value": "No"
+          },
+          {
+            "key": "filegroup_read_only",
+            "label": "Filegroup read-only flag",
+            "value": "No"
+          },
+          {
+            "key": "is_sparse",
+            "label": "Sparse file",
+            "value": "No"
+          },
+          {
+            "key": "database_is_snapshot",
+            "label": "Database snapshot",
+            "value": "No"
+          }
+        ]
+      }
+    ]
+  },
+  "readonly_offline": {
+    "target": {
+      "scope": "database",
+      "identity": {
+        "engine": "mssql",
+        "database": "sample",
+        "location": {
+          "kind": "server",
+          "host": "fixture.invalid",
+          "port": 1433,
+          "instance": "native-logical-database"
+        },
+        "incarnation": null
+      }
+    },
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "sample",
+            "location": {
+              "kind": "server",
+              "host": "fixture.invalid",
+              "port": 1433,
+              "instance": "native-logical-database"
+            },
+            "incarnation": null
+          }
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": null
+      }
+    },
+    "native_sources": [
+      {
+        "source": "file_capacity",
+        "state": "collected",
+        "records": 2,
+        "complete_scope": true,
+        "error_code": null,
+        "stopped": null
+      }
+    ],
+    "sources": [
+      {
+        "source": "file_capacity",
+        "state": "collected",
+        "reason": null
+      }
+    ],
+    "source_state": "collected",
+    "read_complete": true,
+    "native_rows": 2,
+    "observed_rows": 2,
+    "presented_rows": 2,
+    "entries_limited": false,
+    "title": "Storage allocations and files",
+    "summary": "Recorded allocation populations and visible database files retain their own native meaning.",
+    "limitations": [
+      "Log, writable online data-filegroup capacity and shared temporary allocation are separate populations. They are not added into a database total.",
+      "The file list contains visible catalog rows, including read-only and offline files. File type, sparse-file and snapshot size meanings remain distinct; missing used space is unknown.",
+      "Configured growth and maximum-size values do not measure filesystem headroom, physical disk use or a verified usable restore."
+    ],
+    "entries": [
+      {
+        "source": "file_capacity",
+        "observation_key": "filegroup:1",
+        "scope": "database",
+        "title": "PRIMARY",
+        "explanation": "Capacity of writable online data files in this filegroup.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "total_bytes",
+            "label": "Allocated size (bytes)",
+            "value": "9007199254740993"
+          },
+          {
+            "key": "used_bytes",
+            "label": "Used size (bytes)",
+            "value": "0"
+          },
+          {
+            "key": "limit_bytes",
+            "label": "Configured capacity (bytes)",
+            "value": null
+          },
+          {
+            "key": "growth_enabled",
+            "label": "Configured growth enabled",
+            "value": "Yes"
+          },
+          {
+            "key": "reuse_wait",
+            "label": "Native log-reuse wait",
+            "value": null
+          }
+        ]
+      },
+      {
+        "source": "file_capacity",
+        "observation_key": "file:1",
+        "scope": "database",
+        "title": "sample-data",
+        "explanation": "Native file allocation in the source page unit.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "file_id",
+            "label": "Native file ID (local)",
+            "value": "1"
+          },
+          {
+            "key": "native_type",
+            "label": "Native file-type code",
+            "value": "0"
+          },
+          {
+            "key": "native_state",
+            "label": "Native file-state code",
+            "value": "6"
+          },
+          {
+            "key": "type_description",
+            "label": "Native type description",
+            "value": "ROWS"
+          },
+          {
+            "key": "state_description",
+            "label": "Native state description",
+            "value": "OFFLINE"
+          },
+          {
+            "key": "size_pages",
+            "label": "Native size (pages)",
+            "value": "128"
+          },
+          {
+            "key": "page_size_bytes",
+            "label": "Source page size (bytes)",
+            "value": "8192"
+          },
+          {
+            "key": "used_pages",
+            "label": "Used space (pages)",
+            "value": null
+          },
+          {
+            "key": "maximum_size_pages",
+            "label": "Native maximum-size value (pages)",
+            "value": "-1"
+          },
+          {
+            "key": "growth",
+            "label": "Native growth value",
+            "value": "64"
+          },
+          {
+            "key": "growth_is_percent",
+            "label": "Growth unit is percent",
+            "value": "No"
+          },
+          {
+            "key": "is_read_only",
+            "label": "File read-only flag",
+            "value": "Yes"
+          },
+          {
+            "key": "filegroup_read_only",
+            "label": "Filegroup read-only flag",
+            "value": "Yes"
+          },
+          {
+            "key": "is_sparse",
+            "label": "Sparse file",
+            "value": "No"
+          },
+          {
+            "key": "database_is_snapshot",
+            "label": "Database snapshot",
+            "value": "No"
+          }
+        ]
+      }
+    ]
+  },
+  "unavailable": {
+    "target": {
+      "scope": "database",
+      "identity": {
+        "engine": "mssql",
+        "database": "sample",
+        "location": {
+          "kind": "server",
+          "host": "fixture.invalid",
+          "port": 1433,
+          "instance": "native-logical-database"
+        },
+        "incarnation": null
+      }
+    },
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "sample",
+            "location": {
+              "kind": "server",
+              "host": "fixture.invalid",
+              "port": 1433,
+              "instance": "native-logical-database"
+            },
+            "incarnation": null
+          }
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": null
+      }
+    },
+    "native_sources": [
+      {
+        "source": "file_capacity",
+        "state": "unavailable",
+        "records": 0,
+        "complete_scope": false,
+        "error_code": "permission_denied",
+        "stopped": null
+      }
+    ],
+    "sources": [
+      {
+        "source": "file_capacity",
+        "state": "unavailable",
+        "reason": "Storage evidence is unavailable or incomplete for this read."
+      }
+    ],
+    "source_state": "unavailable",
+    "read_complete": true,
+    "native_rows": 0,
+    "observed_rows": 0,
+    "presented_rows": 0,
+    "entries_limited": false,
+    "title": "Storage allocations and files",
+    "summary": "Storage evidence is unavailable or incomplete for this read.",
+    "limitations": [
+      "Log, writable online data-filegroup capacity and shared temporary allocation are separate populations. They are not added into a database total.",
+      "The file list contains visible catalog rows, including read-only and offline files. File type, sparse-file and snapshot size meanings remain distinct; missing used space is unknown.",
+      "Configured growth and maximum-size values do not measure filesystem headroom, physical disk use or a verified usable restore."
+    ],
+    "entries": []
+  },
+  "unknown": {
+    "target": {
+      "scope": "database",
+      "identity": {
+        "engine": "mssql",
+        "database": "sample",
+        "location": {
+          "kind": "server",
+          "host": "fixture.invalid",
+          "port": 1433,
+          "instance": "native-logical-database"
+        },
+        "incarnation": null
+      }
+    },
+    "context": {
+      "kind": "native",
+      "context": {
+        "target": {
+          "scope": "database",
+          "identity": {
+            "engine": "mssql",
+            "database": "sample",
+            "location": {
+              "kind": "server",
+              "host": "fixture.invalid",
+              "port": 1433,
+              "instance": "native-logical-database"
+            },
+            "incarnation": null
+          }
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "database_writable": null
+      }
+    },
+    "native_sources": [
+      {
+        "source": "file_capacity",
+        "state": "collected",
+        "records": 2,
+        "complete_scope": true,
+        "error_code": null,
+        "stopped": null
+      }
+    ],
+    "sources": [
+      {
+        "source": "file_capacity",
+        "state": "collected",
+        "reason": null
+      }
+    ],
+    "source_state": "collected",
+    "read_complete": true,
+    "native_rows": 2,
+    "observed_rows": 2,
+    "presented_rows": 2,
+    "entries_limited": false,
+    "title": "Storage allocations and files",
+    "summary": "Recorded allocation populations and visible database files retain their own native meaning.",
+    "limitations": [
+      "Log, writable online data-filegroup capacity and shared temporary allocation are separate populations. They are not added into a database total.",
+      "The file list contains visible catalog rows, including read-only and offline files. File type, sparse-file and snapshot size meanings remain distinct; missing used space is unknown.",
+      "Configured growth and maximum-size values do not measure filesystem headroom, physical disk use or a verified usable restore."
+    ],
+    "entries": [
+      {
+        "source": "file_capacity",
+        "observation_key": "filegroup:1",
+        "scope": "database",
+        "title": "PRIMARY",
+        "explanation": "Capacity of writable online data files in this filegroup.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "total_bytes",
+            "label": "Allocated size (bytes)",
+            "value": "9007199254740993"
+          },
+          {
+            "key": "used_bytes",
+            "label": "Used size (bytes)",
+            "value": null
+          },
+          {
+            "key": "limit_bytes",
+            "label": "Configured capacity (bytes)",
+            "value": null
+          },
+          {
+            "key": "growth_enabled",
+            "label": "Configured growth enabled",
+            "value": "Yes"
+          },
+          {
+            "key": "reuse_wait",
+            "label": "Native log-reuse wait",
+            "value": null
+          }
+        ]
+      },
+      {
+        "source": "file_capacity",
+        "observation_key": "file:1",
+        "scope": "database",
+        "title": "sample-data",
+        "explanation": "The native file-size basis is unknown; the raw value remains separate.",
+        "fields": [
+          {
+            "key": "observed_at",
+            "label": "Native observation time",
+            "value": "2020-01-01T12:00:00.5Z"
+          },
+          {
+            "key": "file_id",
+            "label": "Native file ID (local)",
+            "value": "1"
+          },
+          {
+            "key": "native_type",
+            "label": "Native file-type code",
+            "value": "255"
+          },
+          {
+            "key": "native_state",
+            "label": "Native file-state code",
+            "value": "0"
+          },
+          {
+            "key": "type_description",
+            "label": "Native type description",
+            "value": null
+          },
+          {
+            "key": "state_description",
+            "label": "Native state description",
+            "value": "ONLINE"
+          },
+          {
+            "key": "size_pages",
+            "label": "Native size (pages)",
+            "value": "128"
+          },
+          {
+            "key": "page_size_bytes",
+            "label": "Source page size (bytes)",
+            "value": "8192"
+          },
+          {
+            "key": "used_pages",
+            "label": "Used space (pages)",
+            "value": null
+          },
+          {
+            "key": "maximum_size_pages",
+            "label": "Native maximum-size value (pages)",
+            "value": "-1"
+          },
+          {
+            "key": "growth",
+            "label": "Native growth value",
+            "value": "64"
+          },
+          {
+            "key": "growth_is_percent",
+            "label": "Growth unit is percent",
+            "value": null
+          },
+          {
+            "key": "is_read_only",
+            "label": "File read-only flag",
+            "value": "No"
+          },
+          {
+            "key": "filegroup_read_only",
+            "label": "Filegroup read-only flag",
+            "value": "No"
+          },
+          {
+            "key": "is_sparse",
+            "label": "Sparse file",
+            "value": "No"
+          },
+          {
+            "key": "database_is_snapshot",
+            "label": "Database snapshot",
+            "value": null
+          }
+        ]
+      }
+    ]
+  }
+}

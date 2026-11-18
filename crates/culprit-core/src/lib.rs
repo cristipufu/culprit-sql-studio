@@ -63,6 +63,8 @@ pub mod memory_participants;
 pub mod model;
 pub mod native_log_analysis;
 pub mod operations;
+mod storage_report;
+pub use storage_report::{StorageEntry, StorageField, StorageReport};
 pub mod page_server_read_report;
 pub mod page_wait_report;
 pub mod plan;
@@ -231,3 +233,6 @@ pub use waits::{
     WaitCategory, WaitQuery, WaitSample, WaitScope, WaitsReport, signal_id,
 };
 pub use window::{MAX_WINDOW_MINUTES, MINUTES_PER_DAY, parse_window, window_label};
+
+mod recipe_qualification;
+pub use recipe_qualification::*;

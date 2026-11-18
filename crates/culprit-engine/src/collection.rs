@@ -1,5 +1,6 @@
 //! Workspace authentication composes with the source-independent capture controller.
 mod overhead;
+mod qualification;
 pub use overhead::inspect_source_overhead;
 #[cfg(test)]
 mod tests;
@@ -24,32 +25,51 @@ struct AuthenticatedSource<'a> {
     name: &'a str,
     admission: &'a SourceAdmission,
     observation_id: &'a str,
-    admitted: Option<&'a FleetSourceAdmission>,
+    selection: SourceSelection<'a>,
+}
+enum SourceSelection<'a> {
+    Ordinary { admitted: Option<&'a FleetSourceAdmission> },
+    Qualification { route: &'a crate::connection::SavedRoute, registration: &'a crate::ProviderRegistration },
+}
+impl SourceSelection<'_> {
+    fn admission(&self) -> Option<&FleetSourceAdmission> {
+        match self {
+            Self::Ordinary { admitted } => *admitted,
+            Self::Qualification { .. } => None,
+        }
+    }
 }
 #[async_trait::async_trait]
 impl SourceFactory for AuthenticatedSource<'_> {
     fn admission_window(&self) -> Option<capture::CollectionAdmissionWindow> {
-        self.admitted.map(|admitted| admitted.window)
+        self.selection.admission().map(|admitted| admitted.window)
     }
     fn investigation_intent(&self) -> Option<&culprit_core::telemetry::DiagnosticInvestigationIntent> {
-        self.admitted.and_then(|admitted| admitted.investigation.as_ref())
+        self.selection.admission().and_then(|admitted| admitted.investigation.as_ref())
     }
     async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
-        if let Some(admitted) = self.admitted {
+        let admitted = self.selection.admission();
+        if let Some(admitted) = admitted {
             admitted.window.check_start()?;
         }
         self.admission.started(self.observation_id.to_owned(), self.name.to_owned()).await?;
         let connections = self.workspace.connection_service();
-        let provider = match self.admitted {
-            Some(admitted) => connections.provider_admitted(self.name, admitted).await?,
-            None => connections.provider(self.name).await?,
+        let provider = match &self.selection {
+            SourceSelection::Qualification { route, registration } => {
+                return connections.qualification_source_at_route(route, registration, request).await;
+            }
+            SourceSelection::Ordinary { admitted: Some(admitted) } => {
+                connections.provider_admitted(self.name, admitted).await?
+            }
+            SourceSelection::Ordinary { admitted: None } => connections.provider(self.name).await?,
         };
-        if let Some(admitted) = self.admitted {
+        if let Some(admitted) = admitted {
             admitted.window.check_start()?;
         }
         provider.telemetry_source(request)
     }
 }
+
 impl Workspace {
     pub async fn discover_resources(
         &self,
@@ -156,7 +176,7 @@ impl Workspace {
             name,
             admission: &admission,
             observation_id: &identity.observation_id,
-            admitted: None,
+            selection: SourceSelection::Ordinary { admitted: None },
         };
         let result =
             capture::collect(&self.source_gate, &source, request, output, identity.clone(), cancellation, None).await;
@@ -237,7 +257,7 @@ impl Workspace {
                 name,
                 admission: &admission,
                 observation_id: &identity.observation_id,
-                admitted,
+                selection: SourceSelection::Ordinary { admitted },
             };
             let result = capture::collect(
                 &self.source_gate,

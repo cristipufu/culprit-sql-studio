@@ -14,10 +14,11 @@ python3 dev/smoke-providers.py postgres \
   --test culprit-postgres telemetry::native_tests::maintenance_waits::
 ```
 
-The two exact ignored selectors are:
+The exact ignored selectors are:
 
 - `telemetry::native_tests::maintenance_waits::concurrent_index_wait_is_generation_bound_and_the_reported_locker_remains_unresolved`
 - `telemetry::native_tests::maintenance_waits::acknowledged_fixture_completion_does_not_turn_a_missing_native_request_into_completion_evidence`
+- `telemetry::native_tests::maintenance_waits::an_original_native_activity_receipt_authenticates_the_focused_owner_and_retained_blocking_report`
 
 Each case owns one nonce-qualified schema, a one-row table, a held UPDATE transaction and a concurrent index
 command. A bounded fixture-only phase check waits up to three seconds for the documented native writer-wait phase.
@@ -28,8 +29,11 @@ Fixture polling is separate from the source's query counts and is not a producti
 The positive case checks exact native locker counters and the same backend/request generation. The reported
 locker PID remains unresolved; no other backend generation or SQL is attached. The negative case releases the
 held transaction and separately acknowledges the fixture command's successful completion. A later retained
-lookup must still report only `NotObserved`, with no completion claim. The original logical-target capture stays
-`UnverifiedOriginalScope` even when the later progress read establishes a physical member.
+lookup must still report only `NotObserved`, with no completion claim. The original Activity acquisition retains
+its own native member/process/updateability checks and exact backend/request generations. Its six statements include
+session setup; no later read supplies missing original authority. The focused blocking case reserves its follow-up
+in the same actual Outbox, authenticates that original receipt, retains the reported current locker generation and
+uses the common pure blocking report. The idle lock holder has no attributed current statement.
 
 Cleanup releases the held transaction, waits for the owned index command, cancels it if necessary, and drops only
 the owned schema. The async case has a 25-second deadline; native statements and cleanup waits are also bounded.

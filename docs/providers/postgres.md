@@ -51,6 +51,15 @@ evidence remains separate. Archived `statement-work` analysis reads the same typ
 
 These sources do not retain a history of every wait. Recorded statement I/O timing covers timed data-file work; WAL-writer and commit work is not assumed to be part of the statement's execution time.
 
+Explicit retained Activity capture brackets its metadata point with the existing native instance reader. Its
+six-statement ceiling includes session setup, two database/process checks, two native member checks and the
+Activity projection. The member uses PostgreSQL's system identifier and observed server address/port; configured
+routes and database updateability do not supply it. A denied control read or unavailable endpoint retains partial
+observations without focused follow-up authority. A later successful check cannot repair missing original identity.
+Focused blocking binds the original member, process, backend start, request start and statement token, then rechecks
+them before retaining its bounded lock closure. These point checks do not prove uninterrupted identity between reads,
+and the source recipes remain cost-unqualified until their exact native routes are measured and approved.
+
 The database keeps a cumulative deadlock count. Import the relevant PostgreSQL log lines to reconstruct the participants and pattern. Cancel and terminate actions are available outside production, subject to the login's permissions.
 
 ## Supplied structured diagnostics

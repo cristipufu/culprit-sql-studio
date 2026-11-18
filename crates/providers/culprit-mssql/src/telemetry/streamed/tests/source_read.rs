@@ -1,6 +1,7 @@
 //! Protocol conformance only: these fixtures neither authenticate a durable parent nor qualify production cost.
 use super::*;
 use crate::telemetry::compilation::QueryCompilation;
+mod measurement;
 
 const FIRST: &str = "2020-01-01T08:01:00Z";
 const LAST: &str = "2020-01-01T08:01:01Z";
@@ -78,7 +79,7 @@ fn prerequisite(original: &ActivityRequestFocus) -> CompilationAdmissionReport {
 fn authority(at: &str) -> Rec {
     replace(&crate::activity::memory::tests::context(), &[("observed_at", Val::Text(at.into()))])
 }
-fn source(before: Rec, after: Rec, shutdown: SourceShutdown) -> StreamedSnapshot<QueryCompilation, StreamingRead> {
+fn native(before: Rec, after: Rec, shutdown: SourceShutdown) -> StreamingRead {
     let mut native = FakeRead::new(vec![
         Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
         Ok(vec![before]),
@@ -89,13 +90,22 @@ fn source(before: Rec, after: Rec, shutdown: SourceShutdown) -> StreamedSnapshot
         Ok(vec![after]),
     ]);
     native.shutdown = shutdown;
-    let io = StreamingRead {
+    StreamingRead {
         native,
         batches: vec![batch(crate::query_store::tests::compilation_row(), true)].into(),
         starts: 0,
         pause_batches: false,
-    };
-    StreamedSnapshot::with_io(io, &request(), "fixture.invalid".into(), 1433, QueryCompilation).unwrap()
+    }
+}
+fn source(before: Rec, after: Rec, shutdown: SourceShutdown) -> StreamedSnapshot<QueryCompilation, StreamingRead> {
+    StreamedSnapshot::with_io(
+        native(before, after, shutdown),
+        &request(),
+        "fixture.invalid".into(),
+        1433,
+        QueryCompilation,
+    )
+    .unwrap()
 }
 
 #[tokio::test]

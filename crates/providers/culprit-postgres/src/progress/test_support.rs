@@ -13,6 +13,9 @@ pub(crate) fn metadata_with(standby: &str, started: &str) -> Row {
     metadata_on_version(180_000, standby, started)
 }
 pub(crate) fn metadata_on_version(version: u32, standby: &str, started: &str) -> Row {
+    metadata_with_visibility(version, standby, started, true)
+}
+pub(crate) fn metadata_with_visibility(version: u32, standby: &str, started: &str, visible: bool) -> Row {
     let build = format!("PostgreSQL {}.0", version / 10_000);
     let version = version.to_string();
     row(&[
@@ -24,7 +27,7 @@ pub(crate) fn metadata_on_version(version: u32, standby: &str, started: &str) ->
         ("standby", Some(standby)),
         ("started_at", Some(started)),
         ("observed_at", Some(AT)),
-        ("full_visibility", Some("t")),
+        ("full_visibility", Some(if visible { "t" } else { "f" })),
         ("replay_pause_requested_access", Some("f")),
         ("replay_pause_state_access", Some("f")),
         ("pgss_schema", None),

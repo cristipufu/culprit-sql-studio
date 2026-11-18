@@ -11,6 +11,7 @@ mod page_server_reads;
 mod page_task_holders;
 mod performance_counters;
 mod source_overhead;
+mod storage;
 
 #[test]
 fn cli_exposes_every_verified_evidence_family() {

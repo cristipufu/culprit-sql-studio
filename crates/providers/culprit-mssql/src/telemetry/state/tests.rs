@@ -37,20 +37,8 @@ pub(super) fn pressure(high: bool) -> Rec {
         ],
     )
 }
-pub(super) fn space_row() -> Rec {
-    Rec::of(&[
-        ("native_id", Val::Int(1)),
-        ("name", Val::Text("PRIMARY".into())),
-        ("total", Val::Float(1000.0)),
-        ("used", Val::Float(100.0)),
-        ("max_bytes", Val::Null),
-        ("can_grow", Val::Int(1)),
-        ("reuse_wait", Val::Text("NOTHING".into())),
-        ("users", Val::Float(50.0)),
-        ("internals", Val::Null),
-        ("versions", Val::Float(50.0)),
-    ])
-}
+pub(super) use crate::operations::native::test_support::{file_row, space_row, temp_space_row};
+
 fn sequence() -> Rec {
     Rec::of(&[
         ("native_id", Val::Text("identity:123:1".into())),
@@ -113,7 +101,11 @@ fn source_with_properties(
         replies.push(if fail_files && kind == native::Kind::Filegroups {
             Err(ReadError::Source(culprit_core::Error::new(ErrorCode::PermissionDenied, "fixture permission denied")))
         } else {
-            Ok(vec![if kind == native::Kind::Sequences { sequence() } else { space_row() }])
+            Ok(match kind {
+                native::Kind::Sequences => vec![sequence()],
+                native::Kind::Filegroups => vec![space_row(), file_row()],
+                _ => vec![space_row()],
+            })
         });
     }
     replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::storage_io::tests::row()])]);
@@ -197,7 +189,7 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
     let mut source = source(true, false, identity());
     let description = source.describe().await.unwrap();
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.records, 10);
+    assert_eq!(snapshot.records, 11);
     assert_eq!(
         snapshot.sources.iter().find(|source| source.source == crate::sources::SUSPECT_PAGES.name).unwrap().state,
         SourceState::NotApplicable
@@ -225,7 +217,7 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
         }
         cursor = next_cursor;
     }
-    assert_eq!(records.len(), 10);
+    assert_eq!(records.len(), 11);
     assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
     for record in &records {
         let exported = ExportedRecord::new(
@@ -822,7 +814,7 @@ async fn hidden_optional_database_properties_keep_the_original_clock_and_other_o
     assert_eq!(coverage.state, SourceState::Unavailable);
     assert_eq!(coverage.records, 0);
     assert_eq!(coverage.error_code, Some(ErrorCode::PermissionDenied));
-    assert_eq!(header.records, 9);
+    assert_eq!(header.records, 10);
     assert_eq!(header.observed_from, canonical_time("2020-01-01T06:02:00Z").unwrap());
     assert!(header.sources.iter().any(|row| row.state == SourceState::Collected));
     assert_eq!(source.io.calls.iter().filter(|call| call.sql == crate::database_properties::query()).count(), 1);

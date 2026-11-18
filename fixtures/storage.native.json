@@ -1,0 +1,42 @@
+{
+  "space": {
+    "kind": "data",
+    "scope": "database",
+    "population": "writable-online-data-filegroups",
+    "observed_at": "2020-01-01T12:00:00.5Z",
+    "database": "sample",
+    "native_name": "PRIMARY",
+    "total_bytes": "9007199254740993",
+    "used_bytes": "0",
+    "limit_bytes": null,
+    "growth_enabled": true,
+    "reuse_wait": null,
+    "parts": []
+  },
+  "file": {
+    "native_object": "sys.database_files",
+    "kind": "data",
+    "size_basis": "allocated",
+    "page_size_bytes": 8192,
+    "observed_at": "2020-01-01T12:00:00.5Z",
+    "database": "sample",
+    "native_database_id": "5",
+    "file_id": "1",
+    "file_guid": null,
+    "native_type": "0",
+    "type_description": "ROWS",
+    "native_state": "0",
+    "state_description": "ONLINE",
+    "data_space_id": "1",
+    "logical_name": "sample-data",
+    "size_pages": "128",
+    "maximum_size_pages": "-1",
+    "growth": "64",
+    "growth_is_percent": false,
+    "is_read_only": false,
+    "filegroup_read_only": false,
+    "is_sparse": false,
+    "database_is_snapshot": false,
+    "used_pages": "0"
+  }
+}

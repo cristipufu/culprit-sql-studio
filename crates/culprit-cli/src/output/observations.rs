@@ -1269,3 +1269,6 @@ mod tests {
         assert!(bounded.contains("9007199254740993"), "exact outcomes precede bounded context details");
     }
 }
+
+mod storage;
+pub(crate) use storage::storage;

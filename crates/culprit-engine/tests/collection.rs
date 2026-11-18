@@ -1876,9 +1876,12 @@ fn operational_rows(scenario: Scenario) -> Vec<TelemetryRecord> {
             key: key.into(),
             fact: OperationalFact::Space(OperationalSpace {
                 kind: culprit_core::FileKind::Log,
+                population: StoragePopulation::DatabaseTransactionLog,
+                observed_at: "2020-01-01T06:00:00Z".into(),
+                database: None,
                 scope: culprit_core::FileScope::Database,
                 native_name: None,
-                total_bytes: Some(1024.0),
+                total_bytes: Some("1024".into()),
                 used_bytes: None,
                 limit_bytes: None,
                 growth_enabled: Some(true),
@@ -1996,10 +1999,13 @@ async fn cancellation_during_native_completion_keeps_sealed_pages_unpublished_an
     let output = dir.output();
     let collect = workspace.collect_once("pilot", operational_request(), &output, &cancellation);
     let cancel = async {
-        state.entered.notified().await;
+        let completion_started =
+            tokio::time::timeout(std::time::Duration::from_secs(2), state.entered.notified()).await;
         cancellation.cancel();
+        completion_started
     };
-    let (manifest, ()) = tokio::join!(collect, cancel);
+    let (manifest, completion_started) = tokio::join!(collect, cancel);
+    assert!(completion_started.is_ok(), "native completion was never entered: {manifest:?}");
     let manifest = manifest.unwrap();
     assert_eq!(manifest.status, CollectionStatus::Incomplete(CollectionStop::Cancelled));
     assert_eq!(manifest.files[0].rows, 2);

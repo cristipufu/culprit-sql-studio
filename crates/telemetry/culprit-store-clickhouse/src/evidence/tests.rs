@@ -638,3 +638,5 @@ mod connection_outcomes;
 mod jobs;
 
 mod query_store_statements;
+
+mod storage;

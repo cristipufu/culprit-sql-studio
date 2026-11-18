@@ -48,6 +48,28 @@ pub(crate) fn source(
     recipes::open(pool, request, host, port)
 }
 
+pub(crate) fn qualification_source(
+    pool: Arc<Pool>,
+    request: &CollectionRequest,
+    host: String,
+    port: u16,
+) -> Result<Box<dyn TelemetrySource>> {
+    if request.collection()
+        != culprit_core::telemetry::TelemetryCollection::Snapshot(
+            culprit_core::telemetry::SnapshotDataset::QueryCompilation,
+        )
+    {
+        return Err(CollectionStop::InvalidPage.error());
+    }
+    Ok(Box::new(streamed::StreamedSnapshot::for_native_measurement(
+        pool,
+        request,
+        host,
+        port,
+        compilation::QueryCompilation,
+    )?))
+}
+
 pub(crate) fn recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
     recipes::declarations()
 }

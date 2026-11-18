@@ -19,6 +19,7 @@ impl Workspace {
         mut report: impl FnMut(&ActivityMonitorEvent) -> Result<()>,
     ) -> Result<ActivityMonitorSummary> {
         options.validate()?;
+        self.restore_qualifications(&outbox.delivery(), Default::default(), cancellation).await?;
         let policies = DiagnosticPolicies::for_activity(name, CollectionSubject::Database, options.policy.clone())?;
         drain_pending(outbox, &policies, cancellation, None).await?;
         self.connection(name)?;

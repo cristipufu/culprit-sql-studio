@@ -20,6 +20,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
     #[derive(Serialize)]
     struct View<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
+        storage: &'a Option<Box<culprit_core::StorageReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         counter_ratios: &'a Option<Box<culprit_core::CounterRatioReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         performance_counters: &'a Option<Box<culprit_core::PerformanceCounterReport>>,
@@ -76,6 +78,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         cleanup: &'a Option<culprit_core::CleanupReport>,
     }
     let Report {
+        storage,
         completed_spills,
         page_server_reads,
         snapshot,
@@ -109,6 +112,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         cleanup,
     } = report;
     View {
+        storage,
         completed_spills,
         page_server_reads,
         snapshot,

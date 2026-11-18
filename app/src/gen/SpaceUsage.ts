@@ -2,5 +2,6 @@
 import type { FileKind } from "./FileKind";
 import type { FileScope } from "./FileScope";
 import type { SpacePart } from "./SpacePart";
+import type { StoragePointRef } from "./StoragePointRef";
 
-export type SpaceUsage = { parts: Array<SpacePart>, name: string, kind: FileKind, scope: FileScope, total_bytes: number, used_bytes: number, growth_enabled: boolean | null, limit_bytes: number | null, reuse_wait: string | null, };
+export type SpaceUsage = { origin?: StoragePointRef, parts: Array<SpacePart>, name: string, kind: FileKind, scope: FileScope, total_bytes: number, used_bytes: number, growth_enabled: boolean | null, limit_bytes: number | null, reuse_wait: string | null, };

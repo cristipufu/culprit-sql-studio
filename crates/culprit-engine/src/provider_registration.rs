@@ -14,6 +14,25 @@ use std::sync::Arc;
 pub type RecipeCostVerifier =
     Arc<dyn Fn(&RecipeCostReceipt, &CollectionDescription, &ExportedRecord) -> Result<bool> + Send + Sync>;
 
+#[cfg(feature = "collector")]
+pub type RecipeQualificationFactory = Arc<
+    dyn Fn(
+            &ConnectionSpec,
+            &culprit_core::telemetry::CollectionRequest,
+        ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>>
+        + Send
+        + Sync,
+>;
+
+#[cfg(feature = "collector")]
+pub type RecipeQualificationIssuer = Arc<
+    dyn for<'a> Fn(
+            culprit_collector::outbox::NativeQualificationEvidence<'a>,
+        ) -> Result<culprit_collector::outbox::NativeQualificationDecision>
+        + Send
+        + Sync,
+>;
+
 #[derive(Clone)]
 struct QualificationAuthority {
     component: ComponentVersion,
@@ -25,6 +44,10 @@ pub struct ProviderRegistration {
     factory: ProviderFactory,
     recipes: Vec<RecipeDescriptor>,
     qualification: Option<QualificationAuthority>,
+    #[cfg(feature = "collector")]
+    issuer: Option<RecipeQualificationIssuer>,
+    #[cfg(feature = "collector")]
+    qualification_factory: Option<RecipeQualificationFactory>,
 }
 impl ProviderRegistration {
     /// An empty catalog is explicitly undeclared support. Declarations establish neither native availability
@@ -33,7 +56,15 @@ impl ProviderRegistration {
         if !recipe_catalog_is_valid(&recipes) {
             return Err(Error::invalid(culprit_core::t!("engine.registry.invalid_recipes")));
         }
-        Ok(Self { factory, recipes, qualification: None })
+        Ok(Self {
+            factory,
+            recipes,
+            qualification: None,
+            #[cfg(feature = "collector")]
+            issuer: None,
+            #[cfg(feature = "collector")]
+            qualification_factory: None,
+        })
     }
 
     pub fn telemetry_recipes(&self) -> &[RecipeDescriptor] {
@@ -85,6 +116,32 @@ impl ProviderRegistration {
         {
             return Ok(false);
         }
+        self.verify_candidate(receipt, source, record)
+    }
+
+    /// Bootstrap only through selected trusted native issuance code. This does not install or activate a recipe.
+    pub(crate) fn verify_candidate(
+        &self,
+        receipt: &RecipeCostReceipt,
+        source: &CollectionDescription,
+        record: &ExportedRecord,
+    ) -> Result<bool> {
+        let Some(authority) = &self.qualification else { return Ok(false) };
+        let Some(recipe) = self
+            .recipes
+            .iter()
+            .find(|recipe| recipe.id == receipt.recipe_id && recipe.version == receipt.recipe_version)
+        else {
+            return Ok(false);
+        };
+        if !receipt.is_valid()
+            || receipt.component != authority.component
+            || !receipt.matches_recipe(recipe)
+            || source.target.telemetry_id()? != receipt.scope.target().telemetry_id()?
+            || receipt.evidence.validate_canonical_record(source, &record.record).is_err()
+        {
+            return Ok(false);
+        }
         let reference = match DiagnosticEvidenceRef::from_export(
             source,
             &receipt.evidence.manifest_sha256,
@@ -98,6 +155,59 @@ impl ProviderRegistration {
             return Ok(false);
         }
         (authority.verifier)(receipt, source, record)
+    }
+
+    #[cfg(feature = "collector")]
+    /// Installing a measurement issuer grants no acceptance authority. Its Approve result additionally requires
+    /// this registration's independently declared pure native-cost verifier.
+    pub fn with_native_qualification_issuer(
+        mut self,
+        factory: RecipeQualificationFactory,
+        issuer: RecipeQualificationIssuer,
+    ) -> Self {
+        self.issuer = Some(issuer);
+        self.qualification_factory = Some(factory);
+        self
+    }
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn qualification_source(
+        &self,
+        spec: &ConnectionSpec,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        self.qualification_factory
+            .as_ref()
+            .ok_or_else(|| Error::invalid(culprit_core::t!("engine.registry.invalid_qualification")))?(
+            spec, request
+        )
+    }
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn native_issuer(&self) -> Option<RecipeQualificationIssuer> {
+        self.issuer.clone()
+    }
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn with_installed(mut self, receipts: impl IntoIterator<Item = RecipeCostReceipt>) -> Result<Self> {
+        for receipt in receipts {
+            let Some(authority) = &self.qualification else { continue };
+            if receipt.component != authority.component {
+                continue;
+            }
+            if let Some(recipe) = self
+                .recipes
+                .iter_mut()
+                .find(|recipe| recipe.id == receipt.recipe_id && recipe.version == receipt.recipe_version)
+                && receipt.matches_recipe(recipe)
+            {
+                recipe.cost = RecipeCostQualification::Measured(Box::new(receipt));
+            }
+        }
+        if !recipe_catalog_is_valid(&self.recipes) {
+            return Err(Error::invalid(culprit_core::t!("engine.registry.invalid_qualification")));
+        }
+        Ok(self)
     }
 
     pub(crate) fn open(&self, spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {

@@ -1,3 +1,4 @@
+mod qualification;
 use crate::output::{Format, Out};
 use clap::{Args, Subcommand, ValueEnum};
 use culprit_collector::capture::CollectionCancellation;
@@ -10,6 +11,8 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub(crate) enum CollectCommand {
+    #[command(subcommand,about=culprit_core::t!("recipe_qualification.cli.about"))]
+    Qualification(qualification::QualificationCommand),
     #[command(subcommand,about=culprit_core::t!("evidence.cli.about"))]
     Evidence(crate::evidence_cmd::EvidenceCommand),
     #[command(about=culprit_core::t!("collection.cli.resources"))]
@@ -350,6 +353,7 @@ impl OnceArgs {
 
 pub(crate) fn run(command: CollectCommand, out: &Out) -> crate::CommandTask<'_> {
     match command {
+        CollectCommand::Qualification(command) => crate::command_task(|| qualification::run(command, out)),
         CollectCommand::Evidence(command) => crate::command_task(|| crate::evidence_cmd::run(command, out)),
         CollectCommand::Resources(args) => crate::command_task(|| args.run(out)),
         CollectCommand::Schema(args) => crate::command_task(|| async { schema(args, out) }),

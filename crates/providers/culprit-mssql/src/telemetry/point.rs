@@ -252,7 +252,7 @@ impl Family {
             }
             Self::Operation(kind) => native::read(reader, kind, limit)
                 .await?
-                .observations(kind)
+                .observations(kind)?
                 .into_iter()
                 .map(TelemetryRecord::Operational)
                 .collect(),

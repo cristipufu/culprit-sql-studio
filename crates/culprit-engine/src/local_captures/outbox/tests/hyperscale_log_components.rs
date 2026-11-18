@@ -22,12 +22,12 @@ async fn local_component_analysis_reuses_original_counts_native_clocks_and_the_s
     for (source, rows) in hyperscale_log_component_evidence_cases() {
         let fixture = LocalCaptureFixture::snapshot(source.clone(), rows).await;
         let original = analyze(&fixture).await.unwrap();
-        assert_eq!(original.connection(), "local-evidence");
-        assert_eq!(original.read().description, source);
-        assert!(original.read().is_valid());
-        assert_eq!(original.bytes_read(), fixture.original_bytes());
-        assert_eq!(original.collected_from(), fixture.manifest.started_at);
-        assert_eq!(Some(original.collected_until()), fixture.manifest.finished_at.as_deref());
+        assert_eq!(original.original().connection(), "local-evidence");
+        assert_eq!(original.original().read().description, source);
+        assert!(original.original().read().is_valid());
+        assert_eq!(original.original().bytes_read(), fixture.original_bytes());
+        assert_eq!(original.original().collected_from(), fixture.manifest.started_at);
+        assert_eq!(Some(original.original().collected_until()), fixture.manifest.finished_at.as_deref());
         let report = original.report();
         let coverage = &source.observation.snapshot().unwrap().sources[0];
         assert_eq!(report.source_state, coverage.state);
@@ -38,7 +38,8 @@ async fn local_component_analysis_reuses_original_counts_native_clocks_and_the_s
             assert!(matches!(first.current_max_log_rate_bps.as_str(), "9007199254740993" | "0"));
             assert_eq!(first.last_reported_time_without_offset.as_deref(), Some("2026-11-18T12:00:00.003"));
         }
-        let recomputed = culprit_checks::hyperscale_log_components::explain_captured(original.read()).unwrap();
+        let recomputed =
+            culprit_checks::hyperscale_log_components::explain_captured(original.original().read()).unwrap();
         assert_eq!(serde_json::to_value(report).unwrap(), serde_json::to_value(recomputed).unwrap());
     }
 }

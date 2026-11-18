@@ -30,6 +30,8 @@ mod indexes;
 mod instance;
 mod live;
 mod local_source;
+mod qualification;
+pub use qualification::assess_recipe_qualification;
 mod memory_clerks;
 mod memory_failures;
 mod missing_indexes;
@@ -114,6 +116,14 @@ impl MssqlProvider {
             endpoint_host: spec.host.trim().into(),
             endpoint_port: spec.port.unwrap_or(conn::DEFAULT_PORT),
         })
+    }
+
+    /// Explicit cost measurement reuses the same native snapshot reader with its recorded execution context.
+    pub fn qualification_source(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::qualification_source(self.pool.clone(), request, self.endpoint_host.clone(), self.endpoint_port)
     }
 
     async fn user_session(&self) -> Result<MsClient> {

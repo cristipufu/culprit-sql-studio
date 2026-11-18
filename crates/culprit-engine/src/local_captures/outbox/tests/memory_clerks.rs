@@ -28,11 +28,11 @@ async fn shared_originals_reach_the_same_view_with_exact_counts_positions_and_in
     let expected_context = NativeReadContext::from_snapshot(&source).unwrap();
     let fixture = LocalCaptureFixture::snapshot(source.clone(), rows).await;
     let result = clerks(&reader(&fixture), &fixture.manifest.capture.observation_id).await.unwrap();
-    assert_eq!(result.connection(), "local-evidence");
-    assert_eq!(result.bytes_read(), fixture.original_bytes());
-    assert_eq!(result.collected_from(), fixture.manifest.started_at);
-    assert_eq!(Some(result.collected_until()), fixture.manifest.finished_at.as_deref());
-    let raw = result.read();
+    assert_eq!(result.original().connection(), "local-evidence");
+    assert_eq!(result.original().bytes_read(), fixture.original_bytes());
+    assert_eq!(result.original().collected_from(), fixture.manifest.started_at);
+    assert_eq!(Some(result.original().collected_until()), fixture.manifest.finished_at.as_deref());
+    let raw = result.original().read();
     assert!(raw.is_valid());
     assert_eq!(raw.description, source);
     assert_eq!(raw.context().unwrap(), expected_context);
@@ -89,8 +89,8 @@ async fn native_partial_and_denied_sources_do_not_become_healthy_empty_after_a_c
             Some(if denied { SourceState::Unavailable } else { SourceState::Partial })
         );
         assert_eq!(result.report().observed_rows, if denied { 0 } else { 2 });
-        assert_eq!(result.read().observations.len(), if denied { 1 } else { 3 });
-        assert_eq!(result.read().source_coverage("independent-native-counters").unwrap().records, 1);
+        assert_eq!(result.original().read().observations.len(), if denied { 1 } else { 3 });
+        assert_eq!(result.original().read().source_coverage("independent-native-counters").unwrap().records, 1);
     }
 }
 
@@ -183,7 +183,7 @@ async fn one_semaphore_preserves_cancelled_and_expired_operations_without_poison
         .unwrap_err();
     assert_eq!(error.detail, Some(ErrorDetail::CollectionStopped(CollectionStop::TimedOut)));
     drop(permit);
-    assert!(clerks(&reader, &fixture.manifest.capture.observation_id).await.unwrap().read().is_valid());
+    assert!(clerks(&reader, &fixture.manifest.capture.observation_id).await.unwrap().original().read().is_valid());
 }
 
 #[tokio::test]

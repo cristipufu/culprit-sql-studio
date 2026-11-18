@@ -33,7 +33,7 @@ pub use views::{
     hyperscale_log_components, jobs, maintenance, maintenance_blocking, maintenance_progress, memory_clerks,
     memory_failures, native_failures, page_server_reads, page_waits, performance_counters, query_store_definitions,
     replication, request_memory, runtime_distributions, session_memory, source_overhead, statement_grants,
-    statement_work, task_space, temporary_work, wait_counters, waits,
+    statement_work, storage, task_space, temporary_work, wait_counters, waits,
 };
 
 use std::sync::Arc;

@@ -39,7 +39,7 @@ Culprit's CLI is designed to be driven by agents: JSON output, stable ids, no pr
 | `blocking` | Who blocks whom right now, as chains under each head blocker |
 | `deadlocks` | Recent deadlocks explained, with the pattern and fix |
 | `waits` | Wait categories with the queries behind each, or a live sample (`now: true`) |
-| `analyze_capture` | When explicitly enabled: explain page-server reads or memory-clerk allocations from one verified local capture |
+| `analyze_capture` | When explicitly enabled: explain bounded native facts from one verified local capture using the shared report |
 | `schema` | Tables; or one table's columns, indexes and which captured plans use each index |
 | `drift` | Schema, index, setting and version differences between two connections |
 | `index_advice` | The index advisor: indexes to add, indexes to clean up, and table storage guidance |
@@ -68,11 +68,19 @@ Enable local evidence at server startup:
 culprit mcp --connection shop-staging --evidence-outbox /path/to/outbox
 ```
 
-`analyze_capture` takes `connection`, `observation_id` and `analysis` (`page_server_reads` or `memory_clerks`);
+`analyze_capture` takes `connection`, `observation_id` and a closed `analysis` choice. It supports `page_server_reads`,
+`memory_clerks`, `hyperscale_log_components`, `performance_counters`, `database_properties`, `compilation`,
+`configured_log_rates`, `connection_outcomes`, `jobs`, `request_memory`, `task_space`, `current_request_work`,
+`statement_work`, `maintenance_progress`, `completed_spills` and `storage`.
 `observation_id` is the capture's `manifest.json` → `capture.observation_id`. The connection must be delegated to the agent and match the original
 journal entry. The tool reanalyzes verified originals, with redacted SQL previews only when their exact original
 definitions match. Memory clerks retain their original shared-server scope, native counts and read bounds; they
 are not allocations attributable to the selected database or its queries. It does not connect to the database or use credentials, recovery storage or a warehouse.
+
+Operational analyses share one authenticated original read. Results keep native source coverage and acquisition
+clocks independently of local verification bytes. Details return at most five entries with explicit presentation
+counts; this does not truncate or relabel the original captured population. Compilation and completed-spill facts
+retain their historical native lifetimes, not current compiler ownership or a statement's elapsed-time cause.
 
 The directory must be available for exclusive ownership; a running collector's lock is not bypassed. An embedding
 host can instead share its existing Outbox actor. Without the startup option or an injected reader, this tool is

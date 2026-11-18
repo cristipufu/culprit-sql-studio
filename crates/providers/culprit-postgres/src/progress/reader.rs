@@ -158,7 +158,7 @@ pub(super) async fn capture<R: QueryRead>(
     if !same_actor(first.as_ref(), last.as_ref()) {
         return Err(CollectionStop::SourceChanged.error());
     }
-    let context = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
+    let context = local_context::complete(reader, host, port, &before, owner.as_ref()).await?.context;
     Ok(Acquired {
         progress: progress.finish(context, original, binding)?,
         sql: first.as_ref().and_then(|actor| actor.sql.clone()),

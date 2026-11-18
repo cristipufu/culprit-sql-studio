@@ -131,11 +131,12 @@ async fn capture<R: NativeRead>(
             Some(_) => BlockingRequestState::Changed,
         };
     }
-    let context = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
+    let completion = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
+    let context = completion.context;
     let observations = if membership == FocusedRequestMembership::Observed { frame.observations() } else { vec![] };
     let count = observations.len().try_into().map_err(|_| native::invalid())?;
     let mut coverage = StateSourceCoverage::observed(SOURCE.into(), count, false);
-    if !before.full_visibility {
+    if !completion.full_visibility {
         coverage.error_code = Some(ErrorCode::PermissionDenied);
     }
     if status.is_limited() {

@@ -92,11 +92,17 @@ fn maintenance_actor(lock_wait: bool) -> Row {
 }
 
 async fn original(outbox: &mut Outbox, lock_wait: bool) -> Captured {
+    original_with_identity(outbox, lock_wait, Ok(vec![fixture::member("127.0.0.1")])).await
+}
+
+async fn original_with_identity(outbox: &mut Outbox, lock_wait: bool, member: Result<Vec<Row>>) -> Captured {
     let reader = NativeReader {
         replies: [
             Ok(vec![fixture::metadata_with("f", PROCESS)]),
+            member,
             Ok(vec![maintenance_actor(lock_wait)]),
             Ok(vec![fixture::metadata_with("f", PROCESS)]),
+            Ok(vec![fixture::member("127.0.0.1")]),
         ]
         .into(),
         ..Default::default()
@@ -114,6 +120,12 @@ async fn original(outbox: &mut Outbox, lock_wait: bool) -> Captured {
 }
 
 fn participant(capture: &Captured) -> ActivityRequestFocus {
+    let focus = participant_candidate(capture);
+    assert!(focus.matches_parent(&capture.source, &focus.original, &focus.parent));
+    focus
+}
+
+fn participant_candidate(capture: &Captured) -> ActivityRequestFocus {
     let index = capture
         .rows
         .iter()
@@ -121,7 +133,7 @@ fn participant(capture: &Captured) -> ActivityRequestFocus {
         .unwrap();
     let TelemetryRecord::Activity(row) = &capture.rows[index].record else { panic!() };
     let frame = capture.source.observation.activity().unwrap();
-    let focus = ActivityRequestFocus {
+    ActivityRequestFocus {
         parent: capture.references[index].clone(),
         target: capture.source.target.clone(),
         partition: capture.source.partition.clone(),
@@ -131,9 +143,7 @@ fn participant(capture: &Captured) -> ActivityRequestFocus {
         original_observed_at: frame.at.clone(),
         original: row.as_ref().clone(),
         statement_identity: row.statement_identity.clone().unwrap(),
-    };
-    assert!(focus.matches_parent(&capture.source, row, &capture.references[index]));
-    focus
+    }
 }
 
 async fn maintenance(outbox: &mut Outbox, focus: &ActivityRequestFocus) -> Captured {
@@ -248,14 +258,14 @@ async fn original_native_maintenance_lock_wait_already_plans_the_existing_blocki
     let progress = maintenance(&mut outbox, &focus).await;
     let SourceObservation::MaintenanceProgress { result, .. } = &progress.source.observation else { panic!() };
     assert_eq!(result.focus.as_deref(), Some(&focus));
-    assert_eq!(result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+    assert_eq!(result.binding, FocusedRequestBinding::Matched);
     assert_eq!(native_progress(&progress).actor, focus.original.key);
     assert_eq!(
         native_progress(&progress).postgres_index_wait().unwrap().phase,
         PostgresIndexWaitPhase::WritersBeforeBuild
     );
     assert_ne!(progress.references[0].capture, focus.parent.capture);
-    assert_eq!(focus.partition, SourcePartition::Target);
+    assert!(matches!(focus.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) }));
 }
 
 #[tokio::test]
@@ -268,12 +278,18 @@ async fn a_fresh_native_blocker_different_from_the_historical_locker_does_not_re
     let current = blocking(&mut outbox, focus.clone(), "44", NEW_OWNER_BACKEND).await;
     let SourceObservation::FocusedBlocking { result, .. } = &current.source.observation else { panic!() };
     assert_eq!(result.focus, focus);
-    assert_eq!(result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+    assert_eq!(result.binding, FocusedRequestBinding::Matched);
     assert_eq!(result.request_end, BlockingRequestState::SameStatement);
     let rows = activity_rows(&current);
     let frame = ActivityFrameEvidence::new(&current.source, &rows, true).unwrap();
     assert!(result.accepts_frame(&frame));
-    assert!(!result.has_complete_owner_context(&frame), "a fresh physical owner cannot repair original Target scope");
+    assert!(result.has_complete_owner_context(&frame), "the original native acquisition already qualified its owner");
+    let report = culprit_checks::focused_blocking::explain(&current.source, &rows, true).unwrap();
+    assert_eq!(report.original, focus.parent);
+    assert_eq!(report.binding, FocusedRequestBinding::Matched);
+    assert_eq!(report.context.partition, original.source.partition);
+    assert_eq!(report.native_rows, current.rows.len() as u32);
+    assert!(report.blocking.as_ref().is_some_and(|graph| graph.chains.iter().any(|chain| chain.head == "44")));
     let current_rows = rows.iter().map(|row| row.observation.clone()).collect::<Vec<_>>();
     let edges = ActivityEvidence::blocking_observations(&current_rows).unwrap();
     assert_eq!(edges.len(), 1);
@@ -285,6 +301,24 @@ async fn a_fresh_native_blocker_different_from_the_historical_locker_does_not_re
 }
 
 #[tokio::test]
+async fn a_sealed_original_with_denied_member_identity_cannot_borrow_the_later_capture_authority() {
+    let (_directory, mut outbox) = outbox();
+    let original = original_with_identity(
+        &mut outbox,
+        true,
+        Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source"))),
+    )
+    .await;
+    let focus = participant_candidate(&original);
+    assert!(matches!(focus.partition, SourcePartition::InstanceLocal { member: None, epoch: Some(_) }));
+    assert_eq!(original.source.observation.activity().unwrap().coverage.state, culprit_core::SourceState::Partial);
+    assert!(!focus.is_valid());
+    let error = outbox.reserve("maintenance", &request(focus)).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::InvalidPage);
+    assert!(matches!(original.source.partition, SourcePartition::InstanceLocal { member: None, .. }));
+}
+
+#[tokio::test]
 async fn an_explicit_new_qualified_parent_gives_only_the_fresh_owner_a_native_generation() {
     let (_directory, mut outbox) = outbox();
     let original = original(&mut outbox, true).await;
@@ -292,7 +326,7 @@ async fn an_explicit_new_qualified_parent_gives_only_the_fresh_owner_a_native_ge
     let qualified = blocking(&mut outbox, logical.clone(), "44", BACKEND).await;
     let focus = participant(&qualified);
     assert_ne!(focus.parent, logical.parent);
-    assert_eq!(logical.partition, SourcePartition::Target);
+    assert!(matches!(logical.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) }));
     assert!(matches!(focus.partition, SourcePartition::InstanceLocal { member: Some(_), epoch: Some(_) }));
     let progress = maintenance(&mut outbox, &focus).await;
     let SourceObservation::MaintenanceProgress { result, .. } = &progress.source.observation else { panic!() };

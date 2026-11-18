@@ -17,7 +17,7 @@ fn request(original: &retained_activity::Original) -> CollectionRequest {
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL14+ on the existing nonce-owned loopback fixture; select native_tests::copy::"]
-async fn genuine_copy_stdin_retains_exact_native_request_and_progress_without_upgrading_original_scope() {
+async fn genuine_copy_stdin_retains_exact_original_native_scope_request_and_progress() {
     Fixture::run("observed", |fixture| {
         Box::pin(async move {
             fixture.prepare().await;
@@ -31,7 +31,7 @@ async fn genuine_copy_stdin_retains_exact_native_request_and_progress_without_up
                 panic!()
             };
             assert_eq!(*profile, CurrentRequestWorkProfile::PostgresCopy);
-            assert_eq!(result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+            assert_eq!(result.binding, FocusedRequestBinding::Matched);
             assert_eq!(result.membership, FocusedRequestMembership::Observed);
             assert_eq!(result.focus.as_deref(), Some(&original.focus));
             assert_eq!(snapshot.records, 1);
@@ -71,7 +71,7 @@ async fn genuine_copy_stdin_retains_exact_native_request_and_progress_without_up
             };
             assert_eq!(*profile, CurrentRequestWorkProfile::PostgresCopy);
             assert_eq!(result.membership, FocusedRequestMembership::NotObserved);
-            assert_eq!(result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+            assert_eq!(result.binding, FocusedRequestBinding::ParticipantChanged);
             assert_eq!(result.focus.as_deref(), Some(&original.focus));
             assert_eq!(snapshot.records, 0);
             assert!(absent.records.is_empty());

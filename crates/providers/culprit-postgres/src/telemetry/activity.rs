@@ -1,12 +1,15 @@
 //! An unfiltered metadata baseline. Optional blocker/SQL reads belong to a later investigation.
 use super::*;
-use crate::native::activity;
+use crate::native::{
+    activity,
+    local_context::{self, Context},
+};
 use culprit_read::{FrozenObservation, FrozenSource, ObservationReader};
 #[cfg(test)]
 mod tests;
 
 const MAX_BASELINE_ROWS: u32 = 500;
-const MAX_BASELINE_QUERIES: u32 = 4; // Owned session setup, before/after metadata and one activity projection.
+const MAX_BASELINE_QUERIES: u32 = 6; // Owned setup, two database/member bounds and one Activity projection.
 pub(super) fn bounded_budget(requested: &CollectionBudget) -> CollectionBudget {
     let mut budget = requested.clone();
     budget.max_snapshot_rows = budget.max_snapshot_rows.min(MAX_BASELINE_ROWS);
@@ -80,6 +83,7 @@ async fn capture<R: crate::read::QueryRead>(
     if before.version < 120_000 {
         return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
     }
+    let owner = Context::observe(reader, &before).await?;
     let read = activity::observe_baseline_rows(
         reader,
         &activity::query(before.version, request.budget.max_snapshot_rows as usize + 1),
@@ -87,36 +91,35 @@ async fn capture<R: crate::read::QueryRead>(
         &request.budget,
     )
     .await?;
-    let after = metadata::activity(reader, host, port).await?;
-    if !before.same_activity_source(&after) {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    let visible = before.full_visibility && after.full_visibility && read.frame.fully_visible_for(&before.database_oid);
+    let completion = local_context::complete(reader, host, port, &before, owner.as_ref()).await?;
+    let visible = completion.full_visibility && read.frame.fully_visible_for(&before.database_oid);
+    let context = completion.context;
+    let qualified = context.has_qualified_local_owner();
     let mut observations = read.frame.observations();
     for row in &mut observations {
         row.blocking_status = ActivityBlockingStatus::Unknown;
     }
     let source = "pg_stat_activity";
     let mut coverage =
-        StateSourceCoverage::observed(source.into(), observations.len() as u32, visible && !read.limited);
-    if !before.full_visibility || !after.full_visibility {
+        StateSourceCoverage::observed(source.into(), observations.len() as u32, visible && qualified && !read.limited);
+    if !completion.full_visibility {
         coverage.error_code = Some(ErrorCode::PermissionDenied);
     }
     if read.limited {
         coverage.stopped = Some(CollectionStop::RowLimit);
-    } else if !visible {
+    } else if !visible || !qualified {
         coverage.stopped = Some(CollectionStop::SourceUnavailable);
     }
     let description = CollectionDescription {
-        partition: culprit_core::telemetry::SourcePartition::Target,
-        target: before.database.clone().into(),
+        partition: context.partition,
+        target: context.target,
         source: source.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
-            database_writable: Some(before.writable_role()),
+            database_writable: context.database_writable,
             epoch: Some(before.activity_epoch()),
-            observed_from: canonical_time(&before.at)?,
-            observed_until: canonical_time(&after.at)?,
+            observed_from: context.observed_from,
+            observed_until: context.observed_until,
             at: read.frame.at,
             scope: culprit_core::MeasurementScope::Database,
             population: ActivityPopulation::ClientBackends,
@@ -125,7 +128,7 @@ async fn capture<R: crate::read::QueryRead>(
             coverage,
         }),
     };
-    if !description.observation.activity().is_some_and(ActivitySnapshotDescription::is_valid) {
+    if !description.matches_request(request) {
         return Err(CollectionStop::SourceChanged.error());
     }
     Ok(FrozenObservation { description, records: observations.into_iter().map(TelemetryRecord::from).collect() })

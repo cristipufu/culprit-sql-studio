@@ -3,4 +3,4 @@
 /**
  * A closed analysis choice; selecting an analysis starts no native collection or source discovery.
  */
-export type LocalCaptureAnalysisKind = "page_server_reads" | "memory_clerks" | "hyperscale_log_components";
+export type LocalCaptureAnalysisKind = "page_server_reads" | "memory_clerks" | "hyperscale_log_components" | "performance_counters" | "database_properties" | "compilation" | "configured_log_rates" | "connection_outcomes" | "jobs" | "request_memory" | "task_space" | "current_request_work" | "statement_work" | "maintenance_progress" | "completed_spills" | "storage";

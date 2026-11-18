@@ -63,9 +63,20 @@ pub(super) async fn capture_parent(
     request: CollectionRequest,
     cancellation: &CollectionCancellation,
 ) -> Captured {
-    let factory = Factory(crate::PostgresProvider::new(specification).unwrap());
     let directory = tempfile::tempdir().unwrap();
     let mut outbox = Outbox::create(&directory.path().join("outbox"), OutboxLimits::default()).unwrap();
+    let mut captured = capture_reserved(&mut outbox, specification, request, cancellation).await;
+    captured._owner = Some((outbox, directory));
+    captured
+}
+
+async fn capture_reserved(
+    outbox: &mut Outbox,
+    specification: &ConnectionSpec,
+    request: CollectionRequest,
+    cancellation: &CollectionCancellation,
+) -> Captured {
+    let factory = Factory(crate::PostgresProvider::new(specification).unwrap());
     let mut lease = outbox.reserve("owned-native-parent", &request).await.unwrap();
     let identity = lease.identity().clone();
     let output = lease.directory().to_owned();
@@ -78,9 +89,7 @@ pub(super) async fn capture_parent(
     assert!(manifest.capture.revision.is_some(), "the actual acquisition owns its durable revision");
     lease.finish().await.unwrap();
     assert_eq!(outbox.verify(&identity.observation_id).await.unwrap().capture, identity);
-    let mut captured = completed(&output, manifest);
-    captured._owner = Some((outbox, directory));
-    captured
+    completed(&output, manifest)
 }
 
 fn completed(output: &std::path::Path, manifest: CollectionManifest) -> Captured {
@@ -107,6 +116,16 @@ fn completed(output: &std::path::Path, manifest: CollectionManifest) -> Captured
 }
 
 impl Captured {
+    pub(super) async fn followup(
+        &mut self,
+        specification: &ConnectionSpec,
+        request: CollectionRequest,
+        cancellation: &CollectionCancellation,
+    ) -> Captured {
+        let (outbox, _) = self._owner.as_mut().expect("the actual original Outbox owns focused authentication");
+        capture_reserved(outbox, specification, request, cancellation).await
+    }
+
     pub(super) fn source(&self) -> &CollectionDescription {
         self.manifest.description.as_ref().unwrap()
     }

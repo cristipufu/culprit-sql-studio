@@ -411,9 +411,9 @@ Trigger audit on sales.orders was altered"
     assert_eq!(filegroup_name("shop", "PRIMARY"), "shop data filegroup PRIMARY");
     assert_eq!(tempdb_name(), "tempdb data files (whole instance)");
     let parts = tempdb_parts(&[
-        native::SpacePart { kind: native::SpacePartKind::Users, bytes: Some(1.0) },
-        native::SpacePart { kind: native::SpacePartKind::Internals, bytes: Some(2.0) },
-        native::SpacePart { kind: native::SpacePartKind::Versions, bytes: Some(3.0) },
+        native::SpacePart { kind: native::SpacePartKind::Users, bytes: Some("1".into()) },
+        native::SpacePart { kind: native::SpacePartKind::Internals, bytes: Some("2".into()) },
+        native::SpacePart { kind: native::SpacePartKind::Versions, bytes: Some("3".into()) },
     ]);
     assert_eq!(
         parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),

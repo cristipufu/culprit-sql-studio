@@ -58,6 +58,10 @@ async fn fixture(analysis: LocalCaptureAnalysisKind) -> LocalCaptureFixture {
             let (source, rows) = memory_clerk_evidence(MemoryClerkCase::SharedInstance);
             LocalCaptureFixture::snapshot(source, rows).await
         }
+        other => {
+            let (source, rows) = super::snapshots::originals(other);
+            LocalCaptureFixture::snapshot(source, rows).await
+        }
     }
 }
 

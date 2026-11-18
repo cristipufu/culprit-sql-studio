@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 const ENTRY_LIMIT: usize = 5;
 
 pub(super) fn captured(analysis: &LocalMemoryClerks) -> Result<Value> {
-    let read = analysis.read();
+    let read = analysis.original().read();
     let view = analysis.report();
     // The opaque owner already authenticated and interpreted the original body. Presentation does no second pass.
     let source = view.native_source.as_ref().ok_or_else(|| DeliveryProblem::Integrity.error())?;
@@ -43,7 +43,7 @@ pub(super) fn captured(analysis: &LocalMemoryClerks) -> Result<Value> {
             "historical_context": true, "independent_shared_scope": true,
             "limitations": view.limitations, "entries": entries,
         },
-        "collected_from": analysis.collected_from(), "collected_until": analysis.collected_until(),
-        "local_verification_bytes": analysis.bytes_read(),
+        "collected_from": analysis.original().collected_from(), "collected_until": analysis.original().collected_until(),
+        "local_verification_bytes": analysis.original().bytes_read(),
     }))
 }

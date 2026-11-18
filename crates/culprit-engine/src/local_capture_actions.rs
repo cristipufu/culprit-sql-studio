@@ -30,7 +30,7 @@ impl Workspace {
         query_log: Option<&Path>,
         captured: crate::LocalHyperscaleLogComponents,
     ) -> Result<Report> {
-        if captured.connection() != name {
+        if captured.original().connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::hyperscale_log_components(captured.into_read())?;
@@ -47,7 +47,7 @@ impl Workspace {
         query_log: Option<&Path>,
         captured: LocalMemoryClerks,
     ) -> Result<Report> {
-        if captured.connection() != name {
+        if captured.original().connection() != name {
             return Err(DeliveryProblem::InvalidContract.error());
         }
         let evidence = crate::scan::CapturedScanEvidence::memory_clerks(captured.into_read())?;

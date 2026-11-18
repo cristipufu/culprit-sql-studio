@@ -49,3 +49,5 @@ pub mod configured_log_rates;
 pub mod database_properties;
 pub mod hyperscale_log_components;
 pub mod memory_clerks;
+
+pub mod storage;

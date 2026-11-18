@@ -34,6 +34,9 @@ pub enum IndexUsageScope {
 pub struct OperationalStats {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub storage: Option<Box<crate::telemetry::StorageRead>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub cached_runtime: Option<Box<crate::telemetry::CachedRuntimeRead>>,
     /// An independent original capture; its shared target and receipts are never current database ownership.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,6 +177,7 @@ impl OperationalStats {
             statement_work: _,
             cached_runtime: _,
             memory_clerks: _,
+            storage: _,
             hyperscale_log_components: _,
             database_properties: _,
             index_usage_scope,
@@ -359,6 +363,9 @@ pub struct RequestEvidence {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct SpaceUsage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub origin: Option<crate::telemetry::StoragePointRef>,
     pub parts: Vec<SpacePart>,
     pub name: String,
     pub kind: FileKind,

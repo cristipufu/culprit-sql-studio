@@ -212,6 +212,8 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.invalid")
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.sharing_withheld")
                 | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.invalid")
+                | (crate::source_id::FILE_CAPACITY, "view.storage.invalid")
+                | (crate::source_id::FILE_CAPACITY, "view.storage.sharing_withheld")
                 | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.sharing_withheld")
                 | (crate::source_id::WAITS, "view.wait_counters.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
@@ -279,6 +281,12 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         s.record_unavailable_evidence(
             crate::telemetry::HYPERSCALE_LOG_COMPONENTS_SOURCE,
             crate::message!("view.hyperscale_log_components.sharing_withheld"),
+        );
+    }
+    if s.operations.storage.take().is_some() {
+        s.record_unavailable_evidence(
+            crate::source_id::FILE_CAPACITY,
+            crate::message!("view.storage.sharing_withheld"),
         );
     }
     if s.operations.memory_clerks.take().is_some() {
@@ -719,6 +727,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         p.replication = p.replication.take().and_then(|read| replication::redact(read).ok());
     }
     for space in &mut s.operations.spaces {
+        space.origin = None;
         space.name = shareable_name(&space.name);
         for part in &mut space.parts {
             part.name = shareable_name(&part.name);

@@ -15,7 +15,7 @@ pub(super) fn captured(analysis: &LocalHyperscaleLogComponents) -> Result<Value>
             let reference = culprit_core::telemetry::digest(
                 &serde_json::to_vec(&(
                     "local-hyperscale-log-component",
-                    &analysis.read().origin.capture,
+                    &analysis.original().read().origin.capture,
                     &entry.observation_key,
                 ))
                 .map_err(|_| DeliveryProblem::Integrity.error())?,
@@ -42,7 +42,7 @@ pub(super) fn captured(analysis: &LocalHyperscaleLogComponents) -> Result<Value>
             "original_read_bounds":{"from":view.context.observed_from,"until":view.context.observed_until},
             "historical_context":true, "limitations":view.limitations, "entries":entries,
         },
-        "collected_from":analysis.collected_from(), "collected_until":analysis.collected_until(),
-        "local_verification_bytes":analysis.bytes_read(),
+        "collected_from":analysis.original().collected_from(), "collected_until":analysis.original().collected_until(),
+        "local_verification_bytes":analysis.original().bytes_read(),
     }))
 }

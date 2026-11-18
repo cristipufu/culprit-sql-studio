@@ -41,7 +41,8 @@ mod local_captures;
 pub use local_captures::OutboxCaptureReader;
 pub use local_captures::{
     LocalCaptureAnalysisKind, LocalCaptureReader, LocalCaptureRequest, LocalCaptureTask, LocalCapturedAnalysis,
-    LocalHyperscaleLogComponents, LocalMemoryClerks, LocalPageServerReads,
+    LocalHyperscaleLogComponents, LocalMemoryClerks, LocalOperationalCapture, LocalPageServerReads,
+    LocalSnapshotAnalysis, LocalSnapshotReport,
 };
 pub mod marks;
 #[cfg(feature = "postgres")]
@@ -87,6 +88,10 @@ pub use marks::Mark;
 pub use operation::run_blocking;
 pub use plans::{PlanFormat, parse_plan};
 pub use provider_registration::{ProviderRegistration, RecipeCostVerifier};
+#[cfg(feature = "collector")]
+pub use provider_registration::{RecipeQualificationFactory, RecipeQualificationIssuer};
+#[cfg(feature = "collector")]
+mod qualification_bindings;
 pub use reports::ReportSummary;
 pub use scan::PopulationReports;
 #[cfg(feature = "collector")]
@@ -115,6 +120,8 @@ pub struct Workspace {
     ssh: ssh::Manager,
     previews: tokio::sync::Semaphore,
     source_gate: culprit_read::admission::SourceGate,
+    #[cfg(feature = "collector")]
+    qualification_bindings: qualification_bindings::QualificationBindings,
 }
 
 impl Workspace {
@@ -158,6 +165,8 @@ impl Workspace {
             ssh: ssh::Manager::default(),
             previews: tokio::sync::Semaphore::new(1),
             source_gate: culprit_read::admission::SourceGate::default(),
+            #[cfg(feature = "collector")]
+            qualification_bindings: Default::default(),
         }
     }
 
@@ -173,6 +182,8 @@ impl Workspace {
             providers: &self.providers,
             ssh: &self.ssh,
             source_gate: &self.source_gate,
+            #[cfg(feature = "collector")]
+            qualification_bindings: &self.qualification_bindings,
         }
     }
 

@@ -258,7 +258,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
         crate::read::ReadSession::new(pool.clone(), culprit_core::telemetry::CollectionBudget::default());
     for kind in crate::operations::native::Kind::ALL {
         let facts = crate::operations::native::read(&mut operations, kind, 10_000).await.unwrap();
-        let observations = facts.observations(kind);
+        let observations = facts.observations(kind).unwrap();
         assert!(observations.iter().all(|row| row.is_valid()));
         if kind == crate::operations::native::Kind::Sequences {
             assert!(observations.iter().any(|row|matches!(&row.fact,culprit_core::telemetry::OperationalFact::Sequence(sequence) if sequence.current=="9007199254740993")));

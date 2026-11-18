@@ -2,7 +2,7 @@
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Value, json};
 
-pub const PREPARATION_VERSION: u32 = 22;
+pub const PREPARATION_VERSION: u32 = 23;
 const MAX_PREVIEW_BYTES: usize = 1024;
 const MAX_INLINE_DETAIL_BYTES: usize = 128 * 1024;
 

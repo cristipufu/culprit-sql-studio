@@ -149,6 +149,7 @@ Replicas reported behind or stopped, PostgreSQL slots with no active consumer an
 fn space(kind: FileKind, scope: FileScope, total_gb: f64, used_gb: f64) -> culprit_core::operations::SpaceUsage {
     const GB: f64 = 1024.0 * 1024.0 * 1024.0;
     culprit_core::operations::SpaceUsage {
+        origin: None,
         parts: Vec::new(),
         name: "shop".into(),
         kind,

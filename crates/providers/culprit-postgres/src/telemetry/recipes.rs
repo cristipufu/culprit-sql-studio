@@ -113,7 +113,7 @@ const REGISTRATIONS: &[Registration] = &[
     },
     Registration {
         id: "postgres.activity",
-        version: 1,
+        version: 2,
         purpose: RecipePurpose::Baseline,
         subject: RecipeSubject::Database,
         route: Route::Activity,

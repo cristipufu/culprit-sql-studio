@@ -253,10 +253,10 @@ pub(crate) fn server_info(p: &Probe, capabilities: Vec<Capability>, missing: Vec
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn probe(engine_edition: i64, rds: bool) -> Probe {
+    pub(crate) fn probe(engine_edition: i64, rds: bool) -> Probe {
         Probe {
             version: "16.0.4135.4".into(),
             major: 16,

@@ -40,6 +40,12 @@ use std::sync::Arc;
 pub(super) struct StreamedSnapshot<D: SnapshotRecipe, R: NativeStreamRead = ReadSession> {
     inner: culprit_read::SnapshotSource<NativeSnapshotReader<D, R>>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotPurpose {
+    Dataset,
+    NativeCostMeasurement,
+}
+
 struct NativeSnapshotReader<D: SnapshotRecipe, R> {
     recipe: D,
     io: R,
@@ -48,6 +54,7 @@ struct NativeSnapshotReader<D: SnapshotRecipe, R> {
     port: u16,
     physical: Option<String>,
     source_read: Option<SourceReadRequest>,
+    purpose: SnapshotPurpose,
     local: Option<crate::local_source::Context>,
     layout: Option<D::Layout>,
 }
@@ -61,9 +68,40 @@ impl<D: SnapshotRecipe> StreamedSnapshot<D> {
         Self::with_io(ReadSession::new(pool, request.budget.clone()), request, host, port, recipe)
     }
 }
+impl<D: SnapshotRecipe> StreamedSnapshot<D> {
+    pub(super) fn for_native_measurement(
+        pool: Arc<Pool>,
+        request: &CollectionRequest,
+        host: String,
+        port: u16,
+        recipe: D,
+    ) -> Result<Self> {
+        Self::with_purpose(
+            ReadSession::new(pool, request.budget.clone()),
+            request,
+            host,
+            port,
+            recipe,
+            SnapshotPurpose::NativeCostMeasurement,
+        )
+    }
+}
 impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16, recipe: D) -> Result<Self> {
+        Self::with_purpose(io, request, host, port, recipe, SnapshotPurpose::Dataset)
+    }
+    fn with_purpose(
+        io: R,
+        request: &CollectionRequest,
+        host: String,
+        port: u16,
+        recipe: D,
+        purpose: SnapshotPurpose,
+    ) -> Result<Self> {
         request.validate()?;
+        if purpose == SnapshotPurpose::NativeCostMeasurement && D::SOURCE_READ.is_none() {
+            return Err(invalid_data());
+        }
         let source_read = match &request.selection {
             CollectionSelection::Snapshot { dataset } if *dataset == D::DATASET => None,
             CollectionSelection::SourceRead { focus, execution }
@@ -81,6 +119,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
             port,
             physical: None,
             source_read,
+            purpose,
             local: None,
             layout: None,
         };
@@ -94,50 +133,54 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         D::SOURCE_READ == Some(question)
     }
     async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
-        let (target, partition, observed_from, metadata_visible) = if let Some(expected) = &self.source_read {
-            description::ensure_supported(&mut self.io).await?;
-            // Replace the existing Azure identity projection with the held reader's native authority projection.
-            // This does not add a query or turn updateability into Primary/Secondary identity.
-            let (context, _) = crate::local_source::read_initial(
-                &mut self.io,
-                &self.host,
-                self.port,
-                crate::activity::IdentityDetail::AzureDatabase,
-                crate::local_source::Detail::Authority,
-            )
-            .await?;
-            let actual = context.completed(&context)?;
-            if !expected.execution.matches_context(&actual) {
-                return Err(CollectionStop::SourceChanged.error());
-            }
-            let visible = state::clock(&mut self.io).await?.1;
-            let target = actual.target.clone();
-            let observed_from = actual.observed_from.clone();
-            self.local = Some(context);
-            (target, SourcePartition::Target, observed_from, visible)
-        } else if D::INSTANCE_LOCAL {
-            let context = crate::local_source::Context::read(&mut self.io, &self.host, self.port).await?;
-            // Source locality does not expand this recipe's independently qualified platform or role policy.
-            if context.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
-                return Err(culprit_core::Error::new(
-                    culprit_core::ErrorCode::Unsupported,
-                    culprit_core::t!("collection.azure_sql_only"),
-                ));
-            }
-            crate::read::require_primary(context.activity.writable)?;
-            let partition = context.source_partition()?;
-            let observed_from = context.activity.at.clone();
-            let target = context.activity.database.clone().into();
-            let visible = if D::REQUIRES_FULL_METADATA { state::clock(&mut self.io).await?.1 } else { true };
-            self.local = Some(context);
-            (target, partition, observed_from, visible)
-        } else {
-            description::ensure_supported(&mut self.io).await?;
-            let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
-            let (at, visible) = state::clock(&mut self.io).await?;
-            self.physical = Some(physical);
-            (database.into(), SourcePartition::Target, at, visible)
-        };
+        let (target, partition, observed_from, metadata_visible) =
+            if self.source_read.is_some() || self.purpose == SnapshotPurpose::NativeCostMeasurement {
+                description::ensure_supported(&mut self.io).await?;
+                // Replace the existing Azure identity projection with the held reader's native authority projection.
+                // This does not add a query or turn updateability into Primary/Secondary identity.
+                let (context, _) = crate::local_source::read_initial(
+                    &mut self.io,
+                    &self.host,
+                    self.port,
+                    crate::activity::IdentityDetail::AzureDatabase,
+                    crate::local_source::Detail::Authority,
+                )
+                .await?;
+                let actual = context.completed(&context)?;
+                if self.purpose == SnapshotPurpose::NativeCostMeasurement && self.source_read.is_none() {
+                    NativeSourceReadScope::from_context(&actual)?;
+                }
+                if self.source_read.as_ref().is_some_and(|expected| !expected.execution.matches_context(&actual)) {
+                    return Err(CollectionStop::SourceChanged.error());
+                }
+                let visible = state::clock(&mut self.io).await?.1;
+                let target = actual.target.clone();
+                let observed_from = actual.observed_from.clone();
+                self.local = Some(context);
+                (target, SourcePartition::Target, observed_from, visible)
+            } else if D::INSTANCE_LOCAL {
+                let context = crate::local_source::Context::read(&mut self.io, &self.host, self.port).await?;
+                // Source locality does not expand this recipe's independently qualified platform or role policy.
+                if context.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
+                    return Err(culprit_core::Error::new(
+                        culprit_core::ErrorCode::Unsupported,
+                        culprit_core::t!("collection.azure_sql_only"),
+                    ));
+                }
+                crate::read::require_primary(context.activity.writable)?;
+                let partition = context.source_partition()?;
+                let observed_from = context.activity.at.clone();
+                let target = context.activity.database.clone().into();
+                let visible = if D::REQUIRES_FULL_METADATA { state::clock(&mut self.io).await?.1 } else { true };
+                self.local = Some(context);
+                (target, partition, observed_from, visible)
+            } else {
+                description::ensure_supported(&mut self.io).await?;
+                let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
+                let (at, visible) = state::clock(&mut self.io).await?;
+                self.physical = Some(physical);
+                (database.into(), SourcePartition::Target, at, visible)
+            };
         if D::REQUIRES_FULL_METADATA && !metadata_visible {
             return Err(crate::catalog_visibility::unavailable());
         }
@@ -197,7 +240,11 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         }
         if let Some(before) = &self.local {
             let source_visibility =
-                if self.source_read.is_some() { Some(state::clock(&mut self.io).await?.1) } else { None };
+                if self.source_read.is_some() || self.purpose == SnapshotPurpose::NativeCostMeasurement {
+                    Some(state::clock(&mut self.io).await?.1)
+                } else {
+                    None
+                };
             let after = before.recheck(&mut self.io, &self.host, self.port).await?;
             let context = match before.completed(&after) {
                 Ok(context) => context,
@@ -216,6 +263,10 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                     initial.partition == SourcePartition::Target
                         && expected.execution.matches_target(&initial.target)
                         && expected.execution.matches_context(&context)
+                }
+                None if self.purpose == SnapshotPurpose::NativeCostMeasurement => {
+                    initial.partition == SourcePartition::Target
+                        && NativeSourceReadScope::from_context(&context)?.matches_target(&initial.target)
                 }
                 None => initial.target == context.target && initial.partition == context.partition,
             };

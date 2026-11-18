@@ -60,12 +60,18 @@ facts and uncertainty without granting trusted query totals or diagnostic escala
 An explicitly configured MCP host can also read original local captures through `LocalCaptureReader` and the
 engine's optional `OutboxCaptureReader` adapter. `culprit mcp --evidence-outbox DIRECTORY` installs that capability;
 `analyze_capture` accepts a delegated connection, its exact original observation ID and the closed analysis choice
-`page_server_reads`, `memory_clerks` or `hyperscale_log_components`. The existing
+`page_server_reads`, `memory_clerks`, `hyperscale_log_components`, `performance_counters`, `database_properties`,
+`compilation`, `configured_log_rates`, `connection_outcomes`, `jobs`, `request_memory`, `task_space`,
+`current_request_work`, `statement_work`, `maintenance_progress`, `completed_spills` or `storage`. The existing
 Outbox owner checks the journal association, Ready state, confirmed native shutdown, manifest and every artifact
 in one canonical verification pass before projecting the requested analysis. Page-server reads keep runtime rows
 and independently matched query definitions. Memory clerks retain all original Operational rows and source
 coverage, including unrelated sources, in a captured raw carrier. Their shared-instance scope and native read
 bounds establish no correlation to the current database scan or any query.
+The other Operational reports use the same original owner and family-specific pure evidence rules. A missing
+declared family is refused; an unavailable native source retains its unavailable state despite a complete local
+file read. Query-global compilation context remains separate from physical acquisition ownership. Details return
+at most five entries with separate original and presented counts. Optional SQL companions are not opened implicitly.
 It performs no native, recovery or warehouse read. The original native window, optional population membership,
 collector clocks and actual local verification bytes remain distinct in the result.
 
@@ -373,6 +379,10 @@ The shared loop diagnosis can link an underestimated TVP access to material repe
 selected actual plan. It requires original TVP binding and explicit serial counter populations; one observed
 worker is insufficient. Healthy single-row seeks and unsupported or missing evidence receive no TVP loop verdict.
 It does not recommend statistics on a TVP or assert that a different join would be faster.
+A completely observed TVP overestimate can also narrow an oversized execution-grant investigation when it is
+on the same memory-consuming branch. The grant and consumed input remain separate facts. Fresh compilation
+and indexed temporary-table staging are candidate experiments outside production, with compilation, tempdb,
+result correctness and runtime checked together; neither is applied automatically.
 Available SQL Server parameter metadata retains names, types and explicit availability states. A native comparison
 describes only compiled/runtime representations in the same selected actual plan; literals and new value hashes
 are not retained. That difference alone establishes neither parameter skew nor harmful cached-plan reuse.
@@ -422,6 +432,16 @@ remain distinct. These observations establish neither free capacity, enabled aut
 Governance stalls are not subtracted to manufacture physical storage service time. SQL Server collects the extra
 columns through the same targeted read, with native version/platform guards; its changed query shape still needs
 work-cost qualification. The app shows these facts in collapsed file details, keeping dashboard summaries concise.
+
+`storage` explains the same Operational log, filegroup and tempdb reads used by a scan. Exact integer byte totals
+survive saved snapshots and warehouse readback, including values above JavaScript's safe integer range. Capacity
+thresholds use those original integers; the chart remains a display projection. The filegroup allocation covers
+only writable online data files, while a separate `sys.database_files` census retains every visible file, including
+read-only, offline and non-ROWS files. Native file types, state codes, growth settings and page counts remain
+separate facts. A snapshot's maximum file size and FILESTREAM container usage do not become allocated data-file
+bytes or free filesystem space. Tempdb allocation and object classes retain their shared scope. Hidden metadata,
+missing row bodies and uncertain source shutdown remain explicit gaps; a visible catalog is not proof of complete
+metadata visibility or current storage pressure. The Health evidence starts folded and pages ten points at a time.
 
 `statement-grants` reads database-target `statement-grants` captures from `operational-samples` through the same
 pure explanation used by scans. Each original cache entry retains its handles, offsets, generation, exact integer
@@ -1063,7 +1083,7 @@ analytical projections expose only opaque scope keys. See [SQL Server replica co
 for the current native identity gates and remaining source restrictions.
 
 Baseline sources preserve stricter caller budgets and cap retained rows at 500, statement time at one second and
-total native time at five seconds. Their native phase ceilings are seven for SQL Server, four for PostgreSQL,
+total native time at five seconds. Their native phase ceilings are seven for SQL Server, six for PostgreSQL,
 twenty for MySQL/MariaDB and eight for YugabyteDB. Setup and prepared-statement phases count toward those limits;
 the counts are not a claim about server work per SQL statement. These hard bounds do not establish production
 overhead under representative load.
@@ -1500,6 +1520,21 @@ python3 dev/smoke-providers.py mssql --test culprit-mssql local_source::native_t
 
 A fast completed query does not exercise active cancellation. That case stays explicitly unqualified unless the
 observer sees the exact source template active. Endpoint evidence does not qualify Azure SQL or Hyperscale.
+
+Local recipe qualification uses the selected provider's trusted native issuer and the existing capture owner:
+
+```sh
+culprit collect qualification run CONNECTION --recipe RECIPE --selection request.json --outbox DIRECTORY
+culprit collect qualification inspect CONNECTION --outbox DIRECTORY
+culprit collect qualification revoke CONNECTION --recipe RECIPE --outbox DIRECTORY
+```
+
+The selection file requests a measurement; it cannot grant approval. An accepted native result is pinned and
+installed for that saved connection, route, recipe and native scope. Restart verifies the original artifact again;
+revocation or a changed route withdraws its authority. Only explicitly registered executable provider policy can
+issue approval. The built-in SQL Server experiment measures the original eight-query Azure SQL compilation route
+but currently refuses approval: its native measurement window is partial, peak-grant evidence is unavailable and
+active cancellation remains unproved. Its recorded work is evidence, not permission for automatic collection.
 
 Optional replication fixtures exercise the same native readers used by scans and retained collection:
 

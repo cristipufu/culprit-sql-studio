@@ -11,10 +11,15 @@ mod attempts;
 mod eviction;
 mod investigations;
 mod journal;
+mod qualifications;
 pub use investigations::{
     DiagnosticCheckpointPage, DiagnosticInput, DiagnosticInputRow, DiagnosticInputState, DiagnosticUpdate,
 };
 pub(crate) use investigations::{eligible_source as diagnostic_source_eligible, evidence_cache_source};
+pub use qualifications::{
+    IssuedQualification, NativeQualificationDecision, NativeQualificationEvidence, NativeQualificationOutcome,
+    NativeQualificationRequest, NativeQualificationSource, QualificationBindingsRead,
+};
 mod runtime;
 pub use runtime::{CaptureLease, Outbox, OutboxDelivery};
 #[cfg(test)]
@@ -51,6 +56,8 @@ enum RevisionAuthority {
 struct Files {
     root: PathBuf,
     journal: journal::Journal,
+    // Declared before the lock so live approvals are fenced before another process can own this directory.
+    qualification_leases: qualifications::QualificationLeases,
     _owner: durable_fs::ExclusiveFile,
     epoch: Option<i64>,
     native_epoch_enabled: bool,
@@ -98,6 +105,7 @@ impl Files {
         Ok(Self {
             root: path.into(),
             journal,
+            qualification_leases: Default::default(),
             _owner: owner,
             epoch: None,
             native_epoch_enabled: false,
@@ -112,6 +120,7 @@ impl Files {
         Ok(Self {
             root: path.into(),
             journal,
+            qualification_leases: Default::default(),
             _owner: owner,
             epoch: None,
             native_epoch_enabled: false,

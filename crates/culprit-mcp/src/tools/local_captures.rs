@@ -9,6 +9,7 @@ use culprit_engine::{LocalCaptureAnalysisKind, LocalCaptureRequest, LocalCapture
 
 mod hyperscale_log_components;
 mod memory_clerks;
+mod snapshots;
 
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 pub(crate) const LOCAL_CAPTURE_TOOL: &str = "analyze_capture";
@@ -30,7 +31,7 @@ pub(super) fn definition() -> Tool {
         }
         Tool::new(
             LOCAL_CAPTURE_TOOL,
-            format!("{}{DATA_NOTE}", culprit_core::t!("view.hyperscale_log_components.intake.mcp_description")),
+            format!("{}{DATA_NOTE}", culprit_core::t!("mcp.local_capture.analyze.snapshot_description")),
             schema,
         )
         .with_title(culprit_core::t!("mcp.local_capture.analyze.title"))
@@ -66,6 +67,7 @@ impl CulpritMcp {
             }
             LocalCapturedAnalysis::MemoryClerks(analysis) => memory_clerks::captured(&analysis)?,
             LocalCapturedAnalysis::HyperscaleLogComponents(analysis) => hyperscale_log_components::captured(&analysis)?,
+            LocalCapturedAnalysis::Snapshot(analysis) => snapshots::captured(&analysis)?,
         };
         json_size(&value, MAX_OUTPUT_BYTES).map_err(|error| match error {
             JsonSizeError::LimitExceeded => DeliveryProblem::Capacity.error(),

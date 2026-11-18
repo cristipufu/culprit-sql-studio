@@ -81,8 +81,8 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
                 kinds.insert("space");
                 assert_eq!(space.scope, culprit_core::FileScope::Server);
                 assert!(space.used_bytes.is_none());
-                assert_eq!(space.total_bytes, Some(1024.0));
-                assert_eq!(space.parts[0].bytes, Some(0.0));
+                assert_eq!(space.total_bytes.as_deref(), Some("1024"));
+                assert_eq!(space.parts[0].bytes.as_deref(), Some("0"));
                 assert!(space.parts[1].bytes.is_none());
             }
             _ => panic!("unexpected fixture fact"),

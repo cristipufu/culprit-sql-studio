@@ -66,7 +66,7 @@ impl ReadControl {
         }
     }
 
-    async fn stopped(&self) -> Error {
+    pub(super) async fn stopped(&self) -> Error {
         match self {
             Self::Collection { cancellation, deadline } => tokio::select! {
                 biased;

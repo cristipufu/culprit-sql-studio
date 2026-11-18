@@ -271,6 +271,28 @@ fn generic_operational_capture_is_not_a_clerk_read_when_scope_dataset_or_family_
 }
 
 #[test]
+fn the_generic_carrier_preserves_other_operational_snapshot_domains_without_granting_clerk_semantics() {
+    for dataset in [SnapshotDataset::QueryCompilation, SnapshotDataset::StatementCounters, SnapshotDataset::TaskSpace] {
+        let original = read();
+        let mut description = original.description;
+        let SourceObservation::Snapshot(header) = &mut description.observation else { panic!() };
+        header.dataset = dataset;
+        header.records = 0;
+        header.sources =
+            vec![StateSourceCoverage::unavailable("declared-native-family".into(), ErrorCode::PermissionDenied, None)];
+        let retained = bind(description, vec![], true);
+        assert!(retained.is_valid());
+        assert!(retained.read_complete);
+        assert_eq!(retained.description.observation.snapshot().unwrap().dataset, dataset);
+        assert_eq!(retained.source_coverage("declared-native-family").unwrap().state, SourceState::Unavailable);
+        assert!(
+            retained.memory_clerk_source().is_err(),
+            "a shared physical stream does not grant another report family"
+        );
+    }
+}
+
+#[test]
 fn sharing_drops_the_whole_original_carrier_and_retains_only_independent_live_counters() {
     let mut snapshot: crate::Snapshot =
         serde_json::from_str(include_str!("../../../../../fixtures/mssql-demo.json")).unwrap();

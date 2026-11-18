@@ -7,6 +7,11 @@ pub(crate) struct Context {
     member_observed_at: String,
 }
 
+pub(crate) struct Completion {
+    pub(crate) context: NativeReadContext,
+    pub(crate) full_visibility: bool,
+}
+
 impl Context {
     pub(crate) async fn observe<R: QueryRead>(
         reader: &mut R,
@@ -39,6 +44,15 @@ impl Context {
         host: &str,
         port: u16,
     ) -> Result<Option<NativeReadContext>> {
+        Ok(self.recheck_completion(reader, host, port).await?.map(|completion| completion.context))
+    }
+
+    async fn recheck_completion<R: QueryRead>(
+        &self,
+        reader: &mut R,
+        host: &str,
+        port: u16,
+    ) -> Result<Option<Completion>> {
         let after = match native::metadata::activity(reader, host, port).await {
             Ok(metadata) => metadata,
             Err(error) if optional(&error) => return Ok(None),
@@ -53,7 +67,9 @@ impl Context {
             return Ok(None);
         }
         let context = self.context_until(&other.member_observed_at)?;
-        Ok(context.has_qualified_local_owner().then_some(context))
+        Ok(context
+            .has_qualified_local_owner()
+            .then_some(Completion { context, full_visibility: self.metadata.full_visibility && after.full_visibility }))
     }
 
     fn context_until(&self, until: &str) -> Result<NativeReadContext> {
@@ -95,9 +111,12 @@ pub(crate) async fn complete<R: QueryRead>(
     port: u16,
     before: &native::metadata::Metadata,
     owner: Option<&Context>,
-) -> Result<NativeReadContext> {
+) -> Result<Completion> {
     if let Some(owner) = owner {
-        return owner.recheck(reader, host, port).await?.ok_or_else(|| CollectionStop::SourceChanged.error());
+        return owner
+            .recheck_completion(reader, host, port)
+            .await?
+            .ok_or_else(|| CollectionStop::SourceChanged.error());
     }
     let after = native::metadata::activity(reader, host, port).await?;
     if !before.same_activity_source(&after) || ObservationBounds::new(&before.at, &after.at).is_none() {
@@ -107,7 +126,10 @@ pub(crate) async fn complete<R: QueryRead>(
         Some(owner) => owner.read_context()?.observed_until,
         None => after.at,
     };
-    unknown(before, &until)
+    Ok(Completion {
+        context: unknown(before, &until)?,
+        full_visibility: before.full_visibility && after.full_visibility,
+    })
 }
 
 fn optional(error: &culprit_core::Error) -> bool {

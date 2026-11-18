@@ -8,6 +8,7 @@ mod source_overhead;
 pub use source_overhead::source_overhead;
 mod state;
 use state::CapturedState;
+pub(crate) use state::read_outcome;
 mod activity;
 mod blocking;
 pub(crate) mod references;
@@ -143,3 +144,6 @@ fn invalid() -> culprit_core::Error {
 }
 
 mod query_store_definitions;
+
+mod storage;
+pub use storage::storage;

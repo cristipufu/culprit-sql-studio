@@ -11,6 +11,8 @@ use ts_rs::TS;
 mod outbox;
 #[cfg(feature = "collector")]
 pub use outbox::OutboxCaptureReader;
+mod operational;
+pub use operational::{LocalOperationalCapture, LocalSnapshotAnalysis, LocalSnapshotReport};
 
 /// A closed analysis choice; selecting an analysis starts no native collection or source discovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -20,9 +22,62 @@ pub enum LocalCaptureAnalysisKind {
     PageServerReads,
     MemoryClerks,
     HyperscaleLogComponents,
+    PerformanceCounters,
+    DatabaseProperties,
+    Compilation,
+    ConfiguredLogRates,
+    ConnectionOutcomes,
+    Jobs,
+    RequestMemory,
+    TaskSpace,
+    CurrentRequestWork,
+    StatementWork,
+    MaintenanceProgress,
+    CompletedSpills,
+    Storage,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 3] = [Self::PageServerReads, Self::MemoryClerks, Self::HyperscaleLogComponents];
+    pub const ALL: [Self; 16] = [
+        Self::PageServerReads,
+        Self::MemoryClerks,
+        Self::HyperscaleLogComponents,
+        Self::PerformanceCounters,
+        Self::DatabaseProperties,
+        Self::Compilation,
+        Self::ConfiguredLogRates,
+        Self::ConnectionOutcomes,
+        Self::Jobs,
+        Self::RequestMemory,
+        Self::TaskSpace,
+        Self::CurrentRequestWork,
+        Self::StatementWork,
+        Self::MaintenanceProgress,
+        Self::CompletedSpills,
+        Self::Storage,
+    ];
+
+    #[cfg(feature = "collector")]
+    pub(crate) fn snapshot_dataset(self) -> Option<culprit_core::telemetry::SnapshotDataset> {
+        use culprit_core::telemetry::SnapshotDataset as Dataset;
+        match self {
+            Self::PageServerReads => None,
+            Self::MemoryClerks
+            | Self::PerformanceCounters
+            | Self::DatabaseProperties
+            | Self::ConfiguredLogRates
+            | Self::ConnectionOutcomes
+            | Self::Storage => Some(Dataset::Operational),
+            Self::HyperscaleLogComponents => Some(Dataset::HyperscaleLogComponents),
+            Self::Compilation => Some(Dataset::QueryCompilation),
+            Self::Jobs => Some(Dataset::Jobs),
+            Self::RequestMemory => Some(Dataset::CurrentRequestMemory),
+            Self::TaskSpace => Some(Dataset::TaskSpace),
+            Self::CurrentRequestWork => Some(Dataset::CurrentRequestWork),
+            Self::StatementWork => Some(Dataset::StatementCounters),
+            Self::MaintenanceProgress => Some(Dataset::MaintenanceProgress),
+            Self::CompletedSpills => Some(Dataset::CachedRuntime),
+        }
+    }
 }
 
 /// The host delegates one saved connection; the reader independently checks the original journal association.
@@ -41,6 +96,7 @@ pub enum LocalCapturedAnalysis {
     PageServerReads(LocalPageServerReads),
     MemoryClerks(LocalMemoryClerks),
     HyperscaleLogComponents(LocalHyperscaleLogComponents),
+    Snapshot(LocalSnapshotAnalysis),
 }
 impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
@@ -48,6 +104,7 @@ impl LocalCapturedAnalysis {
             Self::PageServerReads(_) => LocalCaptureAnalysisKind::PageServerReads,
             Self::MemoryClerks(_) => LocalCaptureAnalysisKind::MemoryClerks,
             Self::HyperscaleLogComponents(_) => LocalCaptureAnalysisKind::HyperscaleLogComponents,
+            Self::Snapshot(analysis) => analysis.report().kind(),
         }
     }
 }
@@ -101,69 +158,35 @@ impl LocalPageServerReads {
 /// Shared-instance data stays independent of a selected database or its current native member.
 #[derive(Debug)]
 pub struct LocalMemoryClerks {
-    connection: String,
-    read: Box<CapturedOperationalRead>,
+    original: LocalOperationalCapture,
     report: Box<MemoryClerkReport>,
-    collected_from: String,
-    collected_until: String,
-    bytes_read: u64,
 }
 impl LocalMemoryClerks {
-    /// The exact saved journal association verified before this value was constructed.
-    pub fn connection(&self) -> &str {
-        &self.connection
-    }
-    pub fn read(&self) -> &CapturedOperationalRead {
-        &self.read
+    pub fn original(&self) -> &LocalOperationalCapture {
+        &self.original
     }
     pub fn into_read(self) -> Box<CapturedOperationalRead> {
-        self.read
+        self.original.into_read()
     }
     pub fn report(&self) -> &MemoryClerkReport {
         &self.report
-    }
-    /// Client acquisition bounds, kept separately from original native clocks in the raw carrier.
-    pub fn collected_from(&self) -> &str {
-        &self.collected_from
-    }
-    pub fn collected_until(&self) -> &str {
-        &self.collected_until
-    }
-    pub fn bytes_read(&self) -> u64 {
-        self.bytes_read
     }
 }
 
 /// One original bounded component capture; no current route or native source is acquired by this value.
 #[derive(Debug)]
 pub struct LocalHyperscaleLogComponents {
-    connection: String,
-    read: Box<CapturedOperationalRead>,
+    original: LocalOperationalCapture,
     report: Box<culprit_core::HyperscaleLogComponentReport>,
-    collected_from: String,
-    collected_until: String,
-    bytes_read: u64,
 }
 impl LocalHyperscaleLogComponents {
-    pub fn connection(&self) -> &str {
-        &self.connection
-    }
-    pub fn read(&self) -> &CapturedOperationalRead {
-        &self.read
+    pub fn original(&self) -> &LocalOperationalCapture {
+        &self.original
     }
     pub fn into_read(self) -> Box<CapturedOperationalRead> {
-        self.read
+        self.original.into_read()
     }
     pub fn report(&self) -> &culprit_core::HyperscaleLogComponentReport {
         &self.report
-    }
-    pub fn collected_from(&self) -> &str {
-        &self.collected_from
-    }
-    pub fn collected_until(&self) -> &str {
-        &self.collected_until
-    }
-    pub fn bytes_read(&self) -> u64 {
-        self.bytes_read
     }
 }

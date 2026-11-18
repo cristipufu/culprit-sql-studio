@@ -2,5 +2,6 @@
 import type { FileKind } from "./FileKind";
 import type { FileScope } from "./FileScope";
 import type { SpaceAllocation } from "./SpaceAllocation";
+import type { StoragePopulation } from "./StoragePopulation";
 
-export type OperationalSpace = { kind: FileKind, scope: FileScope, native_name: string | null, total_bytes: number | null, used_bytes: number | null, limit_bytes: number | null, growth_enabled: boolean | null, reuse_wait: string | null, parts: Array<SpaceAllocation>, };
+export type OperationalSpace = { kind: FileKind, population: StoragePopulation, observed_at: string, database: string | null, scope: FileScope, native_name: string | null, total_bytes: string | null, used_bytes: string | null, limit_bytes: string | null, growth_enabled: boolean | null, reuse_wait: string | null, parts: Array<SpaceAllocation>, };

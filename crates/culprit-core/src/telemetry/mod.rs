@@ -105,6 +105,10 @@ pub use source_read::{
 };
 mod source_partition;
 mod state;
+mod storage;
+pub use storage::{
+    MssqlDatabaseFile, MssqlDatabaseFileProfile, StorageFileSizeBasis, StoragePointRef, StoragePopulation, StorageRead,
+};
 mod statement_counters;
 mod statistics;
 mod subject;
@@ -688,6 +692,8 @@ impl TelemetryRecord {
                     (_, OperationalFact::ConfiguredLogRateLimits(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::HyperscaleLogComponent(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::DatabaseProperties(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::Space(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::MssqlDatabaseFile(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::PageWait(page)) => {
                         accepted
                             && page.fits_source_scope(source)

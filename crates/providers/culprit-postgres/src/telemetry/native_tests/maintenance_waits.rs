@@ -20,7 +20,7 @@ async fn concurrent_index_wait_is_generation_bound_and_the_reported_locker_remai
             let point = progress(&fixture.specification, &parent, &fixture.cancellation).await;
             let source = point.source();
             let SourceObservation::MaintenanceProgress { snapshot, result } = &source.observation else { panic!() };
-            assert_eq!(result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+            assert_eq!(result.binding, FocusedRequestBinding::Matched);
             assert_eq!(result.membership, FocusedRequestMembership::Observed);
             assert_eq!(snapshot.records, 1);
             assert!(!snapshot.sources[0].complete_scope);
@@ -67,7 +67,7 @@ async fn acknowledged_fixture_completion_does_not_turn_a_missing_native_request_
                 panic!()
             };
             assert_eq!(result.focus.as_ref().unwrap().original.key, expected_key);
-            assert_eq!(result.binding, FocusedRequestBinding::UnverifiedOriginalScope);
+            assert_eq!(result.binding, FocusedRequestBinding::ParticipantChanged);
             assert_eq!(result.membership, FocusedRequestMembership::NotObserved);
             assert_eq!(snapshot.records, 0);
             assert!(point.records.is_empty());
@@ -75,6 +75,59 @@ async fn acknowledged_fixture_completion_does_not_turn_a_missing_native_request_
             assert!(
                 point.manifest.source_queries
                     <= crate::progress::bounded_budget(&CollectionBudget::default()).max_queries
+            );
+        })
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires the nonce-owned PostgreSQL smoke fixture; select maintenance_waits:: explicitly"]
+async fn an_original_native_activity_receipt_authenticates_the_focused_owner_and_retained_blocking_report() {
+    Fixture::run("waiting", |fixture| {
+        Box::pin(async move {
+            fixture.prepare().await;
+            fixture.wait_for_writer().await;
+            let mut original = original(&fixture.specification, fixture.builder_pid, &fixture.cancellation).await;
+            assert!(original.focus.is_blocking_focus());
+            let parent = original.focus.parent.clone();
+            let original_key = original.focus.original.key.clone();
+            let current = original.blocking(&fixture.specification, &fixture.cancellation).await;
+            let SourceObservation::FocusedBlocking { result, .. } = &current.source().observation else { panic!() };
+            assert_eq!(result.focus.parent, parent);
+            assert_eq!(result.focus.original.key, original_key);
+            assert_eq!(result.binding, FocusedRequestBinding::Matched);
+            assert_eq!(result.request_end, BlockingRequestState::SameStatement);
+            let rows = current
+                .records
+                .iter()
+                .enumerate()
+                .map(|(index, exported)| {
+                    let TelemetryRecord::Activity(row) = &exported.record else { panic!() };
+                    (row.as_ref(), current.reference(index))
+                })
+                .collect::<Vec<_>>();
+            let evidence = rows
+                .iter()
+                .map(|(observation, reference)| ActivityFrameRow { observation, reference: Some(reference) })
+                .collect::<Vec<_>>();
+            let report = culprit_checks::focused_blocking::explain(current.source(), &evidence, true).unwrap();
+            assert_eq!(report.original, parent);
+            assert_eq!(report.binding, FocusedRequestBinding::Matched);
+            assert!(report.context.has_qualified_local_owner());
+            let holder = fixture.holder_pid.to_string();
+            assert!(report.relationships.iter().any(|edge| {
+                edge.waiter.session.id == original_key.session.id
+                    && edge.owner_observed
+                    && matches!(&edge.owner, ActivityWaitOwner::Session { id, generation: Some(_) } if id == &holder)
+            }), "the native closure must identify the actual independently held UPDATE backend");
+            let owner = rows.iter().find(|(row, _)| row.key.session.id == holder).unwrap().0;
+            assert!(owner.key.request.is_none() && owner.statement_identity.is_none());
+            assert!(matches!(owner.statement, DefinitionPayload::Unavailable { .. }));
+            assert!(!report.relationships.is_empty());
+            assert!(
+                current.manifest.source_queries
+                    <= crate::telemetry::blocking::bounded_budget(&CollectionBudget::default()).max_queries
             );
         })
     })

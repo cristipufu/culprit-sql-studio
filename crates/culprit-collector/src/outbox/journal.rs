@@ -8,7 +8,7 @@ use culprit_core::{Result, telemetry::*};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use std::{collections::BTreeSet, path::Path};
 
-const JOURNAL_VERSION: i64 = 22;
+const JOURNAL_VERSION: i64 = 23;
 const APPLICATION_ID: i64 = 0x43554c54;
 const JOURNAL_PAGES: i64 = 4096;
 
@@ -72,6 +72,7 @@ impl Journal {
           CREATE TABLE diagnostic_inputs(observation_id TEXT PRIMARY KEY,controller_version INTEGER NOT NULL,parent_json TEXT NOT NULL,source_json TEXT NOT NULL,connection TEXT NOT NULL,acknowledged INTEGER NOT NULL CHECK(acknowledged IN(0,1)),restored_json TEXT,charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0),restored_sha TEXT,evidence_only INTEGER NOT NULL DEFAULT 0 CHECK(evidence_only IN(0,1)),lineage_json TEXT);
           CREATE TABLE diagnostic_heads(controller_key TEXT PRIMARY KEY,controller_version INTEGER NOT NULL,observation_id TEXT NOT NULL,checkpoint_json TEXT NOT NULL,capture_json TEXT NOT NULL);
           CREATE TABLE diagnostic_episodes(controller_key TEXT NOT NULL,episode_id TEXT NOT NULL,revision TEXT NOT NULL,episode_json TEXT NOT NULL,PRIMARY KEY(controller_key,episode_id));
+          CREATE TABLE qualifications(connection TEXT NOT NULL,recipe_id TEXT NOT NULL,binding_json TEXT NOT NULL,charged_bytes INTEGER NOT NULL CHECK(charged_bytes>=0),PRIMARY KEY(connection,recipe_id));
           CREATE TABLE diagnostic_pins(owner TEXT NOT NULL,observation_id TEXT NOT NULL,PRIMARY KEY(owner,observation_id));
           CREATE INDEX diagnostic_pin_capture ON diagnostic_pins(observation_id);
           CREATE TABLE diagnostic_steps(observation_id TEXT PRIMARY KEY,input_id TEXT NOT NULL,controller_key TEXT NOT NULL,expected_head TEXT,step_id TEXT NOT NULL,update_json TEXT,update_digest TEXT NOT NULL,result_json TEXT,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)),UNIQUE(input_id,step_id));
@@ -127,7 +128,7 @@ impl Journal {
                 Ok((row.get(0)?, row.get(1)?))
             })
             .map_err(storage)?;
-        let diagnostic_bytes = super::investigations::journal::charged_bytes(&tx)?;
+        let diagnostic_bytes = metadata_bytes(&tx)?;
         let used =
             bytes_from_sql(used)?.checked_add(diagnostic_bytes).ok_or_else(|| problem(OutboxProblem::Capacity))?;
         let debts: u32 = tx
@@ -318,10 +319,7 @@ impl Journal {
         let capture_bytes: i64 = tx
             .query_row("SELECT coalesce(sum(charged_bytes),0) FROM captures", [], |row| row.get(0))
             .map_err(storage)?;
-        if bytes_from_sql(capture_bytes)?
-            .checked_add(super::investigations::journal::charged_bytes(&tx)?)
-            .is_none_or(|bytes| bytes > max_bytes)
-        {
+        if bytes_from_sql(capture_bytes)?.checked_add(metadata_bytes(&tx)?).is_none_or(|bytes| bytes > max_bytes) {
             return Err(problem(OutboxProblem::Capacity));
         }
         Ok(tx)
@@ -466,7 +464,7 @@ impl Journal {
                 Ok((row.get(0)?, row.get(1)?))
             })
             .map_err(storage)?;
-        let diagnostic_bytes = super::investigations::journal::charged_bytes(&tx)?;
+        let diagnostic_bytes = metadata_bytes(&tx)?;
         let charged_bytes = bytes_from_sql(charged_bytes)?
             .checked_add(diagnostic_bytes)
             .ok_or_else(|| problem(OutboxProblem::Integrity))?;
@@ -576,4 +574,10 @@ pub(super) fn bytes_to_sql(bytes: u64) -> Result<i64> {
 }
 pub(super) fn bytes_from_sql(bytes: i64) -> Result<u64> {
     bytes.try_into().map_err(|_| problem(OutboxProblem::Integrity))
+}
+
+pub(super) fn metadata_bytes(conn: &Connection) -> Result<u64> {
+    super::investigations::journal::charged_bytes(conn)?
+        .checked_add(super::qualifications::journal::charged_bytes(conn)?)
+        .ok_or_else(|| problem(OutboxProblem::Capacity))
 }

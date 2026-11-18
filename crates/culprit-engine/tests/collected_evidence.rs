@@ -512,3 +512,5 @@ mod jobs;
 mod query_store_statements;
 
 mod clock_boundaries;
+
+mod storage;

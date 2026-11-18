@@ -25,5 +25,6 @@ tokio-postgres-rustls.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
+culprit-checks.workspace = true
 culprit-collector.workspace = true
 tempfile = "3.27.0"

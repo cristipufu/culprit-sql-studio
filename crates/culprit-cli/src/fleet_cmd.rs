@@ -41,12 +41,12 @@ pub(crate) async fn run(ws: &Workspace, args: FleetArgs, out: &Out) -> Result<u8
     if recovery.source_debts > 0 {
         return Err(CollectionStop::CancellationUnconfirmed.error());
     }
-    let mut runner = FleetRunner::new(ws, &inventory, &args.shard, &journal, &mut outbox)?;
     let cancellation = CollectionCancellation::default();
-    let summary = crate::collection_shutdown::run(
-        &cancellation,
-        runner.run(&cancellation, args.max_work, |event| print(event, out)),
-    )
+    let summary = crate::collection_shutdown::run(&cancellation, async {
+        ws.restore_qualifications(&outbox.delivery(), Default::default(), &cancellation).await?;
+        let mut runner = FleetRunner::new(ws, &inventory, &args.shard, &journal, &mut outbox)?;
+        runner.run(&cancellation, args.max_work, |event| print(event, out)).await
+    })
     .await?;
     Ok(if summary.incomplete > 0 { 2 } else { 0 })
 }

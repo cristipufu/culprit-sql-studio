@@ -38,10 +38,7 @@ pub(crate) fn engine(spec: &ConnectionSpec) -> Result<Engine> {
 pub fn registration(engine: Engine) -> Result<ProviderRegistration> {
     match engine {
         #[cfg(feature = "mssql")]
-        Engine::Mssql => ProviderRegistration::new(
-            Arc::new(|spec| Ok(Box::new(culprit_mssql::MssqlProvider::new(spec)?))),
-            culprit_mssql::telemetry_recipes(),
-        ),
+        Engine::Mssql => mssql_registration(),
         #[cfg(feature = "postgres")]
         Engine::Postgres => ProviderRegistration::new(
             Arc::new(|spec| Ok(Box::new(culprit_postgres::PostgresProvider::new(spec)?))),
@@ -65,6 +62,20 @@ pub fn registration(engine: Engine) -> Result<ProviderRegistration> {
         #[allow(unreachable_patterns)]
         other => Err(Error::new(ErrorCode::Unsupported, t!("engine.registry.unsupported", engine = other.label()))),
     }
+}
+
+#[cfg(feature = "mssql")]
+fn mssql_registration() -> Result<ProviderRegistration> {
+    let registration = ProviderRegistration::new(
+        Arc::new(|spec| Ok(Box::new(culprit_mssql::MssqlProvider::new(spec)?))),
+        culprit_mssql::telemetry_recipes(),
+    )?;
+    #[cfg(feature = "collector")]
+    let registration = registration.with_native_qualification_issuer(
+        Arc::new(|spec, request| culprit_mssql::MssqlProvider::new(spec)?.qualification_source(request)),
+        Arc::new(|evidence| culprit_mssql::assess_recipe_qualification(evidence.manifest, evidence.captured.source())),
+    );
+    Ok(registration)
 }
 
 #[cfg(test)]
