@@ -26,6 +26,7 @@ import { CompilerAdmission } from "./CompilerAdmission";
 import { CleanupEvidence } from "./CleanupEvidence";
 import { StatementWork } from "./StatementWork";
 import { CounterRatios } from "./CounterRatios";
+import { MemoryClerks } from "./MemoryClerks";
 import { ConfiguredLogRates } from "./ConfiguredLogRates";
 import { WaitCounters } from "./WaitCounters";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
@@ -137,6 +138,9 @@ export function HealthTab({
   const counterRatios = report.counter_ratios;
   const counterRatioRead = pressure?.resource_counters?.some((sample) => sample.ratios.length > 0) ?? false;
   const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
+  const memoryClerks = report.memory_clerks;
+  const memoryClerkRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "memory clerks");
+  const memoryClerkIssue = observationReadIssue("memory clerks", report.snapshot.sources ?? [], memoryClerkRecorded);
   const configuredLogRates = report.configured_log_rates;
   const configuredLogRateRead = report.snapshot.pressure?.configured_log_rates;
   const configuredLogRateIssue = observationReadIssue("configured-log-rates", report.snapshot.sources ?? []);
@@ -153,8 +157,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, counterRatios, counterRatioRead, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, counterRatioIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, counterRatios, counterRatioRead, memoryClerks, memoryClerkRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, counterRatioIssue, memoryClerkIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -228,6 +232,9 @@ export function HealthTab({
       {counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
       {!counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
       {!counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
+      {memoryClerks && <MemoryClerks key={report.snapshot.id} report={memoryClerks} />}
+      {!memoryClerks && memoryClerkIssue && <ObservationSourceIssue source={memoryClerkIssue} title={t("collected.memory_clerks.title")} />}
+      {!memoryClerks && memoryClerkRecorded && !memoryClerkIssue && <ObservationExplanationIssue title={t("collected.memory_clerks.title")} reason={t("collected.memory_clerks.invalid")} />}
       {connectionOutcomes && <ConnectionOutcomes key={report.snapshot.id} report={connectionOutcomes} />}
       {pageServerReads && <PageServerReads key={report.snapshot.id} report={pageServerReads} />}
       {!pageServerReads && pageServerIssue && <ObservationSourceIssue source={pageServerIssue} title={t("view.page_server_reads.title")} />}

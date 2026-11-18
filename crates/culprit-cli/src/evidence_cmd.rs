@@ -222,6 +222,7 @@ enum Analysis {
     ConnectionOutcomes,
     ConfiguredLogRates,
     CounterRatios,
+    MemoryClerks,
     WaitCounters,
     Cleanup,
     Tuning,
@@ -254,6 +255,7 @@ impl Analysis {
             | Self::StatementWork
             | Self::CompletedSpills
             | Self::CounterRatios
+            | Self::MemoryClerks
             | Self::ConnectionOutcomes
             | Self::ConfiguredLogRates
             | Self::StatementGrants
@@ -421,6 +423,10 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         Some(Analysis::WaitCounters) => {
             let analysis = culprit_engine::collected_resources::wait_counters(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::wait_counters(&analysis.report))?;
+        }
+        Some(Analysis::MemoryClerks) => {
+            let analysis = culprit_engine::collected_resources::memory_clerks(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::memory_clerks(&analysis.report))?;
         }
         Some(Analysis::CounterRatios) => {
             let analysis = culprit_engine::collected_resources::counter_ratios(&capture)?;

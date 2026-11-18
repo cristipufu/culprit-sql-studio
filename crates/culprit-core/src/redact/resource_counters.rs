@@ -48,3 +48,6 @@ pub(super) fn redact(mut samples: Vec<NativeCounterSet>) -> Result<Vec<NativeCou
     }
     samples.iter().all(NativeCounterSet::is_valid).then_some(samples).ok_or_else(|| CollectionStop::InvalidPage.error())
 }
+
+#[cfg(test)]
+mod tests;

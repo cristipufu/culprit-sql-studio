@@ -12,6 +12,7 @@ import type { Finding } from "./Finding";
 import type { JobsReport } from "./JobsReport";
 import type { LockedCheck } from "./LockedCheck";
 import type { MaintenanceProgressReport } from "./MaintenanceProgressReport";
+import type { MemoryClerkReport } from "./MemoryClerkReport";
 import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
 import type { PageServerReadReport } from "./PageServerReadReport";
 import type { PageWaitReport } from "./PageWaitReport";
@@ -28,7 +29,7 @@ import type { WaitCounterReport } from "./WaitCounterReport";
 /**
  * A snapshot together with everything derived from it. This is what a scan produces and what gets stored.
  */
-export type Report = { wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
+export type Report = { memory_clerks?: MemoryClerkReport, wait_counters?: WaitCounterReport, counter_ratios?: CounterRatioReport, completed_spills?: CompletedSpillReport, jobs?: JobsReport, statement_work?: StatementWorkReport, page_server_reads?: PageServerReadReport, 
 /**
  * A localized view of retained memory-failure observations; raw native documents remain in the snapshot.
  */

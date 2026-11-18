@@ -30,9 +30,9 @@ pub(crate) use views::{advisor, brief, digest};
 pub use views::{
     cache_entry_memory, cleanup, compilation, compiler_admission, completed_spills, configured_log_rates,
     connection_outcomes, counter_ratios, current_request_work, dashboard, drift, focused_blocking, jobs, maintenance,
-    maintenance_blocking, maintenance_progress, memory_failures, native_failures, page_server_reads, page_waits,
-    query_store_definitions, replication, request_memory, runtime_distributions, session_memory, source_overhead,
-    statement_grants, statement_work, task_space, temporary_work, wait_counters, waits,
+    maintenance_blocking, maintenance_progress, memory_clerks, memory_failures, native_failures, page_server_reads,
+    page_waits, query_store_definitions, replication, request_memory, runtime_distributions, session_memory,
+    source_overhead, statement_grants, statement_work, task_space, temporary_work, wait_counters, waits,
 };
 
 use std::sync::Arc;

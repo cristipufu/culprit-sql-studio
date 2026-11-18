@@ -45,3 +45,4 @@ pub mod waits;
 pub mod query_store_definitions;
 
 pub mod configured_log_rates;
+pub mod memory_clerks;

@@ -18,6 +18,8 @@ mod blocking;
 pub(crate) use blocking::blocking;
 mod configured_log_rates;
 mod connection_outcomes;
+mod memory_clerks;
+pub(crate) use memory_clerks::memory_clerks;
 mod counter_ratios;
 pub(crate) use configured_log_rates::configured_log_rates;
 mod wait_counters;

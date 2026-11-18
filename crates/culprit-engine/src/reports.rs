@@ -24,6 +24,8 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         #[serde(skip_serializing_if = "Option::is_none")]
         wait_counters: &'a Option<Box<culprit_core::WaitCounterReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        memory_clerks: &'a Option<Box<culprit_core::MemoryClerkReport>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         completed_spills: &'a Option<Box<culprit_core::CompletedSpillReport>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         page_server_reads: &'a Option<Box<culprit_core::page_server_read_report::PageServerReadReport>>,
@@ -88,6 +90,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         counter_ratios,
         wait_counters,
+        memory_clerks,
         maintenance_progress,
         replication,
         statement_work,
@@ -117,6 +120,7 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         compiler_admission,
         counter_ratios,
         wait_counters,
+        memory_clerks,
         maintenance_progress,
         replication,
         statement_work,

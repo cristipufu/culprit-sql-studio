@@ -27,6 +27,8 @@ mod completed_spills;
 pub use compilation::compilation;
 pub use completed_spills::completed_spills;
 mod compiler_admission;
+mod memory_clerks;
+pub use memory_clerks::memory_clerks;
 mod counter_ratios;
 mod wait_counters;
 pub use compiler_admission::compiler_admission;

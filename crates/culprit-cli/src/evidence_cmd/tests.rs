@@ -5,6 +5,7 @@ mod completed_spills;
 mod configured_log_rates;
 mod connection_outcomes;
 mod maintenance_blocking;
+mod memory_clerks;
 mod page_server_reads;
 mod page_task_holders;
 mod source_overhead;

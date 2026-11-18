@@ -30,6 +30,8 @@ mod columns;
 mod compilation;
 mod compiler_admission;
 mod configured_log_rates;
+mod memory_clerks;
+pub use memory_clerks::{MEMORY_CLERK_NATIVE_OBJECT, memory_clerk_candidate, memory_clerk_source_is_valid};
 mod counters;
 mod current_request_work;
 mod definitions;

@@ -21,6 +21,7 @@ mod fixture;
 mod maintenance;
 mod maintenance_blocking;
 mod maintenance_progress;
+mod memory_clerks;
 mod memory_failures;
 mod native_failures;
 mod observed_membership;

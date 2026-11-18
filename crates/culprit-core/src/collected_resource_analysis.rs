@@ -202,3 +202,10 @@ pub struct CollectedWaitCounterAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: crate::WaitCounterReport,
 }
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CollectedMemoryClerkAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::MemoryClerkReport>,
+}

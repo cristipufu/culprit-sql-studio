@@ -378,6 +378,9 @@ pub struct SeverityCount {
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub memory_clerks: Option<Box<crate::MemoryClerkReport>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub wait_counters: Option<Box<crate::WaitCounterReport>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

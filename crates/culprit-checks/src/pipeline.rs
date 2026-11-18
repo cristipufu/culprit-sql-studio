@@ -28,6 +28,7 @@ mod connection_outcomes;
 mod counter_ratios;
 mod jobs;
 mod maintenance_progress;
+mod memory_clerks;
 mod page_server_reads;
 mod replication;
 mod runtime_populations;
@@ -279,6 +280,7 @@ impl Pipeline {
         let replication = replication::explain(&mut snapshot);
         let connection_outcomes = connection_outcomes::explain(&mut snapshot);
         let configured_log_rates = configured_log_rates::explain(&mut snapshot);
+        let memory_clerks = memory_clerks::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
@@ -401,6 +403,7 @@ impl Pipeline {
             replication,
             connection_outcomes,
             configured_log_rates,
+            memory_clerks,
             statement_work,
             page_server_reads,
             completed_spills,

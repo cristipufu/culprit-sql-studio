@@ -5,6 +5,8 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod memory_clerks;
+pub use memory_clerks::{MemoryClerkCase, memory_clerk_evidence};
 mod counter_ratios;
 mod resource_io;
 mod wait_counters;

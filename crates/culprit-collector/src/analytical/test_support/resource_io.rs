@@ -162,8 +162,11 @@ pub async fn collected_resource_recovery(
         SourceObservation::Snapshot(snapshot) => CollectionSelection::Snapshot { dataset: snapshot.dataset },
         _ => panic!("resource history or point counter fixture"),
     };
-    let request =
-        CollectionRequest { subject: CollectionSubject::Database, selection, budget: CollectionBudget::default() };
+    let subject = match &source.target {
+        CollectionTarget::Database(_) => CollectionSubject::Database,
+        CollectionTarget::Shared(resource) => CollectionSubject::Shared { resource: resource.clone() },
+    };
+    let request = CollectionRequest { subject, selection, budget: CollectionBudget::default() };
     let closed = Arc::new(AtomicBool::new(false));
     let factory = Source { description: source.clone(), rows, closed: closed.clone() };
     let mut lease = outbox.reserve("resource-fixture", &request).await.unwrap();

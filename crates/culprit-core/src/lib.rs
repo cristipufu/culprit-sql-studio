@@ -19,6 +19,8 @@ pub mod counter_ratio_report;
 pub use counter_ratio_report::{CounterRatioEntry, CounterRatioReport};
 pub mod completed_spill_report;
 mod configured_log_rate_report;
+mod memory_clerk_report;
+pub use memory_clerk_report::{MemoryClerkEntry, MemoryClerkField, MemoryClerkReport};
 pub mod connection;
 pub mod connection_outcome_report;
 pub mod connection_outcomes;

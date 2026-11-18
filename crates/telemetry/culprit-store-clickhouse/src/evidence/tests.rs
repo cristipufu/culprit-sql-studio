@@ -15,6 +15,7 @@ mod file_io;
 mod focused_memory;
 mod informational;
 mod maintenance_progress;
+mod memory_clerks;
 mod memory_feedback;
 mod object_definitions;
 mod page_server_io;
