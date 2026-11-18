@@ -79,9 +79,14 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
         page_bytes: 8 * 1024 * 1024,
         ..Default::default()
     };
-    let io =
-        MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget.clone())
-            .await?;
+    let io = crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget.clone(),
+    )
+    .await?;
     let options = ReadOptions { budget, identity: IdentityDetail::Endpoint };
     let mut reader = ActivityReader::new(io, options, "127.0.0.1".into(), fixture.port);
     let outcome =

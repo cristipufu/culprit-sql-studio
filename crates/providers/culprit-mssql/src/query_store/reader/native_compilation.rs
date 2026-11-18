@@ -103,7 +103,14 @@ async fn measured(
     }
     // Opening owns preparation/login work. Let its existing bounded owner finish; profile then closes it
     // without admitting layout/source SQL if the case deadline was reached in the meantime.
-    MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget).await
+    crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget,
+    )
+    .await
 }
 async fn profile(
     io: MeasuredRead,

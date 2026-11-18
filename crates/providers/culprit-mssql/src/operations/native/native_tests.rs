@@ -56,8 +56,14 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
         total_timeout_ms: 10_000,
         ..Default::default()
     };
-    let mut io =
-        MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget).await?;
+    let mut io = crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget,
+    )
+    .await?;
     let file_template = digest(format!("{} OPTION(MAXDOP 1)", Kind::Filegroups.sql()).as_bytes());
     let target = io.scope().target.clone();
     let started = Instant::now();

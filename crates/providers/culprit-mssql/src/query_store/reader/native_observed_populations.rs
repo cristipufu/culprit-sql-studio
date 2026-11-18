@@ -68,8 +68,14 @@ async fn run(directory: &Path, cancellation: &CollectionCancellation) -> Result<
         ..Default::default()
     };
     // The case deadline only cancels a borrowed read; this owner survives until explicit native close.
-    let io =
-        MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget).await?;
+    let io = crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget,
+    )
+    .await?;
     let mut reader = Reader::new(io);
     let started = Instant::now();
     let outcome = AssertUnwindSafe(until_cancelled(cancellation, project(&mut reader, &original))).catch_unwind().await;

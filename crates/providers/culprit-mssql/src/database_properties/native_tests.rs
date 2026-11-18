@@ -1,10 +1,7 @@
 //! Explicit owned endpoint qualification of the changed catalog statement, never production cost approval.
 use super::*;
 use crate::{
-    read::{
-        NativeRead,
-        measurement::{MeasuredRead, shutdown_state},
-    },
+    read::{NativeRead, measurement::shutdown_state},
     test_support::{
         OwnedSourceFixture,
         owned_case::{finish_case, until_cancelled},
@@ -38,7 +35,7 @@ async fn owned_selected_database_catalog_template_retains_one_point_and_closes_t
 }
 
 async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &CollectionCancellation) -> Result<()> {
-    let mut io = MeasuredRead::open(
+    let mut io = crate::test_support::measured_read(
         fixture.pool.clone(),
         fixture.port,
         fixture.password(),

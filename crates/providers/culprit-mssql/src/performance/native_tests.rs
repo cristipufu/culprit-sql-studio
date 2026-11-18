@@ -135,8 +135,14 @@ async fn measured(
         return Err(CollectionStop::Cancelled.error());
     }
     // Preparation keeps its existing held connection and separate accounting. Never drop its owner on a case timer.
-    let mut reader =
-        MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget).await?;
+    let mut reader = crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget,
+    )
+    .await?;
     if cancellation.is_cancelled() {
         let shutdown = reader.close().await;
         return Err(if shutdown == SourceShutdown::Unconfirmed {

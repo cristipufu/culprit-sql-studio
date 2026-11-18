@@ -1,7 +1,7 @@
 //! Empirical owned-environment costs. This does not issue a production qualification receipt.
 use super::*;
 use crate::{
-    read::measurement::{MeasuredRead, lifecycle_cases, shutdown_state},
+    read::measurement::{lifecycle_cases, shutdown_state},
     test_support::{receipt_directory, save_cost_receipt},
 };
 use serde_json::{Value, json};
@@ -98,9 +98,14 @@ async fn capture(fixture: &CostFixture) -> culprit_core::Result<Value> {
 
 async fn capture_with_budget(fixture: &CostFixture, budget: CollectionBudget) -> culprit_core::Result<Value> {
     let full_started = Instant::now();
-    let io =
-        MeasuredRead::open(fixture.pool.clone(), fixture.port, &fixture.password, &fixture.database, budget.clone())
-            .await?;
+    let io = crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        &fixture.password,
+        &fixture.database,
+        budget.clone(),
+    )
+    .await?;
     let scope = io.scope().clone();
     let mut reader = ActivityReader::new(
         io,

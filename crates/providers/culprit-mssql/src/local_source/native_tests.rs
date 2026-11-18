@@ -36,7 +36,14 @@ async fn fixture() -> Result<OwnedSourceFixture> {
 }
 
 async fn measured(fixture: &OwnedSourceFixture, budget: CollectionBudget) -> Result<MeasuredRead> {
-    MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget).await
+    crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget,
+    )
+    .await
 }
 
 fn finish_case(

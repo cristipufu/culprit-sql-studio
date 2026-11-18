@@ -1,7 +1,7 @@
 //! An owned metadata experiment, not a runtime-population fallback or a source-cost qualification.
 use super::*;
 use crate::{
-    read::measurement::{MeasuredRead, shutdown_state},
+    read::measurement::shutdown_state,
     test_support::{
         OwnedSourceFixture,
         owned_case::{finish_case, until_cancelled},
@@ -83,7 +83,7 @@ async fn run(fixture: &OwnedSourceFixture, directory: &Path, cancellation: &Coll
         total_timeout_ms: 10_000,
         ..Default::default()
     };
-    let mut owner = match MeasuredRead::open(
+    let mut owner = match crate::test_support::measured_read(
         fixture.pool.clone(),
         fixture.port,
         fixture.password(),

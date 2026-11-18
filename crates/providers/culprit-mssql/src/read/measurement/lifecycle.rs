@@ -39,7 +39,7 @@ fn stop_on_uncertainty(cases: &mut Vec<Value>) -> bool {
 
 async fn cancelled(pool: Arc<Pool>, port: u16, password: &str, database: &str) -> culprit_core::Result<Value> {
     let budget = CollectionBudget { statement_timeout_ms: 1500, total_timeout_ms: 3000, ..Default::default() };
-    let mut reader = MeasuredRead::open(pool, port, password, database, budget.clone()).await?;
+    let mut reader = crate::test_support::measured_read(pool, port, password, database, budget.clone()).await?;
     let seen = reader.active_seen();
     {
         let work = reader.query(CANCEL_SQL, vec![], 1);
@@ -80,7 +80,7 @@ async fn cancelled(pool: Arc<Pool>, port: u16, password: &str, database: &str) -
 
 async fn timed_out(pool: Arc<Pool>, port: u16, password: &str, database: &str) -> culprit_core::Result<Value> {
     let budget = CollectionBudget { statement_timeout_ms: 100, total_timeout_ms: 1000, ..Default::default() };
-    let mut reader = MeasuredRead::open(pool, port, password, database, budget).await?;
+    let mut reader = crate::test_support::measured_read(pool, port, password, database, budget).await?;
     let result = reader.query(CANCEL_SQL, vec![], 1).await;
     let shutdown = reader.close().await;
     assert!(
@@ -116,7 +116,7 @@ async fn backpressured(pool: Arc<Pool>, port: u16, password: &str, database: &st
         total_timeout_ms: 1500,
         ..Default::default()
     };
-    let mut reader = MeasuredRead::open(pool, port, password, database, budget).await?;
+    let mut reader = crate::test_support::measured_read(pool, port, password, database, budget).await?;
     reader.begin_stream(STREAM_SQL, vec![], 4096).await.map_err(ReadError::into_error)?;
     let first = reader.next_batch().await.map_err(ReadError::into_error)?;
     assert!(!first.complete);
@@ -150,7 +150,7 @@ async fn retired_refuses_rearm(
     database: &str,
 ) -> culprit_core::Result<Value> {
     let budget = CollectionBudget { max_queries: 1, ..Default::default() };
-    let mut reader = MeasuredRead::open(pool, port, password, database, budget.clone()).await?;
+    let mut reader = crate::test_support::measured_read(pool, port, password, database, budget.clone()).await?;
     reader
         .query("SELECT /* culprit fixture exhausted budget */ 1 AS value", vec![], 1)
         .await
@@ -172,7 +172,8 @@ async fn uncertain_refuses_rearm(
     password: &str,
     database: &str,
 ) -> culprit_core::Result<Value> {
-    let mut reader = MeasuredRead::open(pool.clone(), port, password, database, CollectionBudget::default()).await?;
+    let mut reader =
+        crate::test_support::measured_read(pool.clone(), port, password, database, CollectionBudget::default()).await?;
     pool.mark_uncertain();
     assert!(
         reader.owner.measurement_window(CollectionBudget::default()).is_err(),

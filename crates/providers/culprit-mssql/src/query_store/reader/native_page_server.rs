@@ -34,9 +34,15 @@ async fn owned_page_server_runtime_projection_keeps_native_profile_and_settles_t
     let started = Instant::now();
     // No outer timeout drops this source owner. The existing native reader owns its absolute source budget,
     // Attention/drain and bounded close; the disposable supervisor owns final database teardown.
-    let io = MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget)
-        .await
-        .expect("bounded measured reader preparation");
+    let io = crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget,
+    )
+    .await
+    .expect("bounded measured reader preparation");
     let mut reader = Reader::new(io);
     let result = AssertUnwindSafe(projection(&mut reader)).catch_unwind().await;
     let shutdown = reader.close().await;

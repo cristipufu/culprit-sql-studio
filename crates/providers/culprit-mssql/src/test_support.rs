@@ -27,6 +27,21 @@ pub(crate) fn config(port: u16, database: &str, password: &str, application: &st
     config.command_timeout(Some(Duration::from_secs(40)));
     config
 }
+/// Local fixture setup stays separate from portable measurement and never changes source admission.
+pub(crate) async fn measured_read(
+    pool: std::sync::Arc<crate::conn::Pool>,
+    port: u16,
+    password: &str,
+    database: &str,
+    budget: culprit_core::telemetry::CollectionBudget,
+) -> culprit_core::Result<crate::read::measurement::MeasuredRead> {
+    budget.validate()?;
+    pool.ensure_available()?;
+    let observer_pool = crate::conn::Pool::new(config(port, database, password, "culprit-cost-observer"), None);
+    let observer = crate::read::measurement::HeldObserver::acquire(&observer_pool).await?;
+    crate::read::measurement::MeasuredRead::open(pool, "127.0.0.1", port, observer, budget).await
+}
+
 pub(crate) async fn batch(client: &mut MsClient, sql: &str) {
     client.simple_query(sql).await.unwrap().into_results().await.unwrap();
 }

@@ -22,7 +22,7 @@ fn phase(sql: &str) -> Phase {
         sql: sql.into(),
         parameters: json!([]),
         row_limit: 64,
-        before: Counters { cpu: 1, logical: 10, physical: 0, writes: 0 },
+        before: Counters { cpu_ms: 1, logical_reads: 10, reads: 0, dirty_marks: 0 },
         started: Instant::now(),
         active_samples: 0,
         waits: Default::default(),
@@ -35,7 +35,7 @@ fn phase(sql: &str) -> Phase {
 }
 fn sample(active: bool) -> Result<Sample> {
     Ok(Sample {
-        counters: Counters { cpu: 2, logical: 12, physical: 0, writes: 0 },
+        counters: Counters { cpu_ms: 2, logical_reads: 12, reads: 0, dirty_marks: 0 },
         active,
         wait: None,
         blocker: None,
@@ -75,7 +75,7 @@ async fn one_statement_phase_and_exact_watch_span_stream_start_and_multiple_batc
         assert_eq!(phase.started, started);
         assert_eq!(phase.sql, sql);
         assert_eq!(phase.row_limit, 64);
-        assert_eq!(phase.before.logical, 10);
+        assert_eq!(phase.before.logical_reads, 10);
     }
     assert_eq!(observer.attempts, 4);
     assert_eq!(phase.active_samples, 3);

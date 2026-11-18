@@ -13,8 +13,14 @@ pub(super) struct Capture {
 }
 
 pub(super) async fn open(fixture: &OwnedSourceFixture, budget: CollectionBudget) -> Result<Reader<MeasuredRead>> {
-    let io =
-        MeasuredRead::open(fixture.pool.clone(), fixture.port, fixture.password(), &fixture.database, budget).await?;
+    let io = crate::test_support::measured_read(
+        fixture.pool.clone(),
+        fixture.port,
+        fixture.password(),
+        &fixture.database,
+        budget,
+    )
+    .await?;
     Ok(Reader { io, host: "127.0.0.1".into(), port: fixture.port, owner: None })
 }
 
