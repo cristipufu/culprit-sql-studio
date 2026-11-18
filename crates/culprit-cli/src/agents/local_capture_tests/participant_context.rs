@@ -16,6 +16,25 @@ async fn grant_participants_keep_native_amounts_and_checked_request_context_with
     cases.push((source, rows));
     for (source, rows) in cases {
         let expected = rows.clone();
+        let context = NativeReadContext::from_snapshot(&source).unwrap();
+        let observations = expected
+            .iter()
+            .map(|row| {
+                let TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(grant),
+                    ..
+                }) = row
+                else {
+                    panic!("current grant")
+                };
+                grant.as_ref()
+            })
+            .collect::<Vec<_>>();
+        let expected_report = culprit_checks::request_memory::explain(
+            culprit_checks::request_memory::RequestMemoryEvidence { context: &context, observations: &observations },
+            None,
+        )
+        .unwrap();
         let mut fixture = LocalCaptureFixture::snapshot(source, rows).await;
         drop(fixture.outbox.take());
         let calls = Arc::new(AtomicUsize::new(0));
@@ -39,8 +58,15 @@ async fn grant_participants_keep_native_amounts_and_checked_request_context_with
             assert_eq!(native["requested_kibibytes"], json!(point.requested_kibibytes));
             assert_eq!(native["granted_kibibytes"], json!(point.granted_kibibytes));
             assert_eq!(native["used_kibibytes"], json!(point.used_kibibytes));
+            let qualified = &expected_report
+                .entries
+                .iter()
+                .find(|candidate| candidate.observation_identity == point.identity)
+                .unwrap()
+                .qualified_request;
+            assert_eq!(entry["qualified_request"], json!(qualified));
             let context = &entry["participant_context"];
-            if let Some(request) = &point.request {
+            if let Some(request) = point.request.as_ref().filter(|request| qualified.as_ref() == Some(&request.key)) {
                 assert_eq!(context["actor"], json!(request.key));
                 assert_eq!(context["client"], json!(request.client));
                 assert_eq!(context["observed_at"], point.observed_at);

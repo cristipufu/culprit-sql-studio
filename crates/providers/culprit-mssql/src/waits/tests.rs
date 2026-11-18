@@ -126,6 +126,32 @@ fn categorises_wait_types() {
 }
 
 #[tokio::test]
+async fn the_output_subtype_reuses_one_native_read_and_preserves_independent_network_subtotals() {
+    let mut reader = FakeRead::new(vec![Ok(vec![row("ASYNC_NETWORK_IO", 100), row("NET_WAIT", 200)])]);
+    let records = read(&mut reader, false, 16).await.unwrap();
+    assert_eq!(records[0].mechanism, Some(WaitMechanism::ClientResultOutput));
+    assert_eq!(records[0].wait_type, "ASYNC_NETWORK_IO");
+    assert_eq!(records[0].wait_time_ms, "100");
+    assert_eq!(records[0].scope, MeasurementScope::Server);
+    assert_eq!(records[0].reset, ResetMarker::Unknown);
+    assert_eq!(records[1].mechanism, None);
+    let display = categories(&totals(&records));
+    assert_eq!(display.len(), 2);
+    assert!(display.iter().all(|category| category.category == "Network"));
+    assert_eq!(display.iter().map(|category| category.wait_ms).sum::<f64>(), 300.0);
+    assert_eq!(display.iter().filter_map(|category| category.tasks).sum::<f64>(), 6.0);
+    let output = display.iter().find(|category| category.mechanism == Some(WaitMechanism::ClientResultOutput)).unwrap();
+    assert_eq!(output.wait_type.as_deref(), Some("ASYNC_NETWORK_IO"));
+    assert_eq!(output.wait_ms, 100.0);
+    let other = display.iter().find(|category| category.mechanism.is_none()).unwrap();
+    assert_eq!(other.wait_type.as_deref(), Some("NET_WAIT"));
+    assert_eq!(other.wait_ms, 200.0);
+    assert_eq!(reader.calls.len(), 1);
+    assert_eq!(reader.calls[0].limit, 16);
+    assert!(reader.calls[0].sql.contains("sys.dm_os_wait_stats"));
+}
+
+#[tokio::test]
 async fn each_native_rbio_mechanism_keeps_raw_counter_identity_and_a_separate_scan_subtotal() {
     let names = [
         "RBIO_RG_STORAGE",

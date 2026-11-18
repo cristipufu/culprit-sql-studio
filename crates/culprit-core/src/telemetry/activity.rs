@@ -476,6 +476,13 @@ impl ActivityEvidence {
     pub fn validate_references<'a>(rows: impl IntoIterator<Item = &'a ActivityObservation>) -> Result<()> {
         ActivityIndex::new(rows).map(|_| ())
     }
+    /// Validate one supplied population and return only its recorded native-generation refusals. Absence from
+    /// this set supplies no source, scope, complete-population or positive generation authority.
+    pub fn disqualified_session_generations<'a>(
+        rows: impl IntoIterator<Item = &'a ActivityObservation>,
+    ) -> Result<BTreeSet<NativeActivityIdentity>> {
+        Ok(ActivityIndex::new(rows)?.disqualified_sessions)
+    }
     /// Follow previously observed blockers when current native lock details cannot establish their status.
     pub fn context_for(rows: &[ActivityObservation], roots: &BTreeSet<ActivityKey>) -> Result<BTreeSet<ActivityKey>> {
         let index = ActivityIndex::new(rows)?;

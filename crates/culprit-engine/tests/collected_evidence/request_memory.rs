@@ -186,23 +186,54 @@ async fn restricted_and_recovery_only_statements_do_not_invent_an_allocator_or_b
             culprit_core::Engine::Mssql,
         ),
     ] {
-        let recovery_only = matches!(&statement, DefinitionPayload::Available { text, .. } if text.len() > 1024);
-        let (source, rows) = request_memory_evidence(statement, true);
-        let fixture = Fixture::new(source, rows).await;
-        let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
-        let result = collected_resources::request_memory(&capture).unwrap();
-        if recovery_only {
-            assert!(result.report.entries.is_empty());
-            assert_eq!(result.report.source_state, Some(SourceState::Partial));
-            assert!(result.context.read_gaps.iter().any(|gap| gap.reason == EvidenceGapReason::DetailInRecovery));
-        } else {
-            assert!(capture.is_read_complete());
-            assert_eq!(result.report.entries.len(), 1);
-            assert!(
-                result.report.entries[0]
-                    .explanation
-                    .contains(&culprit_core::t!("view.request_memory.request.statement_unavailable"))
-            );
+        for native_statement_observed in [false, true] {
+            let recovery_only = matches!(&statement, DefinitionPayload::Available { text, .. } if text.len() > 1024);
+            let (source, mut rows) = request_memory_evidence(statement.clone(), true);
+            assert!(NativeReadContext::from_snapshot(&source).unwrap().has_qualified_local_owner());
+            let TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::ExecutionGrant(grant),
+                ..
+            }) = &mut rows[0]
+            else {
+                panic!("native grant fixture")
+            };
+            let request = grant.request.as_mut().unwrap();
+            request.statement_identity =
+                native_statement_observed.then(|| NativeIdentity::new("native-current-statement"));
+            let original_request = request.key.clone();
+            assert!(grant.is_valid());
+            let fixture = Fixture::new(source, rows).await;
+            let capture = fixture.read_families(&[EvidenceFamily::OperationalSamples]).await;
+            let result = collected_resources::request_memory(&capture).unwrap();
+            assert_eq!(result.context.source.observation.snapshot().unwrap().records, 1);
+            if recovery_only {
+                assert!(result.report.entries.is_empty());
+                assert_eq!(result.report.source_state, Some(SourceState::Partial));
+                assert!(result.context.read_gaps.iter().any(|gap| gap.reason == EvidenceGapReason::DetailInRecovery));
+            } else {
+                assert!(capture.is_read_complete());
+                assert_eq!(result.report.entries.len(), 1);
+                let entry = &result.report.entries[0];
+                assert_eq!(entry.qualified_request.as_ref(), native_statement_observed.then_some(&original_request));
+                let message = if native_statement_observed {
+                    "view.request_memory.request.statement_unavailable"
+                } else {
+                    "view.request_memory.request.unqualified"
+                };
+                assert!(entry.explanation.contains(&culprit_core::i18n::t(message, &[])));
+                let TelemetryRecord::Operational(OperationalObservation {
+                    fact: OperationalFact::ExecutionGrant(retained),
+                    ..
+                }) = &capture.records()[0].row().record
+                else {
+                    panic!("retained grant")
+                };
+                assert!(matches!(
+                    retained.request.as_ref().unwrap().statement,
+                    DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted }
+                ));
+                assert_eq!(retained.request.as_ref().unwrap().statement_identity.is_some(), native_statement_observed);
+            }
         }
     }
 }

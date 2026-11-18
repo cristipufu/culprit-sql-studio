@@ -191,7 +191,8 @@ fn request_memory(analysis: &LocalSnapshotAnalysis, report: &culprit_core::Memor
         let OperationalFact::ExecutionGrant(grant) = super::context::single_source_fact(analysis, &entry.observation_key)? else {
             return Err(DeliveryProblem::Integrity.error());
         };
-        let participant = grant.request.as_ref().map(|request| super::context::participant(
+        let request = qualified_grant_request(entry, grant)?;
+        let participant = request.map(|request| super::context::participant(
             request,
             &grant.observed_at,
             (grant.statement_relationship == GrantStatementRelationship::ObservedCurrentStatement).then_some(&request.statement),
@@ -199,8 +200,12 @@ fn request_memory(analysis: &LocalSnapshotAnalysis, report: &culprit_core::Memor
         Ok(json!({
             "reference":reference(analysis,&entry.observation_key),"title":entry.title,"explanation":entry.explanation,
             "investigation":entry.investigation,"verify":entry.verify,
+            "mechanism":entry.mechanism,"qualified_request":entry.qualified_request,
             "native_observation":{
                 "observed_at":grant.observed_at,"state":grant.state,"scope":grant.scope,
+                "request_wait":grant.request.as_ref().and_then(|request| request.wait.as_ref()).map(|wait|json!({
+                    "native_type":wait.native_type,"elapsed_ms":wait.elapsed_ms,
+                })),
                 "request_association":grant.request_association,"statement_relationship":grant.statement_relationship,
                 "requested_kibibytes":grant.requested_kibibytes,"required_kibibytes":grant.required_kibibytes,
                 "granted_kibibytes":grant.granted_kibibytes,"used_kibibytes":grant.used_kibibytes,
@@ -401,3 +406,25 @@ fn reference(analysis: &LocalSnapshotAnalysis, key: &str) -> String {
 fn instance_resources(report: &culprit_core::InstanceResourceReport) -> Value {
     crate::waits_view::instance_resources::value(report)
 }
+
+/// Select only the original key the shared interpretation qualified; this adapter makes no lifecycle decision.
+fn qualified_grant_request<'a>(
+    entry: &culprit_core::MemoryParticipantExplanation,
+    grant: &'a culprit_core::telemetry::ExecutionGrantObservation,
+) -> Result<Option<&'a culprit_core::telemetry::ActivityObservation>> {
+    if entry.observation_identity != grant.identity {
+        return Err(DeliveryProblem::Integrity.error());
+    }
+    match &entry.qualified_request {
+        None => Ok(None),
+        Some(key) => grant
+            .request
+            .as_ref()
+            .filter(|request| &request.key == key)
+            .map(Some)
+            .ok_or_else(|| DeliveryProblem::Integrity.error()),
+    }
+}
+
+#[cfg(test)]
+mod tests;

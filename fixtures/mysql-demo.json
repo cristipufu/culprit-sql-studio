@@ -46,7 +46,7 @@
       "reason": null
     }
   ],
-  "format": 16,
+  "format": 17,
   "id": "20261011T120900.394Z",
   "connection": "mysql-demo",
   "environment": "local",

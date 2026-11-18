@@ -14,6 +14,7 @@ mod database_properties;
 mod diagnostics;
 mod file_io;
 mod focused_memory;
+mod grant_output;
 mod hyperscale_log_components;
 mod informational;
 mod maintenance_progress;

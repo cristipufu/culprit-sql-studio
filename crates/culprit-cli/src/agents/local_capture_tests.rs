@@ -1,5 +1,6 @@
 //! Startup composition reaches canonical saved originals without constructing a native provider or a warehouse.
 mod blocking;
+mod grant_output;
 mod hyperscale_log_components;
 mod participant_context;
 mod snapshots;

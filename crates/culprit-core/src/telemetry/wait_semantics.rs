@@ -131,17 +131,21 @@ impl LogRateGovernanceReason {
 #[ts(export)]
 pub enum WaitMechanism {
     LogRateGovernance(LogRateGovernanceReason),
+    /// A native wait for result transfer to the client. It does not identify a client or transport fault.
+    ClientResultOutput,
 }
 impl WaitMechanism {
     pub fn class(self) -> WaitClass {
         match self {
             Self::LogRateGovernance(_) => WaitClass::LogGovernance,
+            Self::ClientResultOutput => WaitClass::Network,
         }
     }
 
     pub fn label(self) -> String {
         match self {
             Self::LogRateGovernance(reason) => reason.label(),
+            Self::ClientResultOutput => crate::t!("core.waits.client_result_output"),
         }
     }
 }

@@ -97,6 +97,11 @@ pub use observations::{
 };
 mod request_memory;
 pub use request_memory::request_memory_evidence_cases;
+mod grant_output;
+pub use grant_output::{
+    GrantOutputCase, assert_grant_output_capture, grant_output_evidence, output_wait_counter_evidence,
+    output_wait_grant_evidence,
+};
 mod session_memory;
 pub use session_memory::session_memory_evidence_cases;
 mod page_waits;

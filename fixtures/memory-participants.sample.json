@@ -1,0 +1,3093 @@
+{
+  "missing_resource": {
+    "evidence": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "fixture-native-process-epoch",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "fixture-logical-database",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "fixture-native-compute-member",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "observations": [
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "ASYNC_NETWORK_IO",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": null,
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "0",
+          "granted_without_offset": null,
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "62"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "RESOURCE_SEMAPHORE",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "waiting",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": "42000",
+          "workload_group": null
+        }
+      ],
+      "observed_at": "2020-01-01T12:00:00Z",
+      "source": "current request memory"
+    },
+    "report": {
+      "admission_resources": [
+        {
+          "participants": [
+            {
+              "observation_identity": {
+                "id": "62:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3"
+            }
+          ],
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          }
+        }
+      ],
+      "entries": [
+        {
+          "explanation": "The native source recorded this participant as waiting for a memory grant. It is an affected participant; the owner of the required memory is not established. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 0 other native grant entries on this resource. This does not identify the cause of a wait. The next grant candidate is unavailable. Requested memory: 9007199254740993 KiB. Reserved memory: 0 KiB. Reported used memory: 0 KiB. Recorded grant wait: 42000 ms.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect reservations in the same native resource and observation, requested/granted/used memory, concurrency and supported operator evidence. Establish the acquiring statements and any blocking context before choosing a query or memory-setting change.",
+          "observation_identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "62"
+            },
+            "transaction": null
+          },
+          "title": "A request was waiting for 9007199254740993 KiB of execution memory",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The source recorded a positive memory reservation and a wait to transfer results on this request’s coordinator. This does not show whether client processing or transport caused the wait. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": null,
+          "investigation": "Inspect the result size and how promptly the caller reads it. Check client processing and transport before changing settings for query memory.",
+          "mechanism": "reservation-during-client-output-wait",
+          "observation_identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "title": "A request held a 9007199254740993 KiB reservation while waiting to send results",
+          "verify": "Under comparable statements, input and concurrency, read the result promptly and observe the native reservation and output wait again. Verify any waiting request’s admission separately."
+        }
+      ],
+      "limitations": [
+        "The read covers its own bounded observation. Requests outside its visibility or observation time may be missing.",
+        "A waiting participant is affected. Granted reservations and matching native resource IDs do not prove which request caused its wait.",
+        "Native request and grant times have no UTC offset. They remain separate from the UTC observation time.",
+        "Reserved, used and peak memory have different meanings. Unavailable or native NULL values remain unknown.",
+        "This database read covers only the observed subset of each resource. It does not establish pool capacity, available memory, a complete queue or which participant caused a wait.",
+        "Missing or masked resource identities cannot link grant entries to the same admission resource."
+      ],
+      "source_reason": null,
+      "source_state": "collected",
+      "summary": "2 request-memory participants were observed: 1 waiting and 1 holding reservations.",
+      "title": "Observed query memory"
+    }
+  },
+  "missing_statement_identity": {
+    "evidence": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "fixture-native-process-epoch",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "fixture-logical-database",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "fixture-native-compute-member",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "observations": [
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "ASYNC_NETWORK_IO",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "0",
+          "granted_without_offset": null,
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "62"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "RESOURCE_SEMAPHORE",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "waiting",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": "42000",
+          "workload_group": null
+        }
+      ],
+      "observed_at": "2020-01-01T12:00:00Z",
+      "source": "current request memory"
+    },
+    "report": {
+      "admission_resources": [
+        {
+          "participants": [
+            {
+              "observation_identity": {
+                "id": "62:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3"
+            }
+          ],
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          }
+        }
+      ],
+      "entries": [
+        {
+          "explanation": "The native source recorded this participant as waiting for a memory grant. It is an affected participant; the owner of the required memory is not established. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 0 other native grant entries on this resource. This does not identify the cause of a wait. The next grant candidate is unavailable. Requested memory: 9007199254740993 KiB. Reserved memory: 0 KiB. Reported used memory: 0 KiB. Recorded grant wait: 42000 ms.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect reservations in the same native resource and observation, requested/granted/used memory, concurrency and supported operator evidence. Establish the acquiring statements and any blocking context before choosing a query or memory-setting change.",
+          "observation_identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "62"
+            },
+            "transaction": null
+          },
+          "title": "A request was waiting for 9007199254740993 KiB of execution memory",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The native source recorded a granted memory reservation. Reserved memory differs from memory used, and this observation does not establish that it delayed another request. The source could not establish matching request-generation evidence. Request and database ownership remain unresolved. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": null,
+          "investigation": "Compare the reservation and native memory actually used at comparable execution stages. Establish the acquiring statement, cardinality estimates and concurrent demand before changing query or memory settings.",
+          "observation_identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3",
+          "qualified_request": null,
+          "title": "A request held a 9007199254740993 KiB execution-memory reservation",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        }
+      ],
+      "limitations": [
+        "The read covers its own bounded observation. Requests outside its visibility or observation time may be missing.",
+        "A waiting participant is affected. Granted reservations and matching native resource IDs do not prove which request caused its wait.",
+        "Native request and grant times have no UTC offset. They remain separate from the UTC observation time.",
+        "Reserved, used and peak memory have different meanings. Unavailable or native NULL values remain unknown.",
+        "This database read covers only the observed subset of each resource. It does not establish pool capacity, available memory, a complete queue or which participant caused a wait."
+      ],
+      "source_reason": null,
+      "source_state": "collected",
+      "summary": "2 request-memory participants were observed: 1 waiting and 1 holding reservations.",
+      "title": "Observed query memory"
+    }
+  },
+  "negative_mars_peer": {
+    "evidence": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "fixture-native-process-epoch",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "fixture-logical-database",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "fixture-native-compute-member",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "observations": [
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "ASYNC_NETWORK_IO",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "0",
+          "granted_without_offset": null,
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "62"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "RESOURCE_SEMAPHORE",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "waiting",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": "42000",
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:1",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "1"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_context": {
+              "client_library": null,
+              "client_process_id": null,
+              "last_request_end_age_ms": null,
+              "lifecycle": "pool-reset-prelogin",
+              "login_age_ms": null,
+              "native": null
+            },
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": null,
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": null,
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        }
+      ],
+      "observed_at": "2020-01-01T12:00:00Z",
+      "source": "current request memory"
+    },
+    "report": {
+      "admission_resources": [
+        {
+          "participants": [
+            {
+              "observation_identity": {
+                "id": "62:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3"
+            }
+          ],
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          }
+        }
+      ],
+      "entries": [
+        {
+          "explanation": "The native source recorded this participant as waiting for a memory grant. It is an affected participant; the owner of the required memory is not established. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 0 other native grant entries on this resource. This does not identify the cause of a wait. The next grant candidate is unavailable. Requested memory: 9007199254740993 KiB. Reserved memory: 0 KiB. Reported used memory: 0 KiB. Recorded grant wait: 42000 ms.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect reservations in the same native resource and observation, requested/granted/used memory, concurrency and supported operator evidence. Establish the acquiring statements and any blocking context before choosing a query or memory-setting change.",
+          "observation_identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "62"
+            },
+            "transaction": null
+          },
+          "title": "A request was waiting for 9007199254740993 KiB of execution memory",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The native source recorded a granted memory reservation. Reserved memory differs from memory used, and this observation does not establish that it delayed another request. The source could not establish matching request-generation evidence. Request and database ownership remain unresolved. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": null,
+          "investigation": "Compare the reservation and native memory actually used at comparable execution stages. Establish the acquiring statement, cardinality estimates and concurrent demand before changing query or memory settings.",
+          "observation_identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3",
+          "qualified_request": null,
+          "title": "A request held a 9007199254740993 KiB execution-memory reservation",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The native source recorded a granted memory reservation. Reserved memory differs from memory used, and this observation does not establish that it delayed another request. The source could not establish matching request-generation evidence. Request and database ownership remain unresolved. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": null,
+          "investigation": "Compare the reservation and native memory actually used at comparable execution stages. Establish the acquiring statement, cardinality estimates and concurrent demand before changing query or memory settings.",
+          "observation_identity": {
+            "id": "61:1",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "b4fe5de5e2e41f817fc086ba78d04cd9df85d50344c88b311dc64325fce1a46b",
+          "qualified_request": null,
+          "title": "A request held a 9007199254740993 KiB execution-memory reservation",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        }
+      ],
+      "limitations": [
+        "The read covers its own bounded observation. Requests outside its visibility or observation time may be missing.",
+        "A waiting participant is affected. Granted reservations and matching native resource IDs do not prove which request caused its wait.",
+        "Native request and grant times have no UTC offset. They remain separate from the UTC observation time.",
+        "Reserved, used and peak memory have different meanings. Unavailable or native NULL values remain unknown.",
+        "This database read covers only the observed subset of each resource. It does not establish pool capacity, available memory, a complete queue or which participant caused a wait.",
+        "Missing or masked resource identities cannot link grant entries to the same admission resource.",
+        "The native read was partial. Additional participants or request details may be missing."
+      ],
+      "source_reason": null,
+      "source_state": "partial",
+      "summary": "3 request-memory participants were observed: 1 waiting and 2 holding reservations.",
+      "title": "Observed query memory"
+    }
+  },
+  "qualified": {
+    "evidence": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "fixture-native-process-epoch",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "fixture-logical-database",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "fixture-native-compute-member",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "observations": [
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "ASYNC_NETWORK_IO",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "0",
+          "granted_without_offset": null,
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "62"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "RESOURCE_SEMAPHORE",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "waiting",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": "42000",
+          "workload_group": null
+        }
+      ],
+      "observed_at": "2020-01-01T12:00:00Z",
+      "source": "current request memory"
+    },
+    "report": {
+      "admission_resources": [
+        {
+          "participants": [
+            {
+              "observation_identity": {
+                "id": "62:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3"
+            },
+            {
+              "observation_identity": {
+                "id": "61:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3"
+            }
+          ],
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          }
+        }
+      ],
+      "entries": [
+        {
+          "explanation": "The native source recorded this participant as waiting for a memory grant. It is an affected participant; the owner of the required memory is not established. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 1 other native grant entry on this resource. This does not identify the cause of a wait. The next grant candidate is unavailable. Requested memory: 9007199254740993 KiB. Reserved memory: 0 KiB. Reported used memory: 0 KiB. Recorded grant wait: 42000 ms.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect reservations in the same native resource and observation, requested/granted/used memory, concurrency and supported operator evidence. Establish the acquiring statements and any blocking context before choosing a query or memory-setting change.",
+          "observation_identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "62"
+            },
+            "transaction": null
+          },
+          "title": "A request was waiting for 9007199254740993 KiB of execution memory",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The source recorded a positive memory reservation and a wait to transfer results on this request’s coordinator. This does not show whether client processing or transport caused the wait. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 1 other native grant entry on this resource. This does not identify the cause of a wait. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect the result size and how promptly the caller reads it. Check client processing and transport before changing settings for query memory.",
+          "mechanism": "reservation-during-client-output-wait",
+          "observation_identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "title": "A request held a 9007199254740993 KiB reservation while waiting to send results",
+          "verify": "Under comparable statements, input and concurrency, read the result promptly and observe the native reservation and output wait again. Verify any waiting request’s admission separately."
+        }
+      ],
+      "limitations": [
+        "The read covers its own bounded observation. Requests outside its visibility or observation time may be missing.",
+        "A waiting participant is affected. Granted reservations and matching native resource IDs do not prove which request caused its wait.",
+        "Native request and grant times have no UTC offset. They remain separate from the UTC observation time.",
+        "Reserved, used and peak memory have different meanings. Unavailable or native NULL values remain unknown.",
+        "This database read covers only the observed subset of each resource. It does not establish pool capacity, available memory, a complete queue or which participant caused a wait."
+      ],
+      "source_reason": null,
+      "source_state": "collected",
+      "summary": "2 request-memory participants were observed: 1 waiting and 1 holding reservations.",
+      "title": "Observed query memory"
+    }
+  },
+  "shared_login": {
+    "evidence": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "fixture-native-process-epoch",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "fixture-logical-database",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "fixture-native-compute-member",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "observations": [
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "ASYNC_NETWORK_IO",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "0",
+          "granted_without_offset": null,
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "62"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "RESOURCE_SEMAPHORE",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "waiting",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": "42000",
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:1",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "1"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_context": {
+              "client_library": null,
+              "client_process_id": null,
+              "last_request_end_age_ms": null,
+              "lifecycle": "running",
+              "login_age_ms": null,
+              "native": null
+            },
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": null,
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": null,
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        }
+      ],
+      "observed_at": "2020-01-01T12:00:00Z",
+      "source": "current request memory"
+    },
+    "report": {
+      "admission_resources": [
+        {
+          "participants": [
+            {
+              "observation_identity": {
+                "id": "62:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3"
+            },
+            {
+              "observation_identity": {
+                "id": "61:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3"
+            }
+          ],
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          }
+        }
+      ],
+      "entries": [
+        {
+          "explanation": "The native source recorded this participant as waiting for a memory grant. It is an affected participant; the owner of the required memory is not established. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 1 other native grant entry on this resource. This does not identify the cause of a wait. The next grant candidate is unavailable. Requested memory: 9007199254740993 KiB. Reserved memory: 0 KiB. Reported used memory: 0 KiB. Recorded grant wait: 42000 ms.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect reservations in the same native resource and observation, requested/granted/used memory, concurrency and supported operator evidence. Establish the acquiring statements and any blocking context before choosing a query or memory-setting change.",
+          "observation_identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "62"
+            },
+            "transaction": null
+          },
+          "title": "A request was waiting for 9007199254740993 KiB of execution memory",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The source recorded a positive memory reservation and a wait to transfer results on this request’s coordinator. This does not show whether client processing or transport caused the wait. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 1 other native grant entry on this resource. This does not identify the cause of a wait. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect the result size and how promptly the caller reads it. Check client processing and transport before changing settings for query memory.",
+          "mechanism": "reservation-during-client-output-wait",
+          "observation_identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "title": "A request held a 9007199254740993 KiB reservation while waiting to send results",
+          "verify": "Under comparable statements, input and concurrency, read the result promptly and observe the native reservation and output wait again. Verify any waiting request’s admission separately."
+        },
+        {
+          "explanation": "The native source recorded a granted memory reservation. Reserved memory differs from memory used, and this observation does not establish that it delayed another request. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": null,
+          "investigation": "Compare the reservation and native memory actually used at comparable execution stages. Establish the acquiring statement, cardinality estimates and concurrent demand before changing query or memory settings.",
+          "observation_identity": {
+            "id": "61:1",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "b4fe5de5e2e41f817fc086ba78d04cd9df85d50344c88b311dc64325fce1a46b",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "1"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "title": "A request held a 9007199254740993 KiB execution-memory reservation",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        }
+      ],
+      "limitations": [
+        "The read covers its own bounded observation. Requests outside its visibility or observation time may be missing.",
+        "A waiting participant is affected. Granted reservations and matching native resource IDs do not prove which request caused its wait.",
+        "Native request and grant times have no UTC offset. They remain separate from the UTC observation time.",
+        "Reserved, used and peak memory have different meanings. Unavailable or native NULL values remain unknown.",
+        "This database read covers only the observed subset of each resource. It does not establish pool capacity, available memory, a complete queue or which participant caused a wait.",
+        "Missing or masked resource identities cannot link grant entries to the same admission resource."
+      ],
+      "source_reason": null,
+      "source_state": "collected",
+      "summary": "3 request-memory participants were observed: 1 waiting and 2 holding reservations.",
+      "title": "Observed query memory"
+    }
+  },
+  "sql_unavailable": {
+    "evidence": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": "fixture-native-process-epoch",
+          "kind": "instance-local",
+          "member": {
+            "engine": "mssql",
+            "kind": "node",
+            "namespace": {
+              "id": "fixture-logical-database",
+              "qualifiers": {}
+            },
+            "native": {
+              "id": "fixture-native-compute-member",
+              "qualifiers": {}
+            }
+          }
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "observations": [
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "reason": "restricted",
+              "state": "unavailable"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "ASYNC_NETWORK_IO",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "unresolved",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "0",
+          "granted_without_offset": null,
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "62"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "RESOURCE_SEMAPHORE",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "waiting",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": "42000",
+          "workload_group": null
+        }
+      ],
+      "observed_at": "2020-01-01T12:00:00Z",
+      "source": "current request memory"
+    },
+    "report": {
+      "admission_resources": [
+        {
+          "participants": [
+            {
+              "observation_identity": {
+                "id": "62:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3"
+            },
+            {
+              "observation_identity": {
+                "id": "61:0",
+                "qualifiers": {
+                  "requested_without_offset": "2020-01-01T10:00:00.003"
+                }
+              },
+              "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3"
+            }
+          ],
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          }
+        }
+      ],
+      "entries": [
+        {
+          "explanation": "The native source recorded this participant as waiting for a memory grant. It is an affected participant; the owner of the required memory is not established. The current request was generation-checked. Its observed statement may differ from the statement that acquired the reservation. The same read includes 1 other native grant entry on this resource. This does not identify the cause of a wait. The next grant candidate is unavailable. Requested memory: 9007199254740993 KiB. Reserved memory: 0 KiB. Reported used memory: 0 KiB. Recorded grant wait: 42000 ms.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect reservations in the same native resource and observation, requested/granted/used memory, concurrency and supported operator evidence. Establish the acquiring statements and any blocking context before choosing a query or memory-setting change.",
+          "observation_identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "62"
+            },
+            "transaction": null
+          },
+          "title": "A request was waiting for 9007199254740993 KiB of execution memory",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The source recorded a positive memory reservation and a wait to transfer results on this request’s coordinator. This does not show whether client processing or transport caused the wait. The current request was generation-checked, but an observed current statement was not established. The same read includes 1 other native grant entry on this resource. This does not identify the cause of a wait. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "investigation": "Inspect the result size and how promptly the caller reads it. Check client processing and transport before changing settings for query memory.",
+          "mechanism": "reservation-during-client-output-wait",
+          "observation_identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3",
+          "qualified_request": {
+            "request": {
+              "generation": "request-1",
+              "id": "0"
+            },
+            "session": {
+              "generation": "login-1",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "title": "A request held a 9007199254740993 KiB reservation while waiting to send results",
+          "verify": "Under comparable statements, input and concurrency, read the result promptly and observe the native reservation and output wait again. Verify any waiting request’s admission separately."
+        }
+      ],
+      "limitations": [
+        "The read covers its own bounded observation. Requests outside its visibility or observation time may be missing.",
+        "A waiting participant is affected. Granted reservations and matching native resource IDs do not prove which request caused its wait.",
+        "Native request and grant times have no UTC offset. They remain separate from the UTC observation time.",
+        "Reserved, used and peak memory have different meanings. Unavailable or native NULL values remain unknown.",
+        "This database read covers only the observed subset of each resource. It does not establish pool capacity, available memory, a complete queue or which participant caused a wait."
+      ],
+      "source_reason": null,
+      "source_state": "collected",
+      "summary": "2 request-memory participants were observed: 1 waiting and 1 holding reservations.",
+      "title": "Observed query memory"
+    }
+  },
+  "unknown_owner": {
+    "evidence": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:01Z",
+        "partition": {
+          "epoch": null,
+          "kind": "instance-local",
+          "member": null
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "observations": [
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "9007199254740993",
+          "granted_without_offset": "2020-01-01T10:00:00.006",
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "61"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "ASYNC_NETWORK_IO",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "granted",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": null,
+          "workload_group": null
+        },
+        {
+          "available_columns": [
+            "session_id",
+            "request_id",
+            "request_time",
+            "grant_time",
+            "requested_memory_kb",
+            "required_memory_kb",
+            "granted_memory_kb",
+            "used_memory_kb",
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "timeout_sec",
+            "dop",
+            "pool_id",
+            "group_id",
+            "resource_semaphore_id",
+            "queue_id"
+          ],
+          "degree_of_parallelism": "1",
+          "granted_kibibytes": "0",
+          "granted_without_offset": null,
+          "ideal_kibibytes": null,
+          "identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "maximum_used_kibibytes": null,
+          "maximum_used_workers": null,
+          "native_null_columns": [
+            "max_used_memory_kb",
+            "ideal_memory_kb",
+            "wait_time_ms",
+            "group_id"
+          ],
+          "native_properties": {
+            "pool_id": "2",
+            "resource_semaphore_id": "0"
+          },
+          "observed_at": "2020-01-01T12:00:00.000000000Z",
+          "queue": {
+            "identity": {
+              "id": "3",
+              "qualifiers": {}
+            },
+            "next_candidate": null,
+            "position": null,
+            "small": null
+          },
+          "request": {
+            "blocking_status": "known",
+            "client": {
+              "application": "application-worker",
+              "host": null,
+              "user": null
+            },
+            "command": "SELECT",
+            "database": "db",
+            "elapsed_ms": "120000",
+            "idle": false,
+            "key": {
+              "request": {
+                "generation": "request-1",
+                "id": "0"
+              },
+              "session": {
+                "generation": "login-1",
+                "id": "62"
+              },
+              "transaction": null
+            },
+            "last_request_age_ms": null,
+            "open_transactions": 0,
+            "query_hash": null,
+            "request_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "scope": "request-database",
+            "session_counters": {
+              "cpu_ms": null,
+              "logical_reads": null,
+              "physical_reads": null,
+              "writes": null
+            },
+            "state": "running",
+            "statement": {
+              "redaction_version": 1,
+              "sha256": "093c3e573f2e5bcbea5ba1fc368fb6c17adc2c6186594e6c16d226a186748672",
+              "state": "available",
+              "text": "SELECT payload FROM dbo.orders WHERE customer_id=?"
+            },
+            "statement_identity": {
+              "id": "fixture-current-statement",
+              "qualifiers": {}
+            },
+            "transaction_age_ms": null,
+            "wait": {
+              "class": null,
+              "elapsed_ms": "3000",
+              "identified_resources": [],
+              "native_type": "RESOURCE_SEMAPHORE",
+              "owners": [],
+              "resources": null
+            },
+            "waiting_on_lock": null
+          },
+          "request_association": "generation-checked",
+          "requested_kibibytes": "9007199254740993",
+          "requested_without_offset": "2020-01-01T10:00:00.003",
+          "required_kibibytes": "64",
+          "reserved_workers": null,
+          "resource": {
+            "id": "2",
+            "qualifiers": {
+              "kind": "sql-server-resource-governor",
+              "resource_semaphore_id": "0"
+            }
+          },
+          "scope": "database",
+          "source": "current request memory",
+          "state": "waiting",
+          "statement_relationship": "observed-current-statement",
+          "timeout_seconds": "25",
+          "used_kibibytes": "0",
+          "used_workers": null,
+          "wait_ms": "42000",
+          "workload_group": null
+        }
+      ],
+      "observed_at": "2020-01-01T12:00:00Z",
+      "source": "current request memory"
+    },
+    "report": {
+      "admission_resources": [],
+      "entries": [
+        {
+          "explanation": "The native source recorded this participant as waiting for a memory grant. It is an affected participant; the owner of the required memory is not established. The source could not establish matching request-generation evidence. Request and database ownership remain unresolved. The next grant candidate is unavailable. Requested memory: 9007199254740993 KiB. Reserved memory: 0 KiB. Reported used memory: 0 KiB. Recorded grant wait: 42000 ms.",
+          "grant_admission": null,
+          "investigation": "Inspect reservations in the same native resource and observation, requested/granted/used memory, concurrency and supported operator evidence. Establish the acquiring statements and any blocking context before choosing a query or memory-setting change.",
+          "observation_identity": {
+            "id": "62:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "d5e84950f8a6bd4dbaa010e085d3b03da37bdeda408f60ed23956c98b94801c3",
+          "qualified_request": null,
+          "title": "A request was waiting for 9007199254740993 KiB of execution memory",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        },
+        {
+          "explanation": "The native source recorded a granted memory reservation. Reserved memory differs from memory used, and this observation does not establish that it delayed another request. The source could not establish matching request-generation evidence. Request and database ownership remain unresolved. Requested memory: 9007199254740993 KiB. Reserved memory: 9007199254740993 KiB. Reported used memory: 0 KiB.",
+          "grant_admission": null,
+          "investigation": "Compare the reservation and native memory actually used at comparable execution stages. Establish the acquiring statement, cardinality estimates and concurrent demand before changing query or memory settings.",
+          "observation_identity": {
+            "id": "61:0",
+            "qualifiers": {
+              "requested_without_offset": "2020-01-01T10:00:00.003"
+            }
+          },
+          "observation_key": "2f11b104a24b5526b474c4044c84a3b16e4997d40a71040932ab2e5b3f48ecb3",
+          "qualified_request": null,
+          "title": "A request held a 9007199254740993 KiB execution-memory reservation",
+          "verify": "Repeat a bounded observation under comparable work and concurrency. Compare native grant waits, requested/granted/used memory and application latency while preserving request generations and resource scope."
+        }
+      ],
+      "limitations": [
+        "The read covers its own bounded observation. Requests outside its visibility or observation time may be missing.",
+        "A waiting participant is affected. Granted reservations and matching native resource IDs do not prove which request caused its wait.",
+        "Native request and grant times have no UTC offset. They remain separate from the UTC observation time.",
+        "Reserved, used and peak memory have different meanings. Unavailable or native NULL values remain unknown.",
+        "This database read covers only the observed subset of each resource. It does not establish pool capacity, available memory, a complete queue or which participant caused a wait.",
+        "The native member or generation is unavailable, so this read cannot link grants to a shared admission resource.",
+        "The native read was partial. Additional participants or request details may be missing."
+      ],
+      "source_reason": null,
+      "source_state": "partial",
+      "summary": "2 request-memory participants were observed: 1 waiting and 1 holding reservations.",
+      "title": "Observed query memory"
+    }
+  }
+}

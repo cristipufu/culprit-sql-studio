@@ -341,3 +341,48 @@ async fn overflow_terminal_enrichment_and_retired_calls_never_reopen_or_verify_n
     assert_eq!(retired.query_count(), 1);
     assert_eq!(retired.close().await, SourceShutdown::Quiescent);
 }
+
+#[tokio::test]
+async fn decoded_output_wait_and_shared_request_reference_keep_the_same_native_generation_without_another_read() {
+    let native = replace(
+        &row(),
+        &[
+            ("wait_type", Val::Text("ASYNC_NETWORK_IO".into())),
+            ("blocking_session_id", Val::Int(0)),
+            ("blocker_generation", Val::Null),
+        ],
+    );
+    let mut reader = reader(vec![
+        Ok(vec![crate::grants::tests::platform()]),
+        Ok(vec![context()]),
+        Ok(columns()),
+        Ok(vec![native]),
+        Ok(vec![details(42, "SELECT * FROM dbo.orders WHERE id=42")]),
+        Ok(vec![context()]),
+    ]);
+    let captured = reader.capture_memory().await.unwrap();
+    let context = reader.verify_memory_context(&captured.owner).await.unwrap();
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    assert_eq!(reader.query_count(), 6);
+    for resource_available in [true, false] {
+        let mut grant = captured.observations[0].clone();
+        if !resource_available {
+            grant.resource = None;
+        }
+        let original = grant.clone();
+        let report = culprit_checks::request_memory::explain(
+            culprit_checks::request_memory::RequestMemoryEvidence { context: &context, observations: &[&grant] },
+            None,
+        )
+        .unwrap();
+        let entry = &report.entries[0];
+        assert_eq!(entry.qualified_request.as_ref(), grant.request.as_ref().map(|request| &request.key));
+        assert_eq!(entry.mechanism, Some(culprit_core::MemoryParticipantMechanism::ReservationDuringClientOutputWait));
+        assert_eq!(entry.grant_admission.is_some(), resource_available);
+        assert_eq!(
+            grant.request.as_ref().unwrap().wait.as_ref().unwrap().native_type.as_deref(),
+            Some("ASYNC_NETWORK_IO")
+        );
+        assert_eq!(grant, original);
+    }
+}

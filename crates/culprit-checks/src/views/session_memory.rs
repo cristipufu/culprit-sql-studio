@@ -103,6 +103,8 @@ fn render(participant: Participant<'_>) -> MemoryParticipantExplanation {
     MemoryParticipantExplanation {
         observation_key: participant.key,
         observation_identity: row.identity.clone(),
+        mechanism: None,
+        qualified_request: None,
         title,
         explanation: details.join(" "),
         investigation: t!("view.session_memory.investigation"),

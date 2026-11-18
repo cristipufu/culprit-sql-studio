@@ -1,6 +1,7 @@
 use super::*;
 use culprit_core::{MeasurementScope, SourceState, telemetry::*};
 use serde_json::json;
+mod output_wait;
 
 pub(crate) fn observation(id: &str, state: ExecutionGrantState) -> ExecutionGrantObservation {
     let row = serde_json::from_value(json!({

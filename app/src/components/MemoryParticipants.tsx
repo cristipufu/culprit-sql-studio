@@ -10,6 +10,7 @@ import { type ReactNode } from "react";
 import { digits } from "../lib/format";
 import { key, t } from "../lib/i18n";
 import { nativeIdentityKey } from "../lib/native-identity";
+import { activityPresentationKey } from "../lib/live-census";
 import { observationRows } from "../lib/observation-rows";
 import { NativeProperties, NativeReference, NativeValue } from "./NativeObservationFields";
 import { ObservationList } from "./ObservationList";
@@ -17,7 +18,7 @@ import { ObservationList } from "./ObservationList";
 export function RequestMemoryParticipants({ evidence, report }: { evidence: RequestMemorySnapshot; report: MemoryParticipantsReport }) {
   return <ParticipantList observations={evidence.observations} source={evidence.source} report={report}
     scope={t("ui.memory_participants.request_scope")} time={t("ui.memory_participants.observed_at", { at: evidence.observed_at })}
-    renderNative={(row) => <RequestMetadata row={row} />} />;
+    renderNative={(row, entry) => <RequestMetadata row={row} entry={entry} />} />;
 }
 
 export function SessionMemoryParticipants({ evidence, report }: { evidence: SessionMemorySnapshot; report: MemoryParticipantsReport }) {
@@ -32,13 +33,13 @@ function ParticipantList<Row extends { identity: NativeIdentity; source: string 
   report: MemoryParticipantsReport;
   scope: string;
   time: ReactNode;
-  renderNative: (row: Row) => ReactNode;
+  renderNative: (row: Row, entry: MemoryParticipantExplanation) => ReactNode;
 }) {
   const rows = observationRows(observations, source, (row) => nativeIdentityKey(row.identity));
   return <ObservationList collapseEntries source={source} time={time} report={report} scope={scope}
     entriesLabel={t("ui.memory_participants.inspect")} renderEntry={(entry) => {
       const row = rows.get(nativeIdentityKey(entry.observation_identity));
-      return row ? <ParticipantCard key={entry.observation_key} entry={entry}>{renderNative(row)}</ParticipantCard>
+      return row ? <ParticipantCard key={entry.observation_key} entry={entry}>{renderNative(row, entry)}</ParticipantCard>
         : <div className="operational-card" key={entry.observation_key}><p>{t("ui.memory_failures.missing_row")}</p></div>;
     }} />;
 }
@@ -77,8 +78,11 @@ const GRANT_STATE: Record<ExecutionGrantState, () => string> = {
   granted: () => t("ui.memory_participants.state.granted"),
 };
 
-function RequestMetadata({ row }: { row: ExecutionGrantObservation }) {
-  const request = row.request;
+function RequestMetadata({ row, entry }: { row: ExecutionGrantObservation; entry: MemoryParticipantExplanation }) {
+  // Display equality only. The backend owns native qualification across the whole supplied population.
+  const request = entry.qualified_request && row.request
+    && activityPresentationKey(entry.qualified_request) === activityPresentationKey(row.request.key) ? row.request : null;
+  const nativeWait = row.request?.wait;
   return <>
     <dl>
       <NativeValue label={t("ui.memory_participants.state")} value={GRANT_STATE[row.state]()} />
@@ -89,6 +93,8 @@ function RequestMetadata({ row }: { row: ExecutionGrantObservation }) {
       <NativeValue label={t("ui.memory_participants.request_generation")} value={request?.key.request && <code>{request.key.request.generation}</code>} />
       <NativeValue label={t("ui.memory_participants.application")} value={request?.client?.application} />
       <NativeValue label={t("ui.native_failures.database_context")} value={request?.database} />
+      <NativeValue label={t("ui.page_waits.native_wait")} value={nativeWait?.native_type} />
+      <NativeValue label={t("ui.page_waits.wait_ms")} value={nativeWait?.elapsed_ms == null ? null : t("common.duration.ms", { n: digits(nativeWait.elapsed_ms) })} />
       <NativeValue label={t("ui.memory_participants.requested_at")} value={<code>{row.requested_without_offset}</code>} />
       <NativeValue label={t("ui.memory_participants.granted_at")} value={row.granted_without_offset && <code>{row.granted_without_offset}</code>} />
       {GRANT_FIELDS.map(([field, label]) => <NativeValue key={field} label={t(label)}

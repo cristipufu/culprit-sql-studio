@@ -24,12 +24,28 @@ pub struct MemoryParticipantExplanation {
     pub observation_key: String,
     /// Exact native reference also permits a scan UI to find its bare native row without hashing identifiers.
     pub observation_identity: crate::telemetry::NativeIdentity,
+    /// A qualified same-read observation, never an exclusive owner, pressure grade or recovery verdict.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mechanism: Option<MemoryParticipantMechanism>,
+    /// The same original request qualified by the shared interpretation over the entire supplied population.
+    /// None withholds positive request/SQL context; this display reference grants no new source authority.
+    pub qualified_request: Option<crate::telemetry::ActivityKey>,
     pub title: String,
     pub explanation: String,
     pub investigation: String,
     pub verify: String,
     /// Same-read admission context only. It neither establishes a blocker nor complete shared-resource coverage.
     pub grant_admission: Option<crate::telemetry::NativeIdentity>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum MemoryParticipantMechanism {
+    /// A positive reservation and the same bound request's coordinator output wait were observed together.
+    /// It does not establish which statement acquired the grant or why the client result transfer waited.
+    ReservationDuringClientOutputWait,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]

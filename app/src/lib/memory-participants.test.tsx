@@ -57,7 +57,7 @@ function explanation(native: NativeIdentity, index = 0): MemoryParticipantExplan
     title: `Backend participant ${index}`, explanation: "The native participant is observed; the allocating statement is unresolved.",
     investigation: "Correlate matching native evidence without treating current context as the allocator.",
     verify: "Compare the same native measurement after a tested change.",
-    grant_admission: null,
+    grant_admission: null, qualified_request: null,
   };
 }
 
@@ -158,14 +158,16 @@ test("native grant units, large counts, zero and unknown remain exact without as
 
 test("statement context needs its typed native association and database-sourced text remains escaped", () => {
   const row = grant();
-  const html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={report()} />);
+  const view = report();
+  view.entries[0]!.qualified_request = structuredClone(row.request!.key);
+  const html = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={view} />);
   expect(html).toContain("Observed current statement context");
   expect(html).toContain("&lt;script&gt;");
   expect(html).toContain("&lt;img");
   expect(html).not.toContain("<script>");
   expect(html).not.toContain("<img ");
   row.statement_relationship = "unresolved";
-  const unresolved = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={report()} />);
+  const unresolved = renderToStaticMarkup(<RequestMemoryParticipants evidence={requestEvidence([row])} report={view} />);
   expect(unresolved).not.toContain("Observed current statement context");
   expect(unresolved).not.toContain("&lt;script&gt;");
 });

@@ -506,6 +506,13 @@ the UI finds original facts without hashing identities or relying on row orderin
 validation is shared by native wrappers and authenticated readers. Unknown source visibility and lost warehouse
 rows remain different conditions.
 
+The shared request-memory interpretation qualifies request context over the entire supplied population, including
+negative session-generation evidence from MARS peers. UI and MCP adapters select only its exact `qualified_request`;
+they do not repeat lifecycle policy or recover SQL from an unqualified row. A positive reservation with the same
+qualified request's coordinator output wait has a typed mechanism selected through `EngineSpec` wait semantics.
+It establishes neither a client/network fault, an oversized grant nor exclusive responsibility for another
+request's wait. Raw reservation, resource and wait values remain independently available.
+
 Page-wait captures follow the same proof admission and pure-view boundary through
 `collected_resources::page_waits` and `culprit_checks::page_waits`. `PageWaitSnapshot` preserves the source and UTC
 read bounds even when no coordinator request is visible. Each original waiting request and its native resource

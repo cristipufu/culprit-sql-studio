@@ -4,6 +4,43 @@ use crate::{blocking, telemetry::activity_frame::tests as frames};
 const LOGIN: &str = "2020-01-01T07:00:00.1533333";
 
 #[test]
+fn a_supplied_population_projects_only_the_existing_indexs_recorded_generation_refusals() {
+    for (lifecycle, refused) in [
+        (SessionLifecycle::Running, false),
+        (SessionLifecycle::Unknown, false),
+        (SessionLifecycle::Connecting, true),
+        (SessionLifecycle::PoolResetPrelogin, true),
+    ] {
+        let original = request("42");
+        let mut peer = original.clone();
+        peer.key.request.as_mut().unwrap().id = "1".into();
+        peer.session_context = Some(Box::new(ActivitySessionContext {
+            lifecycle,
+            login_age_ms: None,
+            last_request_end_age_ms: None,
+            client_library: None,
+            client_process_id: None,
+            native: None,
+        }));
+        let rows = [original.clone(), peer, request("43")];
+        let before = rows.clone();
+        let disqualified = ActivityEvidence::disqualified_session_generations(&rows).unwrap();
+        let expected = if refused { BTreeSet::from([original.key.session]) } else { BTreeSet::new() };
+        assert_eq!(disqualified, expected, "{lifecycle:?}");
+        assert_eq!(rows, before, "original points are not filtered or rewritten");
+    }
+    let original = request("42");
+    assert!(ActivityEvidence::disqualified_session_generations([&original, &original]).is_err());
+    let mut foreign_generation = original.clone();
+    foreign_generation.key.session.generation = "another-login".into();
+    assert!(ActivityEvidence::disqualified_session_generations([&original, &foreign_generation]).is_err());
+    let mut malformed_unrelated = request("43");
+    malformed_unrelated.key.session.id.clear();
+    assert!(ActivityEvidence::disqualified_session_generations([&original, &malformed_unrelated]).is_err());
+    assert!(ActivityEvidence::disqualified_session_generations(std::iter::empty()).unwrap().is_empty());
+}
+
+#[test]
 fn a_negative_mars_peer_disqualifies_the_whole_generation_before_any_selection_or_traversal() {
     for lifecycle in [SessionLifecycle::Unknown, SessionLifecycle::Connecting, SessionLifecycle::PoolResetPrelogin] {
         let mut positive = request("42");

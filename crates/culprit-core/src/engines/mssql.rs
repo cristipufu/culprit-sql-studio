@@ -103,6 +103,11 @@ impl EngineSpec for Mssql {
 
     fn native_wait_mechanism(&self, native_type: &str) -> Option<crate::telemetry::WaitMechanism> {
         use crate::telemetry::{LogRateGovernanceReason as Reason, WaitMechanism};
+        // This wait reports result transfer, not whether client processing or transport caused the delay.
+        // https://learn.microsoft.com/troubleshoot/sql/database-engine/performance/troubleshoot-query-async-network-io
+        if native_type == "ASYNC_NETWORK_IO" {
+            return Some(WaitMechanism::ClientResultOutput);
+        }
         // Native role mapping, not translated role_desc. Keep DESTAGE (long-term log storage) separate from
         // LOCALDESTAGE (log service). https://learn.microsoft.com/sql/relational-databases/system-functions/sys-dm-hs-database-log-rate
         let reason = match native_type {

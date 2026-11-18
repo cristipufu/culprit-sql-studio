@@ -5,6 +5,7 @@ import type { SessionMemorySnapshot } from "../src/gen/SessionMemorySnapshot";
 import type { SourceOutcome } from "../src/gen/SourceOutcome";
 import type { State } from "../src/lib/store";
 import { openConnection } from "./demo";
+import { requestMemoryCase } from "../src/test/memory-participants";
 
 const SOURCE = "session memory";
 const TITLE = english["view.session_memory.title"];
@@ -41,7 +42,7 @@ function explanation(evidence: SessionMemorySnapshot): MemoryParticipantsReport 
       title: `Native participant ${index}`, explanation: "This is tracked session allocation, without an established allocating statement.",
       investigation: "Correlate native identity and capture clocks before testing a code change.",
       verify: "Compare the same native measurement after the tested change.",
-      grant_admission: null,
+      grant_admission: null, qualified_request: null,
     })),
   };
 }
@@ -115,4 +116,61 @@ test("memory participants stay collapsed and page exact typed native references 
   await expect(reason).not.toBeVisible();
   await region.getByText("What this evidence establishes", { exact: true }).click();
   await expect(reason).toBeVisible();
+});
+
+
+test("original grant output-wait details use the shared qualified request and withdraw negative MARS context", async ({ page }, info) => {
+  await page.setViewportSize({ width: 560, height: 850 });
+  await openConnection(page, "mssql-demo");
+  await expect.poll(async () => page.evaluate(async (path) => {
+    const { getState } = await import(path) as { getState: () => State };
+    const report = getState().report;
+    return report.status === "ready" && !report.scanning;
+  }, "/src/lib/store.ts")).toBe(true);
+  for (const name of ["qualified", "negative_mars_peer"] as const) {
+    const { evidence, report } = requestMemoryCase(name);
+    await page.evaluate(async ({ path, evidence, view }) => {
+      const { getState, setState } = await import(path) as { getState: () => State; setState: (patch: Partial<State>) => void };
+      const state = getState();
+      if (state.report.status !== "ready") throw new Error("A ready fixture report is required");
+      const report = structuredClone(state.report.report);
+      report.snapshot.pressure = {
+        uptime_hours: null, signals: [], grants: [], oldest_transaction: null, files: [], replicas: [], cpus: null, numa_nodes: null,
+        request_memory: evidence,
+      };
+      report.request_memory = view;
+      report.snapshot.sources = [{ source: evidence.source, state: view.source_state ?? "partial", reason: null }];
+      setState({ report: { ...state.report, report } });
+    }, { path: "/src/lib/store.ts", evidence, view: report });
+    if (name === "qualified") {
+      await page.locator('[data-tile="health"]').click();
+      await page.getByRole("dialog", { name: "Database health", exact: true }).waitFor();
+    }
+    const region = page.getByRole("region", { name: report.title, exact: true });
+    await expect(region).toBeVisible();
+    const inspect = region.getByText(english["ui.memory_participants.inspect"], { exact: true });
+    const participants = region.locator(":scope > details").filter({
+      has: page.getByText(english["ui.memory_participants.inspect"], { exact: true }),
+    });
+    if ((await participants.getAttribute("open")) === null) await inspect.click();
+    const card = region.locator("article").filter({ hasText: "ASYNC_NETWORK_IO" });
+    const details = card.locator(":scope > details");
+    if ((await details.getAttribute("open")) === null) await card.getByText(english["ui.memory_failures.investigation"], { exact: true }).click();
+    await expect(card).toContainText("9007199254740993 KiB");
+    await expect(card).toContainText("ASYNC_NETWORK_IO");
+    await expect(card).toContainText("2020-01-01T12:00:00.000000000Z");
+    const statement = card.getByText(english["ui.memory_participants.current_statement"], { exact: true });
+    if (name === "qualified") {
+      await expect(statement).toHaveCount(1);
+      await statement.click();
+      await expect(card).toContainText("SELECT payload");
+    } else {
+      await expect(statement).toHaveCount(0);
+      await expect(card).not.toContainText("application-worker");
+      await expect(card).not.toContainText("login-1");
+    }
+    const size = await region.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+    expect(size.scroll).toBeLessThanOrEqual(size.width + 1);
+    await page.screenshot({ path: info.outputPath(`request-memory-${name}.png`) });
+  }
 });

@@ -1120,6 +1120,8 @@ mod tests {
                 .map(|index| culprit_core::MemoryParticipantExplanation {
                     observation_key: format!("native-{index}"),
                     observation_identity: culprit_core::telemetry::NativeIdentity::new(format!("native-{index}")),
+                    mechanism: None,
+                    qualified_request: None,
                     title: "x".repeat(1000),
                     explanation: "not included in concise output".into(),
                     investigation: "resource-first investigation".into(),

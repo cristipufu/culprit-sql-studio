@@ -174,7 +174,8 @@ pub use maintenance_blocking_report::MaintenanceBlockingReport;
 pub use maintenance_progress_report::{MaintenanceProgressEntry, MaintenanceProgressReport};
 pub use measurement::*;
 pub use memory_participants::{
-    MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantReference, MemoryParticipantsReport,
+    MemoryGrantAdmission, MemoryParticipantExplanation, MemoryParticipantMechanism, MemoryParticipantReference,
+    MemoryParticipantsReport,
 };
 pub use model::*;
 pub use native_log_analysis::{

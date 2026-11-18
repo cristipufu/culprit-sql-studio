@@ -185,3 +185,42 @@ fn a_wait_counter_cannot_claim_another_native_mechanism_or_engine() {
     row.mechanism = crate::Engine::Mssql.spec().native_wait_mechanism("RBIO_RG_REPLICA");
     assert!(!row.is_valid_for(crate::Engine::Mssql));
 }
+
+#[test]
+fn client_result_output_has_one_native_mapping_and_keeps_the_shared_network_class() {
+    let mechanism = WaitMechanism::ClientResultOutput;
+    assert_eq!(mechanism.class(), WaitClass::Network);
+    assert_eq!(serde_json::to_value(mechanism).unwrap(), serde_json::json!({"kind":"client-result-output"}));
+    for engine in crate::Engine::ALL {
+        let expected = (engine == crate::Engine::Mssql).then_some(mechanism);
+        assert_eq!(engine.spec().native_wait_mechanism("ASYNC_NETWORK_IO"), expected, "{engine:?}");
+        for unknown in ["async_network_io", "ASYNC_NETWORK_IO_FUTURE", "NET_WAIT", "RESOURCE_SEMAPHORE"] {
+            assert_eq!(engine.spec().native_wait_mechanism(unknown), None, "{engine:?}: {unknown}");
+        }
+    }
+}
+
+#[test]
+fn a_historical_output_wait_counter_keeps_exact_native_counts_without_current_participant_authority() {
+    let mut row = WaitCounterObservation {
+        source: crate::source_id::WAITS.into(),
+        wait_type: "ASYNC_NETWORK_IO".into(),
+        mechanism: Some(WaitMechanism::ClientResultOutput),
+        scope: crate::MeasurementScope::Server,
+        reset: crate::ResetMarker::Unknown,
+        waiting_tasks_count: "9007199254740993".into(),
+        wait_time_ms: "18446744073709551615".into(),
+        signal_wait_time_ms: "0".into(),
+        max_wait_time_ms: "0".into(),
+    };
+    assert!(row.is_valid_for(crate::Engine::Mssql));
+    let restored: WaitCounterObservation = serde_json::from_slice(&serde_json::to_vec(&row).unwrap()).unwrap();
+    assert_eq!(restored, row);
+    assert_eq!(restored.waiting_tasks_count, "9007199254740993");
+    assert_eq!(restored.wait_time_ms, "18446744073709551615");
+    assert_eq!(restored.reset, crate::ResetMarker::Unknown);
+    row.mechanism = None;
+    assert!(!row.is_valid_for(crate::Engine::Mssql));
+    row.mechanism = Some(WaitMechanism::LogRateGovernance(LogRateGovernanceReason::ReplicaLogApply));
+    assert!(!row.is_valid_for(crate::Engine::Mssql));
+}
