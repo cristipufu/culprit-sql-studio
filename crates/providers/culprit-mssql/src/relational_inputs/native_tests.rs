@@ -19,6 +19,8 @@ const TVP: &str = "@Rows dbo.RowsType READONLY,@secret nvarchar(100)=N'header-de
 const LOCAL: &str = "@unused int=1 AS DECLARE @Rows dbo.RowsType;INSERT @Rows VALUES(1);";
 
 mod expressions;
+mod fixture;
+mod reuse;
 
 async fn execute(client: &mut MsClient, tvp: bool) {
     batch(

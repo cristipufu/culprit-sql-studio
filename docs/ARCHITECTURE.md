@@ -1215,6 +1215,10 @@ serial-execution proof and consumes the full input. Filtered rows and final aggr
 Access counts alone cannot establish full input or harmful cached-cardinality reuse; parallel, early-stop and
 incomplete scope remain unresolved. TVPs, local variables, temporary tables and functions retain their native kind-specific advice;
 filter/spool evidence cannot generate persistent-table DDL against those inputs.
+The same completed-input decision can enrich a measured oversized execution grant when the TVP is below the
+selected memory-consuming operator. This retains the input and grant as separate measurements, adds no source
+query and does not establish grant sizing or concurrent pressure. Other branches and incomplete input evidence
+keep the ordinary grant explanation. Nonfinite and negative memory measurements never authorize a warning.
 
 Every plan and plan step carries its facts: the engine's parser records them from the native plan, and a provider that
 plugs in either fills them in or hands its native text to the built-in parser (`culprit_engine::plans::parse_plan`).

@@ -2,6 +2,11 @@
 
 use super::*;
 
+const MIN_OVERSIZED_GRANT_KIB: f64 = 10.0 * 1024.0;
+const MAX_USED_GRANT_FRACTION: f64 = 0.25;
+const LARGE_GRANT_KIB: f64 = 1024.0 * 1024.0;
+const MIN_GRANT_WAIT_MS: f64 = 100.0;
+
 pub(super) fn memory_grant_feedback(cx: &Cx) -> Vec<Draft> {
     let Some(feedback) = crate::plan_facts::PlanMemoryGrantFeedback::disabled_in(cx.plan) else {
         return Vec::new();
@@ -28,31 +33,18 @@ pub(super) fn memory_grant(cx: &Cx) -> Vec<Draft> {
     let facts = cx.plan.facts();
     let mut out = Vec::new();
     let root = cx.plan.root.id;
-    if let (Some(granted), Some(used)) = (facts.memory_granted_kb, facts.memory_max_used_kb)
-        && has_actuals(cx.plan)
-        && granted >= 10.0 * 1024.0
-        && used < 0.25 * granted
+    let measured_memory = |value: f64| value.is_finite() && value >= 0.0;
+    if let (Some(granted), Some(used)) = (
+        facts.memory_granted_kb.filter(|value| measured_memory(*value)),
+        facts.memory_max_used_kb.filter(|value| measured_memory(*value)),
+    ) && has_actuals(cx.plan)
+        && granted >= MIN_OVERSIZED_GRANT_KIB
+        && used < MAX_USED_GRANT_FRACTION * granted
     {
-        let mut d = Draft::new("memory-grant", InsightArea::Memory, 0.15, vec![memory_node(cx).unwrap_or(root)]);
-        d.fixed_weight = true;
-        d.subtree = true;
-        d.floor = if granted >= 1024.0 * 1024.0 { Severity::High } else { Severity::Medium };
-        d.title = t!(
-            "insight.memory_grant.oversized.title",
-            granted = format::bytes(granted * 1024.0),
-            used = format::bytes(used * 1024.0)
-        );
-        let mut detail = vec![t!("insight.memory_grant.oversized.detail")];
-        detail.extend(
-            facts.memory_grant_warning.as_ref().map(|w| t!("insight.memory_grant.oversized.warned", warning = w)),
-        );
-        d.detail = detail.join(" ");
-        d.fix = t!("insight.memory_grant.oversized.fix");
-        d.verify = t!("insight.memory_grant.oversized.verify");
-        out.push(d);
-    } else if let Some(desired) = facts.memory_desired_kb
+        out.push(oversized_grant(cx, granted, used));
+    } else if let Some(desired) = facts.memory_desired_kb.filter(|value| measured_memory(*value))
         && !has_actuals(cx.plan)
-        && desired >= 1024.0 * 1024.0
+        && desired >= LARGE_GRANT_KIB
     {
         let mut d = Draft::new("memory-grant", InsightArea::Memory, 0.1, vec![memory_node(cx).unwrap_or(root)]);
         d.fixed_weight = true;
@@ -65,7 +57,7 @@ pub(super) fn memory_grant(cx: &Cx) -> Vec<Draft> {
         d.verify = t!("insight.memory_grant.desired.verify");
         out.push(d);
     }
-    if let Some(wait) = facts.memory_grant_wait_ms.filter(|w| *w >= 100.0) {
+    if let Some(wait) = facts.memory_grant_wait_ms.filter(|w| w.is_finite() && *w >= MIN_GRANT_WAIT_MS) {
         let mut d = Draft::new("memory-grant", InsightArea::Memory, 0.2, vec![root]);
         d.fixed_weight = true;
         d.cost_ms = Some(wait);
@@ -77,6 +69,39 @@ pub(super) fn memory_grant(cx: &Cx) -> Vec<Draft> {
         out.push(d);
     }
     out
+}
+
+fn oversized_grant(cx: &Cx, granted: f64, used: f64) -> Draft {
+    let mut draft =
+        Draft::new("memory-grant", InsightArea::Memory, 0.15, vec![memory_node(cx).unwrap_or(cx.plan.root.id)]);
+    draft.fixed_weight = true;
+    draft.subtree = true;
+    draft.floor = if granted >= LARGE_GRANT_KIB { Severity::High } else { Severity::Medium };
+    draft.title = t!(
+        "insight.memory_grant.oversized.title",
+        granted = format::bytes(granted * 1024.0),
+        used = format::bytes(used * 1024.0)
+    );
+    let mut detail = vec![t!("insight.memory_grant.oversized.detail")];
+    detail.extend(
+        cx.plan
+            .facts()
+            .memory_grant_warning
+            .as_ref()
+            .map(|warning| t!("insight.memory_grant.oversized.warned", warning = warning)),
+    );
+    draft.fix = t!("insight.memory_grant.oversized.fix");
+    draft.verify = t!("insight.memory_grant.oversized.verify");
+    if let Some(input) = relational_inputs::oversized_grant_input(cx) {
+        detail.push(input.detail());
+        if !draft.nodes.contains(&input.node.id) {
+            draft.nodes.push(input.node.id);
+        }
+        draft.fix = t!("insight.memory_grant.tvp.investigate");
+        draft.verify = t!("insight.memory_grant.tvp.verify");
+    }
+    draft.detail = detail.join(" ");
+    draft
 }
 
 pub(super) fn memory_node(cx: &Cx) -> Option<u32> {

@@ -1,6 +1,9 @@
 //! Discriminate native access volume from rows kept without treating operator output as parameter cardinality.
 use super::*;
 
+mod grant;
+pub(super) use grant::oversized_grant_input;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AccessDifference {
     Volume,
@@ -62,6 +65,13 @@ impl AccessComparison {
 
     pub(super) fn actual_accessed(&self) -> f64 {
         self.actual
+    }
+
+    pub(super) fn overestimated_complete_input(&self) -> bool {
+        self.completed_input
+            && self.estimated >= crate::plan::MISESTIMATE_MIN_ROWS
+            && self.estimated > self.actual
+            && differs_materially(self.estimated, self.actual)
     }
 
     pub(super) fn detail(&self) -> String {

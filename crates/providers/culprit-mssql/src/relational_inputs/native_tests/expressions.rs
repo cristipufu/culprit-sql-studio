@@ -39,7 +39,7 @@ impl Probe {
     }
 }
 
-fn reader_budget() -> CollectionBudget {
+pub(super) fn reader_budget() -> CollectionBudget {
     CollectionBudget {
         max_queries: READER_QUERIES,
         max_snapshot_rows: 1024,
@@ -54,7 +54,7 @@ fn reader_budget() -> CollectionBudget {
     }
 }
 
-fn has_statement(xml: &str, hash: &str) -> bool {
+pub(super) fn has_statement(xml: &str, hash: &str) -> bool {
     culprit_core::xml::read(xml, |document| {
         document.is_ok_and(|document| {
             document.descendants().any(|node| {
@@ -134,32 +134,6 @@ fn assert_native_evidence(case: Probe, plan: &Plan) {
     );
 }
 
-async fn create_database(fixture: &OwnedSourceFixture, database: &str) {
-    let mut setup = crate::test_support::connect(
-        &config(fixture.port, "master", fixture.password(), "tvp-expression-setup"),
-        SessionKind::User,
-    )
-    .await
-    .unwrap();
-    verify_owned_source(&mut setup).await.unwrap();
-    let version = crate::conn::query_one(
-        &mut setup,
-        "SELECT /* culprit fixture */ CONVERT(int,SERVERPROPERTY('ProductMajorVersion')) AS major",
-    )
-    .await
-    .unwrap();
-    assert!(
-        crate::read::signed_integer(&version, "major").unwrap() >= 16,
-        "owned COUNT/TVP qualification requires SQL Server 2022+"
-    );
-    batch(
-        &mut setup,
-        &format!("CREATE DATABASE [{database}] COLLATE Latin1_General_100_CS_AS;ALTER DATABASE [{database}] SET COMPATIBILITY_LEVEL=160"),
-    )
-    .await;
-    setup.close().await.unwrap();
-}
-
 async fn capture_probe(application: &mut MsClient, pool: &Arc<Pool>, case: Probe) {
     batch(
         application,
@@ -228,47 +202,8 @@ async fn capture_probes(fixture: &OwnedSourceFixture, database: &str) {
     application.close().await.unwrap();
 }
 
-async fn delete_database(fixture: &OwnedSourceFixture, database: &str) {
-    let mut cleanup = crate::test_support::connect(
-        &config(fixture.port, "master", fixture.password(), "tvp-expression-cleanup"),
-        SessionKind::User,
-    )
-    .await
-    .unwrap();
-    verify_owned_source(&mut cleanup).await.unwrap();
-    batch(
-        &mut cleanup,
-        &format!("IF DB_ID(N'{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;DROP DATABASE [{database}];END"),
-    )
-    .await;
-    cleanup.close().await.unwrap();
-}
-
 #[tokio::test]
 #[ignore = "requires SQL Server 2022+ owned loopback fixture, full nonce admission and CULPRIT_MSSQL_SOURCE_TEST_PORT/PASSWORD"]
 async fn owned_count_and_abs_actual_plans_bind_tvp_input_and_preserve_a_healthy_large_control() {
-    let fixture = OwnedSourceFixture::open("tvp-expression-fixture").await.unwrap();
-    let owner = std::env::var("CULPRIT_SMOKE_OWNER").unwrap();
-    let database = format!(
-        "culprit_tvp_count_{owner}_{}_{}",
-        std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap()
-    );
-    // Creation is tracked before it starts. Every actor is owned inside this unwind boundary.
-    let body = AssertUnwindSafe(async {
-        create_database(&fixture, &database).await;
-        capture_probes(&fixture, &database).await;
-    })
-    .catch_unwind()
-    .await;
-    // Failed setup/actors are never reused as cleanup authority, even after a successful attention call.
-    let cleanup = AssertUnwindSafe(delete_database(&fixture, &database)).catch_unwind().await;
-    match (body, cleanup) {
-        (Err(original), Err(_)) => {
-            eprintln!("owned TVP cleanup also failed; no successful native qualification is recorded");
-            std::panic::resume_unwind(original);
-        }
-        (Err(error), Ok(())) | (Ok(()), Err(error)) => std::panic::resume_unwind(error),
-        (Ok(()), Ok(())) => {}
-    }
+    super::fixture::run("count", capture_probes).await;
 }
