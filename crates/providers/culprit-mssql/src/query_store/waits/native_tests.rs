@@ -153,7 +153,7 @@ async fn native_query_store_wait_ids_semantics_and_scan_totals_agree_without_his
         }
         let mut raw_totals = BTreeMap::<u8,u64>::new();
         for interval in window.interval_ids() {
-            let rows = reader.read(&catalog_sql::waits(false),vec![Parameter::Integer(1000),Parameter::Integer(interval)],1000).await.unwrap();
+            let rows = reader.read(&catalog_sql::waits(None, &reader.observed_native_layout().unwrap()),vec![Parameter::Integer(1000),Parameter::Integer(interval)],1000).await.unwrap();
             for row in rows.into_iter().filter(|row|plans.contains(&row.string("plan_id"))) {
                 let TelemetryRecord::QueryWaits(raw) = decode::record(&row,TelemetryStream::QueryWaits,StatementReferences::default()).unwrap() else {panic!("native wait")};
                 let id = raw.category.parse::<u8>().unwrap();

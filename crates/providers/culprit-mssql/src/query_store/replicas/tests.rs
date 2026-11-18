@@ -52,7 +52,7 @@ fn catalog_order_is_stable_and_cannot_hide_duplicate_or_incomplete_native_metada
 #[tokio::test]
 async fn catalog_uses_one_bounded_native_read_and_preserves_nullable_names() {
     let mut reader = FakeRead::new(vec![Ok(vec![row(1, 1, None), row(5, 5, Some("named-reader"))])]);
-    let catalog = read(&mut reader).await.unwrap();
+    let catalog = read(&mut reader).await.unwrap().unwrap();
     assert_eq!(catalog.ids(), ["1", "5"]);
     assert_eq!(reader.calls.len(), 1);
     assert_eq!(reader.calls[0].limit, MAX_REPLICA_GROUP_ROWS + 1);
@@ -78,4 +78,12 @@ fn selection_never_pools_groups_or_guesses_from_role_history_and_unknown_roles()
     assert_eq!(Population::ReplicaGroup(7).predicate("rs"), "rs.replica_group_id=7");
     assert_eq!(Population::ReplicaGroup(7).predicate("ws"), "ws.replica_group_id=7");
     assert_eq!(Population::Unpartitioned.predicate("rs"), "1=1");
+}
+
+#[tokio::test]
+async fn a_successfully_empty_native_catalog_preserves_missing_membership() {
+    let mut reader = FakeRead::new(vec![Ok(vec![])]);
+    assert!(read(&mut reader).await.unwrap().is_none());
+    assert_eq!(reader.calls.len(), 1);
+    assert!(reader.calls[0].sql.contains("sys.query_store_replicas"));
 }

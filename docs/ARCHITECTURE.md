@@ -227,6 +227,14 @@ even when a native cohort is shared. Unlocalized runtime read gaps withhold each
 membership cannot establish an unpartitioned workload. Warehouse receipt and recovery verification always cover
 the original capture rather than a filtered proof.
 
+`QueryHistoryDescription.acquisition_owner` records the native observer independently of the historical data
+namespace and execution populations. An acquired owner requires `SourceCompletion::QueryHistory`: its original
+owner, read start, interval, wait semantics and layout facts must survive completion. Only fully drained runtime
+rows may establish observed-window membership when the native catalog was readable but empty. Plain `Verified`
+cannot bypass that completion. Acquisition ownership neither invents a global database incarnation nor authorizes
+member-local investigation or collection cost. SQL Server history reuses its existing native context, Query Store
+layout, decoding and paging for supported Azure and boxed SQL2022 profiles.
+
 The shared export boundary canonicalizes runtime UTC instants without changing their nanosecond value. Equivalent
 offset or fractional spellings produce the same authenticated payload; oversized or subnanosecond values are
 rejected rather than truncated. Opaque native generation timestamps remain unchanged.
@@ -942,11 +950,10 @@ differences for retained input and collection. Loading restores the full report.
 in memory across these snapshots. Report lists read small summary sidecars, without deserializing plans and retained
 evidence. Culprit reads only what the current version writes: a snapshot records its format (`SNAPSHOT_FORMAT`), and one
 in another format is refused, never half-read with missing fields filled in.
-Snapshot format **10** retains captured cache-entry origins and query-level page-server evidence. Collector export
-format **41** separates physical acquisition integrity from resolved statement references. Delivery schema **2**,
-preparation **19**, Outbox **19** and fleet **13** bind the resulting receipt/publication contracts. Diagnostic controller
-**9**, native representation **2** and projection normalization **3** keep their existing meanings. These formats
-require fresh state, without aliases or migrations.
+Snapshot, collector export, delivery preparation, Outbox/fleet journals and the diagnostic controller version their
+own serialized contracts. Their constants live beside each owner's encoding; native representation and projection
+normalization have separate versions. An export-header change does not change an unrelated journal schema. These
+formats require fresh state, without aliases or migrations.
 
 A physically complete capture can retain explicitly unresolved native query/plan references. Every supplied
 definition ID must still resolve exactly, and native source rechecks, rosters and file integrity remain mandatory.

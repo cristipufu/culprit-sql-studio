@@ -59,6 +59,7 @@ fn recorded() -> (Snapshot, CollectionDescription, Vec<TelemetryRecord>) {
         source: culprit_core::source_id::QUERY_STORE.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+            acquisition_owner: None,
             population_binding: QueryHistoryPopulationBinding::Unpartitioned,
             population_catalog: Some(culprit_core::NativeRuntimePopulationCatalog {
                 membership: culprit_core::RuntimePopulationMembership::NativeCatalog,
@@ -517,3 +518,5 @@ mod clock_boundaries;
 mod storage;
 
 mod instance_resources;
+
+mod boxed_query_history;

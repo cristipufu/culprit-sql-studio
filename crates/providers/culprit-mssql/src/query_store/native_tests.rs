@@ -153,7 +153,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
     for interval in intervals {
         let rows = reader
             .read(
-                &catalog_sql::runtime(false, crate::query_store::page_server::Availability::NotApplicable),
+                &catalog_sql::runtime(None, &reader.observed_native_layout().unwrap()),
                 vec![Parameter::Integer(1000), Parameter::Integer(crate::read::integer(&interval, "id").unwrap())],
                 1000,
             )
@@ -199,7 +199,7 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
         }
         reader
             .read(
-                &catalog_sql::waits(false),
+                &catalog_sql::waits(None, &reader.observed_native_layout().unwrap()),
                 vec![Parameter::Integer(1000), Parameter::Integer(crate::read::integer(&interval, "id").unwrap())],
                 1000,
             )
@@ -276,7 +276,42 @@ async fn native_query_store_fragments_definitions_and_interactive_projections_ag
             .any(|row| row.database.as_deref() == Some("tempdb") && row.scope == culprit_core::FileScope::Server)
     );
     assert!(!crate::storage_io::display(&file_counters).is_empty());
-    let native_counters = crate::performance::read(&mut operations, 32).await.unwrap();
+    let queries_before_counters = operations.queries();
+    let counters_started = std::time::Instant::now();
+    // The finite profile can return59 native rows. Use its existing source ceiling, as ordinary pressure does.
+    let native_counters = crate::performance::read(&mut operations, crate::performance::MAX_COUNTERS).await;
+    let counters_client_elapsed_ms = counters_started.elapsed().as_secs_f64() * 1000.0;
+    if let Err(error) = &native_counters {
+        // Preserve the original rejection and await this same owner; no retry or replacement repairs Attention.
+        let shutdown = operations.close().await;
+        let summary = operations.read_metrics().map(|metrics| metrics.summary(None)).transpose();
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "fixture_phase":"query-store-parity-performance",
+                "requested_native_counter_ceiling":crate::performance::MAX_COUNTERS,
+                "queries_before":queries_before_counters,"queries_after":operations.queries(),
+                "performance_call_client_elapsed_ms":counters_client_elapsed_ms,
+                "error_code":error.code,"error_detail":error.detail,
+                "shutdown":crate::read::measurement::shutdown_state(shutdown),
+                "read_work":summary.as_ref().ok(),
+                "metrics_error_code":summary.as_ref().err().map(|error|error.code),
+            })
+        );
+    }
+    let native_counters = native_counters.expect("the bounded native performance projection must succeed");
+    assert_eq!(operations.queries(), queries_before_counters + 1, "one unchanged native performance statement");
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "fixture_phase":"query-store-parity-performance",
+            "requested_native_counter_ceiling":crate::performance::MAX_COUNTERS,
+            "native_input_rows":native_counters.native_rows,
+            "queries_before":queries_before_counters,"queries_after":operations.queries(),
+            "performance_call_client_elapsed_ms":counters_client_elapsed_ms,
+            "native_cost_qualified":false,
+        })
+    );
     assert!(native_counters.sample.counters.iter().all(|row| row.is_valid()));
     assert!(!crate::performance::application(&native_counters.sample.counters).is_empty());
     for kind in crate::queues::KINDS {

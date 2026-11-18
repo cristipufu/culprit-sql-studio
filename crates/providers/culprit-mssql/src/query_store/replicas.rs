@@ -189,7 +189,7 @@ impl ReplicaGroup {
 }
 
 /// A runtime summary supplies positive group membership only. Roles and replica names require native metadata.
-pub(super) fn observed_catalog(
+pub(crate) fn observed_catalog(
     populations: impl Iterator<Item = Population>,
     from: &str,
     until: &str,
@@ -238,12 +238,12 @@ pub(crate) fn unpartitioned_catalog() -> RuntimePopulationCatalog {
     }
 }
 
-pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<Catalog> {
+pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<Option<Catalog>> {
     let rows = reader
         .query(super::catalog_sql::REPLICAS, vec![], MAX_REPLICA_GROUP_ROWS + 1)
         .await
         .map_err(ReadError::into_error)?;
-    Catalog::decode(&rows)
+    if rows.is_empty() { Ok(None) } else { Catalog::decode(&rows).map(Some) }
 }
 
 #[cfg(test)]

@@ -644,3 +644,5 @@ mod query_store_statements;
 mod storage;
 
 mod instance_resources;
+
+mod boxed_query_history;

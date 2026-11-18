@@ -63,6 +63,7 @@ fn enabled_capture_requires_a_dictionary_but_never_establishes_read_completeness
         assert!(evidence.is_valid());
     }
     let mut source = QueryHistoryDescription {
+        acquisition_owner: None,
         population_binding: crate::telemetry::QueryHistoryPopulationBinding::Unknown,
         population_catalog: None,
         interval: TelemetryInterval {

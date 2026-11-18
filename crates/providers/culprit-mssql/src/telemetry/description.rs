@@ -14,13 +14,21 @@ use culprit_core::{
 
 pub(super) struct Description {
     pub value: CollectionDescription,
-    pub physical_incarnation: String,
+    pub acquisition: super::history_acquisition::HistoryAcquisition,
+    pub layout: crate::query_store::layout::NativeLayout,
     pub plan_upper_bound: i64,
     pub replica_group_ids: Vec<String>,
-    pub variant_families: crate::query_store::variants_sql::Availability,
-    pub page_server_reads: crate::query_store::page_server::Availability,
 }
 impl Description {
+    pub(super) fn range_population(&self) -> super::cursor::PopulationRange {
+        if !self.layout.partitioned {
+            super::cursor::PopulationRange::Unpartitioned
+        } else if self.replica_group_ids.is_empty() {
+            super::cursor::PopulationRange::AllGroups
+        } else {
+            super::cursor::PopulationRange::Catalog
+        }
+    }
     pub fn waits_supported(&self) -> bool {
         self.value
             .query_history()
@@ -68,45 +76,74 @@ pub(super) async fn supported_profile<R: NativeRead>(
 pub(super) async fn read<R: NativeRead>(
     session: &mut R,
     request: &CollectionRequest,
-    host: &str,
-    port: u16,
+    acquisition: super::history_acquisition::HistoryAcquisition,
 ) -> Result<Description> {
     let settings = settings(session).await?;
-    let (database, physical_incarnation) = query_history_identity(session, host, port).await?;
+    if settings.layout.edition != acquisition.edition() {
+        return Err(culprit_core::telemetry::CollectionStop::SourceChanged.error());
+    }
+    let target = acquisition.target();
     let interval = crate::query_store::intervals::exact(session, request).await?;
-    let replicas = crate::query_store::replicas::read(session).await?;
-    let replica_group_ids = replicas.ids();
-    let population_catalog = replicas.population_catalog()?.native_facts();
-    let population_binding = QueryHistoryPopulationBinding::Dimensions {
-        bindings: population_catalog
-            .populations
-            .iter()
-            .map(|population| QueryHistoryPopulationBindingEntry {
-                population: population.identity.clone(),
-                qualifiers: [("replica_group_id".into(), population.identity.id.clone())].into(),
-            })
-            .collect(),
+    let replicas = if settings.layout.partitioned {
+        crate::query_store::replicas::read(session).await?
+    } else {
+        if settings.layout.mode == crate::query_store::mode::ReadMode::ReadCaptureSecondary {
+            return Err(Error::new(ErrorCode::Unsupported, t!("provider.mssql.query_store.population_unavailable")));
+        }
+        None
+    };
+    let replica_group_ids = replicas.as_ref().map_or_else(Vec::new, |catalog| catalog.ids());
+    let population_catalog = match replicas {
+        Some(replicas) => Some(replicas.population_catalog()?.native_facts()),
+        None if !settings.layout.partitioned => {
+            Some(crate::query_store::replicas::unpartitioned_catalog().native_facts())
+        }
+        None => None,
+    };
+    let population_binding = match &population_catalog {
+        Some(catalog) if !catalog.partitioned => culprit_core::telemetry::QueryHistoryPopulationBinding::Unpartitioned,
+        Some(catalog) => QueryHistoryPopulationBinding::Dimensions {
+            bindings: catalog
+                .populations
+                .iter()
+                .map(|population| QueryHistoryPopulationBindingEntry {
+                    population: population.identity.clone(),
+                    qualifiers: [("replica_group_id".into(), population.identity.id.clone())].into(),
+                })
+                .collect(),
+        },
+        None => QueryHistoryPopulationBinding::Unknown,
+    };
+    let dimensions = if replica_group_ids.is_empty() {
+        Default::default()
+    } else {
+        [("replica_group_id".into(), replica_group_ids.clone())].into()
     };
     let plan_upper_bound = plan_upper_bound(session).await?;
     Ok(Description {
         value: CollectionDescription {
-            target: database.into(),
+            target,
             partition: culprit_core::telemetry::SourcePartition::Target,
             source: culprit_core::source_id::QUERY_STORE.into(),
             observation: culprit_core::telemetry::SourceObservation::QueryHistory(
                 culprit_core::telemetry::QueryHistoryDescription {
                     interval,
-                    population_catalog: Some(population_catalog),
+                    acquisition_owner: Some(Box::new(acquisition.owner()?)),
+                    population_catalog,
                     population_binding,
-                    dimensions: [("replica_group_id".into(), replica_group_ids.clone())].into(),
+                    dimensions,
                     native_properties: [
                         ("capture_mode".into(), settings.capture_mode),
+                        ("runtime_replica_dimension".into(), settings.layout.partitioned.to_string()),
+                        ("tempdb_metric_available".into(), settings.layout.tempdb.to_string()),
+                        ("log_bytes_metric_available".into(), settings.layout.log_bytes.to_string()),
+                        ("waits_view_available".into(), settings.layout.waits.to_string()),
                         ("actual_state".into(), settings.actual_state),
-                        ("local_capture_permitted".into(), settings.mode.accepts_local_capture().to_string()),
-                        ("variant_families".into(), settings.variant_families.native_property().into()),
+                        ("local_capture_permitted".into(), settings.layout.mode.accepts_local_capture().to_string()),
+                        ("variant_families".into(), settings.layout.variants.native_property().into()),
                         (
                             culprit_core::telemetry::PageServerReadAvailability::PROPERTY.into(),
-                            settings.page_server_reads.native_property().into(),
+                            settings.layout.page_server_reads.native_property().into(),
                         ),
                     ]
                     .into(),
@@ -115,37 +152,33 @@ pub(super) async fn read<R: NativeRead>(
             ),
             continuity: SourceContinuity::Unverified,
         },
-        physical_incarnation,
+        acquisition,
+        layout: settings.layout,
         plan_upper_bound,
         replica_group_ids,
-        variant_families: settings.variant_families,
-        page_server_reads: settings.page_server_reads,
     })
 }
 
 pub(super) struct Settings {
+    pub(super) layout: crate::query_store::layout::NativeLayout,
     capture_mode: String,
     actual_state: String,
-    mode: crate::query_store::mode::ReadMode,
     wait_capture: WaitCaptureState,
-    variant_families: crate::query_store::variants_sql::Availability,
-    page_server_reads: crate::query_store::page_server::Availability,
 }
 
 pub(super) async fn settings<R: NativeRead>(session: &mut R) -> Result<Settings> {
     let rows = session.query(sql::OPTIONS, vec![], 1).await.map_err(ReadError::into_error)?;
-    let row = rows.first().ok_or_else(malformed)?;
+    let [row] = rows.as_slice() else { return Err(malformed()) };
+    if crate::read::optional_boolean(row, "metadata_visibility")? != Some(true) {
+        return Err(crate::catalog_visibility::unavailable());
+    }
+    let layout = crate::query_store::layout::NativeLayout::decode(row)?;
     let actual_state = text(row, "actual_state_desc")?;
-    let mode = crate::query_store::mode::ReadMode::from_native(&actual_state)
-        .ok_or_else(|| Error::new(ErrorCode::Unsupported, t!("collection.query_store_unavailable")))?;
-    let variant_families = crate::query_store::variants_sql::Availability::decode(row, "variant_families")?;
     Ok(Settings {
+        layout,
         actual_state,
-        mode,
         capture_mode: text(row, "query_capture_mode_desc")?,
-        wait_capture: waits::capture_state(row)?,
-        variant_families,
-        page_server_reads: crate::query_store::page_server::decode_availability(row)?,
+        wait_capture: if layout.waits { waits::capture_state(row)? } else { WaitCaptureState::Unavailable },
     })
 }
 
@@ -222,13 +255,10 @@ mod tests {
     };
 
     fn options(state: &str) -> Rec {
-        Rec::of(&[
-            ("actual_state_desc", Val::Text(state.into())),
-            ("query_capture_mode_desc", Val::Text("AUTO".into())),
-            ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
-            ("variant_families", Val::Int(1)),
-            ("page_server_read_availability", Val::Int(0)),
-        ])
+        crate::resources::test_support::replace(
+            &super::super::history_tests::options(5, true),
+            &[("actual_state_desc", Val::Text(state.into()))],
+        )
     }
 
     #[tokio::test]
@@ -237,7 +267,7 @@ mod tests {
             let mut reader = FakeRead::new(vec![Ok(vec![options(state)])]);
             let settings = settings(&mut reader).await.unwrap();
             assert_eq!(settings.actual_state, state);
-            assert_eq!(settings.mode.accepts_local_capture(), capture);
+            assert_eq!(settings.layout.mode.accepts_local_capture(), capture);
             assert_eq!(settings.wait_capture, WaitCaptureState::Enabled);
             assert_eq!(reader.calls.len(), 1);
         }

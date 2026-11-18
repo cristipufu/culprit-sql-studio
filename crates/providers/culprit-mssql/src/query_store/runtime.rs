@@ -265,15 +265,7 @@ pub(crate) fn layout_query(detail: crate::database_identity::log_rates::Detail) 
 }
 
 pub(crate) const LAYOUT: &str = concat!(
-    r#"SELECT /* culprit */ CAST(SERVERPROPERTY('EngineEdition') AS int) AS engine_edition,
- CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_tempdb_space_used') THEN 1 ELSE 0 END AS tempdb,
- CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'avg_log_bytes_used') THEN 1 ELSE 0 END AS log_bytes,
- CASE WHEN EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.query_store_runtime_stats') AND name=N'replica_group_id') THEN 1 ELSE 0 END AS replicas,
- "#,
-    super::page_server::availability!(),
-    " AS page_server_read_availability,",
-    super::variants_sql::readable!(),
-    r#" AS variants,
- CASE WHEN OBJECT_ID(N'sys.query_store_wait_stats') IS NOT NULL AND EXISTS(SELECT 1 FROM sys.all_columns WHERE object_id=OBJECT_ID(N'sys.database_query_store_options') AND name=N'wait_stats_capture_mode_desc') THEN 1 ELSE 0 END AS waits,
- o.actual_state_desc FROM sys.database_query_store_options o"#
+    "SELECT /* culprit */ ",
+    super::layout::columns!(),
+    ",\n o.actual_state_desc FROM sys.database_query_store_options o"
 );

@@ -28,6 +28,7 @@ fn source() -> CollectionDescription {
         source: "query_store".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {
+                acquisition_owner: None,
                 population_binding: culprit_core::telemetry::QueryHistoryPopulationBinding::Unknown,
                 population_catalog: None,
                 waits: None,

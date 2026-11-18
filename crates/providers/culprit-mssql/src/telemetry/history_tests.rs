@@ -5,6 +5,7 @@ use crate::{
     value::Val,
 };
 use culprit_core::telemetry::*;
+mod boxed;
 mod page_server;
 
 #[test]
@@ -63,23 +64,40 @@ pub(super) fn pressure() -> Rec {
         ],
     )
 }
+pub(super) fn native_platform(edition: i64) -> Rec {
+    replace(&crate::instance::test_support::metadata(), &[("edition", Val::Int(edition))])
+}
+pub(super) fn authority(edition: i64) -> Rec {
+    replace(
+        &crate::activity::database_context::tests::row(edition),
+        &[
+            ("database_name", Val::Text("fixture".into())),
+            ("incarnation", if edition == 5 { Val::Text("logical".into()) } else { Val::Null }),
+            ("physical_incarnation", if edition == 5 { Val::Text("physical".into()) } else { Val::Null }),
+        ],
+    )
+}
+pub(super) fn options(edition: i64, partitioned: bool) -> Rec {
+    Rec::of(&[
+        ("engine_edition", Val::Int(edition)),
+        ("tempdb", Val::Int(1)),
+        ("log_bytes", Val::Int(1)),
+        ("replicas", Val::Int(i64::from(partitioned))),
+        ("waits", Val::Int(1)),
+        ("metadata_visibility", Val::Int(1)),
+        ("actual_state_desc", Val::Text("READ_WRITE".into())),
+        ("query_capture_mode_desc", Val::Text("AUTO".into())),
+        ("variants", Val::Int(1)),
+        ("page_server_read_availability", Val::Int(0)),
+        ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
+    ])
+}
 pub(super) fn description_rows() -> Vec<crate::read::ReadResult<Vec<Rec>>> {
     vec![
-        Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
+        Ok(vec![native_platform(5)]),
+        Ok(vec![authority(5)]),
         Ok(vec![pressure()]),
-        Ok(vec![Rec::of(&[
-            ("actual_state_desc", Val::Text("READ_WRITE".into())),
-            ("query_capture_mode_desc", Val::Text("AUTO".into())),
-            ("variant_families", Val::Int(1)),
-            ("page_server_read_availability", Val::Int(0)),
-            ("wait_stats_capture_mode_desc", Val::Text("ON".into())),
-        ])]),
-        Ok(vec![Rec::of(&[
-            ("database_name", Val::Text("fixture".into())),
-            ("incarnation", Val::Text("logical".into())),
-            ("physical_incarnation", Val::Text("physical".into())),
-            ("updateability", Val::Text("READ_WRITE".into())),
-        ])]),
+        Ok(vec![options(5, true)]),
         Ok(vec![Rec::of(&[
             ("id", Val::Int(1)),
             ("starts", Val::Text("2020-01-01T06:00:00Z".into())),
@@ -89,14 +107,23 @@ pub(super) fn description_rows() -> Vec<crate::read::ReadResult<Vec<Rec>>> {
         Ok(vec![Rec::of(&[("plan_id", Val::Int(0))])]),
     ]
 }
+pub(super) fn closing_rows(availability: i64) -> Vec<crate::read::ReadResult<Vec<Rec>>> {
+    let mut rows = description_rows();
+    let Ok(options) = &mut rows[3] else { panic!() };
+    options[0] = replace(&options[0], &[("page_server_read_availability", Val::Int(availability))]);
+    // Existing final pressure checkpoint is supplied by the caller; metadata precedes final held-owner recheck.
+    let mut current = rows.drain(3..).collect::<Vec<_>>();
+    current.push(Ok(vec![authority(5)]));
+    current
+}
 
 #[tokio::test]
 async fn readable_secondary_exports_exact_native_history_without_claiming_local_capture_when_read_only() {
     for (mode, permitted) in [("READ_CAPTURE_SECONDARY", "true"), ("READ_ONLY", "false")] {
         let mut replies = description_rows();
-        let Ok(options) = &mut replies[2] else { unreachable!() };
+        let Ok(options) = &mut replies[3] else { unreachable!() };
         options[0] = replace(&options[0], &[("actual_state_desc", Val::Text(mode.into()))]);
-        let Ok(identity) = &mut replies[3] else { unreachable!() };
+        let Ok(identity) = &mut replies[1] else { unreachable!() };
         identity[0] = replace(&identity[0], &[("updateability", Val::Text("READ_ONLY".into()))]);
         replies[5] = Ok(vec![crate::query_store::replicas::tests::row(7, 2, None)]);
         replies[6] = Ok(vec![Rec::of(&[("plan_id", Val::Int(4))])]);
@@ -223,9 +250,12 @@ async fn native_group_binding_reuses_the_catalog_read_and_keeps_query_runtime_an
     );
     assert_eq!(
         source.session.calls[8].sql,
-        crate::query_store::catalog_sql::runtime(false, crate::query_store::page_server::Availability::NotApplicable)
+        crate::query_store::catalog_sql::runtime(None, &source.description.as_ref().unwrap().layout)
     );
-    assert_eq!(source.session.calls[10].sql, crate::query_store::catalog_sql::waits(false));
+    assert_eq!(
+        source.session.calls[10].sql,
+        crate::query_store::catalog_sql::waits(None, &source.description.as_ref().unwrap().layout)
+    );
     assert!(source.finish().await.is_err(), "unread definitions still cannot establish a complete capture");
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
@@ -292,7 +322,7 @@ async fn retiring_query_description_or_native_page_cannot_authorize_another_read
 async fn query_history_freezes_native_wait_semantics_without_an_additional_read() {
     for (native, capture) in [("ON", WaitCaptureState::Enabled), ("OFF", WaitCaptureState::Disabled)] {
         let mut replies = description_rows();
-        let Ok(rows) = &mut replies[2] else { panic!("native settings") };
+        let Ok(rows) = &mut replies[3] else { panic!("native settings") };
         rows[0] = replace(&rows[0], &[("wait_stats_capture_mode_desc", Val::Text(native.into()))]);
         if capture == WaitCaptureState::Disabled {
             replies.extend([
@@ -336,9 +366,9 @@ async fn unrecognized_or_timed_out_wait_settings_cannot_become_disabled_or_read_
     for timeout in [false, true] {
         let mut replies = description_rows();
         if timeout {
-            replies[2] = Err(crate::read::ReadError::Stopped(CollectionStop::TimedOut));
+            replies[3] = Err(crate::read::ReadError::Stopped(CollectionStop::TimedOut));
         } else {
-            let Ok(rows) = &mut replies[2] else { panic!("native settings") };
+            let Ok(rows) = &mut replies[3] else { panic!("native settings") };
             rows[0] = replace(&rows[0], &[("wait_stats_capture_mode_desc", Val::Text("UNKNOWN".into()))]);
         }
         let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
@@ -346,9 +376,9 @@ async fn unrecognized_or_timed_out_wait_settings_cannot_become_disabled_or_read_
         if timeout {
             assert_eq!(CollectionStop::from_error(&error), CollectionStop::TimedOut);
         }
-        assert_eq!(source.query_count(), 3, "no identity/page query after failed settings");
+        assert_eq!(source.query_count(), 4, "no interval/page query after failed settings");
         assert!(source.describe().await.is_err());
-        assert_eq!(source.query_count(), 3);
+        assert_eq!(source.query_count(), 4);
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }
 }
@@ -365,7 +395,7 @@ async fn a_wait_capture_change_prevents_empty_native_streams_from_verifying_comp
         Ok(vec![pressure()]),
         Ok(vec![pressure()]),
     ]);
-    let mut closing = description_rows().into_iter().skip(2).collect::<Vec<_>>();
+    let mut closing = closing_rows(0);
     let Ok(settings) = &mut closing[0] else { panic!("native settings") };
     settings[0] = replace(&settings[0], &[("wait_stats_capture_mode_desc", Val::Text("OFF".into()))]);
     replies.extend(closing);

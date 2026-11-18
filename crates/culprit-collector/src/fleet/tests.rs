@@ -80,6 +80,7 @@ impl FleetBackend for Backend {
             let observation = match &request.selection {
                 CollectionSelection::QueryHistory { from, .. } => {
                     SourceObservation::QueryHistory(QueryHistoryDescription {
+                        acquisition_owner: None,
                         population_binding: culprit_core::telemetry::QueryHistoryPopulationBinding::Unknown,
                         population_catalog: None,
                         waits: None,

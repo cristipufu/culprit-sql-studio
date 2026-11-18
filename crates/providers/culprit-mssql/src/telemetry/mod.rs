@@ -25,6 +25,7 @@ pub(crate) mod activity;
 mod cursor;
 mod definitions;
 mod description;
+mod history_acquisition;
 pub(crate) use description::query_history_identity;
 mod discovery;
 pub(crate) use discovery::discover;
@@ -75,17 +76,19 @@ pub(crate) fn recipes() -> Vec<culprit_core::telemetry::RecipeDescriptor> {
     recipes::declarations()
 }
 
+use crate::query_store::replicas::Population;
 use crate::read::{Parameter, ReadError, ReadSession as Session};
 use crate::{conn::Pool, value::Rec};
 use async_trait::async_trait;
 use culprit_core::{
     Result,
     telemetry::{
-        CollectionDescription, CollectionRead, CollectionRequest, CollectionStop, ReadWorkMetrics, TelemetrySource,
-        TelemetryStream,
+        CollectionDescription, CollectionRead, CollectionRequest, CollectionStop, QueryHistoryPopulationBinding,
+        QueryHistoryPopulationBindingEntry, ReadWorkMetrics, SourceObservation, TelemetrySource, TelemetryStream,
     },
 };
 use cursor::{Cursor, PlanRange};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub(crate) struct Source<R = Session> {
@@ -96,12 +99,14 @@ pub(crate) struct Source<R = Session> {
     description: Option<description::Description>,
     definitions: definitions::Definitions,
     progress: progress::PagedProgress,
+    observed_runtime_groups: BTreeSet<i64>,
+    observed_wait_groups: BTreeSet<i64>,
 }
 
 struct PageQuery {
     sql: String,
     parameters: Vec<Parameter>,
-    range: Option<(Cursor, PlanRange)>,
+    range: Option<(Cursor, Population, PlanRange)>,
 }
 
 impl Source {
@@ -123,10 +128,18 @@ impl<R: crate::read::NativeRead> Source<R> {
             description: None,
             definitions: definitions::Definitions::default(),
             progress: progress::PagedProgress::new(request.collection()),
+            observed_runtime_groups: BTreeSet::new(),
+            observed_wait_groups: BTreeSet::new(),
         })
     }
     async fn admitted(&mut self) -> std::result::Result<(), ReadError> {
-        crate::resources::admit_resources(&mut self.session).await
+        self.description
+            .as_ref()
+            .ok_or_else(decode::malformed)?
+            .acquisition
+            .admit(&mut self.session)
+            .await
+            .map_err(ReadError::Source)
     }
     async fn page(
         &mut self,
@@ -144,7 +157,7 @@ impl<R: crate::read::NativeRead> Source<R> {
                     &self.request.budget,
                     stream,
                     token,
-                    description.variant_families == crate::query_store::variants_sql::Availability::Readable,
+                    description.layout.variants == crate::query_store::variants_sql::Availability::Readable,
                 )
                 .await;
         }
@@ -181,25 +194,27 @@ impl<R: crate::read::NativeRead> Source<R> {
                 stream,
                 &description.value.query_history().ok_or_else(decode::malformed)?.interval.native_id,
             )?;
-            match cursor.next_range(&description.replica_group_ids, description.plan_upper_bound)? {
-                Some((replica, range)) => {
-                    parameters.extend([
-                        Parameter::Integer(replica),
-                        Parameter::Integer(range.lower),
-                        Parameter::Integer(range.upper),
-                    ]);
-                    Some((cursor, range))
+            match cursor.next_range(
+                &description.replica_group_ids,
+                description.plan_upper_bound,
+                description.range_population(),
+            )? {
+                Some((population, range)) => {
+                    if let Population::ReplicaGroup(group) = population {
+                        parameters.push(Parameter::Integer(group))
+                    }
+                    parameters.extend([Parameter::Integer(range.lower), Parameter::Integer(range.upper)]);
+                    Some((cursor, population, range))
                 }
                 None => return Ok(None),
             }
         } else {
             None
         };
-        let sql = match (stream, range.is_some()) {
-            (TelemetryStream::QueryRuntime, false) => sql::runtime(false, description.page_server_reads),
-            (TelemetryStream::QueryRuntime, true) => sql::runtime(true, description.page_server_reads),
-            (TelemetryStream::QueryWaits, false) => sql::waits(false),
-            (TelemetryStream::QueryWaits, true) => sql::waits(true),
+        let selected = range.as_ref().map(|(_, population, _)| *population);
+        let sql = match stream {
+            TelemetryStream::QueryRuntime => sql::runtime(selected, &description.layout),
+            TelemetryStream::QueryWaits => sql::waits(selected, &description.layout),
             _ => return Err(decode::malformed()),
         };
         Ok(Some(PageQuery { sql, parameters, range }))
@@ -208,12 +223,13 @@ impl<R: crate::read::NativeRead> Source<R> {
         &mut self,
         stream: TelemetryStream,
         rows: Vec<Rec>,
-        range: Option<(Cursor, PlanRange)>,
+        range: Option<(Cursor, Population, PlanRange)>,
     ) -> Result<CollectionRead> {
         let description = self.description.as_ref().ok_or_else(decode::malformed)?;
         let overflow = rows.len() > self.request.budget.page_rows as usize;
+        let selected = range.as_ref().map(|(_, population, range)| (*population, range.clone()));
         let mut cursor = match range {
-            Some((mut cursor, range)) => {
+            Some((mut cursor, _population, range)) => {
                 if overflow && let Err(reason) = cursor.split(range) {
                     return Ok(CollectionRead::Stopped(reason));
                 }
@@ -222,6 +238,7 @@ impl<R: crate::read::NativeRead> Source<R> {
             None if overflow => Some(Cursor::new(
                 stream,
                 description.value.query_history().ok_or_else(decode::malformed)?.interval.native_id.clone(),
+                description.range_population(),
             )),
             None => None,
         };
@@ -233,12 +250,28 @@ impl<R: crate::read::NativeRead> Source<R> {
         }
         let mut records = Vec::with_capacity(rows.len());
         for row in &rows {
+            let population = Population::from_row(row)?;
+            if description.layout.partitioned != matches!(population, Population::ReplicaGroup(_)) {
+                return Ok(CollectionRead::Stopped(CollectionStop::SourceChanged));
+            }
+            if let Some((selected, range)) = &selected {
+                let plan = decode::integer(row, "plan_id")?;
+                if plan < range.lower
+                    || plan >= range.upper
+                    || matches!(selected, Population::ReplicaGroup(_)) && population != *selected
+                {
+                    return Ok(CollectionRead::Stopped(CollectionStop::SourceChanged));
+                }
+            }
             let definition = self.definitions.reference(row, &description.value)?;
             let record = decode::record(row, stream, definition)?;
             if matches!(&record, culprit_core::telemetry::TelemetryRecord::QueryRuntime(runtime)
-                if runtime.page_server_reads.as_ref().is_none_or(|statistics| statistics.availability != description.page_server_reads))
+                if runtime.page_server_reads.as_ref().is_none_or(|statistics| statistics.availability != description.layout.page_server_reads))
             {
                 return Ok(CollectionRead::Stopped(CollectionStop::SourceChanged));
+            }
+            if !record.is_valid() {
+                return Err(decode::malformed());
             }
             records.push(record);
         }
@@ -254,10 +287,33 @@ impl<R: crate::read::NativeRead> Source<R> {
         }) {
             return Ok(CollectionRead::Stopped(CollectionStop::SourceChanged));
         }
+        if description.range_population() == cursor::PopulationRange::AllGroups {
+            for row in &rows {
+                let Population::ReplicaGroup(group) = Population::from_row(row)? else {
+                    return Err(decode::malformed());
+                };
+                let groups = if stream == TelemetryStream::QueryRuntime {
+                    &mut self.observed_runtime_groups
+                } else {
+                    &mut self.observed_wait_groups
+                };
+                groups.insert(group);
+                if groups.len()
+                    > culprit_core::MAX_RUNTIME_POPULATIONS
+                        .min(culprit_core::telemetry::MAX_QUERY_HISTORY_DIMENSION_VALUES)
+                {
+                    return Ok(CollectionRead::Stopped(CollectionStop::RowLimit));
+                }
+            }
+        }
         let next_cursor = if let Some(cursor) = cursor.take() {
             let mut remaining = cursor.clone();
             remaining
-                .next_range(&description.replica_group_ids, description.plan_upper_bound)?
+                .next_range(
+                    &description.replica_group_ids,
+                    description.plan_upper_bound,
+                    description.range_population(),
+                )?
                 .map(|_| cursor.encode())
                 .transpose()?
         } else {
@@ -271,9 +327,10 @@ impl<R: crate::read::NativeRead> Source<R> {
 impl<R: crate::read::NativeRead> TelemetrySource for Source<R> {
     async fn describe(&mut self) -> Result<CollectionDescription> {
         self.progress.describing()?;
-        description::ensure_supported(&mut self.session).await?;
-        self.admitted().await.map_err(ReadError::into_error)?;
-        let description = description::read(&mut self.session, &self.request, &self.host, self.port).await?;
+        let acquisition =
+            history_acquisition::HistoryAcquisition::read(&mut self.session, &self.host, self.port).await?;
+        acquisition.admit(&mut self.session).await?;
+        let description = description::read(&mut self.session, &self.request, acquisition).await?;
         let value = description.value.clone();
         self.description = Some(description);
         self.progress.described();
@@ -303,11 +360,53 @@ impl<R: crate::read::NativeRead> TelemetrySource for Source<R> {
     async fn finish(&mut self) -> Result<culprit_core::telemetry::SourceCompletion> {
         self.progress.verifying()?;
         self.admitted().await.map_err(ReadError::into_error)?;
-        let current = description::read(&mut self.session, &self.request, &self.host, self.port).await?;
+        let before = self.description.as_ref().ok_or_else(decode::malformed)?;
+        let mut current = description::read(&mut self.session, &self.request, before.acquisition.clone()).await?;
+        let after = before.acquisition.recheck(&mut self.session, &self.host, self.port).await?;
+        let owner = before.acquisition.completed(&after)?;
+        let SourceObservation::QueryHistory(history) = &mut current.value.observation else {
+            return Err(decode::malformed());
+        };
+        history.acquisition_owner = Some(Box::new(owner));
+        // Revalidate every original native metadata fact before deriving membership from already drained rows.
+        if !history.is_valid() {
+            return Err(decode::malformed());
+        }
+        if before
+            .value
+            .completed(culprit_core::telemetry::SourceCompletion::QueryHistory(Box::new(history.clone())))
+            .is_err()
+        {
+            return Ok(culprit_core::telemetry::SourceCompletion::Changed);
+        }
+        if before.range_population() == cursor::PopulationRange::AllGroups && !self.observed_runtime_groups.is_empty() {
+            if !self.observed_wait_groups.is_subset(&self.observed_runtime_groups) {
+                return Ok(culprit_core::telemetry::SourceCompletion::Changed);
+            }
+            let catalog = crate::query_store::replicas::observed_catalog(
+                self.observed_runtime_groups.iter().copied().map(Population::ReplicaGroup),
+                &history.interval.from,
+                &history.interval.until,
+            )?
+            .native_facts();
+            history.population_binding = QueryHistoryPopulationBinding::Dimensions {
+                bindings: catalog
+                    .populations
+                    .iter()
+                    .map(|population| QueryHistoryPopulationBindingEntry {
+                        population: population.identity.clone(),
+                        qualifiers: [("replica_group_id".into(), population.identity.id.clone())].into(),
+                    })
+                    .collect(),
+            };
+            history.dimensions.insert(
+                "replica_group_id".into(),
+                catalog.populations.iter().map(|population| population.identity.id.clone()).collect(),
+            );
+            history.population_catalog = Some(catalog);
+        }
         self.progress.verified();
-        Ok(culprit_core::telemetry::SourceCompletion::verified_if(self.description.as_ref().is_some_and(|before| {
-            before.value == current.value && before.physical_incarnation == current.physical_incarnation
-        })))
+        Ok(culprit_core::telemetry::SourceCompletion::QueryHistory(Box::new(history.clone())))
     }
     async fn close(&mut self) -> culprit_core::telemetry::SourceShutdown {
         self.progress.close();
@@ -317,3 +416,6 @@ impl<R: crate::read::NativeRead> TelemetrySource for Source<R> {
 
 #[cfg(test)]
 mod history_tests;
+
+#[cfg(test)]
+mod native_history;

@@ -59,9 +59,14 @@ async fn native_cache_grants_share_exact_rows_with_app_observations_and_preserve
     assert_eq!(decoded[zero_index].total_grant_kibibytes.as_deref(), Some("0"));
     let hashes = vec![decoded[zero_index].context.query_hash.clone().unwrap()];
     let selected = application(&mut native, &hashes).await.unwrap().unwrap();
-    assert_eq!(selected.len(), 1);
-    assert_eq!(selected[0].total_grant_kibibytes.as_deref(), Some("0"));
-    assert_eq!(selected[0].total_used_kibibytes.as_deref(), Some("0"));
+    // A query hash selects a population, including independently cached monitoring/application incarnations.
+    // Assert this original native entry without discarding the other matching observations.
+    assert!(selected.iter().all(|entry| entry.context.query_hash.as_ref() == Some(&hashes[0])));
+    let mut original = selected.iter().filter(|entry| entry.context.identity == decoded[zero_index].context.identity);
+    let zero = original.next().expect("the exact original zero-grant cache incarnation");
+    assert!(original.next().is_none(), "an exact native cache entry cannot be duplicated");
+    assert_eq!(zero.total_grant_kibibytes.as_deref(), Some("0"));
+    assert_eq!(zero.total_used_kibibytes.as_deref(), Some("0"));
     let sort_index = rows
         .iter()
         .position(|row| row.string("text_prefix").contains("FROM dbo.grant_fixture ORDER BY payload DESC"))

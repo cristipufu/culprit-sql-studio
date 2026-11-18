@@ -34,16 +34,28 @@ impl NativeReadContext {
         Ok(context)
     }
 
-    /// Exact known owner/role and ordered native observation bounds. Matching endpoints do not prove that the
+    /// Exact known owner/updateability and ordered native observation bounds. Matching endpoints do not prove that the
     /// process, role or participant remained continuously unchanged between those observations.
     pub fn matches_earlier_scope(&self, original: &Self) -> bool {
+        self.same_qualified_owner(original)
+            && ObservationBounds::new(&original.observed_until, &self.observed_from).is_some()
+    }
+
+    /// Confirm one already-acquired read owner while preserving its original start. This is neither data
+    /// namespace qualification nor permission to run a source question on that member.
+    pub fn completes_read(&self, original: &Self) -> bool {
+        self.same_qualified_owner(original)
+            && same_time(&self.observed_from, &original.observed_from)
+            && ObservationBounds::new(&original.observed_until, &self.observed_until).is_some()
+    }
+
+    fn same_qualified_owner(&self, original: &Self) -> bool {
         self.has_qualified_local_owner()
             && original.has_qualified_local_owner()
             && original.database_writable.is_some()
             && self.target == original.target
             && self.partition == original.partition
             && self.database_writable == original.database_writable
-            && ObservationBounds::new(&original.observed_until, &self.observed_from).is_some()
     }
 
     pub fn from_snapshot(source: &CollectionDescription) -> Result<Self> {

@@ -3,7 +3,7 @@ use crate::read::{ReadError, ReadResult};
 
 fn description(availability: i64) -> Vec<ReadResult<Vec<Rec>>> {
     let mut replies = description_rows();
-    let Ok(options) = &mut replies[2] else { unreachable!() };
+    let Ok(options) = &mut replies[3] else { unreachable!() };
     options[0] = replace(&options[0], &[("page_server_read_availability", Val::Int(availability))]);
     replies
 }
@@ -91,7 +91,7 @@ async fn original_capability_is_rechecked_even_for_empty_native_rows_without_cla
         Ok(vec![pressure()]),
         Ok(vec![pressure()]),
     ]);
-    replies.extend(description(3).into_iter().skip(2));
+    replies.extend(closing_rows(3));
     let mut source = Source::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
     source.describe().await.unwrap();
     for stream in [

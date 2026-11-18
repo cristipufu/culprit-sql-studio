@@ -25,6 +25,7 @@ impl Fixture {
             source: "original-query-definitions".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+                acquisition_owner: None,
                 // A definition's runtime interval supplies no compiler acquisition clock or execution cohort.
                 interval: TelemetryInterval {
                     native_id: "independent-native-runtime-period".into(),

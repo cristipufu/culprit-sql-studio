@@ -237,6 +237,11 @@ impl TelemetryRange {
 #[ts(export)]
 pub struct QueryHistoryDescription {
     pub interval: TelemetryInterval,
+    /// Actual native acquisition owner, independent of the data namespace and historical execution populations.
+    /// None means the source did not acquire this capability; it never authorizes member-local work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub acquisition_owner: Option<Box<NativeReadContext>>,
     /// Native execution groups available at capture time, independent of the connected physical compute member.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -251,11 +256,16 @@ pub struct QueryHistoryDescription {
     pub native_properties: std::collections::BTreeMap<String, String>,
 }
 
-const MAX_DIMENSION_VALUES: usize = 100;
+pub const MAX_QUERY_HISTORY_DIMENSION_VALUES: usize = 100;
 
 impl QueryHistoryDescription {
     pub fn is_valid(&self) -> bool {
         valid_key(&self.interval.native_id)
+            && self.acquisition_owner.as_ref().is_none_or(|owner| {
+                owner.has_qualified_local_owner()
+                    && owner.target.database().is_some()
+                    && owner.database_writable.is_some()
+            })
             && self.population_binding.is_valid(self.population_catalog.as_ref(), &self.dimensions)
             && self.population_catalog.as_ref().is_none_or(|catalog| {
                 catalog.membership.matches_window(Some(&self.interval.from), Some(&self.interval.until))
@@ -267,7 +277,7 @@ impl QueryHistoryDescription {
                 let unique = values.iter().collect::<std::collections::BTreeSet<_>>();
                 valid_key(name)
                     && !values.is_empty()
-                    && values.len() <= MAX_DIMENSION_VALUES
+                    && values.len() <= MAX_QUERY_HISTORY_DIMENSION_VALUES
                     && unique.len() == values.len()
                     && values.iter().all(|value| valid_key(value))
             })
@@ -784,9 +794,23 @@ impl CollectionDescription {
                 if !matches!(
                     self.observation,
                     SourceObservation::PagedSnapshot(_) | SourceObservation::PagedSourceRead { .. }
-                ) =>
+                ) && !matches!(&self.observation,SourceObservation::QueryHistory(history) if history.acquisition_owner.is_some()) =>
             {
                 Ok(Some(self.clone()))
+            }
+            SourceCompletion::QueryHistory(history) => {
+                let SourceObservation::QueryHistory(initial) = &self.observation else {
+                    return Err(CollectionStop::InvalidPage.error());
+                };
+                if !initial.accepts_completion(&history) {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                let mut completed = self.clone();
+                completed.observation = SourceObservation::QueryHistory(*history);
+                if !completed.partition_is_consistent() || !completed.observation.covers_request() {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+                Ok(Some(completed))
             }
             SourceCompletion::SourceRead { snapshot, execution } => {
                 let SourceObservation::PagedSourceRead { snapshot: declared, focus_key, execution: initial } =

@@ -89,6 +89,13 @@ impl CollectionDescription {
             };
             return header_valid && self.partition == SourcePartition::Target && scope.matches_target(&self.target);
         }
+        if let SourceObservation::QueryHistory(history) = &self.observation
+            && history.acquisition_owner.as_ref().is_some_and(|owner| {
+                self.partition != SourcePartition::Target || owner.target != self.target || !history.is_valid()
+            })
+        {
+            return false;
+        }
         if let SourceObservation::Jobs { snapshot, metadata } = &self.observation {
             return metadata.matches_source(self, snapshot);
         }

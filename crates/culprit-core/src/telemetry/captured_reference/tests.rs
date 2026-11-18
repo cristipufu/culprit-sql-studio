@@ -13,6 +13,7 @@ impl Original {
             source: "original-query-history".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::QueryHistory(QueryHistoryDescription {
+                acquisition_owner: None,
                 interval: TelemetryInterval {
                     native_id: "1".into(),
                     from: "2020-01-01T00:00:00Z".into(),

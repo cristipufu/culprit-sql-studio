@@ -76,10 +76,12 @@ pub(crate) const SQL_SERVER_PAGE_BYTES: u32 = 8192;
 
 pub(crate) fn record(row: &Rec, stream: TelemetryStream, references: StatementReferences) -> Result<TelemetryRecord> {
     let outcome: u8 = integer(row, "execution_type")?.try_into().map_err(|_| malformed())?;
-    let native = NativeIdentity::new(integer(row, "row_id")?.to_string())
+    let mut native = NativeIdentity::new(integer(row, "row_id")?.to_string())
         .qualified("plan_id", integer(row, "plan_id")?.to_string())
-        .qualified("replica_group_id", integer(row, "replica_group_id")?.to_string())
         .qualified("execution_type", outcome.to_string());
+    if let Some(group) = crate::read::optional_integer(row, "replica_group_id")? {
+        native = native.qualified("replica_group_id", group.to_string());
+    }
     let key = NativeMeasurementKey { cohort: Some(cohort(&native)), native, references };
     Ok(match stream {
         TelemetryStream::QueryRuntime => TelemetryRecord::QueryRuntime(RuntimeMeasurement {

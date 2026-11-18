@@ -2,6 +2,7 @@
 pub(crate) mod catalog_sql;
 pub(crate) mod decode;
 pub(crate) mod intervals;
+pub(crate) mod layout;
 pub(crate) mod mode;
 pub(crate) mod page_server;
 pub(crate) mod reader;

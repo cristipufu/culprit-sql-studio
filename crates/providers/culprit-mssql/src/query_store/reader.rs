@@ -1,5 +1,8 @@
 //! Bounded native operations. The caller owns this reader through completion and shutdown.
-use super::runtime::{self, PlanSummary};
+use super::{
+    layout::NativeLayout,
+    runtime::{self, PlanSummary},
+};
 use crate::{
     conn::Pool,
     read::{NativeRead, Parameter, ReadError, ReadSession, integer, invalid_data},
@@ -37,51 +40,11 @@ pub(crate) struct Reader<R = ReadSession> {
     connection_generation: Option<u64>,
     batch: Option<batch::Batch>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct NativeLayout {
-    edition: i64,
-    tempdb: bool,
-    log_bytes: bool,
-    page_server_reads: super::page_server::Availability,
-    waits: bool,
-    variants: super::variants_sql::Availability,
-    mode: super::mode::ReadMode,
-    partitioned: bool,
-}
 #[derive(Clone, Copy)]
 struct RuntimeLayout {
     variants: super::variants_sql::Availability,
     population: super::replicas::Population,
     mode: super::mode::ReadMode,
-}
-impl NativeLayout {
-    fn supports_compilation(&self) -> bool {
-        COMPILATION_NATIVE_EDITIONS.contains(&self.edition)
-    }
-    fn decode(row: &Rec) -> Result<Self> {
-        let flag = |name| match integer(row, name)? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(invalid_data()),
-        };
-        let mode =
-            super::mode::ReadMode::from_native(&crate::read::text(row, "actual_state_desc")?).ok_or_else(|| {
-                culprit_core::Error::new(
-                    culprit_core::ErrorCode::Unsupported,
-                    culprit_core::t!("collection.query_store_unavailable"),
-                )
-            })?;
-        Ok(Self {
-            edition: integer(row, "engine_edition")?,
-            tempdb: flag("tempdb")?,
-            log_bytes: flag("log_bytes")?,
-            page_server_reads: super::page_server::decode_availability(row)?,
-            waits: super::window_sql::waits_supported(row)?,
-            variants: super::variants_sql::Availability::decode(row, "variants")?,
-            mode,
-            partitioned: flag("replicas")?,
-        })
-    }
 }
 impl Reader {
     pub(crate) fn open(pool: Arc<Pool>) -> Self {
@@ -94,6 +57,11 @@ impl Reader {
     }
 }
 impl<R: NativeRead> Reader<R> {
+    #[cfg(test)]
+    pub(crate) fn observed_native_layout(&self) -> Result<NativeLayout> {
+        self.native_layout.ok_or_else(invalid_data)
+    }
+
     pub(crate) fn new(io: R) -> Self {
         Self {
             io,
@@ -167,7 +135,7 @@ impl<R: NativeRead> Reader<R> {
     /// Inspect only this reader's already acquired source profile; never perform replacement discovery.
     pub(crate) fn require_compilation_profile(&self) -> Result<()> {
         self.admit()?;
-        if self.native_layout.is_some_and(|layout| layout.supports_compilation()) {
+        if self.native_layout.is_some_and(|layout| COMPILATION_NATIVE_EDITIONS.contains(&layout.edition)) {
             return Ok(());
         }
         Err(culprit_core::Error::new(culprit_core::ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")))

@@ -55,8 +55,8 @@ fn lengths(row: &Rec) -> Rec {
 
 fn replies(query: Rec, availability: i64) -> Vec<ReadResult<Vec<Rec>>> {
     let mut replies = description_rows();
-    let Ok(settings) = &mut replies[2] else { panic!("native settings") };
-    settings[0] = replace(&settings[0], &[("variant_families", Val::Int(availability))]);
+    let Ok(settings) = &mut replies[3] else { panic!("native settings") };
+    settings[0] = replace(&settings[0], &[("variants", Val::Int(availability))]);
     replies[6] = Ok(vec![Rec::of(&[("plan_id", Val::Int(4))])]);
     replies.extend([
         Ok(vec![pressure()]),

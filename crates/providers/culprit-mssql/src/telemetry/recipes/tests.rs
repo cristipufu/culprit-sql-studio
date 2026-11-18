@@ -15,7 +15,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
     assert_eq!(
         revised,
         BTreeSet::from([
-            ("mssql.query-history", 2),
+            ("mssql.query-history", 3),
             ("mssql.resource-history", 2),
             ("mssql.activity", 3),
             ("mssql.page-wait-targets", 2),

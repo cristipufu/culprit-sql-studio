@@ -39,6 +39,13 @@ async fn all_fixed_native_fields_use_one_query_without_entering_the_original_app
             ));
         }
     }
+    // The same complete profile exceeds the obsolete32-row native parity caller. That tighter caller remains
+    // a refusal: no successful prefix, extra read or fallback is allowed. This does not model Attention ack.
+    let mut tight = FakeRead::new(vec![Ok(rows.clone())]);
+    let error = read(&mut tight, 32).await.unwrap_err();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::RowLimit);
+    assert_eq!(tight.calls.len(), 1);
+    assert_eq!(tight.calls[0].limit, 33);
     let mut reader = FakeRead::new(vec![Ok(rows)]);
     let read = read(&mut reader, MAX_COUNTERS).await.unwrap();
     assert_eq!(reader.calls.len(), 1);

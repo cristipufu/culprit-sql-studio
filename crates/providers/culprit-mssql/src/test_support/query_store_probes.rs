@@ -477,3 +477,6 @@ impl IdentityFields {
 
 #[cfg(test)]
 mod tests;
+
+mod closed_interval;
+pub(crate) use closed_interval::seed_closed_interval;

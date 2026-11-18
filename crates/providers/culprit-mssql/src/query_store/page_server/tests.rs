@@ -154,7 +154,17 @@ fn native_templates_bound_capability_and_preserve_existing_membership_without_un
         assert_eq!(metadata.matches(&format!("N'{name}'")).count(), 1);
     }
     for unavailable in [Availability::Unknown, Availability::NotApplicable, Availability::Unavailable] {
-        let raw = crate::query_store::catalog_sql::runtime(false, unavailable);
+        let layout = crate::query_store::layout::NativeLayout::decode(&capability(
+            &layout_row(),
+            match unavailable {
+                Availability::Unknown => 2,
+                Availability::NotApplicable => 0,
+                Availability::Unavailable => 3,
+                Availability::Available => unreachable!(),
+            },
+        ))
+        .unwrap();
+        let raw = crate::query_store::catalog_sql::runtime(None, &layout);
         let summary = crate::query_store::runtime::summary_sql(
             false,
             false,
@@ -170,7 +180,15 @@ fn native_templates_bound_capability_and_preserve_existing_membership_without_un
     assert!(summary.contains("COUNT(DISTINCT rs.execution_type)=1"));
     assert!(summary.contains("COUNT_BIG(*)=1 THEN MAX(rs.last_page_server_io_reads)"));
     assert!(summary.contains("COUNT_BIG(*)=1 THEN MAX(rs.stdev_page_server_io_reads)"));
-    let raw = crate::query_store::catalog_sql::runtime(true, Availability::Available);
+    let layout = crate::query_store::layout::NativeLayout::decode(&replace(
+        &capability(&layout_row(), 1),
+        &[("replicas", Val::Int(1))],
+    ))
+    .unwrap();
+    let raw = crate::query_store::catalog_sql::runtime(
+        Some(crate::query_store::replicas::Population::ReplicaGroup(7)),
+        &layout,
+    );
     assert!(raw.contains("r.runtime_stats_interval_id=@P2") && raw.contains("r.replica_group_id=@P3"));
     assert!(raw.contains("ORDER BY r.plan_id,r.execution_type,r.replica_group_id,r.runtime_stats_id"));
     assert!(!summary.contains("total_page_server") && !summary.contains("avg_physical_io_reads+"));

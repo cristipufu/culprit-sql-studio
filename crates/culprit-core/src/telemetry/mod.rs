@@ -82,6 +82,7 @@ mod page_waits;
 mod partitions;
 mod payloads;
 mod persistent_versions;
+mod query_history_completion;
 mod query_populations;
 mod queues;
 mod read_accounting;
@@ -930,10 +931,11 @@ pub enum SourceShutdown {
     Unconfirmed,
 }
 
-/// A completed native read either verifies its advertised observation or closes a declared paged snapshot.
+/// A completed native read verifies its advertised observation or closes its source-specific header.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceCompletion {
     Verified,
+    QueryHistory(Box<QueryHistoryDescription>),
     Snapshot(StateSnapshotDescription),
     SourceRead { snapshot: StateSnapshotDescription, execution: Box<NativeReadContext> },
     Changed,
@@ -961,7 +963,8 @@ pub trait TelemetrySource: Send {
         None
     }
     async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead>;
-    /// Recheck native ownership/identity and finish coverage. Paged descriptors require a snapshot completion.
+    /// Recheck native ownership/identity and finish coverage. Acquired history owners and paged snapshots
+    /// require their typed completion; a plain Verified result cannot bypass those final checks.
     async fn finish(&mut self) -> Result<SourceCompletion>;
     /// Finish cancellation/disconnect handling before a controller exits its runtime.
     async fn close(&mut self) -> SourceShutdown;

@@ -1025,3 +1025,6 @@ pub use qualification::{QualificationFixture, QualificationFixtureCase};
 
 mod instance_resources;
 pub use instance_resources::{InstanceResourceCase, instance_resource_evidence};
+
+mod boxed_query_history;
+pub use boxed_query_history::boxed_query_history_evidence;

@@ -7,6 +7,7 @@ fn history() -> QueryHistoryDescription {
         NativeIdentity::new("same-native-id").qualified("generation", "second"),
     ];
     QueryHistoryDescription {
+        acquisition_owner: None,
         interval: TelemetryInterval {
             native_id: "source-interval".into(),
             from: "2026-11-01T00:00:00Z".into(),

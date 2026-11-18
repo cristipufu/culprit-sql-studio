@@ -149,6 +149,7 @@ fn definitions(
     let mut source = current.0.clone();
     source.source = "original-query-store-definitions".into();
     source.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
+        acquisition_owner: None,
         interval: TelemetryInterval {
             native_id: "independent-runtime-history".into(),
             from: "2020-01-01T07:00:00Z".into(),
