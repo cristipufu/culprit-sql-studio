@@ -296,27 +296,43 @@ async fn native_dispatch_enforces_profile_envelopes_and_every_stricter_caller_li
     assert_eq!(source.query_count(), 0);
 }
 
-#[test]
-fn native_resource_discovery_derives_its_routes_from_registrations_and_observed_platform() {
+#[tokio::test]
+async fn native_resource_discovery_derives_its_routes_from_registrations_and_observed_platform() {
     let CollectionSubject::Shared { resource: instance } = subject(RecipeSubject::Shared(SharedResourceKind::Instance))
     else {
         panic!()
     };
-    for edition in [3, crate::probe::ENGINE_EDITION_MANAGED_INSTANCE] {
+    for edition in [2, 3, 4, crate::probe::ENGINE_EDITION_MANAGED_INSTANCE] {
         let collections = collections_for(&instance, edition);
-        assert!(collections.contains(&TelemetryCollection::Snapshot(SnapshotDataset::Operational)));
-        assert_eq!(
-            collections.contains(&TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures)),
-            edition == crate::probe::ENGINE_EDITION_MANAGED_INSTANCE
-        );
+        let mut expected = vec![
+            TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
+            TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
+            TelemetryCollection::Snapshot(SnapshotDataset::Operational),
+        ];
+        if edition == crate::probe::ENGINE_EDITION_MANAGED_INSTANCE {
+            expected.push(TelemetryCollection::Snapshot(SnapshotDataset::MemoryFailures));
+        }
+        assert_eq!(collections, expected, "native edition {edition}");
         for collection in collections {
-            assert!(REGISTRATIONS.iter().any(|entry| {
-                entry.selector == RecipeSelector::Collection(collection)
-                    && entry
-                        .subjects
-                        .iter()
-                        .any(|kind| kind.accepts(&CollectionSubject::Shared { resource: instance.clone() }))
-            }));
+            let request = CollectionRequest {
+                subject: CollectionSubject::Shared { resource: instance.clone() },
+                selection: match collection {
+                    TelemetryCollection::Snapshot(dataset) => CollectionSelection::Snapshot { dataset },
+                    _ => panic!("registered instance snapshots"),
+                },
+                budget: CollectionBudget::default(),
+            };
+            let registration = REGISTRATIONS.iter().find(|entry| entry.accepts(&request)).unwrap();
+            assert_eq!(registration.descriptor().cost, RecipeCostQualification::Unqualified);
+            let mut source = open(
+                Arc::new(Pool::new(tiberius::Config::new(), None)),
+                &request,
+                "never-connect.fixture.invalid".into(),
+                1433,
+            )
+            .unwrap();
+            assert_eq!(source.query_count(), 0, "discovery is not native acquisition or approval");
+            assert_eq!(source.close().await, SourceShutdown::Quiescent);
         }
     }
     let CollectionSubject::Shared { resource: pool } = subject(RecipeSubject::Shared(SharedResourceKind::Pool)) else {

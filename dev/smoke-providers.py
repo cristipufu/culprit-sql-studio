@@ -69,7 +69,10 @@ POSTGRES_REPLICATION_IMAGES = {"postgres-replication": "postgres:18.6", "postgre
 OPTIONAL_NATIVE_MODULES = {
     "culprit-postgres": ("telemetry::native_tests::replication::", "jobs::", "maintenance_waits::"),
     "culprit-mysql": ("telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::"),
-    "culprit-mssql": ("telemetry::replication::native_tests::", "jobs::"),
+    "culprit-mssql": (
+        "telemetry::replication::native_tests::", "jobs::",
+        "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request",
+    ),
 }
 
 

@@ -355,13 +355,40 @@ class NativeSelection(unittest.TestCase):
         self.assertEqual(agent.configuration()[0]["MSSQL_AGENT_ENABLED"], "true")
         self.assertEqual(agent.configuration()[0]["MSSQL_SA_PASSWORD"], agent.password)
         plain.test_environment = Mock(return_value={})
+        strict_holder = "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request"
         for selection, expected in [
-            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::"]),
-            ("jobs::native_tests::", ["telemetry::replication::native_tests::"]),
+            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::", strict_holder]),
+            ("jobs::native_tests::", ["telemetry::replication::native_tests::", strict_holder]),
         ]:
             with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
                 plain.test("culprit-mssql", selection)
                 self.assertEqual(run_tests.call_args.kwargs["skip"], expected)
+
+    def test_mssql_broad_selection_runs_compatibility_once_and_exact_selection_preserves_strict_qualification(self):
+        database = smoke.Database(next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql"))
+        database.test_environment = Mock(return_value={})
+        prefix = "activity::page_targets::native_tests::holders::"
+        strict = "an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request"
+        compatibility = "owned_native_page_tasks_preserve_original_receipts_and_truthful_holder_refusals"
+        native_tests = [prefix + strict, prefix + compatibility]
+        for selection, expected in [
+            ("", [prefix + compatibility]),
+            ("native_tests::", [prefix + compatibility]),
+            (prefix, [prefix + compatibility]),
+            (prefix + compatibility, [prefix + compatibility]),
+            (strict, [prefix + strict]),
+            (prefix + strict, [prefix + strict]),
+        ]:
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                database.test("culprit-mssql", selection)
+                run_tests.assert_called_once()
+                skips = run_tests.call_args.kwargs["skip"]
+                selected = [test for test in native_tests if selection in test and not any(skip in test for skip in skips)]
+                self.assertEqual(selected, expected)
+        database.test = Mock()
+        database.verify()
+        ordinary = [call for call in database.test.call_args_list if call.args == ("culprit-mssql", "native_tests::")]
+        self.assertEqual(len(ordinary), 1, "default verification owns one broad native run")
 
     def test_broad_selection_excludes_optional_topologies_without_their_environment(self):
         database = smoke.Database(smoke.FIXTURES[1])

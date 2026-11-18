@@ -25,7 +25,14 @@ async fn instance(provider: &MssqlProvider) -> SharedResourceIdentity {
         .await
         .unwrap();
     assert_eq!(resources.len(), 1);
-    assert_eq!(resources[0].collections, [TelemetryCollection::Snapshot(SnapshotDataset::Operational)]);
+    assert_eq!(
+        resources[0].collections,
+        [
+            TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
+            TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets),
+            TelemetryCollection::Snapshot(SnapshotDataset::Operational),
+        ]
+    );
     assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);
     resources[0].identity.clone()
 }
@@ -48,7 +55,13 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
     let description = source.describe().await.unwrap();
     assert_eq!(description.target, CollectionTarget::Shared(identity));
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.sources.len(), 6);
+    let expected_sources = point::shared_families(SnapshotDataset::Operational)
+        .unwrap()
+        .into_iter()
+        .map(|family| family.source().name)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(snapshot.sources.len(), expected_sources.len(), "each registered family appears once");
+    assert_eq!(snapshot.sources.iter().map(|source| source.source.as_str()).collect::<BTreeSet<_>>(), expected_sources);
     for name in [crate::sources::MEMORY_CLERKS.name, crate::sources::SCHEDULERS.name] {
         let coverage = snapshot.sources.iter().find(|source| source.source == name).unwrap();
         assert_eq!(coverage.state, SourceState::Collected, "{coverage:?}");
@@ -57,6 +70,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
 
     let capture = CaptureIdentity { observation_id: "owned-shared-native".into(), revision: None };
     let mut counter_sources = BTreeSet::new();
+    let mut instance_points = 0;
     let mut cursor = None;
     let mut records = 0;
     loop {
@@ -68,15 +82,21 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
         records += page.len();
         for record in page {
             let row = ExportedRecord::new(&description, &capture, record).unwrap();
-            if let TelemetryRecord::Operational(OperationalObservation {
-                source,
-                fact: OperationalFact::CounterSet(set),
-                ..
-            }) = row.record
-            {
-                assert_eq!(set.scope, MeasurementScope::Server);
-                assert!(set.is_valid());
-                counter_sources.insert(source);
+            if let TelemetryRecord::Operational(OperationalObservation { source, fact, .. }) = row.record {
+                match fact {
+                    OperationalFact::CounterSet(set) => {
+                        assert_eq!(set.scope, MeasurementScope::Server);
+                        assert!(set.is_valid());
+                        counter_sources.insert(source);
+                    }
+                    OperationalFact::MssqlInstanceResources(point) => {
+                        assert_eq!(source, INSTANCE_RESOURCES_SOURCE);
+                        assert!(point.is_valid());
+                        assert!(point.matches_context(&NativeReadContext::from_snapshot(&description).unwrap()));
+                        instance_points += 1;
+                    }
+                    _ => {}
+                }
             }
         }
         cursor = next_cursor;
@@ -85,6 +105,7 @@ async fn shared_instance_capture_and_scan_use_the_same_native_memory_and_schedul
         }
     }
     assert_eq!(records, snapshot.records as usize);
+    assert_eq!(instance_points, 1, "the seventh family retains its raw instance point without admission");
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(member.source_shutdown(), SourceShutdown::Quiescent);

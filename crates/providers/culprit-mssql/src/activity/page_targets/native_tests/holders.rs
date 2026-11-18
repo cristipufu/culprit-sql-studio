@@ -1,5 +1,5 @@
-//! Native qualification, not a fabricated latch owner or cost promotion. Some engines/builds expose only
-//! sentinel/unknown latch owners; a finite fixture that cannot qualify a holder reports that exact gap.
+//! One owned native scenario serves compatibility and strict positive qualification. Native task evidence
+//! can establish compatibility while missing/transient holder fields keep the causal qualification open.
 use super::{
     durable_capture::{Captured, OwnedCaptures},
     fixture::{self, Fixture, invalid},
@@ -13,17 +13,30 @@ use std::{
     time::Duration,
 };
 
+mod acceptance;
+mod identity_receipt;
+#[cfg(test)]
+mod test_support;
+use acceptance::{NativeHolderEvidence, require_readable_capture};
+
 const MAX_CAPTURE_ATTEMPTS: usize = 8;
-const MAX_IDENTITY_DIAGNOSTIC_SAMPLES: u32 = 4;
+const MAX_PLANNER_DIAGNOSTIC_SAMPLES: u32 = 4;
 const ORIGINAL_GATE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[tokio::test]
 #[ignore = "requires disposable loopback SQL Server and CULPRIT_MSSQL_SOURCE_TEST_PORT / CULPRIT_MSSQL_SOURCE_TEST_PASSWORD"]
 async fn an_owned_native_page_task_holder_requires_the_reported_pointer_and_exact_current_request() {
-    fixture::run(|fixture| Box::pin(qualify_owned_holder(fixture))).await;
+    fixture::run(|fixture| Box::pin(async move { observe_owned_holder(fixture).await?.require_qualified_holder() }))
+        .await;
 }
 
-async fn qualify_owned_holder(fixture: &mut Fixture) -> Result<()> {
+#[tokio::test]
+#[ignore = "requires disposable loopback SQL Server and CULPRIT_MSSQL_SOURCE_TEST_PORT / CULPRIT_MSSQL_SOURCE_TEST_PASSWORD"]
+async fn owned_native_page_tasks_preserve_original_receipts_and_truthful_holder_refusals() {
+    fixture::run(|fixture| Box::pin(async move { observe_owned_holder(fixture).await?.require_compatibility() })).await;
+}
+
+async fn observe_owned_holder(fixture: &mut Fixture) -> Result<NativeHolderEvidence> {
     let mut captures = OwnedCaptures::new(fixture)?;
     fixture.start_holder_gate().await?;
     let work = fixture.start_holder_workload().await?;
@@ -39,7 +52,7 @@ async fn qualify_owned_holder(fixture: &mut Fixture) -> Result<()> {
     let gate_held_client_ms = work.elapsed().as_secs_f64() * 1000.0;
     let mut outcomes = BTreeMap::new();
     let mut planning_outcomes = BTreeMap::new();
-    let mut qualified = false;
+    let mut evidence = NativeHolderEvidence::default();
     for attempt in 0..MAX_CAPTURE_ATTEMPTS {
         if fixture.workers_finished() {
             break;
@@ -52,22 +65,30 @@ async fn qualify_owned_holder(fixture: &mut Fixture) -> Result<()> {
             })
             .await?;
         query_count += pages.manifest.source_queries;
+        require_readable_capture(&pages)?;
+        if !matches!(&pages.source()?.observation,
+            SourceObservation::PageWaitTargets { original_activity: Some(parent), .. } if *parent == activity)
+        {
+            return Err(invalid("native task capture lost its exact original Activity parent"));
+        }
+        captures.verify_retained(&original).await?;
+        captures.verify_retained(&pages).await?;
         let mut selected = None;
         for ordinal in 0..pages.records.len() {
-            if let Some(focus) = original_focus(&original, &pages, ordinal, &mut planning_outcomes)? {
-                selected = Some(focus);
-                break;
+            let page = captured_page(&pages, ordinal)?;
+            evidence.observe_page(page, &original_requests)?;
+            let focus = original_focus(&original, &pages, ordinal, page, &mut planning_outcomes)?;
+            if selected.is_none() {
+                selected = focus;
             }
         }
         let Some(focus) = selected else { continue };
-        captures.verify_retained(&original).await?;
-        captures.verify_retained(&pages).await?;
         let (points, queries) = inspect_holder(&mut captures, &focus, attempt, &mut outcomes).await?;
         captures.verify_retained(&original).await?;
         captures.verify_retained(&pages).await?;
         query_count += queries;
-        if points > 0 {
-            qualified = true;
+        evidence.observe_qualified_points(points);
+        if evidence.has_qualified_holder() {
             break;
         }
     }
@@ -81,7 +102,11 @@ async fn qualify_owned_holder(fixture: &mut Fixture) -> Result<()> {
         "{}",
         serde_json::json!({
             "phase": "owned-holder-qualification-summary", "native_queries": query_count,
-            "native_holder_relations": outcomes, "native_positive": qualified,
+            "native_holder_relations": outcomes, "native_positive": evidence.has_qualified_holder(),
+            "native_task_waits": evidence.native_task_waits(),
+            "native_compatibility_evidence": evidence.require_compatibility().is_ok(),
+            "holder_qualification_open": !evidence.has_qualified_holder(),
+            "contention_cause_proven": false, "continuous_owner_proven": false,
             "original_planning_outcomes": planning_outcomes,
             "fixture_work_client_ms": work.elapsed().as_secs_f64() * 1000.0,
             "fixture_gate_held_client_ms": gate_held_client_ms,
@@ -93,12 +118,8 @@ async fn qualify_owned_holder(fixture: &mut Fixture) -> Result<()> {
             "native_cost_qualified": false,
         })
     );
-    if !qualified {
-        return Err(invalid(
-            "finite owned native page workload did not expose a qualified blocking-task/request relationship; no positive proof",
-        ));
-    }
-    Ok(())
+    captures.verify_retained(&original).await?;
+    Ok(evidence)
 }
 
 /// This is a finite synchronization assertion, not a substitute for a real native holder positive.
@@ -111,6 +132,7 @@ async fn capture_gated_original(captures: &mut OwnedCaptures) -> Result<(Capture
                 return Err(CollectionStop::Cancelled.error());
             }
             let original = captures.capture_with_cancellation(CollectionSelection::Activity, &cancellation).await?;
+            require_readable_capture(&original)?;
             queries += original.manifest.source_queries;
             if contains_all_gated_inserts(&original)? {
                 return Ok((original, queries));
@@ -197,6 +219,7 @@ async fn inspect_holder(
     outcomes: &mut BTreeMap<String, u32>,
 ) -> Result<(usize, u32)> {
     let captured = captures.capture(CollectionSelection::PageTaskHolders { focus: Box::new(focus.clone()) }).await?;
+    require_readable_capture(&captured)?;
     let source = captured.source()?;
     let context = NativeReadContext::from_snapshot(source)?;
     let [row] = captured.records.as_slice() else {
@@ -256,15 +279,26 @@ fn validate_actual_points(row: &PageTaskHolderObservation, context: &NativeReadC
     Ok(qualified)
 }
 
+fn captured_page(capture: &Captured, ordinal: usize) -> Result<&PageWaitObservation> {
+    let Some(raw) = capture.records.get(ordinal) else {
+        return Err(invalid("native task capture omitted its selected page row"));
+    };
+    let TelemetryRecord::Operational(raw) = &raw.record else {
+        return Err(invalid("native task capture changed stream"));
+    };
+    let OperationalFact::PageWait(page) = &raw.fact else {
+        return Err(invalid("native task capture changed fact"));
+    };
+    Ok(page)
+}
+
 fn original_focus(
     original: &Captured,
     pages: &Captured,
     ordinal: usize,
+    page: &PageWaitObservation,
     outcomes: &mut BTreeMap<String, u32>,
 ) -> Result<Option<PageTaskHolderFocus>> {
-    let Some(raw) = pages.records.get(ordinal) else { return Ok(None) };
-    let TelemetryRecord::Operational(raw) = &raw.record else { return Ok(None) };
-    let OperationalFact::PageWait(page) = &raw.fact else { return Ok(None) };
     *outcomes.entry(format!("page-resolution:{:?}", page.resolution)).or_default() += 1;
     *outcomes.entry(format!("mapped-page-kind:{:?}", page.target.as_ref().map(|target| target.kind))).or_default() += 1;
     let Some(task) = &page.task_wait else {
@@ -273,11 +307,7 @@ fn original_focus(
     };
     *outcomes.entry(format!("native-task-wait:{}", task.wait_type)).or_default() += 1;
     if page.resolution == PageWaitResolution::UnrecognizedAddress {
-        let seen = outcomes.entry("unrecognized-task-resource-samples".into()).or_default();
-        if *seen < 4 {
-            eprintln!("{}", serde_json::json!({"phase":"owned-native-task-resource","raw":task.resource.native.id}));
-        }
-        *seen += 1;
+        *outcomes.entry("unrecognized-task-resource".into()).or_default() += 1;
     }
     if !task.blocking_session_id.is_some_and(|id| id > 0) {
         *outcomes.entry(format!("native-holder-session:{:?}", task.blocking_session_id)).or_default() += 1;
@@ -297,69 +327,11 @@ fn original_focus(
             }
             DiagnosticFocusPlan::Unavailable(issue) => {
                 *outcomes.entry(format!("unavailable:{issue:?}")).or_default() += 1;
-                if issue == DiagnosticAnalysisIssue::MissingNativeIdentity {
-                    note_missing_identity(outcomes, frame, pages.source()?, page);
-                }
+                identity_receipt::note(outcomes, frame, pages.source()?, page, issue);
                 Ok(None)
             }
         }
     })
-}
-
-/// Diagnostic prerequisites only. The real planner above remains the sole authority and no SQL, payload,
-/// native token, task pointer or request key is printed or used to repair its result.
-fn note_missing_identity(
-    outcomes: &mut BTreeMap<String, u32>,
-    frame: &ActivityFrameEvidence<'_>,
-    page_source: &CollectionDescription,
-    page: &PageWaitObservation,
-) {
-    let original = frame.row(&page.request.key);
-    let token = original.and_then(|row| row.observation.statement_identity.as_ref());
-    let original_qualified = frame.context().has_qualified_local_owner();
-    let page_qualified =
-        page_source.is_partition_qualified() && matches!(page_source.partition, SourcePartition::InstanceLocal { .. });
-    for (key, missing) in [
-        ("original-scope", !original_qualified),
-        ("current-page-scope", !page_qualified),
-        ("original-request-key", original.is_none()),
-        ("original-receipt", original.is_some_and(|row| row.reference.is_none())),
-        ("original-statement-token", original.is_some_and(|row| row.observation.statement_identity.is_none())),
-        ("original-epoch", frame.native().epoch.is_none()),
-        ("current-page-statement-token", page.statement_identity.is_none()),
-    ] {
-        if missing {
-            *outcomes.entry(format!("missing-identity:{key}")).or_default() += 1;
-        }
-    }
-    let samples = outcomes.entry("missing-identity-diagnostic-samples".into()).or_default();
-    if *samples >= MAX_IDENTITY_DIAGNOSTIC_SAMPLES {
-        return;
-    }
-    *samples += 1;
-    let payload_reason = match &page.request.statement {
-        DefinitionPayload::Unavailable { reason } => Some(*reason),
-        _ => None,
-    };
-    eprintln!(
-        "{}",
-        serde_json::json!({
-            "phase":"owned-native-task-identity-gap",
-            "original_scope_qualified":original_qualified,"page_scope_qualified":page_qualified,
-            "original_request_key_present":original.is_some(),
-            "original_receipt_present":original.is_some_and(|row|row.reference.is_some()),
-            "original_statement_token_present":token.is_some(),"original_epoch_present":frame.native().epoch.is_some(),
-            "raw_current_request_token_present":page.request.statement_identity.is_some(),
-            "raw_current_request_token_matches_original":page.request.statement_identity.as_ref().zip(token).map(|(a,b)|a==b),
-            "qualified_page_statement_token_present":page.statement_identity.is_some(),
-            "qualified_page_statement_token_matches_original":page.statement_identity.as_ref().zip(token).map(|(a,b)|a==b),
-            "statement_payload_available":page.request.statement.is_available(),"statement_payload_reason":payload_reason,
-            "before_request":page.before_check.as_ref().map(|check|check.request),
-            "before_wait":page.before_check.as_ref().map(|check|check.wait),
-            "after_request":page.after_check.as_ref().map(|check|check.request),
-            "after_wait":page.after_check.as_ref().map(|check|check.wait),
-        })
-    );
 }
 
 #[cfg(test)]

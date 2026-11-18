@@ -62,7 +62,7 @@ impl<'a> AgentJob<'a> {
 EXEC msdb.dbo.sp_add_job @job_name=@P1,@enabled=1,@job_id=@job OUTPUT;
 EXEC msdb.dbo.sp_add_jobstep @job_id=@job,@step_id=1,@step_name=N'owned failure',@subsystem=N'TSQL',@database_name=@P2,@command=N'THROW 51000, N''owned Agent fixture failure'', 1;',@on_success_action=1,@on_fail_action=2;
 EXEC msdb.dbo.sp_add_jobserver @job_id=@job;
-SELECT /* culprit fixture */ CONVERT(varchar(36),@job) AS job_id;"#,
+SELECT /* culprit fixture */ @job AS job_id;"#,
         );
         query.bind(self.name.clone());
         query.bind(self.fixture.database.clone());
@@ -75,7 +75,7 @@ SELECT /* culprit fixture */ CONVERT(varchar(36),@job) AS job_id;"#,
     }
     async fn confirm_identity(&mut self) -> Result<()> {
         let mut query = tiberius::Query::new(
-            "SELECT TOP (2) /* culprit fixture */ CONVERT(varchar(36),job_id) AS job_id,name FROM msdb.dbo.sysjobs WHERE job_id=CONVERT(uniqueidentifier,@P1) AND name=@P2",
+            "SELECT TOP (2) /* culprit fixture */ job_id,name FROM msdb.dbo.sysjobs WHERE job_id=CONVERT(uniqueidentifier,@P1) AND name=@P2",
         );
         query.bind(self.id.clone().ok_or_else(invalid_data)?);
         query.bind(self.name.clone());
@@ -173,7 +173,7 @@ SELECT /* culprit fixture */ CONVERT(varchar(36),@job) AS job_id;"#,
         // Retire any prior admin connection. Cleanup uses a freshly admitted exact-owned control client.
         self.client.take();
         let mut lookup = tiberius::Query::new(
-            "SELECT TOP (2) /* culprit fixture cleanup */ CONVERT(varchar(36),job_id) AS job_id,name FROM msdb.dbo.sysjobs WHERE name=@P1",
+            "SELECT TOP (2) /* culprit fixture cleanup */ job_id,name FROM msdb.dbo.sysjobs WHERE name=@P1",
         );
         lookup.bind(self.name.clone());
         let rows = self.query(lookup).await?;

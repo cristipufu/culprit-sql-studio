@@ -117,7 +117,21 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Collect, restrict permissions and verify cancellation in a disposable database
-        run: python3 -B dev/smoke-providers.py ${{ matrix.fixture }}
+        env:
+          CULPRIT_NATIVE_COST_RECEIPT_DIR: ${{ runner.temp }}/native-provider-cost-receipts
+        run: |
+          if [ "${{ matrix.fixture }}" = mssql ]; then
+            mkdir -m 700 "$CULPRIT_NATIVE_COST_RECEIPT_DIR"
+          fi
+          python3 -B dev/smoke-providers.py ${{ matrix.fixture }}
+      - name: Keep SQL Server native source and cancellation receipts
+        if: always() && matrix.fixture == 'mssql'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-provider-cost-receipts
+          path: ${{ runner.temp }}/native-provider-cost-receipts
+          if-no-files-found: warn
+          retention-days: 7
       # SQL Server Agent's real worker needs a supported native x64 host; metadata success alone is insufficient.
       - name: Capture Agent metadata and genuine failure/success history on native x64
         if: ${{ !cancelled() && matrix.fixture == 'mssql' }}
