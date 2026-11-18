@@ -10,8 +10,10 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_PHASES: usize = 32;
 const MAX_OBSERVER_QUERIES: u32 = 512;
 mod lifecycle;
+mod observation;
 mod result_trace;
 pub(crate) use lifecycle::{assert_no_followup, lifecycle_cases};
+use observation::{await_observed, measured_result};
 use result_trace::ResultTrace;
 
 #[derive(Clone)]
@@ -72,6 +74,7 @@ struct Phase {
     maximum_sampled_granted_kb: Option<u64>,
     maximum_sampled_requested_kb: Option<u64>,
     maximum_sampled_used_kb: Option<u64>,
+    observer_error: Option<Error>,
 }
 
 pub(crate) struct MeasuredRead {
@@ -222,11 +225,15 @@ impl MeasuredRead {
             maximum_sampled_granted_kb: None,
             maximum_sampled_requested_kb: None,
             maximum_sampled_used_kb: None,
+            observer_error: None,
         });
         Ok(())
     }
     async fn end(&mut self, outcome: &str) -> culprit_core::Result<()> {
-        let after = self.observer.sample().await;
+        let after = match self.phase.as_ref().and_then(|phase| phase.observer_error.clone()) {
+            Some(error) => Err(error),
+            None => self.observer.sample().await,
+        };
         let phase = self.phase.take().ok_or_else(invalid_data)?;
         let sample = match after {
             Ok(sample) => sample,
@@ -275,6 +282,18 @@ impl MeasuredRead {
         }
         Ok(())
     }
+
+    async fn complete_phase<T>(&mut self, result: ReadResult<T>, outcome: &str) -> ReadResult<T> {
+        // Losing the observer never drops an in-flight native operation. Callers first await that same
+        // bounded operation, then close its retained owner before completing a successful unmeasured statement.
+        let shutdown = if self.phase.as_ref().is_some_and(|phase| phase.observer_error.is_some()) {
+            Some(self.owner.close().await)
+        } else {
+            None
+        };
+        let accounting = self.end(outcome).await;
+        measured_result(result, accounting, shutdown)
+    }
 }
 
 impl ReadSession {
@@ -315,56 +334,25 @@ impl NativeRead for MeasuredRead {
     }
     async fn query(&mut self, sql: &str, parameters: Vec<Parameter>, row_limit: usize) -> ReadResult<Vec<Rec>> {
         self.begin(sql, &parameters, row_limit).await.map_err(ReadError::Source)?;
-        let mut observer_error = None;
-        let result = {
-            let work = self.owner.query(sql, parameters, row_limit);
-            tokio::pin!(work);
-            loop {
-                tokio::select! {
-                    result = &mut work => break result,
-                    _ = tokio::time::sleep(SAMPLE_INTERVAL), if observer_error.is_none() => {
-                        match self.observer.sample().await {
-                            Ok(sample) => {
-                                if sample.active { self.active_seen.store(true, Ordering::Release); }
-                                if let (Some(watch), Some(phase)) = (&self.template_watch, &self.phase) {
-                                    watch.observe(&phase.sql, sample.active);
-                                }
-                                if let Some(phase) = &mut self.phase { phase.observe(&sample); }
-                            }
-                            // A bounded source failure can retire its socket before the observer's next sample.
-                            // Stop sampling and await the same native work so instrumentation cannot replace
-                            // its original byte/row/deadline result with an invented caller cancellation.
-                            Err(error) => { observer_error = Some(error); }
-                        }
-                    }
-                }
-            }
-        };
+        let phase = self.phase.as_mut().ok_or_else(|| ReadError::Source(invalid_data()))?;
+        let result = await_observed(
+            self.owner.query(sql, parameters, row_limit),
+            &mut self.observer,
+            phase,
+            &self.active_seen,
+            self.template_watch.as_ref(),
+        )
+        .await;
         let outcome = match &result {
             Ok(_) => "completed",
             Err(ReadError::Source(_)) => "source-error",
             Err(ReadError::Stopped(_)) => "stopped",
         };
-        // If observing failed, first settle the real owner. Its native shutdown cannot be replaced by an
-        // instrumentation error or by an observer later finding no request.
-        if let Some(error) = &observer_error {
-            self.errors.push(format!("observer:{:?}", error.code));
-            let _ = self.owner.close().await;
+        let rows = self.complete_phase(result, outcome).await?;
+        if let Some(trace) = &mut self.result_trace {
+            trace.retain(sql, &rows);
         }
-        let accounting = self.end(outcome).await;
-        match result {
-            Err(error) => Err(error),
-            Ok(rows) => {
-                if let Some(error) = observer_error {
-                    return Err(ReadError::Source(error));
-                }
-                accounting.map_err(ReadError::Source)?;
-                if let Some(trace) = &mut self.result_trace {
-                    trace.retain(sql, &rows);
-                }
-                Ok(rows)
-            }
-        }
+        Ok(rows)
     }
     fn queries(&self) -> u32 {
         self.owner.queries()
@@ -388,12 +376,40 @@ impl NativeRead for MeasuredRead {
 impl NativeStreamRead for MeasuredRead {
     async fn begin_stream(&mut self, sql: &str, parameters: Vec<Parameter>, row_limit: usize) -> ReadResult<()> {
         self.begin(sql, &parameters, row_limit).await.map_err(ReadError::Source)?;
-        self.owner.begin_stream(sql, parameters, row_limit).await
+        let phase = self.phase.as_mut().ok_or_else(|| ReadError::Source(invalid_data()))?;
+        let result = await_observed(
+            self.owner.begin_stream(sql, parameters, row_limit),
+            &mut self.observer,
+            phase,
+            &self.active_seen,
+            self.template_watch.as_ref(),
+        )
+        .await;
+        // A successful start does not settle the statement. Keep its phase (including any observer loss)
+        // until the same stream reaches its native terminal result or the retained owner is closed.
+        if result.is_err() {
+            return self.complete_phase(result, "stream-start-failed").await;
+        }
+        result
     }
     async fn next_batch(&mut self) -> ReadResult<ReadBatch> {
-        let result = self.owner.next_batch().await;
-        if result.as_ref().is_ok_and(|batch| batch.complete) {
-            self.end("stream-completed").await.map_err(ReadError::Source)?;
+        let phase = self.phase.as_mut().ok_or_else(|| ReadError::Source(invalid_data()))?;
+        let result = await_observed(
+            self.owner.next_batch(),
+            &mut self.observer,
+            phase,
+            &self.active_seen,
+            self.template_watch.as_ref(),
+        )
+        .await;
+        // A partial batch cannot replace a later native byte/row/server error with instrumentation failure.
+        if result.as_ref().is_ok_and(|batch| batch.complete) || result.is_err() {
+            let outcome = match &result {
+                Ok(_) => "stream-completed",
+                Err(ReadError::Source(_)) => "source-error",
+                Err(ReadError::Stopped(_)) => "stopped",
+            };
+            return self.complete_phase(result, outcome).await;
         }
         result
     }

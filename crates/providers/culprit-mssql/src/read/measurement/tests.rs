@@ -67,6 +67,7 @@ fn an_unobserved_grant_is_unknown_and_a_wait_sentinel_does_not_identify_a_blocke
         maximum_sampled_granted_kb: None,
         maximum_sampled_requested_kb: None,
         maximum_sampled_used_kb: None,
+        observer_error: None,
     };
     phase.observe(&Sample {
         counters: phase.before.clone(),
