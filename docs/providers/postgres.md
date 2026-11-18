@@ -62,7 +62,7 @@ and the source recipes remain cost-unqualified until their exact native routes a
 
 The database keeps a cumulative deadlock count. Import the relevant PostgreSQL log lines to reconstruct the participants and pattern. Cancel and terminate actions are available outside production, subject to the login's permissions.
 
-## Supplied structured diagnostics
+### Supplied structured diagnostics
 
 Analyze an explicitly supplied local PostgreSQL log without a saved connection, workspace or database credentials:
 

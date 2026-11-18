@@ -30,7 +30,7 @@ Sessions, blocking chains, cancellation, live session sampling and PostgreSQL pr
 
 A deadlock counter remains PostgreSQL's database counter; reconstructing a deadlock pattern requires the relevant server-log records. Managed-service restrictions can make individual sources unavailable.
 
-## Background jobs
+### Background jobs
 
 `culprit scan metrics --collect-native-failures` also reads supported job diagnostics. Scans and
 `culprit collect once metrics --collection jobs` share one bounded reader of the installed public

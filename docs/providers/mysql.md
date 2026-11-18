@@ -64,7 +64,7 @@ establish historical session thresholds, other logging filters, or that every st
 zero. See the [MySQL slow-log rules](https://dev.mysql.com/doc/refman/8.0/en/slow-query-log.html) and
 [MariaDB's native statement timers](https://mariadb.com/docs/server/reference/system-tables/performance-schema/performance-schema-tables/performance-schema-events_statements_current-table).
 
-## Recorded temporary statement work
+### Recorded temporary statement work
 
 Digest scans and export share the native definitions for internal temporary tables, disk tables and sort-merge
 passes. The counts retain exact unsigned integers, with unsupported or null measurements left unknown. These
@@ -73,7 +73,7 @@ be created directly, and MySQL's counters can omit memory-mapped overflow. Nativ
 memory exhaustion or size a new memory limit. `statement-work` explains published counter points using the same
 pure view as scans, without inferring rates, SQL definitions or an allocating operator.
 
-## Tracked session allocations
+### Tracked session allocations
 
 `culprit scan shop --collect-session-memory` requests native thread-allocation counters on MySQL 8.0.31+.
 Default scans skip them. The shared-instance collector's `session-memory` profile uses the same reader and decoder.
@@ -98,7 +98,7 @@ ceilings, preserving stricter caller bounds. The profile defaults off; represent
 qualification remains required. MariaDB has no qualified route for this profile. Culprit does not fall back to its
 process-list memory view, which can enumerate and lock threads before applying a filter or limit.
 
-## Retained native diagnostics
+### Retained native diagnostics
 
 `culprit scan shop --collect-native-failures` explicitly requests metadata from MySQL 8.0.22+'s native
 `performance_schema.error_log` buffer. Default scans skip it. Scans and the shared-instance collector profile
