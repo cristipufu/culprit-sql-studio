@@ -61,6 +61,74 @@ fn reader(prefix: &str) -> FakeRead {
 }
 
 #[tokio::test]
+async fn history_terminal_stops_close_the_owner_without_dispatching_performance_counters() {
+    let errors = [
+        CollectionStop::TimedOut,
+        CollectionStop::Cancelled,
+        CollectionStop::CancellationUnconfirmed,
+        CollectionStop::QueryLimit,
+        CollectionStop::ByteLimit,
+        CollectionStop::PageLimit,
+        CollectionStop::Pressure,
+        CollectionStop::PressureUnavailable,
+        CollectionStop::SourceChanged,
+    ]
+    .map(CollectionStop::error)
+    .into_iter()
+    .chain([
+        culprit_core::Error::new(culprit_core::ErrorCode::Timeout, "fixture timeout"),
+        culprit_core::Error::new(culprit_core::ErrorCode::ConnectionFailed, "fixture connection failure"),
+        culprit_core::Error::new(culprit_core::ErrorCode::AuthFailed, "fixture authentication failure"),
+    ]);
+    for error in errors {
+        let mut io = FakeRead::new(vec![Err(ReadError::Source(error.clone())), Ok(native_counters("SQLServer"))]);
+        let (waits, counters) = history_from(&mut io, false).await;
+        assert_eq!(io.calls.len(), 1, "terminal failure must not dispatch another source: {error:?}");
+        assert_eq!(io.closed, 1, "the same owner must still settle its source work");
+        for result in [waits.map(|_| ()), counters.map(|_| ())] {
+            let stopped = result.unwrap_err();
+            assert_eq!(stopped.code, error.code);
+            assert_eq!(stopped.detail, error.detail);
+        }
+    }
+}
+
+#[tokio::test]
+async fn history_terminal_stop_keeps_an_unconfirmed_close_stronger_than_the_original_error() {
+    let mut io =
+        FakeRead::new(vec![Err(ReadError::Stopped(CollectionStop::TimedOut)), Ok(native_counters("SQLServer"))]);
+    io.shutdown = SourceShutdown::Unconfirmed;
+    let (waits, counters) = history_from(&mut io, false).await;
+    assert_eq!(io.calls.len(), 1);
+    assert_eq!(io.closed, 1);
+    for result in [waits.map(|_| ()), counters.map(|_| ())] {
+        assert_eq!(CollectionStop::from_error(&result.unwrap_err()), CollectionStop::CancellationUnconfirmed);
+    }
+}
+
+#[tokio::test]
+async fn history_independent_source_gaps_keep_performance_evidence_without_retrying_waits() {
+    for error in [
+        culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "fixture denied"),
+        CollectionStop::SourceUnavailable.error(),
+        CollectionStop::RowLimit.error(),
+    ] {
+        let mut io = FakeRead::new(vec![Err(ReadError::Source(error.clone())), Ok(native_counters("SQLServer"))]);
+        let (waits, counters) = history_from(&mut io, false).await;
+        assert_eq!(io.calls.len(), 2);
+        assert_eq!(io.closed, 1);
+        assert!(io.calls[0].sql.contains("sys.dm_os_wait_stats"));
+        assert!(io.calls[1].sql.contains("sys.dm_os_performance_counters"));
+        let failed = waits.unwrap_err();
+        assert_eq!(failed.code, error.code);
+        assert_eq!(failed.detail, error.detail);
+        let counters = counters.unwrap();
+        assert_eq!(counters.native_rows, 6);
+        assert_eq!(counters.sample.counters.len(), 6);
+    }
+}
+
+#[tokio::test]
 async fn an_earlier_pooled_probe_cannot_supply_the_lifetime_of_the_current_native_counter_read() {
     for prefix in ["MSSQL$other-member", "SQLServer"] {
         for started_at in [Some("2000-01-01T00:00:00Z"), Some("2026-11-15T00:00:00Z"), Some("invalid"), None] {

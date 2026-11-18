@@ -210,7 +210,10 @@ async fn history_from<R: NativeRead>(
     culprit_core::Result<crate::performance::PerformanceRead>,
 ) {
     let waits = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
-    let counters = counters(reader).await;
+    let counters = match &waits {
+        Err(error) if crate::read::stops_remaining_reads(error) => Err(error.clone()),
+        _ => counters(reader).await,
+    };
     if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
         let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
         return (Err(error.clone()), Err(error));
