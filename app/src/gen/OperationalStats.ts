@@ -9,6 +9,7 @@ import type { CompilerAdmissionSnapshot } from "./CompilerAdmissionSnapshot";
 import type { DatabasePropertiesRead } from "./DatabasePropertiesRead";
 import type { FreezeAge } from "./FreezeAge";
 import type { IndexUsageScope } from "./IndexUsageScope";
+import type { JobsSnapshot } from "./JobsSnapshot";
 import type { LoggedFailure } from "./LoggedFailure";
 import type { MaintenanceProgressSnapshot } from "./MaintenanceProgressSnapshot";
 import type { MemoryFailureSnapshot } from "./MemoryFailureSnapshot";
@@ -24,7 +25,6 @@ import type { StatementCounterSnapshot } from "./StatementCounterSnapshot";
 import type { StorageRead } from "./StorageRead";
 import type { TaskSpaceSnapshot } from "./TaskSpaceSnapshot";
 import type { TerminationHistory } from "./TerminationHistory";
-import type { TimescaleJobsSnapshot } from "./TimescaleJobsSnapshot";
 
 export type OperationalStats = { storage?: StorageRead, cached_runtime?: CachedRuntimeRead, 
 /**
@@ -34,4 +34,4 @@ memory_clerks?: CapturedOperationalRead, hyperscale_log_components?: CapturedOpe
 /**
  * None means that the native usage population was not established.
  */
-index_usage_scope?: IndexUsageScope, log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, jobs?: TimescaleJobsSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, task_space?: TaskSpaceSnapshot, query_compilation?: CompilationSnapshot, compiler_admission?: CompilerAdmissionSnapshot, maintenance_progress?: MaintenanceProgressSnapshot, cleanup?: Array<CleanupSnapshot>, node_resources?: NodeResources, };
+index_usage_scope?: IndexUsageScope, log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, jobs?: JobsSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, task_space?: TaskSpaceSnapshot, query_compilation?: CompilationSnapshot, compiler_admission?: CompilerAdmissionSnapshot, maintenance_progress?: MaintenanceProgressSnapshot, cleanup?: Array<CleanupSnapshot>, node_resources?: NodeResources, };

@@ -6,15 +6,18 @@ use culprit_core::plan_facts::{
 };
 use roxmltree::Node;
 use std::collections::BTreeSet;
+mod integers;
 mod uses;
 
 const MAX_PARAMETER_REPRESENTATION_BYTES: usize = 16 * 1024;
 
 pub(super) fn withhold_statement_binding(context: &mut PlanParameterContext) {
+    context.retrieved_from_cache = None;
     context.uses.clear();
     context.issues.push(Issue::UnboundStatement);
     for parameter in &mut context.parameters {
         parameter.comparison = Comparison::Unavailable;
+        parameter.integer_values_equal = None;
         if parameter.runtime == State::Recorded {
             parameter.runtime = State::Unqualified;
         }
@@ -23,24 +26,42 @@ pub(super) fn withhold_statement_binding(context: &mut PlanParameterContext) {
 
 pub(super) fn restore(plan: &mut culprit_core::Plan, context: &PlanParameterContext) -> culprit_core::Result<()> {
     let invalid = || culprit_core::telemetry::DeliveryProblem::Integrity.error();
-    if !context.is_valid() {
+    if !context.is_valid()
+        || context.parameters.iter().any(|parameter| {
+            parameter.integer_values_equal.is_some() && !integers::supports(parameter.data_type.as_deref())
+        })
+    {
+        return Err(invalid());
+    }
+    if plan
+        .facts()
+        .parameter_context
+        .as_ref()
+        .is_none_or(|parsed| parsed.retrieved_from_cache != context.retrieved_from_cache)
+    {
         return Err(invalid());
     }
     if !context.issues.contains(&Issue::MetadataLimit) {
         let parsed = plan.facts().parameter_context.as_ref().ok_or_else(invalid)?;
         if context.uses != parsed.uses
             || context.parameters.len() != parsed.parameters.len()
-            || context
-                .parameters
-                .iter()
-                .zip(&parsed.parameters)
-                .any(|(native, retained)| native.name != retained.name || native.data_type != retained.data_type)
+            || context.parameters.iter().zip(&parsed.parameters).any(|(native, retained)| {
+                native.name != retained.name
+                    || native.data_type != retained.data_type
+                    || !attribute_presence_matches(native.compiled, retained.compiled)
+                    || !attribute_presence_matches(native.runtime, retained.runtime)
+            })
         {
             return Err(invalid());
         }
     }
     plan.facts_mut().parameter_context = Some(context.clone());
     Ok(())
+}
+
+// Redaction may change Recorded to Redacted/Unqualified; it does not add or remove native value attributes.
+fn attribute_presence_matches(original: State, reparsed: State) -> bool {
+    (original == State::NotRecorded) == (reparsed == State::NotRecorded)
 }
 
 pub(super) fn read(query_plan: Node<'_, '_>) -> Option<PlanParameterContext> {
@@ -65,6 +86,7 @@ pub(super) fn read(query_plan: Node<'_, '_>) -> Option<PlanParameterContext> {
     if issues.contains(&Issue::ParameterLimit) {
         for parameter in &mut parameters {
             parameter.comparison = Comparison::Unavailable;
+            parameter.integer_values_equal = None;
         }
     }
     let supported_scope = query_plan.parent().is_some_and(super::relational_inputs::direct_statement_scope);
@@ -76,7 +98,17 @@ pub(super) fn read(query_plan: Node<'_, '_>) -> Option<PlanParameterContext> {
     } else {
         uses::read(query_plan, &parameters, &mut issues)
     };
-    Some(PlanParameterContext { parameters, uses, issues: issues.into_iter().collect() })
+    // BaseStmtInfoType declares RetrievedFromCache as an optional string. Only the engine's exact true/false
+    // tokens on this selected actual statement are supported; estimated/unbound/ambiguous scopes stay unknown.
+    let retrieved_from_cache = (runtime && supported_scope)
+        .then(|| query_plan.parent().and_then(|statement| statement.attribute("RetrievedFromCache")))
+        .flatten()
+        .and_then(|value| match value {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        });
+    Some(PlanParameterContext { retrieved_from_cache, parameters, uses, issues: issues.into_iter().collect() })
 }
 
 fn parameter(native: Node<'_, '_>, runtime: bool, issues: &mut BTreeSet<Issue>) -> PlanParameter {
@@ -101,7 +133,10 @@ fn parameter(native: Node<'_, '_>, runtime: bool, issues: &mut BTreeSet<Issue>) 
     } else {
         Comparison::Unavailable
     };
-    PlanParameter { name, data_type, compiled, runtime: runtime_state, comparison }
+    let integer_values_equal = (comparison != Comparison::Unavailable)
+        .then(|| integers::equal(data_type.as_deref(), compiled_value, runtime_value))
+        .flatten();
+    PlanParameter { name, data_type, compiled, runtime: runtime_state, comparison, integer_values_equal }
 }
 
 fn parameter_name(name: &str) -> bool {
@@ -159,6 +194,7 @@ fn withhold_duplicate_comparisons(parameters: &mut [PlanParameter], issues: &mut
     for parameter in parameters {
         if parameter.name.as_ref().is_some_and(|name| duplicates.contains(name)) {
             parameter.comparison = Comparison::Unavailable;
+            parameter.integer_values_equal = None;
         }
     }
 }

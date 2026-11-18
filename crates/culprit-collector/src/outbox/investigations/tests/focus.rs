@@ -20,7 +20,7 @@ pub(super) fn page_activity() -> ActivityObservation {
 pub(super) fn focus(input: &DiagnosticInput) -> ActivityWaitFocus {
     focus_at(input, 0)
 }
-fn focus_at(input: &DiagnosticInput, ordinal: usize) -> ActivityWaitFocus {
+pub(super) fn focus_at(input: &DiagnosticInput, ordinal: usize) -> ActivityWaitFocus {
     let row = &input.rows[ordinal];
     let TelemetryRecord::Activity(original) = &row.row.record else { panic!() };
     let native = input.source.observation.activity().unwrap();

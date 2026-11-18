@@ -1,5 +1,7 @@
 //! One local owner, immutable capture artifacts and a transactional commit boundary.
 mod archive;
+mod completed_blocking;
+pub use completed_blocking::{CompletedActivity, CompletedBlocking};
 mod completed_capture;
 pub use completed_capture::{CompletedCaptureBudget, CompletedCaptureLookup};
 mod completed_query_history;

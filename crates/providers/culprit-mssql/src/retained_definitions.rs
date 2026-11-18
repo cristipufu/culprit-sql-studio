@@ -46,7 +46,10 @@ pub(crate) fn decode(
     layout: &Layout,
     source: Option<&CollectionDescription>,
 ) -> Result<MssqlRetainedPlanDefinition> {
-    let native = retained::decode(row, layout.maximum_bytes, layout.maximum_statement_bytes)?;
+    let native = retained::decode(row, layout.maximum_bytes, layout.maximum_statement_bytes).inspect_err(|_error| {
+        #[cfg(test)]
+        diagnostics::report("native", row, source, None, _error);
+    })?;
     let evidence = source.filter(|source| MssqlRelationalInputProof::supports_source(source)).and_then(|source| {
         native.payload.text().and_then(|xml| {
             crate::plan_xml::original_statement_evidence(
@@ -73,7 +76,11 @@ pub(crate) fn decode(
             native.statement_utf16_bytes,
             layout.maximum_statement_bytes,
             DefinitionPayload::sql,
-        )?,
+        )
+        .inspect_err(|_error| {
+            #[cfg(test)]
+            diagnostics::report("statement-payload", row, source, None, _error);
+        })?,
         module_parameters: native.module_parameters,
         relational_input_proof: None,
         parameter_context_proof: None,
@@ -82,7 +89,11 @@ pub(crate) fn decode(
             native.source_utf16_bytes,
             layout.maximum_bytes,
             DefinitionPayload::plan,
-        )?,
+        )
+        .inspect_err(|_error| {
+            #[cfg(test)]
+            diagnostics::report("plan-payload", row, source, None, _error);
+        })?,
     };
     if let Some((source, bindings)) = source.zip(bindings)
         && value.batch_plan.payload.is_available()
@@ -91,19 +102,33 @@ pub(crate) fn decode(
                 binding.input.kind != culprit_core::plan_facts::RelationalInputKind::TableValuedParameter
             }))
     {
-        value.relational_input_proof = Some(MssqlRelationalInputProof::for_retained(source, &value, bindings)?);
+        value.relational_input_proof =
+            Some(MssqlRelationalInputProof::for_retained(source, &value, bindings).inspect_err(|_error| {
+                #[cfg(test)]
+                diagnostics::report("relational-proof", row, Some(source), Some(&value), _error);
+            })?);
     }
     if let Some((source, context)) = source.zip(parameter_context)
         && value.batch_plan.payload.is_available()
         && MssqlParameterContextProof::supports_source(source)
     {
-        value.parameter_context_proof = Some(MssqlParameterContextProof::for_retained(source, &value, context)?);
+        value.parameter_context_proof =
+            Some(MssqlParameterContextProof::for_retained(source, &value, context).inspect_err(|_error| {
+                #[cfg(test)]
+                diagnostics::report("parameter-proof", row, Some(source), Some(&value), _error);
+            })?);
     }
     if !value.is_valid() {
-        return Err(invalid_data());
+        let error = invalid_data();
+        #[cfg(test)]
+        diagnostics::report("retained-model", row, source, Some(&value), &error);
+        return Err(error);
     }
     Ok(value)
 }
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+pub(crate) mod diagnostics;

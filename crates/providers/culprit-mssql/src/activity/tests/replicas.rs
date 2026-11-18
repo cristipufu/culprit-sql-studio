@@ -7,7 +7,7 @@ fn replies(row: Rec) -> Vec<ReadResult<Vec<Rec>>> {
 }
 
 async fn captured(row: Rec) -> CollectionDescription {
-    let mut owner = reader(replies(row), ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+    let mut owner = reader(replies(row), IdentityDetail::AzureDatabase);
     let (description, _) = crate::telemetry::activity::capture(&mut owner).await.unwrap();
     assert_eq!(owner.close().await, SourceShutdown::Quiescent);
     description
@@ -30,14 +30,14 @@ async fn native_members_partition_one_logical_database_while_observed_roles_do_n
 
 #[tokio::test]
 async fn native_process_restart_changes_the_scope_epoch_without_inventing_a_new_compute_member() {
-    let mut first = reader(replies(metadata(42)), ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+    let mut first = reader(replies(metadata(42)), IdentityDetail::AzureDatabase);
     let (before, _) = crate::telemetry::activity::capture(&mut first).await.unwrap();
     let mut restarted = replies(metadata(42));
     for index in [0, 2] {
         let rows = restarted[index].as_mut().unwrap();
         rows[0] = replace(&rows[0], &[("local_started_ticks", Val::Int(200))]);
     }
-    let mut restarted = reader(restarted, ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+    let mut restarted = reader(restarted, IdentityDetail::AzureDatabase);
     let (after, _) = crate::telemetry::activity::capture(&mut restarted).await.unwrap();
     assert!(before.partition.same_member(&after.partition));
     assert_eq!(before.logical_source_id().unwrap(), after.logical_source_id().unwrap());
@@ -60,7 +60,7 @@ async fn missing_member_native_epoch_or_role_preserves_positive_rows_without_cur
                 rows[0] = replace(&rows[0], &crate::activity::database_context::tests::epoch_fields(false));
             }
         }
-        let mut owner = reader(native, ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+        let mut owner = reader(native, IdentityDetail::AzureDatabase);
         let (description, rows) = crate::telemetry::activity::capture(&mut owner).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert!(!description.is_partition_qualified(), "{missing}");
@@ -87,7 +87,7 @@ async fn member_role_and_native_process_changes_during_one_reader_stop_publicati
         let mut native = replies(metadata(42));
         let rows = native[2].as_mut().unwrap();
         rows[0] = replace(&rows[0], &[(field, value)]);
-        let mut owner = reader(native, ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+        let mut owner = reader(native, IdentityDetail::AzureDatabase);
         let error = crate::telemetry::activity::capture(&mut owner).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::SourceChanged, "{field}");
         assert_eq!(owner.query_count(), 3);
@@ -117,7 +117,7 @@ impl NativeRead for Reconnecting {
 
 #[tokio::test]
 async fn reconnecting_to_the_same_native_member_and_process_cannot_reuse_an_earlier_reader_authority() {
-    let base = reader(replies(metadata(42)), ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+    let base = reader(replies(metadata(42)), IdentityDetail::AzureDatabase);
     let mut owner =
         ActivityReader::new(Reconnecting { inner: base.io, after: 2 }, base.options, "fixture.invalid".into(), 1433);
     let error = crate::telemetry::activity::capture(&mut owner).await.err().unwrap();
@@ -146,7 +146,7 @@ async fn reconnecting_during_boxed_authority_acquisition_keeps_baseline_rows_wit
         Ok(vec![crate::instance::test_support::epoch(100)]),
         Ok(vec![crate::activity::database_context::tests::row(3)]),
     ];
-    let base = reader(native, ActivityScope::CurrentDatabase, IdentityDetail::Endpoint);
+    let base = reader(native, IdentityDetail::Endpoint);
     let mut owner =
         ActivityReader::new(Reconnecting { inner: base.io, after: 2 }, base.options, "fixture.invalid".into(), 1433);
     let (description, rows) = crate::telemetry::activity::capture(&mut owner).await.unwrap();
@@ -162,7 +162,7 @@ async fn terminal_authority_and_replica_baseline_cancellation_preserve_source_fe
     for stage in [0, 1, 2] {
         let mut native = replies(metadata(42));
         native[stage] = Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed));
-        let mut owner = reader(native, ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
+        let mut owner = reader(native, IdentityDetail::AzureDatabase);
         owner.io.shutdown = SourceShutdown::Unconfirmed;
         let error = crate::telemetry::activity::capture(&mut owner).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);

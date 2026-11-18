@@ -22,7 +22,7 @@ mod task_waits;
 pub(crate) mod tests;
 pub(crate) mod writers;
 
-use super::{ActivityContext, ActivityFrame, ActivityReader, ActivityScope};
+use super::{ActivityContext, ActivityFrame, ActivityReader};
 use crate::read::{NativeRead, Parameter, ReadError, invalid_data, stops_remaining_reads};
 use culprit_core::{ErrorCode, ObservedWaitResource, Result, WaitResourceKind, telemetry::*};
 use rows::{HeaderRecord, PageAddress};
@@ -126,9 +126,6 @@ impl<R: NativeRead> ActivityReader<R> {
         include_shared: bool,
         original: Option<(&NativeReadContext, &[ActivityRequestSelector])>,
     ) -> Result<PageWaitCapture> {
-        if !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
-            return Err(invalid_data());
-        }
         let initial = context::initial_scan(self, include_shared).await?;
         if let Some((original, _)) = original {
             let current = initial.capture_context()?;
@@ -167,9 +164,6 @@ impl<R: NativeRead> ActivityReader<R> {
         &mut self,
         resource: &SharedResourceIdentity,
     ) -> Result<PageWaitCapture> {
-        if !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
-            return Err(invalid_data());
-        }
         let initial = context::initial_shared(self, resource).await?;
         let population = self.page_population().await?;
         if !initial.matches_initial(&population.frame) {

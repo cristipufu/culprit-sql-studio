@@ -1,6 +1,6 @@
 //! The explicit scan and fleet dataset use the same bounded native reader. No default live poll reads headers.
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
     read::NativeRead,
     sources,
@@ -37,11 +37,8 @@ pub(crate) async fn collect(
         );
         return (None, coverage);
     }
-    let options = ReadOptions {
-        budget: bounded_budget(&CollectionBudget::default()),
-        scope: ActivityScope::CurrentDatabase,
-        identity: IdentityDetail::Endpoint,
-    };
+    let options =
+        ReadOptions { budget: bounded_budget(&CollectionBudget::default()), identity: IdentityDetail::Endpoint };
     match ActivityReader::open(pool, options, host, port) {
         Ok(mut reader) => collect_from(&mut reader, include_shared).await,
         Err(error) => {

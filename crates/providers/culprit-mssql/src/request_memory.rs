@@ -1,7 +1,7 @@
 //! Explicit scan composition over the native reader also used by the collector; results remain provisional until
 //! final identity verification and confirmed shutdown. The default policy performs no native read.
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
     read::NativeRead,
     sources,
@@ -41,7 +41,7 @@ pub(crate) async fn collect(
         return (None, coverage);
     }
     let budget = bounded_budget(&CollectionBudget::default());
-    let options = ReadOptions { budget, scope: ActivityScope::CurrentDatabase, identity: IdentityDetail::Endpoint };
+    let options = ReadOptions { budget, identity: IdentityDetail::Endpoint };
     match ActivityReader::open(pool, options, host, port) {
         Ok(mut reader) => collect_from(&mut reader).await,
         Err(error) => {

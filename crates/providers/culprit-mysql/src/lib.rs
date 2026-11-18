@@ -262,7 +262,9 @@ impl Provider for MysqlProvider {
     }
 
     async fn recorded_changes(&self, since: &str) -> Result<Vec<culprit_core::ChangeEvent>> {
-        let Some(database) = self.connector.database.clone() else { return Ok(Vec::new()) };
+        let Some(database) = self.connector.database.clone() else {
+            return Ok(Vec::new());
+        };
         // No default database: these catalog reads must not count as the application's statements.
         let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
         let out = recorded::changes(&mut conn, &database, since).await;
@@ -358,6 +360,9 @@ impl Provider for MysqlProvider {
                 let active = state == "active";
                 let wait = if active { r.text("state").filter(|s| !s.is_empty()) } else { None };
                 Session {
+                    progress_eligible: None,
+                    sql_context: None,
+                    activity_key: None,
                     action_target: rows.target(r),
                     blocked_by: blockers.get(&id).cloned(),
                     user: r.text("user_name"),
@@ -410,6 +415,8 @@ impl Provider for MysqlProvider {
         let blocking = culprit_core::blocking::analyze(Engine::Mysql, &sessions, &locks, &[]);
         let session_actions = rows.session_actions();
         Ok(LiveState {
+            activity_census: None,
+            session_census: None,
             notes,
             taken_at: now,
             sessions,
@@ -453,7 +460,9 @@ fn with_progress(state: String, r: &rows::Rec) -> String {
 }
 
 fn progress_label(state: String, progress: Option<f64>, stage: Option<f64>, max: Option<f64>) -> String {
-    let Some(progress) = progress.filter(|p| *p > 0.0) else { return state };
+    let Some(progress) = progress.filter(|p| *p > 0.0) else {
+        return state;
+    };
     let percent = format::digits(format!("{progress:.0}"));
     match (stage, max) {
         (Some(stage), Some(max)) if max > 1.0 => t!(

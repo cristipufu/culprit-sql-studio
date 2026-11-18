@@ -71,6 +71,11 @@ pub struct PlanParameter {
     pub compiled: PlanParameterValueState,
     pub runtime: PlanParameterValueState,
     pub comparison: PlanParameterComparison,
+    /// A provider compared both original values under one supported declared integer type and native range.
+    /// Values and value hashes are discarded. None preserves unsupported types, missing or unqualified values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub integer_values_equal: Option<bool>,
 }
 
 impl PlanParameter {
@@ -81,12 +86,25 @@ impl PlanParameter {
                 || self.name.is_some()
                     && self.compiled == PlanParameterValueState::Recorded
                     && self.runtime == PlanParameterValueState::Recorded)
+            && (self.integer_values_equal.is_none()
+                || self.name.is_some()
+                    && self.data_type.is_some()
+                    && self.compiled == PlanParameterValueState::Recorded
+                    && self.runtime == PlanParameterValueState::Recorded
+                    && self.comparison != PlanParameterComparison::Unavailable
+                    && (self.comparison != PlanParameterComparison::SameRepresentation
+                        || self.integer_values_equal == Some(true)))
     }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct PlanParameterContext {
+    /// The selected actual statement's native cache-use verdict, not a cache lifetime/count inference.
+    /// False does not independently prove compilation time, a new incarnation, or harmful reuse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub retrieved_from_cache: Option<bool>,
     pub parameters: Vec<PlanParameter>,
     /// Exact native access-node relationships, never bindings reconstructed from display SQL.
     pub uses: Vec<PlanParameterUse>,
@@ -112,7 +130,8 @@ impl PlanParameterContext {
             || self.issues.contains(&PlanParameterIssue::UseLimit) && !self.uses.is_empty()
             || self.issues.contains(&PlanParameterIssue::AmbiguousUse) && !self.uses.is_empty()
             || self.issues.contains(&PlanParameterIssue::UnboundStatement)
-                && (!self.uses.is_empty()
+                && (self.retrieved_from_cache.is_some()
+                    || !self.uses.is_empty()
                     || self.parameters.iter().any(|parameter| {
                         parameter.comparison != PlanParameterComparison::Unavailable
                             || parameter.runtime == PlanParameterValueState::Recorded

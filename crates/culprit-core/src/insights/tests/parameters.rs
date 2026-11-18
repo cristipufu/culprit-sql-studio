@@ -6,6 +6,7 @@ use crate::plan_facts::{
 
 fn parameter(name: &str) -> PlanParameter {
     PlanParameter {
+        integer_values_equal: None,
         name: Some(name.into()),
         data_type: Some("int".into()),
         compiled: State::Recorded,
@@ -16,8 +17,12 @@ fn parameter(name: &str) -> PlanParameter {
 
 fn recorded_plan() -> Plan {
     let mut plan = actual(Engine::Mssql, measured(0, "Table Scan", NodeKind::Scan, 1.0, 1.0, 1.0), 400.0);
-    plan.facts_mut().parameter_context =
-        Some(PlanParameterContext { parameters: vec![parameter("@customer")], uses: vec![], issues: vec![] });
+    plan.facts_mut().parameter_context = Some(PlanParameterContext {
+        retrieved_from_cache: None,
+        parameters: vec![parameter("@customer")],
+        uses: vec![],
+        issues: vec![],
+    });
     plan
 }
 
@@ -42,6 +47,48 @@ fn native_parameter_comparison_is_low_scope_context_without_a_reuse_or_mutation_
     assert!(insight.detail.contains("not SQL value equivalence"));
     assert!(insight.fix.contains("does not justify"));
     assert!(!serde_json::to_string(&insight).unwrap().contains("private-compiled-canary"));
+}
+
+#[test]
+fn native_integer_and_cache_facts_refine_context_without_turning_co_occurrence_into_a_reuse_cause() {
+    for cached in [true, false] {
+        let mut plan = parameterized_seek();
+        let context = plan.facts_mut().parameter_context.as_mut().unwrap();
+        context.retrieved_from_cache = Some(cached);
+        context.parameters[0].integer_values_equal = Some(false);
+        let insight = context_insight(&plan).unwrap();
+        assert!(insight.detail.contains(&if cached {
+            t!("insight.parameter_context.cache.used")
+        } else {
+            t!("insight.parameter_context.cache.not_used")
+        }));
+        assert!(
+            insight
+                .detail
+                .contains(&t!("insight.parameter_context.integer.different", parameter = parameter_label_for_test()))
+        );
+        assert_eq!(insight.severity, Severity::Low);
+        assert_eq!(insight.impact, 0.0);
+        assert!(insight.fix_sql.is_none());
+        assert_eq!(insight.fix, t!("insight.parameter_context.fix"));
+    }
+}
+
+#[test]
+fn numerically_equal_native_integers_do_not_gain_a_different_input_access_binding_from_lexical_difference() {
+    let mut plan = parameterized_seek();
+    plan.facts_mut().parameter_context.as_mut().unwrap().parameters[0].integer_values_equal = Some(true);
+    let insight = context_insight(&plan).unwrap();
+    assert!(
+        insight.detail.contains(&t!("insight.parameter_context.integer.same", parameter = parameter_label_for_test()))
+    );
+    assert!(!insight.detail.contains(&t!(
+        "insight.parameter_context.access",
+        node = "0",
+        parameter = parameter_label_for_test()
+    )));
+    assert_eq!(insight.nodes, vec![plan.root.id]);
+    assert!(insight.fix_sql.is_none());
 }
 
 #[test]

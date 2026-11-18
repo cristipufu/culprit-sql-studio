@@ -112,7 +112,9 @@ fn efficient_seeks_and_healthy_large_tvp_estimates_are_not_loop_faults() {
     healthy.root.children[0].facts_mut().access_rows = PlanAccessRows::new(Some(20_000.0), Some(20_000.0));
     assert_no_loop(&healthy, "large, accurately estimated input");
     healthy.facts_mut().parameter_context = Some(crate::plan_facts::PlanParameterContext {
+        retrieved_from_cache: None,
         parameters: vec![crate::plan_facts::PlanParameter {
+            integer_values_equal: None,
             name: Some("@filter".into()),
             data_type: Some("int".into()),
             compiled: crate::plan_facts::PlanParameterValueState::Recorded,

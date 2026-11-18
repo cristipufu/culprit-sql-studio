@@ -134,7 +134,7 @@ fn boxed_reader(caller: &CollectionBudget) -> ActivityReader<crate::resources::t
     ];
     reader_with_options(
         FakeRead::new(replies).with_query_limit(budget.max_queries),
-        ReadOptions { budget, scope: ActivityScope::CurrentDatabase, identity: IdentityDetail::Endpoint },
+        ReadOptions { budget, identity: IdentityDetail::Endpoint },
     )
 }
 
@@ -170,11 +170,7 @@ async fn cancellation_during_owner_acquisition_never_reaches_native_grants_or_a_
         crate::resources::test_support::FakeRead::new(vec![Err(crate::read::ReadError::Stopped(
             CollectionStop::Cancelled,
         ))]),
-        ReadOptions {
-            budget: bounded_budget(&CollectionBudget::default()),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::Endpoint,
-        },
+        ReadOptions { budget: bounded_budget(&CollectionBudget::default()), identity: IdentityDetail::Endpoint },
     );
     let (capture, coverage) = collect_from(&mut reader).await;
     assert!(capture.is_none());

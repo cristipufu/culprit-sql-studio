@@ -11,6 +11,7 @@ use culprit_collector::outbox::{
 use culprit_core::telemetry::*;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+mod blocking;
 mod reports;
 
 enum LocalOutbox {
@@ -104,8 +105,8 @@ impl OutboxCaptureReader {
         #[cfg(test)]
         let boundary = self.projection_boundary.clone();
         let lookup = CompletedCaptureLookup { connection: request.connection, observation_id: request.observation_id };
-        match request.analysis.snapshot_dataset() {
-            None => {
+        match request.analysis.read_plan() {
+            LocalCaptureReadPlan::QueryHistory => {
                 delivery
                     .with_completed_query_history(lookup, self.budget, request.operation, permit, move |capture| {
                         let result = explain_page_server_reads(capture).map(LocalCapturedAnalysis::PageServerReads);
@@ -117,10 +118,36 @@ impl OutboxCaptureReader {
                     })
                     .await
             }
-            Some(dataset) => {
+            LocalCaptureReadPlan::Snapshot(dataset) => {
                 delivery
                     .with_completed_snapshot(lookup, dataset, self.budget, request.operation, permit, move |capture| {
                         let result = explain_operational(capture, request.analysis);
+                        #[cfg(test)]
+                        if let Some(boundary) = boundary {
+                            boundary()?;
+                        }
+                        result
+                    })
+                    .await
+            }
+            LocalCaptureReadPlan::Activity => {
+                delivery
+                    .with_completed_activity(lookup, self.budget, request.operation, permit, move |capture| {
+                        let original = blocking::local_read(capture)?;
+                        let report = Box::new(culprit_checks::session_census::explain_frame(&original.frame()?)?);
+                        #[cfg(test)]
+                        if let Some(boundary) = boundary {
+                            boundary()?;
+                        }
+                        Ok(LocalCapturedAnalysis::SessionCensus(Box::new(LocalSessionCensus { original, report })))
+                    })
+                    .await
+            }
+            LocalCaptureReadPlan::Blocking => {
+                delivery
+                    .with_completed_blocking(lookup, self.budget, request.operation, permit, move |capture| {
+                        let result = blocking::explain(capture)
+                            .map(|analysis| LocalCapturedAnalysis::Blocking(Box::new(analysis)));
                         #[cfg(test)]
                         if let Some(boundary) = boundary {
                             boundary()?;
@@ -177,7 +204,9 @@ fn explain_page_server_reads(capture: CompletedQueryHistory) -> Result<LocalPage
         .iter()
         .filter(|row| row.row.record.stream() == TelemetryStream::QueryDefinitions)
         .map(|row| {
-            let TelemetryRecord::QueryDefinition(definition) = &row.row.record else { return Err(invalid()) };
+            let TelemetryRecord::QueryDefinition(definition) = &row.row.record else {
+                return Err(invalid());
+            };
             let CapturedRecordReference::Diagnostic { reference } = analysis_reference(&binding, row)? else {
                 return Err(invalid());
             };

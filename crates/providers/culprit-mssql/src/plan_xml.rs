@@ -7,6 +7,10 @@ use roxmltree::{Document, Node};
 
 mod cached_definitions;
 mod memory_feedback;
+#[cfg(test)]
+mod original_batch;
+#[cfg(test)]
+mod original_statement_diagnostics;
 mod page_server_io;
 mod parameters;
 mod relational_inputs;
@@ -224,12 +228,26 @@ impl CachedInputContext<'_> {
     fn matches_original_statement(&self, statement: Node<'_, '_>) -> bool {
         statement.has_tag_name_local("StmtSimple")
             && children(statement, "QueryPlan").take(2).count() == 1
-            && statement.attribute("StatementText").map(str::trim) == self.text.map(str::trim)
-            && self.text.is_some()
+            && statement.attribute("StatementText").is_some_and(|native| self.matches_original_text(native))
             && statement
                 .attribute("QueryHash")
                 .zip(self.statement.query_hash.as_deref())
                 .is_some_and(|(native, observed)| native.eq_ignore_ascii_case(observed))
+    }
+
+    fn matches_original_text(&self, native: &str) -> bool {
+        let Some(original) = self.text else { return false };
+        if native.trim() == original.trim() {
+            return true;
+        }
+        // Some native last-known plans put the complete batch/module in StatementText. Only the held original
+        // scope and complete native UTF-16 offsets may select its statement; stored redacted text cannot rebind.
+        if self.origin.original_target().is_none() || !self.is_valid() {
+            return false;
+        }
+        crate::cached_statements::native_statement_from_prefix(self.statement, Some(native))
+            .text()
+            .is_some_and(|selected| selected == original)
     }
 
     fn is_valid(&self) -> bool {
@@ -277,10 +295,13 @@ pub(crate) fn original_statement_evidence(
                     .map(|(node_id, input)| culprit_core::telemetry::MssqlRelationalInputBinding { node_id, input })
                     .collect()
             });
-        let parameter_context = context
-            .matches_original_statement(statement)
-            .then(|| query_plan_of(statement).and_then(parameters::read))
-            .flatten();
+        let original_statement_matches = context.matches_original_statement(statement);
+        #[cfg(test)]
+        if !original_statement_matches {
+            original_statement_diagnostics::report(statement, &context);
+        }
+        let parameter_context =
+            original_statement_matches.then(|| query_plan_of(statement).and_then(parameters::read)).flatten();
         Some(OriginalStatementEvidence { relational_inputs, parameter_context })
     })
 }

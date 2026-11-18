@@ -3,6 +3,7 @@ use culprit_core::{Engine, MeasurementScope, ObservedWaitResource, WaitResourceK
 
 pub fn activity_observation(statement: DefinitionPayload) -> ActivityObservation {
     ActivityObservation {
+        session_context: None,
         blocking_status: ActivityBlockingStatus::Known,
         waiting_on_lock: None,
         key: ActivityKey {

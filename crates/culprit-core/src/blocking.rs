@@ -252,7 +252,9 @@ fn statement_verb(session: &Session) -> Option<String> {
 }
 
 fn head_kind(session: Option<&Session>) -> HeadKind {
-    let Some(s) = session else { return HeadKind::Unknown };
+    let Some(s) = session else {
+        return HeadKind::Unknown;
+    };
     let state = s.state.to_ascii_lowercase();
     if state.contains("idle in transaction") {
         return HeadKind::IdleInTransaction;
@@ -450,6 +452,9 @@ mod tests {
 
     fn session(id: &str, state: &str, blocked_by: Option<&str>) -> Session {
         Session {
+            progress_eligible: None,
+            sql_context: None,
+            activity_key: None,
             action_target: None,
             id: id.into(),
             user: Some("app".into()),

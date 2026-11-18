@@ -9,6 +9,7 @@ use ts_rs::TS;
 pub enum JobEntryKind {
     State,
     RetainedRun,
+    AgentContext,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
@@ -16,7 +17,7 @@ pub enum JobEntryKind {
 pub struct JobEntry {
     pub source: String,
     pub observation_key: String,
-    pub job_id: String,
+    pub job_id: Option<String>,
     pub kind: JobEntryKind,
     pub title: String,
     pub explanation: String,

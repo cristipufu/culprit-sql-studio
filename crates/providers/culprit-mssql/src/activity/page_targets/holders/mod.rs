@@ -41,7 +41,7 @@ impl<R: NativeRead> ActivityReader<R> {
         focus: &PageTaskHolderFocus,
     ) -> Result<PageTaskHolderCapture> {
         validate_native_focus(focus)?;
-        if self.observed || !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
+        if self.observed {
             return Err(invalid_data());
         }
         self.observed = true;

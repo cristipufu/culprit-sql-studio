@@ -181,6 +181,9 @@ async fn unknown_native_role_is_not_rewritten_to_match_a_claimed_known_role() {
 async fn the_source_offers_actions_only_for_qualified_rows_and_retains_the_production_refusal() {
     let target = original_target().await;
     let mut session = culprit_core::Session {
+        progress_eligible: None,
+        sql_context: None,
+        activity_key: None,
         id: culprit_core::Engine::Yugabyte.spec().live_session_id(&target.activity.session),
         action_target: Some(target),
         user: None,

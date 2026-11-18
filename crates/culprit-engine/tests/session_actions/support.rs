@@ -54,6 +54,8 @@ pub(crate) fn live(engine: Engine, id: &str) -> LiveState {
     }))
     .unwrap();
     LiveState {
+        activity_census: None,
+        session_census: None,
         notes: vec![],
         taken_at: "2026-11-15T10:00:01Z".into(),
         sessions: vec![row],

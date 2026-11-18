@@ -111,7 +111,8 @@ fn report() -> Box<Report> {
         observations,
     };
     assert!(native.is_valid());
-    report.snapshot.operations.jobs = Some(Box::new(native));
+    report.snapshot.operations.jobs =
+        Some(Box::new(JobsSnapshot::Timescale { snapshot: Box::new(native), read_complete: true }));
     report
         .snapshot
         .sources
@@ -185,11 +186,12 @@ fn valid_foreign_carriers_are_refused_even_when_a_cached_report_claims_matching_
                 None,
             )),
             _ => {
-                let CollectionTarget::Database(database) =
-                    &mut report.snapshot.operations.jobs.as_mut().unwrap().context.target
+                let JobsSnapshot::Timescale { snapshot: native, .. } =
+                    report.snapshot.operations.jobs.as_mut().unwrap().as_mut()
                 else {
                     panic!()
                 };
+                let CollectionTarget::Database(database) = &mut native.context.target else { panic!() };
                 database.incarnation = Some("captured-native-db".into());
                 report.snapshot.identity.as_mut().unwrap().incarnation = Some("other-native-db".into());
             }
@@ -238,4 +240,171 @@ fn source_only_failure_remains_explicit_and_a_stale_cached_view_cannot_resurrect
     assert_eq!(output["jobs_unavailable"]["sources"][0]["reason"], "Native permission denied.");
     assert!(output.get("jobs").is_none());
     assert!(!output["jobs_unavailable"].to_string().contains("native_rows"));
+}
+
+#[test]
+fn agent_projection_identifies_original_jobs_and_steps_without_borrowing_current_definitions() {
+    let mut report = report();
+    report.snapshot.server.engine = Engine::Mssql;
+    report.snapshot.identity = None;
+    let member = SharedResourceIdentity {
+        engine: Engine::Mssql,
+        kind: SharedResourceKind::Instance,
+        namespace: NativeIdentity::new("PRIVATE-AGENT-MACHINE"),
+        native: NativeIdentity::new("PRIVATE-AGENT-SERVER"),
+    };
+    let job = MssqlAgentJob {
+        observed_at: FROM.into(),
+        job_id: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb".into(),
+        name: "current import configuration".into(),
+        enabled: true,
+        start_step_id: "1".into(),
+        version_number: "2".into(),
+        created_without_offset: None,
+        modified_without_offset: None,
+        activity: None,
+    };
+    let history = MssqlAgentHistory {
+        observed_at: UNTIL.into(),
+        job_id: job.job_id.clone(),
+        instance_id: "2147483647".into(),
+        step_id: "1".into(),
+        stored_step_name: Some("original failed import".into()),
+        run_status: 0,
+        run_date: "20261115".into(),
+        run_time: "0".into(),
+        run_duration: "250101".into(),
+        sql_message_id: "0".into(),
+        sql_severity: "0".into(),
+        retries_attempted: "0".into(),
+        reported_server: Some("PRIVATE-AGENT-HISTORY-SERVER".into()),
+    };
+    let job_id = job.job_id.clone();
+    let other_history = MssqlAgentHistory {
+        job_id: "cccccccc-1111-2222-3333-dddddddddddd".into(),
+        instance_id: "2147483646".into(),
+        stored_step_name: Some("original failed cleanup".into()),
+        ..history.clone()
+    };
+    let other_job_id = other_history.job_id.clone();
+    let rows = vec![
+        OperationalObservation {
+            source: MSSQL_AGENT_JOBS_SOURCE.into(),
+            key: job.key().unwrap(),
+            fact: OperationalFact::MssqlAgentJob(Box::new(job)),
+        },
+        OperationalObservation {
+            source: MSSQL_AGENT_HISTORY_SOURCE.into(),
+            key: history.key().unwrap(),
+            fact: OperationalFact::MssqlAgentHistory(Box::new(history)),
+        },
+        OperationalObservation {
+            source: MSSQL_AGENT_HISTORY_SOURCE.into(),
+            key: other_history.key().unwrap(),
+            fact: OperationalFact::MssqlAgentHistory(Box::new(other_history)),
+        },
+    ];
+    let read = MssqlAgentJobsSnapshot {
+        context: NativeReadContext {
+            target: CollectionTarget::Shared(member.clone()),
+            partition: SourcePartition::InstanceLocal {
+                member: Some(member),
+                epoch: Some("PRIVATE-AGENT-EPOCH".into()),
+            },
+            observed_from: FROM.into(),
+            observed_until: UNTIL.into(),
+            database_writable: None,
+        },
+        metadata: MssqlAgentJobsMetadata {
+            engine_edition: 3,
+            major_version: 16,
+            availability: MssqlAgentAvailability::Supported,
+            visibility: MssqlAgentVisibility::Sysadmin,
+            history_limit: 256,
+            recheck: MssqlAgentMetadataRecheck::Unchanged,
+            capabilities: [
+                MssqlAgentObject::Jobs,
+                MssqlAgentObject::Steps,
+                MssqlAgentObject::History,
+                MssqlAgentObject::Activity,
+                MssqlAgentObject::Sessions,
+                MssqlAgentObject::Services,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, object)| MssqlAgentCapability {
+                object,
+                access: MssqlAgentAccess::Available,
+                columns_sha256: Some(digest(object.native_name().as_bytes())),
+                object_id: Some((i + 100).to_string()),
+            })
+            .collect(),
+        },
+        sources: vec![
+            StateSourceCoverage::collected(MSSQL_AGENT_JOBS_SOURCE.into(), 1),
+            StateSourceCoverage::collected(MSSQL_AGENT_STEPS_SOURCE.into(), 0),
+            StateSourceCoverage::observed(MSSQL_AGENT_HISTORY_SOURCE.into(), 2, false),
+            StateSourceCoverage::unavailable(
+                MSSQL_AGENT_CONTEXT_SOURCE.into(),
+                culprit_core::ErrorCode::PermissionDenied,
+                None,
+            ),
+        ],
+        observations: rows,
+    };
+    assert!(read.is_valid_read(true));
+    report.snapshot.operations.jobs =
+        Some(Box::new(JobsSnapshot::MssqlAgent { snapshot: Box::new(read), read_complete: true }));
+    report.jobs.as_mut().unwrap().summary = "PRIVATE-AGENT-CACHED-PROSE".into();
+    let mut output = json!({});
+    attach(&mut output, &report);
+    assert_eq!(output["jobs"]["native_rows"], 3);
+    assert_eq!(output["jobs"]["read_complete"], true);
+    assert!(output.to_string().contains("250101"));
+    assert!(!output.to_string().contains("PRIVATE-AGENT"));
+    let entries = output["jobs"]["entries"].as_array().unwrap();
+    let histories = entries.iter().filter(|entry| entry["kind"] == "retained-run").collect::<Vec<_>>();
+    assert_eq!(histories.len(), 2);
+    assert!(
+        histories.iter().any(|entry| entry["job_id"] == job_id && entry.to_string().contains("original failed import"))
+    );
+    assert!(
+        histories
+            .iter()
+            .any(|entry| entry["job_id"] == other_job_id && entry.to_string().contains("original failed cleanup"))
+    );
+    assert!(histories.iter().all(|entry| !entry.to_string().contains("current import configuration")));
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["job_id"] == job_id && entry.to_string().contains("current import configuration"))
+    );
+    assert!(!output.to_string().contains("2147483647"));
+}
+
+#[test]
+fn agent_service_states_keep_their_native_labels_and_exclude_unselected_text() {
+    let entry = JobEntry {
+        source: MSSQL_AGENT_CONTEXT_SOURCE.into(),
+        observation_key: "original-agent-context".into(),
+        job_id: None,
+        kind: culprit_core::JobEntryKind::AgentContext,
+        title: "Agent context".into(),
+        explanation: "Original service observations".into(),
+        metrics: vec![
+            Metric::said_text("view.mssql_agent_jobs.field.service_name", "SQL Server Agent (instance A)"),
+            Metric::said_text("view.mssql_agent_jobs.field.service_status", "4"),
+            Metric::said_text("view.mssql_agent_jobs.field.service_name", "SQL Server (instance A)"),
+            Metric::said_text("view.mssql_agent_jobs.field.service_status", "1"),
+            Metric::said_text("unselected-command", "PRIVATE-COMMAND-CANARY"),
+        ],
+        investigation: "Inspect the recorded service state.".into(),
+        verify: "Compare a new bounded observation.".into(),
+    };
+    let output = point(&entry);
+    let metrics = output["metrics"].as_array().unwrap();
+    assert_eq!(metrics.len(), 4);
+    assert!(metrics[0].to_string().contains("SQL Server Agent (instance A)"));
+    assert!(metrics[2].to_string().contains("SQL Server (instance A)"));
+    assert!(!output.to_string().contains("PRIVATE-COMMAND-CANARY"));
 }

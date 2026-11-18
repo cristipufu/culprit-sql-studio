@@ -178,7 +178,8 @@ impl SourceReadFocus {
             && execution.matches_target(&self.target)
             && source.target.telemetry_id().ok() == self.target.telemetry_id().ok()
             && matches!(&row.record, TelemetryRecord::Activity(original)
-            if original.scope == ActivityScopeBasis::RequestDatabase
+            if original.has_session_generation_authority()
+                && original.scope == ActivityScopeBasis::RequestDatabase
                 && original.wait.as_ref().is_some_and(|wait| wait.class == Some(match self.question {
                     SourceReadQuestion::CompilationHistory => ActivityWaitClass::CompilationAdmission,
                     SourceReadQuestion::HyperscaleLogComponents => ActivityWaitClass::LogRateGovernance,

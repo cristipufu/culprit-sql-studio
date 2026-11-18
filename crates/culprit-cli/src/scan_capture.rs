@@ -91,9 +91,10 @@ async fn captured_scan(
             })
             .await
         }
-        LocalCapturedAnalysis::PageServerReads(_) | LocalCapturedAnalysis::Snapshot(_) => {
-            Err(DeliveryProblem::InvalidContract.error())
-        }
+        LocalCapturedAnalysis::PageServerReads(_)
+        | LocalCapturedAnalysis::Snapshot(_)
+        | LocalCapturedAnalysis::Blocking(_)
+        | LocalCapturedAnalysis::SessionCensus(_) => Err(DeliveryProblem::InvalidContract.error()),
     }
 }
 

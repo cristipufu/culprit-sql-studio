@@ -4,6 +4,7 @@ mod focus;
 mod page_writers;
 mod request_memory;
 mod retirement;
+mod session_authority;
 mod shared;
 mod task_holders;
 use super::*;
@@ -15,6 +16,7 @@ use std::sync::Arc;
 
 fn activity(id: &str) -> ActivityObservation {
     ActivityObservation {
+        session_context: None,
         key: ActivityKey {
             session: NativeActivityIdentity { id: id.into(), generation: "login-1".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),

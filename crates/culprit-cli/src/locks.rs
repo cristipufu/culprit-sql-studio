@@ -34,7 +34,9 @@ pub fn parse_since(text: &str) -> Result<f64> {
         "" | "h" | "hour" | "hours" => n,
         "m" | "min" | "minutes" => n / 60.0,
         "d" | "day" | "days" => n * 24.0,
-        _ => return Err(Error::invalid(t!("cli.since.unit", unit = unit)).with_hint(t!("cli.since.hint"))),
+        _ => {
+            return Err(Error::invalid(t!("cli.since.unit", unit = unit)).with_hint(t!("cli.since.hint")));
+        }
     };
     if hours.is_nan() || hours <= 0.0 {
         return Err(Error::invalid(t!("cli.since.positive")));
@@ -218,6 +220,8 @@ mod tests {
         ])).unwrap();
         let blocking = culprit_core::blocking::analyze(culprit_core::Engine::Postgres, &sessions, &[], unqualified);
         LiveState {
+            activity_census: None,
+            session_census: None,
             session_action_route: None,
             taken_at: "2026-11-15T10:00:00Z".into(),
             sessions,

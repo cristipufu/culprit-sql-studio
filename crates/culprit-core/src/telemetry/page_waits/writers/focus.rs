@@ -71,12 +71,14 @@ impl PageWaitWriterFocus {
         self.is_valid()
             && frame.read_complete()
             && frame.context().has_qualified_local_owner()
+            && frame.has_session_generation_authority(&original.original.key.session)
             && waiter
                 .reference
                 .is_some_and(|reference| original.matches_parent(frame.source(), waiter.observation, reference))
             && self.candidates.iter().all(|candidate| {
                 frame.row(&candidate.key).is_some_and(|row| {
-                    row.reference == Some(&candidate.parent)
+                    frame.has_session_generation_authority(&candidate.key.session)
+                        && row.reference == Some(&candidate.parent)
                         && row.observation.statement_identity.as_ref() == Some(&candidate.statement_identity)
                         && row.observation.scope == ActivityScopeBasis::RequestDatabase
                         && original

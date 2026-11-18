@@ -50,7 +50,11 @@ pub(super) fn frame_select_with_context(
             "JOIN sys.dm_user_db_resource_governance g ON g.database_id=DB_ID() AND g.database_name=d.database_name",
         ),
     };
-    let ordering = if matches!(policy, QueryPolicy::Activity) { "ORDER BY a.session_id,a.request_id" } else { "" };
+    let ordering = if matches!(policy, QueryPolicy::Activity) {
+        "ORDER BY CASE WHEN a.request_id IS NOT NULL THEN 0 WHEN a.open_transaction_count>0 THEN 1 WHEN a.reported_blocker=1 THEN 2 ELSE 3 END,a.session_id,a.request_id"
+    } else {
+        ""
+    };
     let hints = policy.hints();
     format!(
         r#"SELECT TOP (@P1) /* culprit */
@@ -117,8 +121,10 @@ pub(crate) fn request_columns(availability: Availability) -> String {
 
 pub(super) fn metadata(identity: IdentityDetail, availability: Availability) -> String {
     let columns = request_columns(availability);
+    let session_context = super::session_context::COLUMNS;
     let rows = format!(
-        r#"SELECT {columns},
+        r#"SELECT {columns},{session_context},
+  CASE WHEN s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE blocking_session_id>0) THEN 1 ELSE 0 END AS reported_blocker,
   CASE WHEN NOT EXISTS(SELECT 1 FROM sys.dm_exec_requests ar WHERE ar.session_id=s.session_id) THEN 1 ELSE 0 END AS no_current_request,
   CASE WHEN r.request_id IS NOT NULL THEN CASE WHEN r.database_id=DB_ID() THEN 1
    WHEN s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE database_id=DB_ID() AND blocking_session_id>0) THEN 4 ELSE 5 END
@@ -136,9 +142,7 @@ pub(super) fn metadata(identity: IdentityDetail, availability: Availability) -> 
   WHERE st.session_id=s.session_id ORDER BY at.transaction_begin_time,st.transaction_id,dt.database_id
  ) tx
  WHERE s.is_user_process=1 AND s.session_id<>@@SPID
-  AND (r.request_id IS NOT NULL OR s.open_transaction_count>0
-   OR s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE blocking_session_id>0))
-  AND (@P2=0 OR r.request_id IS NOT NULL OR (s.open_transaction_count>0 AND(s.database_id=DB_ID() OR tx.transaction_id IS NOT NULL))
+  AND (@P2=0 OR r.request_id IS NOT NULL OR s.database_id=DB_ID() OR (s.open_transaction_count>0 AND tx.transaction_id IS NOT NULL)
    OR s.session_id IN(SELECT blocking_session_id FROM sys.dm_exec_requests WHERE database_id=DB_ID() AND blocking_session_id>0))
 "#
     );
@@ -179,7 +183,7 @@ CROSS APPLY(SELECT x.value('@session[1]','int') AS session_id,x.value('@login[1]
  x.value('@last_start[1]','varchar(40)') AS last_request_start,x.value('@last_end[1]','varchar(40)') AS last_request_end) i
 LEFT JOIN sys.dm_exec_sessions s ON s.session_id=i.session_id AND s.login_time=CAST(CONVERT(datetime2,i.session_generation,126) AS datetime)
  AND s.last_request_start_time=CAST(CONVERT(datetime2,i.last_request_start,126) AS datetime) AND s.last_request_end_time=CAST(CONVERT(datetime2,i.last_request_end,126) AS datetime)
-LEFT JOIN sys.dm_exec_connections c ON c.session_id=s.session_id AND c.parent_connection_id IS NULL
+LEFT JOIN sys.dm_exec_connections c ON c.session_id=s.session_id AND c.most_recent_session_id=s.session_id AND c.parent_connection_id IS NULL
 OUTER APPLY sys.dm_exec_sql_text(CASE WHEN NOT EXISTS(SELECT 1 FROM sys.dm_exec_requests r WHERE r.session_id=s.session_id) THEN c.most_recent_sql_handle END) t
 "#;
 

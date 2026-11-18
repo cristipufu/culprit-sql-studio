@@ -137,6 +137,7 @@ pub fn decode_row(row: Row, database_oid: &str) -> Result<ActivityRecord> {
             culprit_core::engines::postgres_activity_statement_identity(&pid, &backend_start, &request.generation)
         });
         let observation = ActivityObservation {
+            session_context: None,
             waiting_on_lock: waiting_on_lock(&row),
             blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
             key: ActivityKey {
@@ -340,6 +341,9 @@ pub(crate) fn project(record: &ActivityRecord) -> Session {
         _ => None,
     };
     Session {
+        progress_eligible: None,
+        sql_context: None,
+        activity_key: None,
         action_target: None,
         id: row.string("pid"),
         user: row.text("username"),

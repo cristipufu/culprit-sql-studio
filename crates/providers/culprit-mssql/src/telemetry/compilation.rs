@@ -1,4 +1,4 @@
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{query_store::costs, read::NativeRead, value::Rec};
 use culprit_core::{Result, Source, telemetry::*};
 
@@ -9,7 +9,7 @@ impl SnapshotRecipe for QueryCompilation {
     const DATASET: SnapshotDataset = SnapshotDataset::QueryCompilation;
     const NAME: &'static str = "query-compilation-state";
     const SOURCE: &'static Source = &crate::sources::QUERY_COMPILATION;
-    const INSTANCE_LOCAL: bool = false;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabase;
     const SOURCE_READ: Option<SourceReadQuestion> = Some(SourceReadQuestion::CompilationHistory);
     const REQUIRES_FULL_METADATA: bool = true;
 

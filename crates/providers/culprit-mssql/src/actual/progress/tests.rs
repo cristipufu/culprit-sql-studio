@@ -5,6 +5,7 @@ use crate::{
     value::Val,
 };
 use culprit_core::telemetry::SourceShutdown;
+mod session_authority;
 
 const XML: &str = r#"<ShowPlanXML><BatchSequence><Batch><Statements><StmtSimple StatementText="SELECT id FROM orders" QueryHash="0x0123456789ABCDEF" StatementSubTreeCost="1"><QueryPlan><RelOp NodeId="0" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="100" EstimatedTotalSubtreeCost="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="10" ActualExecutions="1" /></RunTimeInformation><TableScan><Object Table="[orders]"/></TableScan></RelOp></QueryPlan></StmtSimple></Statements></Batch></BatchSequence></ShowPlanXML>"#;
 
@@ -120,6 +121,7 @@ fn layout(live: bool, profiles: bool) -> Rec {
 fn request() -> Rec {
     Rec::of(&[
         ("request_count", Val::Int(1)),
+        ("session_established", Val::Bool(true)),
         ("ordinal", Val::Int(0)),
         ("observed_at", Val::Text("2020-01-01T12:00:00Z".into())),
         ("checked_session_id", Val::Int(42)),

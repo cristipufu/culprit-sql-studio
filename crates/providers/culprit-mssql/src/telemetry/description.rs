@@ -160,7 +160,7 @@ pub(super) async fn identity<R: NativeRead>(
 
 /// Query Store history is a logical-database authority replicated to readable members. Reading it does not
 /// authorize replica-local operational sources or establish that this member captured the retained executions.
-pub(super) async fn query_history_identity<R: NativeRead>(
+pub(crate) async fn query_history_identity<R: NativeRead>(
     session: &mut R,
     host: &str,
     port: u16,

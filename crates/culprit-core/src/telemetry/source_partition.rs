@@ -74,7 +74,9 @@ impl CollectionDescription {
             return false;
         }
         if let Some(execution) = self.observation.execution_context() {
-            let Ok(scope) = NativeSourceReadScope::from_context(execution) else { return false };
+            let Ok(scope) = NativeSourceReadScope::from_context(execution) else {
+                return false;
+            };
             let header_valid = match &self.observation {
                 SourceObservation::SourceRead { .. } => self.observation.covers_request(),
                 SourceObservation::PagedSourceRead { snapshot, focus_key, .. } => {
@@ -88,6 +90,9 @@ impl CollectionDescription {
             return header_valid && self.partition == SourcePartition::Target && scope.matches_target(&self.target);
         }
         if let SourceObservation::Jobs { snapshot, metadata } = &self.observation {
+            return metadata.matches_source(self, snapshot);
+        }
+        if let SourceObservation::MssqlAgentJobs { snapshot, metadata } = &self.observation {
             return metadata.matches_source(self, snapshot);
         }
         if let SourceObservation::FocusedBlocking { snapshot, result } = &self.observation {

@@ -30,6 +30,7 @@ mod populations;
 mod queries;
 mod replication;
 mod resource_io;
+mod session_census;
 mod source_overhead;
 mod source_partitions;
 mod statement_grants;
@@ -640,3 +641,5 @@ mod jobs;
 mod query_store_statements;
 
 mod storage;
+
+mod instance_resources;

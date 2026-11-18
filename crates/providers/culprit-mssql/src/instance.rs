@@ -5,6 +5,9 @@ use culprit_core::{Engine, Error, ErrorCode, Result, telemetry::*};
 
 const MIN_SUPPORTED_MAJOR: u32 = 11;
 const SUPPORTED_EDITIONS: &[i64] = &[2, 3, 4, 8];
+pub(crate) fn supports_profile(edition: i64, major: u32) -> bool {
+    SUPPORTED_EDITIONS.contains(&edition) && major >= MIN_SUPPORTED_MAJOR
+}
 const IDENTITY: &str = r#"SELECT /* culprit */
  CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition,
  CAST(SERVERPROPERTY('ProductMajorVersion') AS nvarchar(16)) AS major,
@@ -78,7 +81,7 @@ pub(crate) async fn observe<R: NativeRead>(reader: &mut R) -> Result<Observation
     let edition = integer(&row, "edition")?;
     let major = text(&row, "major")?.parse::<u32>().map_err(|_| invalid_data())?;
     let observed_at = canonical_time(&text(&row, "observed_at")?)?;
-    if !SUPPORTED_EDITIONS.contains(&edition) || major < MIN_SUPPORTED_MAJOR {
+    if !supports_profile(edition, major) {
         return Ok(Observation { edition, major, observed_at, native: None });
     }
     let identity = SharedResourceIdentity {

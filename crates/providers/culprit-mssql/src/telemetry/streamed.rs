@@ -7,6 +7,34 @@ use crate::{
 use crate::{read::NativeRead, value::Rec};
 use culprit_core::{Result, Source, telemetry::*};
 
+/// A recipe chooses its acquisition policy explicitly. Local cache scope is never logical database history.
+#[derive(Clone, Copy)]
+pub(super) enum SnapshotAcquisition {
+    AzureDatabase,
+    AzureDatabaseCache,
+    ConnectedDatabaseCache,
+}
+impl SnapshotAcquisition {
+    fn uses_local_authority(self) -> bool {
+        !matches!(self, Self::AzureDatabase)
+    }
+
+    fn require_cache_platform(self, context: &crate::local_source::Context) -> Result<()> {
+        match self {
+            Self::AzureDatabase => Err(invalid_data()),
+            Self::AzureDatabaseCache if context.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE => {
+                Err(culprit_core::Error::new(
+                    culprit_core::ErrorCode::Unsupported,
+                    culprit_core::t!("collection.azure_sql_only"),
+                ))
+            }
+            // Context::read already observes and admits the native platform. Unsupported products never reach
+            // this point; missing member/recovery evidence still withholds source qualification and plan proofs.
+            Self::AzureDatabaseCache | Self::ConnectedDatabaseCache => Ok(()),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub(super) trait SnapshotRecipe: Send + Sync {
     type Layout: Send + Sync;
@@ -14,8 +42,7 @@ pub(super) trait SnapshotRecipe: Send + Sync {
     const NAME: &'static str;
     const SOURCE: &'static Source;
     const REQUIRES_FULL_METADATA: bool = false;
-    /// Connected-cache facts need a checked native compute member and process epoch, independent of history groups.
-    const INSTANCE_LOCAL: bool;
+    const ACQUISITION: SnapshotAcquisition;
     const SOURCE_READ: Option<SourceReadQuestion> = None;
     async fn layout<R: NativeRead>(&self, reader: &mut R, budget: &CollectionBudget) -> Result<Option<Self::Layout>>;
     fn query(&self, layout: &Self::Layout) -> String;
@@ -52,11 +79,28 @@ struct NativeSnapshotReader<D: SnapshotRecipe, R> {
     budget: CollectionBudget,
     host: String,
     port: u16,
-    physical: Option<String>,
+    authority: SnapshotAuthority,
     source_read: Option<SourceReadRequest>,
     purpose: SnapshotPurpose,
-    local: Option<crate::local_source::Context>,
     layout: Option<D::Layout>,
+}
+enum SnapshotAuthority {
+    Unobserved,
+    AzureLogical { physical_incarnation: String },
+    Local(Box<crate::local_source::Context>),
+}
+impl SnapshotAuthority {
+    async fn admit<R: NativeRead>(&self, reader: &mut R) -> Result<()> {
+        match self {
+            Self::Unobserved => Err(invalid_data()),
+            Self::Local(context) if context.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE => {
+                crate::resources::admit_instance_resources(reader).await.map_err(ReadError::into_error)
+            }
+            Self::AzureLogical { .. } | Self::Local(_) => {
+                crate::resources::admit_resources(reader).await.map_err(ReadError::into_error)
+            }
+        }
+    }
 }
 struct SourceReadRequest {
     focus_key: String,
@@ -117,10 +161,9 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
             budget: request.budget.clone(),
             host,
             port,
-            physical: None,
+            authority: SnapshotAuthority::Unobserved,
             source_read,
             purpose,
-            local: None,
             layout: None,
         };
         Ok(Self { inner: culprit_read::SnapshotSource::new(reader, request)? })
@@ -156,41 +199,35 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                 let visible = state::clock(&mut self.io).await?.1;
                 let target = actual.target.clone();
                 let observed_from = actual.observed_from.clone();
-                self.local = Some(context);
+                self.authority = SnapshotAuthority::Local(Box::new(context));
                 (target, SourcePartition::Target, observed_from, visible)
-            } else if D::INSTANCE_LOCAL {
+            } else if D::ACQUISITION.uses_local_authority() {
                 let context = crate::local_source::Context::read(&mut self.io, &self.host, self.port).await?;
-                // Source locality does not expand this recipe's independently qualified platform or role policy.
-                if context.activity.edition != crate::probe::ENGINE_EDITION_AZURE_SQL_DATABASE {
-                    return Err(culprit_core::Error::new(
-                        culprit_core::ErrorCode::Unsupported,
-                        culprit_core::t!("collection.azure_sql_only"),
-                    ));
-                }
+                D::ACQUISITION.require_cache_platform(&context)?;
                 crate::read::require_primary(context.activity.writable)?;
                 let partition = context.source_partition()?;
                 let observed_from = context.activity.at.clone();
                 let target = context.activity.database.clone().into();
                 let visible = if D::REQUIRES_FULL_METADATA { state::clock(&mut self.io).await?.1 } else { true };
-                self.local = Some(context);
+                self.authority = SnapshotAuthority::Local(Box::new(context));
                 (target, partition, observed_from, visible)
             } else {
                 description::ensure_supported(&mut self.io).await?;
                 let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
                 let (at, visible) = state::clock(&mut self.io).await?;
-                self.physical = Some(physical);
+                self.authority = SnapshotAuthority::AzureLogical { physical_incarnation: physical };
                 (database.into(), SourcePartition::Target, at, visible)
             };
         if D::REQUIRES_FULL_METADATA && !metadata_visible {
             return Err(crate::catalog_visibility::unavailable());
         }
-        crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+        self.authority.admit(&mut self.io).await?;
         self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
         let snapshot =
             PagedSnapshotDescription { dataset: D::DATASET, observed_from, sources: vec![D::SOURCE.name.into()] };
         let observation = match &self.source_read {
             Some(expected) => {
-                let context = self.local.as_ref().ok_or_else(invalid_data)?;
+                let SnapshotAuthority::Local(context) = &self.authority else { return Err(invalid_data()) };
                 SourceObservation::PagedSourceRead {
                     snapshot,
                     focus_key: expected.focus_key.clone(),
@@ -209,7 +246,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
     }
     async fn begin(&mut self, request: &CollectionRequest) -> Result<()> {
         let Some(layout) = &self.layout else { return Ok(()) };
-        crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+        self.authority.admit(&mut self.io).await?;
         let limit = request.budget.max_snapshot_rows as usize + 1;
         self.io
             .begin_stream(&self.recipe.query(layout), vec![Parameter::Integer(limit as i64)], limit)
@@ -238,7 +275,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         if let Some(layout) = &self.layout {
             self.recipe.recheck(&mut self.io, layout).await?;
         }
-        if let Some(before) = &self.local {
+        if let SnapshotAuthority::Local(before) = &self.authority {
             let source_visibility =
                 if self.source_read.is_some() || self.purpose == SnapshotPurpose::NativeCostMeasurement {
                     Some(state::clock(&mut self.io).await?.1)
@@ -297,8 +334,11 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
                 scopes: vec![scope],
             });
         }
+        let SnapshotAuthority::AzureLogical { physical_incarnation } = &self.authority else {
+            return Err(invalid_data());
+        };
         let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
-        if initial.target.database() != Some(&database) || self.physical.as_ref() != Some(&physical) {
+        if initial.target.database() != Some(&database) || physical_incarnation != &physical {
             return Ok(culprit_read::SnapshotRecheck {
                 execution: None,
                 unchanged: false,

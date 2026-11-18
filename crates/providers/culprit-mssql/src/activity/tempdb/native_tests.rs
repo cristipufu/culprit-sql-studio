@@ -133,7 +133,7 @@ async fn prove_task_space(pool: Arc<Pool>, session: &str, port: u16) {
     assert_eq!((budget.max_queries, budget.statement_timeout_ms, budget.total_timeout_ms), (7, 1000, 5000));
     let mut reader = ActivityReader::new(
         RecordedRead { owner: ReadSession::new(pool.clone(), budget.clone()), calls: vec![] },
-        ReadOptions { budget, scope: ActivityScope::CurrentDatabase, identity: IdentityDetail::Endpoint },
+        ReadOptions { budget, identity: IdentityDetail::Endpoint },
         "127.0.0.1".into(),
         port,
     );

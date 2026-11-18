@@ -126,3 +126,46 @@ fn content_binding_cannot_replace_the_native_access_relationship_even_with_a_rec
     let error = crate::plan_xml::parse_retained_definition(&definition, &source).unwrap_err();
     assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
 }
+
+mod full_batch;
+
+#[test]
+fn native_xml_attribute_whitespace_keeps_original_parameter_proof_through_canonical_export_and_restore() {
+    let source = crate::plan_xml::test_source(SnapshotDataset::RetainedPlans);
+    let sql = SQL.replacen("SELECT ", "SELECT\r\n\t", 1);
+    let xml = XML.replacen("StatementText=\"SELECT ", "StatementText=\"SELECT&#xD;&#xA;&#x9;", 1);
+    let definition = decode(&row(Some(&sql), &xml), &limits(), Some(&source)).unwrap();
+    let original_proof =
+        definition.parameter_context_proof.clone().expect("original native statement is exactly bound");
+    assert!(original_proof.matches_retained(&source, &definition));
+    let original_native_sha = definition.batch_plan.native_sha256.clone();
+    let record = TelemetryRecord::ObjectDefinition(
+        ObjectDefinitionRecord::new(
+            source.observation.snapshot().unwrap().sources[0].source.clone(),
+            ObjectDefinitionFact::MssqlRetainedPlan(Box::new(definition)),
+        )
+        .unwrap(),
+    );
+    // This is the canonical structural boundary, not a claim of durable capture authentication.
+    let capture = CaptureIdentity { observation_id: "controlled-original-parameter-proof".into(), revision: None };
+    let first = ExportedRecord::new(&source, &capture, record).unwrap();
+    let second = ExportedRecord::new(&source, &capture, first.record.clone()).unwrap();
+    assert_eq!(first, second, "canonical export may not change the content-bound original proof");
+    let TelemetryRecord::ObjectDefinition(record) = &first.record else { panic!() };
+    let ObjectDefinitionFact::MssqlRetainedPlan(retained) = &record.fact else { panic!() };
+    assert_eq!(retained.parameter_context_proof.as_ref(), Some(&original_proof));
+    assert_eq!(retained.batch_plan.native_sha256, original_native_sha);
+    assert!(original_proof.matches_retained(&source, retained));
+    let restored = crate::plan_xml::parse_retained_definition(retained, &source).unwrap();
+    assert_eq!(restored.facts().parameter_context.as_ref(), Some(&original_proof.context));
+    assert_eq!(restored.root.facts().access_rows.unwrap().actual_total, Some(10000.0));
+    let encoded = serde_json::to_string(&first).unwrap();
+    for private in ["private-compiled-canary", "private-runtime-canary"] {
+        assert!(!encoded.contains(private));
+    }
+
+    let mut changed = (**retained).clone();
+    changed.batch_plan.payload =
+        DefinitionPayload::plan(&xml.replace("NodeId=\"7\"", "NodeId=\"8\""), culprit_core::Engine::Mssql);
+    assert!(!changed.is_valid(), "a canonical body change must still invalidate the original proof");
+}

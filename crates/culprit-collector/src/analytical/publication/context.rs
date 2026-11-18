@@ -24,6 +24,10 @@ enum PublicObservation<'a> {
         focus_key: &'a str,
         execution_key: String,
     },
+    MssqlAgentJobs {
+        snapshot: &'a StateSnapshotDescription,
+        metadata: &'a MssqlAgentJobsMetadata,
+    },
     Jobs {
         snapshot: &'a StateSnapshotDescription,
         metadata: &'a TimescaleJobsMetadata,
@@ -139,6 +143,9 @@ pub(super) fn observation(value: &SourceObservation) -> Result<Value> {
             }
         }
         SourceObservation::Jobs { snapshot, metadata } => PublicObservation::Jobs { snapshot, metadata },
+        SourceObservation::MssqlAgentJobs { snapshot, metadata } => {
+            PublicObservation::MssqlAgentJobs { snapshot, metadata }
+        }
         SourceObservation::CacheEntryMemory { snapshot, focus } => {
             PublicObservation::CacheEntryMemoryContext { snapshot, focus_key: focus.key()? }
         }

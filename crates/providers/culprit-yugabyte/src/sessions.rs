@@ -66,7 +66,9 @@ async fn read_live(observed: &mut ReadSession, connector: &Connector, environmen
     let mut transactions = HashMap::new();
     let mut backends = HashMap::new();
     for row in rows.into_iter().take(1000) {
-        let Some(raw) = row.text("sample") else { continue };
+        let Some(raw) = row.text("sample") else {
+            continue;
+        };
         let v: Value =
             serde_json::from_str(&raw).map_err(|_| Error::invalid(t!("provider.yugabyte.error.malformed_session")))?;
         let Some(pid) = v.get("pid").and_then(Value::as_i64).filter(|n| *n > 0) else {
@@ -94,6 +96,9 @@ async fn read_live(observed: &mut ReadSession, connector: &Connector, environmen
             notes.push(t!("provider.yugabyte.sessions.hidden"));
         }
         sessions.push(Session {
+            progress_eligible: None,
+            sql_context: None,
+            activity_key: None,
             action_target: original
                 .as_ref()
                 .and_then(|original| actions::target(&v, original, action_context.as_ref(), node.as_deref()?)),
@@ -172,6 +177,8 @@ async fn read_live(observed: &mut ReadSession, connector: &Connector, environmen
     let blocking = culprit_core::blocking::analyze(Engine::Yugabyte, &sessions, &waits, &[]);
     let session_actions = actions::offered(&sessions, environment);
     Ok(LiveState {
+        activity_census: None,
+        session_census: None,
         taken_at: p.now,
         sessions,
         waits: vec![],
@@ -218,7 +225,9 @@ fn optional_context<T>(result: Result<T>) -> Result<Option<T>> {
 pub(crate) fn lock_query(database: u32, transaction: Option<&str>, limit: usize) -> Result<String> {
     let transaction = match transaction {
         None => "NULL".into(),
-        Some(value) if value.len() == 32 && value.bytes().all(|b| b.is_ascii_hexdigit()) => format!("'{value}'::uuid"),
+        Some(value) if value.len() == 32 && value.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            format!("'{value}'::uuid")
+        }
         _ => return Err(culprit_core::telemetry::CollectionStop::InvalidPage.error()),
     };
     Ok(format!(

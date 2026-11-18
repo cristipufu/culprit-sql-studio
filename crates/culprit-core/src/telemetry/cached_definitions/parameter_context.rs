@@ -33,6 +33,7 @@ impl MssqlParameterContextProof {
         crate::redact::redact_parameter_context(&mut context, crate::Engine::Mssql);
         if crate::serialization::json_size(&context, MAX_PARAMETER_FACT_BYTES).is_err() {
             context = PlanParameterContext {
+                retrieved_from_cache: context.retrieved_from_cache,
                 parameters: vec![],
                 uses: vec![],
                 issues: vec![PlanParameterIssue::MetadataLimit],

@@ -1,14 +1,11 @@
 //! The baseline persists native metadata before any optional SQL or owner investigation.
 use crate::{
-    activity::{
-        ActivityReader, ActivityScope, IdentityDetail, ReadOptions,
-        database_context::{self, Context},
-    },
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
     query_store::decode,
 };
 use async_trait::async_trait;
-use culprit_core::{ErrorCode, MeasurementScope, Result, telemetry::*};
+use culprit_core::{ErrorCode, Result, telemetry::*};
 use std::sync::Arc;
 
 const MAX_BASELINE_ROWS: u32 = 500;
@@ -40,11 +37,7 @@ impl ActivitySource {
         }
         let mut request = request.clone();
         request.budget = bounded_budget(&request.budget);
-        let options = ReadOptions {
-            budget: request.budget.clone(),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::Endpoint,
-        };
+        let options = ReadOptions { budget: request.budget.clone(), identity: IdentityDetail::Endpoint };
         let reader = NativeActivityReader { reader: ActivityReader::open(pool, options, host, port)?, verified: None };
         Ok(Self { inner: culprit_read::FrozenSource::new(reader, &request)? })
     }
@@ -97,111 +90,17 @@ impl TelemetrySource for ActivitySource {
 pub(crate) async fn capture<R: crate::read::NativeRead>(
     reader: &mut ActivityReader<R>,
 ) -> Result<(CollectionDescription, Vec<ActivityObservation>)> {
-    let before = AuthorityRead::admit(database_context::initial(reader).await)?;
-    let mut baseline = reader.observe_baseline().await?;
-    // Activity DMVs describe the member actually connected, including documented readable replicas. This
-    // eligibility is source-specific: no cache/history/memory/resource primary gate is changed here.
-    if !matches!(baseline.frame.context.edition, 2 | 3 | 4 | 5 | 8) || baseline.frame.context.major < 11 {
+    let pending = crate::activity::capture::PendingActivityFrame::begin(
+        reader,
+        crate::activity::capture::ActivityAuthorityPolicy::RetainPartialBaseline,
+    )
+    .await?;
+    if !matches!(pending.baseline.frame.context.edition, 2 | 3 | 4 | 5 | 8) || pending.baseline.frame.context.major < 11
+    {
         return Err(culprit_core::Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
     }
-    let after = AuthorityRead::admit(match &before.context {
-        Some(context) => database_context::recheck(reader, context).await,
-        None => database_context::initial(reader).await,
-    })?;
-    if before.context.is_none() || after.context.is_none() {
-        // Optional columns were admitted by the initial held profile. A missing final authority cannot
-        // attest that profile; retain the independent activity frame and its explicit coverage gap.
-        for record in &mut baseline.frame.records {
-            if let Some(counters) = &mut record.facts.request_counters {
-                counters.page_server_reads = None;
-            }
-        }
-    }
-    for context in [&before.context, &after.context].into_iter().flatten() {
-        if !context.matches_frame(&baseline.frame.context) {
-            return Err(CollectionStop::SourceChanged.error());
-        }
-    }
-    if let (Some(before), Some(after)) = (&before.context, &after.context)
-        && before.connection_changed(after)
-    {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    let qualified = match (&before.context, &after.context) {
-        (Some(before), Some(after)) if before.is_qualified() && after.is_qualified() => {
-            if !before.same_source(after) {
-                return Err(CollectionStop::SourceChanged.error());
-            }
-            true
-        }
-        _ => false,
-    };
-    let database_wide = [&before.context, &after.context].into_iter().flatten().all(|context| context.database_wide);
-    if !database_wide || !qualified {
-        baseline.coverage.state = culprit_core::SourceState::Partial;
-        baseline.coverage.complete_scope = false;
-        baseline.coverage.error_code = before.error_code.or(after.error_code).or(baseline.coverage.error_code);
-        if !database_wide {
-            baseline.coverage.error_code = Some(ErrorCode::PermissionDenied);
-        }
-        baseline.coverage.stopped.get_or_insert(CollectionStop::SourceUnavailable);
-    }
-    let observed_from = before
-        .context
-        .as_ref()
-        .map_or_else(|| baseline.frame.context.at.clone(), |context| context.activity.at.clone());
-    let observed_until =
-        after.context.as_ref().map_or_else(|| baseline.frame.context.at.clone(), |context| context.activity.at.clone());
-    let mut context = match &before.context {
-        Some(before) => before.capture_context()?,
-        None => baseline.frame.context.clone(),
-    };
-    if !qualified {
-        context.epoch = None;
-    }
-    let at = baseline.frame.context.at;
-    let database_writable = baseline.frame.context.writable;
-    let member = before.context.as_ref().and_then(Context::source_instance);
-    let partition = SourcePartition::InstanceLocal { member, epoch: context.epoch.clone() };
-    let observations = export_observations(baseline.frame.records);
-    let activity = ActivitySnapshotDescription {
-        epoch: context.epoch,
-        database_writable,
-        observed_from,
-        observed_until,
-        at,
-        scope: MeasurementScope::Database,
-        population: ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers,
-        native_rows: baseline.native_rows,
-        observations: observations.len() as u32,
-        coverage: baseline.coverage,
-    };
-    if !activity.is_valid() {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    let description = CollectionDescription {
-        target: context.database.into(),
-        partition,
-        source: culprit_core::source_id::SESSIONS.into(),
-        continuity: SourceContinuity::Unverified,
-        observation: SourceObservation::Activity(activity),
-    };
-    Ok((description, observations))
-}
-/// A completed metadata authority failure cannot erase the independent native actor frame. Terminal
-/// ownership/budget failures still stop all follow-up work and require the enclosing source to close.
-struct AuthorityRead {
-    context: Option<Context>,
-    error_code: Option<ErrorCode>,
-}
-impl AuthorityRead {
-    fn admit(result: Result<Context>) -> Result<Self> {
-        match result {
-            Ok(context) => Ok(Self { error_code: context.qualification_error, context: Some(context) }),
-            Err(error) if crate::read::stops_remaining_reads(&error) => Err(error),
-            Err(error) => Ok(Self { context: None, error_code: Some(error.code) }),
-        }
-    }
+    let completed = pending.finish(reader).await?;
+    Ok((completed.description, export_observations(completed.frame.records)))
 }
 pub(crate) fn export_observations(records: Vec<crate::activity::ActivityRecord>) -> Vec<ActivityObservation> {
     let mut observations: Vec<_> =

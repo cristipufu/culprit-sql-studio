@@ -10,11 +10,15 @@ fn snapshot() -> Box<culprit_core::Snapshot> {
     snapshot.server.engine = database.engine;
     snapshot.server.database = database.database.clone();
     snapshot.bind_identity(database);
-    snapshot.operations.jobs = Some(Box::new(read));
+    snapshot.operations.jobs =
+        Some(Box::new(JobsSnapshot::Timescale { snapshot: Box::new(read), read_complete: true }));
     snapshot
 }
 fn replace_target(snapshot: &mut culprit_core::Snapshot, change: &str) {
-    let target = &mut snapshot.operations.jobs.as_mut().unwrap().context.target;
+    let JobsSnapshot::Timescale { snapshot: read, .. } = snapshot.operations.jobs.as_mut().unwrap().as_mut() else {
+        panic!()
+    };
+    let target = &mut read.context.target;
     let CollectionTarget::Database(database) = target else { panic!() };
     match change {
         "database" => database.database = "another-database".into(),
@@ -36,7 +40,7 @@ fn replace_target(snapshot: &mut culprit_core::Snapshot, change: &str) {
 fn matching_namespace_reuses_the_raw_view_without_modification_or_inferred_attribution() {
     let snapshot = snapshot();
     let raw = snapshot.operations.jobs.as_ref().unwrap();
-    let expected = explain(raw, true).unwrap();
+    let expected = explain(raw).unwrap();
     let before = serde_json::to_value(raw).unwrap();
     let actual = explain_snapshot(&snapshot).unwrap().unwrap();
     assert_eq!(serde_json::to_value(actual).unwrap(), serde_json::to_value(expected).unwrap());
@@ -55,7 +59,7 @@ fn valid_foreign_job_namespaces_are_rejected_without_invalidating_independent_ar
         assert!(read.is_valid(), "{change}: the original source remains individually valid");
         let before = serde_json::to_value(read).unwrap();
         assert!(explain_snapshot(&snapshot).is_err(), "{change}");
-        let independent = explain(read, true).unwrap();
+        let independent = explain(read).unwrap();
         assert_eq!((independent.native_rows, independent.observed_rows), (1, 1));
         assert!(independent.entries[0].metrics.iter().any(|metric| metric.text.as_deref() == Some("9007199254740993")));
         assert_eq!(serde_json::to_value(read).unwrap(), before);
@@ -74,11 +78,11 @@ fn unknown_outer_identity_keeps_exact_independent_positives_with_explicit_namesp
         }
         let read = snapshot.operations.jobs.as_ref().unwrap();
         assert_eq!(
-            read.context.target.snapshot_namespace_comparison(&snapshot).reason(),
+            read.context().target.snapshot_namespace_comparison(&snapshot).reason(),
             Some(&ComparisonReason::UnknownIdentity)
         );
         let actual = explain_snapshot(&snapshot).unwrap().unwrap();
-        assert_eq!(actual.context, read.context, "the enclosing scan cannot replace original ownership");
+        assert_eq!(actual.context, *read.context(), "the enclosing scan cannot replace original ownership");
         assert!(actual.limitations.contains(&t!("view.observations.limit.namespace")));
         assert_eq!((actual.native_rows, actual.observed_rows), (1, 1));
     }

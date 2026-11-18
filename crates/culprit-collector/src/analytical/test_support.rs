@@ -20,6 +20,8 @@ pub use resource_io::{
 };
 pub use wait_counters::{WaitCounterCase, wait_counter_evidence};
 mod activity;
+mod session_census;
+pub use session_census::{SessionCensusCase, session_census_evidence};
 mod compilation_definitions;
 mod compilation_intervals;
 pub use activity::{activity_evidence_cases, activity_observation, assert_activity_capture};
@@ -137,7 +139,9 @@ pub use projection::JsonProjection;
 mod native_failures;
 pub use native_failures::native_failure_evidence_cases;
 mod jobs;
+mod mssql_agent_jobs;
 pub use jobs::{JobsCase, assert_jobs_capture, jobs_evidence, jobs_evidence_cases};
+pub use mssql_agent_jobs::{MssqlAgentJobsCase, mssql_agent_jobs_evidence, mssql_agent_jobs_evidence_cases};
 mod maintenance_progress;
 pub use maintenance_progress::maintenance_progress_evidence_cases;
 mod maintenance_blocking;
@@ -406,7 +410,9 @@ impl AsyncRead for Input {
     fn poll_read(mut self: Pin<&mut Self>, _: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
         if self.offset == self.bytes.len() {
             match self.fault {
-                Fault::LateError => return Poll::Ready(Err(std::io::Error::other("owned late failure"))),
+                Fault::LateError => {
+                    return Poll::Ready(Err(std::io::Error::other("owned late failure")));
+                }
                 Fault::Stall => return Poll::Pending,
                 _ => (),
             }
@@ -901,6 +907,7 @@ pub fn shared_operational_capture(destination: &str, schema: &str) -> Recovery {
 
 fn activity_sample() -> ActivityObservation {
     ActivityObservation {
+        session_context: None,
         blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         waiting_on_lock: None,
         key: ActivityKey {
@@ -1010,3 +1017,6 @@ mod storage;
 pub use storage::{StorageCase, storage_evidence};
 mod qualification;
 pub use qualification::{QualificationFixture, QualificationFixtureCase};
+
+mod instance_resources;
+pub use instance_resources::{InstanceResourceCase, instance_resource_evidence};

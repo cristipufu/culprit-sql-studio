@@ -7,8 +7,11 @@ use culprit_core::{
 };
 use culprit_engine::{LocalCaptureAnalysisKind, LocalCaptureRequest, LocalCapturedAnalysis};
 
+mod blocking;
+mod context;
 mod hyperscale_log_components;
 mod memory_clerks;
+mod session_census;
 mod snapshots;
 
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
@@ -68,6 +71,8 @@ impl CulpritMcp {
             LocalCapturedAnalysis::MemoryClerks(analysis) => memory_clerks::captured(&analysis)?,
             LocalCapturedAnalysis::HyperscaleLogComponents(analysis) => hyperscale_log_components::captured(&analysis)?,
             LocalCapturedAnalysis::Snapshot(analysis) => snapshots::captured(&analysis)?,
+            LocalCapturedAnalysis::Blocking(analysis) => blocking::captured(&analysis)?,
+            LocalCapturedAnalysis::SessionCensus(analysis) => session_census::captured(&analysis)?,
         };
         json_size(&value, MAX_OUTPUT_BYTES).map_err(|error| match error {
             JsonSizeError::LimitExceeded => DeliveryProblem::Capacity.error(),

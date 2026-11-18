@@ -34,7 +34,10 @@ impl ActivityFrameEvidence<'_> {
         let mut requests = Vec::new();
         for row in self.rows() {
             let observation = row.observation;
-            if observation.scope != ActivityScopeBasis::RequestDatabase || observation.key.request.is_none() {
+            if !self.has_session_generation_authority(&observation.key.session)
+                || observation.scope != ActivityScopeBasis::RequestDatabase
+                || observation.key.request.is_none()
+            {
                 continue;
             }
             let Some(statement_identity) = &observation.statement_identity else { continue };

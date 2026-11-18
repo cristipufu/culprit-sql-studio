@@ -14,8 +14,10 @@ pub(super) fn value<'a>(row: &'a Rec, name: &str) -> Result<&'a Val> {
 fn generation(row: &Rec, name: &str) -> Result<String> {
     native_time(&text(row, name)?)
 }
-fn age(row: &Rec, start: &str) -> Result<Option<String>> {
-    let Some(start) = optional_text(row, start)? else { return Ok(None) };
+pub(super) fn age(row: &Rec, start: &str) -> Result<Option<String>> {
+    let Some(start) = optional_text(row, start)? else {
+        return Ok(None);
+    };
     let parse =
         |value: &str| chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f").map_err(|_| invalid_data());
     let now = parse(&text(row, "native_observed_at")?)?;
@@ -32,7 +34,9 @@ fn counters(row: &Rec, prefix: &str) -> Result<ActivityCounters> {
     })
 }
 pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
-    let Some(session) = optional_counter(row, "session_id")? else { return Ok(None) };
+    let Some(session) = optional_counter(row, "session_id")? else {
+        return Ok(None);
+    };
     let request = optional_counter(row, "request_id")?
         .map(|id| {
             Ok::<_, culprit_core::Error>(NativeActivityIdentity {
@@ -64,14 +68,17 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
         None
     };
     let current_locator = request.as_ref().map(|_| request_locator(row)).transpose()?.flatten();
+    let key = ActivityKey {
+        session: NativeActivityIdentity { id: session, generation: generation(row, "session_generation")? },
+        transaction: if request.is_none() { optional_counter(row, "transaction_id")? } else { None },
+        request: request.clone(),
+    };
+    let session_context = super::session_context::decode(row, &key, idle, no_current_request)?;
     let observation = ActivityObservation {
+        session_context,
         waiting_on_lock,
         blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
-        key: ActivityKey {
-            session: NativeActivityIdentity { id: session, generation: generation(row, "session_generation")? },
-            transaction: if request.is_none() { optional_counter(row, "transaction_id")? } else { None },
-            request: request.clone(),
-        },
+        key,
         idle,
         scope: match integer(row, "scope_basis")? {
             1 => ActivityScopeBasis::RequestDatabase,
@@ -124,7 +131,9 @@ fn request_counters(row: &Rec) -> Result<ActivityCounters> {
     Ok(counters)
 }
 fn request_locator(row: &Rec) -> Result<Option<RequestLocator>> {
-    let Some(handle) = optional_text(row, "sql_handle")? else { return Ok(None) };
+    let Some(handle) = optional_text(row, "sql_handle")? else {
+        return Ok(None);
+    };
     // Native work without an active statement has no SQL locator, even when its request and counters are visible.
     let start = match value(row, "statement_start")? {
         Val::Null | Val::Int(-1) => return Ok(None),
@@ -169,7 +178,10 @@ fn owner(row: &Rec) -> Result<Option<ActivityWaitOwner>> {
         0 => None,
         id if id > 0 => Some(ActivityWaitOwner::Session {
             id: id.to_string(),
-            generation: optional_text(row, "blocker_generation")?.map(|value| native_time(&value)).transpose()?,
+            generation: optional_text(row, "blocker_generation")?
+                .map(|value| native_time(&value))
+                .transpose()?
+                .filter(|value| super::session_context::established_login(value)),
         }),
         -2 => Some(ActivityWaitOwner::Transaction { native_id: id.to_string(), owner: TransactionWaitOwner::Orphaned }),
         -3 => Some(ActivityWaitOwner::Transaction { native_id: id.to_string(), owner: TransactionWaitOwner::Recovery }),

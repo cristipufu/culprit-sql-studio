@@ -196,6 +196,7 @@ enum Analysis {
     Queries,
     SourceOverhead,
     Blocking,
+    SessionCensus,
     MemoryFailures,
     NativeFailures,
     Jobs,
@@ -226,6 +227,7 @@ enum Analysis {
     PerformanceCounters,
     MemoryClerks,
     DatabaseProperties,
+    InstanceResources,
     Storage,
     WaitCounters,
     Cleanup,
@@ -236,7 +238,7 @@ impl Analysis {
         match self {
             Self::WaitCounters => vec![EvidenceFamily::WaitCounterSamples],
             Self::SourceOverhead => vec![], // Metadata is selected before constructing a row EvidenceRequest.
-            Self::Blocking | Self::Maintenance => vec![EvidenceFamily::ActivityObservations],
+            Self::Blocking | Self::Maintenance | Self::SessionCensus => vec![EvidenceFamily::ActivityObservations],
             Self::CachedPlans => vec![EvidenceFamily::ObjectDefinitions],
             Self::Tuning => vec![EvidenceFamily::TuningObservations],
             Self::Replication => vec![EvidenceFamily::ReplicationSamples],
@@ -261,6 +263,7 @@ impl Analysis {
             | Self::CounterRatios
             | Self::PerformanceCounters
             | Self::MemoryClerks
+            | Self::InstanceResources
             | Self::DatabaseProperties
             | Self::Storage
             | Self::ConnectionOutcomes
@@ -432,9 +435,17 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
             let analysis = culprit_engine::collected_resources::wait_counters(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::wait_counters(&analysis.report))?;
         }
+        Some(Analysis::SessionCensus) => {
+            let analysis = culprit_engine::collected_resources::session_census(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::session_census(&analysis.report))?;
+        }
         Some(Analysis::Storage) => {
             let analysis = culprit_engine::collected_resources::storage(&capture)?;
             emit(out, &analysis, common.max_output_bytes, || observations::storage(&analysis.report))?;
+        }
+        Some(Analysis::InstanceResources) => {
+            let analysis = culprit_engine::collected_resources::instance_resources(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::instance_resources(&analysis.report))?;
         }
         Some(Analysis::DatabaseProperties) => {
             let analysis = culprit_engine::collected_resources::database_properties(&capture)?;

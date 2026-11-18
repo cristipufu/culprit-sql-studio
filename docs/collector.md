@@ -61,8 +61,8 @@ An explicitly configured MCP host can also read original local captures through 
 engine's optional `OutboxCaptureReader` adapter. `culprit mcp --evidence-outbox DIRECTORY` installs that capability;
 `analyze_capture` accepts a delegated connection, its exact original observation ID and the closed analysis choice
 `page_server_reads`, `memory_clerks`, `hyperscale_log_components`, `performance_counters`, `database_properties`,
-`compilation`, `configured_log_rates`, `connection_outcomes`, `jobs`, `request_memory`, `task_space`,
-`current_request_work`, `statement_work`, `maintenance_progress`, `completed_spills` or `storage`. The existing
+`instance_resources`, `compilation`, `configured_log_rates`, `connection_outcomes`, `jobs`, `request_memory`, `task_space`,
+`current_request_work`, `statement_work`, `maintenance_progress`, `completed_spills`, `storage`, `blocking` or `session_census`. The existing
 Outbox owner checks the journal association, Ready state, confirmed native shutdown, manifest and every artifact
 in one canonical verification pass before projecting the requested analysis. Page-server reads keep runtime rows
 and independently matched query definitions. Memory clerks retain all original Operational rows and source
@@ -72,8 +72,20 @@ The other Operational reports use the same original owner and family-specific pu
 declared family is refused; an unavailable native source retains its unavailable state despite a complete local
 file read. Query-global compilation context remains separate from physical acquisition ownership. Details return
 at most five entries with separate original and presented counts. Optional SQL companions are not opened implicitly.
+Grant and task reports include exact native measurements and generation-checked request context. A current
+statement is not the statement that acquired a reservation or allocated temporary pages; unresolved and changed
+relationships withhold its SQL. Focused work keeps the original participant's client labels and clock separate from
+the later native point. SQL previews are bounded and redacted. Database-reported client names do not establish a
+business-service or source-code owner.
 It performs no native, recovery or warehouse read. The original native window, optional population membership,
 collector clocks and actual local verification bytes remain distinct in the result.
+
+Blocking analysis consumes the selected focused Activity closure and its exact original Activity capture under
+one worker and cumulative row, byte and absolute deadline allowance. Each input passes the same canonical
+journal/manifest/body verifier once. The parent comes only from the authenticated focused receipt, never a latest
+lookup. Missing, changed or unsettled parents fail the analysis; native source gaps and unverified original scope
+remain explicit after a complete local read. Presented chains, nodes and relationships are bounded independently
+of original counts, with no live administrative action attached to historical identities.
 
 `culprit scan CONNECTION --evidence-outbox DIRECTORY --memory-clerks-capture OBSERVATION` explicitly attaches
 one verified clerk capture to the normal report after confirmed native scan shutdown. Existing captured or live
@@ -965,6 +977,21 @@ instance/host/resource-governor scope does not establish elastic-pool ownership.
 exclude instance performance counters, processor topology, compiler
 gateways and shared tempdb capacity. The shared resource is assigned once instead of reread for every database.
 
+The SQL Server/Managed Instance operational point includes bounded native scheduler queues, process/system memory,
+grant waiters, pending I/O and current I/O waits. Explicit scan shared-resource diagnostics use the same native
+reader. `instance_resources` analysis preserves every population's retained, sampled and unknown counts; an
+incomplete population cannot admit optional follow-up work. These are shared instantaneous observations, not
+database CPU percentages, storage latency or proof of a particular query's cause. Health keeps the evidence folded
+and informational. No additional native reads run in an ordinary scan without the shared-resource selection.
+
+SQL Server/Managed Instance `jobs` captures and explicit scan failure diagnostics share one Agent metadata reader.
+It reads job/step definitions, retained outcomes, current Agent activity and service/startup context, with at most
+13 queries, one second per statement and five seconds overall. Azure SQL Database reports this source unavailable
+without querying `msdb`. Commands, raw history messages, credentials and proxy configuration are omitted. Historical
+step numbers and names remain historical; current definitions cannot identify the command used by an earlier run.
+Permission gaps, partial history and native local times remain explicit. This is metadata collection: Culprit does
+not start jobs. Its recipe remains cost-unqualified until the applicable native profile is measured.
+
 `memory-failures` is a separate opt-in point observation; it takes no historical `--from`/`--until` bounds and is not
 part of the general operational profile. Managed Instance supports the instance route; boxed SQL Server does not
 support this native DMV. The pool route requires an eligible writable member and rechecks its physical route and
@@ -1051,6 +1078,28 @@ identity checks and confirmed shutdown precede accepting the result. Scan limits
 three seconds per statement and ten seconds overall. These limits do not prove low server cost: qualify the
 source under representative load before scheduling it. Native application, login and host labels follow the
 existing activity collection policy; SQL literals are redacted. Snapshot sharing removes those client labels.
+
+## Session and request census
+
+SQL Server Activity retains selected-database user sessions, including idle and dormant rows, together with their
+current requests and required blocker context. The same bounded metadata query prioritizes current requests, open
+transactions and blockers before quiet rows; a truncated or permission-limited population stays partial. Native
+client-library, client-reported process, TDS protocol and login/last-request clock facts remain session context.
+Native times without a UTC offset remain explicit tokens. They are not reassigned a time zone or an execution epoch.
+
+Use `--analysis session-census` on an archived Activity range, or `analysis: "session_census"` with the existing MCP
+`analyze_capture` tool and an explicitly installed local Outbox reader. Local analysis uses the same canonical
+single-capture worker as retained blocking inputs; it does not query a database or fetch a latest capture. Live
+renders the same informational view with raw entries and qualifications folded. JSON retains original source,
+native clocks, row counts, exact counters and individual request relationships.
+
+A session can have several MARS requests. Session totals are not added across those rows, and neither session nor
+request counts are transport-connection counts. A request's native `connection_id` is retained only on that exact
+request row. Quiet rows receive no SQL enrichment. Prior session batches remain separate from current-request
+SQL; no query, lock owner, service identity or incident is inferred from a session ID or a client label. The
+session-only progress endpoint is withheld when several current requests share its ID. Idle or dormant sessions
+alone are not faults. The Activity recipe remains cost-unqualified until its changed native template is measured
+for an applicable profile.
 
 ## Activity baselines and diagnostic episodes
 

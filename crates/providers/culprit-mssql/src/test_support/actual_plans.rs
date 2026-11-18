@@ -19,6 +19,21 @@ const MAX_CAPTURE_PLANS: usize = 16;
 /// The actor must be owned inside the fixture's unwind/cleanup boundary. Failure panics: no subsequent SQL or
 /// reuse is permitted on that actor, even when the driver's attention call returns Ok (not settlement proof).
 pub(crate) async fn actual_plans(client: &mut MsClient, sql: &str, parameters: Vec<Parameter>) -> Vec<String> {
+    actual_plan_capture(client, sql, parameters).await.plans
+}
+
+/// Result rows and native XML belong to the same completely drained owned execution. Neither a second execution
+/// nor a later runtime-counter read is needed to verify its result semantics.
+pub(crate) struct ActualPlanCapture {
+    pub plans: Vec<String>,
+    pub results: Vec<Rec>,
+}
+
+pub(crate) async fn actual_plan_capture(
+    client: &mut MsClient,
+    sql: &str,
+    parameters: Vec<Parameter>,
+) -> ActualPlanCapture {
     batch(client, "SET STATISTICS XML ON").await;
     let response = tokio::time::timeout(CAPTURE_TIMEOUT, async {
         let mut query = tiberius::Query::new(sql);
@@ -67,6 +82,7 @@ struct Capture {
     bytes: usize,
     sets: usize,
     plans: Vec<String>,
+    results: Vec<Rec>,
     limit: Option<&'static str>,
 }
 
@@ -84,10 +100,12 @@ impl Capture {
             self.limit = Some("rows or decoded bytes");
             return;
         }
+        let mut plan_row = false;
         for (_, value) in row.columns() {
             if let Val::Text(xml) = value
                 && xml.contains("<ShowPlanXML")
             {
+                plan_row = true;
                 if self.plans.len() == MAX_CAPTURE_PLANS {
                     self.limit = Some("plan count");
                     return;
@@ -95,15 +113,18 @@ impl Capture {
                 self.plans.push(xml.clone());
             }
         }
+        if !plan_row {
+            self.results.push(row.clone());
+        }
     }
-    fn finish(self) -> Result<Vec<String>, &'static str> {
+    fn finish(self) -> Result<ActualPlanCapture, &'static str> {
         if let Some(limit) = self.limit {
             return Err(limit);
         }
         if self.plans.is_empty() {
             return Err("no actual XML plan returned");
         }
-        Ok(self.plans)
+        Ok(ActualPlanCapture { plans: self.plans, results: self.results })
     }
 }
 
@@ -119,4 +140,15 @@ fn a_response_limit_never_turns_a_retained_plan_prefix_into_a_success() {
     capture.row(&Rec::of(&[("xml", Val::Text("<ShowPlanXML />".into()))]));
     capture.row(&Rec::of(&[("native", Val::Text("x".repeat(MAX_CAPTURE_BYTES)))]));
     assert!(capture.finish().is_err());
+}
+
+#[test]
+fn result_semantics_and_plan_xml_share_one_capture_and_one_existing_retention_budget() {
+    let mut capture = Capture::default();
+    capture.row(&Rec::of(&[("native_result", Val::Int(9007199254740993))]));
+    capture.row(&Rec::of(&[("xml", Val::Text("<ShowPlanXML />".into()))]));
+    let captured = capture.finish().unwrap();
+    assert_eq!(captured.plans, vec!["<ShowPlanXML />"]);
+    assert_eq!(crate::read::signed_integer(&captured.results[0], "native_result").unwrap(), 9007199254740993);
+    assert_eq!(captured.results.len(), 1, "plan output is not an application result row");
 }

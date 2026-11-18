@@ -4,7 +4,7 @@ import { Jobs } from "../components/Jobs";
 import { HealthTab } from "../components/Health";
 import type { Report } from "../gen/Report";
 import { partial } from "../test/fixtures";
-import { JOBS_SOURCE, jobPoint, jobsEvidence, jobsReport } from "../test/jobs";
+import { JOBS_SOURCE, jobPoint, jobsEvidence, jobsReport, agentJobEvidence, agentJobsReport } from "../test/jobs";
 import { t } from "./i18n";
 
 test("job points keep exact native counts in collapsed paged text without rendering read-owner metadata", () => {
@@ -64,4 +64,28 @@ test("Jobs assesses the native-failure opt-in while an explicitly recorded log-s
   expect(render()).toContain(`aria-label="${t("view.native_failures.title")}"`);
   report.snapshot.sources![1] = { source: "native failures", state: "not-applicable", reason: "An explicit native-log coverage qualification." };
   expect(render()).toContain("An explicit native-log coverage qualification.");
+});
+
+test("Agent history reuses folded exact text, local-clock limits and source binding without a Timescale window", () => {
+  const evidence=agentJobEvidence();const report=agentJobsReport(evidence);
+  const html=renderToStaticMarkup(<Jobs evidence={evidence} report={report}/>);
+  expect(html).toContain("2147483647");expect(html).toContain("250101");expect(html).toContain("stored &lt;script&gt;agent-canary&lt;/script&gt;");expect(html).not.toContain("<script>");
+  expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);expect(html).not.toContain("private-read-database-canary");expect(html).not.toContain("private-read-host-canary");
+  expect(html).toContain("Job local times have no recorded offset.");
+  report.entries[0]!.kind="state";
+  const mismatch=renderToStaticMarkup(<Jobs evidence={evidence} report={report}/>);expect(mismatch).toContain(t("ui.memory_failures.missing_row"));expect(mismatch).not.toContain("2147483647");
+});
+test("Agent source-only gap cannot fall through to healthy Health emptiness", () => {
+  const report=partial<Report>({snapshot:{server:{engine:"mssql"},sources:[{source:"mssql-agent-jobs",state:"unavailable",reason:"Native msdb visibility denied."}],operations:{spaces:[],counters:[],sequences:[],multixacts:[],sqlite:null,cluster:null}}});
+  const html=renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server"/>);
+  expect(html).toContain(t("view.mssql_agent_jobs.title"));expect(html).toContain("Native msdb visibility denied.");expect(html).not.toContain(t("ui.health.empty"));
+});
+
+test("Agent not-applicable and acquired-without-view markers retain explicit Health coverage", () => {
+  for (const state of ["not-applicable","collected"] as const) {
+    const report=partial<Report>({snapshot:{server:{engine:"mssql"},sources:[{source:"mssql-agent-jobs",state,reason:null}],operations:{spaces:[],counters:[],sequences:[],multixacts:[],sqlite:null,cluster:null}}});
+    const html=renderToStaticMarkup(<HealthTab report={report} pressure={null} resources={[]} engineLabel="SQL Server"/>);
+    expect(html).toContain(t("view.mssql_agent_jobs.title"));expect(html).not.toContain(t("ui.health.empty"));
+    if (state==="collected") expect(html).toContain(t("view.jobs.invalid"));
+  }
 });

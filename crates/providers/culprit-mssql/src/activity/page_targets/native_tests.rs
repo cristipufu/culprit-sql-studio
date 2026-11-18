@@ -15,11 +15,7 @@ async fn local_limited_header_projection_preserves_native_file_epoch_and_bounded
         Box::pin(async move {
             let port = fixture.port;
             let pool = fixture.pool.as_ref().unwrap().clone();
-            let options = || ReadOptions {
-                budget: CollectionBudget::default(),
-                scope: ActivityScope::CurrentDatabase,
-                identity: IdentityDetail::Endpoint,
-            };
+            let options = || ReadOptions { budget: CollectionBudget::default(), identity: IdentityDetail::Endpoint };
             let mut reader = ActivityReader::open(pool.clone(), options(), "127.0.0.1".into(), port).unwrap();
             let initial = context::initial(&mut reader).await.unwrap();
             assert!(

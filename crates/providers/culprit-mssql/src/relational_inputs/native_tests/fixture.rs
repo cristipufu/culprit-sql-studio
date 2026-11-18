@@ -3,22 +3,23 @@ use super::*;
 use crate::test_support::{OwnedSourceFixture, verify_owned_source};
 
 pub(super) async fn run(label: &str, work: impl AsyncFnOnce(&OwnedSourceFixture, &str)) {
-    let fixture = OwnedSourceFixture::open("tvp-causal-fixture").await.unwrap();
+    let fixture = Box::pin(OwnedSourceFixture::open("tvp-causal-fixture")).await.unwrap();
     let owner = std::env::var("CULPRIT_SMOKE_OWNER").unwrap();
     let database = format!(
         "culprit_tvp_{label}_{owner}_{}_{}",
         std::process::id(),
         chrono::Utc::now().timestamp_nanos_opt().unwrap()
     );
-    let body = AssertUnwindSafe(async {
+    // The fixture retains this one body through unwind and native settlement without inlining its state.
+    let body = AssertUnwindSafe(Box::pin(async {
         create_database(&fixture, &database).await;
         work(&fixture, &database).await;
-    })
+    }))
     .catch_unwind()
     .await;
     // A separate owned actor closes the database after every body/setup failure. A successful Attention return
     // never allows a failed fixture actor to serve as cleanup authority.
-    let cleanup = AssertUnwindSafe(delete_database(&fixture, &database)).catch_unwind().await;
+    let cleanup = AssertUnwindSafe(Box::pin(delete_database(&fixture, &database))).catch_unwind().await;
     match (body, cleanup) {
         (Err(original), Err(_)) => {
             eprintln!("owned TVP cleanup also failed; no successful native qualification is recorded");

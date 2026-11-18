@@ -91,7 +91,8 @@ impl DiagnosticEpisode {
             return Err(invalid());
         }
         let (Some(epoch), Some(statement)) = (&native.epoch, &original.statement_identity) else { return Ok(None) };
-        if !scope.partition.is_qualified()
+        if !original.has_session_generation_authority()
+            || !scope.partition.is_qualified()
             || !matches!(original.scope, ActivityScopeBasis::RequestDatabase | ActivityScopeBasis::SessionDatabase)
         {
             return Ok(None);
@@ -148,7 +149,8 @@ impl DiagnosticEpisode {
         let (Some(epoch), Some(statement)) = (&native.epoch, &original.statement_identity) else {
             return Ok(PageWaitFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
         };
-        if self.scope.native_epoch.is_none()
+        if !original.has_session_generation_authority()
+            || self.scope.native_epoch.is_none()
             || !scope.partition.is_qualified()
             || statement_identity.is_none()
             || original.scope != ActivityScopeBasis::RequestDatabase

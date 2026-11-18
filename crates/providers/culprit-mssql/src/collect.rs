@@ -408,10 +408,13 @@ async fn collect_misc(
     } else {
         server_state_unreadable(&mut part.outcome, probe);
     }
-    let (shared_resources, shared_coverage) =
+    let shared =
         crate::resource_counters::collect(provider.pool.clone(), probe, options.collect_shared_resources).await;
-    part.outcome.merge(shared_coverage);
-    if let Some(counters) = shared_resources {
+    part.outcome.merge(shared.coverage);
+    if let Some(read) = shared.instance_resources {
+        part.pressure.get_or_insert_with(Default::default).instance_resources = Some(read);
+    }
+    if let Some(counters) = shared.counters {
         part.pressure
             .get_or_insert_with(Default::default)
             .resource_counters
@@ -658,6 +661,10 @@ async fn acquire(
     .await;
     snapshot.operations.task_space = task_space;
     task_space_coverage.append_to(&mut snapshot);
+    if options.collect_native_failures {
+        crate::jobs::collect(provider.pool.clone(), &provider.endpoint_host, provider.endpoint_port, &mut snapshot)
+            .await;
+    }
     provider.pool.ensure_available()?;
     let identity =
         workloads.database_identity(&snapshot.server.database, &provider.endpoint_host, provider.endpoint_port)?;

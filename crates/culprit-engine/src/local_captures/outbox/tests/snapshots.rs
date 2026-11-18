@@ -38,6 +38,8 @@ async fn every_new_snapshot_report_retains_one_exact_original_without_source_wor
         !matches!(
             kind,
             LocalCaptureAnalysisKind::PageServerReads
+                | LocalCaptureAnalysisKind::SessionCensus
+                | LocalCaptureAnalysisKind::Blocking
                 | LocalCaptureAnalysisKind::MemoryClerks
                 | LocalCaptureAnalysisKind::HyperscaleLogComponents
         )

@@ -184,7 +184,9 @@ fn horizons(values: &BTreeMap<String, Value>, holder: CleanupHolder) -> Result<V
                     CleanupHorizon::Data => {
                         vec![CleanupHorizon::Data, CleanupHorizon::Catalog, CleanupHorizon::SharedCatalog]
                     }
-                    CleanupHorizon::Catalog => vec![CleanupHorizon::Catalog, CleanupHorizon::SharedCatalog],
+                    CleanupHorizon::Catalog => {
+                        vec![CleanupHorizon::Catalog, CleanupHorizon::SharedCatalog]
+                    }
                     CleanupHorizon::SharedCatalog => return Err(invalid()),
                 },
                 native_name: native_name.into(),

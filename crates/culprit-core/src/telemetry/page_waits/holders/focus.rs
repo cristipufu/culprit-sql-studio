@@ -82,6 +82,7 @@ impl PageTaskHolderFocus {
         self.is_valid()
             && frame.read_complete()
             && frame.context().has_qualified_local_owner()
+            && frame.has_session_generation_authority(&self.participant.original.key.session)
             && row
                 .reference
                 .is_some_and(|reference| self.participant.matches_parent(frame.source(), row.observation, reference))

@@ -4,4 +4,4 @@
  * The native root predicate defines what a complete point observation can establish. It is not a claim about
  * every session, parallel task or distributed component associated with the database.
  */
-export type ActivityPopulation = "client-backends" | "active-requests-open-transactions-and-blockers" | "default-database-connections" | "node-client-backends-and-connection-workers";
+export type ActivityPopulation = "client-backends" | "active-requests-open-transactions-and-blockers" | "user-sessions-current-requests-and-blockers" | "default-database-connections" | "node-client-backends-and-connection-workers";

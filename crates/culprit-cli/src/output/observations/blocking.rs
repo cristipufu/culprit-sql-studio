@@ -117,9 +117,15 @@ fn owner(owner: &ActivityWaitOwner) -> String {
             let id = format!("{native_id:?}");
             match owner {
                 TransactionWaitOwner::Active => t!("evidence.cli.blocking_owner.active", id = id),
-                TransactionWaitOwner::Prepared => t!("evidence.cli.blocking_owner.prepared", id = id),
-                TransactionWaitOwner::Orphaned => t!("evidence.cli.blocking_owner.orphaned", id = id),
-                TransactionWaitOwner::Recovery => t!("evidence.cli.blocking_owner.recovery", id = id),
+                TransactionWaitOwner::Prepared => {
+                    t!("evidence.cli.blocking_owner.prepared", id = id)
+                }
+                TransactionWaitOwner::Orphaned => {
+                    t!("evidence.cli.blocking_owner.orphaned", id = id)
+                }
+                TransactionWaitOwner::Recovery => {
+                    t!("evidence.cli.blocking_owner.recovery", id = id)
+                }
             }
         }
         ActivityWaitOwner::Unknown { native_id, .. } => {

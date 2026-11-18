@@ -106,6 +106,7 @@ pub fn parameter_evidence(case: ParameterEvidenceCase) -> (CollectionDescription
 
 fn native_context(case: ParameterEvidenceCase) -> PlanParameterContext {
     let mut parameter = PlanParameter {
+        integer_values_equal: None,
         name: Some("@customer".into()),
         data_type: Some("nvarchar(4000)".into()),
         compiled: State::Recorded,
@@ -127,12 +128,14 @@ fn native_context(case: ParameterEvidenceCase) -> PlanParameterContext {
         parameter.comparison = Comparison::Unavailable;
     }
     let mut context = PlanParameterContext {
+        retrieved_from_cache: None,
         parameters: vec![parameter],
         uses: vec![PlanParameterUse { parameter_index: 0, node_id: 7, kind: PlanParameterUseKind::EqualitySeek }],
         issues: vec![],
     };
     if case == ParameterEvidenceCase::UnusedDifferentParameter {
         context.parameters.push(PlanParameter {
+            integer_values_equal: None,
             name: Some("@unused".into()),
             comparison: Comparison::DifferentRepresentation,
             ..context.parameters[0].clone()

@@ -336,6 +336,9 @@ impl Out {
         for note in &live.notes {
             println!("{}", t!("cli.live.limitation", note = note));
         }
+        if let Some(census) = &live.session_census {
+            println!("{}", census.summary);
+        }
         for s in &live.sessions {
             println!(
                 "{:>6}  {:<10} {:>9}  {}{}  {}",

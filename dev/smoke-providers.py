@@ -21,6 +21,7 @@ from mysql_replication_fixture import MySqlMovingReplication
 
 ROOT = Path(__file__).resolve().parent.parent
 OWNER_LABEL = "dev.culprit.smoke"
+MSSQL_SHORT_HOST_OWNER_LENGTH = 14
 STARTUP_BUDGET = 240
 COMMAND_BUDGET = 120
 CONNECT_BUDGET = 3
@@ -68,7 +69,7 @@ POSTGRES_REPLICATION_IMAGES = {"postgres-replication": "postgres:18.6", "postgre
 OPTIONAL_NATIVE_MODULES = {
     "culprit-postgres": ("telemetry::native_tests::replication::", "jobs::", "maintenance_waits::"),
     "culprit-mysql": ("telemetry::native_tests::replication::", "telemetry::native_tests::replication_movement::"),
-    "culprit-mssql": ("telemetry::replication::native_tests::",),
+    "culprit-mssql": ("telemetry::replication::native_tests::", "jobs::"),
 }
 
 
@@ -163,6 +164,11 @@ class Database:
         self.owner = secrets.token_hex(12)
         self.name = f"culprit-smoke-{fixture.name}-{self.owner}"
         self.hostname = f"culprit-smoke-{fixture.engine}-{self.owner}"
+        if fixture.engine == "mssql":
+            # SQL Server on Linux supports physical hostnames of at most fifteen characters. The full
+            # nonce remains in the native database name and Docker label, not a truncated member claim.
+            self.hostname = "m" + self.owner[:MSSQL_SHORT_HOST_OWNER_LENGTH]
+            self.fixture = replace(fixture, database=f"{fixture.database}_{self.owner}")
         self.password = f"Smoke!{secrets.token_hex(16)}Aa9"
         self.limited_password = f"Reader!{secrets.token_hex(16)}Aa9"
         self.commands = Commands([self.password, self.limited_password])
@@ -215,7 +221,7 @@ class Database:
         deadline = time.monotonic() + STARTUP_BUDGET
         while time.monotonic() < deadline:
             try:
-                status, _ = self.sql("SELECT 1;", database=self.admin_database(), check=False, timeout=5)
+                status, _ = self.sql(self.readiness_query(), database=self.admin_database(), check=False, timeout=5)
             except TimeoutError:
                 status = 1
             if status == 0:
@@ -224,6 +230,9 @@ class Database:
             time.sleep(2)
         self.commands.run(["docker", "logs", "--tail", "60", self.name], check=False, echo=True)
         raise TimeoutError(f"{self.fixture.name} did not become ready")
+
+    def readiness_query(self):
+        return "SELECT 1;"
 
     def restart(self):
         if not self.owns_container():
@@ -438,6 +447,20 @@ class Database:
         print(f"Removed owned {self.fixture.name} container and anonymous volumes", flush=True)
 
 
+class AgentDatabase(Database):
+    def configuration(self):
+        environment, command = super().configuration()
+        environment["MSSQL_AGENT_ENABLED"] = "true"
+        return environment, command
+
+    def readiness_query(self):
+        # A reported Running service can precede Agent's own initialized database connection.
+        return """IF NOT EXISTS (
+ SELECT 1 FROM sys.dm_exec_sessions WHERE program_name=N'SQLAgent - Generic Refresher'
+) THROW 51000, N'Owned Agent fixture is not ready.', 1;
+SELECT 1;"""
+
+
 class HadrDatabase(Database):
     def configuration(self):
         environment, command = super().configuration()
@@ -641,7 +664,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fixtures", nargs="+", choices=[f.name for f in FIXTURES + REPLICATION_FIXTURES]
                         + list(POSTGRES_REPLICATION_IMAGES)
-                        + ["mssql-hadr", "mssql-replication", "mysql-moving-replication", "yugabyte-cluster", "ssh", "all"])
+                        + ["mssql-agent", "mssql-hadr", "mssql-replication", "mysql-moving-replication", "yugabyte-cluster", "ssh", "all"])
     parser.add_argument("--test", nargs=2, action="append", metavar=("CRATE", "FILTER"),
                         help="run only this live test selection; repeat for multiple commands in the same fixture")
     args = parser.parse_args()
@@ -664,6 +687,12 @@ def main():
             with PostgresReplication(primary, standby, OWNER_LABEL) as database:
                 database.verify(args.test)
             count += 1
+    if "mssql-agent" in args.fixtures:
+        fixture = replace(next(fixture for fixture in FIXTURES if fixture.name == "mssql"), name="mssql-agent")
+        with AgentDatabase(fixture) as database:
+            database.seed()
+            database.verify(args.test or [("culprit-mssql", "jobs::native_tests::")])
+        count += 1
     if "mssql-hadr" in args.fixtures:
         fixture = replace(next(fixture for fixture in FIXTURES if fixture.name == "mssql"), name="mssql-hadr")
         with HadrDatabase(fixture) as database:

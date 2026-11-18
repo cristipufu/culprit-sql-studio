@@ -1,6 +1,8 @@
 //! Provider-neutral activity facts and bounded selection of persistent issues and their blocker context.
 use super::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+mod session_context;
+pub use session_context::*;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -199,6 +201,9 @@ pub enum ActivityBlockingStatus {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ActivityObservation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_context: Option<Box<ActivitySessionContext>>,
     pub blocking_status: ActivityBlockingStatus,
     /// Native current lock-wait verdict, independent of owner visibility or measured wait duration.
     /// None means the source could not establish whether this actor is waiting on a lock.
@@ -229,6 +234,17 @@ pub struct ActivityObservation {
     pub statement: DefinitionPayload,
 }
 impl ActivityObservation {
+    /// Recorded prelogin/pool-reset context withdraws the source's native generation contract. Unacquired
+    /// metadata adds no authority and preserves other sources' existing identity validation.
+    pub fn has_session_generation_authority(&self) -> bool {
+        self.session_context.as_deref().is_none_or(|context| {
+            !matches!(context.lifecycle, SessionLifecycle::PoolResetPrelogin | SessionLifecycle::Connecting)
+                && context.native.as_deref().is_none_or(|native| match native {
+                    SessionNativeContext::Mssql(native) => native.login_established,
+                })
+        })
+    }
+
     /// Reject a conflicting label on claimed request-database context. Other scope bases remain unowned context;
     /// accepting them here does not establish membership in the selected database.
     pub fn database_context_is_consistent(&self, database: &str) -> bool {
@@ -238,6 +254,7 @@ impl ActivityObservation {
 
     pub fn is_valid(&self) -> bool {
         self.key.is_valid()
+            && self.session_context.as_deref().is_none_or(|context| context.is_valid_for(&self.key, self.idle))
             && (!self.idle || self.key.request.is_none())
             && identifier(&self.state)
             && self.database.as_deref().is_none_or(|value| !value.is_empty() && value.len() <= 512)
@@ -298,7 +315,9 @@ impl ActivityObservation {
     }
     pub fn conditions(&self, policy: &ActivityPolicy) -> Vec<ActivityCondition> {
         let mut conditions = Vec::new();
-        if matches!(self.scope, ActivityScopeBasis::BlockingReference | ActivityScopeBasis::OtherDatabase) {
+        if !self.has_session_generation_authority()
+            || matches!(self.scope, ActivityScopeBasis::BlockingReference | ActivityScopeBasis::OtherDatabase)
+        {
             return conditions;
         }
         if self.key.request.is_some() {
@@ -392,6 +411,7 @@ pub enum ActivityDetailStatus {
 pub enum ActivityPopulation {
     ClientBackends,
     ActiveRequestsOpenTransactionsAndBlockers,
+    UserSessionsCurrentRequestsAndBlockers,
     DefaultDatabaseConnections,
     NodeClientBackendsAndConnectionWorkers,
 }
@@ -443,8 +463,12 @@ pub struct ActivityEvidence {
 impl ActivityEvidence {
     /// All native owner relationships in one validated frame, without applying incident-age selection policy.
     pub fn blocking_observations(rows: &[ActivityObservation]) -> Result<Vec<BlockingObservation>> {
-        Self::validate(rows)?;
-        Ok(blocking_observations(rows))
+        let index = ActivityIndex::new(rows)?;
+        Ok(blocking_observations(&index, rows))
+    }
+    pub fn blocking_for_frame(frame: &ActivityFrameEvidence<'_>) -> Vec<BlockingObservation> {
+        let rows = frame.rows().map(|row| row.observation.clone()).collect::<Vec<_>>();
+        blocking_observations(frame.index(), &rows)
     }
     pub fn validate(rows: &[ActivityObservation]) -> Result<()> {
         ActivityIndex::new(rows).map(|_| ())
@@ -454,15 +478,27 @@ impl ActivityEvidence {
     }
     /// Follow previously observed blockers when current native lock details cannot establish their status.
     pub fn context_for(rows: &[ActivityObservation], roots: &BTreeSet<ActivityKey>) -> Result<BTreeSet<ActivityKey>> {
-        let ActivityIndex { by_key, by_session } = ActivityIndex::new(rows)?;
-        let roots = roots.iter().filter(|key| by_key.contains_key(*key)).cloned().collect::<Vec<_>>();
-        Ok(context(&roots, &by_key, &by_session))
+        let index = ActivityIndex::new(rows)?;
+        Ok(context(&roots.iter().cloned().collect::<Vec<_>>(), &index))
+    }
+    pub fn context_for_frame(
+        frame: &ActivityFrameEvidence<'_>,
+        roots: &BTreeSet<ActivityKey>,
+    ) -> BTreeSet<ActivityKey> {
+        context(&roots.iter().cloned().collect::<Vec<_>>(), frame.index())
     }
     pub fn select(rows: &[ActivityObservation], policy: &ActivityPolicy) -> Result<Self> {
+        Self::select_index(&ActivityIndex::new(rows)?, policy)
+    }
+    pub fn select_frame(frame: &ActivityFrameEvidence<'_>, policy: &ActivityPolicy) -> Result<Self> {
+        Self::select_index(frame.index(), policy)
+    }
+    fn select_index(index: &ActivityIndex<'_>, policy: &ActivityPolicy) -> Result<Self> {
         policy.validate()?;
-        let ActivityIndex { by_key, by_session } = ActivityIndex::new(rows)?;
-        let mut conditions: BTreeMap<_, _> = rows
-            .iter()
+        let mut conditions: BTreeMap<_, _> = index
+            .by_key
+            .values()
+            .filter(|row| index.has_session_generation_authority(&row.key.session))
             .filter_map(|row| {
                 let conditions = row.conditions(policy);
                 (!conditions.is_empty()).then(|| (row.key.clone(), conditions))
@@ -473,10 +509,11 @@ impl ActivityEvidence {
             .filter(|(_, conditions)| conditions.contains(&ActivityCondition::Blocked))
             .map(|(key, _)| key.clone())
             .collect();
-        let blocked_context = context(&blocked_roots, &by_key, &by_session);
+        let blocked_context = context(&blocked_roots, index);
         for key in &blocked_context {
-            let row = by_key[key];
-            if !matches!(row.scope, ActivityScopeBasis::BlockingReference | ActivityScopeBasis::OtherDatabase)
+            let row = index.by_key[key];
+            if index.has_session_generation_authority(&row.key.session)
+                && !matches!(row.scope, ActivityScopeBasis::BlockingReference | ActivityScopeBasis::OtherDatabase)
                 && row.idle
                 && row.key.request.is_none()
                 && row.key.transaction.is_some()
@@ -486,23 +523,22 @@ impl ActivityEvidence {
             }
         }
         let uncertain: BTreeSet<_> =
-            rows.iter().filter(|row| row.blocking_uncertain(policy)).map(|row| row.key.clone()).collect();
+            index.by_key.values().filter(|row| row.blocking_uncertain(policy)).map(|row| row.key.clone()).collect();
         let roots = conditions.keys().chain(uncertain.iter()).cloned().collect::<Vec<_>>();
-        let selected = context(&roots, &by_key, &by_session);
-        let observations: Vec<_> = selected.iter().map(|key| (*by_key[key]).clone()).collect();
-        let blocking = blocking_observations(&observations);
+        let selected = context(&roots, index);
+        let observations: Vec<_> = selected.iter().map(|key| (*index.by_key[key]).clone()).collect();
+        let blocking = blocking_observations(index, &observations);
         Ok(Self { observations, blocking, conditions, uncertain })
     }
 }
 
-fn blocking_observations(rows: &[ActivityObservation]) -> Vec<BlockingObservation> {
-    let sessions: BTreeSet<_> = rows.iter().map(|row| &row.key.session).collect();
-    let sessions = &sessions;
+fn blocking_observations(index: &ActivityIndex<'_>, rows: &[ActivityObservation]) -> Vec<BlockingObservation> {
     rows.iter()
-        .filter(|row| row.key.request.is_some())
+        .filter(|row| row.key.request.is_some() && index.has_session_generation_authority(&row.key.session))
         .flat_map(|row| {
             row.wait.iter().flat_map(|wait| &wait.owners).filter(|owner| owner.is_blocker()).map(move |owner| {
-                let owner_observed = owner.session().is_some_and(|session| sessions.contains(&session));
+                let owner_observed =
+                    owner.session().is_some_and(|session| index.has_session_generation_authority(&session));
                 BlockingObservation { waiter: row.key.clone(), owner: owner.clone(), owner_observed }
             })
         })
@@ -513,12 +549,14 @@ fn blocking_observations(rows: &[ActivityObservation]) -> Vec<BlockingObservatio
 pub(super) struct ActivityIndex<'a> {
     pub(super) by_key: BTreeMap<ActivityKey, &'a ActivityObservation>,
     pub(super) by_session: BTreeMap<NativeActivityIdentity, Vec<&'a ActivityObservation>>,
+    disqualified_sessions: BTreeSet<NativeActivityIdentity>,
 }
 impl<'a> ActivityIndex<'a> {
     pub(super) fn new(rows: impl IntoIterator<Item = &'a ActivityObservation>) -> Result<Self> {
         let mut by_key = BTreeMap::new();
         let mut by_session: BTreeMap<NativeActivityIdentity, Vec<&ActivityObservation>> = BTreeMap::new();
         let mut generations = BTreeMap::new();
+        let mut disqualified_sessions = BTreeSet::new();
         for row in rows {
             if !row.is_valid() || by_key.insert(row.key.clone(), row).is_some() {
                 return Err(CollectionStop::InvalidPage.error());
@@ -530,25 +568,34 @@ impl<'a> ActivityIndex<'a> {
                 return Err(CollectionStop::SourceChanged.error());
             }
             by_session.entry(row.key.session.clone()).or_default().push(row);
+            if !row.has_session_generation_authority() {
+                disqualified_sessions.insert(row.key.session.clone());
+            }
         }
-        Ok(Self { by_key, by_session })
+        Ok(Self { by_key, by_session, disqualified_sessions })
+    }
+    pub(super) fn has_session_generation_authority(&self, identity: &NativeActivityIdentity) -> bool {
+        self.by_session.contains_key(identity) && !self.session_generation_is_disqualified(identity)
+    }
+    pub(super) fn session_generation_is_disqualified(&self, identity: &NativeActivityIdentity) -> bool {
+        self.disqualified_sessions.contains(identity)
     }
 }
 
-fn context(
-    roots: &[ActivityKey],
-    by_key: &BTreeMap<ActivityKey, &ActivityObservation>,
-    by_session: &BTreeMap<NativeActivityIdentity, Vec<&ActivityObservation>>,
-) -> BTreeSet<ActivityKey> {
-    let mut pending: VecDeque<_> = roots.iter().cloned().collect();
+fn context(roots: &[ActivityKey], index: &ActivityIndex<'_>) -> BTreeSet<ActivityKey> {
+    let mut pending: VecDeque<_> = roots.iter().filter(|key| index.by_key.contains_key(*key)).cloned().collect();
     let mut selected = BTreeSet::new();
     while let Some(key) = pending.pop_front() {
         if !selected.insert(key.clone()) {
             continue;
         }
-        for owner in by_key[&key].wait.iter().flat_map(|wait| &wait.owners) {
+        let row = index.by_key[&key];
+        if !index.has_session_generation_authority(&row.key.session) {
+            continue;
+        }
+        for owner in row.wait.iter().flat_map(|wait| &wait.owners) {
             if let Some(session) = owner.session() {
-                for row in by_session.get(&session).into_iter().flatten() {
+                for row in index.by_session.get(&session).into_iter().flatten() {
                     pending.push_back(row.key.clone());
                 }
             }

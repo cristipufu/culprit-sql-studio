@@ -9,9 +9,11 @@ mod page_writers;
 mod partitions;
 mod planning;
 mod request_memory;
+mod session_authority;
 
 fn actor() -> ActivityObservation {
     ActivityObservation {
+        session_context: None,
         blocking_status: ActivityBlockingStatus::Known,
         waiting_on_lock: None,
         key: ActivityKey {

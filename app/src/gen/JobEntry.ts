@@ -2,4 +2,4 @@
 import type { JobEntryKind } from "./JobEntryKind";
 import type { Metric } from "./Metric";
 
-export type JobEntry = { source: string, observation_key: string, job_id: string, kind: JobEntryKind, title: string, explanation: string, metrics: Array<Metric>, investigation: string, verify: string, };
+export type JobEntry = { source: string, observation_key: string, job_id: string | null, kind: JobEntryKind, title: string, explanation: string, metrics: Array<Metric>, investigation: string, verify: string, };

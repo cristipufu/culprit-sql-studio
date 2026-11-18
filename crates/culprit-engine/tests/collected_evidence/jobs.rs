@@ -8,7 +8,10 @@ use culprit_engine::collected_resources;
 const FAMILY: &[EvidenceFamily] = &[EvidenceFamily::OperationalSamples];
 #[tokio::test]
 async fn original_job_capabilities_outcomes_counts_and_receipts_reuse_the_same_pure_view_without_recovery() {
-    for (source, records) in jobs_evidence_cases() {
+    for (source, records) in jobs_evidence_cases()
+        .into_iter()
+        .chain(culprit_collector::analytical::test_support::mssql_agent_jobs_evidence_cases())
+    {
         let rows = records
             .iter()
             .map(|record| {
@@ -16,8 +19,8 @@ async fn original_job_capabilities_outcomes_counts_and_receipts_reuse_the_same_p
                 row.clone()
             })
             .collect();
-        let snapshot = TimescaleJobsSnapshot::from_source(&source, rows).unwrap();
-        let expected = culprit_checks::jobs::explain(&snapshot, true).unwrap();
+        let snapshot = JobsSnapshot::from_source(&source, rows, true).unwrap();
+        let expected = culprit_checks::jobs::explain(&snapshot).unwrap();
         let fixture = Fixture::new(source.clone(), records.clone()).await;
         let opened = fixture.recovery_object_reads();
         let capture = fixture.read_families(FAMILY).await;
@@ -105,3 +108,5 @@ async fn native_nulls_and_duplicate_job_ids_never_gain_worker_current_definition
         assert!(collected_resources::jobs(&wrong).is_err());
     }
 }
+
+mod mssql_agent;

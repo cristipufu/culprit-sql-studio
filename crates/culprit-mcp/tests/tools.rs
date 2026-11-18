@@ -44,6 +44,8 @@ impl Provider for Replay {
 
     async fn live(&self) -> Result<LiveState> {
         Ok(LiveState {
+            activity_census: None,
+            session_census: None,
             session_action_route: None,
             notes: Vec::new(),
             taken_at: "2026-10-11T12:00:00Z".into(),

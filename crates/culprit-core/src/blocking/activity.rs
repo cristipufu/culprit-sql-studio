@@ -3,8 +3,7 @@ use super::*;
 use crate::{Result, telemetry::*};
 
 pub fn analyze_activity(frame: &ActivityFrameEvidence<'_>) -> Result<Option<Blocking>> {
-    let rows = frame.rows().map(|row| row.observation.clone()).collect::<Vec<_>>();
-    let edges = ActivityEvidence::blocking_observations(&rows)?;
+    let edges = ActivityEvidence::blocking_for_frame(frame);
     let mut owners = BTreeMap::<String, ActivityWaitOwner>::new();
     for edge in &edges {
         let waiter = session_owner(&edge.waiter.session);
@@ -23,10 +22,12 @@ pub fn analyze_activity(frame: &ActivityFrameEvidence<'_>) -> Result<Option<Bloc
     let mut locks = BTreeMap::<&str, LockWait>::new();
     if frame.context().has_qualified_local_owner() {
         for (key, owner) in &owners {
-            let Some(identity) = owner.session() else { continue };
+            let Some(identity) = owner.session() else {
+                continue;
+            };
             let mut matches = frame.session_rows(&identity);
             let Some(row) = matches.next() else { continue };
-            if matches.next().is_some() {
+            if matches.next().is_some() || !frame.has_session_generation_authority(&row.observation.key.session) {
                 continue;
             }
             sessions.insert(key, session(row.observation));
@@ -101,6 +102,10 @@ fn number(value: &Option<String>) -> Option<f64> {
 }
 fn session(row: &ActivityObservation) -> Session {
     Session {
+        progress_eligible: None,
+        sql_context: (row.key.request.is_some() && matches!(&row.statement, DefinitionPayload::Available { .. }))
+            .then_some(crate::SessionStatementContext::CurrentRequest),
+        activity_key: Some(row.key.clone()),
         id: row.key.session.id.clone(),
         action_target: None,
         user: row.client.as_ref().and_then(|client| client.user.clone()),

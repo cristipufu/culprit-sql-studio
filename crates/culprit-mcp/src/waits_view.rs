@@ -14,6 +14,7 @@ mod completed_spills;
 mod configured_log_rates;
 mod connection_outcomes;
 mod counter_ratios;
+pub(crate) mod instance_resources;
 mod jobs;
 pub(crate) mod page_server_reads;
 pub(crate) mod performance_counters;
@@ -115,6 +116,7 @@ pub fn report(report: &Report) -> Value {
     counter_ratios::attach(&mut response, report);
     performance_counters::attach(&mut response, report);
     configured_log_rates::attach(&mut response, report);
+    instance_resources::attach(&mut response, report);
     if let Some(native) = snapshot.pressure.as_ref().and_then(|pressure| pressure.replication.as_deref()) {
         match culprit_engine::explain_replication(native, true, REPLICATION_ENTRIES) {
             Ok(evidence) => {

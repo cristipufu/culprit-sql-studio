@@ -31,6 +31,7 @@ pub mod plan_view;
 pub mod replication;
 pub mod request_memory;
 pub mod runtime_distributions;
+pub mod session_census;
 pub mod session_memory;
 mod source_coverage;
 pub mod source_overhead;
@@ -50,4 +51,5 @@ pub mod database_properties;
 pub mod hyperscale_log_components;
 pub mod memory_clerks;
 
+pub mod instance_resources;
 pub mod storage;

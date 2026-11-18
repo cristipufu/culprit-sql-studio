@@ -1,6 +1,10 @@
 //! Sharing validates the original typed roster before any masking or replacement key can make it look admissible.
 use super::*;
-use crate::redact::jobs::redact as redact_jobs;
+fn redact_jobs(read: Box<TimescaleJobsSnapshot>) -> crate::Result<Box<TimescaleJobsSnapshot>> {
+    let shared = crate::redact::jobs::redact(JobsSnapshot::Timescale { snapshot: read, read_complete: false })?;
+    let JobsSnapshot::Timescale { snapshot, .. } = *shared else { panic!() };
+    Ok(snapshot)
+}
 use crate::{DatabaseIdentity, ErrorDetail, MeasurementScope, SourceOutcome, SourceState, telemetry::*};
 
 const PRIVATE: &str = "JOBS-REDACTION-PRIVATE";
@@ -129,7 +133,7 @@ fn snapshot(read: Box<TimescaleJobsSnapshot>) -> Snapshot {
     let mut snapshot: Snapshot =
         serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/postgres-demo.json")))
             .unwrap();
-    snapshot.operations.jobs = Some(read);
+    snapshot.operations.jobs = Some(Box::new(JobsSnapshot::Timescale { snapshot: read, read_complete: false }));
     snapshot
         .sources
         .retain(|source| source.source != TIMESCALE_JOBS_SOURCE && source.source != TIMESCALE_JOB_RUNS_SOURCE);

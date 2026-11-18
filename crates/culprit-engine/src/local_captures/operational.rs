@@ -53,6 +53,7 @@ impl LocalSnapshotAnalysis {
 pub enum LocalSnapshotReport {
     PerformanceCounters(Box<PerformanceCounterReport>),
     DatabaseProperties(Box<DatabasePropertiesReport>),
+    InstanceResources(Box<InstanceResourceReport>),
     Compilation(Box<CompilationReport>),
     ConfiguredLogRates(Box<ConfiguredLogRateReport>),
     ConnectionOutcomes(Box<ConnectionOutcomeReport>),
@@ -69,6 +70,7 @@ impl LocalSnapshotReport {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
         match self {
             Self::PerformanceCounters(_) => LocalCaptureAnalysisKind::PerformanceCounters,
+            Self::InstanceResources(_) => LocalCaptureAnalysisKind::InstanceResources,
             Self::DatabaseProperties(_) => LocalCaptureAnalysisKind::DatabaseProperties,
             Self::Compilation(_) => LocalCaptureAnalysisKind::Compilation,
             Self::ConfiguredLogRates(_) => LocalCaptureAnalysisKind::ConfiguredLogRates,

@@ -31,6 +31,7 @@ pub fn local_snapshot_evidence_cases() -> Vec<LocalSnapshotCase> {
     let case = |analysis, (source, records)| LocalSnapshotCase { analysis, source, records };
     vec![
         case("performance_counters", super::performance_counter_evidence(super::PerformanceCounterCase::Exact)),
+        case("instance_resources", super::instance_resource_evidence(super::InstanceResourceCase::Exact)),
         case("database_properties", super::database_properties_evidence(super::DatabasePropertiesCase::Exact)),
         case("compilation", super::query_compilation_evidence()),
         case("configured_log_rates", super::configured_log_rate_evidence_cases().remove(0)),
@@ -63,6 +64,11 @@ impl LocalCaptureFixture {
         Self::with_shutdown(source, records, SourceShutdown::Quiescent).await
     }
 
+    pub async fn activity(source: CollectionDescription, records: Vec<TelemetryRecord>) -> Self {
+        assert!(source.observation.activity().is_some());
+        Self::with_shutdown(source, records, SourceShutdown::Quiescent).await
+    }
+
     pub async fn with_shutdown(
         mut source: CollectionDescription,
         records: Vec<TelemetryRecord>,
@@ -85,6 +91,13 @@ impl LocalCaptureFixture {
 
 fn selection(source: &CollectionDescription) -> CollectionSelection {
     match &source.observation {
+        SourceObservation::Activity(_) => CollectionSelection::Activity,
+        SourceObservation::FocusedBlocking { result, .. } => {
+            CollectionSelection::FocusedBlocking { focus: Box::new(result.focus.clone()) }
+        }
+        SourceObservation::FocusedRequestMemory { result, .. } => {
+            CollectionSelection::FocusedRequestMemory { focus: Box::new(result.focus.clone()) }
+        }
         SourceObservation::QueryHistory(history) => CollectionSelection::QueryHistory {
             from: history.interval.from.clone(),
             until: history.interval.until.clone(),
@@ -98,7 +111,7 @@ fn selection(source: &CollectionDescription) -> CollectionSelection {
         observation if observation.snapshot().is_some() => {
             CollectionSelection::Snapshot { dataset: observation.snapshot().unwrap().dataset }
         }
-        _ => panic!("local fixture requires an original history or snapshot read"),
+        _ => panic!("local fixture requires an original history, Activity or snapshot read"),
     }
 }
 async fn collect_original(
@@ -140,6 +153,8 @@ async fn collect_original(
 /// local ownership fixture, not native execution/cost qualification or a replacement source of actor identity.
 async fn retain_focused_parent(outbox: &mut Outbox, source: &mut CollectionDescription) {
     let focus = match &mut source.observation {
+        SourceObservation::FocusedBlocking { result, .. } => &mut result.focus,
+        SourceObservation::FocusedRequestMemory { result, .. } => &mut result.focus,
         SourceObservation::MaintenanceProgress { result, .. }
         | SourceObservation::CurrentRequestWork { result, .. } => {
             result.focus.as_mut().expect("focused fixture retains its original actor")

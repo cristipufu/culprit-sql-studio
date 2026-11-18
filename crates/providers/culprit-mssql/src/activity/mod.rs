@@ -1,4 +1,5 @@
-//! One native activity reader. Consumers choose scope, enrichment and presentation after reading the same facts.
+//! One selected-database activity reader. Consumers choose enrichment and presentation over the same facts.
+pub(crate) mod capture;
 pub(crate) mod compiler_admission;
 pub(crate) mod database_context;
 pub(crate) mod memory;
@@ -7,6 +8,8 @@ pub(crate) mod page_targets;
 pub(crate) mod participants;
 mod resources;
 mod rows;
+mod session_context;
+pub(crate) use session_context::{ESTABLISHED_SESSION_SQL, established_login};
 pub(crate) mod sql;
 mod statement_identity;
 pub(crate) mod tempdb;
@@ -23,11 +26,7 @@ use std::{
 };
 
 const DETAIL_METADATA_ALLOWANCE: u32 = 4096;
-#[derive(Clone, Copy)]
-pub(crate) enum ActivityScope {
-    Visible,
-    CurrentDatabase,
-}
+const CURRENT_DATABASE_SCOPE: i64 = 1;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IdentityDetail {
     Endpoint,
@@ -35,7 +34,6 @@ pub(crate) enum IdentityDetail {
 }
 pub(crate) struct ReadOptions {
     pub budget: CollectionBudget,
-    pub scope: ActivityScope,
     pub identity: IdentityDetail,
 }
 #[derive(Clone, PartialEq, Eq)]
@@ -154,6 +152,9 @@ pub(crate) struct ActivityRecord {
     previous_locator: Option<PreviousBatchLocator>,
 }
 impl ActivityRecord {
+    pub(crate) fn can_identify_session(&self) -> bool {
+        session_context::can_identify_session(&self.facts)
+    }
     pub(crate) fn into_redacted_observation(self) -> ActivityObservation {
         let mut observation = self.facts;
         observation.statement = match self.current_sql {
@@ -190,6 +191,29 @@ impl ActivityFrame {
     }
     pub(crate) fn keys(&self) -> BTreeSet<ActivityKey> {
         self.records.iter().map(|record| record.facts.key.clone()).collect()
+    }
+    /// Preserve the original enrichment population. Quiet census rows must not initiate a last-SQL walk.
+    pub(crate) fn sql_context_keys(&self) -> BTreeSet<ActivityKey> {
+        let blocker_ids: BTreeSet<&str> = self
+            .records
+            .iter()
+            .flat_map(|record| {
+                record.facts.wait.iter().flat_map(|wait| &wait.owners).filter_map(|owner| match owner {
+                    ActivityWaitOwner::Session { id, .. } => Some(id.as_str()),
+                    _ => None,
+                })
+            })
+            .collect();
+        self.records
+            .iter()
+            .filter(|record| {
+                record.can_identify_session()
+                    && (record.facts.key.request.is_some()
+                        || record.facts.open_transactions.is_some_and(|count| count > 0)
+                        || blocker_ids.contains(record.facts.key.session.id.as_str()))
+            })
+            .map(|record| record.facts.key.clone())
+            .collect()
     }
 }
 
@@ -231,19 +255,14 @@ impl<R: NativeRead> ActivityReader<R> {
     pub(crate) async fn close(&mut self) -> SourceShutdown {
         self.io.close().await
     }
-    pub(crate) async fn observe(&mut self) -> Result<ActivityFrame> {
-        self.observe_baseline().await?.into_complete()
-    }
-
     pub(crate) async fn observe_baseline(&mut self) -> Result<ActivityBaseline> {
         let sql = sql::metadata(self.options.identity, self.request_page_server_read_capability);
-        let scope = match self.options.scope {
-            ActivityScope::Visible => 0,
-            ActivityScope::CurrentDatabase => 1,
-        };
         self.read_baseline_frame(
             &sql,
-            vec![Parameter::Integer(i64::from(self.options.budget.max_snapshot_rows) + 1), Parameter::Integer(scope)],
+            vec![
+                Parameter::Integer(i64::from(self.options.budget.max_snapshot_rows) + 1),
+                Parameter::Integer(CURRENT_DATABASE_SCOPE),
+            ],
         )
         .await
     }
@@ -361,7 +380,9 @@ impl<R: NativeRead> ActivityReader<R> {
             let detail_rows = match result {
                 Ok(rows) => rows,
                 Err(ReadError::Stopped(reason)) => return Err(reason.error()),
-                Err(ReadError::Source(error)) if stops_remaining_reads(&error) => return Err(error),
+                Err(ReadError::Source(error)) if stops_remaining_reads(&error) => {
+                    return Err(error);
+                }
                 Err(ReadError::Source(error)) => {
                     mark_unavailable(frame, &targets, previous);
                     return Ok(ActivityDetailStatus::Unavailable { code: error.code });

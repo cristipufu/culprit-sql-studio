@@ -7,7 +7,9 @@ fn with_parameter(name: &str, data_type: &str) -> crate::Plan {
     let snapshot: Snapshot = serde_json::from_str(include_str!("../../../../../fixtures/mssql-demo.json")).unwrap();
     let mut plan = snapshot.queries().iter().find_map(|query| query.plan.clone()).unwrap();
     plan.facts_mut().parameter_context = Some(PlanParameterContext {
+        retrieved_from_cache: None,
         parameters: vec![PlanParameter {
+            integer_values_equal: None,
             name: Some(name.into()),
             data_type: Some(data_type.into()),
             compiled: State::Recorded,
@@ -103,5 +105,31 @@ fn filtering_an_unchanged_invalid_name_also_withdraws_its_comparison_authority()
         assert_eq!(context.parameters[0].comparison, Comparison::Unavailable);
         assert!(context.is_valid());
         assert_eq!(serde_json::to_value(&shared).unwrap(), serde_json::to_value(redact_plan(&shared)).unwrap());
+    }
+}
+
+#[test]
+fn integer_equivalence_is_kept_only_with_unchanged_name_and_declaration_and_sharing_is_idempotent() {
+    for (name, data_type, kept) in [
+        ("@customer", "int", true),
+        ("@invalid name", "int", false),
+        ("@customer", "private_database_canary.dbo.IntegerType", false),
+        ("@customer", "int(private_canary)", false),
+    ] {
+        let mut original = with_parameter(name, data_type);
+        let context = original.facts_mut().parameter_context.as_mut().unwrap();
+        context.retrieved_from_cache = Some(true);
+        context.parameters[0].integer_values_equal = Some(false);
+        let shared = redact_plan(&original);
+        let context = shared.facts().parameter_context.as_ref().unwrap();
+        assert!(context.is_valid());
+        assert_eq!(context.parameters[0].integer_values_equal, kept.then_some(false));
+        assert_eq!(
+            context.retrieved_from_cache,
+            Some(true),
+            "the independent selected-statement verdict contains no literal"
+        );
+        assert_eq!(serde_json::to_value(&shared).unwrap(), serde_json::to_value(redact_plan(&shared)).unwrap());
+        assert!(!serde_json::to_string(&shared).unwrap().contains("private_database_canary"));
     }
 }

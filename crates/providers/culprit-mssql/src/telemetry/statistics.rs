@@ -1,4 +1,4 @@
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{read::NativeRead, statistics, value::Rec};
 use culprit_core::{Result, Source, telemetry::*};
 pub(super) struct Statistics;
@@ -8,7 +8,7 @@ impl SnapshotRecipe for Statistics {
     const DATASET: SnapshotDataset = SnapshotDataset::Statistics;
     const NAME: &'static str = "statistics-state";
     const SOURCE: &'static Source = &crate::sources::STATISTICS;
-    const INSTANCE_LOCAL: bool = false;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabase;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<()>> {
         Ok(Some(()))

@@ -38,6 +38,7 @@ pub(crate) fn session() -> Rec {
         ("user_process", Val::Bool(true)),
         ("program_name", Val::Text("app".into())),
         ("own", Val::Bool(false)),
+        ("session_established", Val::Bool(true)),
     ])
 }
 

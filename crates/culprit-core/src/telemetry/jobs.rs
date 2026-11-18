@@ -4,6 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod points;
 pub use points::*;
+mod agent;
+mod profile;
+pub use agent::*;
+pub use profile::JobsSnapshot;
 
 pub const TIMESCALE_JOBS_SOURCE: &str = "timescale-jobs";
 pub const TIMESCALE_JOB_RUNS_SOURCE: &str = "timescale-job-runs";
@@ -208,7 +212,9 @@ pub struct TimescaleJobsSnapshot {
 }
 impl TimescaleJobsSnapshot {
     pub fn from_source(source: &CollectionDescription, observations: Vec<OperationalObservation>) -> Result<Self> {
-        let SourceObservation::Jobs { snapshot, metadata } = &source.observation else { return Err(invalid()) };
+        let SourceObservation::Jobs { snapshot, metadata } = &source.observation else {
+            return Err(invalid());
+        };
         if !metadata.matches_source(source, snapshot) {
             return Err(invalid());
         }
@@ -264,7 +270,9 @@ impl TimescaleJobsSnapshot {
             self.sources.iter().map(|source| (source.source.as_str(), (source, 0usize))).collect();
         let mut keys = BTreeSet::new();
         for row in &self.observations {
-            let Some((coverage, count)) = counts.get_mut(row.source.as_str()) else { return false };
+            let Some((coverage, count)) = counts.get_mut(row.source.as_str()) else {
+                return false;
+            };
             if !row.is_valid()
                 || !self.accepts(row)
                 || !keys.insert((&row.source, &row.key))

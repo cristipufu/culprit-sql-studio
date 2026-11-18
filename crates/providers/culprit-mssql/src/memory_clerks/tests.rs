@@ -144,12 +144,14 @@ async fn retiring_a_read_requires_the_callers_explicit_native_shutdown() {
 #[tokio::test]
 #[ignore = "requires the owned loopback SQL Server provider fixture"]
 async fn live_native_memory_clerk_groups_preserve_scope_and_permission_failures() {
-    use crate::{conn::Pool, read::ReadSession, test_support::config};
+    use crate::{
+        conn::Pool,
+        read::ReadSession,
+        test_support::{OwnedSourceFixture, config},
+    };
     use std::sync::Arc;
-    let port = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PORT").unwrap().parse::<u16>().unwrap();
-    let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").unwrap();
-    let pool = Arc::new(Pool::new(config(port, "culprit_smoke", &password, "culprit"), None));
-    let mut reader = ReadSession::new(pool, CollectionBudget::default());
+    let fixture = OwnedSourceFixture::open("culprit").await.unwrap();
+    let mut reader = ReadSession::new(fixture.pool.clone(), CollectionBudget::default());
     let result = read(&mut reader, MAX_CLERK_GROUPS).await;
     let samples = reader.finish(result).await.unwrap();
     assert!(!samples.is_empty());
@@ -163,7 +165,7 @@ async fn live_native_memory_clerk_groups_preserve_scope_and_permission_failures(
             .and_then(|counter| counter.value.integer())
             .is_some_and(|count| count > 0)
     }));
-    let mut configuration = config(port, "culprit_smoke", &password, "culprit");
+    let mut configuration = config(fixture.port, &fixture.database, fixture.password(), "culprit");
     configuration.authentication(tiberius::AuthMethod::sql_server(
         std::env::var("CULPRIT_SMOKE_LIMITED_USER").unwrap(),
         std::env::var("CULPRIT_SMOKE_LIMITED_PASSWORD").unwrap(),

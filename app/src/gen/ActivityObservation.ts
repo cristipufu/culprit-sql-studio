@@ -4,11 +4,12 @@ import type { ActivityClient } from "./ActivityClient";
 import type { ActivityCounters } from "./ActivityCounters";
 import type { ActivityKey } from "./ActivityKey";
 import type { ActivityScopeBasis } from "./ActivityScopeBasis";
+import type { ActivitySessionContext } from "./ActivitySessionContext";
 import type { ActivityWait } from "./ActivityWait";
 import type { DefinitionPayload } from "./DefinitionPayload";
 import type { NativeIdentity } from "./NativeIdentity";
 
-export type ActivityObservation = { blocking_status: ActivityBlockingStatus, 
+export type ActivityObservation = { session_context?: ActivitySessionContext, blocking_status: ActivityBlockingStatus, 
 /**
  * Native current lock-wait verdict, independent of owner visibility or measured wait duration.
  * None means the source could not establish whether this actor is waiting on a lock.

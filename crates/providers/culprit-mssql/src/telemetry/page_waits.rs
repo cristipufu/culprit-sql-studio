@@ -1,6 +1,6 @@
 //! Explicit current page targets: native acquisition is identical to scans, while FrozenSource owns delivery.
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions, page_targets::PageWaitGuard},
+    activity::{ActivityReader, IdentityDetail, ReadOptions, page_targets::PageWaitGuard},
     conn::Pool,
     read::{NativeRead, ReadSession, invalid_data},
     sources,
@@ -18,11 +18,7 @@ struct PageWaitReader<R: NativeRead> {
 impl PageWaitSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let request = bounded_request(request)?;
-        let options = ReadOptions {
-            budget: request.budget.clone(),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::Endpoint,
-        };
+        let options = ReadOptions { budget: request.budget.clone(), identity: IdentityDetail::Endpoint };
         Self::from_reader(ActivityReader::open(pool, options, host, port)?, &request)
     }
 }

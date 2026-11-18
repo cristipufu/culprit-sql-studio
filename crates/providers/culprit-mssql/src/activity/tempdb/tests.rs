@@ -36,7 +36,6 @@ pub(crate) fn reader(replies: Vec<ReadResult<Vec<Rec>>>) -> ActivityReader<FakeR
         FakeRead::new(replies),
         ReadOptions {
             budget: crate::task_space::bounded_budget(&CollectionBudget::default()),
-            scope: ActivityScope::CurrentDatabase,
             identity: IdentityDetail::AzureDatabase,
         },
         "fixture.invalid".into(),

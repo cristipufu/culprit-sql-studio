@@ -12,7 +12,8 @@ pub(crate) async fn collect(connector: &Connector, snapshot: &mut Snapshot) {
     let budget = native::jobs::bounded_budget(&CollectionBudget::default());
     let mut reader = ReadSession::new(connector.clone(), budget.clone());
     let (captured, coverage) = collect_from(&mut reader, &connector.host, connector.port, &budget).await;
-    snapshot.operations.jobs = captured.map(Box::new);
+    snapshot.operations.jobs = captured
+        .map(|snapshot| Box::new(JobsSnapshot::Timescale { snapshot: Box::new(snapshot), read_complete: true }));
     coverage.append_to(snapshot);
 }
 async fn collect_from<R: NativeRead>(

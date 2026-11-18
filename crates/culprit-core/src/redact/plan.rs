@@ -225,10 +225,11 @@ pub fn redact_parameter_context(context: &mut crate::plan_facts::PlanParameterCo
             .filter(|name| crate::plan_facts::parameter_name_is_valid(name));
         if name.is_none() || name != parameter.name {
             parameter.comparison = crate::plan_facts::PlanParameterComparison::Unavailable;
+            parameter.integer_values_equal = None;
         }
         parameter.name = name;
-        parameter.data_type = parameter
-            .data_type
+        let original_type = parameter.data_type.take();
+        let data_type = original_type
             .as_deref()
             .and_then(|data_type| {
                 if engine.sql_syntax() == crate::SqlSyntax::Mssql {
@@ -238,6 +239,10 @@ pub fn redact_parameter_context(context: &mut crate::plan_facts::PlanParameterCo
                 }
             })
             .filter(|data_type| crate::plan_facts::parameter_type_is_valid(data_type));
+        if data_type != original_type {
+            parameter.integer_values_equal = None;
+        }
+        parameter.data_type = data_type;
     }
     context.uses =
         std::mem::take(&mut context.uses).into_iter().filter(|usage| context.parameter(usage).is_some()).collect();
@@ -309,6 +314,8 @@ fn redact_showplan(xml: &str) -> String {
                 let replacement = match attr.name() {
                     "Database" => Some("[database]".to_string()),
                     "Server" => Some("[server]".to_string()),
+                    // PSP boundaries are data values, including native unquoted spellings, not measurements.
+                    "LowBoundary" | "HighBoundary" => Some("?".to_string()),
                     "ParameterDataType" => Some(xml_escape(&parameter_types::redact(attr.value()).unwrap_or_default())),
                     name if SHOWPLAN_TEXT.contains(&name) => {
                         Some(xml_escape(&strip_database(&redact_sql(attr.value(), Engine::Mssql))))
@@ -400,6 +407,21 @@ fn redact_text_line(line: &str, engine: Engine) -> String {
     redact_strings(line, engine)
 }
 
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+fn xml_escape(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            // XML normalizes literal attribute whitespace. References preserve the decoded characters on every read.
+            '\t' => escaped.push_str("&#x9;"),
+            '\n' => escaped.push_str("&#xA;"),
+            '\r' => escaped.push_str("&#xD;"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }

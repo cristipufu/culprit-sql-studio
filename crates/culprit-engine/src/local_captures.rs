@@ -13,6 +13,10 @@ mod outbox;
 pub use outbox::OutboxCaptureReader;
 mod operational;
 pub use operational::{LocalOperationalCapture, LocalSnapshotAnalysis, LocalSnapshotReport};
+mod blocking;
+pub use blocking::{LocalActivityRead, LocalBlockingAnalysis};
+mod session_census;
+pub use session_census::LocalSessionCensus;
 
 /// A closed analysis choice; selecting an analysis starts no native collection or source discovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -24,6 +28,7 @@ pub enum LocalCaptureAnalysisKind {
     HyperscaleLogComponents,
     PerformanceCounters,
     DatabaseProperties,
+    InstanceResources,
     Compilation,
     ConfiguredLogRates,
     ConnectionOutcomes,
@@ -35,14 +40,17 @@ pub enum LocalCaptureAnalysisKind {
     MaintenanceProgress,
     CompletedSpills,
     Storage,
+    Blocking,
+    SessionCensus,
 }
 impl LocalCaptureAnalysisKind {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 19] = [
         Self::PageServerReads,
         Self::MemoryClerks,
         Self::HyperscaleLogComponents,
         Self::PerformanceCounters,
         Self::DatabaseProperties,
+        Self::InstanceResources,
         Self::Compilation,
         Self::ConfiguredLogRates,
         Self::ConnectionOutcomes,
@@ -54,30 +62,51 @@ impl LocalCaptureAnalysisKind {
         Self::MaintenanceProgress,
         Self::CompletedSpills,
         Self::Storage,
+        Self::Blocking,
+        Self::SessionCensus,
     ];
 
     #[cfg(feature = "collector")]
-    pub(crate) fn snapshot_dataset(self) -> Option<culprit_core::telemetry::SnapshotDataset> {
+    fn read_plan(self) -> LocalCaptureReadPlan {
+        use LocalCaptureReadPlan::{Activity, Blocking, QueryHistory, Snapshot};
         use culprit_core::telemetry::SnapshotDataset as Dataset;
         match self {
-            Self::PageServerReads => None,
+            Self::PageServerReads => QueryHistory,
+            Self::Blocking => Blocking,
+            Self::SessionCensus => Activity,
             Self::MemoryClerks
             | Self::PerformanceCounters
+            | Self::InstanceResources
             | Self::DatabaseProperties
             | Self::ConfiguredLogRates
             | Self::ConnectionOutcomes
-            | Self::Storage => Some(Dataset::Operational),
-            Self::HyperscaleLogComponents => Some(Dataset::HyperscaleLogComponents),
-            Self::Compilation => Some(Dataset::QueryCompilation),
-            Self::Jobs => Some(Dataset::Jobs),
-            Self::RequestMemory => Some(Dataset::CurrentRequestMemory),
-            Self::TaskSpace => Some(Dataset::TaskSpace),
-            Self::CurrentRequestWork => Some(Dataset::CurrentRequestWork),
-            Self::StatementWork => Some(Dataset::StatementCounters),
-            Self::MaintenanceProgress => Some(Dataset::MaintenanceProgress),
-            Self::CompletedSpills => Some(Dataset::CachedRuntime),
+            | Self::Storage => Snapshot(Dataset::Operational),
+            Self::HyperscaleLogComponents => Snapshot(Dataset::HyperscaleLogComponents),
+            Self::Compilation => Snapshot(Dataset::QueryCompilation),
+            Self::Jobs => Snapshot(Dataset::Jobs),
+            Self::RequestMemory => Snapshot(Dataset::CurrentRequestMemory),
+            Self::TaskSpace => Snapshot(Dataset::TaskSpace),
+            Self::CurrentRequestWork => Snapshot(Dataset::CurrentRequestWork),
+            Self::StatementWork => Snapshot(Dataset::StatementCounters),
+            Self::MaintenanceProgress => Snapshot(Dataset::MaintenanceProgress),
+            Self::CompletedSpills => Snapshot(Dataset::CachedRuntime),
         }
     }
+    #[cfg(feature = "collector")]
+    pub(crate) fn snapshot_dataset(self) -> Option<culprit_core::telemetry::SnapshotDataset> {
+        match self.read_plan() {
+            LocalCaptureReadPlan::Snapshot(dataset) => Some(dataset),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "collector")]
+enum LocalCaptureReadPlan {
+    Activity,
+    QueryHistory,
+    Snapshot(culprit_core::telemetry::SnapshotDataset),
+    Blocking,
 }
 
 /// The host delegates one saved connection; the reader independently checks the original journal association.
@@ -97,6 +126,8 @@ pub enum LocalCapturedAnalysis {
     MemoryClerks(LocalMemoryClerks),
     HyperscaleLogComponents(LocalHyperscaleLogComponents),
     Snapshot(LocalSnapshotAnalysis),
+    Blocking(Box<LocalBlockingAnalysis>),
+    SessionCensus(Box<LocalSessionCensus>),
 }
 impl LocalCapturedAnalysis {
     pub fn kind(&self) -> LocalCaptureAnalysisKind {
@@ -105,6 +136,8 @@ impl LocalCapturedAnalysis {
             Self::MemoryClerks(_) => LocalCaptureAnalysisKind::MemoryClerks,
             Self::HyperscaleLogComponents(_) => LocalCaptureAnalysisKind::HyperscaleLogComponents,
             Self::Snapshot(analysis) => analysis.report().kind(),
+            Self::Blocking(_) => LocalCaptureAnalysisKind::Blocking,
+            Self::SessionCensus(_) => LocalCaptureAnalysisKind::SessionCensus,
         }
     }
 }

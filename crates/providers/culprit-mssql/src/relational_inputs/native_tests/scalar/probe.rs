@@ -1,0 +1,138 @@
+use super::*;
+use crate::test_support::actual_plan_capture;
+use culprit_core::telemetry::{CachedStatementContext, CachedStatementIdentity};
+
+const MARKER: &str = "scalar_original_probe";
+const SOURCE_ROWS: usize = 32_768;
+const COMMON_ROWS: i64 = 24_576;
+const PAYLOAD_BYTES: i64 = 256;
+const STATEMENT: &str =
+    "SELECT SUM(CONVERT(bigint,LEN(r.pad))) AS scalar_original_probe FROM dbo.scalar_rows r WHERE r.bucket=@bucket";
+
+#[derive(Clone, Copy)]
+pub(super) enum CacheExpectation<'a> {
+    New,
+    Reused(&'a CachedStatementContext),
+}
+#[derive(Clone, Copy)]
+pub(super) enum IndexCoverage {
+    Covering,
+    LookupRequired,
+}
+pub(super) struct RecordedRun {
+    pub plan: Plan,
+    pub context: CachedStatementContext,
+    pub result: i64,
+}
+impl RecordedRun {
+    pub fn operator(&self, physical: &str) -> &culprit_core::PlanNode {
+        let matching = self.plan.nodes().into_iter().filter(|node| node.op == physical).collect::<Vec<_>>();
+        let [node] = matching.as_slice() else {
+            panic!("one actual native {physical} required; observed {}", matching.len())
+        };
+        node
+    }
+    pub fn logical_reads(&self, physical: &str) -> f64 {
+        self.operator(physical)
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.logical_reads)
+            .filter(|reads| reads.is_finite() && *reads >= 0.0)
+            .expect("native reads for this one data-access operator, never an inclusive sum")
+    }
+}
+#[derive(Clone)]
+pub(super) struct Actor {
+    pub id: i64,
+    pub generation: String,
+}
+pub(super) struct Probe {
+    pub application: MsClient,
+    pub pool: Arc<Pool>,
+    pub port: u16,
+    object: i64,
+    actor: Actor,
+}
+impl Probe {
+    pub async fn new(fixture: &OwnedSourceFixture, database: &str, coverage: IndexCoverage) -> Self {
+        let mut application = crate::test_support::connect(
+            &config(fixture.port, database, fixture.password(), "scalar-reuse-actor"),
+            SessionKind::User,
+        )
+        .await
+        .unwrap();
+        verify_owned_source(&mut application).await.unwrap();
+        batch(&mut application,"ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP=1;ALTER DATABASE SCOPED CONFIGURATION SET PARAMETER_SENSITIVE_PLAN_OPTIMIZATION=OFF;ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS=ON").await;
+        batch(&mut application,"CREATE TABLE dbo.scalar_rows(id int NOT NULL CONSTRAINT pk_scalar_rows PRIMARY KEY CLUSTERED,bucket int NOT NULL,pad char(256) NOT NULL)").await;
+        let seed = format!(
+            "WITH digits(n) AS(SELECT n FROM(VALUES(0),(1),(2),(3),(4),(5),(6),(7),(8),(9))d(n)),numbers AS(SELECT TOP({SOURCE_ROWS}) ROW_NUMBER() OVER(ORDER BY a.n,b.n,c.n,d.n,e.n)n FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d CROSS JOIN digits e) INSERT dbo.scalar_rows SELECT CONVERT(int,n),CASE WHEN n<={COMMON_ROWS} THEN 1 ELSE CONVERT(int,n-{COMMON_ROWS}+1) END,REPLICATE('x',{PAYLOAD_BYTES}) FROM numbers"
+        );
+        batch(&mut application, &seed).await;
+        batch(
+            &mut application,
+            match coverage {
+                IndexCoverage::Covering => "CREATE INDEX ix_scalar_bucket ON dbo.scalar_rows(bucket) INCLUDE(pad)",
+                IndexCoverage::LookupRequired => "CREATE INDEX ix_scalar_bucket ON dbo.scalar_rows(bucket)",
+            },
+        )
+        .await;
+        batch(&mut application, "UPDATE STATISTICS dbo.scalar_rows WITH FULLSCAN").await;
+        batch(&mut application, &format!("CREATE PROCEDURE dbo.scalar_probe @bucket int AS {STATEMENT}")).await;
+        let native=crate::conn::query_one(&mut application,"SELECT /* culprit fixture */ OBJECT_ID(N'dbo.scalar_probe') AS object_id,@@SPID AS id,CONVERT(varchar(40),login_time,126) AS generation FROM sys.dm_exec_sessions WHERE session_id=@@SPID").await.unwrap();
+        let object = crate::read::signed_integer(&native, "object_id").unwrap();
+        let actor = Actor {
+            id: crate::read::signed_integer(&native, "id").unwrap(),
+            generation: crate::read::text(&native, "generation").unwrap(),
+        };
+        let pool = Arc::new(Pool::new(config(fixture.port, database, fixture.password(), "culprit"), None));
+        Self { application, pool, port: fixture.port, object, actor }
+    }
+    pub fn actor(&self) -> Actor {
+        self.actor.clone()
+    }
+    pub async fn record(&mut self, bucket: i32, expected: CacheExpectation<'_>) -> RecordedRun {
+        assert!(matches!(bucket, 1..=3));
+        let mut reader = ReadSession::new(self.pool.clone(), super::super::expressions::reader_budget());
+        if let CacheExpectation::Reused(original) = expected {
+            let before = super::super::named_definition(&mut reader, self.object, MARKER).await;
+            same_incarnation(&before.context, original);
+        }
+        let captured =
+            actual_plan_capture(&mut self.application, &format!("EXEC dbo.scalar_probe @bucket={bucket}"), vec![])
+                .await;
+        let current = super::super::named_definition(&mut reader, self.object, MARKER).await;
+        if let CacheExpectation::Reused(original) = expected {
+            same_incarnation(&current.context, original);
+        }
+        let hash = current.context.query_hash.as_ref().unwrap();
+        let selected =
+            captured.plans.iter().filter(|xml| super::super::expressions::has_statement(xml, hash)).collect::<Vec<_>>();
+        let [xml] = selected.as_slice() else { panic!("one selected native scalar statement") };
+        let DefinitionPayload::Available { text: statement, .. } = &current.statement.payload else {
+            panic!("same original complete native statement")
+        };
+        let plan = crate::plan_xml::parse_cached_statement(
+            xml,
+            crate::plan_xml::CachedInputContext {
+                statement: &current.context,
+                module_parameters: current.module_parameters.as_ref(),
+                text: Some(statement),
+                origin: crate::plan_xml::PlanInputOrigin::OriginalNative { read: None },
+            },
+        )
+        .unwrap();
+        let results =
+            captured.results.iter().filter(|row| row.columns().any(|(column, _)| column == MARKER)).collect::<Vec<_>>();
+        let [result] = results.as_slice() else { panic!("exactly one result from the same actual execution") };
+        let result = crate::read::signed_integer(result, MARKER).unwrap();
+        assert_eq!(result, if bucket == 1 { COMMON_ROWS * PAYLOAD_BYTES } else { PAYLOAD_BYTES });
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+        let plan = culprit_core::redact::redact_plan(&plan);
+        RecordedRun { plan, context: current.context, result }
+    }
+}
+fn same_incarnation(current: &CachedStatementContext, original: &CachedStatementContext) {
+    assert_eq!(current.database_id, original.database_id);
+    let key = |identity: &CachedStatementIdentity| identity.key().unwrap();
+    assert_eq!(key(&current.identity), key(&original.identity), "new cache generations must not replace the original");
+}

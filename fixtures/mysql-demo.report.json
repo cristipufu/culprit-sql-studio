@@ -1902,7 +1902,7 @@
         "table": "orders"
       }
     ],
-    "format": 15,
+    "format": 16,
     "histograms": [
       {
         "buckets": 4.0,

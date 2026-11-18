@@ -2,6 +2,7 @@
 import type { ConfiguredLogRateRead } from "./ConfiguredLogRateRead";
 import type { ConnectionOutcomeSnapshot } from "./ConnectionOutcomeSnapshot";
 import type { FileIo } from "./FileIo";
+import type { InstanceResourceRead } from "./InstanceResourceRead";
 import type { NativeCounterSet } from "./NativeCounterSet";
 import type { OpenTransaction } from "./OpenTransaction";
 import type { Replica } from "./Replica";
@@ -16,6 +17,10 @@ import type { WaitCounterSnapshot } from "./WaitCounterSnapshot";
  * Pressure signals from cheap counters, collected with every scan.
  */
 export type Pressure = { 
+/**
+ * Shared native point retained independently of optional-read admission or selected-database grading.
+ */
+instance_resources?: InstanceResourceRead, 
 /**
  * Original wait rows from the existing read, separate from lossy category summaries and short samples.
  */

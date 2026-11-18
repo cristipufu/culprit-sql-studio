@@ -1,4 +1,7 @@
 use super::*;
+fn explain_native(snapshot: &TimescaleJobsSnapshot, read_complete: bool) -> Result<JobsReport> {
+    explain(&JobsSnapshot::Timescale { snapshot: Box::new(snapshot.clone()), read_complete })
+}
 fn input() -> TimescaleJobsSnapshot {
     let context = NativeReadContext {
         target: culprit_core::DatabaseIdentity::server(
@@ -75,7 +78,7 @@ fn input() -> TimescaleJobsSnapshot {
 fn finished_native_failure_reuses_sqlstate_without_current_worker_pressure_or_historical_definition_join() {
     let input = input();
     let original = serde_json::to_value(&input).unwrap();
-    let report = explain(&input, true).unwrap();
+    let report = explain_native(&input, true).unwrap();
     let entry = &report.entries[0];
     assert_eq!(entry.observation_key, input.observations[0].key);
     assert!(entry.explanation.contains(&t!("view.native_failures.cause.allocation.explanation")));
@@ -103,7 +106,7 @@ fn null_outcome_or_unfinished_row_and_error_view_membership_do_not_become_failur
             }
         }
         row.key = point.key().unwrap();
-        let report = explain(&input, true).unwrap();
+        let report = explain_native(&input, true).unwrap();
         assert_eq!(report.entries[0].title, t!("view.jobs.run.unverified_title", job = "1000"));
         assert!(!report.entries[0].explanation.contains(&t!("view.native_failures.cause.allocation.explanation")));
     }
@@ -112,8 +115,8 @@ fn null_outcome_or_unfinished_row_and_error_view_membership_do_not_become_failur
 fn missing_archive_rows_and_permission_outcomes_keep_original_counts_and_explicit_read_gaps() {
     let mut input = input();
     input.observations.clear();
-    assert!(explain(&input, true).is_err());
-    let report = explain(&input, false).unwrap();
+    assert!(explain_native(&input, true).is_err());
+    let report = explain_native(&input, false).unwrap();
     assert_eq!((report.native_rows, report.observed_rows), (1, 0));
     assert!(!report.read_complete);
     assert!(report.entries.is_empty());
@@ -123,7 +126,7 @@ fn missing_archive_rows_and_permission_outcomes_keep_original_counts_and_explici
         culprit_core::ErrorCode::PermissionDenied,
         None,
     );
-    assert_eq!(explain(&input, true).unwrap().sources[1].state, SourceState::Unavailable);
+    assert_eq!(explain_native(&input, true).unwrap().sources[1].state, SourceState::Unavailable);
 }
 #[test]
 fn presentation_limits_preserve_raw_counts_and_do_not_hide_a_late_recorded_failure() {
@@ -146,7 +149,7 @@ fn presentation_limits_preserve_raw_counts_and_do_not_hide_a_late_recorded_failu
     let failure = rows.last().unwrap().key.clone();
     input.sources[1].records = rows.len() as u32;
     input.observations = rows;
-    let report = explain(&input, true).unwrap();
+    let report = explain_native(&input, true).unwrap();
     assert!(report.entries_limited);
     assert_eq!(report.entries.len(), MAX_JOB_ENTRIES);
     assert_eq!(report.entries[0].observation_key, failure);
@@ -163,10 +166,12 @@ fn a_stored_reported_label_is_available_without_becoming_a_definition_or_resourc
     point.native_run_id = None;
     point.procedure.as_mut().unwrap().origin = TimescaleJobProcedureOrigin::Stored;
     row.key = point.key().unwrap();
-    let report = explain(&input, true).unwrap();
+    let report = explain_native(&input, true).unwrap();
     assert!(report.entries[0].explanation.contains(&t!("view.jobs.limit.stored_label")));
     assert_eq!(report.entries[0].title, t!("view.jobs.run.unverified_title", job = "1000"));
     assert!(!report.entries[0].metrics.iter().any(|metric| metric.is("view.jobs.metric.owner")));
 }
 
 mod policy;
+
+mod agent;

@@ -219,7 +219,8 @@ fn sharing_withholds_the_read_endpoint_owner_and_paths_but_preserves_valid_exact
     let original = TimescaleJobsSnapshot::from_source(&source, vec![row]).unwrap();
     let mut snapshot: crate::Snapshot =
         serde_json::from_str(include_str!("../../../../../fixtures/postgres-demo.json")).unwrap();
-    snapshot.operations.jobs = Some(Box::new(original.clone()));
+    snapshot.operations.jobs =
+        Some(Box::new(JobsSnapshot::Timescale { snapshot: Box::new(original.clone()), read_complete: true }));
     let shared = crate::redact::redact_snapshot(&snapshot);
     let read = shared.operations.jobs.as_ref().unwrap();
     assert!(read.is_valid());
@@ -234,11 +235,16 @@ fn sharing_withholds_the_read_endpoint_owner_and_paths_but_preserves_valid_exact
         serde_json::to_value(read).unwrap(),
         serde_json::to_value(crate::redact::redact_snapshot(&shared).operations.jobs.unwrap()).unwrap()
     );
-    assert_eq!(snapshot.operations.jobs.as_deref(), Some(&original));
+    let JobsSnapshot::Timescale { snapshot: native, read_complete } = snapshot.operations.jobs.as_deref().unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(native.as_ref(), &original);
+    assert!(*read_complete);
 }
 
 #[test]
-fn jobs_require_the_database_subject_and_a_typed_header_even_for_empty_reads() {
+fn jobs_require_the_native_profile_subject_and_a_typed_header_even_for_empty_reads() {
     let mut request = CollectionRequest {
         subject: CollectionSubject::Database,
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs },
@@ -267,7 +273,7 @@ fn jobs_require_the_database_subject_and_a_typed_header_even_for_empty_reads() {
             native: NativeIdentity::new("instance"),
         },
     };
-    assert!(request.validate().is_err());
+    assert!(request.validate().is_ok(), "the closed native profile determines whether an instance subject applies");
     assert!(!source.matches_request(&request));
 }
 

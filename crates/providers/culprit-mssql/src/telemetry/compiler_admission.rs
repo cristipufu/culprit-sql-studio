@@ -1,6 +1,6 @@
 //! Focused compiler admission uses the shared frozen-source owner and the existing native request/gateway readers.
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
     read::{NativeRead, ReadSession, invalid_data},
 };
@@ -31,11 +31,7 @@ struct CompilerObservationReader<R: NativeRead> {
 }
 impl CompilerAdmissionSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        let options = ReadOptions {
-            budget: focused_budget(&request.budget),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::Endpoint,
-        };
+        let options = ReadOptions { budget: focused_budget(&request.budget), identity: IdentityDetail::Endpoint };
         Self::from_reader(ActivityReader::open(pool, options, host, port)?, request)
     }
 }

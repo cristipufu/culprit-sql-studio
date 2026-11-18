@@ -306,7 +306,6 @@ async fn task_population_sentinel_preserves_only_the_admitted_point_without_quer
         io,
         crate::activity::ReadOptions {
             budget: CollectionBudget { max_snapshot_rows: 1, ..CollectionBudget::default() },
-            scope: ActivityScope::CurrentDatabase,
             identity: crate::activity::IdentityDetail::AzureDatabase,
         },
         "fixture.invalid".into(),

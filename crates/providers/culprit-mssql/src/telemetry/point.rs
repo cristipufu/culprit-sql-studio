@@ -17,6 +17,7 @@ pub(super) enum Family {
     ProcessorTopology,
     CompilationGateways,
     MemoryClerks,
+    InstanceResources,
     Schedulers,
     MemoryFailures,
     PlanCacheSummary,
@@ -109,6 +110,7 @@ pub(super) fn shared_families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
     Ok(vec![
         Family::Operation(native::Kind::Temp),
         Family::MemoryClerks,
+        Family::InstanceResources,
         Family::Schedulers,
         Family::PerformanceCounters,
         Family::ProcessorTopology,
@@ -129,6 +131,7 @@ impl Family {
             Self::ProcessorTopology => &sources::PROCESSOR_TOPOLOGY,
             Self::CompilationGateways => &sources::COMPILATION_GATEWAYS,
             Self::MemoryClerks => &sources::MEMORY_CLERKS,
+            Self::InstanceResources => &sources::INSTANCE_RESOURCES,
             Self::Schedulers => &sources::SCHEDULERS,
             Self::MemoryFailures => &sources::MEMORY_FAILURES,
             Self::PlanCacheSummary => &sources::PLAN_CACHE_USE,
@@ -182,6 +185,26 @@ impl Family {
                         }))
                     })
                     .collect::<Result<Vec<_>>>()?
+            }
+            Self::InstanceResources => {
+                if limit == 0 {
+                    return Err(CollectionStop::RowLimit.error());
+                }
+                let point = crate::resources::read_instance_pressure(reader)
+                    .await
+                    .map_err(ReadError::into_error)?
+                    .observation()?;
+                let complete_scope = point.has_complete_population();
+                let row = OperationalObservation {
+                    source: self.source().name.into(),
+                    key: point.key()?,
+                    fact: OperationalFact::MssqlInstanceResources(Box::new(point)),
+                };
+                return Ok(ReadOutcome::Observed(Records {
+                    values: vec![TelemetryRecord::Operational(row)],
+                    complete_scope,
+                    error_code: None,
+                }));
             }
             Self::MemoryClerks => counter_sets(self.source().name, crate::memory_clerks::read(reader, limit).await?)?,
             Self::Schedulers => counter_sets(self.source().name, crate::schedulers::read(reader, limit).await?)?,

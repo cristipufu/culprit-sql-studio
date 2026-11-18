@@ -1,4 +1,4 @@
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{columns, read::NativeRead, value::Rec};
 use culprit_core::{Result, Source, telemetry::*};
 pub(super) struct Columns;
@@ -8,7 +8,7 @@ impl SnapshotRecipe for Columns {
     const DATASET: SnapshotDataset = SnapshotDataset::Columns;
     const NAME: &'static str = "column-state";
     const SOURCE: &'static Source = &crate::sources::COLUMNS;
-    const INSTANCE_LOCAL: bool = false;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabase;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, budget: &CollectionBudget) -> Result<Option<usize>> {
         Ok(Some(MAX_CATALOG_EXPRESSION_BYTES.min(budget.max_sql_bytes as usize)))

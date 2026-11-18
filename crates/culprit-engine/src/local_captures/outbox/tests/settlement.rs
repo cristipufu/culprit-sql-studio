@@ -46,6 +46,18 @@ impl Wake for PermitRelease {
 
 async fn fixture(analysis: LocalCaptureAnalysisKind) -> LocalCaptureFixture {
     match analysis {
+        LocalCaptureAnalysisKind::SessionCensus => {
+            let (source, rows) = culprit_collector::analytical::test_support::session_census_evidence(
+                culprit_collector::analytical::test_support::SessionCensusCase::Mars,
+            );
+            LocalCaptureFixture::activity(source, rows).await
+        }
+        LocalCaptureAnalysisKind::Blocking => {
+            let (source, rows) = culprit_collector::analytical::test_support::blocking_evidence(
+                culprit_collector::analytical::test_support::BlockingCase::Matched,
+            );
+            LocalCaptureFixture::activity(source, rows).await
+        }
         LocalCaptureAnalysisKind::PageServerReads => {
             let case = page_server_read_evidence_cases().remove(0);
             LocalCaptureFixture::query_history(case.source, case.records).await
@@ -156,7 +168,9 @@ async fn assert_settlement(analysis: LocalCaptureAnalysisKind, exit: Exit) {
             Exit::Panic => {
                 assert_eq!(result.unwrap().unwrap_err().detail, Some(ErrorDetail::Outbox(OutboxProblem::Storage)));
             }
-            Exit::CallerDrop => unreachable!("caller drop was joined while the worker still held the barrier"),
+            Exit::CallerDrop => {
+                unreachable!("caller drop was joined while the worker still held the barrier")
+            }
         }
     }
     assert_eq!(queued.await.unwrap().kind(), analysis, "the waiting action uses the same reader without Locked");

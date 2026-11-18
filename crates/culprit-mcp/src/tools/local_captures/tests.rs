@@ -192,3 +192,5 @@ fn deadline_and_cancellation_remain_distinct_without_any_native_or_store_access(
         Some(ErrorDetail::CollectionStopped(CollectionStop::Cancelled))
     );
 }
+
+mod session_census;

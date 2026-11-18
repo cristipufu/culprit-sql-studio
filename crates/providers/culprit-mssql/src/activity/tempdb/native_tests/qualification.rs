@@ -104,11 +104,7 @@ async fn capture_with_budget(fixture: &CostFixture, budget: CollectionBudget) ->
     let scope = io.scope().clone();
     let mut reader = ActivityReader::new(
         io,
-        ReadOptions {
-            budget: budget.clone(),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::Endpoint,
-        },
+        ReadOptions { budget: budget.clone(), identity: IdentityDetail::Endpoint },
         "127.0.0.1".into(),
         fixture.port,
     );

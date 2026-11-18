@@ -409,6 +409,10 @@ pub enum SourceObservation {
         snapshot: StateSnapshotDescription,
         metadata: Box<TimescaleJobsMetadata>,
     },
+    MssqlAgentJobs {
+        snapshot: StateSnapshotDescription,
+        metadata: Box<MssqlAgentJobsMetadata>,
+    },
     CacheEntryMemory {
         snapshot: StateSnapshotDescription,
         focus: Box<CacheEntryMemoryFocus>,
@@ -510,7 +514,7 @@ impl SourceObservation {
             Self::MaintenanceProgress { .. } => TelemetryCollection::Snapshot(SnapshotDataset::MaintenanceProgress),
             Self::CurrentRequestWork { .. } => TelemetryCollection::Snapshot(SnapshotDataset::CurrentRequestWork),
             Self::Diagnostics(_) => TelemetryCollection::Diagnostics,
-            Self::Jobs { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
+            Self::Jobs { .. } | Self::MssqlAgentJobs { .. } => TelemetryCollection::Snapshot(SnapshotDataset::Jobs),
             Self::Snapshot(snapshot) | Self::SourceRead { snapshot, .. } => {
                 TelemetryCollection::Snapshot(snapshot.dataset)
             }
@@ -555,9 +559,11 @@ impl SourceObservation {
                         .map_err(|_| CollectionStop::InvalidPage.error())?,
                 ),
             },
-            Self::PageWaitTargets { .. } | Self::Jobs { .. } | Self::Snapshot(_) | Self::PagedSnapshot(_) => {
-                TelemetryRange::Current
-            }
+            Self::PageWaitTargets { .. }
+            | Self::Jobs { .. }
+            | Self::MssqlAgentJobs { .. }
+            | Self::Snapshot(_)
+            | Self::PagedSnapshot(_) => TelemetryRange::Current,
         })
     }
     pub fn accepts_sample(&self, at: &str) -> bool {
@@ -582,6 +588,7 @@ impl SourceObservation {
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
             Self::Jobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
+            Self::MssqlAgentJobs { snapshot, metadata } => metadata.matches_snapshot(snapshot),
             Self::Activity(snapshot) => snapshot.is_valid(),
             Self::FocusedBlocking { snapshot, result } => result.is_valid_header(snapshot),
             Self::CacheEntryMemory { snapshot, focus } => {
@@ -673,6 +680,7 @@ impl SourceObservation {
             Self::Snapshot(snapshot)
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
+            | Self::MssqlAgentJobs { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
@@ -690,6 +698,7 @@ impl SourceObservation {
             Self::Snapshot(snapshot)
             | Self::SourceRead { snapshot, .. }
             | Self::Jobs { snapshot, .. }
+            | Self::MssqlAgentJobs { snapshot, .. }
             | Self::PageWaitTargets { snapshot, .. }
             | Self::FocusedPageWait { snapshot, .. }
             | Self::PageWaitWriters { snapshot, .. }
@@ -726,7 +735,9 @@ impl SourceObservation {
             Self::MaintenanceProgress { snapshot, .. } | Self::CurrentRequestWork { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
-            Self::Jobs { snapshot, .. } | Self::CacheEntryMemory { snapshot, .. } => {
+            Self::Jobs { snapshot, .. }
+            | Self::MssqlAgentJobs { snapshot, .. }
+            | Self::CacheEntryMemory { snapshot, .. } => {
                 count(TelemetryStream::OperationalSamples) == u64::from(snapshot.records)
             }
             Self::Diagnostics(description) => {
@@ -830,7 +841,9 @@ impl CollectionDescription {
             return false;
         }
         if let CollectionSelection::SourceRead { focus, execution: expected } = &request.selection {
-            let Some(actual) = self.observation.execution_context() else { return false };
+            let Some(actual) = self.observation.execution_context() else {
+                return false;
+            };
             let (dataset, observed_rows, focus_key, valid) = match &self.observation {
                 SourceObservation::SourceRead { snapshot, focus_key, .. } => {
                     (snapshot.dataset, snapshot.records, focus_key, self.observation.covers_request())
@@ -969,6 +982,13 @@ impl CollectionDescription {
         }
         if let (
             SourceObservation::Jobs { snapshot, metadata },
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs },
+        ) = (&self.observation, &request.selection)
+        {
+            return metadata.matches_source(self, snapshot) && snapshot.records <= request.budget.max_snapshot_rows;
+        }
+        if let (
+            SourceObservation::MssqlAgentJobs { snapshot, metadata },
             CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs },
         ) = (&self.observation, &request.selection)
         {

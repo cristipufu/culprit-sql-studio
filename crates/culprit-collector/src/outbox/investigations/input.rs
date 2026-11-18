@@ -8,6 +8,11 @@ enum InputInstallation {
     EvidenceOnly,
 }
 
+enum ReferenceUse {
+    Evidence,
+    ActivityAuthority,
+}
+
 struct StoredDiagnosticInput {
     parent: String,
     source: String,
@@ -160,6 +165,14 @@ impl Files {
         &mut self,
         reference: &DiagnosticEvidenceRef,
     ) -> Result<(CollectionDescription, ExportedRecord)> {
+        self.diagnostic_reference_for(reference, ReferenceUse::Evidence)
+    }
+
+    fn diagnostic_reference_for(
+        &mut self,
+        reference: &DiagnosticEvidenceRef,
+        purpose: ReferenceUse,
+    ) -> Result<(CollectionDescription, ExportedRecord)> {
         if !reference.is_valid() {
             return Err(integrity());
         }
@@ -204,11 +217,26 @@ impl Files {
         if parent != reference.capture_ref() {
             return Err(integrity());
         }
-        rows.into_iter().find(|row| row.reference == *reference).map(|row| (source, row.row)).ok_or_else(integrity)
+        let position = rows.iter().position(|row| row.reference == *reference).ok_or_else(integrity)?;
+        if matches!(purpose, ReferenceUse::ActivityAuthority) {
+            let NativeRecordIdentity::Activity(key) = &reference.native_key else { return Err(integrity()) };
+            let original = rows
+                .iter()
+                .map(|row| {
+                    let TelemetryRecord::Activity(observation) = &row.row.record else { return Err(integrity()) };
+                    Ok(ActivityFrameRow { observation, reference: Some(&row.reference) })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let frame = ActivityFrameEvidence::new(&source, &original, true)?;
+            if !frame.has_session_generation_authority(&key.session) {
+                return Err(CollectionStop::SourceChanged.error());
+            }
+        }
+        rows.into_iter().nth(position).map(|row| (source, row.row)).ok_or_else(integrity)
     }
 
     pub(in crate::outbox) fn verify_focus_parent(&mut self, focus: &ActivityRequestFocus) -> Result<()> {
-        let (source, row) = self.diagnostic_reference(&focus.parent)?;
+        let (source, row) = self.diagnostic_reference_for(&focus.parent, ReferenceUse::ActivityAuthority)?;
         let TelemetryRecord::Activity(original) = &row.record else {
             return Err(integrity());
         };
@@ -301,7 +329,7 @@ impl Files {
         focus: &SourceReadFocus,
         execution: &NativeSourceReadScope,
     ) -> Result<()> {
-        let (source, row) = self.diagnostic_reference(&focus.basis)?;
+        let (source, row) = self.diagnostic_reference_for(&focus.basis, ReferenceUse::ActivityAuthority)?;
         if !focus.matches_basis(&source, &row, execution) {
             return Err(integrity());
         }

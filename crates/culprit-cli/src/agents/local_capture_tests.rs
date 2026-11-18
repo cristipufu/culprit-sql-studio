@@ -1,5 +1,7 @@
 //! Startup composition reaches canonical saved originals without constructing a native provider or a warehouse.
+mod blocking;
 mod hyperscale_log_components;
+mod participant_context;
 mod snapshots;
 use super::*;
 use clap::Parser;
@@ -289,3 +291,7 @@ async fn selecting_the_wrong_local_family_never_returns_an_empty_success_or_cons
     assert!(value.get("memory_clerks").is_none());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
+
+mod session_census;
+
+mod instance_resources;

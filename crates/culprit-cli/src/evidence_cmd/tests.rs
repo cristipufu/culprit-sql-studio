@@ -768,3 +768,7 @@ fn wait_counter_analysis_selects_only_the_existing_wait_family_without_payload_h
         assert!(request.budget.recovery_payloads.is_none());
     }
 }
+
+mod session_census;
+
+mod instance_resources;

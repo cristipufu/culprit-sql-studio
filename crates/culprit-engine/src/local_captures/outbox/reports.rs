@@ -26,6 +26,9 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
                 },
             )?)))
         }
+        LocalCaptureAnalysisKind::InstanceResources => Ok(LocalSnapshotReport::InstanceResources(Box::new(
+            culprit_checks::instance_resources::explain_captured(read)?,
+        ))),
         LocalCaptureAnalysisKind::DatabaseProperties => {
             required_source(read, DATABASE_PROPERTIES_SOURCE)?;
             let native = DatabasePropertiesRead::from_source(source, read.observations.clone(), read.read_complete)?;
@@ -67,8 +70,8 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
             )?)))
         }
         LocalCaptureAnalysisKind::Jobs => {
-            let native = TimescaleJobsSnapshot::from_source(source, read.observations.clone())?;
-            Ok(LocalSnapshotReport::Jobs(Box::new(culprit_checks::jobs::explain(&native, read.read_complete)?)))
+            let native = JobsSnapshot::from_source(source, read.observations.clone(), read.read_complete)?;
+            Ok(LocalSnapshotReport::Jobs(Box::new(culprit_checks::jobs::explain(&native)?)))
         }
         LocalCaptureAnalysisKind::StatementWork => {
             let native = StatementCounterSnapshot::from_source(source, read.observations.clone())?;
@@ -98,6 +101,8 @@ pub(super) fn explain(kind: LocalCaptureAnalysisKind, read: &CapturedOperational
             Ok(LocalSnapshotReport::Storage(Box::new(culprit_checks::storage::explain_captured(read)?)))
         }
         LocalCaptureAnalysisKind::PageServerReads
+        | LocalCaptureAnalysisKind::SessionCensus
+        | LocalCaptureAnalysisKind::Blocking
         | LocalCaptureAnalysisKind::MemoryClerks
         | LocalCaptureAnalysisKind::HyperscaleLogComponents => Err(DeliveryProblem::UnsupportedSchema.error()),
     }

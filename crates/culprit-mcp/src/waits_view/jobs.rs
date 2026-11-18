@@ -1,7 +1,7 @@
 //! MCP projects the shared job explanation; it does not reacquire or reclassify native scheduler records.
 use culprit_core::{
     JobEntry, Metric, Report,
-    telemetry::{TIMESCALE_JOB_RUNS_SOURCE, TIMESCALE_JOBS_SOURCE},
+    telemetry::{MSSQL_AGENT_SOURCES, TIMESCALE_JOB_RUNS_SOURCE, TIMESCALE_JOBS_SOURCE},
 };
 use serde_json::{Value, json};
 const ENTRY_LIMIT: usize = 5;
@@ -11,7 +11,10 @@ pub(super) fn attach(response: &mut Value, report: &Report) {
             .snapshot
             .sources
             .iter()
-            .filter(|source| matches!(source.source.as_str(), TIMESCALE_JOBS_SOURCE | TIMESCALE_JOB_RUNS_SOURCE))
+            .filter(|source| {
+                matches!(source.source.as_str(), TIMESCALE_JOBS_SOURCE | TIMESCALE_JOB_RUNS_SOURCE)
+                    || MSSQL_AGENT_SOURCES.contains(&source.source.as_str())
+            })
             .collect::<Vec<_>>();
         if report.snapshot.operations.jobs.is_some() || !sources.is_empty() {
             let reason = if report.snapshot.operations.jobs.is_some() {
@@ -29,7 +32,7 @@ pub(super) fn attach(response: &mut Value, report: &Report) {
         "entries":view.entries.iter().take(ENTRY_LIMIT).map(point).collect::<Vec<_>>(),"limitations":view.limitations});
 }
 fn point(entry: &JobEntry) -> Value {
-    json!({"reference":{"source":entry.source,"observation_key":entry.observation_key},"kind":entry.kind,"title":entry.title,"explanation":entry.explanation,
+    json!({"reference":{"source":entry.source,"observation_key":entry.observation_key},"job_id":entry.job_id,"kind":entry.kind,"title":entry.title,"explanation":entry.explanation,
         "metrics":entry.metrics.iter().filter(|metric|safe_metric(metric)).collect::<Vec<_>>(),"investigation":entry.investigation,"verify":entry.verify})
 }
 fn safe_metric(metric: &Metric) -> bool {
@@ -56,7 +59,40 @@ fn safe_metric(metric: &Metric) -> bool {
         "view.jobs.metric.fixed_schedule",
         "view.jobs.metric.succeeded",
     ];
-    KEYS.contains(&metric.key.as_str())
+    const AGENT_KEYS: &[&str] = &[
+        "view.mssql_agent_jobs.field.name",
+        "view.mssql_agent_jobs.field.stored_step",
+        "view.mssql_agent_jobs.field.subsystem",
+        "view.mssql_agent_jobs.field.database",
+        "view.mssql_agent_jobs.field.service_name",
+        "view.mssql_agent_jobs.field.observed_at",
+        "view.mssql_agent_jobs.field.enabled",
+        "view.mssql_agent_jobs.field.version",
+        "view.mssql_agent_jobs.field.start_step",
+        "view.mssql_agent_jobs.field.created",
+        "view.mssql_agent_jobs.field.modified",
+        "view.mssql_agent_jobs.field.requested",
+        "view.mssql_agent_jobs.field.queued",
+        "view.mssql_agent_jobs.field.started",
+        "view.mssql_agent_jobs.field.stopped",
+        "view.mssql_agent_jobs.field.last_step",
+        "view.mssql_agent_jobs.field.last_step_time",
+        "view.mssql_agent_jobs.field.next_scheduled",
+        "view.mssql_agent_jobs.field.step_id",
+        "view.mssql_agent_jobs.field.outcome",
+        "view.mssql_agent_jobs.field.run_date",
+        "view.mssql_agent_jobs.field.run_time",
+        "view.mssql_agent_jobs.field.duration",
+        "view.mssql_agent_jobs.field.sql_message",
+        "view.mssql_agent_jobs.field.sql_severity",
+        "view.mssql_agent_jobs.field.retries",
+        "view.mssql_agent_jobs.field.bound",
+        "view.mssql_agent_jobs.field.agent_start",
+        "view.mssql_agent_jobs.field.service_status",
+        "view.mssql_agent_jobs.field.service_start",
+        "view.mssql_agent_jobs.field.service_limit",
+    ];
+    KEYS.contains(&metric.key.as_str()) || AGENT_KEYS.contains(&metric.key.as_str())
 }
 #[cfg(test)]
 mod tests;

@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     read::ReadError,
     resources::test_support::{FakeRead, replace},
     value::Val,
@@ -12,11 +12,7 @@ use support::{authority, platform, target};
 fn activity_reader(replies: Vec<crate::read::ReadResult<Vec<crate::value::Rec>>>) -> ActivityReader<FakeRead> {
     ActivityReader::new(
         FakeRead::new(replies),
-        ReadOptions {
-            budget: CollectionBudget::default(),
-            scope: ActivityScope::Visible,
-            identity: IdentityDetail::Endpoint,
-        },
+        ReadOptions { budget: CollectionBudget::default(), identity: IdentityDetail::Endpoint },
         "fixture.invalid".into(),
         1433,
     )

@@ -76,7 +76,7 @@ pub struct OperationalStats {
     pub native_failures: Option<crate::telemetry::NativeFailureSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub jobs: Option<Box<crate::telemetry::TimescaleJobsSnapshot>>,
+    pub jobs: Option<Box<crate::telemetry::JobsSnapshot>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub session_memory: Option<crate::telemetry::SessionMemorySnapshot>,
@@ -114,6 +114,10 @@ impl OperationalStats {
                     crate::source_id::NATIVE_FAILURES
                         | crate::telemetry::TIMESCALE_JOBS_SOURCE
                         | crate::telemetry::TIMESCALE_JOB_RUNS_SOURCE
+                        | crate::telemetry::MSSQL_AGENT_JOBS_SOURCE
+                        | crate::telemetry::MSSQL_AGENT_STEPS_SOURCE
+                        | crate::telemetry::MSSQL_AGENT_HISTORY_SOURCE
+                        | crate::telemetry::MSSQL_AGENT_CONTEXT_SOURCE
                 )
             })
     }

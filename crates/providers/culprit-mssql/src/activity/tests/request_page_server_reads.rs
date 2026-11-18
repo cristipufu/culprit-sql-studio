@@ -50,11 +50,8 @@ async fn same_held_profile_exposes_request_count_once_without_borrowing_session_
     for pages in [0, 9007199254740993, i64::MAX] {
         let raw = page_fields(&metadata(42), 1, Val::Int(pages));
         let before = page_fields(&authority(&raw), 1, Val::Null);
-        let mut source = reader(
-            vec![Ok(vec![before.clone()]), Ok(vec![raw]), Ok(vec![before])],
-            ActivityScope::CurrentDatabase,
-            IdentityDetail::AzureDatabase,
-        );
+        let mut source =
+            reader(vec![Ok(vec![before.clone()]), Ok(vec![raw]), Ok(vec![before])], IdentityDetail::AzureDatabase);
         let (_, records) = crate::telemetry::activity::capture(&mut source).await.unwrap();
         assert_eq!(records[0].request_counters.as_ref().unwrap().page_server_reads, Some(pages.to_string()));
         assert!(records[0].session_counters.page_server_reads.is_none());
@@ -72,11 +69,8 @@ async fn unknown_unavailable_or_denied_metadata_never_promotes_a_later_capabilit
     for capability in [0, 2, 3] {
         let raw = page_fields(&metadata(42), capability, Val::Null);
         let before = page_fields(&authority(&raw), capability, Val::Null);
-        let mut source = reader(
-            vec![Ok(vec![before.clone()]), Ok(vec![raw]), Ok(vec![before])],
-            ActivityScope::CurrentDatabase,
-            IdentityDetail::AzureDatabase,
-        );
+        let mut source =
+            reader(vec![Ok(vec![before.clone()]), Ok(vec![raw]), Ok(vec![before])], IdentityDetail::AzureDatabase);
         let (_, records) = crate::telemetry::activity::capture(&mut source).await.unwrap();
         assert_eq!(records[0].request_counters.as_ref().unwrap().page_server_reads, None);
         assert_eq!(records[0].request_counters.as_ref().unwrap().cpu_ms.as_deref(), Some("10"));
@@ -84,11 +78,7 @@ async fn unknown_unavailable_or_denied_metadata_never_promotes_a_later_capabilit
         assert_eq!(source.query_count(), 3);
     }
     let denied = || Err(ReadError::Source(Error::new(ErrorCode::PermissionDenied, "controlled metadata denial")));
-    let mut source = reader(
-        vec![denied(), Ok(vec![metadata(42)]), denied()],
-        ActivityScope::CurrentDatabase,
-        IdentityDetail::AzureDatabase,
-    );
+    let mut source = reader(vec![denied(), Ok(vec![metadata(42)]), denied()], IdentityDetail::AzureDatabase);
     let (description, records) = crate::telemetry::activity::capture(&mut source).await.unwrap();
     assert!(!description.observation.activity().unwrap().coverage.complete_scope);
     assert!(records[0].request_counters.as_ref().unwrap().page_server_reads.is_none());
@@ -101,11 +91,8 @@ async fn a_changed_final_native_profile_refuses_the_original_positive_request_co
     for final_capability in [0, 2, 3] {
         let initial = page_fields(&authority(&raw), 1, Val::Null);
         let final_row = page_fields(&authority(&raw), final_capability, Val::Null);
-        let mut source = reader(
-            vec![Ok(vec![initial]), Ok(vec![raw.clone()]), Ok(vec![final_row])],
-            ActivityScope::CurrentDatabase,
-            IdentityDetail::AzureDatabase,
-        );
+        let mut source =
+            reader(vec![Ok(vec![initial]), Ok(vec![raw.clone()]), Ok(vec![final_row])], IdentityDetail::AzureDatabase);
         let error = crate::telemetry::activity::capture(&mut source).await.unwrap_err();
         assert_eq!(error.detail, Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceChanged)));
         assert_eq!(source.query_count(), 3);
@@ -122,7 +109,6 @@ async fn final_optional_authority_denial_withholds_only_the_unattested_optional_
             Ok(vec![raw]),
             Err(ReadError::Source(Error::new(ErrorCode::PermissionDenied, "controlled final metadata denial"))),
         ],
-        ActivityScope::CurrentDatabase,
         IdentityDetail::AzureDatabase,
     );
     let (description, records) = crate::telemetry::activity::capture(&mut source).await.unwrap();
@@ -139,8 +125,8 @@ async fn final_optional_authority_denial_withholds_only_the_unattested_optional_
 #[tokio::test]
 async fn context_free_metadata_can_observe_capability_without_rereading_or_inventing_a_counter() {
     let raw = page_fields(&metadata(42), 1, Val::Null);
-    let mut source = reader(vec![Ok(vec![raw])], ActivityScope::Visible, IdentityDetail::Endpoint);
-    let frame = source.observe().await.unwrap();
+    let mut source = reader(vec![Ok(vec![raw])], IdentityDetail::Endpoint);
+    let frame = source.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
     assert_eq!(frame.context.request_page_server_read_capability, Availability::Available);
     assert_eq!(frame.records[0].facts.request_counters.as_ref().unwrap().page_server_reads, None);
     assert_eq!(source.query_count(), 1);
@@ -159,7 +145,6 @@ async fn terminal_final_authority_stops_never_publish_a_first_point_count_or_ret
         let initial = page_fields(&authority(&raw), 1, Val::Null);
         let mut source = reader(
             vec![Ok(vec![initial]), Ok(vec![raw]), Err(ReadError::Stopped(stop))],
-            ActivityScope::CurrentDatabase,
             IdentityDetail::AzureDatabase,
         );
         let error = crate::telemetry::activity::capture(&mut source).await.unwrap_err();
@@ -178,11 +163,7 @@ async fn a_stricter_caller_query_budget_cannot_skip_the_final_profile_check_or_r
     let initial = page_fields(&authority(&raw), 1, Val::Null);
     let mut source = ActivityReader::new(
         crate::resources::test_support::FakeRead::new(vec![Ok(vec![initial]), Ok(vec![raw])]).with_query_limit(2),
-        ReadOptions {
-            budget: CollectionBudget::default(),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::AzureDatabase,
-        },
+        ReadOptions { budget: CollectionBudget::default(), identity: IdentityDetail::AzureDatabase },
         "fixture.invalid".into(),
         1433,
     );

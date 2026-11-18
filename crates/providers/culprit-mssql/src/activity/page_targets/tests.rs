@@ -22,11 +22,7 @@ pub(crate) fn reader(replies: Vec<ReadResult<Vec<Rec>>>) -> ActivityReader<FakeR
 pub(crate) fn reader_with_native(io: FakeRead) -> ActivityReader<FakeRead> {
     ActivityReader::new(
         io,
-        ReadOptions {
-            budget: CollectionBudget::default(),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::AzureDatabase,
-        },
+        ReadOptions { budget: CollectionBudget::default(), identity: IdentityDetail::AzureDatabase },
         "fixture.invalid".into(),
         1433,
     )
@@ -34,7 +30,7 @@ pub(crate) fn reader_with_native(io: FakeRead) -> ActivityReader<FakeRead> {
 fn reader_with_identity(replies: Vec<ReadResult<Vec<Rec>>>, identity: IdentityDetail) -> ActivityReader<FakeRead> {
     ActivityReader::new(
         FakeRead::new(replies),
-        ReadOptions { budget: CollectionBudget::default(), scope: ActivityScope::CurrentDatabase, identity },
+        ReadOptions { budget: CollectionBudget::default(), identity },
         "fixture.invalid".into(),
         1433,
     )

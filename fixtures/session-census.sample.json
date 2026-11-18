@@ -1,0 +1,2013 @@
+{
+  "dormant": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "known",
+          "client": {
+            "application": "fixture-client",
+            "host": "client-reported.invalid",
+            "user": "fixture-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "1900-01-01T00:00:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": 0,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": "fixture-native-library",
+            "client_process_id": "0",
+            "last_request_end_age_ms": null,
+            "lifecycle": "pool-reset-prelogin",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "has_current_request": false,
+                "login_established": false,
+                "native_state": "Dormant",
+                "request_connection_id": null,
+                "tds_protocol_version": null,
+                "times": {
+                  "last_request_end_without_offset": null,
+                  "last_request_start_without_offset": null,
+                  "login_without_offset": "1900-01-01T00:00:00.0000000"
+                }
+              },
+              "kind": "mssql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": "0",
+            "logical_reads": "9007199254740993",
+            "physical_reads": null,
+            "writes": "0"
+          },
+          "state": "dormant",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.0001Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            "epoch": "native-source-generation",
+            "native_rows": 1,
+            "observations": 1,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:00.0002Z",
+            "population": "user-sessions-current-requests-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "source": "sessions",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "partition": {
+          "kind": "target"
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "1900-01-01T00:00:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "dormant"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-client"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "fixture-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "client-reported.invalid"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": "fixture-native-library"
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": "0"
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "0"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": "0"
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": "0"
+            },
+            {
+              "key": "native_session_state",
+              "label": "Native session state",
+              "value": "Dormant"
+            },
+            {
+              "key": "login_established",
+              "label": "Native login established",
+              "value": "No"
+            },
+            {
+              "key": "has_any_current_request",
+              "label": "Any current request on this session",
+              "value": "No"
+            },
+            {
+              "key": "tds_protocol",
+              "label": "Native TDS protocol version",
+              "value": null
+            },
+            {
+              "key": "native_login_time",
+              "label": "Native login time (no offset)",
+              "value": "1900-01-01T00:00:00.0000000"
+            },
+            {
+              "key": "native_last_start",
+              "label": "Native latest request start (no offset)",
+              "value": null
+            },
+            {
+              "key": "native_last_end",
+              "label": "Native latest request completion (no offset)",
+              "value": null
+            },
+            {
+              "key": "request_connection_id",
+              "label": "This request’s native connection ID",
+              "value": null
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Pool reset; prelogin",
+          "title": "Session 61"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+      ],
+      "native_rows": 1,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "sessions",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 0,
+      "observed_at": "2020-01-01T12:00:00.0001Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 0,
+      "observed_rows": 1,
+      "observed_sessions": 1,
+      "population": "user-sessions-current-requests-and-blockers",
+      "presented_rows": 1,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "sessions",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 1; current request identities: 0. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "empty": {
+    "read": {
+      "observations": [],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.0001Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 0,
+              "source": "sessions",
+              "state": "empty",
+              "stopped": null
+            },
+            "epoch": "native-source-generation",
+            "native_rows": 0,
+            "observations": 0,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:00.0002Z",
+            "population": "user-sessions-current-requests-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "source": "sessions",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "partition": {
+          "kind": "target"
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+      ],
+      "native_rows": 0,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 0,
+        "source": "sessions",
+        "state": "empty",
+        "stopped": null
+      },
+      "observed_active_sessions": 0,
+      "observed_at": "2020-01-01T12:00:00.0001Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 0,
+      "observed_rows": 0,
+      "observed_sessions": 0,
+      "population": "user-sessions-current-requests-and-blockers",
+      "presented_rows": 0,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "sessions",
+          "state": "empty"
+        }
+      ],
+      "summary": "No session rows were retained. The original source coverage and read completeness determine what is known.",
+      "title": "Session census"
+    }
+  },
+  "idle": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "known",
+          "client": {
+            "application": "fixture-client",
+            "host": "client-reported.invalid",
+            "user": "fixture-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": "6000",
+          "open_transactions": 0,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": "fixture-native-library",
+            "client_process_id": "0",
+            "last_request_end_age_ms": "5000",
+            "lifecycle": "idle",
+            "login_age_ms": "600000",
+            "native": {
+              "data": {
+                "has_current_request": false,
+                "login_established": true,
+                "native_state": "sleeping",
+                "request_connection_id": null,
+                "tds_protocol_version": null,
+                "times": {
+                  "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
+                  "last_request_start_without_offset": "2020-01-01T11:59:54.0000000",
+                  "login_without_offset": "2020-01-01T11:50:00.0000000"
+                }
+              },
+              "kind": "mssql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": "0",
+            "logical_reads": "9007199254740993",
+            "physical_reads": null,
+            "writes": "0"
+          },
+          "state": "sleeping",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.0001Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            "epoch": "native-source-generation",
+            "native_rows": 1,
+            "observations": 1,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:00.0002Z",
+            "population": "user-sessions-current-requests-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "source": "sessions",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "partition": {
+          "kind": "target"
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "sleeping"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-client"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "fixture-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "client-reported.invalid"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": "fixture-native-library"
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": "0"
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": "600000"
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": "6000"
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": "5000"
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "0"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": "0"
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": "0"
+            },
+            {
+              "key": "native_session_state",
+              "label": "Native session state",
+              "value": "sleeping"
+            },
+            {
+              "key": "login_established",
+              "label": "Native login established",
+              "value": "Yes"
+            },
+            {
+              "key": "has_any_current_request",
+              "label": "Any current request on this session",
+              "value": "No"
+            },
+            {
+              "key": "tds_protocol",
+              "label": "Native TDS protocol version",
+              "value": null
+            },
+            {
+              "key": "native_login_time",
+              "label": "Native login time (no offset)",
+              "value": "2020-01-01T11:50:00.0000000"
+            },
+            {
+              "key": "native_last_start",
+              "label": "Native latest request start (no offset)",
+              "value": "2020-01-01T11:59:54.0000000"
+            },
+            {
+              "key": "native_last_end",
+              "label": "Native latest request completion (no offset)",
+              "value": "2020-01-01T11:59:55.0000000"
+            },
+            {
+              "key": "request_connection_id",
+              "label": "This request’s native connection ID",
+              "value": null
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Idle session",
+          "title": "Session 61"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+      ],
+      "native_rows": 1,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "sessions",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 0,
+      "observed_at": "2020-01-01T12:00:00.0001Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 0,
+      "observed_rows": 1,
+      "observed_sessions": 1,
+      "population": "user-sessions-current-requests-and-blockers",
+      "presented_rows": 1,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "sessions",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 1; current request identities: 0. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "mars": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "known",
+          "client": {
+            "application": "fixture-client",
+            "host": "client-reported.invalid",
+            "user": "fixture-login"
+          },
+          "command": "SELECT",
+          "database": "db",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.0000000",
+              "id": "0"
+            },
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": "6000",
+          "open_transactions": 0,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": "0",
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "request-database",
+          "session_context": {
+            "client_library": "fixture-native-library",
+            "client_process_id": "0",
+            "last_request_end_age_ms": "5000",
+            "lifecycle": "running",
+            "login_age_ms": "600000",
+            "native": {
+              "data": {
+                "has_current_request": true,
+                "login_established": true,
+                "native_state": "Running",
+                "request_connection_id": "11111111-1111-1111-1111-111111111111",
+                "tds_protocol_version": null,
+                "times": {
+                  "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
+                  "last_request_start_without_offset": "2020-01-01T11:59:54.0000000",
+                  "login_without_offset": "2020-01-01T11:50:00.0000000"
+                }
+              },
+              "kind": "mssql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": "0",
+            "logical_reads": "9007199254740993",
+            "physical_reads": null,
+            "writes": "0"
+          },
+          "state": "running",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        },
+        {
+          "blocking_status": "known",
+          "client": {
+            "application": "fixture-client",
+            "host": "client-reported.invalid",
+            "user": "fixture-login"
+          },
+          "command": "SELECT",
+          "database": "db",
+          "elapsed_ms": "10",
+          "idle": false,
+          "key": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.0000000",
+              "id": "1"
+            },
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": "6000",
+          "open_transactions": 0,
+          "query_hash": null,
+          "request_counters": {
+            "cpu_ms": "0",
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "scope": "request-database",
+          "session_context": {
+            "client_library": "fixture-native-library",
+            "client_process_id": "0",
+            "last_request_end_age_ms": "5000",
+            "lifecycle": "running",
+            "login_age_ms": "600000",
+            "native": {
+              "data": {
+                "has_current_request": true,
+                "login_established": true,
+                "native_state": "Running",
+                "request_connection_id": "22222222-2222-2222-2222-222222222222",
+                "tds_protocol_version": null,
+                "times": {
+                  "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
+                  "last_request_start_without_offset": "2020-01-01T11:59:54.0000000",
+                  "login_without_offset": "2020-01-01T11:50:00.0000000"
+                }
+              },
+              "kind": "mssql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": "0",
+            "logical_reads": "9007199254740993",
+            "physical_reads": null,
+            "writes": "0"
+          },
+          "state": "running",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.0001Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 2,
+              "source": "sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            "epoch": "native-source-generation",
+            "native_rows": 2,
+            "observations": 2,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:00.0002Z",
+            "population": "user-sessions-current-requests-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "source": "sessions",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "partition": {
+          "kind": "target"
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.0000000",
+              "id": "0"
+            },
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "running"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-client"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "fixture-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "client-reported.invalid"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": "fixture-native-library"
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": "0"
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": "600000"
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": "6000"
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": "5000"
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "0"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": "0"
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": "0"
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": "0"
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "native_session_state",
+              "label": "Native session state",
+              "value": "Running"
+            },
+            {
+              "key": "login_established",
+              "label": "Native login established",
+              "value": "Yes"
+            },
+            {
+              "key": "has_any_current_request",
+              "label": "Any current request on this session",
+              "value": "Yes"
+            },
+            {
+              "key": "tds_protocol",
+              "label": "Native TDS protocol version",
+              "value": null
+            },
+            {
+              "key": "native_login_time",
+              "label": "Native login time (no offset)",
+              "value": "2020-01-01T11:50:00.0000000"
+            },
+            {
+              "key": "native_last_start",
+              "label": "Native latest request start (no offset)",
+              "value": "2020-01-01T11:59:54.0000000"
+            },
+            {
+              "key": "native_last_end",
+              "label": "Native latest request completion (no offset)",
+              "value": "2020-01-01T11:59:55.0000000"
+            },
+            {
+              "key": "request_connection_id",
+              "label": "This request’s native connection ID",
+              "value": "11111111-1111-1111-1111-111111111111"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "request-database",
+          "state": "Running session",
+          "title": "Session 61, request 0"
+        },
+        {
+          "activity": {
+            "request": {
+              "generation": "2020-01-01T11:59:59.0000000",
+              "id": "1"
+            },
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "running"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-client"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "fixture-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "client-reported.invalid"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": "fixture-native-library"
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": "0"
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": "600000"
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": "6000"
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": "5000"
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": "10"
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "0"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": "0"
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": "0"
+            },
+            {
+              "key": "request_cpu",
+              "label": "Current request CPU total (ms)",
+              "value": "0"
+            },
+            {
+              "key": "request_logical_reads",
+              "label": "Current request logical-read total",
+              "value": null
+            },
+            {
+              "key": "request_physical_reads",
+              "label": "Current request physical-read total",
+              "value": null
+            },
+            {
+              "key": "request_writes",
+              "label": "Current request write total",
+              "value": null
+            },
+            {
+              "key": "native_session_state",
+              "label": "Native session state",
+              "value": "Running"
+            },
+            {
+              "key": "login_established",
+              "label": "Native login established",
+              "value": "Yes"
+            },
+            {
+              "key": "has_any_current_request",
+              "label": "Any current request on this session",
+              "value": "Yes"
+            },
+            {
+              "key": "tds_protocol",
+              "label": "Native TDS protocol version",
+              "value": null
+            },
+            {
+              "key": "native_login_time",
+              "label": "Native login time (no offset)",
+              "value": "2020-01-01T11:50:00.0000000"
+            },
+            {
+              "key": "native_last_start",
+              "label": "Native latest request start (no offset)",
+              "value": "2020-01-01T11:59:54.0000000"
+            },
+            {
+              "key": "native_last_end",
+              "label": "Native latest request completion (no offset)",
+              "value": "2020-01-01T11:59:55.0000000"
+            },
+            {
+              "key": "request_connection_id",
+              "label": "This request’s native connection ID",
+              "value": "22222222-2222-2222-2222-222222222222"
+            }
+          ],
+          "idle": false,
+          "reference": null,
+          "scope": "request-database",
+          "state": "Running session",
+          "title": "Session 61, request 1"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+      ],
+      "native_rows": 2,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 2,
+        "source": "sessions",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 1,
+      "observed_at": "2020-01-01T12:00:00.0001Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 2,
+      "observed_rows": 2,
+      "observed_sessions": 1,
+      "population": "user-sessions-current-requests-and-blockers",
+      "presented_rows": 2,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "sessions",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 1; current request identities: 2. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "partial": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "known",
+          "client": {
+            "application": "fixture-client",
+            "host": "client-reported.invalid",
+            "user": "fixture-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": "6000",
+          "open_transactions": 0,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": "fixture-native-library",
+            "client_process_id": "0",
+            "last_request_end_age_ms": "5000",
+            "lifecycle": "idle",
+            "login_age_ms": "600000",
+            "native": {
+              "data": {
+                "has_current_request": false,
+                "login_established": true,
+                "native_state": "sleeping",
+                "request_connection_id": null,
+                "tds_protocol_version": null,
+                "times": {
+                  "last_request_end_without_offset": "2020-01-01T11:59:55.0000000",
+                  "last_request_start_without_offset": "2020-01-01T11:59:54.0000000",
+                  "login_without_offset": "2020-01-01T11:50:00.0000000"
+                }
+              },
+              "kind": "mssql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": "0",
+            "logical_reads": "9007199254740993",
+            "physical_reads": null,
+            "writes": "0"
+          },
+          "state": "sleeping",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.0001Z",
+            "coverage": {
+              "complete_scope": false,
+              "error_code": null,
+              "records": 1,
+              "source": "sessions",
+              "state": "partial",
+              "stopped": "row-limit"
+            },
+            "epoch": "native-source-generation",
+            "native_rows": 2,
+            "observations": 1,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:00.0002Z",
+            "population": "user-sessions-current-requests-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "source": "sessions",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "partition": {
+          "kind": "target"
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "sleeping"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-client"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "fixture-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "client-reported.invalid"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": "fixture-native-library"
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": "0"
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": "600000"
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": "6000"
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": "5000"
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": "0"
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": "0"
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": "9007199254740993"
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": "0"
+            },
+            {
+              "key": "native_session_state",
+              "label": "Native session state",
+              "value": "sleeping"
+            },
+            {
+              "key": "login_established",
+              "label": "Native login established",
+              "value": "Yes"
+            },
+            {
+              "key": "has_any_current_request",
+              "label": "Any current request on this session",
+              "value": "No"
+            },
+            {
+              "key": "tds_protocol",
+              "label": "Native TDS protocol version",
+              "value": null
+            },
+            {
+              "key": "native_login_time",
+              "label": "Native login time (no offset)",
+              "value": "2020-01-01T11:50:00.0000000"
+            },
+            {
+              "key": "native_last_start",
+              "label": "Native latest request start (no offset)",
+              "value": "2020-01-01T11:59:54.0000000"
+            },
+            {
+              "key": "native_last_end",
+              "label": "Native latest request completion (no offset)",
+              "value": "2020-01-01T11:59:55.0000000"
+            },
+            {
+              "key": "request_connection_id",
+              "label": "This request’s native connection ID",
+              "value": null
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Idle session",
+          "title": "Session 61"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "The observed rows do not establish complete population visibility. Missing permissions, generations, row limits and read gaps do not become healthy emptiness."
+      ],
+      "native_rows": 2,
+      "native_source": {
+        "complete_scope": false,
+        "error_code": null,
+        "records": 1,
+        "source": "sessions",
+        "state": "partial",
+        "stopped": "row-limit"
+      },
+      "observed_active_sessions": 0,
+      "observed_at": "2020-01-01T12:00:00.0001Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 0,
+      "observed_rows": 1,
+      "observed_sessions": 1,
+      "population": "user-sessions-current-requests-and-blockers",
+      "presented_rows": 1,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": "The telemetry source stopped before the read completed.",
+          "source": "sessions",
+          "state": "partial"
+        }
+      ],
+      "summary": "Observed session identities: 1; current request identities: 0. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  },
+  "unavailable": {
+    "read": {
+      "observations": [],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.0001Z",
+            "coverage": {
+              "complete_scope": false,
+              "error_code": "permission_denied",
+              "records": 0,
+              "source": "sessions",
+              "state": "unavailable",
+              "stopped": null
+            },
+            "epoch": null,
+            "native_rows": 0,
+            "observations": 0,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:00.0002Z",
+            "population": "user-sessions-current-requests-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "source": "sessions",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "partition": {
+          "kind": "target"
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps.",
+        "The observed rows do not establish complete population visibility. Missing permissions, generations, row limits and read gaps do not become healthy emptiness."
+      ],
+      "native_rows": 0,
+      "native_source": {
+        "complete_scope": false,
+        "error_code": "permission_denied",
+        "records": 0,
+        "source": "sessions",
+        "state": "unavailable",
+        "stopped": null
+      },
+      "observed_active_sessions": 0,
+      "observed_at": "2020-01-01T12:00:00.0001Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 0,
+      "observed_rows": 0,
+      "observed_sessions": 0,
+      "population": "user-sessions-current-requests-and-blockers",
+      "presented_rows": 0,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "sessions",
+          "state": "unavailable"
+        }
+      ],
+      "summary": "No session rows were retained. The original source coverage and read completeness determine what is known.",
+      "title": "Session census"
+    }
+  },
+  "unknown": {
+    "read": {
+      "observations": [
+        {
+          "blocking_status": "known",
+          "client": {
+            "application": "fixture-client",
+            "host": "client-reported.invalid",
+            "user": "fixture-login"
+          },
+          "command": null,
+          "database": "db",
+          "elapsed_ms": null,
+          "idle": true,
+          "key": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "last_request_age_ms": null,
+          "open_transactions": null,
+          "query_hash": null,
+          "request_counters": null,
+          "scope": "session-database",
+          "session_context": {
+            "client_library": null,
+            "client_process_id": null,
+            "last_request_end_age_ms": null,
+            "lifecycle": "unknown",
+            "login_age_ms": null,
+            "native": {
+              "data": {
+                "has_current_request": false,
+                "login_established": true,
+                "native_state": "future-native-state",
+                "request_connection_id": null,
+                "tds_protocol_version": null,
+                "times": {
+                  "last_request_end_without_offset": null,
+                  "last_request_start_without_offset": null,
+                  "login_without_offset": "2020-01-01T11:50:00.0000000"
+                }
+              },
+              "kind": "mssql"
+            }
+          },
+          "session_counters": {
+            "cpu_ms": null,
+            "logical_reads": null,
+            "physical_reads": null,
+            "writes": null
+          },
+          "state": "sleeping",
+          "statement": {
+            "reason": "not-collected",
+            "state": "unavailable"
+          },
+          "transaction_age_ms": null,
+          "wait": null,
+          "waiting_on_lock": null
+        }
+      ],
+      "read_complete": true,
+      "source": {
+        "continuity": "unverified",
+        "observation": {
+          "data": {
+            "at": "2020-01-01T12:00:00.0001Z",
+            "coverage": {
+              "complete_scope": true,
+              "error_code": null,
+              "records": 1,
+              "source": "sessions",
+              "state": "collected",
+              "stopped": null
+            },
+            "epoch": "native-source-generation",
+            "native_rows": 1,
+            "observations": 1,
+            "observed_from": "2020-01-01T12:00:00Z",
+            "observed_until": "2020-01-01T12:00:00.0002Z",
+            "population": "user-sessions-current-requests-and-blockers",
+            "scope": "database"
+          },
+          "kind": "activity"
+        },
+        "partition": {
+          "kind": "target"
+        },
+        "source": "sessions",
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      }
+    },
+    "report": {
+      "context": {
+        "database_writable": null,
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "partition": {
+          "kind": "target"
+        },
+        "target": {
+          "identity": {
+            "database": "db",
+            "engine": "mssql",
+            "incarnation": null,
+            "location": {
+              "host": "fixture.invalid",
+              "instance": null,
+              "kind": "server",
+              "port": 1433
+            }
+          },
+          "scope": "database"
+        }
+      },
+      "entries": [
+        {
+          "activity": {
+            "request": null,
+            "session": {
+              "generation": "2020-01-01T11:50:00.0000000",
+              "id": "61"
+            },
+            "transaction": null
+          },
+          "fields": [
+            {
+              "key": "actor_state",
+              "label": "Native actor state",
+              "value": "sleeping"
+            },
+            {
+              "key": "database",
+              "label": "Observed database context",
+              "value": "db"
+            },
+            {
+              "key": "application",
+              "label": "Client program",
+              "value": "fixture-client"
+            },
+            {
+              "key": "login",
+              "label": "Native login name",
+              "value": "fixture-login"
+            },
+            {
+              "key": "host",
+              "label": "Client-reported host",
+              "value": "client-reported.invalid"
+            },
+            {
+              "key": "library",
+              "label": "Client library",
+              "value": null
+            },
+            {
+              "key": "client_process",
+              "label": "Client-reported process ID",
+              "value": null
+            },
+            {
+              "key": "login_age_ms",
+              "label": "Age from native login and sample clocks (ms)",
+              "value": null
+            },
+            {
+              "key": "last_start_age_ms",
+              "label": "Age of the latest request start (ms)",
+              "value": null
+            },
+            {
+              "key": "last_end_age_ms",
+              "label": "Age of the latest request completion (ms)",
+              "value": null
+            },
+            {
+              "key": "current_elapsed_ms",
+              "label": "Current request elapsed time (ms)",
+              "value": null
+            },
+            {
+              "key": "open_transactions",
+              "label": "Observed open transactions",
+              "value": null
+            },
+            {
+              "key": "session_cpu",
+              "label": "Session CPU total (ms)",
+              "value": null
+            },
+            {
+              "key": "session_logical_reads",
+              "label": "Session logical-read total",
+              "value": null
+            },
+            {
+              "key": "session_physical_reads",
+              "label": "Session physical-read total",
+              "value": null
+            },
+            {
+              "key": "session_writes",
+              "label": "Session write total",
+              "value": null
+            },
+            {
+              "key": "native_session_state",
+              "label": "Native session state",
+              "value": "future-native-state"
+            },
+            {
+              "key": "login_established",
+              "label": "Native login established",
+              "value": "Yes"
+            },
+            {
+              "key": "has_any_current_request",
+              "label": "Any current request on this session",
+              "value": "No"
+            },
+            {
+              "key": "tds_protocol",
+              "label": "Native TDS protocol version",
+              "value": null
+            },
+            {
+              "key": "native_login_time",
+              "label": "Native login time (no offset)",
+              "value": "2020-01-01T11:50:00.0000000"
+            },
+            {
+              "key": "native_last_start",
+              "label": "Native latest request start (no offset)",
+              "value": null
+            },
+            {
+              "key": "native_last_end",
+              "label": "Native latest request completion (no offset)",
+              "value": null
+            },
+            {
+              "key": "request_connection_id",
+              "label": "This request’s native connection ID",
+              "value": null
+            }
+          ],
+          "idle": true,
+          "reference": null,
+          "scope": "session-database",
+          "state": "Session lifecycle not established",
+          "title": "Session 61"
+        }
+      ],
+      "entries_limited": false,
+      "limitations": [
+        "One bounded native read does not make all session and request fields atomic. Idle or dormant sessions alone do not establish a fault, a leak or application demand.",
+        "Session totals, last-request times and current-request counters have different lifetimes. MARS can expose several requests for one session; a session ID alone does not bind SQL, a transport connection or a lock owner.",
+        "Client program, library, host and process fields describe native client context; they are not authenticated service identities. Native times without an offset are retained as tokens, not UTC timestamps."
+      ],
+      "native_rows": 1,
+      "native_source": {
+        "complete_scope": true,
+        "error_code": null,
+        "records": 1,
+        "source": "sessions",
+        "state": "collected",
+        "stopped": null
+      },
+      "observed_active_sessions": 0,
+      "observed_at": "2020-01-01T12:00:00.0001Z",
+      "observed_blocked_sessions": 0,
+      "observed_requests": 0,
+      "observed_rows": 1,
+      "observed_sessions": 1,
+      "population": "user-sessions-current-requests-and-blockers",
+      "presented_rows": 1,
+      "read_complete": true,
+      "scope": "database",
+      "sources": [
+        {
+          "reason": null,
+          "source": "sessions",
+          "state": "collected"
+        }
+      ],
+      "summary": "Observed session identities: 1; current request identities: 0. Transport connections are a different population.",
+      "title": "Session census"
+    }
+  }
+}

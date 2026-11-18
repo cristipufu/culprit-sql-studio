@@ -10,6 +10,7 @@ use crate::model::{Engine, Snapshot};
 mod cached_runtime;
 mod configured_log_rates;
 mod connection_outcomes;
+mod instance_resources;
 mod jobs;
 mod page_server_reads;
 mod plan;
@@ -212,11 +213,14 @@ fn public_evidence_issue(source: &str, message: Option<&crate::i18n::Message>) -
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.invalid")
                 | (crate::source_id::MEMORY_CLERKS, "collected.memory_clerks.sharing_withheld")
                 | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.invalid")
+                | (crate::telemetry::INSTANCE_RESOURCES_SOURCE, "view.instance_resources.invalid")
                 | (crate::source_id::FILE_CAPACITY, "view.storage.invalid")
                 | (crate::source_id::FILE_CAPACITY, "view.storage.sharing_withheld")
                 | (crate::telemetry::DATABASE_PROPERTIES_SOURCE, "view.database_properties.sharing_withheld")
                 | (crate::source_id::WAITS, "view.wait_counters.invalid")
                 | (crate::telemetry::TIMESCALE_JOBS_SOURCE, "view.jobs.invalid")
+                | (crate::telemetry::MSSQL_AGENT_JOBS_SOURCE, "view.jobs.invalid")
+                | (crate::telemetry::MSSQL_AGENT_JOBS_SOURCE, "view.mssql_agent_jobs.sharing_withheld")
                 | (crate::telemetry::CACHED_RUNTIME_READ_SOURCE, "view.completed_spills.invalid")
                 | (crate::source_id::QUERY_STORE, "view.page_server_reads.invalid")
         )
@@ -302,6 +306,17 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             crate::message!("view.database_properties.sharing_withheld"),
         );
     }
+    if let Some(read) = s.pressure.as_mut().and_then(|pressure| pressure.instance_resources.take()) {
+        let retained = admit_shared_evidence(
+            &mut s,
+            crate::telemetry::INSTANCE_RESOURCES_SOURCE,
+            crate::message!("view.instance_resources.invalid"),
+            instance_resources::redact(read),
+        );
+        if let Some(pressure) = &mut s.pressure {
+            pressure.instance_resources = retained;
+        }
+    }
     let counters = s.pressure.as_mut().and_then(|pressure| pressure.resource_counters.take());
     if let Some(counters) = counters {
         let (clerks, counters): (Vec<_>, Vec<_>) =
@@ -370,12 +385,14 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         );
     }
     if let Some(evidence) = s.operations.jobs.take() {
-        s.operations.jobs = admit_shared_evidence(
-            &mut s,
-            crate::telemetry::TIMESCALE_JOBS_SOURCE,
-            crate::message!("view.jobs.invalid"),
-            jobs::redact(evidence),
-        );
+        let source = evidence.primary_source();
+        let message =
+            if matches!(evidence.as_ref(), crate::telemetry::JobsSnapshot::MssqlAgent { .. }) && evidence.is_valid() {
+                crate::message!("view.mssql_agent_jobs.sharing_withheld")
+            } else {
+                crate::message!("view.jobs.invalid")
+            };
+        s.operations.jobs = admit_shared_evidence(&mut s, source, message, jobs::redact(*evidence));
     }
     let configured = s.pressure.as_mut().and_then(|pressure| pressure.configured_log_rates.take());
     if let Some(evidence) = configured {

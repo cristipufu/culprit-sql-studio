@@ -3,6 +3,7 @@ use culprit_core::{Engine, MeasurementScope, SourceState};
 
 pub(in crate::views) fn current(session: &str, sql: &str) -> ActivityObservation {
     ActivityObservation {
+        session_context: None,
         blocking_status: ActivityBlockingStatus::Known,
         waiting_on_lock: Some(false),
         key: ActivityKey {
@@ -118,6 +119,128 @@ fn multiple_current_requests_on_a_blocking_session_remain_competing_context() {
     assert_eq!(entry.competing_requests[0].activity, peer.key);
     assert!(entry.issues.contains(&MaintenanceRelationIssue::MultipleOwnerRequests));
     assert!(entry.explanation.contains(&t!("view.maintenance.entry.competing", count = "1")));
+}
+
+fn mars_peer_with_lifecycle(original: &ActivityObservation, lifecycle: SessionLifecycle) -> ActivityObservation {
+    let mut peer = current(&original.key.session.id, "SELECT id FROM dbo.orders");
+    peer.key.session = original.key.session.clone();
+    peer.key.request.as_mut().unwrap().id = "1".into();
+    peer.key.request.as_mut().unwrap().generation = "peer-request".into();
+    peer.statement_identity = Some(NativeIdentity::new("peer-statement"));
+    peer.session_context = Some(Box::new(ActivitySessionContext {
+        lifecycle,
+        login_age_ms: None,
+        last_request_end_age_ms: None,
+        client_library: None,
+        client_process_id: None,
+        native: None,
+    }));
+    peer
+}
+
+const SESSION_AUTHORITY_CONTROLS: [(SessionLifecycle, bool); 4] = [
+    (SessionLifecycle::Running, true),
+    (SessionLifecycle::Unknown, true),
+    (SessionLifecycle::Connecting, false),
+    (SessionLifecycle::PoolResetPrelogin, false),
+];
+
+#[test]
+fn a_negative_maintenance_mars_peer_withholds_blocking_and_competing_links_but_keeps_the_raw_entry() {
+    for (lifecycle, established) in SESSION_AUTHORITY_CONTROLS {
+        let maintenance = current("57", "ALTER INDEX ix ON dbo.orders REBUILD");
+        let peer = mars_peer_with_lifecycle(&maintenance, lifecycle);
+        let waiter = waiting(current("58", "SELECT id FROM dbo.orders"), &maintenance);
+        let observations = [maintenance.clone(), peer, waiter.clone()];
+        let original = serde_json::to_value(&observations).unwrap();
+        let result = report(&frame(3), &observations, true).unwrap();
+        assert_eq!(result.observed_rows, 3);
+        assert_eq!(result.native_rows, 3);
+        assert_eq!(result.maintenance_observations, 1);
+        let entry = &result.entries[0];
+        assert_eq!(entry.reference.activity, maintenance.key);
+        assert!(!entry.metrics.is_empty());
+        assert_eq!(entry.affected_count, u32::from(established), "{lifecycle:?}");
+        assert_eq!(entry.competing_request_count, u32::from(established), "{lifecycle:?}");
+        assert_eq!(
+            entry.direction,
+            if established { MaintenanceDirection::BlockingSession } else { MaintenanceDirection::Unlinked },
+            "{lifecycle:?}"
+        );
+        if established {
+            assert_eq!(entry.affected[0].activity, waiter.key);
+        } else {
+            assert!(entry.affected.is_empty() && entry.competing_requests.is_empty() && entry.waiting_on.is_empty());
+            assert_eq!(entry.explanation, t!("view.maintenance.entry.unlinked"));
+        }
+        assert_eq!(serde_json::to_value(&observations).unwrap(), original, "original evidence stays intact");
+    }
+}
+
+#[test]
+fn a_negative_maintenance_mars_peer_cannot_authorize_a_waiting_direction_or_owner_link() {
+    for (lifecycle, established) in SESSION_AUTHORITY_CONTROLS {
+        let owner = current("59", "UPDATE dbo.orders SET value = 1");
+        let maintenance = waiting(current("57", "ALTER INDEX ix ON dbo.orders REBUILD"), &owner);
+        let peer = mars_peer_with_lifecycle(&maintenance, lifecycle);
+        let observations = [maintenance.clone(), peer, owner];
+        let result = report(&frame(3), &observations, true).unwrap();
+        let entry = &result.entries[0];
+        assert_eq!(entry.reference.activity, maintenance.key);
+        assert_eq!(
+            entry.direction,
+            if established { MaintenanceDirection::Waiting } else { MaintenanceDirection::Unlinked },
+            "{lifecycle:?}"
+        );
+        assert_eq!(entry.waiting_on.len(), usize::from(established), "{lifecycle:?}");
+        assert_eq!(entry.competing_request_count, u32::from(established), "{lifecycle:?}");
+        assert_eq!(observations[0].wait, maintenance.wait, "the raw native wait is still retained");
+    }
+}
+
+#[test]
+fn a_negative_dependent_mars_peer_cannot_decorate_an_established_maintenance_as_a_blocker() {
+    for (lifecycle, established) in SESSION_AUTHORITY_CONTROLS {
+        let maintenance = current("57", "ALTER INDEX ix ON dbo.orders REBUILD");
+        let waiter = waiting(current("58", "SELECT id FROM dbo.orders"), &maintenance);
+        let peer = mars_peer_with_lifecycle(&waiter, lifecycle);
+        let result = report(&frame(3), &[maintenance, waiter, peer], true).unwrap();
+        let entry = &result.entries[0];
+        assert_eq!(entry.affected_count, u32::from(established), "{lifecycle:?}");
+        assert_eq!(entry.affected.len(), usize::from(established), "{lifecycle:?}");
+        assert_eq!(
+            entry.direction,
+            if established { MaintenanceDirection::BlockingSession } else { MaintenanceDirection::Unlinked },
+            "{lifecycle:?}"
+        );
+    }
+}
+
+#[test]
+fn a_negative_owner_mars_peer_keeps_the_maintenance_wait_with_its_owner_unresolved() {
+    for (lifecycle, established) in SESSION_AUTHORITY_CONTROLS {
+        let owner = current("59", "UPDATE dbo.orders SET value = 1");
+        let peer = mars_peer_with_lifecycle(&owner, lifecycle);
+        let maintenance = waiting(current("57", "ALTER INDEX ix ON dbo.orders REBUILD"), &owner);
+        let result = report(&frame(3), &[maintenance, owner, peer], true).unwrap();
+        let entry = &result.entries[0];
+        assert_eq!(entry.direction, MaintenanceDirection::Waiting, "{lifecycle:?}");
+        assert_eq!(entry.waiting_on.len(), usize::from(established), "{lifecycle:?}");
+        assert_eq!(entry.issues.contains(&MaintenanceRelationIssue::WaitOwnerUnavailable), !established);
+        assert_eq!(entry.affected_count, 0);
+    }
+}
+
+#[test]
+fn a_different_disqualified_session_does_not_withdraw_an_established_maintenance_relationship() {
+    let maintenance = current("57", "ALTER INDEX ix ON dbo.orders REBUILD");
+    let waiter = waiting(current("58", "SELECT id FROM dbo.orders"), &maintenance);
+    let unrelated = mars_peer_with_lifecycle(&current("59", "SELECT id FROM dbo.orders"), SessionLifecycle::Connecting);
+    let result = report(&frame(3), &[maintenance, waiter.clone(), unrelated], true).unwrap();
+    let entry = &result.entries[0];
+    assert_eq!(entry.direction, MaintenanceDirection::BlockingSession);
+    assert_eq!(entry.affected_count, 1);
+    assert_eq!(entry.affected[0].activity, waiter.key);
 }
 
 #[test]

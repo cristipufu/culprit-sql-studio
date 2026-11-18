@@ -55,8 +55,7 @@ async fn every_shared_operational_report_reaches_the_existing_english_mcp_operat
             "payload_sha256",
             "qualifiers",
             "fixture.invalid",
-            "private-current-work-login",
-            "private-current-work-client",
+            "private-current-work-sql",
         ] {
             assert!(!text.contains(private), "{}: {private}", case.analysis);
         }

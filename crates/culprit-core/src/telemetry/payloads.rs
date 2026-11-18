@@ -182,9 +182,14 @@ impl OperationalFact {
             Self::CurrentRequestWork(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::MssqlStatementGrants(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::MssqlQueryCompilation(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
-            Self::MssqlDatabaseFile(_)
+            Self::MssqlInstanceResources(_)
+            | Self::MssqlDatabaseFile(_)
             | Self::Space(_)
             | Self::MaintenanceProgress(_)
+            | Self::MssqlAgentJob(_)
+            | Self::MssqlAgentStep(_)
+            | Self::MssqlAgentHistory(_)
+            | Self::MssqlAgentContext(_)
             | Self::TimescaleJobState(_)
             | Self::TimescaleJobRun(_)
             | Self::SessionMemory(_)

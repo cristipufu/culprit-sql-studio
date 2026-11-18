@@ -38,6 +38,7 @@ mod replication;
 mod request_memory;
 mod resource_io;
 mod runtime_distributions;
+mod session_census;
 mod session_memory;
 mod statement_grants;
 mod statement_work;
@@ -514,3 +515,5 @@ mod query_store_statements;
 mod clock_boundaries;
 
 mod storage;
+
+mod instance_resources;

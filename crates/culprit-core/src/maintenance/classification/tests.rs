@@ -3,6 +3,7 @@ use crate::{maintenance::MaintenanceKind, telemetry::*};
 
 fn current(sql: &str) -> ActivityObservation {
     ActivityObservation {
+        session_context: None,
         key: ActivityKey {
             session: NativeActivityIdentity { id: "57".into(), generation: "native-login".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "native-request-start".into() }),

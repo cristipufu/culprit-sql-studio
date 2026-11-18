@@ -25,6 +25,7 @@ pub(crate) mod activity;
 mod cursor;
 mod definitions;
 mod description;
+pub(crate) use description::query_history_identity;
 mod discovery;
 pub(crate) use discovery::discover;
 mod events;

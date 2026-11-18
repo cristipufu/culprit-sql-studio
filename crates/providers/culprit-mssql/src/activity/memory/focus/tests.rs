@@ -205,7 +205,6 @@ async fn one_row_cost_approval_cannot_read_or_publish_a_larger_native_set_by_fil
     let io = crate::resources::test_support::FakeRead::new(replies(vec![native_row(), peer], false));
     let options = crate::activity::ReadOptions {
         budget: CollectionBudget { max_snapshot_rows: 1, ..Default::default() },
-        scope: ActivityScope::CurrentDatabase,
         identity: IdentityDetail::AzureDatabase,
     };
     let mut reader = crate::activity::memory::tests::reader_with_options(io, options);

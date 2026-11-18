@@ -127,6 +127,36 @@ fn explicit_task_question_uses_both_original_receipts_without_creating_a_coordin
 }
 
 #[test]
+fn holder_session_authority_is_checked_against_every_original_mars_peer() {
+    for lifecycle in [SessionLifecycle::Unknown, SessionLifecycle::Connecting, SessionLifecycle::PoolResetPrelogin] {
+        let mut scenario = Scenario::new();
+        let DiagnosticFocusPlan::Ready(question) = scenario.plan(true).unwrap() else { panic!("original holder") };
+        let DiagnosticFocus::PageTaskHolders { mut focus } = *question else { panic!("holder question") };
+        let mut peer = scenario.rows[0].clone();
+        peer.key.request.as_mut().unwrap().id = "1".into();
+        peer.session_context = Some(Box::new(ActivitySessionContext {
+            lifecycle,
+            login_age_ms: None,
+            last_request_end_age_ms: None,
+            client_library: None,
+            client_process_id: None,
+            native: None,
+        }));
+        scenario.rows.push(peer);
+        let SourceObservation::Activity(native) = &mut scenario.source.observation else { panic!("Activity") };
+        native.native_rows = 2;
+        native.observations = 2;
+        native.coverage = StateSourceCoverage::collected(scenario.source.source.clone(), 2);
+        scenario.rebind_frame();
+        focus.participant.parent = scenario.refs[0].clone();
+        let frame = scenario.frame(true);
+        assert!(focus.participant.matches_parent(&scenario.source, &scenario.rows[0], &scenario.refs[0]));
+        assert_eq!(frame.rows().count(), 2, "canonical raw peer remains retained");
+        assert_eq!(focus.matches_activity_frame(&frame), lifecycle == SessionLifecycle::Unknown);
+    }
+}
+
+#[test]
 fn present_page_payload_digest_or_receipt_scope_mismatch_is_integrity_failure_even_when_key_stays_the_same() {
     for field in ["counter", "payload", "scope", "ordinal"] {
         let mut scenario = Scenario::new();

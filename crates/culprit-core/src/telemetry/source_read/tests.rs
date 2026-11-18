@@ -239,6 +239,33 @@ fn first_canonical_receipt_is_required_not_same_actor_in_another_capture_or_a_re
 }
 
 #[test]
+fn a_canonical_original_wait_cannot_grant_source_read_authority_to_a_known_prelogin_request() {
+    for lifecycle in [SessionLifecycle::PoolResetPrelogin, SessionLifecycle::Connecting, SessionLifecycle::Unknown] {
+        let mut original = original();
+        let TelemetryRecord::Activity(actor) = &mut original.row.record else { panic!() };
+        actor.session_context = Some(Box::new(ActivitySessionContext {
+            lifecycle,
+            login_age_ms: None,
+            last_request_end_age_ms: None,
+            client_library: None,
+            client_process_id: None,
+            native: None,
+        }));
+        let row = ExportedRecord::new(&original.source, &original.row.capture, original.row.record.clone()).unwrap();
+        let basis =
+            DiagnosticEvidenceRef::from_export(&original.source, &original.focus.basis.manifest_sha256, &row, 0)
+                .unwrap();
+        basis.validate_canonical_record(&original.source, &row.record).unwrap();
+        *original.focus.basis = basis;
+        assert!(original.focus.is_valid());
+        assert_eq!(
+            original.focus.matches_basis(&original.source, &row, &original.execution),
+            lifecycle == SessionLifecycle::Unknown
+        );
+    }
+}
+
+#[test]
 fn a_completed_gateway_answer_and_quiet_symptom_keep_separate_finite_source_debt() {
     let original = original();
     let enrolled = original.episode.enroll_source_read(original.focus.clone()).unwrap();

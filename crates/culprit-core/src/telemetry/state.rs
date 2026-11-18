@@ -444,6 +444,7 @@ pub struct OperationalSpace {
 pub enum OperationalFact {
     Space(OperationalSpace),
     MssqlDatabaseFile(Box<MssqlDatabaseFile>),
+    MssqlInstanceResources(Box<MssqlInstanceResourceObservation>),
     Sequence(SequenceCapacity),
     FileIo(Box<FileIoCounters>),
     Counter(NativeCounterSample),
@@ -463,6 +464,10 @@ pub enum OperationalFact {
     MssqlOutOfMemory(Box<MssqlOutOfMemoryObservation>),
     MysqlErrorLog(Box<MysqlErrorLogObservation>),
     PostgresLog(Box<PostgresLogFailureObservation>),
+    MssqlAgentJob(Box<MssqlAgentJob>),
+    MssqlAgentStep(Box<MssqlAgentStep>),
+    MssqlAgentHistory(Box<MssqlAgentHistory>),
+    MssqlAgentContext(Box<MssqlAgentContext>),
     TimescaleJobState(Box<TimescaleJobState>),
     TimescaleJobRun(Box<TimescaleJobRun>),
     StatementCounters(Box<StatementCounterSample>),
@@ -509,6 +514,10 @@ impl OperationalFact {
             Self::MssqlOutOfMemory(observation) => observation.key(),
             Self::MysqlErrorLog(observation) => observation.key(),
             Self::PostgresLog(observation) => observation.key(),
+            Self::MssqlAgentJob(point) => point.key(),
+            Self::MssqlAgentStep(point) => point.key(),
+            Self::MssqlAgentHistory(point) => point.key(),
+            Self::MssqlAgentContext(point) => point.key(),
             Self::TimescaleJobState(point) => point.key(),
             Self::TimescaleJobRun(point) => point.key(),
             Self::StatementCounters(counters) => counters.key(),
@@ -524,6 +533,7 @@ impl OperationalFact {
             Self::MssqlQueryCompilation(compilation) => compilation.key(),
             Self::ConfiguredLogRateLimits(point) => point.key(),
             Self::MssqlDatabaseFile(file) => file.key(),
+            Self::MssqlInstanceResources(point) => point.key(),
             Self::HyperscaleLogComponent(point) => point.key(),
             Self::DatabaseProperties(point) => point.key(),
             Self::MssqlCachedRuntime(runtime) => runtime.context.identity.key(),
@@ -567,7 +577,8 @@ impl OperationalFact {
                     compilation.statement = DefinitionPayload::sql(text, engine);
                 }
             }
-            Self::MssqlDatabaseFile(_)
+            Self::MssqlInstanceResources(_)
+            | Self::MssqlDatabaseFile(_)
             | Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
@@ -575,6 +586,10 @@ impl OperationalFact {
             | Self::StatementCounters(_)
             | Self::RuntimeDistribution(_)
             | Self::MaintenanceProgress(_)
+            | Self::MssqlAgentJob(_)
+            | Self::MssqlAgentStep(_)
+            | Self::MssqlAgentHistory(_)
+            | Self::MssqlAgentContext(_)
             | Self::TimescaleJobState(_)
             | Self::TimescaleJobRun(_)
             | Self::DiagnosticRevision(_)
@@ -596,6 +611,7 @@ impl OperationalFact {
         let name = |value: &str| value.len() <= 2048;
         match self {
             Self::MssqlDatabaseFile(file) => file.is_valid(),
+            Self::MssqlInstanceResources(point) => point.is_valid(),
             Self::Space(space) => {
                 space.population.matches(space.kind, space.scope)
                     && storage::storage_time(&space.observed_at)
@@ -646,6 +662,10 @@ impl OperationalFact {
             Self::MssqlOutOfMemory(observation) => observation.is_valid(),
             Self::MysqlErrorLog(observation) => observation.is_valid(),
             Self::PostgresLog(observation) => observation.is_valid(),
+            Self::MssqlAgentJob(point) => point.is_valid(),
+            Self::MssqlAgentStep(point) => point.is_valid(),
+            Self::MssqlAgentHistory(point) => point.is_valid(),
+            Self::MssqlAgentContext(point) => point.is_valid(),
             Self::TimescaleJobState(point) => point.is_valid(),
             Self::TimescaleJobRun(point) => point.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
@@ -691,6 +711,10 @@ impl OperationalObservation {
             && self.fact.is_valid()
             && self.fact.matches_key(&self.key)
             && match &self.fact {
+                OperationalFact::MssqlAgentJob(_) => self.source == MSSQL_AGENT_JOBS_SOURCE,
+                OperationalFact::MssqlAgentStep(_) => self.source == MSSQL_AGENT_STEPS_SOURCE,
+                OperationalFact::MssqlAgentHistory(_) => self.source == MSSQL_AGENT_HISTORY_SOURCE,
+                OperationalFact::MssqlAgentContext(_) => self.source == MSSQL_AGENT_CONTEXT_SOURCE,
                 OperationalFact::TimescaleJobState(_) => self.source == TIMESCALE_JOBS_SOURCE,
                 OperationalFact::TimescaleJobRun(_) => self.source == TIMESCALE_JOB_RUNS_SOURCE,
                 OperationalFact::CompilerWaiter(_) => self.source == crate::source_id::COMPILATION_GATEWAYS,
@@ -698,6 +722,7 @@ impl OperationalObservation {
                 OperationalFact::HyperscaleLogComponent(_) => self.source == HYPERSCALE_LOG_COMPONENTS_SOURCE,
                 OperationalFact::DatabaseProperties(_) => self.source == DATABASE_PROPERTIES_SOURCE,
                 OperationalFact::MssqlDatabaseFile(_) => self.source == crate::source_id::FILE_CAPACITY,
+                OperationalFact::MssqlInstanceResources(_) => self.source == INSTANCE_RESOURCES_SOURCE,
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,

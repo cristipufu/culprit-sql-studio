@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    activity::{ActivityScope, IdentityDetail, ReadOptions},
+    activity::{IdentityDetail, ReadOptions},
     instance::test_support::{epoch, metadata},
     read::ReadError,
     resources::test_support::{FakeRead, replace},
@@ -38,7 +38,7 @@ pub(crate) fn epoch_fields(visible: bool) -> Vec<(&'static str, Val)> {
 fn reader(replies: Vec<crate::read::ReadResult<Vec<Rec>>>, identity: IdentityDetail) -> ActivityReader<FakeRead> {
     ActivityReader::new(
         FakeRead::new(replies),
-        ReadOptions { budget: CollectionBudget::default(), scope: ActivityScope::CurrentDatabase, identity },
+        ReadOptions { budget: CollectionBudget::default(), identity },
         "fixture.invalid".into(),
         1433,
     )

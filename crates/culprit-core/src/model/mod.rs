@@ -22,7 +22,7 @@ pub use workload::{
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
 /// or mean something else.
-pub const SNAPSHOT_FORMAT: u32 = 15;
+pub const SNAPSHOT_FORMAT: u32 = 16;
 
 /// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
 mod current_format {
@@ -919,6 +919,18 @@ impl Snapshot {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct Session {
+    /// Presentation eligibility derived from this response's exact Activity row. None means that metadata was
+    /// not acquired. This neither authorizes native work nor binds a later progress point to this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub progress_eligible: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sql_context: Option<SessionStatementContext>,
+    /// Exact native request/session generations, when the provider retained canonical Activity facts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub activity_key: Option<crate::telemetry::ActivityKey>,
     pub id: String,
     /// A source-issued observation for administrative signalling; a displayed ID alone grants no action.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -948,9 +960,23 @@ pub struct Session {
     pub waiting_on_lock: Option<bool>,
 }
 
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum SessionStatementContext {
+    CurrentRequest,
+    PriorSessionBatch,
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct LiveState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub activity_census: Option<Box<crate::telemetry::ActivityCensusRead>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_census: Option<Box<crate::SessionCensusReport>>,
     pub notes: Vec<String>,
     pub taken_at: String,
     pub sessions: Vec<Session>,

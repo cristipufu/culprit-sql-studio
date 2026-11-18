@@ -24,6 +24,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+culprit-checks.workspace = true
 culprit-collector.workspace = true
 tempfile = "3.27.0"
 serde_json.workspace = true

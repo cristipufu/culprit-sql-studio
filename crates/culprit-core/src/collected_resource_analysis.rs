@@ -15,6 +15,13 @@ pub struct CollectedStorageAnalysis {
 
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
+pub struct CollectedSessionCensusAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::SessionCensusReport>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct CollectedDatabasePropertiesAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::DatabasePropertiesReport>,
@@ -236,4 +243,12 @@ pub struct CollectedHyperscaleLogComponentAnalysis {
 pub struct CollectedPerformanceCounterAnalysis {
     pub context: CollectedEvidenceContext,
     pub report: Box<crate::PerformanceCounterReport>,
+}
+
+/// An independent original shared-instance point; no selected-database pressure or current-owner inference.
+#[derive(serde::Serialize, ts_rs::TS, Clone, Debug)]
+#[ts(export)]
+pub struct CollectedInstanceResourceAnalysis {
+    pub context: CollectedEvidenceContext,
+    pub report: Box<crate::InstanceResourceReport>,
 }

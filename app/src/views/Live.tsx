@@ -1,6 +1,8 @@
 import { Lock, Pause, Play } from "lucide-react";
-import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { BlockingChains } from "../components/BlockingChains";
+import { SessionCensus } from "../components/SessionCensus";
+import { liveSessionPresentation, sessionPresentationKey } from "../lib/live-census";
 import type { LiveState } from "../gen/LiveState";
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
 import type { Session } from "../gen/Session";
@@ -66,6 +68,7 @@ function LiveSessions({ connection }: { connection: string }) {
   const [failure, setError] = useState<LiveError | null>(null);
   const state = read && read.owner === owner ? read.value : null;
   const error = failure && failure.owner === owner ? failure.value : null;
+  const census = useMemo(() => liveSessionPresentation(state), [state]);
   const [paused, setPaused] = useState(false);
   const [showIdle, setShowIdle] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -103,10 +106,9 @@ function LiveSessions({ connection }: { connection: string }) {
 
   useEffect(() => {
     if (!state) return;
-    const active = state.sessions.filter((s) => s.state !== "idle" && s.state !== "sleeping").length;
-    const blocked = state.sessions.filter((s) => s.blocked_by).length;
+    const { active, blocked } = census;
     setHistory((h) => [...h.slice(-(HISTORY - 1)), { at: Date.now(), active, blocked }]);
-  }, [state]);
+  }, [state, census]);
 
   // `state` only gates the first read; depending on it would restart the timer on every tick.
   const hasRead = useEffectEvent(() => state != null);
@@ -153,9 +155,11 @@ function LiveSessions({ connection }: { connection: string }) {
   const sessions = state?.sessions ?? [];
   const blocked = sessions.filter((s) => s.blocked_by);
   const heads = [...new Set(blocked.map((s) => s.blocked_by!))].filter((id) => !blocked.some((b) => b.id === id));
-  const visible = sessions.filter((s) => showIdle || s.state !== "idle" || s.blocked_by || heads.includes(s.id));
+  const visible = sessions.filter((s) => showIdle || !census.isIdle(s) || s.blocked_by || heads.includes(s.id));
   const chains = state?.blocking?.chains ?? [];
-  const activeNow = sessions.filter((s) => s.state !== "idle" && s.state !== "sleeping").length;
+  const activeNow = census.active;
+  const watched = sessions.find((session) => sessionPresentationKey(session) === watching);
+  const progressSession = watched && census.canInspect(watched) ? watched.id : null;
   const age = state ? Math.max(0, Math.round((now - Date.parse(state.taken_at)) / 1000)) : null;
   const freshness = paused
     ? t("ui.live.paused")
@@ -243,7 +247,8 @@ function LiveSessions({ connection }: { connection: string }) {
         </div>
       )}
       {state?.notes?.length ? <details className="notice"><summary>{t("ui.live.limitations", { count: String(state.notes.length) })}</summary>{state.notes.map((note) => <p key={note}>{note}</p>)}</details> : null}
-      <div className="table-wrap" ref={tableRef} style={watching ? { flex: "0 1 auto", maxHeight: "34%" } : undefined}>
+      {state?.session_census && <details className="notice live-census"><summary>{state.session_census.title}</summary><SessionCensus report={state.session_census} /></details>}
+      <div className="table-wrap" ref={tableRef} style={progressSession ? { flex: "0 1 auto", maxHeight: "34%" } : undefined}>
         <table className="grid">
           <thead>
             <tr>
@@ -261,7 +266,7 @@ function LiveSessions({ connection }: { connection: string }) {
           </thead>
           <tbody>
             {visible.map((s) => (
-              <SessionRow key={s.id} connection={connection} route={route} session={s} isHead={heads.includes(s.id)} located={located === s.id} actions={actions} onInterrupt={interrupt} open={watching === s.id} onOpen={() => setWatching((w) => (w === s.id ? null : s.id))} />
+              <SessionRow key={sessionPresentationKey(s)} connection={connection} route={route} session={s} isHead={heads.includes(s.id)} located={located === s.id} actions={actions} onInterrupt={interrupt} progressAvailable={census.canInspect(s)} open={progressSession != null && watching === sessionPresentationKey(s)} onOpen={() => setWatching((w) => (w === sessionPresentationKey(s) ? null : sessionPresentationKey(s)))} />
             ))}
           </tbody>
         </table>
@@ -272,9 +277,9 @@ function LiveSessions({ connection }: { connection: string }) {
           </div>
         )}
       </div>
-      {watching && (
+      {progressSession && (
         <Suspense fallback={null}>
-          <QueryProgressPanel connection={connection} session={watching} onClose={() => setWatching(null)} />
+          <QueryProgressPanel connection={connection} session={progressSession} onClose={() => setWatching(null)} />
         </Suspense>
           )}
         </>
@@ -319,6 +324,7 @@ function SessionRow({
   located = false,
   actions,
   onInterrupt,
+  progressAvailable,
   open,
   onOpen,
 }: {
@@ -329,6 +335,8 @@ function SessionRow({
   located?: boolean;
   actions: SessionAction[];
   onInterrupt: (request: SessionActionRequest) => Promise<SessionActionOutcome>;
+  /** The session-only progress endpoint can identify exactly one current native request. */
+  progressAvailable: boolean;
   /** Its progress panel is showing. */
   open: boolean;
   /** Show (or hide) how far along its running statement is. */
@@ -337,15 +345,16 @@ function SessionRow({
   return (
     <tr
       data-session={s.id}
-      className={`row ${s.transaction_ms != null && (s.state === "idle in transaction" || s.state === "sleeping") ? "idle-tx" : ""} ${located ? "located" : ""} ${open ? "selected" : ""} ${s.state !== "idle" ? "openable" : ""}`}
-      tabIndex={s.state !== "idle" ? 0 : undefined}
-      aria-expanded={s.state !== "idle" ? open : undefined}
-      title={s.state !== "idle" ? t("ui.live.progress_title", { key: "Enter" }) : undefined}
-      onClick={(e) => s.state !== "idle" && !(e.target as HTMLElement).closest("button") && onOpen()}
-      onKeyDown={(e) => s.state !== "idle" && e.key === "Enter" && e.target === e.currentTarget && onOpen()}
+      className={`row ${s.transaction_ms != null && (s.state === "idle in transaction" || s.state === "sleeping") ? "idle-tx" : ""} ${located ? "located" : ""} ${open ? "selected" : ""} ${progressAvailable ? "openable" : ""}`}
+      tabIndex={progressAvailable ? 0 : undefined}
+      aria-expanded={progressAvailable ? open : undefined}
+      title={progressAvailable ? t("ui.live.progress_title", { key: "Enter" }) : undefined}
+      onClick={(e) => progressAvailable && !(e.target as HTMLElement).closest("button") && onOpen()}
+      onKeyDown={(e) => progressAvailable && e.key === "Enter" && e.target === e.currentTarget && onOpen()}
     >
       <td className="mono">
         {s.id}
+        {s.activity_key?.request && <small className="muted">{t("view.session_census.request_id", { request: s.activity_key.request.id })}</small>}
         {isHead && <span className="tag high" style={{ marginLeft: 6 }}>{t("ui.live.blocking")}</span>}
       </td>
       <td>{s.state}</td>
@@ -362,6 +371,7 @@ function SessionRow({
       <td className="r">{s.cpu_ms != null ? duration(s.cpu_ms) : "—"}</td>
       <td className="r">{s.reads != null ? count(s.reads) : "—"}</td>
       <td className="sqlcell" title={s.sql ?? ""}>
+        {s.sql_context && <small className="muted">{s.sql_context === "current-request" ? t("view.session_census.sql.current") : t("view.session_census.sql.previous")}</small>}
         {s.sql ? oneLine(s.sql) : ""}
       </td>
       <td className="muted">{s.application ?? ""}</td>

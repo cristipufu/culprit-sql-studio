@@ -6,7 +6,7 @@ mod fields;
 pub(crate) mod focus;
 mod sql;
 
-use super::{ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, ActivityScope, IdentityDetail, rows};
+use super::{ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, IdentityDetail, rows};
 use crate::{
     read::{NativeRead, Parameter, ReadError, integer, invalid_data, optional_counter, optional_text, text},
     value::Rec,
@@ -73,7 +73,7 @@ impl<R: NativeRead> ActivityReader<R> {
         self.observe_memory_for(None).await
     }
     async fn observe_memory_for(&mut self, focus: Option<&ActivityRequestFocus>) -> Result<MemoryFrame> {
-        if self.observed || !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
+        if self.observed {
             return Err(invalid_data());
         }
         self.observed = true;

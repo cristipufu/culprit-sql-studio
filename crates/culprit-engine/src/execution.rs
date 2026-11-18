@@ -244,7 +244,9 @@ impl Execution<'_> {
             expected_query: None,
             expected_plan: None,
         };
-        let Some(query) = query else { return Ok(request) };
+        let Some(query) = query else {
+            return Ok(request);
+        };
         let unverified = || {
             Error::new(ErrorCode::Unsupported, t!("engine.execution.actual_identity_unverified"))
                 .with_hint(t!("engine.execution.actual_identity_unverified_hint"))
@@ -441,17 +443,33 @@ impl Execution<'_> {
         let provider = observed.provider();
         let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             let mut live = self.connections.forget_rejected(name, provider.live().await)?;
+            {
+                let frame = live.activity_census.as_deref().map(|read| read.frame()).transpose()?;
+                live.session_census =
+                    frame.as_ref().map(culprit_checks::session_census::explain_frame).transpose()?.map(Box::new);
+                crate::progress_presentation::qualify_live(&mut live.sessions, frame.as_ref());
+            }
             // Lock details are read only when someone waits, so a quiet server costs one query per refresh.
             if live.blocking.is_none() && live.sessions.iter().any(|s| s.blocked_by.is_some()) {
                 let locks = match self.connections.forget_rejected(name, provider.lock_waits().await) {
                     Ok(locks) => locks,
-                    Err(error) if crate::source_operation::native_shutdown_uncertain(&error) => return Err(error),
+                    Err(error) if crate::source_operation::native_shutdown_uncertain(&error) => {
+                        return Err(error);
+                    }
                     Err(error) => {
                         live.notes.push(t!("engine.execution.no_lock_details", why = &error.message));
                         Vec::new()
                     }
                 };
-                live.blocking = culprit_core::blocking::analyze(route.stored.engine, &live.sessions, &locks, &[]);
+                let unqualified_owners = live
+                    .activity_census
+                    .iter()
+                    .flat_map(|read| &read.observations)
+                    .filter(|row| !row.has_session_generation_authority())
+                    .map(|row| route.stored.engine.spec().live_session_id(&row.key.session))
+                    .collect::<Vec<_>>();
+                live.blocking =
+                    culprit_core::blocking::analyze(route.stored.engine, &live.sessions, &locks, &unqualified_owners);
             }
             self.connections.require_current_route(&route)?;
             if route.stored.environment.is_production() {
@@ -463,7 +481,12 @@ impl Execution<'_> {
                 }
             } else {
                 let supported = provider.session_actions();
-                live.session_actions.retain(|action| supported.contains(action));
+                live.session_actions.retain(|action| {
+                    supported.contains(action)
+                        && live.sessions.iter().any(|session| {
+                            session.action_target.as_ref().is_some_and(|target| target.is_valid_for(*action))
+                        })
+                });
                 live.session_action_route = (!live.session_actions.is_empty()).then(|| route.action_route());
                 if !live.sessions.is_empty()
                     && !supported.is_empty()
@@ -644,7 +667,9 @@ impl Execution<'_> {
                 .forget_rejected(name, provider.run(catalog::databases_sql(info.engine), 500).await)
             {
                 Ok(databases) => Some(databases),
-                Err(error) if crate::source_operation::native_shutdown_uncertain(&error) => return Err(error),
+                Err(error) if crate::source_operation::native_shutdown_uncertain(&error) => {
+                    return Err(error);
+                }
                 Err(_) => None,
             };
             Ok(catalog::fold(columns, databases))

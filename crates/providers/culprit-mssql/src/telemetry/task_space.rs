@@ -1,6 +1,6 @@
 //! Snapshot paging, cursors and close proof remain in FrozenSource. Native task and request reading is shared.
 use crate::{
-    activity::{ActivityContext, ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityContext, ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
     read::{NativeRead, ReadSession, invalid_data},
     sources,
@@ -20,7 +20,6 @@ impl TaskSpaceSource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let options = ReadOptions {
             budget: crate::task_space::bounded_budget(&request.budget),
-            scope: ActivityScope::CurrentDatabase,
             identity: IdentityDetail::AzureDatabase,
         };
         Self::from_reader(ActivityReader::open(pool, options, host, port)?, request)

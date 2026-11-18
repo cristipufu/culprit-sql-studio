@@ -456,6 +456,8 @@ impl Provider for PostgresProvider {
             );
             let session_actions = sessions::offered_actions(&sessions, self.spec.environment);
             Ok(LiveState {
+                activity_census: None,
+                session_census: None,
                 notes: Vec::new(),
                 taken_at: now,
                 sessions,

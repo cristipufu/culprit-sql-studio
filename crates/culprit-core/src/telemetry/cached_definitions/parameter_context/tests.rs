@@ -30,7 +30,9 @@ fn source() -> CollectionDescription {
 
 fn context() -> PlanParameterContext {
     PlanParameterContext {
+        retrieved_from_cache: None,
         parameters: vec![PlanParameter {
+            integer_values_equal: None,
             name: Some("@customer".into()),
             data_type: Some("[private-native-database].[dbo].[CustomerType]".into()),
             compiled: PlanParameterValueState::Recorded,
@@ -87,7 +89,7 @@ fn excessive_metadata_retains_an_explicit_gap_without_a_selected_parameter_subse
     let source = source();
     let definition = super::super::retained_tests::retained();
     let mut context = context();
-    context.parameters = (0..crate::plan_facts::MAX_PLAN_PARAMETERS).map(|index| PlanParameter {
+    context.parameters = (0..crate::plan_facts::MAX_PLAN_PARAMETERS).map(|index| PlanParameter { integer_values_equal: None,
         name: Some(format!("@parameter_{index}")), data_type: Some("[dbo].[AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA]".into()),
         ..context.parameters[0].clone()
     }).collect();

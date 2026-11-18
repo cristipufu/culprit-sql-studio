@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     activity::page_targets::tests::{boxed_context, header, page_wait, participant},
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions, tests::details},
+    activity::{ActivityReader, IdentityDetail, ReadOptions, tests::details},
     instance::test_support::{epoch, metadata},
     read::{ReadError, ReadResult},
     resources::test_support::{FakeRead, replace},
@@ -21,11 +21,7 @@ async fn resource() -> SharedResourceIdentity {
 fn native_reader(replies: Vec<ReadResult<Vec<Rec>>>) -> ActivityReader<FakeRead> {
     ActivityReader::new(
         FakeRead::new(replies),
-        ReadOptions {
-            budget: CollectionBudget::default(),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::Endpoint,
-        },
+        ReadOptions { budget: CollectionBudget::default(), identity: IdentityDetail::Endpoint },
         "fixture.invalid".into(),
         1433,
     )

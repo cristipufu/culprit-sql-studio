@@ -3,7 +3,11 @@ use crate::analytical::test_support::jobs_evidence_cases;
 #[tokio::test]
 async fn jobs_reconstruct_from_the_existing_operational_projection_with_original_view_metadata_and_exact_facts() {
     let catalog = LogicalCatalog::new().unwrap();
-    for (index, (source, records)) in jobs_evidence_cases().into_iter().enumerate() {
+    for (index, (source, records)) in jobs_evidence_cases()
+        .into_iter()
+        .chain(crate::analytical::test_support::mssql_agent_jobs_evidence_cases())
+        .enumerate()
+    {
         let recovery = test_support::Recovery::capture(
             "jobs:decode",
             catalog.digest(),

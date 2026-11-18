@@ -104,15 +104,7 @@ async fn native_reset_between_summary_and_definitions_preserves_original_failure
     let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").unwrap();
     let mut admin =
         crate::test_support::connect(&config(port, "master", &password, "culprit"), SessionKind::User).await.unwrap();
-    let host = crate::conn::query_one(
-        &mut admin,
-        "SELECT /* culprit */ CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) AS machine",
-    )
-    .await
-    .unwrap()
-    .string("machine");
-    let nonce = host.strip_prefix("culprit-smoke-mssql-").expect("only the disposable smoke fixture is permitted");
-    assert!(nonce.len() == 24 && nonce.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    crate::test_support::verify_owned_source(&mut admin).await.unwrap();
     let database = format!("culprit_cohort_{}_{}", std::process::id(), chrono::Utc::now().timestamp_millis());
     batch(&mut admin, &format!("CREATE DATABASE [{database}]")).await;
     let proof = AssertUnwindSafe(async {

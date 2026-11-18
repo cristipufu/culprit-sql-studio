@@ -17,7 +17,7 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
         BTreeSet::from([
             ("mssql.query-history", 2),
             ("mssql.resource-history", 2),
-            ("mssql.activity", 2),
+            ("mssql.activity", 3),
             ("mssql.page-wait-targets", 2),
             ("mssql.page-wait-tasks", 2),
             ("mssql.shared-tempdb-page-wait-targets", 2),
@@ -31,9 +31,10 @@ fn changed_query_projections_revise_only_their_registered_source_versions() {
             ("mssql.focused-request-memory", 2),
             ("mssql.task-space", 2),
             ("mssql.operational", 5),
-            ("mssql.shared-operational", 4),
+            ("mssql.shared-operational", 5),
             ("mssql.settings", 2),
             ("mssql.query-compilation", 3),
+            ("mssql.retained-plans", 2),
         ])
     );
 }

@@ -1,5 +1,6 @@
-//! Provider-owned Azure SQL resource evidence, shared by snapshots and collection adapters.
+//! Provider-owned resource evidence and optional-read admission, shared by snapshots and collection adapters.
 mod admission;
+mod instance_admission;
 mod inventory;
 pub(crate) mod pool;
 mod sample;
@@ -13,6 +14,7 @@ use crate::{
 pub(crate) use admission::admit_resources;
 use chrono::{DateTime, Utc};
 use culprit_core::{Result, telemetry::*};
+pub(crate) use instance_admission::{InstancePressurePoint, read_instance_pressure};
 pub(crate) use inventory::Inventory;
 pub(crate) use sample::{Metric, Sample};
 use std::sync::Arc;
@@ -202,3 +204,9 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod test_support;
+
+/// The source owner chooses the instance profile and retains shutdown; pressure inspection grants no source rights.
+pub(crate) async fn admit_instance_resources<R: NativeRead>(reader: &mut R) -> ReadResult<()> {
+    let point: InstancePressurePoint = read_instance_pressure(reader).await?;
+    point.admit().map_err(ReadError::Stopped)
+}

@@ -95,6 +95,13 @@ macro_rules! state {
 }
 
 const REGISTRATIONS: &[Registration] = &[
+    Registration::database(
+        "mssql.agent-jobs",
+        RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::Jobs)),
+        crate::jobs::source,
+    )
+    .shared(&[RecipeSubject::Database, RecipeSubject::Shared(SharedResourceKind::Instance)])
+    .bounded(crate::jobs::bounded_budget),
     streamed!(
         "mssql.hyperscale-log-components",
         HyperscaleLogComponents,
@@ -136,7 +143,7 @@ const REGISTRATIONS: &[Registration] = &[
     )
     .bounded(activity::bounded_budget)
     .baseline()
-    .version(2),
+    .version(3),
     Registration::database(
         "mssql.page-wait-targets",
         RecipeSelector::Collection(TelemetryCollection::Snapshot(SnapshotDataset::PageWaitTargets)),
@@ -236,7 +243,7 @@ const REGISTRATIONS: &[Registration] = &[
     state!("mssql.shared-operational", Operational)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance)])
         .baseline()
-        .version(4),
+        .version(5),
     state!("mssql.memory-failures", MemoryFailures)
         .shared(&[RecipeSubject::Shared(SharedResourceKind::Instance), RecipeSubject::Shared(SharedResourceKind::Pool)])
         .bounded(state::memory_failure_budget)
@@ -268,7 +275,9 @@ const REGISTRATIONS: &[Registration] = &[
     streamed!("mssql.triggers", Triggers, triggers::Triggers),
     streamed!("mssql.partitions", Partitions, partitions::Partitions),
     streamed!("mssql.cached-definitions", CachedDefinitions, cached_definitions::CachedDefinitions),
-    streamed!("mssql.retained-plans", RetainedPlans, retained_definitions::RetainedPlans),
+    streamed!("mssql.retained-plans", RetainedPlans, retained_definitions::RetainedPlans)
+        .version(2)
+        .bounded(retained_definitions::bounded_budget),
 ];
 
 pub(super) fn declarations() -> Vec<RecipeDescriptor> {

@@ -125,6 +125,10 @@ last-actual-plans  Actual plans without re-running queries
                   SQL Server · SQL Server 2019+ can keep each query's last actual plan (LAST_QUERY_PLAN_STATS) and report live per-operator progress (LIGHTWEIGHT_QUERY_PROFILING).
 $ culprit --format text sources
 SQL Server
+  mssql-agent-jobs          Current Agent job definitions and recorded activity · adds detail
+  mssql-agent-job-steps     Current Agent step metadata, excluding commands · adds detail
+  mssql-agent-job-history   Bounded retained Agent history, excluding messages · adds detail
+  mssql-agent-context       Agent startup-session and service context at both bounds · adds detail
   hyperscale-log-components Native Hyperscale log components · adds detail
   configured-log-rates      Configured transaction-log rate limits from sys.dm_user_db_resource_governance. · adds detail
   memory failures           retained database-engine out-of-memory observations · adds detail
@@ -156,6 +160,7 @@ SQL Server
   resources                 resource statistics · Resource usage
   pool resources            Elastic-pool resource history · adds detail
   memory clerks             database engine memory allocations by component · adds detail
+  instance-resources        Shared instance resource views · adds detail
   schedulers                native scheduler tasks, worker queues and CPU counters · adds detail
   forwarded_fetches         forwarded fetches · adds detail
   query_families            query families · adds detail

@@ -1,5 +1,5 @@
 //! An explicit unqualified source reuses the common streamed snapshot's one native owner.
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{
     read::{NativeRead, ReadError, integer, invalid_data, optional_text, text},
     value::Rec,
@@ -90,7 +90,7 @@ impl Layout {
 #[async_trait::async_trait]
 impl SnapshotRecipe for HyperscaleLogComponents {
     type Layout = Layout;
-    const INSTANCE_LOCAL: bool = true;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabaseCache;
     const DATASET: SnapshotDataset = SnapshotDataset::HyperscaleLogComponents;
     const NAME: &'static str = HYPERSCALE_LOG_COMPONENTS_SOURCE;
     const SOURCE_READ: Option<SourceReadQuestion> = Some(SourceReadQuestion::HyperscaleLogComponents);

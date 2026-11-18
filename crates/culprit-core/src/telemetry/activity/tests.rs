@@ -1,4 +1,30 @@
 use super::*;
+mod session_authority;
+
+pub(crate) fn native_session_context(row: &mut ActivityObservation, state: &str, login: &str) {
+    row.key.session.generation = login.into();
+    let lifecycle = MssqlSessionContext::lifecycle_from_native_state(state);
+    let login_established = MssqlSessionContext::login_is_established(login, lifecycle);
+    row.session_context = Some(Box::new(ActivitySessionContext {
+        lifecycle,
+        login_age_ms: login_established.then(|| "0".into()),
+        last_request_end_age_ms: None,
+        client_library: None,
+        client_process_id: None,
+        native: Some(Box::new(SessionNativeContext::Mssql(MssqlSessionContext {
+            native_state: state.into(),
+            login_established,
+            tds_protocol_version: None,
+            times: MssqlSessionTimeTokens {
+                login_without_offset: login.into(),
+                last_request_start_without_offset: None,
+                last_request_end_without_offset: None,
+            },
+            has_current_request: !row.idle,
+            request_connection_id: None,
+        }))),
+    }));
+}
 
 #[test]
 fn request_page_server_counts_keep_exact_native_bigint_and_do_not_compare_missing_or_decreased_counters() {
@@ -24,6 +50,7 @@ fn request_page_server_counts_keep_exact_native_bigint_and_do_not_compare_missin
 
 pub(crate) fn request(id: &str) -> ActivityObservation {
     ActivityObservation {
+        session_context: None,
         blocking_status: crate::telemetry::ActivityBlockingStatus::Known,
         waiting_on_lock: None,
         key: ActivityKey {

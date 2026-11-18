@@ -57,10 +57,7 @@ pub(crate) fn reader_with_identity(
     replies: Vec<ReadResult<Vec<Rec>>>,
     identity: IdentityDetail,
 ) -> ActivityReader<FakeRead> {
-    reader_with_options(
-        FakeRead::new(replies),
-        ReadOptions { budget: CollectionBudget::default(), scope: ActivityScope::CurrentDatabase, identity },
-    )
+    reader_with_options(FakeRead::new(replies), ReadOptions { budget: CollectionBudget::default(), identity })
 }
 pub(crate) fn reader_with_options(io: FakeRead, options: ReadOptions) -> ActivityReader<FakeRead> {
     ActivityReader::new(io, options, "fixture.invalid".into(), 1433)
@@ -335,11 +332,7 @@ async fn overflow_terminal_enrichment_and_retired_calls_never_reopen_or_verify_n
     }
     let mut retired = ActivityReader::new(
         FakeRead::new(vec![]).pause_on_query(1),
-        ReadOptions {
-            budget: CollectionBudget::default(),
-            scope: ActivityScope::CurrentDatabase,
-            identity: IdentityDetail::Endpoint,
-        },
+        ReadOptions { budget: CollectionBudget::default(), identity: IdentityDetail::Endpoint },
         "fixture.invalid".into(),
         1433,
     );

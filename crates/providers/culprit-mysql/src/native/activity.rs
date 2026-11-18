@@ -145,9 +145,15 @@ async fn sessions<R: QueryRead>(reader: &mut R, database: &str, limit: usize) ->
     reader.read(&sql, vec![Value::from(database)], limit).await
 }
 pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -> Result<Option<ActivityObservation>> {
-    let Some(command) = row.native_text("command")?.filter(|value| !value.is_empty()) else { return Ok(None) };
-    let Some(session_id) = row.unsigned("id")? else { return Ok(None) };
-    let Some(thread_id) = row.unsigned("thread_id")? else { return Ok(None) };
+    let Some(command) = row.native_text("command")?.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(session_id) = row.unsigned("id")? else {
+        return Ok(None);
+    };
+    let Some(thread_id) = row.unsigned("thread_id")? else {
+        return Ok(None);
+    };
     if session_id == 0 || thread_id == 0 {
         return Ok(None);
     }
@@ -179,6 +185,7 @@ pub(crate) fn decode(row: &Rec, database: &str, instrumentation_enabled: bool) -
     };
     let request_db = row.native_text("request_db")?;
     let observation = ActivityObservation {
+        session_context: None,
         waiting_on_lock: request.as_ref().and(lock_wait),
         blocking_status: ActivityBlockingStatus::Unknown,
         key: ActivityKey { session, request: request.clone(), transaction: None },

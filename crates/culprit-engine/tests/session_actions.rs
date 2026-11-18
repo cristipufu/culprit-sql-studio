@@ -1,4 +1,5 @@
 //! Exact native targets cross the Workspace action boundary; all native work here is a bounded scripted provider.
+mod session_authority;
 pub(crate) mod support;
 
 use std::sync::{
@@ -18,6 +19,7 @@ use culprit_read::admission::SourceAdmission;
 
 struct State {
     current: Mutex<SessionActionTarget>,
+    live_override: Mutex<Option<LiveState>>,
     received: Mutex<Vec<(SessionActionTarget, SessionAction)>>,
     signals: AtomicUsize,
     factories: AtomicUsize,
@@ -34,6 +36,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             current: Mutex::new(support::target(Engine::Postgres, "42")),
+            live_override: Mutex::new(None),
             received: Mutex::new(vec![]),
             signals: AtomicUsize::new(0),
             factories: AtomicUsize::new(0),
@@ -66,6 +69,9 @@ impl Provider for NativeAction {
         }
     }
     async fn live(&self) -> Result<LiveState> {
+        if let Some(live) = &*self.0.live_override.lock().unwrap() {
+            return Ok(live.clone());
+        }
         let mut live = support::live(Engine::Postgres, "42");
         live.sessions[0].action_target = Some(self.0.current.lock().unwrap().clone());
         live.session_actions = self.session_actions();

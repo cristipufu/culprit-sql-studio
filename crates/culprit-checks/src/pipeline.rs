@@ -28,6 +28,7 @@ mod connection_outcomes;
 mod counter_ratios;
 mod database_properties;
 mod hyperscale_log_components;
+mod instance_resources;
 mod jobs;
 mod maintenance_progress;
 mod memory_clerks;
@@ -289,6 +290,7 @@ impl Pipeline {
         let memory_clerks = memory_clerks::explain(&mut snapshot);
         let database_properties = database_properties::explain(&mut snapshot);
         let storage = storage::explain(&mut snapshot);
+        let instance_resources = instance_resources::explain(&mut snapshot);
         let jobs = jobs::explain(&mut snapshot);
         let statement_work = statement_work::explain(&mut snapshot);
         let page_server_reads = page_server_reads::explain(&mut snapshot);
@@ -389,6 +391,7 @@ impl Pipeline {
         }
         Report {
             storage,
+            instance_resources,
             snapshot,
             findings,
             locked,

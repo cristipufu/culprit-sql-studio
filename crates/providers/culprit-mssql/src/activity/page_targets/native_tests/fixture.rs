@@ -1,11 +1,10 @@
 use crate::{
     activity::page_targets::PageWaitCapture,
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::{MsClient, Pool, SessionKind, map_error},
     index_operations,
     read::{Parameter, ReadError, ReadSession},
     test_support::config,
-    value::Rec,
 };
 use culprit_core::{Error, ErrorCode, Result, telemetry::*};
 use futures_util::{FutureExt, future::BoxFuture};
@@ -58,24 +57,10 @@ impl Fixture {
         })
     }
     async fn initialize(&mut self) -> Result<()> {
-        let rows = self
-            .admin
-            .as_mut()
-            .ok_or_else(|| invalid("owned fixture admin connection was retired"))?
-            .simple_query("SELECT /* culprit */ CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) AS machine")
-            .await
-            .map_err(map_error)?
-            .into_first_result()
-            .await
-            .map_err(map_error)?;
-        let host = rows.first().map(Rec::from_row).ok_or_else(|| invalid("missing owned fixture identity"))?;
-        let machine = crate::read::text(&host, "machine")?;
-        if !machine
-            .strip_prefix("culprit-smoke-mssql-")
-            .is_some_and(|nonce| nonce.len() == 24 && nonce.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        {
-            return Err(invalid("only an owned nonce-labelled smoke fixture may create page workloads"));
-        }
+        crate::test_support::verify_owned_source(
+            self.admin.as_mut().ok_or_else(|| invalid("owned fixture admin connection was retired"))?,
+        )
+        .await?;
         self.owned_host = true;
         self.execute(&format!(
             "CREATE DATABASE [{}]; ALTER DATABASE [{}] SET RECOVERY SIMPLE;
@@ -188,7 +173,6 @@ impl Fixture {
                     max_sql_bytes: 16 * 1024,
                     ..Default::default()
                 },
-                scope: ActivityScope::CurrentDatabase,
                 identity: IdentityDetail::Endpoint,
             },
             "127.0.0.1".into(),

@@ -1,0 +1,40 @@
+{
+  "observed_at": "2020-01-01T12:00:00.0000000Z",
+  "schedulers": {
+    "observed_rows": 2,
+    "unknown_values": 0,
+    "runnable_tasks": "0",
+    "worker_queue": "0",
+    "failed_worker_creations": "0",
+    "population_rows": 2
+  },
+  "memory": {
+    "process_rows": 1,
+    "system_rows": 1,
+    "unknown_process_flags": 0,
+    "unknown_system_flags": 0,
+    "process_physical_low": false,
+    "process_virtual_low": false,
+    "system_low": false,
+    "physical_used_kib": "9007199254740993",
+    "virtual_committed_kib": "0",
+    "virtual_available_kib": null,
+    "system_total_kib": null,
+    "system_available_kib": "0"
+  },
+  "grant_waiters": 0,
+  "pending_io": {
+    "observed_rows": 0,
+    "unknown_flags": 0,
+    "os_pending": "0",
+    "completion_pending": "0"
+  },
+  "io_waits": {
+    "observed_rows": 0,
+    "unknown_durations": 0,
+    "longest_wait_ms": null,
+    "population_rows": 0,
+    "unknown_types": 0
+  },
+  "grant_rows": 0
+}

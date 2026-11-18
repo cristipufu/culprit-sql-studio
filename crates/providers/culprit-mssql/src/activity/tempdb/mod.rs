@@ -4,7 +4,7 @@
 mod sql;
 
 use super::{
-    ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, ActivityScope, NativeStatement,
+    ActivityContext, ActivityFrame, ActivityReader, ActivityRecord, NativeStatement,
     participants::{Check, RequestState},
     rows,
 };
@@ -36,7 +36,7 @@ struct RequestChecks {
 
 impl<R: NativeRead> ActivityReader<R> {
     pub(crate) async fn capture_task_space(&mut self) -> Result<TaskSpaceCapture> {
-        if self.observed || !matches!(self.options.scope, ActivityScope::CurrentDatabase) {
+        if self.observed {
             return Err(invalid_data());
         }
         self.observed = true;

@@ -69,9 +69,9 @@ culprit mcp --connection shop-staging --evidence-outbox /path/to/outbox
 ```
 
 `analyze_capture` takes `connection`, `observation_id` and a closed `analysis` choice. It supports `page_server_reads`,
-`memory_clerks`, `hyperscale_log_components`, `performance_counters`, `database_properties`, `compilation`,
+`memory_clerks`, `hyperscale_log_components`, `performance_counters`, `database_properties`, `instance_resources`, `compilation`,
 `configured_log_rates`, `connection_outcomes`, `jobs`, `request_memory`, `task_space`, `current_request_work`,
-`statement_work`, `maintenance_progress`, `completed_spills` and `storage`.
+`statement_work`, `maintenance_progress`, `completed_spills`, `storage`, `blocking` and `session_census`.
 `observation_id` is the capture's `manifest.json` → `capture.observation_id`. The connection must be delegated to the agent and match the original
 journal entry. The tool reanalyzes verified originals, with redacted SQL previews only when their exact original
 definitions match. Memory clerks retain their original shared-server scope, native counts and read bounds; they
@@ -81,6 +81,12 @@ Operational analyses share one authenticated original read. Results keep native 
 clocks independently of local verification bytes. Details return at most five entries with explicit presentation
 counts; this does not truncate or relabel the original captured population. Compilation and completed-spill facts
 retain their historical native lifetimes, not current compiler ownership or a statement's elapsed-time cause.
+
+For `blocking`, select the focused closure capture. The same worker authenticates its exact original Activity
+capture from the retained receipt, with one cumulative row, byte and deadline allowance for both inputs. A missing,
+changed or unsettled original is refused; another baseline cannot replace it. Both native scopes and clocks remain
+separate. Relationships and graph details have explicit presentation limits, and historical nodes offer no live
+session action. A fully read file does not establish complete native lock visibility or repair unknown original scope.
 
 The directory must be available for exclusive ownership; a running collector's lock is not bypassed. An embedding
 host can instead share its existing Outbox actor. Without the startup option or an injected reader, this tool is

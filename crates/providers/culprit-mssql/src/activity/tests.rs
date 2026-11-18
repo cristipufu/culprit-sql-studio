@@ -1,6 +1,7 @@
 use super::*;
 use crate::{read::ReadResult, value::Val};
 use std::collections::VecDeque;
+mod census;
 mod replicas;
 mod request_page_server_reads;
 
@@ -29,14 +30,10 @@ impl NativeRead for FakeRead {
         self.shutdown
     }
 }
-fn reader(
-    replies: Vec<ReadResult<Vec<Rec>>>,
-    scope: ActivityScope,
-    identity: IdentityDetail,
-) -> ActivityReader<FakeRead> {
+fn reader(replies: Vec<ReadResult<Vec<Rec>>>, identity: IdentityDetail) -> ActivityReader<FakeRead> {
     ActivityReader::new(
         FakeRead { replies: replies.into(), calls: Vec::new(), closed: 0, shutdown: SourceShutdown::Quiescent },
-        ReadOptions { budget: CollectionBudget::default(), scope, identity },
+        ReadOptions { budget: CollectionBudget::default(), identity },
         "fixture.invalid".into(),
         1433,
     )
@@ -112,7 +109,6 @@ async fn native_readable_replica_baselines_keep_their_actual_member_epoch_and_ro
     assert_eq!(context.writable, Some(false));
     let mut reader = reader(
         vec![Ok(vec![authority(&readonly)]), Ok(vec![readonly.clone()]), Ok(vec![authority(&readonly)])],
-        ActivityScope::CurrentDatabase,
         IdentityDetail::AzureDatabase,
     );
     let (description, observations) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
@@ -202,14 +198,10 @@ pub(crate) fn authority(row: &Rec) -> Rec {
 fn baseline_reader(rows: Vec<Rec>) -> ActivityReader<FakeRead> {
     let after = authority(&replace(&metadata(0), &[("observed_at", Val::Text("2020-01-01T06:00:01Z".into()))]));
     let before = authority(&replace(&metadata(0), &[("observed_at", Val::Text("2020-01-01T05:59:59Z".into()))]));
-    reader(
-        vec![Ok(vec![before]), Ok(rows), Ok(vec![after])],
-        ActivityScope::CurrentDatabase,
-        IdentityDetail::AzureDatabase,
-    )
+    reader(vec![Ok(vec![before]), Ok(rows), Ok(vec![after])], IdentityDetail::AzureDatabase)
 }
 async fn enriched(reader: &mut ActivityReader<FakeRead>) -> (ActivityDetailStatus, Vec<ActivityObservation>) {
-    let mut frame = reader.observe().await.unwrap();
+    let mut frame = reader.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
     let keys = frame.keys();
     let status = reader.enrich(&mut frame, &keys, false, 16 * 1024).await.unwrap();
     (status, crate::telemetry::activity::export_observations(frame.records))
@@ -219,11 +211,8 @@ async fn enriched(reader: &mut ActivityReader<FakeRead>) -> (ActivityDetailStatu
 async fn live_and_baseline_share_all_request_facts_without_baseline_sql_enrichment() {
     let sql = "SELECT N'private-activity-canary' FROM dbo.orders";
     let rows = vec![metadata(42), healthy(99)];
-    let mut interactive = reader(
-        vec![Ok(rows.clone()), Ok(vec![details(99, "SELECT 1"), details(42, sql)])],
-        ActivityScope::Visible,
-        IdentityDetail::Endpoint,
-    );
+    let mut interactive =
+        reader(vec![Ok(rows.clone()), Ok(vec![details(99, "SELECT 1"), details(42, sql)])], IdentityDetail::Endpoint);
     let live = crate::live::collect_from(&mut interactive).await.unwrap();
     let session = live.sessions.iter().find(|session| session.id == "42").unwrap();
     assert_eq!(live.sessions.len(), 2);
@@ -245,7 +234,7 @@ async fn live_and_baseline_share_all_request_facts_without_baseline_sql_enrichme
     assert_eq!(native.native_rows, 2);
     assert_eq!(native.coverage.records, 2);
     assert!(native.coverage.complete_scope);
-    assert_eq!(native.population, ActivityPopulation::ActiveRequestsOpenTransactionsAndBlockers);
+    assert_eq!(native.population, ActivityPopulation::UserSessionsCurrentRequestsAndBlockers);
     assert_eq!(exporting.query_count(), 3);
     assert!(exporting.io.calls[2].sql.contains("WHERE sd.database_id=DB_ID()"));
     assert!(!exporting.io.calls.iter().any(|call| call.sql.contains("sys.dm_exec_sql_text")));
@@ -257,13 +246,14 @@ async fn idle_previous_batches_are_separate_from_the_metadata_baseline() {
     let rows = vec![metadata(42), idle(55)];
     let mut interactive = reader(
         vec![Ok(rows.clone()), Ok(vec![details(42, "SELECT 1")]), Ok(vec![details(55, last)])],
-        ActivityScope::Visible,
         IdentityDetail::Endpoint,
     );
     let live = crate::live::collect_from(&mut interactive).await.unwrap();
     let sleeper = live.sessions.iter().find(|session| session.id == "55").unwrap();
     assert_eq!(sleeper.sql.as_deref(), Some(last));
-    assert_eq!(sleeper.elapsed_ms, Some(300_000.0));
+    assert_eq!(sleeper.sql_context, Some(culprit_core::SessionStatementContext::PriorSessionBatch));
+    assert_eq!(sleeper.elapsed_ms, None, "a prior batch has no current-request elapsed time");
+    assert_eq!(sleeper.transaction_ms, Some(90_000.0));
     assert_eq!(sleeper.cpu_ms, Some(1000.0));
     assert_eq!(interactive.io.calls[2].sql, sql::details(true, sql::QueryPolicy::Activity));
     let mut exporting = baseline_reader(rows);
@@ -271,6 +261,9 @@ async fn idle_previous_batches_are_separate_from_the_metadata_baseline() {
     let sleeper = observations.iter().find(|row| row.key.session.id == "55").unwrap();
     assert!(sleeper.idle && sleeper.key.request.is_none());
     assert_eq!(sleeper.open_transactions, Some(1));
+    assert_eq!(sleeper.elapsed_ms, None);
+    assert_eq!(sleeper.transaction_age_ms.as_deref(), Some("90000"));
+    assert_eq!(sleeper.last_request_age_ms.as_deref(), Some("300000"));
     assert_eq!(sleeper.statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected });
     assert!(sleeper.statement_identity.is_none());
     assert!(!serde_json::to_string(&observations).unwrap().contains("previous-batch-canary"));
@@ -289,8 +282,8 @@ async fn quiet_and_short_request_baselines_never_fetch_sql_or_drop_normal_rows()
 }
 #[tokio::test]
 async fn native_identity_and_age_keep_local_ticks_without_treating_server_time_as_utc() {
-    let mut reader = reader(vec![Ok(vec![metadata(42)])], ActivityScope::Visible, IdentityDetail::Endpoint);
-    let frame = reader.observe().await.unwrap();
+    let mut reader = reader(vec![Ok(vec![metadata(42)])], IdentityDetail::Endpoint);
+    let frame = reader.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
     let row = &frame.records[0].facts;
     assert_eq!(frame.context.at, "2020-01-01T06:00:00.000000000Z");
     assert_eq!(row.key.session.generation, "2020-01-01T07:00:00.1533333");
@@ -305,11 +298,7 @@ async fn native_identity_and_age_keep_local_ticks_without_treating_server_time_a
 #[tokio::test]
 async fn a_reused_request_or_advancing_statement_never_supplies_unowned_text() {
     let response = replace(&details(42, "SELECT N'wrong-statement-canary'"), &[("matched", Val::Int(0))]);
-    let mut reader = reader(
-        vec![Ok(vec![metadata(42)]), Ok(vec![response])],
-        ActivityScope::CurrentDatabase,
-        IdentityDetail::AzureDatabase,
-    );
+    let mut reader = reader(vec![Ok(vec![metadata(42)]), Ok(vec![response])], IdentityDetail::AzureDatabase);
     let (_, observations) = enriched(&mut reader).await;
     assert_eq!(observations[0].statement, DefinitionPayload::Unavailable { reason: PayloadUnavailable::Missing });
 }
@@ -319,7 +308,6 @@ async fn sql_handles_and_offsets_allow_statements_without_query_hashes() {
         let metadata = replace(&metadata(42), &[("query_hash", hash), ("command", Val::Text("WAITFOR".into()))]);
         let mut reader = reader(
             vec![Ok(vec![metadata]), Ok(vec![details(42, "WAITFOR DELAY '00:00:10'")])],
-            ActivityScope::Visible,
             IdentityDetail::Endpoint,
         );
         let live = crate::live::collect_from(&mut reader).await.unwrap();
@@ -341,7 +329,6 @@ async fn multiple_requests_on_one_session_keep_their_own_text_even_when_results_
     );
     let mut reader = reader(
         vec![Ok(vec![metadata(42), second]), Ok(vec![second_detail, details(42, "SELECT * FROM dbo.first_request")])],
-        ActivityScope::CurrentDatabase,
         IdentityDetail::AzureDatabase,
     );
     let (_, observations) = enriched(&mut reader).await;
@@ -353,11 +340,7 @@ async fn multiple_requests_on_one_session_keep_their_own_text_even_when_results_
 #[tokio::test]
 async fn null_request_counters_never_fall_back_to_session_lifetime_totals() {
     let input = replace(&metadata(42), &[("request_cpu_ms", Val::Null), ("request_logical_reads", Val::Int(0))]);
-    let mut reader = reader(
-        vec![Ok(vec![input]), Ok(vec![details(42, "SELECT 1")])],
-        ActivityScope::Visible,
-        IdentityDetail::Endpoint,
-    );
+    let mut reader = reader(vec![Ok(vec![input]), Ok(vec![details(42, "SELECT 1")])], IdentityDetail::Endpoint);
     let live = crate::live::collect_from(&mut reader).await.unwrap();
     assert_eq!(live.sessions[0].cpu_ms, None);
     assert_eq!(live.sessions[0].reads, Some(0.0));
@@ -365,16 +348,12 @@ async fn null_request_counters_never_fall_back_to_session_lifetime_totals() {
 #[tokio::test]
 async fn restricted_or_overflowed_activity_never_looks_like_a_clean_empty_database() {
     let restricted = replace(&metadata(42), &[("database_wide", Val::Int(0))]);
-    let mut reader = reader(vec![Ok(vec![restricted])], ActivityScope::Visible, IdentityDetail::Endpoint);
+    let mut reader = reader(vec![Ok(vec![restricted])], IdentityDetail::Endpoint);
     let error = crate::live::collect_from(&mut reader).await.unwrap_err();
     assert_eq!(error.code, ErrorCode::PermissionDenied);
     assert!(error.message.contains("GRANT VIEW DATABASE STATE"));
     assert_eq!(reader.io.closed, 1);
-    let mut reader = super::tests::reader(
-        vec![Ok(vec![metadata(42), metadata(43)])],
-        ActivityScope::Visible,
-        IdentityDetail::Endpoint,
-    );
+    let mut reader = super::tests::reader(vec![Ok(vec![metadata(42), metadata(43)])], IdentityDetail::Endpoint);
     reader.options.budget.max_snapshot_rows = 1;
     let error = crate::live::collect_from(&mut reader).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::RowLimit);
@@ -384,7 +363,6 @@ async fn restricted_or_overflowed_activity_never_looks_like_a_clean_empty_databa
 async fn optional_detail_failure_retains_metadata_with_explicit_unavailability() {
     let mut reader = reader(
         vec![Ok(vec![metadata(42)]), Err(ReadError::Source(Error::new(ErrorCode::PermissionDenied, "fixture")))],
-        ActivityScope::Visible,
         IdentityDetail::Endpoint,
     );
     let live = crate::live::collect_from(&mut reader).await.unwrap();
@@ -397,20 +375,13 @@ async fn optional_detail_failure_retains_metadata_with_explicit_unavailability()
 #[tokio::test]
 async fn stopped_or_unconfirmed_reads_close_owned_work_and_never_return_fresh_live_counts() {
     for stop in [CollectionStop::Cancelled, CollectionStop::TimedOut, CollectionStop::ByteLimit] {
-        let mut reader = reader(
-            vec![Ok(vec![metadata(42)]), Err(ReadError::Stopped(stop))],
-            ActivityScope::Visible,
-            IdentityDetail::Endpoint,
-        );
+        let mut reader = reader(vec![Ok(vec![metadata(42)]), Err(ReadError::Stopped(stop))], IdentityDetail::Endpoint);
         let error = crate::live::collect_from(&mut reader).await.unwrap_err();
         assert_eq!(CollectionStop::from_error(&error), stop);
         assert_eq!(reader.io.closed, 1);
     }
-    let mut reader = reader(
-        vec![Ok(vec![replace(&metadata(42), &[("session_id", Val::Null)])])],
-        ActivityScope::Visible,
-        IdentityDetail::Endpoint,
-    );
+    let mut reader =
+        reader(vec![Ok(vec![replace(&metadata(42), &[("session_id", Val::Null)])])], IdentityDetail::Endpoint);
     reader.io.shutdown = SourceShutdown::Unconfirmed;
     let error = crate::live::collect_from(&mut reader).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
@@ -453,11 +424,7 @@ async fn malformed_detail_sets_and_oversized_sql_do_not_replace_valid_metadata()
             PayloadUnavailable::SourceUnavailable,
         ),
     ] {
-        let mut reader = reader(
-            vec![Ok(vec![metadata(42)]), Ok(vec![payload])],
-            ActivityScope::CurrentDatabase,
-            IdentityDetail::AzureDatabase,
-        );
+        let mut reader = reader(vec![Ok(vec![metadata(42)]), Ok(vec![payload])], IdentityDetail::AzureDatabase);
         let (actual_details, observations) = enriched(&mut reader).await;
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].request_counters.as_ref().unwrap().cpu_ms.as_deref(), Some("10"));
@@ -470,8 +437,7 @@ async fn duplicate_or_reused_native_identities_in_one_read_are_rejected() {
     for duplicate in
         [metadata(42), replace(&metadata(42), &[("session_generation", Val::Text("2020-01-01T07:01:00".into()))])]
     {
-        let mut reader =
-            reader(vec![Ok(vec![metadata(42), duplicate])], ActivityScope::Visible, IdentityDetail::Endpoint);
+        let mut reader = reader(vec![Ok(vec![metadata(42), duplicate])], IdentityDetail::Endpoint);
         assert!(crate::live::collect_from(&mut reader).await.is_err());
         assert_eq!(reader.io.closed, 1);
     }
@@ -487,11 +453,7 @@ async fn endpoint_projection_works_for_sql_server_without_azure_database_identit
             ("physical_incarnation", Val::Null),
         ],
     );
-    let mut reader = reader(
-        vec![Ok(vec![row]), Ok(vec![details(42, "SELECT 1")])],
-        ActivityScope::Visible,
-        IdentityDetail::Endpoint,
-    );
+    let mut reader = reader(vec![Ok(vec![row]), Ok(vec![details(42, "SELECT 1")])], IdentityDetail::Endpoint);
     let live = crate::live::collect_from(&mut reader).await.unwrap();
     assert_eq!(live.sessions.len(), 1);
     assert_eq!(
@@ -503,12 +465,12 @@ async fn endpoint_projection_works_for_sql_server_without_azure_database_identit
 
 #[tokio::test]
 async fn source_representation_changes_start_a_new_activity_epoch() {
-    let mut original =
-        reader(vec![Ok(vec![metadata(42)])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-    let original = original.observe().await.unwrap();
+    let mut original = reader(vec![Ok(vec![metadata(42)])], IdentityDetail::AzureDatabase);
+    let original =
+        original.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
     let changed = replace(&metadata(42), &[("compatibility_level", Val::Int(120))]);
-    let mut changed = reader(vec![Ok(vec![changed])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-    let changed = changed.observe().await.unwrap();
+    let mut changed = reader(vec![Ok(vec![changed])], IdentityDetail::AzureDatabase);
+    let changed = changed.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
     assert_ne!(original.context.epoch, changed.context.epoch);
 }
 
@@ -532,8 +494,7 @@ async fn native_requests_without_a_statement_span_preserve_counters_without_fetc
             &metadata(42),
             &[("statement_start", start), ("statement_end", Val::Int(-1)), ("command", Val::Text("EXECUTE".into()))],
         );
-        let mut interactive =
-            reader(vec![Ok(vec![metadata.clone()])], ActivityScope::Visible, IdentityDetail::Endpoint);
+        let mut interactive = reader(vec![Ok(vec![metadata.clone()])], IdentityDetail::Endpoint);
         let live = crate::live::collect_from(&mut interactive).await.unwrap();
         assert_eq!(live.sessions.len(), 1);
         assert_eq!(live.sessions[0].cpu_ms, Some(10.0));
@@ -552,11 +513,7 @@ async fn native_requests_without_a_statement_span_preserve_counters_without_fetc
 async fn an_observed_request_wins_over_a_later_absence_probe_without_attributing_ended_sql() {
     let metadata = replace(&metadata(42), &[("no_current_request", Val::Int(1))]);
     let ended = replace(&details(42, "SELECT N'ended-statement-canary'"), &[("matched", Val::Int(0))]);
-    let mut interactive = reader(
-        vec![Ok(vec![metadata.clone()]), Ok(vec![ended.clone()])],
-        ActivityScope::Visible,
-        IdentityDetail::Endpoint,
-    );
+    let mut interactive = reader(vec![Ok(vec![metadata.clone()]), Ok(vec![ended.clone()])], IdentityDetail::Endpoint);
     let live = crate::live::collect_from(&mut interactive).await.unwrap();
     assert_eq!(live.sessions.len(), 1);
     assert_eq!(live.sessions[0].cpu_ms, Some(10.0));
@@ -586,11 +543,7 @@ async fn page_wait_targets_share_the_request_identity_without_inventing_a_holder
             ],
         );
         let sql = "SELECT id FROM dbo.orders";
-        let mut interactive = reader(
-            vec![Ok(vec![row.clone()]), Ok(vec![details(42, sql)])],
-            ActivityScope::Visible,
-            IdentityDetail::Endpoint,
-        );
+        let mut interactive = reader(vec![Ok(vec![row.clone()]), Ok(vec![details(42, sql)])], IdentityDetail::Endpoint);
         let live = crate::live::collect_from(&mut interactive).await.unwrap();
         let session = &live.sessions[0];
         let targets = session.wait_resources.as_ref().unwrap();
@@ -615,16 +568,16 @@ async fn page_wait_targets_share_the_request_identity_without_inventing_a_holder
 #[tokio::test]
 async fn an_unidentified_page_stays_unknown_and_invalid_native_identifiers_cannot_complete_capture() {
     let row = replace(&metadata(42), &[("wait_type", Val::Text("PAGELATCH_EX".into())), ("wait_resource", Val::Null)]);
-    let mut unknown = reader(vec![Ok(vec![row])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-    let frame = unknown.observe().await.unwrap();
+    let mut unknown = reader(vec![Ok(vec![row])], IdentityDetail::AzureDatabase);
+    let frame = unknown.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
     assert!(frame.records[0].facts.wait.as_ref().unwrap().identified_resources.is_empty());
     for invalid in ["control\nidentifier".to_owned(), "x".repeat(513)] {
         let row = replace(
             &metadata(42),
             &[("wait_type", Val::Text("PAGELATCH_EX".into())), ("wait_resource", Val::Text(invalid))],
         );
-        let mut reader = reader(vec![Ok(vec![row])], ActivityScope::CurrentDatabase, IdentityDetail::AzureDatabase);
-        assert!(reader.observe().await.is_err());
+        let mut reader = reader(vec![Ok(vec![row])], IdentityDetail::AzureDatabase);
+        assert!(reader.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).is_err());
         assert_eq!(reader.query_count(), 1);
     }
 }
@@ -746,12 +699,23 @@ async fn denied_optional_authority_retains_native_actors_but_cannot_authorize_fo
         assert!(!native.coverage.complete_scope);
         assert_eq!(reader.query_count(), 3);
     }
-    let mut reader = reader(
-        vec![Err(ReadError::Stopped(CollectionStop::Cancelled))],
-        ActivityScope::CurrentDatabase,
-        IdentityDetail::AzureDatabase,
-    );
+    let mut reader = reader(vec![Err(ReadError::Stopped(CollectionStop::Cancelled))], IdentityDetail::AzureDatabase);
     let error = crate::telemetry::activity::capture(&mut reader).await.unwrap_err();
     assert_eq!(CollectionStop::from_error(&error), CollectionStop::Cancelled);
     assert_eq!(reader.query_count(), 1, "no actor read follows a terminal authority failure");
+}
+
+#[tokio::test]
+async fn selected_database_reader_keeps_the_existing_native_template_and_fixed_scope_parameter() {
+    let mut owner = reader(vec![Ok(vec![metadata(42)])], IdentityDetail::Endpoint);
+    let baseline = owner.observe_baseline().await.unwrap();
+    baseline.into_complete().unwrap();
+    assert_eq!(owner.io.calls.len(), 1);
+    assert_eq!(
+        owner.io.calls[0].sql,
+        sql::metadata(IdentityDetail::Endpoint, page_server_reads::Availability::Unknown)
+    );
+    assert!(matches!(&owner.io.calls[0].parameters[1], Parameter::Integer(value) if *value == CURRENT_DATABASE_SCOPE));
+    assert_eq!(CURRENT_DATABASE_SCOPE, 1);
+    assert_eq!(owner.close().await, SourceShutdown::Quiescent);
 }

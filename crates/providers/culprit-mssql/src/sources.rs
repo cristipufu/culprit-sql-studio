@@ -4,6 +4,26 @@
 //! detail some checks use; without it those checks say less, never something wrong.
 
 use culprit_core::{Capability, Coverage, ErrorCode, Source, source_id};
+pub const AGENT_JOBS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_AGENT_JOBS_SOURCE,
+    reads: culprit_core::key!("view.mssql_agent_jobs.source.jobs"),
+    delivers: &[],
+};
+pub const AGENT_STEPS: Source = Source {
+    name: culprit_core::telemetry::MSSQL_AGENT_STEPS_SOURCE,
+    reads: culprit_core::key!("view.mssql_agent_jobs.source.steps"),
+    delivers: &[],
+};
+pub const AGENT_HISTORY: Source = Source {
+    name: culprit_core::telemetry::MSSQL_AGENT_HISTORY_SOURCE,
+    reads: culprit_core::key!("view.mssql_agent_jobs.source.history"),
+    delivers: &[],
+};
+pub const AGENT_CONTEXT: Source = Source {
+    name: culprit_core::telemetry::MSSQL_AGENT_CONTEXT_SOURCE,
+    reads: culprit_core::key!("view.mssql_agent_jobs.source.context"),
+    delivers: &[],
+};
 pub const SUSPECT_PAGES: Source = Source {
     name: source_id::SUSPECT_PAGES,
     reads: culprit_core::key!("provider.mssql.source.suspect_pages"),
@@ -124,6 +144,11 @@ pub const RESOURCES: Source = Source {
 pub const POOL_RESOURCES: Source = Source {
     name: source_id::POOL_RESOURCES,
     reads: culprit_core::key!("provider.mssql.source.pool_resources"),
+    delivers: &[],
+};
+pub const INSTANCE_RESOURCES: Source = Source {
+    name: culprit_core::telemetry::INSTANCE_RESOURCES_SOURCE,
+    reads: culprit_core::key!("view.instance_resources.source"),
     delivers: &[],
 };
 pub const MEMORY_CLERKS: Source = Source {
@@ -386,6 +411,10 @@ pub const SIGNAL_READS: &[Source] = &[
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    AGENT_JOBS,
+    AGENT_STEPS,
+    AGENT_HISTORY,
+    AGENT_CONTEXT,
     HYPERSCALE_LOG_COMPONENTS,
     CONFIGURED_LOG_RATES,
     MEMORY_FAILURES,
@@ -417,6 +446,7 @@ pub const ALL: &[Source] = &[
     RESOURCES,
     POOL_RESOURCES,
     MEMORY_CLERKS,
+    INSTANCE_RESOURCES,
     SCHEDULERS,
     FORWARDED_FETCHES,
     QUERY_FAMILIES,

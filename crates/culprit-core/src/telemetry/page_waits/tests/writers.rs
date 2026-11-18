@@ -170,6 +170,52 @@ fn selected_object_writers_keep_original_receipts_and_independent_unknown_latch_
 }
 
 #[test]
+fn writer_session_authority_requires_both_waiter_and_every_candidate_generation() {
+    use crate::telemetry::activity_frame::tests as frames;
+
+    for selected in [0, 1] {
+        for lifecycle in [SessionLifecycle::Unknown, SessionLifecycle::Connecting, SessionLifecycle::PoolResetPrelogin]
+        {
+            let (mut focus, _, observation) = fixture();
+            let mut rows =
+                vec![focus.waiter.participant.original.clone(), observation.candidates[0].request.clone().unwrap()];
+            let mut peer = rows[selected].clone();
+            peer.key.request.as_mut().unwrap().id = "1".into();
+            peer.session_context = Some(Box::new(ActivitySessionContext {
+                lifecycle,
+                login_age_ms: None,
+                last_request_end_age_ms: None,
+                client_library: None,
+                client_process_id: None,
+                native: None,
+            }));
+            rows.push(peer);
+            let original = &focus.waiter.participant;
+            let mut source = frames::source(rows.len());
+            source.target = original.target.clone();
+            source.partition = original.partition.clone();
+            source.source = original.source.clone();
+            let SourceObservation::Activity(native) = &mut source.observation else { panic!("Activity") };
+            native.epoch = Some(original.epoch.clone());
+            native.database_writable = original.database_writable;
+            native.at = original.original_observed_at.clone();
+            native.observed_from = native.at.clone();
+            native.observed_until = native.at.clone();
+            native.coverage = StateSourceCoverage::collected(source.source.clone(), rows.len() as u32);
+            let refs = frames::references(&source, &rows);
+            focus.waiter.participant.parent = refs[0].clone();
+            focus.candidates[0].parent = refs[1].clone();
+            let borrowed = frames::borrowed(&rows, &refs);
+            let frame = ActivityFrameEvidence::new(&source, &borrowed, true).unwrap();
+            assert!(focus.is_valid());
+            assert!(focus.waiter.participant.matches_parent(&source, &rows[0], &refs[0]));
+            assert_eq!(frame.rows().count(), 3, "the conflicting canonical peer is never discarded");
+            assert_eq!(focus.matches_activity_frame(&frame), lifecycle == SessionLifecycle::Unknown);
+        }
+    }
+}
+
+#[test]
 fn writer_scope_request_and_native_binding_tampering_cannot_borrow_original_authority() {
     let (focus, context, row) = fixture();
     for field in ["member", "epoch", "role", "database"] {

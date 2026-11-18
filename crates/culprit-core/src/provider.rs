@@ -36,7 +36,7 @@ pub struct SnapshotOptions {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_memory_failures: bool,
-    /// Explicit opt-in to bounded native failure diagnostics, including supported Timescale job state/history.
+    /// Explicit opt-in to bounded native failure diagnostics, including supported Timescale and SQL Server Agent job state/history.
     /// Free-form diagnostic messages remain omitted; each source retains its own scope and coverage.
     #[serde(default)]
     #[ts(optional = nullable)]

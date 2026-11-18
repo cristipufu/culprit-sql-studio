@@ -6,6 +6,7 @@ mod native_context;
 mod parameter_context;
 mod replication;
 mod resources;
+mod showplan;
 
 #[test]
 fn recorded_messages_and_capability_actions_do_not_retain_private_collector_details() {
@@ -730,3 +731,5 @@ fn fuzz_redact_sql_and_prose_are_idempotent_and_never_leak_planted_literals() {
         }
     }
 }
+
+mod instance_resources;

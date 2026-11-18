@@ -6364,6 +6364,16 @@ table.rg {
   min-height: 0;
 }
 
+.live-view > details.notice {
+  display: block;
+}
+
+.live-census {
+  flex: 0 1 auto;
+  overflow-y: auto;
+  max-height: 45%;
+}
+
 .live-view .spacer {
   flex: 1;
 }

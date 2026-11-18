@@ -85,7 +85,6 @@ fn options() -> ReadOptions {
             total_timeout_ms: 10_000,
             ..Default::default()
         },
-        scope: ActivityScope::CurrentDatabase,
         identity: IdentityDetail::Endpoint,
     }
 }

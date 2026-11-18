@@ -1,5 +1,33 @@
 //! Native progress is validated and worded after the provider's read owner finishes.
-use culprit_core::{Error, QueryProgress, Result, t};
+use culprit_core::{Error, QueryProgress, Result, Session, t, telemetry::ActivityFrameEvidence};
+use std::collections::BTreeMap;
+
+/// Current acquired Activity metadata may refuse inspection; missing metadata supplies no new qualification.
+/// Providers cannot inject this presentation decision, and displayed IDs never replace an exact native row.
+pub(super) fn qualify_live(sessions: &mut [Session], frame: Option<&ActivityFrameEvidence<'_>>) {
+    let displayed = sessions.iter().fold(BTreeMap::new(), |mut counts, row| {
+        *counts.entry(row.id.clone()).or_insert(0usize) += 1;
+        counts
+    });
+    for session in sessions {
+        session.progress_eligible = frame.map(|frame| {
+            session.activity_key.as_ref().and_then(|key| frame.row(key)).is_some_and(|row| {
+                let row = row.observation;
+                frame.has_session_generation_authority(&row.key.session)
+                    && !row.idle
+                    && row.key.request.is_some()
+                    && frame.source().target.engine().spec().live_session_id(&row.key.session) == session.id
+                    && frame.session_rows(&row.key.session).count() == 1
+                    && displayed.get(&session.id) == Some(&1)
+            })
+        });
+        if session.action_target.as_ref().is_some_and(|target| {
+            frame.is_some_and(|frame| frame.session_generation_is_disqualified(&target.activity.session))
+        }) {
+            session.action_target = None;
+        }
+    }
+}
 
 pub(super) fn present(mut progress: QueryProgress) -> Result<QueryProgress> {
     progress.current_work_report = None;
@@ -76,6 +104,9 @@ fn explain_current_work(progress: &mut QueryProgress) -> Result<()> {
 fn invalid() -> Error {
     Error::invalid(t!("collection.invalid_source"))
 }
+
+#[cfg(test)]
+mod eligibility_tests;
 
 #[cfg(test)]
 mod tests {

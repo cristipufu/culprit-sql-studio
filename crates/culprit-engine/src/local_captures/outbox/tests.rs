@@ -200,4 +200,9 @@ async fn journal_scope_and_queued_cancellation_cannot_return_another_connections
 mod hyperscale_log_components;
 mod memory_clerks;
 
+mod blocking;
 mod settlement;
+
+mod session_census;
+
+mod instance_resources;

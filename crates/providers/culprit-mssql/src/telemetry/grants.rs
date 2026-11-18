@@ -1,4 +1,4 @@
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{
     grants::{Layout, decode, select_sql},
     read::NativeRead,
@@ -12,7 +12,7 @@ impl SnapshotRecipe for Grants {
     const DATASET: SnapshotDataset = SnapshotDataset::StatementGrants;
     const NAME: &'static str = crate::sources::GRANTS.name;
     const SOURCE: &'static Source = &crate::sources::GRANTS;
-    const INSTANCE_LOCAL: bool = true;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabaseCache;
     async fn layout<R: NativeRead>(&self, reader: &mut R, _budget: &CollectionBudget) -> Result<Option<Layout>> {
         Layout::read(reader).await
     }

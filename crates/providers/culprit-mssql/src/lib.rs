@@ -28,6 +28,7 @@ mod grants;
 mod index_operations;
 mod indexes;
 mod instance;
+mod jobs;
 mod live;
 mod local_source;
 mod qualification;

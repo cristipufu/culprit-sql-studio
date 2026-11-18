@@ -1,15 +1,13 @@
 //! Native session checks and KILL share one held owner. The final conditional guard narrows the race; SQL Server
 //! still accepts a numeric SPID, not an atomic session-generation comparison. Never retry a dispatched KILL.
 use crate::{
-    activity::{ActivityContext, ActivityReader, ActivityRecord, database_context},
+    activity::{ActivityRecord, ESTABLISHED_SESSION_SQL, established_login},
     conn::Pool,
     local_source::Context,
-    read::{
-        NativeRead, Parameter, ReadError, ReadSession, boolean, integer, optional_text, stops_remaining_reads, text,
-    },
+    read::{NativeRead, Parameter, ReadError, ReadSession, boolean, integer, optional_text, text},
 };
 use culprit_core::{
-    ErrorCode, Result, SessionAction, SessionActionOutcome, SessionActionTarget, session_number,
+    Result, SessionAction, SessionActionOutcome, SessionActionTarget, session_number,
     telemetry::{
         ActivityKey, CollectionBudget, CollectionStop, NativeActivityIdentity, NativeReadContext, SourceShutdown,
     },
@@ -19,47 +17,22 @@ const ACTION_QUERIES: u32 = 8;
 const ACTION_BYTES: u32 = 128 * 1024;
 const ACTION_STATEMENT_TIMEOUT_MS: u32 = 2_000;
 const ACTION_TOTAL_TIMEOUT_MS: u32 = 10_000;
-const TARGET_SQL: &str = r#"SELECT TOP (2) /* culprit */ session_id,
- CONVERT(varchar(40),CAST(login_time AS datetime2),126) AS session_generation,
- CAST(is_user_process AS bit) AS user_process,program_name,
- CAST(CASE WHEN session_id=@@SPID THEN 1 ELSE 0 END AS bit) AS own
-FROM sys.dm_exec_sessions WHERE session_id=@P1 OPTION(MAXDOP 1)"#;
-
-pub(super) fn optional_authority(result: Result<Context>) -> Result<Option<Context>> {
-    match result {
-        Ok(context) => Ok(Some(context)),
-        Err(error) if stops_remaining_reads(&error) => Err(error),
-        Err(error)
-            if matches!(error.code, ErrorCode::PermissionDenied | ErrorCode::Unsupported)
-                || matches!(
-                    error.detail,
-                    Some(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::SourceUnavailable))
-                ) =>
-        {
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-pub(super) async fn complete_authority<R: NativeRead>(
-    reader: &mut ActivityReader<R>,
-    before: Option<&Context>,
-    frame: &ActivityContext,
-) -> Result<Option<NativeReadContext>> {
-    let Some(before) = before else { return Ok(None) };
-    let Some(after) = optional_authority(database_context::recheck(reader, before).await)? else {
-        return Ok(None);
-    };
-    if !before.matches_frame(frame) || !after.matches_frame(frame) || before.connection_changed(&after) {
-        return Err(CollectionStop::SourceChanged.error());
-    }
-    let context = before.completed(&after)?;
-    Ok((before.is_qualified() && after.is_qualified()).then_some(context))
+fn target_sql() -> String {
+    format!(
+        r#"SELECT TOP (2) /* culprit */ s.session_id,
+ CONVERT(varchar(40),CAST(s.login_time AS datetime2),126) AS session_generation,
+ CAST(s.is_user_process AS bit) AS user_process,s.program_name,
+ CAST(CASE WHEN s.session_id=@@SPID THEN 1 ELSE 0 END AS bit) AS own,
+ CAST(CASE WHEN {ESTABLISHED_SESSION_SQL} THEN 1 ELSE 0 END AS bit) AS session_established
+FROM sys.dm_exec_sessions s WHERE s.session_id=@P1 OPTION(MAXDOP 1)"#
+    )
 }
 
 pub(super) fn target(record: &ActivityRecord, context: Option<&NativeReadContext>) -> Option<SessionActionTarget> {
     let context = context?;
+    if !record.can_identify_session() {
+        return None;
+    }
     let database = context.target.database()?;
     if record.facts.database.as_deref() != Some(database.database.as_str())
         || record
@@ -126,7 +99,10 @@ fn validate(target: &SessionActionTarget, action: SessionAction) -> Result<()> {
     if !(1..=i16::MAX as u64).contains(&id) || id.to_string() != target.activity.session.id {
         return Err(SessionActionTarget::unavailable());
     }
-    crate::sql_time::native_time(&target.activity.session.generation)?;
+    let generation = crate::sql_time::native_time(&target.activity.session.generation)?;
+    if !established_login(&generation) {
+        return Err(SessionActionTarget::unavailable());
+    }
     Ok(())
 }
 
@@ -164,7 +140,9 @@ async fn signal<R: NativeRead>(
         )
         .await
         .map_err(ReadError::into_error)?;
-    let [row] = rows.as_slice() else { return Err(SessionActionTarget::signal_failed()) };
+    let [row] = rows.as_slice() else {
+        return Err(SessionActionTarget::signal_failed());
+    };
     if !boolean(row, "signalled")? {
         return Err(SessionActionTarget::changed());
     }
@@ -194,7 +172,7 @@ fn action_context<T>(result: Result<T>) -> Result<T> {
 async fn current_session<R: NativeRead>(reader: &mut R, id: u64) -> Result<ActivityKey> {
     let rows = reader
         .query(
-            TARGET_SQL,
+            &target_sql(),
             vec![Parameter::Integer(i64::try_from(id).map_err(|_| SessionActionTarget::unavailable())?)],
             2,
         )
@@ -212,6 +190,9 @@ async fn current_session<R: NativeRead>(reader: &mut R, id: u64) -> Result<Activ
     }
     if !boolean(row, "user_process")? {
         return Err(super::system_session(id));
+    }
+    if !boolean(row, "session_established")? {
+        return Err(SessionActionTarget::changed());
     }
     let current = ActivityKey {
         session: NativeActivityIdentity {
@@ -234,9 +215,10 @@ fn guarded_kill(id: u64) -> String {
         r#"DECLARE /* culprit */ @signalled bit=0;
 IF DB_NAME()=@P3
  AND CONVERT(nvarchar(32),DATABASEPROPERTYEX(DB_NAME(),'Updateability'))=CASE @P4 WHEN 1 THEN N'READ_WRITE' ELSE N'READ_ONLY' END
- AND EXISTS(SELECT 1 FROM sys.dm_exec_sessions
-   WHERE session_id=@P1 AND login_time=CONVERT(datetime,@P2,126)
-    AND is_user_process=1 AND session_id<>@@SPID AND LOWER(COALESCE(program_name,N''))<>N'culprit')
+ AND EXISTS(SELECT 1 FROM sys.dm_exec_sessions s
+   WHERE s.session_id=@P1 AND s.login_time=CONVERT(datetime,@P2,126)
+    AND s.is_user_process=1 AND s.session_id<>@@SPID AND LOWER(COALESCE(s.program_name,N''))<>N'culprit'
+    AND {ESTABLISHED_SESSION_SQL})
 BEGIN
  KILL {id};
  SET @signalled=1;

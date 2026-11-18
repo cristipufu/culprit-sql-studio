@@ -1,6 +1,6 @@
 //! Frozen paging and capture ownership stay generic; native grant/request reading is shared with explicit scans.
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
     read::{NativeRead, ReadSession},
     sources,
@@ -19,7 +19,6 @@ impl MemorySource {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
         let options = ReadOptions {
             budget: crate::request_memory::bounded_budget(&request.budget),
-            scope: ActivityScope::CurrentDatabase,
             identity: IdentityDetail::AzureDatabase,
         };
         Self::from_reader(ActivityReader::open(pool, options, host, port)?, request)

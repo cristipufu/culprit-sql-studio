@@ -1,0 +1,108 @@
+{
+  "source": {
+    "partition": {
+      "kind": "target"
+    },
+    "target": {
+      "scope": "database",
+      "identity": {
+        "engine": "mssql",
+        "database": "db",
+        "location": {
+          "kind": "server",
+          "host": "fixture.invalid",
+          "port": 1433,
+          "instance": null
+        },
+        "incarnation": null
+      }
+    },
+    "source": "sessions",
+    "continuity": "unverified",
+    "observation": {
+      "kind": "activity",
+      "data": {
+        "epoch": "native-source-generation",
+        "observed_from": "2020-01-01T12:00:00Z",
+        "observed_until": "2020-01-01T12:00:00.0002Z",
+        "at": "2020-01-01T12:00:00.0001Z",
+        "scope": "database",
+        "population": "user-sessions-current-requests-and-blockers",
+        "native_rows": 1,
+        "observations": 1,
+        "coverage": {
+          "source": "sessions",
+          "state": "collected",
+          "records": 1,
+          "complete_scope": true,
+          "error_code": null,
+          "stopped": null
+        }
+      }
+    }
+  },
+  "observations": [
+    {
+      "session_context": {
+        "lifecycle": "idle",
+        "login_age_ms": "600000",
+        "last_request_end_age_ms": "5000",
+        "client_library": "fixture-native-library",
+        "client_process_id": "0",
+        "native": {
+          "kind": "mssql",
+          "data": {
+            "native_state": "sleeping",
+            "login_established": true,
+            "tds_protocol_version": null,
+            "times": {
+              "login_without_offset": "2020-01-01T11:50:00.0000000",
+              "last_request_start_without_offset": "2020-01-01T11:59:54.0000000",
+              "last_request_end_without_offset": "2020-01-01T11:59:55.0000000"
+            },
+            "has_current_request": false,
+            "request_connection_id": null
+          }
+        }
+      },
+      "blocking_status": "known",
+      "waiting_on_lock": null,
+      "key": {
+        "session": {
+          "id": "61",
+          "generation": "2020-01-01T11:50:00.0000000"
+        },
+        "request": null,
+        "transaction": null
+      },
+      "idle": true,
+      "scope": "session-database",
+      "state": "sleeping",
+      "database": "db",
+      "command": null,
+      "last_request_age_ms": "6000",
+      "open_transactions": 0,
+      "elapsed_ms": null,
+      "transaction_age_ms": null,
+      "session_counters": {
+        "cpu_ms": "0",
+        "logical_reads": "9007199254740993",
+        "physical_reads": null,
+        "writes": "0"
+      },
+      "request_counters": null,
+      "wait": null,
+      "query_hash": null,
+      "client": {
+        "application": "fixture-client",
+        "user": "fixture-login",
+        "host": "client-reported.invalid"
+      },
+      "statement": {
+        "state": "unavailable",
+        "reason": "not-collected"
+      }
+    }
+  ],
+  "read_complete": true
+}

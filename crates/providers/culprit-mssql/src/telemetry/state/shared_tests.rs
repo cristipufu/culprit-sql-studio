@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     instance::test_support::{epoch, metadata},
-    resources::test_support::{FakeRead, replace},
+    resources::test_support::{FakeRead, instance_pressure_row, replace},
     value::{Rec, Val},
 };
 
@@ -26,6 +26,7 @@ fn source(final_identity: Rec, shutdown: SourceShutdown) -> StateSource<FakeRead
         Ok(vec![super::tests::clock(false, "2020-01-01T06:02:00Z")]),
         Ok(vec![super::tests::temp_space_row()]),
         Ok(vec![crate::memory_clerks::tests::row()]),
+        Ok(vec![replace(&instance_pressure_row(), &[("observed_at", Val::Text("2020-01-01T06:02:00.5Z".into()))])]),
         Ok(crate::schedulers::fixture_columns()),
         Ok(vec![crate::schedulers::tests::row()]),
         Ok(vec![crate::performance::tests::row()]),
@@ -53,8 +54,8 @@ async fn instance_capture_reuses_native_readers_and_never_charges_the_shared_fac
     assert!(valid_digest(epoch));
     assert!(description.is_partition_qualified());
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.sources.len(), 6);
-    assert_eq!(snapshot.records, 8);
+    assert_eq!(snapshot.sources.len(), 7);
+    assert_eq!(snapshot.records, 9);
     assert!(snapshot.sources.iter().all(|source| source.state == culprit_core::SourceState::Collected));
     let capture = CaptureIdentity { observation_id: "native-instance".into(), revision: None };
     let mut cursor = None;
@@ -79,11 +80,16 @@ async fn instance_capture_reuses_native_readers_and_never_charges_the_shared_fac
             OperationalFact::Counter(counter) => assert_eq!(counter.scope, culprit_core::MeasurementScope::Server),
             OperationalFact::CounterSet(set) => assert_eq!(set.scope, culprit_core::MeasurementScope::Server),
             OperationalFact::Space(space) => assert_eq!(space.scope, culprit_core::FileScope::Server),
+            OperationalFact::MssqlInstanceResources(point) => {
+                assert!(point.has_complete_population());
+                assert!(point.matches_context(&NativeReadContext::from_snapshot(&description).unwrap()));
+            }
             _ => panic!("shared native resource family"),
         }
     }
     assert_eq!(source.finish().await.unwrap(), SourceCompletion::Verified);
-    assert_eq!(source.query_count(), 13);
+    assert_eq!(source.query_count(), 14);
+    assert_eq!(source.io.calls.iter().filter(|call| call.sql.contains("sys.dm_os_process_memory")).count(), 1);
     assert!(
         !source.io.calls.iter().any(|call| call.sql.contains("sys.dm_db_resource_stats")),
         "native SQL Server instance statistics do not use Azure database pressure views"
@@ -144,6 +150,6 @@ async fn the_emitted_shared_partition_is_the_existing_native_process_generation_
             epoch: Some(native.capture_epoch().unwrap()),
         }
     );
-    assert_eq!(source.query_count(), 11, "the partition reuses the initial authority already owned by this read");
+    assert_eq!(source.query_count(), 12, "the partition reuses the initial authority already owned by this read");
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }

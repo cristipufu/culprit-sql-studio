@@ -4,6 +4,7 @@ use crate::{
     resources::test_support::{FakeRead, replace},
     value::Val,
 };
+use culprit_core::ErrorCode;
 
 fn ready() -> FakeRead {
     FakeRead::new(vec![
@@ -36,6 +37,8 @@ async fn one_held_native_owner_rechecks_original_generation_and_returns_only_sig
     assert!(dispatch.sql.contains("login_time=CONVERT(datetime,@P2,126)"));
     assert!(dispatch.sql.contains("session_id<>@@SPID"));
     assert!(dispatch.sql.contains("DATABASEPROPERTYEX"));
+    assert!(reader.calls[2].sql.contains(ESTABLISHED_SESSION_SQL));
+    assert!(dispatch.sql.contains(ESTABLISHED_SESSION_SQL));
     assert!(
         matches!(&dispatch.parameters[1], Parameter::Text(value) if value == &target().activity.session.generation)
     );
@@ -107,6 +110,36 @@ async fn self_system_and_other_culprit_sessions_remain_refused() {
         assert!(terminate(&mut reader).await.is_err());
         no_kill(&reader);
     }
+}
+
+#[tokio::test]
+async fn a_caller_constructed_prelogin_sentinel_cannot_start_native_action_work() {
+    let mut sentinel = target();
+    sentinel.activity.session.generation = "1900-01-01T00:00:00.0000000".into();
+    assert!(sentinel.is_valid_for(SessionAction::Terminate), "the generic target cannot supply native establishment");
+    let mut reader = FakeRead::new(vec![]);
+    assert!(interrupt_from(&mut reader, "fixture.invalid", 1433, &sentinel, SessionAction::Terminate).await.is_err());
+    assert!(reader.calls.is_empty());
+    no_kill(&reader);
+}
+
+#[tokio::test]
+async fn fresh_native_prelogin_or_missing_establishment_withholds_kill_even_for_a_valid_original_target() {
+    for native in [Val::Bool(false), Val::Null] {
+        let mut reader = FakeRead::new(vec![
+            Ok(vec![platform()]),
+            Ok(vec![authority()]),
+            Ok(vec![replace(&session(), &[("session_established", native)])]),
+        ]);
+        assert!(terminate(&mut reader).await.is_err());
+        assert_eq!(reader.calls.len(), 3);
+        assert!(reader.calls[2].sql.contains(ESTABLISHED_SESSION_SQL));
+        no_kill(&reader);
+    }
+    let sql = target_sql();
+    assert!(sql.contains("CONVERT(date,s.login_time)<>CONVERT(date,'19000101',112)"));
+    assert!(sql.contains("LOWER(s.status) NOT IN(N'dormant',N'preconnect')"));
+    assert!(guarded_kill(42).contains(ESTABLISHED_SESSION_SQL), "the final native race guard repeats the same policy");
 }
 
 #[tokio::test]

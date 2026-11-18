@@ -71,9 +71,13 @@ pub fn observe_diagnostic_activity(
     let mut revisions = Vec::new();
     let mut focuses = Vec::new();
     let mut native_keys = BTreeSet::new();
-    let observations = rows.iter().map(|row| row.observation.clone()).collect::<Vec<_>>();
-    let classified = ActivityEvidence::select(&observations, policy)?;
-    let uncertain_blocking = ActivityEvidence::context_for(&observations, &classified.uncertain)?;
+    let original_rows = rows
+        .iter()
+        .map(|row| ActivityFrameRow { observation: row.observation, reference: Some(row.reference) })
+        .collect::<Vec<_>>();
+    let frame = ActivityFrameEvidence::new(source, &original_rows, true)?;
+    let classified = ActivityEvidence::select_frame(&frame, policy)?;
+    let uncertain_blocking = ActivityEvidence::context_for_frame(&frame, &classified.uncertain);
     for row in rows {
         row.verify(source, input)?;
         if !native_keys.insert(row.observation.key.clone()) {
@@ -81,7 +85,7 @@ pub fn observe_diagnostic_activity(
         }
         // Without an actual native member/generation, these are private capture-local points only. Keeping one
         // unresolvable durable episode per poll would exhaust the working set without establishing continuity.
-        if !scope.partition.is_qualified() {
+        if !scope.partition.is_qualified() || !frame.has_session_generation_authority(&row.observation.key.session) {
             continue;
         }
         for signal in signals(
@@ -132,7 +136,11 @@ pub fn observe_diagnostic_activity(
         let before = episode.clone();
         // Complete actor inventory can establish that an actor disappeared. A still-visible actor whose
         // condition is no longer measured is uncertainty, not a negative lock/resource observation.
-        if episode.scope.key()? == scope_key && can_resolve && !native_keys.contains(episode.signal.activity_key()) {
+        if episode.scope.key()? == scope_key
+            && can_resolve
+            && !native_keys.contains(episode.signal.activity_key())
+            && !frame.session_generation_is_disqualified(&episode.signal.activity_key().session)
+        {
             episode.lifecycle = DiagnosticLifecycle::Resolved;
             episode.recovery = Some(DiagnosticRecoveryProof::CompleteScope { capture: input.clone() });
         } else {

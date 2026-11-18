@@ -109,3 +109,39 @@ pub(crate) fn inventory_row() -> Rec {
 pub(crate) fn window() -> super::Window {
     super::Window::new("2020-01-01T06:00:00Z".parse().unwrap(), "2020-01-01T06:01:00Z".parse().unwrap()).unwrap()
 }
+
+/// One explicit native instance-pressure point; shared by helper and streamed-source behavioral controls.
+pub(crate) fn instance_pressure_row() -> Rec {
+    Rec::of(&[
+        ("observed_at", Val::Text("2026-11-18T12:00:00.0000000Z".into())),
+        ("scheduler_population_rows", Val::Int(2)),
+        ("scheduler_rows", Val::Int(2)),
+        ("scheduler_invalid", Val::Int(0)),
+        ("runnable_tasks", Val::Int(0)),
+        ("worker_queue", Val::Int(0)),
+        ("failed_worker_creations", Val::Int(0)),
+        ("process_memory_rows", Val::Int(1)),
+        ("process_memory_invalid", Val::Int(0)),
+        ("process_physical_low", Val::Int(0)),
+        ("process_virtual_low", Val::Int(0)),
+        ("process_physical_used_kib", Val::Int(32768)),
+        ("process_virtual_committed_kib", Val::Int(65536)),
+        ("process_virtual_available_kib", Val::Int(131072)),
+        ("system_memory_rows", Val::Int(1)),
+        ("system_memory_invalid", Val::Int(0)),
+        ("system_memory_low", Val::Int(0)),
+        ("system_total_kib", Val::Int(1048576)),
+        ("system_available_kib", Val::Int(524288)),
+        ("grant_rows", Val::Int(0)),
+        ("grant_waiters", Val::Int(0)),
+        ("pending_io_rows", Val::Int(0)),
+        ("pending_io_invalid", Val::Int(0)),
+        ("os_pending_io", Val::Int(0)),
+        ("completion_pending_io", Val::Int(0)),
+        ("io_waiter_population_rows", Val::Int(0)),
+        ("io_waiter_rows", Val::Int(0)),
+        ("io_waiter_unknown_types", Val::Int(0)),
+        ("io_waiter_unknown_durations", Val::Int(0)),
+        ("longest_io_related_wait_ms", Val::Null),
+    ])
+}

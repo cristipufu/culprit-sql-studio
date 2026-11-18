@@ -73,6 +73,24 @@ fn one_original_row_and_native_token_are_required_without_interpreting_provider_
 }
 
 #[test]
+fn a_valid_saved_request_with_known_negative_session_context_cannot_become_a_focus() {
+    let mut point = focus();
+    super::super::activity::tests::native_session_context(
+        &mut point.participant.original,
+        "Running",
+        "2020-01-01T07:00:00.1533333",
+    );
+    point.participant.parent.native_key = NativeRecordIdentity::Activity(point.participant.original.key.clone());
+    assert!(point.is_valid());
+    point.participant.original.session_context.as_deref_mut().unwrap().native = None;
+    for lifecycle in [SessionLifecycle::PoolResetPrelogin, SessionLifecycle::Connecting, SessionLifecycle::Unknown] {
+        point.participant.original.session_context.as_deref_mut().unwrap().lifecycle = lifecycle;
+        assert!(point.participant.original.is_valid());
+        assert_eq!(point.is_valid(), lifecycle == SessionLifecycle::Unknown);
+    }
+}
+
+#[test]
 fn retained_request_selections_require_parent_authentication_independently_of_diagnostic_question_support() {
     let wait = focus();
     let original = &wait.participant;

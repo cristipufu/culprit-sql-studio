@@ -101,7 +101,7 @@ fn blocking_dependents<'a>(
     if !frame.is_qualified() {
         return dependents;
     }
-    for row in rows.iter().filter(|row| is_lock_wait(row.observation)) {
+    for row in rows.iter().filter(|row| is_lock_wait(row.observation, frame)) {
         if row.observation.blocking_status != ActivityBlockingStatus::Known {
             continue;
         }
@@ -114,6 +114,7 @@ fn blocking_dependents<'a>(
             .collect::<BTreeSet<_>>();
         for owner in owners {
             if owner == row.observation.key.session
+                || !frame.has_session_generation_authority(&owner)
                 || !frame.session_rows(&owner).any(|row| row.observation.key.request.is_some())
             {
                 continue;
@@ -128,8 +129,10 @@ fn blocking_dependents<'a>(
     dependents
 }
 
-fn is_lock_wait(row: &ActivityObservation) -> bool {
-    row.key.request.is_some() && row.waiting_on_lock == Some(true)
+fn is_lock_wait(row: &ActivityObservation, frame: &ActivityFrameEvidence<'_>) -> bool {
+    frame.has_session_generation_authority(&row.key.session)
+        && row.key.request.is_some()
+        && row.waiting_on_lock == Some(true)
 }
 
 fn reference(row: &ActivityFrameRow<'_>) -> MaintenanceReference {
@@ -148,9 +151,10 @@ fn render(
 ) -> MaintenanceParticipation {
     let observation = row.observation;
     let qualified = frame.is_qualified();
+    let session_authority = frame.has_session_generation_authority(&observation.key.session);
     let affected = dependents.get(&observation.key.session);
     let affected_count = affected.map_or(0, |entry| entry.total);
-    let waiting = is_lock_wait(observation);
+    let waiting = is_lock_wait(observation, frame);
     let direction = match (affected_count > 0, waiting) {
         (true, true) => MaintenanceDirection::Both,
         (true, false) => MaintenanceDirection::BlockingSession,
@@ -159,7 +163,9 @@ fn render(
     };
     let competing = frame
         .session_rows(&observation.key.session)
-        .filter(|other| other.observation.key.request.is_some() && other.observation.key != observation.key)
+        .filter(|other| {
+            session_authority && other.observation.key.request.is_some() && other.observation.key != observation.key
+        })
         .collect::<Vec<_>>();
     let mut issues = Vec::new();
     if !qualified {
@@ -171,8 +177,22 @@ fn render(
     if !competing.is_empty() {
         issues.push(MaintenanceRelationIssue::MultipleOwnerRequests);
     }
-    let waiting_on =
-        if waiting { observation.wait.as_ref().map(|wait| wait.owners.clone()).unwrap_or_default() } else { vec![] };
+    let waiting_on = if waiting {
+        observation
+            .wait
+            .iter()
+            .flat_map(|wait| &wait.owners)
+            .filter(|owner| match owner {
+                ActivityWaitOwner::Session { .. } => {
+                    owner.session().is_some_and(|session| frame.has_session_generation_authority(&session))
+                }
+                _ => true,
+            })
+            .cloned()
+            .collect()
+    } else {
+        vec![]
+    };
     if waiting && !waiting_on.iter().any(ActivityWaitOwner::is_blocker) {
         issues.push(MaintenanceRelationIssue::WaitOwnerUnavailable);
     }

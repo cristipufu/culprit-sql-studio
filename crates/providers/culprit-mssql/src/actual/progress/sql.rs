@@ -1,6 +1,7 @@
 //! Fixed, session/database-bounded native batches. Network reads stay layout/request/profiles; native work is
 //! changed by the roster materialization and final guard and remains cost-unqualified.
 use crate::activity::{
+    ESTABLISHED_SESSION_SQL,
     page_server_reads::{self, Availability},
     participants::CHECK_COLUMNS,
 };
@@ -27,11 +28,12 @@ DECLARE /* culprit */ @at datetime2=SYSUTCDATETIME();
 DECLARE @selected TABLE(session_id smallint,request_id int,session_generation datetime,start_time datetime,
  database_id smallint,sql_handle varbinary(64),plan_handle varbinary(64),statement_start_offset int,statement_end_offset int,
  query_hash binary(8),query_plan_hash binary(8),status nvarchar(30),command nvarchar(32),wait_type nvarchar(60),
- wait_resource nvarchar(256),wait_time bigint,total_elapsed_time bigint,cpu_time bigint,logical_reads bigint,percent_complete real,page_server_reads bigint);
+ wait_resource nvarchar(256),wait_time bigint,total_elapsed_time bigint,cpu_time bigint,logical_reads bigint,percent_complete real,page_server_reads bigint,session_established bit);
 INSERT INTO @selected
 SELECT TOP(2) r.session_id,r.request_id,s.login_time,r.start_time,r.database_id,r.sql_handle,r.plan_handle,
  r.statement_start_offset,r.statement_end_offset,r.query_hash,r.query_plan_hash,r.status,r.command,r.wait_type,
- r.wait_resource,r.wait_time,r.total_elapsed_time,r.cpu_time,r.logical_reads,r.percent_complete,{page_server_reads}
+ r.wait_resource,r.wait_time,r.total_elapsed_time,r.cpu_time,r.logical_reads,r.percent_complete,{page_server_reads},
+ CAST(CASE WHEN {ESTABLISHED_SESSION_SQL} THEN 1 ELSE 0 END AS bit)
 FROM sys.dm_exec_requests r JOIN sys.dm_exec_sessions s ON s.session_id=r.session_id
 WHERE r.session_id=@P1 AND r.database_id=DB_ID() AND r.session_id<>@@SPID AND s.is_user_process=1;
 IF (SELECT COUNT(*) FROM @selected)<>1
@@ -39,7 +41,12 @@ BEGIN
  SELECT (SELECT COUNT(*) FROM @selected) AS request_count,CONVERT(varchar(40),@at,126)+'Z' AS observed_at;
  RETURN;
 END;
-SELECT 1 AS request_count,{CHECK_COLUMNS},{SCOPE_COLUMNS},{capability} AS request_page_server_read_capability,
+IF NOT EXISTS(SELECT 1 FROM @selected WHERE session_established=1)
+BEGIN
+ SELECT 1 AS request_count,CAST(0 AS bit) AS session_established,CONVERT(varchar(40),@at,126)+'Z' AS observed_at;
+ RETURN;
+END;
+SELECT 1 AS request_count,r.session_established,{CHECK_COLUMNS},{SCOPE_COLUMNS},{capability} AS request_page_server_read_capability,
  r.status,r.command,r.wait_type,r.wait_time,r.total_elapsed_time AS elapsed_ms,r.cpu_time AS cpu_ms,r.logical_reads,r.percent_complete,
  r.page_server_reads AS request_page_server_reads,{availability} AS request_page_server_read_availability,
  CONVERT(varchar(18),r.query_hash,1) AS query_hash,
@@ -74,12 +81,14 @@ JOIN sys.dm_exec_requests r ON r.session_id=p.session_id AND r.request_id=p.requ
 JOIN sys.dm_exec_sessions s ON s.session_id=r.session_id
 WHERE r.session_id=@P1 AND r.request_id=@P2 AND r.database_id=DB_ID() AND r.database_id=@P9
  AND r.session_id<>@@SPID AND s.is_user_process=1
+ AND {ESTABLISHED_SESSION_SQL}
  AND s.login_time=CONVERT(datetime,@P3,126) AND r.start_time=CONVERT(datetime,@P4,126)
  AND r.sql_handle=CONVERT(varbinary(64),@P5,2) AND r.plan_handle=CONVERT(varbinary(64),@P6,2)
  AND r.statement_start_offset=@P7 AND r.statement_end_offset=@P8
 GROUP BY p.node_id OPTION(MAXDOP 1);
 SET @at=SYSUTCDATETIME();
 SELECT 'guard' AS row_kind,{CHECK_COLUMNS},{SCOPE_COLUMNS},{capability} AS request_page_server_read_capability,
+ CAST(CASE WHEN {ESTABLISHED_SESSION_SQL} THEN 1 ELSE 0 END AS bit) AS session_established,
  (SELECT COUNT(*) FROM sys.dm_exec_requests ar WHERE ar.session_id=@P1 AND ar.database_id=DB_ID()) AS request_count
 FROM(SELECT 0 AS ordinal)a
 LEFT JOIN sys.dm_exec_sessions s ON s.session_id=@P1 AND s.is_user_process=1 AND s.session_id<>@@SPID

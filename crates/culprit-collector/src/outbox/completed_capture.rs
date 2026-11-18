@@ -85,12 +85,17 @@ pub(super) enum ReadRequest {
     Snapshot { attempt: DiagnosticAttemptReceipt, dataset: SnapshotDataset },
     SnapshotLookup { connection: String, observation_id: String, dataset: SnapshotDataset },
     QueryHistory { connection: String, observation_id: String },
+    ActivityLookup { connection: String, observation_id: String },
+    ActivityReference { connection: String, reference: DiagnosticCaptureRef },
 }
 impl ReadRequest {
     fn observation_id(&self) -> &str {
         match self {
             Self::Snapshot { attempt, .. } => &attempt.capture.observation_id,
-            Self::SnapshotLookup { observation_id, .. } | Self::QueryHistory { observation_id, .. } => observation_id,
+            Self::SnapshotLookup { observation_id, .. }
+            | Self::QueryHistory { observation_id, .. }
+            | Self::ActivityLookup { observation_id, .. } => observation_id,
+            Self::ActivityReference { reference, .. } => &reference.capture.observation_id,
         }
     }
 
@@ -99,6 +104,9 @@ impl ReadRequest {
             Self::Snapshot { dataset, .. } | Self::SnapshotLookup { dataset, .. } => stream == dataset.stream(),
             Self::QueryHistory { .. } => {
                 matches!(stream, TelemetryStream::QueryRuntime | TelemetryStream::QueryDefinitions)
+            }
+            Self::ActivityLookup { .. } | Self::ActivityReference { .. } => {
+                stream == TelemetryStream::ActivityObservations
             }
         }
     }
@@ -110,9 +118,36 @@ pub(super) struct CompletedCaptureRead {
     pub budget: CompletedCaptureBudget,
     pub rows: artifacts::CanonicalRows,
     pub bytes_read: u64,
+    selected_rows: u32,
     required_connection: Option<String>,
 }
 impl CompletedCaptureRead {
+    pub fn activity_lookup(
+        lookup: CompletedCaptureLookup<'_>,
+        budget: CompletedCaptureBudget,
+        operation: OperationHandle,
+    ) -> Result<Self> {
+        Self::lookup(
+            ReadRequest::ActivityLookup {
+                connection: lookup.connection.into(),
+                observation_id: lookup.observation_id.into(),
+            },
+            lookup,
+            budget,
+            operation,
+        )
+    }
+
+    /// Select the exact prerequisite without replacing the original deadline or cumulative row/byte counters.
+    pub fn select_activity_reference(&mut self, connection: &str, reference: DiagnosticCaptureRef) -> Result<()> {
+        self.check()?;
+        validate_connection(connection)?;
+        if !reference.is_valid() || !valid_id(&reference.capture.observation_id) {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
+        self.request = ReadRequest::ActivityReference { connection: connection.into(), reference };
+        Ok(())
+    }
     pub fn snapshot(
         attempt: DiagnosticAttemptReceipt,
         dataset: SnapshotDataset,
@@ -195,6 +230,7 @@ impl CompletedCaptureRead {
             budget,
             rows: artifacts::CanonicalRows::new(budget.max_rows),
             bytes_read: 0,
+            selected_rows: 0,
             required_connection: None,
         }
     }
@@ -237,9 +273,13 @@ impl artifacts::VerificationObserver for CompletedCaptureRead {
                 .iter()
                 .filter(|file| self.request.retains(file.stream))
                 .try_fold(0u32, |sum, file| sum.checked_add(file.rows).ok_or_else(capacity))?,
+            ReadRequest::ActivityLookup { .. } | ReadRequest::ActivityReference { .. } => {
+                source.observation.activity().filter(|frame| frame.is_valid()).ok_or_else(unsupported)?.observations
+            }
             _ => return Err(unsupported()),
         };
-        if rows > self.budget.max_rows {
+        self.selected_rows = self.selected_rows.checked_add(rows).ok_or_else(capacity)?;
+        if self.selected_rows > self.budget.max_rows {
             return Err(capacity());
         }
         Ok(())
@@ -272,9 +312,19 @@ pub(super) struct CompletedCapture {
 impl OutboxDelivery {
     pub(super) async fn with_completed_capture<T: Send + 'static>(
         &self,
-        mut read: CompletedCaptureRead,
+        read: CompletedCaptureRead,
         worker_guard: impl Send + 'static,
         project: impl FnOnce(CompletedCapture) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.with_capture_worker(read, worker_guard, move |files, read| project(files.completed_capture(read)?)).await
+    }
+
+    /// One worker owns every requested original and its shared read allowance through projection and settlement.
+    pub(super) async fn with_capture_worker<T: Send + 'static>(
+        &self,
+        mut read: CompletedCaptureRead,
+        worker_guard: impl Send + 'static,
+        project: impl FnOnce(&mut Files, &mut CompletedCaptureRead) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         read.check()?;
         let access = tokio::select! {
@@ -285,8 +335,7 @@ impl OutboxDelivery {
         // Do not wrap started work in timeout/abort: the same worker keeps Files until it has stopped.
         access
             .run_owned(worker_guard, move |files| {
-                let completed = files.completed_capture(&mut read)?;
-                let result = project(completed)?;
+                let result = project(files, &mut read)?;
                 read.check()?;
                 Ok(result)
             })
@@ -294,8 +343,9 @@ impl OutboxDelivery {
     }
 }
 impl Files {
-    fn completed_capture(&mut self, read: &mut CompletedCaptureRead) -> Result<CompletedCapture> {
+    pub(super) fn completed_capture(&mut self, read: &mut CompletedCaptureRead) -> Result<CompletedCapture> {
         read.check()?;
+        let started_bytes = read.bytes_read;
         let capture = self.journal.capture(read.request.observation_id())?;
         if read.required_connection.as_ref().is_some_and(|connection| capture.connection != *connection) {
             return Err(problem(OutboxProblem::MissingCapture));
@@ -304,7 +354,13 @@ impl Files {
             ReadRequest::Snapshot { attempt, .. } if capture.identity != attempt.capture => {
                 return Err(DeliveryProblem::Conflict.error());
             }
-            ReadRequest::SnapshotLookup { connection, .. } | ReadRequest::QueryHistory { connection, .. }
+            ReadRequest::ActivityReference { reference, .. } if capture.identity != reference.capture => {
+                return Err(DeliveryProblem::Conflict.error());
+            }
+            ReadRequest::SnapshotLookup { connection, .. }
+            | ReadRequest::QueryHistory { connection, .. }
+            | ReadRequest::ActivityLookup { connection, .. }
+            | ReadRequest::ActivityReference { connection, .. }
                 if capture.connection != *connection =>
             {
                 return Err(problem(OutboxProblem::MissingCapture));
@@ -332,6 +388,11 @@ impl Files {
         if !capture.is_valid() {
             return Err(integrity());
         }
+        if let ReadRequest::ActivityReference { reference, .. } = &read.request
+            && reference != &capture
+        {
+            return Err(DeliveryProblem::Conflict.error());
+        }
         let streams = manifest
             .files
             .iter()
@@ -350,7 +411,7 @@ impl Files {
             references: manifest.references,
             collected_from: manifest.started_at,
             collected_until: manifest.finished_at.ok_or_else(integrity)?,
-            bytes_read: read.bytes_read,
+            bytes_read: read.bytes_read.checked_sub(started_bytes).ok_or_else(integrity)?,
         })
     }
 }

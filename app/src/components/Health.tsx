@@ -31,6 +31,7 @@ import { MemoryClerks } from "./MemoryClerks";
 import { HyperscaleLogComponents } from "./HyperscaleLogComponents";
 import { DatabaseProperties } from "./DatabaseProperties";
 import { StorageEvidence } from "./StorageEvidence";
+import { InstanceResources } from "./InstanceResources";
 import { ConfiguredLogRates } from "./ConfiguredLogRates";
 import { WaitCounters } from "./WaitCounters";
 import { ConnectionOutcomes } from "./ConnectionOutcomes";
@@ -107,6 +108,8 @@ export function HealthTab({
   const nativeReport = report.native_failures;
   const jobs = report.snapshot.operations.jobs;
   const jobsReport = report.jobs;
+  const agentJobs = jobs?.kind === "mssql-agent" || (report.snapshot.sources ?? []).some((outcome) => JOBS_SOURCES.slice(2).some((source) => source === outcome.source));
+  const jobsTitle = t(agentJobs ? "view.mssql_agent_jobs.title" : "view.jobs.title");
   const jobsAssessed = Boolean(jobs) || (report.snapshot.sources ?? []).some((outcome) => JOBS_SOURCES.some((source) => source === outcome.source));
   const explicitNativeFailureSource = (report.snapshot.sources ?? []).some((outcome) => outcome.source === (nativeFailures?.source ?? "native failures"));
   const nativeIssue = nativeFailureReadIssue(nativeFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_native_failures === true && (!jobsAssessed || explicitNativeFailureSource));
@@ -132,7 +135,8 @@ export function HealthTab({
   const compilerAdmission = report.snapshot.operations.compiler_admission;
   const compilerAdmissionReport = report.compiler_admission;
   const compilerAdmissionIssue = observationReadIssue(compilerAdmission?.source ?? "compilation gateways", report.snapshot.sources ?? []);
-  const jobsIssues = JOBS_SOURCES.map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
+  const jobsSources = (report.snapshot.sources ?? []).filter((outcome) => JOBS_SOURCES.some((source) => source === outcome.source));
+  const jobsIssues = jobsSources.map((source) => observationReadIssue(source.source, jobsSources, true)).filter((source) => source !== undefined);
   const statementWork = report.snapshot.operations.statement_work;
   const statementWorkReport = report.statement_work;
   const statementWorkUnexplained = Boolean(statementWork && !statementWorkReport);
@@ -145,6 +149,10 @@ export function HealthTab({
   const counterRatios = report.counter_ratios;
   const counterRatioRead = pressure?.resource_counters?.some((sample) => sample.ratios.length > 0) ?? false;
   const counterRatioIssue = observationReadIssue("performance counters", report.snapshot.sources ?? []);
+  const instanceResources = report.instance_resources;
+  const instanceResourceRead = pressure?.instance_resources;
+  const instanceResourceRecorded = (report.snapshot.sources ?? []).some((source) => source.source === "instance-resources");
+  const instanceResourceIssue = observationReadIssue("instance-resources", report.snapshot.sources ?? [], Boolean(instanceResourceRead));
   const storage = report.storage;
   const storageRead = report.snapshot.operations.storage;
   const storageIssue = observationReadIssue("file_capacity", report.snapshot.sources ?? [], Boolean(storageRead));
@@ -175,8 +183,8 @@ export function HealthTab({
   const cleanupIssues = [...cleanupSources].map((source) => observationReadIssue(source, report.snapshot.sources ?? [])).filter((source) => source !== undefined);
   const cleanupUnexplained = !cleanup && (cleanupReads.length > 0 || retention !== null);
   const hasDetailedEvidence = [memoryFailures && memoryReport, nativeFailures && nativeReport, requests && requestReport,
-    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, storage, storageRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsIssues.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
-  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, storageIssue, databasePropertiesIssue, memoryClerkIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
+    sessions && sessionReport, pageWaits && pageReport, tasks && taskReport, compilation && compilationReport, completedSpillRead, completedSpillReport, compilerAdmission && compilerAdmissionReport, statementWork, waitCounters, waitCounterRead, performanceCounters, performanceRecorded, counterRatios, counterRatioRead, instanceResources, instanceResourceRead, instanceResourceRecorded, storage, storageRead, databaseProperties, databasePropertiesRead, databasePropertiesRecorded, memoryClerks, memoryClerkRecorded, hyperscaleLogComponents, hyperscaleLogRead, hyperscaleLogRecorded, configuredLogRates, configuredLogRateRead, connectionOutcomes, connectionOutcomesRead, pageServerReads, pageServerCarrier, jobs, jobsSources.length > 0, cleanup, cleanupUnexplained, report.replication].some(Boolean);
+  const hasReadIssue = [memoryIssue, nativeIssue, requestIssue, sessionIssue, pageIssue, taskIssue, compilationIssue, completedSpillIssue, compilerAdmissionIssue, waitCounterIssue, performanceIssue, counterRatioIssue, instanceResourceIssue, storageIssue, databasePropertiesIssue, memoryClerkIssue, hyperscaleLogIssue, configuredLogRateIssue, connectionOutcomesIssue, pageServerIssue].some(Boolean) || cleanupIssues.length > 0;
   if (!signals.length && !resources.length && !hasOperationalHealth(report) && !hasDetailedEvidence && !hasReadIssue) {
     return (
       <div className="waits-empty">
@@ -237,8 +245,8 @@ export function HealthTab({
       {compilerAdmission && compilerAdmissionReport && <CompilerAdmission key={report.snapshot.id} evidence={compilerAdmission} report={compilerAdmissionReport} />}
       {!(compilerAdmission && compilerAdmissionReport) && compilerAdmissionIssue && <ObservationSourceIssue source={compilerAdmissionIssue} title={t("view.compiler_admission.title")} />}
       {jobs && jobsReport && <Jobs key={report.snapshot.id} evidence={jobs} report={jobsReport} />}
-      {!(jobs && jobsReport) && jobsIssues.length > 0 && <ObservationSourceIssue sources={jobsIssues} title={t("view.jobs.title")} />}
-      {jobs && !jobsReport && jobsIssues.length === 0 && <ObservationSourceIssue source={{ source: "timescale-jobs", state: "unavailable", reason: t("view.jobs.invalid") }} title={t("view.jobs.title")} />}
+      {!(jobs && jobsReport) && jobsIssues.length > 0 && <ObservationSourceIssue sources={jobsIssues} title={jobsTitle} />}
+      {!(jobs && jobsReport) && (jobs || jobsSources.length > 0) && jobsIssues.length === 0 && <ObservationExplanationIssue title={jobsTitle} reason={t("view.jobs.invalid")} />}
       {statementWork && statementWorkReport && <StatementWork key={report.snapshot.id} evidence={statementWork} report={statementWorkReport} />}
       {statementWorkUnexplained && <ObservationExplanationIssue title={t("view.statement_work.title")} reason={t("view.statement_work.invalid")} />}
       {hyperscaleLogComponents && <HyperscaleLogComponents key={report.snapshot.id} report={hyperscaleLogComponents} />}
@@ -256,6 +264,9 @@ export function HealthTab({
       {!performanceCounters?.ratios && counterRatios && <CounterRatios key={report.snapshot.id} report={counterRatios} />}
       {!performanceCounters && !counterRatios && counterRatioIssue && <ObservationSourceIssue source={counterRatioIssue} title={t("view.counter_ratios.title")} />}
       {!performanceCounters && !counterRatios && counterRatioRead && !counterRatioIssue && <ObservationExplanationIssue title={t("view.counter_ratios.title")} reason={t("view.counter_ratios.invalid")} />}
+      {instanceResources && <InstanceResources key={report.snapshot.id} report={instanceResources} />}
+      {!instanceResources && instanceResourceIssue && <ObservationSourceIssue source={instanceResourceIssue} title={t("view.instance_resources.title")} />}
+      {!instanceResources && (instanceResourceRead || instanceResourceRecorded) && !instanceResourceIssue && <ObservationExplanationIssue title={t("view.instance_resources.title")} reason={t("view.instance_resources.invalid")} />}
       {storage && <StorageEvidence key={report.snapshot.id} report={storage} />}
       {!storage && storageIssue && <ObservationSourceIssue source={storageIssue} title={t("view.storage.title")} />}
       {!storage && storageRead && !storageIssue && <ObservationExplanationIssue title={t("view.storage.title")} reason={t("view.storage.invalid")} />}

@@ -52,7 +52,7 @@ def prefixed_values(output, prefix):
 def require_unstarted_member(database):
     fixture = database.fixture
     if (fixture.engine != "mssql" or fixture.image != SQL_SERVER_IMAGE
-            or fixture.database != DATABASE_NAME or fixture.user != "sa"
+            or fixture.database != f"{DATABASE_NAME}_{database.owner}" or fixture.user != "sa"
             or fixture.platform != "linux/amd64" or database.port is not None
             or database.container_options or database.options or database.published_ports() != (1433,)
             or not re.fullmatch(r"[0-9a-f]{24}", database.owner)):

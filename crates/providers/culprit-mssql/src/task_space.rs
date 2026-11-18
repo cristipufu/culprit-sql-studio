@@ -1,6 +1,6 @@
 //! The explicit scan and collector reuse one native task reader. No default scan or Live poll adds this SQL.
 use crate::{
-    activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions},
+    activity::{ActivityReader, IdentityDetail, ReadOptions},
     conn::Pool,
     read::NativeRead,
     sources,
@@ -33,11 +33,8 @@ pub(crate) async fn collect(
         coverage.not_applicable(&sources::TASK_SPACE, culprit_core::message!("provider.task_space.not_requested"));
         return (None, coverage);
     }
-    let options = ReadOptions {
-        budget: bounded_budget(&CollectionBudget::default()),
-        scope: ActivityScope::CurrentDatabase,
-        identity: IdentityDetail::Endpoint,
-    };
+    let options =
+        ReadOptions { budget: bounded_budget(&CollectionBudget::default()), identity: IdentityDetail::Endpoint };
     match ActivityReader::open(pool, options, host, port) {
         Ok(mut reader) => collect_from(&mut reader).await,
         Err(error) => {

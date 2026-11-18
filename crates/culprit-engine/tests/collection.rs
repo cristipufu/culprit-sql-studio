@@ -1325,6 +1325,7 @@ async fn equivalent_resource_timestamps_cannot_create_duplicate_measurements() {
 fn activity_row() -> culprit_core::telemetry::ActivityObservation {
     use culprit_core::telemetry::*;
     ActivityObservation {
+        session_context: None,
         blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: "42".into(), generation: "login-1".into() },
@@ -1770,7 +1771,9 @@ async fn activity_monitor_reports_partial_absence_as_uncertain_without_fabricati
     assert_eq!((summary.attempts, summary.complete, summary.unknown), (2, 2, 0));
     assert_eq!((events[0].active_episodes, events[0].uncertain_episodes), (Some(1), Some(0)));
     assert_eq!((events[1].active_episodes, events[1].uncertain_episodes), (Some(0), Some(1)));
-    assert!(events.iter().all(|event| event.native_coverage.as_ref().is_some_and(|coverage| !coverage.complete_scope)));
+    assert!(
+        events.iter().all(|event| { event.native_coverage.as_ref().is_some_and(|coverage| !coverage.complete_scope) })
+    );
     let checkpoint = analyze_activity_checkpoint(&mut outbox).await;
     assert_eq!(checkpoint.episodes[0].lifecycle, DiagnosticLifecycle::Uncertain);
     assert!(checkpoint.episodes[0].recovery.is_none());

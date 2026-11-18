@@ -1,0 +1,166 @@
+use super::*;
+
+fn census_row(id: i64, request: Option<i64>, native_state: &str) -> Rec {
+    let base = metadata(id);
+    let mut columns = base.columns().map(|(name, value)| (name, value.clone())).collect::<Vec<_>>();
+    columns.extend([
+        ("session_context_collected", Val::Int(1)),
+        ("native_session_state", Val::Text(native_state.into())),
+        ("client_interface_name", Val::Text("owned driver library".into())),
+        ("host_process_id", Val::Int(0)),
+        ("client_version", Val::Null),
+        (
+            "request_connection_id",
+            if request.is_some() { Val::Text("a8a44410-5033-4db1-9e90-79354ab31702".into()) } else { Val::Null },
+        ),
+    ]);
+    let row = Rec::of(&columns);
+    if let Some(request) = request {
+        return replace(&row, &[("request_id", Val::Int(request))]);
+    }
+    replace(
+        &row,
+        &[
+            ("request_id", Val::Null),
+            ("request_generation", Val::Null),
+            ("no_current_request", Val::Int(1)),
+            ("scope_basis", Val::Int(3)),
+            ("state", Val::Text("sleeping".into())),
+            ("command", Val::Null),
+            ("open_transaction_count", Val::Int(0)),
+            ("transaction_id", Val::Null),
+            ("transaction_start", Val::Null),
+            ("elapsed_ms", Val::Null),
+            ("wait_type", Val::Null),
+            ("wait_ms", Val::Null),
+            ("blocking_session_id", Val::Null),
+            ("query_hash", Val::Null),
+            ("sql_handle", Val::Null),
+            ("statement_start", Val::Null),
+            ("statement_end", Val::Null),
+        ],
+    )
+}
+
+#[tokio::test]
+async fn quiet_user_sessions_keep_library_lifetimes_and_exact_counters_without_a_sql_text_read() {
+    let mut reader = reader(vec![Ok(vec![census_row(55, None, "Sleeping")])], IdentityDetail::Endpoint);
+    let live = crate::live::collect_from(&mut reader).await.unwrap();
+    assert_eq!(reader.query_count(), 1);
+    assert_eq!(reader.io.closed, 1);
+    assert!(!reader.io.calls.iter().any(|call| call.sql.contains("sys.dm_exec_sql_text")));
+    let session = &live.sessions[0];
+    assert!(session.sql.is_none() && session.elapsed_ms.is_none() && session.sql_context.is_none());
+    let read = live.activity_census.unwrap();
+    assert!(read.is_valid());
+    let point = &read.observations[0];
+    assert!(point.idle && point.conditions(&ActivityPolicy::default()).is_empty());
+    assert_eq!(point.session_counters.logical_reads.as_deref(), Some("9007199254740993"));
+    let context = point.session_context.as_ref().unwrap();
+    assert_eq!(context.lifecycle, SessionLifecycle::Idle);
+    assert_eq!(context.client_library.as_deref(), Some("owned driver library"));
+    assert_eq!(context.client_process_id.as_deref(), Some("0"));
+    assert!(context.login_age_ms.is_some());
+    let SessionNativeContext::Mssql(native) = context.native.as_deref().unwrap();
+    assert!(native.tds_protocol_version.is_none() && native.request_connection_id.is_none());
+    assert_eq!(native.times.last_request_start_without_offset.as_deref(), Some("2020-01-01T07:55:00.0000000"));
+}
+
+#[tokio::test]
+async fn quiet_rows_do_not_expand_the_existing_active_request_sql_enrichment_population() {
+    // metadata(42) normally names session55 as its blocker. This control is an unrelated quiet row,
+    // so it must not enter the already supported blocker/prior-batch enrichment population.
+    let active = replace(&census_row(42, Some(0), "Running"), &[("blocking_session_id", Val::Int(0))]);
+    let mut reader = reader(
+        vec![Ok(vec![active, census_row(55, None, "Sleeping")]), Ok(vec![details(42, "SELECT 1")])],
+        IdentityDetail::Endpoint,
+    );
+    let live = crate::live::collect_from(&mut reader).await.unwrap();
+    assert_eq!(live.sessions.len(), 2);
+    assert_eq!(reader.query_count(), 2);
+    assert_eq!(reader.io.closed, 1);
+    assert_eq!(reader.io.calls[1].sql, sql::details(false, sql::QueryPolicy::Activity));
+    assert!(!xml_parameter(&reader.io.calls[1]).contains("session=\"55\""));
+    assert!(!reader.io.calls.iter().any(|call| call.sql.contains("most_recent_sql_handle")));
+    assert_eq!(
+        live.sessions.iter().find(|session| session.id == "42").unwrap().sql_context,
+        Some(culprit_core::SessionStatementContext::CurrentRequest)
+    );
+}
+
+#[tokio::test]
+async fn mars_retains_each_exact_current_request_connection_without_a_representative_session_row() {
+    let a = census_row(42, Some(0), "Running");
+    let b = replace(
+        &census_row(42, Some(1), "Running"),
+        &[("request_connection_id", Val::Text("b8a44410-5033-4db1-9e90-79354ab31702".into()))],
+    );
+    let mut reader = baseline_reader(vec![a, b]);
+    let (source, rows) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+    assert_eq!(reader.query_count(), 3);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].key.session, rows[1].key.session);
+    assert_ne!(rows[0].key.request, rows[1].key.request);
+    let ids = rows
+        .iter()
+        .map(|row| {
+            let SessionNativeContext::Mssql(native) = row.session_context.as_ref().unwrap().native.as_deref().unwrap();
+            native.request_connection_id.as_deref().unwrap()
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(ids.len(), 2);
+    assert!(ActivityCensusRead::new(source, rows, true).unwrap().is_valid());
+}
+
+#[tokio::test]
+async fn prelogin_sentinels_and_malformed_details_cannot_authorize_current_request_work() {
+    let row =
+        replace(&census_row(55, None, "Dormant"), &[("session_generation", Val::Text("1900-01-01T00:00:00".into()))]);
+    let mut reader = reader(vec![Ok(vec![row])], IdentityDetail::Endpoint);
+    let frame = reader.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
+    let point = &frame.records[0];
+    assert!(!point.can_identify_session());
+    assert!(frame.sql_context_keys().is_empty());
+    assert!(point.facts.conditions(&ActivityPolicy::default()).is_empty());
+    assert!(point.facts.session_context.as_ref().unwrap().login_age_ms.is_none());
+    assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    for (column, value) in [
+        ("client_version", Val::Float(1.5)),
+        ("request_connection_id", Val::Text("foreign-not-native-guid".into())),
+        ("session_context_collected", Val::Null),
+    ] {
+        let row = replace(&census_row(42, Some(0), "Running"), &[(column, value)]);
+        let mut reader = super::reader(vec![Ok(vec![row])], IdentityDetail::Endpoint);
+        assert_eq!(
+            CollectionStop::from_error(
+                &reader
+                    .observe_baseline()
+                    .await
+                    .and_then(crate::activity::ActivityBaseline::into_complete)
+                    .err()
+                    .unwrap()
+            ),
+            CollectionStop::InvalidPage
+        );
+        assert_eq!(reader.query_count(), 1);
+        assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn limits_keep_request_priority_and_explicit_original_population_gaps() {
+    let mut reader = baseline_reader(vec![census_row(42, Some(0), "Running"), census_row(55, None, "Sleeping")]);
+    reader.options.budget.max_snapshot_rows = 1;
+    let (source, rows) = crate::telemetry::activity::capture(&mut reader).await.unwrap();
+    let native = source.observation.activity().unwrap();
+    assert_eq!(native.native_rows, 2);
+    assert_eq!(native.observations, 1);
+    assert!(!native.coverage.complete_scope);
+    assert_eq!(native.coverage.stopped, Some(CollectionStop::RowLimit));
+    assert_eq!(rows[0].key.session.id, "42");
+    let query = &reader.io.calls[1].sql;
+    assert!(query.contains("OR s.database_id=DB_ID()"));
+    assert!(query.contains("CASE WHEN a.request_id IS NOT NULL THEN 0"));
+    assert!(!query.contains("sys.dm_exec_sql_text"));
+    assert!(sql::details(true, sql::QueryPolicy::Activity).contains("c.most_recent_session_id=s.session_id"));
+}

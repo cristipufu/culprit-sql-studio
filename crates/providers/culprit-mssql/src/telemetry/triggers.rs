@@ -1,4 +1,4 @@
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{read::NativeRead, triggers, value::Rec};
 use culprit_core::{Result, Source, telemetry::*};
 pub(super) struct Triggers;
@@ -8,7 +8,7 @@ impl SnapshotRecipe for Triggers {
     const DATASET: SnapshotDataset = SnapshotDataset::Triggers;
     const NAME: &'static str = "trigger-state";
     const SOURCE: &'static Source = &crate::sources::TRIGGERS;
-    const INSTANCE_LOCAL: bool = false;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabase;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _: &mut R, _: &CollectionBudget) -> Result<Option<()>> {
         Ok(Some(()))

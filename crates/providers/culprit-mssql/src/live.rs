@@ -20,7 +20,7 @@ pub(crate) async fn collect(
     port: u16,
     qualify_actions: bool,
 ) -> Result<LiveState> {
-    use crate::activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions};
+    use crate::activity::{ActivityReader, IdentityDetail, ReadOptions};
     use culprit_core::telemetry::CollectionBudget;
     let mut budget = CollectionBudget {
         max_snapshot_rows: LIVE_ACTIVITY_ROWS,
@@ -31,7 +31,7 @@ pub(crate) async fn collect(
     if qualify_actions {
         budget.max_queries = LIVE_ACTION_QUERIES;
     }
-    let options = ReadOptions { budget, scope: ActivityScope::Visible, identity: IdentityDetail::Endpoint };
+    let options = ReadOptions { budget, identity: IdentityDetail::Endpoint };
     let mut reader = ActivityReader::open(pool, options, host, port)?;
     collect_qualified_from(&mut reader, qualify_actions).await
 }
@@ -60,17 +60,36 @@ pub(crate) async fn read<R: crate::read::NativeRead>(
     qualify_actions: bool,
 ) -> Result<LiveState> {
     use culprit_core::telemetry::ActivityDetailStatus;
-    let before = if qualify_actions {
-        actions::optional_authority(crate::activity::database_context::initial(reader).await)?
+    let authority = if qualify_actions {
+        crate::activity::capture::ActivityAuthorityPolicy::AdministrativeCandidates
     } else {
-        None
+        crate::activity::capture::ActivityAuthorityPolicy::MetadataOnly
     };
-    let mut frame = reader.observe().await?;
-    let keys = frame.keys();
+    let mut pending = crate::activity::capture::PendingActivityFrame::begin(reader, authority).await?;
+    pending.require_complete()?;
+    let keys = pending.baseline.frame.sql_context_keys();
     let limit = reader.sql_limit();
-    let details = reader.enrich(&mut frame, &keys, true, limit).await?;
-    let context = actions::complete_authority(reader, before.as_ref(), &frame.context).await?;
-    let mut sessions: Vec<_> = frame.records.iter().map(|row| session_of(row, context.as_ref())).collect();
+    let details = reader.enrich(&mut pending.baseline.frame, &keys, true, limit).await?;
+    let completed = pending.finish(reader).await?;
+    let context = completed.action_context;
+    let frame = completed.frame;
+    let activity_census = culprit_core::telemetry::ActivityCensusRead::new(
+        completed.description,
+        frame.records.iter().cloned().map(crate::activity::ActivityRecord::into_redacted_observation).collect(),
+        true,
+    )?;
+    let mut sessions: Vec<_> = {
+        let census = activity_census.frame()?;
+        frame
+            .records
+            .iter()
+            .map(|row| {
+                let context =
+                    context.as_ref().filter(|_| census.has_session_generation_authority(&row.facts.key.session));
+                session_of(row, context)
+            })
+            .collect()
+    };
     sessions.sort_by(|a, b| b.elapsed_ms.partial_cmp(&a.elapsed_ms).unwrap_or(std::cmp::Ordering::Equal));
     let mut notes = if matches!(details, ActivityDetailStatus::Unavailable { .. }) {
         vec![culprit_core::t!("provider.mssql.activity.details_unavailable")]
@@ -89,6 +108,8 @@ pub(crate) async fn read<R: crate::read::NativeRead>(
         Vec::new()
     };
     Ok(LiveState {
+        session_census: None,
+        activity_census: Some(Box::new(activity_census)),
         notes,
         taken_at: frame.context.at,
         waits: current_waits(&sessions),
@@ -140,6 +161,15 @@ fn session_of(
     });
     let sql = if facts.key.request.is_some() { &record.current_sql } else { &record.previous_sql };
     Session {
+        progress_eligible: None,
+        sql_context: sql.text().map(|_| {
+            if facts.key.request.is_some() {
+                culprit_core::SessionStatementContext::CurrentRequest
+            } else {
+                culprit_core::SessionStatementContext::PriorSessionBatch
+            }
+        }),
+        activity_key: Some(facts.key.clone()),
         id: facts.key.session.id.clone(),
         action_target: actions::target(record, context),
         user: client.and_then(|client| client.user.clone()),
@@ -153,11 +183,7 @@ fn session_of(
         wait_ms: number(wait.and_then(|wait| wait.elapsed_ms.as_deref())),
         wait_resources: wait.map(|wait| wait.identified_resources.clone()).filter(|resources| !resources.is_empty()),
         blocked_by,
-        elapsed_ms: number(if facts.key.request.is_some() {
-            facts.elapsed_ms.as_deref()
-        } else {
-            facts.last_request_age_ms.as_deref()
-        }),
+        elapsed_ms: number(facts.elapsed_ms.as_deref().filter(|_| facts.key.request.is_some())),
         transaction_ms: number(facts.transaction_age_ms.as_deref()),
         cpu_ms: number(counters.cpu_ms.as_deref()),
         reads: number(counters.logical_reads.as_deref()),
@@ -169,7 +195,9 @@ fn current_waits(sessions: &[Session]) -> Vec<WaitStat> {
     let mut by: BTreeMap<(&'static str, Option<culprit_core::telemetry::WaitMechanism>), (f64, f64, String)> =
         BTreeMap::new();
     for s in sessions {
-        let Some(wait) = s.wait.as_deref() else { continue };
+        let Some(wait) = s.wait.as_deref() else {
+            continue;
+        };
         if BENIGN_WAITS.contains(&wait) {
             continue;
         }

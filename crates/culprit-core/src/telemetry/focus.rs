@@ -109,6 +109,7 @@ impl ActivityRequestFocus {
             && self.original_observed_at.len() <= 64
             && canonical_time(&self.original_observed_at).is_ok()
             && self.original.is_valid()
+            && self.original.has_session_generation_authority()
             && self.original.key.request.is_some()
             && matches!(self.original.scope, ActivityScopeBasis::RequestDatabase | ActivityScopeBasis::SessionDatabase)
             && self

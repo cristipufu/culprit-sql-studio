@@ -268,7 +268,101 @@ class TimescaleJobsOwnership(unittest.TestCase):
         self.assertEqual(len(inspections), 2)
 
 
+class MssqlFixtureIdentity(unittest.TestCase):
+    def ordinary_fixture(self):
+        return next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql")
+
+    def test_common_and_agent_use_a_supported_machine_with_full_native_database_and_docker_nonces(self):
+        original = self.ordinary_fixture()
+        owner = "a" * 24
+        for fixture_type in (smoke.Database, smoke.AgentDatabase):
+            with self.subTest(fixture_type=fixture_type.__name__):
+                with patch.object(smoke.secrets, "token_hex", side_effect=[owner, "b" * 32, "c" * 32]):
+                    database = fixture_type(original)
+                self.assertEqual(database.hostname, "m" + owner[:14])
+                self.assertEqual(len(database.hostname), 15)
+                self.assertEqual(database.fixture.database, "culprit_smoke_" + owner)
+                self.assertTrue(database.name.endswith(owner))
+                self.assertEqual(database.owner, owner)
+                self.assertEqual(database.test_environment()["CULPRIT_SMOKE_DATABASE"], database.fixture.database)
+                self.assertEqual(database.test_environment()["CULPRIT_SMOKE_OWNER"], owner)
+                self.assertEqual(original.database, "culprit_smoke", "the immutable fixture recipe is not rewritten")
+
+    def test_other_provider_fixture_names_and_native_databases_are_unchanged(self):
+        for fixture in smoke.FIXTURES:
+            if fixture.engine == "mssql":
+                continue
+            database = smoke.Database(fixture)
+            self.assertEqual(database.fixture, fixture)
+            self.assertEqual(database.hostname, f"culprit-smoke-{fixture.engine}-{database.owner}")
+
+    def test_native_machine_limit_keeps_the_full_owner_label_and_exact_cleanup_target(self):
+        database = smoke.Database(self.ordinary_fixture())
+        database.commands = Mock()
+        database.commands.run.side_effect = lambda args, **_: (0, database.owner if args[:2] == ["docker", "inspect"] else "")
+        database.wait_until_ready = Mock()
+        with redirect_stdout(io.StringIO()):
+            with database:
+                self.assertEqual(database.commands.run.call_count, 3)
+        commands = [call.args[0] for call in database.commands.run.call_args_list]
+        create = next(command for command in commands if command[:2] == ["docker", "create"])
+        self.assertEqual(create[create.index("--hostname") + 1], database.hostname)
+        self.assertEqual(create[create.index("--label") + 1], f"{smoke.OWNER_LABEL}={database.owner}")
+        self.assertEqual(create[create.index("--name") + 1], database.name)
+        self.assertEqual(commands[-1], ["docker", "rm", "--force", "--volumes", database.name])
+
+    def test_missing_or_foreign_mssql_ownership_still_refuses_removal(self):
+        for status, actual in ((1, "missing"), (0, "foreign-full-owner")):
+            database = smoke.Database(self.ordinary_fixture())
+            database.commands = Mock()
+            database.commands.run.return_value = (status, actual)
+            if status:
+                database.close()
+            else:
+                with self.assertRaisesRegex(RuntimeError, "ownership label"):
+                    database.close()
+            self.assertEqual(database.commands.run.call_count, 1)
+
+    def test_ag_constructor_requires_its_exact_common_nonce_database_before_any_setup(self):
+        database = smoke.Database(self.ordinary_fixture())
+        original = database.fixture
+        foreign_owner = ("a" if database.owner[0] != "a" else "b") + database.owner[1:]
+        for wrong_name in ("culprit_smoke", "culprit_smoke_" + database.owner[:14], "culprit_smoke_" + foreign_owner):
+            database.fixture = smoke.replace(original, database=wrong_name)
+            with self.subTest(wrong_name=wrong_name), self.assertRaisesRegex(ValueError, "unstarted owned"):
+                smoke.SqlServerReplication(database, smoke.Database(self.ordinary_fixture()), smoke.OWNER_LABEL)
+        database.fixture = original
+
+    def test_existing_ag_members_keep_their_own_short_machines_and_both_full_database_nonces(self):
+        primary = smoke.Database(smoke.replace(self.ordinary_fixture(), name="mssql-ag-primary"))
+        secondary = smoke.Database(smoke.replace(self.ordinary_fixture(), name="mssql-ag-secondary"))
+        topology = smoke.SqlServerReplication(primary, secondary, smoke.OWNER_LABEL)
+        self.assertEqual(primary.hostname, "p" + primary.owner[:14])
+        self.assertEqual(secondary.hostname, "s" + secondary.owner[:14])
+        expected = f"culprit_smoke_{primary.owner}_{secondary.owner}"
+        self.assertEqual(topology.database_name, expected)
+        self.assertEqual(primary.fixture.database, expected)
+        self.assertEqual(secondary.fixture.database, expected)
+        self.assertEqual(topology.name, "culprit_ag_" + primary.owner)
+
+
 class NativeSelection(unittest.TestCase):
+    def test_agent_launch_is_explicit_and_its_tests_are_excluded_from_plain_mssql(self):
+        fixture = next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql")
+        plain = smoke.Database(fixture)
+        agent = smoke.AgentDatabase(smoke.replace(fixture, name="mssql-agent"))
+        self.assertNotIn("MSSQL_AGENT_ENABLED", plain.configuration()[0])
+        self.assertEqual(agent.configuration()[0]["MSSQL_AGENT_ENABLED"], "true")
+        self.assertEqual(agent.configuration()[0]["MSSQL_SA_PASSWORD"], agent.password)
+        plain.test_environment = Mock(return_value={})
+        for selection, expected in [
+            ("native_tests::", ["telemetry::replication::native_tests::", "jobs::"]),
+            ("jobs::native_tests::", ["telemetry::replication::native_tests::"]),
+        ]:
+            with self.subTest(selection=selection), patch.object(smoke, "run_tests") as run_tests:
+                plain.test("culprit-mssql", selection)
+                self.assertEqual(run_tests.call_args.kwargs["skip"], expected)
+
     def test_broad_selection_excludes_optional_topologies_without_their_environment(self):
         database = smoke.Database(smoke.FIXTURES[1])
         database.test_environment = Mock(return_value={})

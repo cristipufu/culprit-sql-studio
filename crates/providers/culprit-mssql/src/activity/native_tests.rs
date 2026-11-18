@@ -5,8 +5,8 @@ use crate::test_support::session_id;
 use crate::test_support::{batch, config};
 use std::time::{Duration, Instant};
 
-fn options(scope: ActivityScope) -> ReadOptions {
-    ReadOptions { budget: CollectionBudget::default(), scope, identity: IdentityDetail::Endpoint }
+fn options() -> ReadOptions {
+    ReadOptions { budget: CollectionBudget::default(), identity: IdentityDetail::Endpoint }
 }
 
 #[tokio::test]
@@ -47,10 +47,8 @@ async fn local_blocking_uses_the_shared_reader_for_live_and_export_at_compatibil
     let policy = ActivityPolicy { blocked_after_ms: 1000, running_after_ms: 86_400_000 };
     let (mut reader, mut frame) = loop {
         assert!(started.elapsed() < Duration::from_secs(12), "the fixture never established a sustained blocker");
-        let mut reader =
-            ActivityReader::open(pool.clone(), options(ActivityScope::CurrentDatabase), "127.0.0.1".into(), port)
-                .unwrap();
-        let frame = reader.observe().await.unwrap();
+        let mut reader = ActivityReader::open(pool.clone(), options(), "127.0.0.1".into(), port).unwrap();
+        let frame = reader.observe_baseline().await.and_then(crate::activity::ActivityBaseline::into_complete).unwrap();
         let established = frame.records.iter().any(|record| {
             record.facts.key.session.id == waiter_id
                 && record.facts.conditions(&policy).contains(&ActivityCondition::Blocked)
@@ -143,3 +141,5 @@ async fn local_blocking_uses_the_shared_reader_for_live_and_export_at_compatibil
     batch(&mut admin, &format!("ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE")).await;
     batch(&mut admin, &format!("DROP DATABASE [{database}]")).await;
 }
+
+mod census;

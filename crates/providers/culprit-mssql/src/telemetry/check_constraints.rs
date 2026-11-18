@@ -1,4 +1,4 @@
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{check_constraints, read::NativeRead, value::Rec};
 use culprit_core::{Result, Source, telemetry::*};
 pub(super) struct CheckConstraints;
@@ -8,7 +8,7 @@ impl SnapshotRecipe for CheckConstraints {
     const DATASET: SnapshotDataset = SnapshotDataset::CheckConstraints;
     const NAME: &'static str = "check-constraint-state";
     const SOURCE: &'static Source = &crate::sources::CHECK_CONSTRAINTS;
-    const INSTANCE_LOCAL: bool = false;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabase;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, budget: &CollectionBudget) -> Result<Option<usize>> {
         Ok(Some(MAX_CATALOG_EXPRESSION_BYTES.min(budget.max_sql_bytes as usize)))

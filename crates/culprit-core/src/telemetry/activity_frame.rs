@@ -67,6 +67,18 @@ impl<'a> ActivityFrameEvidence<'a> {
         self.index.by_session.get(session).into_iter().flatten().map(|observation| self.wrap(observation))
     }
 
+    /// A recorded refusal applies to this whole exact session generation, including other MARS requests.
+    /// Raw rows remain available; missing metadata does not create a refusal or a new native identity.
+    pub fn has_session_generation_authority(&self, session: &NativeActivityIdentity) -> bool {
+        self.index.has_session_generation_authority(session)
+    }
+    pub fn session_generation_is_disqualified(&self, session: &NativeActivityIdentity) -> bool {
+        self.index.session_generation_is_disqualified(session)
+    }
+    pub(super) fn index(&self) -> &ActivityIndex<'a> {
+        &self.index
+    }
+
     fn wrap(&self, observation: &'a ActivityObservation) -> ActivityFrameRow<'a> {
         ActivityFrameRow { observation, reference: self.references.get(&observation.key).copied() }
     }

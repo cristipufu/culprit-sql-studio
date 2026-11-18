@@ -2,4 +2,9 @@
 import type { PlanParameterComparison } from "./PlanParameterComparison";
 import type { PlanParameterValueState } from "./PlanParameterValueState";
 
-export type PlanParameter = { name: string | null, data_type: string | null, compiled: PlanParameterValueState, runtime: PlanParameterValueState, comparison: PlanParameterComparison, };
+export type PlanParameter = { name: string | null, data_type: string | null, compiled: PlanParameterValueState, runtime: PlanParameterValueState, comparison: PlanParameterComparison, 
+/**
+ * A provider compared both original values under one supported declared integer type and native range.
+ * Values and value hashes are discarded. None preserves unsupported types, missing or unqualified values.
+ */
+integer_values_equal?: boolean, };

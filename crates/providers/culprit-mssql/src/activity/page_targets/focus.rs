@@ -32,7 +32,6 @@ impl<R: NativeRead> ActivityReader<R> {
         if !focus.is_valid()
             || focus.participant().source != culprit_core::source_id::SESSIONS
             || RequestLocator::from_identity(&focus.participant().statement_identity).is_none()
-            || !matches!(self.options.scope, ActivityScope::CurrentDatabase)
         {
             return Err(invalid_data());
         }

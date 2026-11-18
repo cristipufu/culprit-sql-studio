@@ -162,6 +162,8 @@ fn selecting_from_live_preserves_the_original_route_and_refuses_ambiguous_or_unq
     }))
     .unwrap();
     let original = LiveState {
+        activity_census: None,
+        session_census: None,
         notes: vec![],
         taken_at: "2026-11-15T12:00:01Z".into(),
         sessions: vec![row.clone()],

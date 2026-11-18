@@ -60,6 +60,8 @@ def main():
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "plan_view_sample")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "replication_sample")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "storage_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "session_census_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "instance_resources_sample")
 
 
 if __name__ == "__main__":

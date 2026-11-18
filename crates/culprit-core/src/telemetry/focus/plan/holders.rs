@@ -40,6 +40,9 @@ pub fn plan_page_task_holder_focus(
     let Some(original) = frame.row(&page.request.key) else {
         return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
     };
+    if !frame.has_session_generation_authority(&original.observation.key.session) {
+        return Ok(DiagnosticFocusPlan::Unavailable(DiagnosticAnalysisIssue::MissingNativeIdentity));
+    }
     let (Some(parent), Some(statement), Some(epoch)) =
         (original.reference, &original.observation.statement_identity, &frame.native().epoch)
     else {

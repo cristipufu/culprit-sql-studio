@@ -488,6 +488,10 @@ impl OpenTransaction {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
 #[ts(export)]
 pub struct Pressure {
+    /// Shared native point retained independently of optional-read admission or selected-database grading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub instance_resources: Option<Box<crate::telemetry::InstanceResourceRead>>,
     /// Original wait rows from the existing read, separate from lossy category summaries and short samples.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

@@ -18,6 +18,8 @@ mod blocking;
 pub(crate) use blocking::blocking;
 mod configured_log_rates;
 mod connection_outcomes;
+mod instance_resources;
+pub(crate) use instance_resources::instance_resources;
 mod database_properties;
 mod hyperscale_log_components;
 mod memory_clerks;
@@ -360,7 +362,7 @@ pub(crate) fn maintenance(report: &culprit_core::MaintenanceReport) -> String {
 }
 
 pub(crate) fn jobs(report: &culprit_core::JobsReport) -> String {
-    native_work_summary(
+    let mut text = native_work_summary(
         Summary {
             title: &report.title,
             summary: &report.summary,
@@ -370,9 +372,29 @@ pub(crate) fn jobs(report: &culprit_core::JobsReport) -> String {
         report.entries.iter().map(|entry| {
             let mut details = vec![entry.explanation.clone()];
             details.extend(native_metrics(&entry.metrics));
+            details.push(entry.investigation.clone());
+            details.push(entry.verify.clone());
             (entry.title.as_str(), details)
         }),
-    )
+    );
+    text.push('\n');
+    text.push_str(&t!(
+        "view.mssql_agent_jobs.cli.bounds",
+        from = &report.context.observed_from,
+        until = &report.context.observed_until
+    ));
+    text.push('\n');
+    text.push_str(&t!(
+        "view.mssql_agent_jobs.cli.counts",
+        native = format::digits(report.native_rows.to_string()),
+        observed = format::digits(report.observed_rows.to_string()),
+        presented = format::digits(report.entries.len().min(super::BRIEF_FINDING_LIMIT).to_string())
+    ));
+    for limitation in report.limitations.iter().skip(1) {
+        text.push('\n');
+        text.push_str(limitation);
+    }
+    text
 }
 
 pub(crate) fn maintenance_progress(report: &culprit_core::MaintenanceProgressReport) -> String {
@@ -1272,3 +1294,9 @@ mod tests {
 
 mod storage;
 pub(crate) use storage::storage;
+
+mod session_census;
+pub(crate) use session_census::session_census;
+
+#[cfg(test)]
+mod jobs_tests;

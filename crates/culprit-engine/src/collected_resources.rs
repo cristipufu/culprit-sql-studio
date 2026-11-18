@@ -28,6 +28,8 @@ mod completed_spills;
 pub use compilation::compilation;
 pub use completed_spills::completed_spills;
 mod compiler_admission;
+mod instance_resources;
+pub use instance_resources::instance_resources;
 mod database_properties;
 mod memory_clerks;
 pub use database_properties::database_properties;
@@ -90,7 +92,9 @@ pub fn memory_failures(capture: &EvidenceCapture) -> Result<CollectedRetainedFai
         .rows()?
         .into_iter()
         .map(|observation| {
-            let OperationalFact::MssqlOutOfMemory(failure) = &observation.fact else { return Err(invalid()) };
+            let OperationalFact::MssqlOutOfMemory(failure) = &observation.fact else {
+                return Err(invalid());
+            };
             Ok(failure.as_ref().clone())
         })
         .collect::<Result<Vec<_>>>()?;
@@ -145,5 +149,7 @@ fn invalid() -> culprit_core::Error {
 
 mod query_store_definitions;
 
+mod session_census;
 mod storage;
+pub use session_census::session_census;
 pub use storage::storage;

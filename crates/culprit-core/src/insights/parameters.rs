@@ -31,6 +31,22 @@ pub(super) fn context(cx: &Cx) -> Vec<Draft> {
         count = format::count(differences.len() as f64),
         parameters = format::list(&examples)
     )];
+    if let Some(cached) = context.retrieved_from_cache {
+        detail.push(if cached {
+            t!("insight.parameter_context.cache.used")
+        } else {
+            t!("insight.parameter_context.cache.not_used")
+        });
+    }
+    for parameter in differences.iter().take(MAX_PARAMETER_EXAMPLES) {
+        if let Some(equal) = parameter.integer_values_equal {
+            detail.push(if equal {
+                t!("insight.parameter_context.integer.same", parameter = parameter_label(parameter))
+            } else {
+                t!("insight.parameter_context.integer.different", parameter = parameter_label(parameter))
+            });
+        }
+    }
     let nodes = access_details(cx, &mut detail);
     if !nodes.is_empty() {
         concern.nodes = nodes;
@@ -87,6 +103,7 @@ pub(super) fn access_mismatch<'a>(cx: &Cx<'a>, node: &PlanNode) -> Option<Parame
     }
     let parameter = context.parameter(usage)?;
     if parameter.comparison != PlanParameterComparison::DifferentRepresentation
+        || parameter.integer_values_equal == Some(true)
         || node.kind != NodeKind::Seek
         || node.facts().relational_input.is_some()
         || serial_executions(node).is_none()

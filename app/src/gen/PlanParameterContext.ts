@@ -3,7 +3,12 @@ import type { PlanParameter } from "./PlanParameter";
 import type { PlanParameterIssue } from "./PlanParameterIssue";
 import type { PlanParameterUse } from "./PlanParameterUse";
 
-export type PlanParameterContext = { parameters: Array<PlanParameter>, 
+export type PlanParameterContext = { 
+/**
+ * The selected actual statement's native cache-use verdict, not a cache lifetime/count inference.
+ * False does not independently prove compilation time, a new incarnation, or harmful reuse.
+ */
+retrieved_from_cache?: boolean, parameters: Array<PlanParameter>, 
 /**
  * Exact native access-node relationships, never bindings reconstructed from display SQL.
  */

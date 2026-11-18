@@ -1,4 +1,4 @@
-use super::streamed::SnapshotRecipe;
+use super::streamed::{SnapshotAcquisition, SnapshotRecipe};
 use crate::{read::NativeRead, recorded, value::Rec};
 use culprit_core::{Result, Source, telemetry::*};
 pub(super) struct Objects;
@@ -8,7 +8,7 @@ impl SnapshotRecipe for Objects {
     const DATASET: SnapshotDataset = SnapshotDataset::Objects;
     const NAME: &'static str = "object-metadata-state";
     const SOURCE: &'static Source = &crate::sources::OBJECTS;
-    const INSTANCE_LOCAL: bool = false;
+    const ACQUISITION: SnapshotAcquisition = SnapshotAcquisition::AzureDatabase;
     const REQUIRES_FULL_METADATA: bool = true;
     async fn layout<R: NativeRead>(&self, _reader: &mut R, _budget: &CollectionBudget) -> Result<Option<()>> {
         Ok(Some(()))

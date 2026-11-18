@@ -8,6 +8,8 @@ use ts_rs::TS;
 use crate::{DatabaseIdentity, Error, ErrorCode, Result, t};
 
 mod activity;
+mod activity_census;
+pub use activity_census::ActivityCensusRead;
 pub(crate) mod activity_frame;
 mod admission;
 mod blocking;
@@ -103,8 +105,10 @@ pub use source_read::{
     NativeSourceReadScope, SourceReadFocus, SourceReadPrerequisite, SourceReadQuestion, SourceReadStage,
     SourceReadStageState,
 };
+mod instance_resources;
 mod source_partition;
 mod state;
+pub use instance_resources::*;
 mod storage;
 pub use storage::{
     MssqlDatabaseFile, MssqlDatabaseFileProfile, StorageFileSizeBasis, StoragePointRef, StoragePopulation, StorageRead,
@@ -335,9 +339,15 @@ impl CollectionRequest {
                     return Err(CollectionStop::InvalidPage.error());
                 }
             }
-            CollectionSelection::Snapshot {
-                dataset: SnapshotDataset::Jobs | SnapshotDataset::HyperscaleLogComponents,
-            } => self.subject.require_database()?,
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::Jobs } => {
+                if matches!(&self.subject, CollectionSubject::Shared {resource} if resource.kind!=SharedResourceKind::Instance)
+                {
+                    return Err(CollectionStop::InvalidPage.error());
+                }
+            }
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::HyperscaleLogComponents } => {
+                self.subject.require_database()?
+            }
             CollectionSelection::Snapshot {
                 dataset:
                     SnapshotDataset::CacheEntryMemory
@@ -669,7 +679,18 @@ impl TelemetryRecord {
                 let accepted = source.observation.accepts_snapshot_record(row.stream(), &row.source);
                 match (&source.observation, &row.fact) {
                     (SourceObservation::Jobs { snapshot, metadata }, _) => accepted && metadata.accepts(snapshot, row),
-                    (_, OperationalFact::TimescaleJobState(_) | OperationalFact::TimescaleJobRun(_)) => false,
+                    (SourceObservation::MssqlAgentJobs { snapshot, metadata }, _) => {
+                        accepted && metadata.accepts(snapshot, row)
+                    }
+                    (
+                        _,
+                        OperationalFact::TimescaleJobState(_)
+                        | OperationalFact::TimescaleJobRun(_)
+                        | OperationalFact::MssqlAgentJob(_)
+                        | OperationalFact::MssqlAgentStep(_)
+                        | OperationalFact::MssqlAgentHistory(_)
+                        | OperationalFact::MssqlAgentContext(_),
+                    ) => false,
                     (SourceObservation::CurrentRequestWork { .. }, OperationalFact::CurrentRequestWork(point)) => {
                         accepted && point.fits_source_scope(source)
                     }
@@ -694,6 +715,7 @@ impl TelemetryRecord {
                     (_, OperationalFact::DatabaseProperties(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::Space(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::MssqlDatabaseFile(point)) => accepted && point.fits_source(source),
+                    (_, OperationalFact::MssqlInstanceResources(point)) => accepted && point.fits_source(source),
                     (_, OperationalFact::PageWait(page)) => {
                         accepted
                             && page.fits_source_scope(source)

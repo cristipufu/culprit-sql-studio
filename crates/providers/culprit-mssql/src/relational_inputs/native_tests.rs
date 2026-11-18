@@ -21,6 +21,7 @@ const LOCAL: &str = "@unused int=1 AS DECLARE @Rows dbo.RowsType;INSERT @Rows VA
 mod expressions;
 mod fixture;
 mod reuse;
+mod scalar;
 
 async fn execute(client: &mut MsClient, tvp: bool) {
     batch(
@@ -35,25 +36,74 @@ async fn execute(client: &mut MsClient, tvp: bool) {
 }
 
 async fn definition(reader: &mut ReadSession, object: i64) -> culprit_core::telemetry::MssqlCachedDefinition {
+    named_definition(reader, object, "tvp_original_header_probe").await
+}
+
+async fn named_definition(
+    reader: &mut ReadSession,
+    object: i64,
+    marker: &str,
+) -> culprit_core::telemetry::MssqlCachedDefinition {
+    let rows = named_definitions(reader, object, marker).await;
+    let [row] = rows.as_slice() else {
+        panic!("exactly one native statement, not an arbitrary first same-module variant")
+    };
+    row.fact.clone()
+}
+
+/// Original SQL stays only in this owned test's stack. The production decoder discards literal values normally.
+/// Every selected cache point uses the existing final plan-to-SQL binding verifier before an actual XML join.
+struct NamedDefinition {
+    fact: culprit_core::telemetry::MssqlCachedDefinition,
+    original_statement: String,
+}
+async fn named_definitions(reader: &mut ReadSession, object: i64, marker: &str) -> Vec<NamedDefinition> {
+    verified_definitions(reader, |row| {
+        crate::read::optional_signed_integer(row, "module_object_id").unwrap() == Some(object)
+            && row.str("statement_text").is_some_and(|text| text.contains(marker))
+    })
+    .await
+}
+
+async fn exact_definitions(
+    reader: &mut impl NativeRead,
+    expected: &culprit_core::telemetry::CachedStatementContext,
+) -> Vec<NamedDefinition> {
+    let key = expected.identity.key().unwrap();
+    verified_definitions(reader, |row| {
+        let current = crate::cached_statements::context(row).unwrap();
+        current.database_id == expected.database_id && current.identity.key().unwrap() == key
+    })
+    .await
+}
+
+async fn verified_definitions(
+    reader: &mut impl NativeRead,
+    select: impl Fn(&crate::value::Rec) -> bool,
+) -> Vec<NamedDefinition> {
     let limits = cached_definitions::Limits::from_budget(&CollectionBudget::default()).unwrap();
     let rows = reader
         .query(&cached_definitions::select_sql(&limits), vec![Parameter::Integer(501)], 501)
         .await
         .map_err(ReadError::into_error)
         .unwrap();
-    let row = rows
-        .iter()
-        .find(|row| {
-            crate::read::optional_signed_integer(row, "module_object_id").unwrap() == Some(object)
-                && row.str("statement_text").is_some_and(|text| text.contains("tvp_original_header_probe"))
-        })
-        .expect("owned module statement must be in the bounded native cache projection");
-    let value = cached_definitions::decode(row, &limits, None).unwrap();
+    let mut selected = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     let mut bindings = Bindings::default();
-    assert!(bindings.admit(&value.context).unwrap());
+    assert!(rows.len() < 501, "a truncated native cache roster cannot prove an exact selected original");
+    for row in rows.iter().filter(|row| select(row)) {
+        let fact = cached_definitions::decode(row, &limits, None).unwrap();
+        assert!(
+            seen.insert(fact.context.identity.key().unwrap()),
+            "duplicate native cache point is not another variant"
+        );
+        assert!(bindings.admit(&fact.context).unwrap());
+        selected.push(NamedDefinition { fact, original_statement: crate::read::text(row, "statement_text").unwrap() });
+    }
+    assert!(!selected.is_empty(), "the exact native selection must remain inside the bounded cache projection");
     let verified = bindings.verify(reader).await.unwrap();
     assert!(bindings.all_verified(&verified));
-    value
+    selected
 }
 
 struct AlterAfterPayload {
@@ -119,17 +169,7 @@ async fn original_module_headers_bind_tvp_kind_and_withhold_reused_handle_enrich
     let password = std::env::var("CULPRIT_MSSQL_SOURCE_TEST_PASSWORD").unwrap();
     let mut admin =
         crate::test_support::connect(&config(port, "master", &password, "culprit"), SessionKind::User).await.unwrap();
-    let machine = crate::conn::query_one(
-        &mut admin,
-        "SELECT /* culprit */ CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) AS machine",
-    )
-    .await
-    .unwrap()
-    .string("machine");
-    let nonce =
-        machine.strip_prefix("culprit-smoke-mssql-").expect("only the owned disposable fixture may mutate a module");
-    assert_eq!(nonce.len(), 24);
-    assert!(nonce.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    crate::test_support::verify_owned_source(&mut admin).await.unwrap();
     let database = format!("culprit_tvp_{}_{}", std::process::id(), chrono::Utc::now().timestamp_millis());
     batch(&mut admin, &format!("CREATE DATABASE [{database}] COLLATE Latin1_General_100_CS_AS")).await;
     let proof=AssertUnwindSafe(async {

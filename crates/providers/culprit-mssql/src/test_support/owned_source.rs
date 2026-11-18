@@ -9,6 +9,10 @@ use std::{sync::Arc, time::Instant};
 
 const OWNER_BYTES: usize = 24;
 const SHORT_HOST_OWNER_BYTES: usize = 14;
+// The current catalog may be master/msdb for verified administrative work. Ownership comes from the
+// actual nonce-bearing baseline database on this same held native instance, never the current DB name.
+const OWNED_SOURCE_SQL: &str = "SELECT /* culprit fixture guard */ CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) AS machine, \
+             CONVERT(nvarchar(128),DB_NAME(DB_ID(@P1))) AS owned_database";
 
 struct OwnedSourceAdmission {
     database: String,
@@ -28,11 +32,11 @@ impl OwnedSourceAdmission {
         if !valid_owner(owner) {
             return Err(invalid_data());
         }
-        let machine = if database == "culprit_smoke" {
+        let prefix = if database == format!("culprit_smoke_{owner}") {
             if role.is_some() || group.is_some() {
                 return Err(invalid_data());
             }
-            format!("culprit-smoke-mssql-{owner}")
+            'm'
         } else {
             let (primary, secondary) = database
                 .strip_prefix("culprit_smoke_")
@@ -42,13 +46,13 @@ impl OwnedSourceAdmission {
             if group != Some(format!("culprit_ag_{primary}").as_str()) {
                 return Err(invalid_data());
             }
-            let prefix = match role {
+            match role {
                 Some("primary") if owner == primary => 'p',
                 Some("secondary") if owner == secondary => 's',
                 _ => return Err(invalid_data()),
-            };
-            format!("{prefix}{}", &owner[..SHORT_HOST_OWNER_BYTES])
+            }
         };
+        let machine = format!("{prefix}{}", &owner[..SHORT_HOST_OWNER_BYTES]);
         Ok(Self { database: database.into(), machine })
     }
 
@@ -60,10 +64,7 @@ impl OwnedSourceAdmission {
     }
 
     async fn verify(&self, client: &mut MsClient) -> culprit_core::Result<()> {
-        let mut query = tiberius::Query::new(
-            "SELECT /* culprit fixture guard */ CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) AS machine, \
-             CONVERT(nvarchar(128),DB_NAME(DB_ID(@P1))) AS owned_database",
-        );
+        let mut query = tiberius::Query::new(OWNED_SOURCE_SQL);
         query.bind(self.database.as_str());
         let rows = query.query(client).await.map_err(map_error)?.into_results().await.map_err(map_error)?;
         let [rows] = rows.as_slice() else { return Err(invalid_data()) };
@@ -122,16 +123,60 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_admission_keeps_the_full_native_hostname_and_fixed_database() {
+    fn a_single_member_requires_the_supported_native_machine_and_complete_native_database_nonce() {
         let owner = "a".repeat(OWNER_BYTES);
-        let admission = OwnedSourceAdmission::new(&owner, "culprit_smoke", None, None).unwrap();
-        assert!(admission.validate_row(&native(&format!("culprit-smoke-mssql-{owner}"), "culprit_smoke")).is_ok());
+        let database = format!("culprit_smoke_{owner}");
+        let machine = format!("m{}", &owner[..SHORT_HOST_OWNER_BYTES]);
+        let admission = OwnedSourceAdmission::new(&owner, &database, None, None).unwrap();
+        assert_eq!(machine.len(), 15);
+        assert!(admission.validate_row(&native(&machine, &database)).is_ok());
+        for wrong_machine in [
+            format!("culprit-smoke-mssql-{owner}"),
+            "foreign-machine".into(),
+            format!("p{}", &owner[..SHORT_HOST_OWNER_BYTES]),
+        ] {
+            assert!(admission.validate_row(&native(&wrong_machine, &database)).is_err());
+        }
+    }
+
+    #[test]
+    fn a_short_matching_machine_never_substitutes_for_full_native_database_ownership() {
+        let owner = "a".repeat(OWNER_BYTES);
+        let database = format!("culprit_smoke_{owner}");
+        let machine = format!("m{}", &owner[..SHORT_HOST_OWNER_BYTES]);
+        let admission = OwnedSourceAdmission::new(&owner, &database, None, None).unwrap();
+        let same_machine_foreign_owner =
+            format!("{}{}", &owner[..SHORT_HOST_OWNER_BYTES], "b".repeat(OWNER_BYTES - SHORT_HOST_OWNER_BYTES));
+        for wrong_database in [
+            "culprit_smoke".into(),
+            format!("culprit_smoke_{}", &owner[..SHORT_HOST_OWNER_BYTES]),
+            format!("culprit_smoke_{same_machine_foreign_owner}"),
+            database.clone() + "_extra",
+            "msdb".into(),
+            "master".into(),
+        ] {
+            assert!(admission.validate_row(&native(&machine, &wrong_database)).is_err(), "{wrong_database}");
+        }
+        let hidden = Rec::of(&[("machine", Val::Text(machine)), ("owned_database", Val::Null)]);
         assert!(
-            admission
-                .validate_row(&native(&format!("p{}", &owner[..SHORT_HOST_OWNER_BYTES]), "culprit_smoke"))
-                .is_err()
+            admission.validate_row(&hidden).is_err(),
+            "native DB absence cannot be repaired from environment or current catalog"
         );
-        assert!(admission.validate_row(&native(&format!("culprit-smoke-mssql-{owner}"), "another_db")).is_err());
+        assert!(OwnedSourceAdmission::new(&owner, "culprit_smoke", None, None).is_err());
+        assert!(OwnedSourceAdmission::new(&owner, &database, Some("primary"), None).is_err());
+        assert!(OwnedSourceAdmission::new(&owner, &database, None, Some("unexpected-group")).is_err());
+    }
+
+    #[test]
+    fn administrative_control_keeps_the_same_held_nonce_database_lookup_without_current_catalog_authority() {
+        assert!(OWNED_SOURCE_SQL.contains("DB_NAME(DB_ID(@P1))) AS owned_database"));
+        assert!(!OWNED_SOURCE_SQL.contains("DB_NAME()"));
+        assert!(OWNED_SOURCE_SQL.contains("SERVERPROPERTY('MachineName')"));
+        let owner = "a".repeat(OWNER_BYTES);
+        let database = format!("culprit_smoke_{owner}");
+        let admission = OwnedSourceAdmission::new(&owner, &database, None, None).unwrap();
+        assert!(admission.validate_row(&native(&admission.machine, &database)).is_ok());
+        assert!(admission.validate_row(&native(&admission.machine, "msdb")).is_err());
     }
 
     #[test]

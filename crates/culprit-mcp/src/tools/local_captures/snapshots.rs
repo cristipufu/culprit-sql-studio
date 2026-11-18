@@ -1,7 +1,10 @@
 //! Bounded historical report values and proven redacted statement previews, without private receipt internals.
 use culprit_core::{
     Result,
-    telemetry::{CollectionTarget, DeliveryProblem, digest},
+    telemetry::{
+        CollectionTarget, DeliveryProblem, GrantStatementRelationship, OperationalFact, SourceObservation,
+        TaskRequestContext, digest,
+    },
 };
 use culprit_engine::{LocalSnapshotAnalysis, LocalSnapshotReport};
 use serde_json::{Value, json};
@@ -17,6 +20,7 @@ pub(super) fn captured(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
         "analysis": analysis.report().kind(),
         "historical_context": true,
         "independent_shared_scope": matches!(context.target, CollectionTarget::Shared(_)),
+        "native_scope_qualified":context.has_qualified_local_owner(),
         "original_read_bounds": {"from":context.observed_from,"until":context.observed_until},
         "native_rows":native.records,"observed_rows":read.observations.len(),"read_complete":read.read_complete,
         "native_sources":native.sources.iter().map(|source|json!({
@@ -35,14 +39,15 @@ pub(super) fn captured(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
 fn report_value(analysis: &LocalSnapshotAnalysis) -> Result<Value> {
     Ok(match analysis.report() {
         LocalSnapshotReport::PerformanceCounters(report) => performance_counters(report),
+        LocalSnapshotReport::InstanceResources(report) => instance_resources(report),
         LocalSnapshotReport::DatabaseProperties(report) => database_properties(report),
         LocalSnapshotReport::Compilation(report) => compilation(analysis, report),
         LocalSnapshotReport::ConfiguredLogRates(report) => configured_log_rates(report),
         LocalSnapshotReport::ConnectionOutcomes(report) => connection_outcomes(analysis, report),
         LocalSnapshotReport::Jobs(report) => jobs(analysis, report),
-        LocalSnapshotReport::RequestMemory(report) => request_memory(analysis, report),
-        LocalSnapshotReport::TaskSpace(report) => task_space(analysis, report),
-        LocalSnapshotReport::CurrentRequestWork(report) => current_request_work(analysis, report),
+        LocalSnapshotReport::RequestMemory(report) => request_memory(analysis, report)?,
+        LocalSnapshotReport::TaskSpace(report) => task_space(analysis, report)?,
+        LocalSnapshotReport::CurrentRequestWork(report) => current_request_work(analysis, report)?,
         LocalSnapshotReport::StatementWork(report) => statement_work(analysis, report),
         LocalSnapshotReport::MaintenanceProgress(report) => maintenance_progress(analysis, report),
         LocalSnapshotReport::CompletedSpills(report) => return completed_spills(analysis, report),
@@ -181,33 +186,110 @@ fn jobs(analysis: &LocalSnapshotAnalysis, report: &culprit_core::JobsReport) -> 
     value
 }
 
-fn request_memory(analysis: &LocalSnapshotAnalysis, report: &culprit_core::MemoryParticipantsReport) -> Value {
-    summary(&report.title,&report.summary,report.source_state,&report.source_reason,&report.limitations,report.entries.len(),
-                report.entries.iter().take(ENTRY_LIMIT).map(|entry|json!({
-                    "reference":reference(analysis,&entry.observation_key),"title":entry.title,"explanation":entry.explanation,
-                    "investigation":entry.investigation,"verify":entry.verify,
-                })).collect())
+fn request_memory(analysis: &LocalSnapshotAnalysis, report: &culprit_core::MemoryParticipantsReport) -> Result<Value> {
+    let entries = report.entries.iter().take(ENTRY_LIMIT).map(|entry| {
+        let OperationalFact::ExecutionGrant(grant) = super::context::single_source_fact(analysis, &entry.observation_key)? else {
+            return Err(DeliveryProblem::Integrity.error());
+        };
+        let participant = grant.request.as_ref().map(|request| super::context::participant(
+            request,
+            &grant.observed_at,
+            (grant.statement_relationship == GrantStatementRelationship::ObservedCurrentStatement).then_some(&request.statement),
+        ));
+        Ok(json!({
+            "reference":reference(analysis,&entry.observation_key),"title":entry.title,"explanation":entry.explanation,
+            "investigation":entry.investigation,"verify":entry.verify,
+            "native_observation":{
+                "observed_at":grant.observed_at,"state":grant.state,"scope":grant.scope,
+                "request_association":grant.request_association,"statement_relationship":grant.statement_relationship,
+                "requested_kibibytes":grant.requested_kibibytes,"required_kibibytes":grant.required_kibibytes,
+                "granted_kibibytes":grant.granted_kibibytes,"used_kibibytes":grant.used_kibibytes,
+                "maximum_used_kibibytes":grant.maximum_used_kibibytes,"ideal_kibibytes":grant.ideal_kibibytes,
+                "wait_ms":grant.wait_ms,
+            },
+            "participant_context":participant,
+        }))
+    }).collect::<Result<Vec<_>>>()?;
+    let mut value = summary(
+        &report.title,
+        &report.summary,
+        report.source_state,
+        &report.source_reason,
+        &report.limitations,
+        report.entries.len(),
+        entries,
+    );
+    let source = &analysis.original().read().description;
+    if let SourceObservation::FocusedRequestMemory { result, .. } = &source.observation {
+        value["focus_source"] = json!(result.source);
+        value["focus_membership"] = json!(result.membership);
+    }
+    value["original_participant_context"] = json!(super::context::focused_original(source));
+    Ok(value)
 }
 
-fn task_space(analysis: &LocalSnapshotAnalysis, report: &culprit_core::TaskSpaceReport) -> Value {
-    summary(&report.title,&report.summary,report.source_state,&report.source_reason,&report.limitations,report.entries.len(),
-                report.entries.iter().take(ENTRY_LIMIT).map(|entry|json!({
-                    "reference":reference(analysis,&entry.observation_key),"task":entry.task,"activity":entry.activity,
-                    "title":entry.title,"explanation":entry.explanation,"investigation":entry.investigation,"verify":entry.verify,
-                })).collect())
+fn task_space(analysis: &LocalSnapshotAnalysis, report: &culprit_core::TaskSpaceReport) -> Result<Value> {
+    let entries = report.entries.iter().take(ENTRY_LIMIT).map(|entry| {
+        let OperationalFact::TaskSpace(task) = super::context::single_source_fact(analysis, &entry.observation_key)? else {
+            return Err(DeliveryProblem::Integrity.error());
+        };
+        let participant = match task.request_context() {
+            TaskRequestContext::CheckedAtBounds => task.request.as_ref()
+                .map(|request| super::context::participant(request,&task.observed_at,Some(&request.statement))),
+            _ => None,
+        };
+        Ok(json!({
+            "reference":reference(analysis,&entry.observation_key),"task":entry.task,"activity":entry.activity,
+            "title":entry.title,"explanation":entry.explanation,"investigation":entry.investigation,"verify":entry.verify,
+            "native_observation":{
+                "observed_at":task.observed_at,"bytes_per_page":task.bytes_per_page,
+                "user_allocated_pages":task.user_allocated_pages,"user_deallocated_pages":task.user_deallocated_pages,
+                "internal_allocated_pages":task.internal_allocated_pages,"internal_deallocated_pages":task.internal_deallocated_pages,
+                "request_context":task.request_context(),
+            },
+            "participant_context":participant,
+        }))
+    }).collect::<Result<Vec<_>>>()?;
+    Ok(summary(
+        &report.title,
+        &report.summary,
+        report.source_state,
+        &report.source_reason,
+        &report.limitations,
+        report.entries.len(),
+        entries,
+    ))
 }
 
-fn current_request_work(analysis: &LocalSnapshotAnalysis, report: &culprit_core::CurrentRequestWorkReport) -> Value {
-    let mut value = summary(&report.title,&report.summary,Some(report.source_state),&report.source_reason,&report.limitations,report.entries.len(),
-                report.entries.iter().take(ENTRY_LIMIT).map(|entry|json!({
-                    "reference":reference(analysis,&entry.observation_key),"actor":entry.actor,"observed_at":entry.observed_at,"scope":entry.scope,
-                    "title":entry.title,"explanation":entry.explanation,"metrics":entry.metrics,
-                    "investigation":entry.investigation,"verify":entry.verify,
-                })).collect());
+fn current_request_work(
+    analysis: &LocalSnapshotAnalysis,
+    report: &culprit_core::CurrentRequestWorkReport,
+) -> Result<Value> {
+    let entries = report.entries.iter().take(ENTRY_LIMIT).map(|entry| {
+        let OperationalFact::CurrentRequestWork(point) = super::context::single_source_fact(analysis, &entry.observation_key)? else {
+            return Err(DeliveryProblem::Integrity.error());
+        };
+        Ok(json!({
+            "reference":reference(analysis,&entry.observation_key),"actor":entry.actor,"observed_at":entry.observed_at,"scope":entry.scope,
+            "title":entry.title,"explanation":entry.explanation,"metrics":entry.metrics,
+            "statement":super::context::statement(&point.statement),
+            "investigation":entry.investigation,"verify":entry.verify,
+        }))
+    }).collect::<Result<Vec<_>>>()?;
+    let mut value = summary(
+        &report.title,
+        &report.summary,
+        Some(report.source_state),
+        &report.source_reason,
+        &report.limitations,
+        report.entries.len(),
+        entries,
+    );
     value["binding"] = json!(report.binding);
     value["membership"] = json!(report.membership);
-
-    value
+    value["original_participant_context"] =
+        json!(super::context::focused_original(&analysis.original().read().description));
+    Ok(value)
 }
 
 fn statement_work(analysis: &LocalSnapshotAnalysis, report: &culprit_core::StatementWorkReport) -> Value {
@@ -242,6 +324,8 @@ fn maintenance_progress(analysis: &LocalSnapshotAnalysis, report: &culprit_core:
                 })).collect());
     value["binding"] = json!(report.binding);
     value["membership"] = json!(report.membership);
+    value["original_participant_context"] =
+        json!(super::context::focused_original(&analysis.original().read().description));
 
     value
 }
@@ -312,4 +396,8 @@ fn reference(analysis: &LocalSnapshotAnalysis, key: &str) -> String {
         )
         .as_bytes(),
     )
+}
+
+fn instance_resources(report: &culprit_core::InstanceResourceReport) -> Value {
+    crate::waits_view::instance_resources::value(report)
 }

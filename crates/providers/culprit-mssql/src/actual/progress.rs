@@ -2,10 +2,10 @@
 //! point establishes the original Live row or a cross-capture member/process identity.
 use super::{Availability, Layout, no_profiling, own_estimate};
 use crate::{
-    activity::participants::Check,
+    activity::{established_login, participants::Check},
     conn::Pool,
     plan_xml,
-    read::{NativeRead, Parameter, ReadError, integer, invalid_data, optional_text, text},
+    read::{NativeRead, Parameter, ReadError, boolean, integer, invalid_data, optional_text, text},
     value::Rec,
 };
 use culprit_core::{
@@ -97,12 +97,18 @@ async fn read<R: NativeRead>(reader: &mut R, id: u64) -> Result<Reading> {
     if count != 1 {
         return Ok(Reading::Unknown { at, ambiguous: count > 1 });
     }
+    if !boolean(&row, "session_established")? {
+        return Ok(Reading::Changed { at });
+    }
     let check = Check::decode(&row)?;
     let scope = Scope::read(&row)?;
     if scope.request_page_server_read_capability != layout.request_page_server_read_capability {
         return Err(CollectionStop::SourceChanged.error());
     }
     let Some((key, statement)) = check.selector() else { return Ok(Reading::Changed { at }) };
+    if !established_login(&key.session.generation) {
+        return Ok(Reading::Changed { at });
+    }
     if key.session.id != id.to_string()
         || statement.qualifiers.get("database_id").and_then(|id| id.parse::<i64>().ok()) != Some(scope.database)
     {
@@ -159,6 +165,9 @@ fn finish(point: Box<Point>, rows: Vec<Rec>) -> Result<Reading> {
         return Err(CollectionStop::RowLimit.error());
     }
     let guard = guard.ok_or_else(invalid_data)?;
+    if !boolean(&guard, "session_established")? {
+        return Ok(Reading::Changed { at: canonical_time(&text(&guard, "observed_at")?)? });
+    }
     let check = Check::decode(&guard)?;
     let scope = Scope::read(&guard)?;
     if integer(&guard, "request_count")? != 1

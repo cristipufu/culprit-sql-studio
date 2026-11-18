@@ -68,7 +68,9 @@ fn healthy_large_completed_input_and_parameter_representation_differences_do_not
     let mut plan = access_plan(10_000.0, 10_000.0, 100_000.0, 100_000.0);
     plan.root.facts_mut().scan_completion = Some(completion());
     plan.facts_mut().parameter_context = Some(crate::plan_facts::PlanParameterContext {
+        retrieved_from_cache: None,
         parameters: vec![crate::plan_facts::PlanParameter {
+            integer_values_equal: None,
             name: Some("@filter".into()),
             data_type: Some("int".into()),
             compiled: crate::plan_facts::PlanParameterValueState::Recorded,

@@ -3,28 +3,43 @@ use culprit_core::{
     Error, JobEntry, JobEntryKind, JobsReport, Metric, Result, SourceOutcome, SourceState, format, t, telemetry::*,
 };
 use std::collections::BTreeMap;
+mod agent;
 mod points;
 const MAX_JOB_ENTRIES: usize = 256;
 
 /// Ordinary scans may display independent native positives under unknown identity only with an explicit limit.
 /// A known namespace conflict cannot borrow the scan's database; archive explanation remains source-owned.
 pub fn explain_snapshot(snapshot: &culprit_core::Snapshot) -> Result<Option<JobsReport>> {
-    let Some(read) = snapshot.operations.jobs.as_deref() else { return Ok(None) };
-    match read.context.target.snapshot_namespace_comparison(snapshot) {
-        culprit_core::Comparison::Compatible => explain(read, true).map(Some),
-        culprit_core::Comparison::Incompatible(culprit_core::ComparisonReason::UnknownIdentity) => explain(read, true)
-            .map(|mut report| {
+    let Some(read) = snapshot.operations.jobs.as_deref() else {
+        return Ok(None);
+    };
+    match read.context().target.snapshot_namespace_comparison(snapshot) {
+        culprit_core::Comparison::Compatible => explain(read).map(Some),
+        culprit_core::Comparison::Incompatible(culprit_core::ComparisonReason::UnknownIdentity) => {
+            explain(read).map(|mut report| {
                 report.limitations.push(t!("view.observations.limit.namespace"));
                 Some(report)
-            }),
+            })
+        }
         _ => Err(Error::invalid(t!("view.jobs.invalid"))),
     }
 }
 
-pub fn explain(snapshot: &TimescaleJobsSnapshot, read_complete: bool) -> Result<JobsReport> {
-    explain_bounded(snapshot, read_complete, MAX_JOB_ENTRIES)
+pub fn explain(snapshot: &JobsSnapshot) -> Result<JobsReport> {
+    explain_bounded(snapshot, MAX_JOB_ENTRIES)
 }
-pub fn explain_bounded(
+pub fn explain_bounded(snapshot: &JobsSnapshot, max_entries: usize) -> Result<JobsReport> {
+    if !snapshot.is_valid() {
+        return Err(Error::invalid(t!("view.jobs.invalid")));
+    }
+    match snapshot {
+        JobsSnapshot::Timescale { snapshot, read_complete } => {
+            explain_timescale_bounded(snapshot, *read_complete, max_entries)
+        }
+        JobsSnapshot::MssqlAgent { snapshot, read_complete } => agent::explain(snapshot, *read_complete, max_entries),
+    }
+}
+fn explain_timescale_bounded(
     snapshot: &TimescaleJobsSnapshot,
     read_complete: bool,
     max_entries: usize,
@@ -144,7 +159,7 @@ fn entry(
     JobEntry {
         source: row.source.clone(),
         observation_key: row.key.clone(),
-        job_id: job_id.into(),
+        job_id: Some(job_id.into()),
         kind,
         title,
         explanation,
