@@ -10,7 +10,9 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_PHASES: usize = 32;
 const MAX_OBSERVER_QUERIES: u32 = 512;
 mod lifecycle;
+mod result_trace;
 pub(crate) use lifecycle::{assert_no_followup, lifecycle_cases};
+use result_trace::ResultTrace;
 
 #[derive(Clone)]
 pub(crate) struct TemplateObservation {
@@ -82,6 +84,7 @@ pub(crate) struct MeasuredRead {
     phases: Vec<Value>,
     active_seen: Arc<AtomicBool>,
     template_watch: Option<TemplateObservation>,
+    result_trace: Option<ResultTrace>,
     errors: Vec<String>,
 }
 
@@ -141,6 +144,7 @@ impl MeasuredRead {
             phases: vec![],
             active_seen: Arc::new(AtomicBool::new(false)),
             template_watch: None,
+            result_trace: None,
             errors: vec![],
         })
     }
@@ -158,6 +162,22 @@ impl MeasuredRead {
         let observation = TemplateObservation { id: id.into(), observed: Arc::new(AtomicBool::new(false)) };
         self.template_watch = Some(observation.clone());
         Ok(observation)
+    }
+    /// Opt in before the source window. This test-only trace retains one bounded original result and never
+    /// changes query execution, source errors, observer accounting or default response retention.
+    pub(crate) fn trace_result(&mut self, template_id: &str) -> culprit_core::Result<()> {
+        if self.owner.queries() != 0
+            || self.phase.is_some()
+            || self.result_trace.is_some()
+            || !valid_digest(template_id)
+        {
+            return Err(invalid_data());
+        }
+        self.result_trace = Some(ResultTrace::new(template_id));
+        Ok(())
+    }
+    pub(crate) fn take_result(&mut self) -> culprit_core::Result<Option<Vec<Rec>>> {
+        self.result_trace.as_mut().map_or(Ok(None), ResultTrace::take)
     }
     pub(crate) async fn is_quiet(&mut self) -> culprit_core::Result<bool> {
         self.observer.is_quiet().await
@@ -302,7 +322,7 @@ impl NativeRead for MeasuredRead {
             loop {
                 tokio::select! {
                     result = &mut work => break result,
-                    _ = tokio::time::sleep(SAMPLE_INTERVAL) => {
+                    _ = tokio::time::sleep(SAMPLE_INTERVAL), if observer_error.is_none() => {
                         match self.observer.sample().await {
                             Ok(sample) => {
                                 if sample.active { self.active_seen.store(true, Ordering::Release); }
@@ -311,7 +331,10 @@ impl NativeRead for MeasuredRead {
                                 }
                                 if let Some(phase) = &mut self.phase { phase.observe(&sample); }
                             }
-                            Err(error) => { observer_error = Some(error); break Err(ReadError::Stopped(CollectionStop::Cancelled)); }
+                            // A bounded source failure can retire its socket before the observer's next sample.
+                            // Stop sampling and await the same native work so instrumentation cannot replace
+                            // its original byte/row/deadline result with an invented caller cancellation.
+                            Err(error) => { observer_error = Some(error); }
                         }
                     }
                 }
@@ -336,6 +359,9 @@ impl NativeRead for MeasuredRead {
                     return Err(ReadError::Source(error));
                 }
                 accounting.map_err(ReadError::Source)?;
+                if let Some(trace) = &mut self.result_trace {
+                    trace.retain(sql, &rows);
+                }
                 Ok(rows)
             }
         }

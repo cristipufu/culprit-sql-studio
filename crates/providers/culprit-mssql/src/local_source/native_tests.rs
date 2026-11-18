@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     conn::SessionKind,
-    read::{NativeRead, Parameter, ReadError, ReadSession, measurement::MeasuredRead},
+    read::{NativeRead, Parameter, ReadSession, measurement::MeasuredRead},
     test_support::{OwnedSourceFixture, config, connect, receipt_directory, save_cost_receipt},
 };
 use culprit_core::Result;
@@ -13,7 +13,7 @@ use tokio::time::Instant;
 
 mod lifecycle;
 mod matrix;
-mod population;
+use crate::test_support::idle_sessions as population;
 
 const SOURCE_QUERIES: u32 = 6;
 const SCENARIO_TIMEOUT: Duration = Duration::from_secs(75);

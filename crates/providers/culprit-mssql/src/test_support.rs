@@ -4,6 +4,7 @@ use std::time::Duration;
 use tiberius::{AuthMethod, Config, EncryptionLevel};
 mod actual_plans;
 mod cost_receipts;
+pub(crate) mod idle_sessions;
 pub(crate) mod owned_case;
 mod owned_source;
 pub(crate) mod query_store_probes;

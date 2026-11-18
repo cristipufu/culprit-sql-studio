@@ -1,19 +1,25 @@
 //! Idle unrelated connections own no tasks or outstanding response. Dropping this owner closes every actor.
-use super::*;
+use super::{OwnedSourceFixture, config, connect};
 use crate::{
-    conn::MsClient,
-    read::{integer, text},
+    conn::{MsClient, SessionKind},
+    read::{Parameter, ReadError, ReadSession, integer, text},
     value::Rec,
 };
-use std::collections::BTreeSet;
+use culprit_core::{
+    Result,
+    telemetry::{CollectionBudget, CollectionStop, NativeActivityIdentity},
+};
+use serde_json::{Value, json};
+use std::{collections::BTreeSet, time::Duration};
+use tokio::time::Instant;
 
-pub(super) const IDLE_SESSIONS: usize = 32;
+pub(crate) const IDLE_SESSIONS: usize = 32;
 const SETUP_TIMEOUT: Duration = Duration::from_secs(3);
 const RELEASE_TIMEOUT: Duration = Duration::from_secs(3);
 const IDENTITY_SQL: &str = "SELECT /* culprit */ /* owned context idle identity */ CONVERT(bigint,@@SPID) AS id,CONVERT(varchar(40),CAST(login_time AS datetime2),126) AS login_time FROM sys.dm_exec_sessions WHERE session_id=@@SPID";
 const POPULATION_SQL: &str = "SELECT TOP(33) /* culprit */ /* owned context idle population */ CONVERT(bigint,session_id) AS id,CONVERT(varchar(40),CAST(login_time AS datetime2),126) AS login_time,CONVERT(int,database_id) AS database_id,status FROM sys.dm_exec_sessions WHERE program_name=@P1 OPTION(MAXDOP 1)";
 
-pub(super) struct IdleSessions {
+pub(crate) struct IdleSessions {
     clients: Vec<MsClient>,
     identities: BTreeSet<(String, String)>,
     application: String,
@@ -23,7 +29,7 @@ pub(super) struct IdleSessions {
     release_elapsed_ms: f64,
 }
 impl IdleSessions {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             clients: Vec::new(),
             identities: BTreeSet::new(),
@@ -34,13 +40,13 @@ impl IdleSessions {
             release_elapsed_ms: 0.0,
         }
     }
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.clients.len()
     }
-    pub(super) fn contains(&self, session: &NativeActivityIdentity) -> bool {
+    pub(crate) fn contains(&self, session: &NativeActivityIdentity) -> bool {
         self.identities.contains(&(session.id.clone(), session.generation.clone()))
     }
-    pub(super) async fn populate(&mut self, fixture: &OwnedSourceFixture, observer: &mut ReadSession) -> Result<()> {
+    pub(crate) async fn populate(&mut self, fixture: &OwnedSourceFixture, observer: &mut ReadSession) -> Result<()> {
         assert!(self.clients.is_empty() && self.identities.is_empty());
         let started = Instant::now();
         let result = self.retain_actors(fixture).await;
@@ -79,7 +85,7 @@ impl IdleSessions {
         }
         Ok(())
     }
-    pub(super) fn release(&mut self) {
+    pub(crate) fn release(&mut self) {
         self.clients.clear();
     }
     async fn rows(&mut self, observer: &mut ReadSession) -> Result<Vec<Rec>> {
@@ -89,7 +95,7 @@ impl IdleSessions {
             .await
             .map_err(ReadError::into_error)
     }
-    pub(super) async fn confirm_idle(&mut self, observer: &mut ReadSession) -> Result<()> {
+    pub(crate) async fn confirm_idle(&mut self, observer: &mut ReadSession) -> Result<()> {
         let rows = self.rows(observer).await?;
         let identities = rows.iter().map(identity).collect::<Result<BTreeSet<_>>>()?;
         if rows.len() != self.clients.len()
@@ -103,7 +109,7 @@ impl IdleSessions {
         }
         Ok(())
     }
-    pub(super) async fn confirm_released(&mut self, observer: &mut ReadSession) -> Result<()> {
+    pub(crate) async fn confirm_released(&mut self, observer: &mut ReadSession) -> Result<()> {
         assert!(self.clients.is_empty(), "release actors before awaiting native cleanup");
         let started = Instant::now();
         let deadline = started + RELEASE_TIMEOUT;
@@ -119,7 +125,7 @@ impl IdleSessions {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
-    pub(super) fn accounting(&self) -> Value {
+    pub(crate) fn accounting(&self) -> Value {
         json!({"identity_queries_attempted":self.setup_queries,"native_membership_queries":self.observer_queries,
             "actor_login_and_session_setup":"included in setup client elapsed; native CPU/IO not isolated",
             "setup_client_elapsed_ms":self.setup_elapsed_ms,"release_client_elapsed_ms":self.release_elapsed_ms,
@@ -133,7 +139,7 @@ fn identity(row: &Rec) -> Result<(String, String)> {
     }
     Ok((id.to_string(), crate::sql_time::native_time(&text(row, "login_time")?)?))
 }
-pub(super) fn observer(fixture: &OwnedSourceFixture) -> ReadSession {
+pub(crate) fn observer(fixture: &OwnedSourceFixture) -> ReadSession {
     let pool = std::sync::Arc::new(crate::conn::Pool::new(
         config(fixture.port, &fixture.database, fixture.password(), "culprit-context-population-observer"),
         None,

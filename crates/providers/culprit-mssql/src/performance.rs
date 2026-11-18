@@ -215,3 +215,6 @@ pub(crate) fn observations(read: PerformanceRead) -> Result<Vec<OperationalObser
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod native_tests;
