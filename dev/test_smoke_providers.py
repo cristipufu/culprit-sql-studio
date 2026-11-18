@@ -432,6 +432,17 @@ class NativeSelection(unittest.TestCase):
         database.test.assert_called_once_with("culprit-postgres", "jobs::limits::", library=True, skip=None)
 
 
+    def test_agent_metadata_success_cannot_hide_a_failed_history_selection(self):
+        database = smoke.AgentDatabase(smoke.replace(
+            next(fixture for fixture in smoke.FIXTURES if fixture.name == "mssql"), name="mssql-agent"))
+        metadata = "jobs::native_tests::owned_agent_metadata_source_roundtrips_without_creating_or_executing_jobs"
+        history = "jobs::native_tests::owned_agent_history_keeps_real_failure_success_and_current_definition_separate_on_the_same_reader"
+        database.test = Mock(side_effect=[None, RuntimeError("controlled incomplete Agent execution")])
+        with self.assertRaisesRegex(RuntimeError, "incomplete Agent execution"):
+            database.verify([("culprit-mssql", metadata), ("culprit-mssql", history)])
+        self.assertEqual([call.args[1] for call in database.test.call_args_list], [metadata, history])
+
+
 class ChildProcesses(unittest.TestCase):
     def test_sql_diagnostics_remain_visible_without_corrupting_native_rows(self):
         diagnostics = io.StringIO()
@@ -500,6 +511,84 @@ time.sleep(60)
             for pid in map(int, pids.read_text().split()):
                 with self.assertRaises(ProcessLookupError):
                     os.kill(pid, 0)
+
+
+    @unittest.skipUnless(os.name == "posix", "the existing supervisor uses POSIX process groups")
+    def test_outer_termination_reaps_active_work_before_exact_owned_agent_cleanup(self):
+        for foreign in (False, True):
+            with self.subTest(foreign=foreign), tempfile.TemporaryDirectory() as directory:
+                ready = Path(directory) / "ready"
+                events = Path(directory) / "events"
+                program = r"""
+import importlib.util, os, signal, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]).parent))
+spec = importlib.util.spec_from_file_location('owned_agent_supervisor', sys.argv[1])
+smoke = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = smoke
+spec.loader.exec_module(smoke)
+ready, events = Path(sys.argv[2]), Path(sys.argv[3])
+foreign = sys.argv[4] == 'foreign'
+def event(value):
+    with events.open('a') as output:
+        output.write(value + '\n')
+fixture = smoke.replace(next(value for value in smoke.FIXTURES if value.name == 'mssql'), name='mssql-agent')
+database = smoke.AgentDatabase(fixture)
+database.start = lambda: None
+class DockerCommands:
+    def run(self, args, **kwargs):
+        if args[:2] == ['docker', 'inspect']:
+            event('inspect-exact-name' if args[-1] == database.name else 'wrong-name')
+            return 0, 'foreign' if foreign else database.owner
+        if args == ['docker', 'unpause', database.name]:
+            event('unpause-exact-name')
+            return 0, ''
+        if args == ['docker', 'rm', '--force', '--volumes', database.name]:
+            event('remove-exact-name-and-volumes')
+            return 0, ''
+        raise RuntimeError('unexpected Docker operation')
+database.commands = DockerCommands()
+signal.signal(signal.SIGTERM, smoke.interrupted)
+worker = "import os, signal, sys, time; from pathlib import Path; signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)"
+try:
+    with database:
+        try:
+            smoke.Commands([]).run([sys.executable, '-c', worker, str(ready)])
+        finally:
+            event('active-worker-settled')
+except KeyboardInterrupt:
+    event('supervisor-interrupted-after-cleanup')
+    raise SystemExit(124)
+except RuntimeError:
+    event('foreign-owner-refused')
+    raise SystemExit(125)
+"""
+                supervisor = smoke.subprocess.Popen(
+                    [sys.executable, "-c", program, str(Path(smoke.__file__).resolve()),
+                     str(ready), str(events), "foreign" if foreign else "owned"],
+                    stdout=smoke.subprocess.PIPE, stderr=smoke.subprocess.PIPE, text=True,
+                    start_new_session=True)
+                try:
+                    deadline = time.monotonic() + 30
+                    while not ready.exists():
+                        if supervisor.poll() is not None or time.monotonic() >= deadline:
+                            self.fail("the supervised active worker did not establish ownership")
+                        time.sleep(0.02)
+                    supervisor.send_signal(smoke.signal.SIGTERM)
+                    output, diagnostics = supervisor.communicate(timeout=10)
+                    self.assertEqual(supervisor.returncode, 125 if foreign else 124, diagnostics)
+                    self.assertNotIn("Traceback", diagnostics)
+                    expected = ["active-worker-settled", "inspect-exact-name"]
+                    expected += (["foreign-owner-refused"] if foreign else [
+                        "unpause-exact-name", "remove-exact-name-and-volumes", "supervisor-interrupted-after-cleanup"])
+                    self.assertEqual(events.read_text().splitlines(), expected)
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(int(ready.read_text()), 0)
+                    self.assertEqual(output.count("Removed owned mssql-agent"), 0 if foreign else 1)
+                finally:
+                    smoke.Commands.stop(supervisor)
+                    for stream in (supervisor.stdout, supervisor.stderr):
+                        stream.close()
 
 
 class ClusterOwnership(unittest.TestCase):

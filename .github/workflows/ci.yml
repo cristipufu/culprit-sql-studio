@@ -118,6 +118,28 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Collect, restrict permissions and verify cancellation in a disposable database
         run: python3 -B dev/smoke-providers.py ${{ matrix.fixture }}
+      # SQL Server Agent's real worker needs a supported native x64 host; metadata success alone is insufficient.
+      - name: Capture Agent metadata and genuine failure/success history on native x64
+        if: ${{ !cancelled() && matrix.fixture == 'mssql' }}
+        timeout-minutes: 12
+        env:
+          CULPRIT_NATIVE_COST_RECEIPT_DIR: ${{ runner.temp }}/native-agent-job-receipts
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -m 700 "$CULPRIT_NATIVE_COST_RECEIPT_DIR"
+          # Signal the same supervisor after 300 s, then await its existing bounded, exact-owner cleanup.
+          # No kill-after shortcut may drop that cleanup; the step ceiling also covers its three 120 s commands.
+          timeout --signal=TERM 300s python3 -B dev/smoke-providers.py mssql-agent \
+            --test culprit-mssql jobs::native_tests::owned_agent_metadata_source_roundtrips_without_creating_or_executing_jobs \
+            --test culprit-mssql jobs::native_tests::owned_agent_history_keeps_real_failure_success_and_current_definition_separate_on_the_same_reader
+      - name: Keep Agent metadata and execution acceptance receipts
+        if: always() && matrix.fixture == 'mssql'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-agent-job-receipts
+          path: ${{ runner.temp }}/native-agent-job-receipts
+          if-no-files-found: warn
+          retention-days: 7
 
   replication:
     name: Native replication (${{ matrix.suite }})
