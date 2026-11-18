@@ -232,8 +232,8 @@ fn one_investigation_pin_owner_protects_both_authenticated_parents_and_rejects_s
             row.get(0)
         })
         .unwrap();
-    assert_eq!(count, 2);
-    for capture in [&fixture.original, &fixture.owner] {
+    assert_eq!(count, 3);
+    for capture in [&fixture.original, &fixture.owner, &fixture.intent.qualification.evidence.capture] {
         assert!(super::super::journal::is_pinned(&fixture.files.journal.conn, &capture.observation_id).unwrap());
     }
     fixture.files.release_investigation_parent(&key).unwrap();

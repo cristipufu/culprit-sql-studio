@@ -16,13 +16,15 @@ use crate::{
 };
 use tokio::time::Instant;
 
-async fn restart(runtime: Runtime) -> Runtime {
+mod qualification_pins;
+
+async fn restart(runtime: Runtime, expected_source_debts: u32) -> Runtime {
     let Harness { _directory, inventory, outbox, journal, bindings, backend } = runtime.fixture;
     drop(outbox);
     drop(journal);
     let mut outbox = Outbox::open(&_directory.path().join("outbox")).unwrap();
     let recovered = outbox.recover().await.unwrap();
-    assert_eq!((recovered.interrupted, recovered.quarantined, recovered.source_debts), (0, 0, 0));
+    assert_eq!((recovered.interrupted, recovered.quarantined, recovered.source_debts), (0, 0, expected_source_debts));
     let journal = FleetJournal::open(&_directory.path().join("fleet"), &inventory, "one").await.unwrap();
     let started = Instant::now();
     let mut scheduler = Scheduler::new(&inventory, "one").unwrap();
@@ -54,7 +56,7 @@ async fn ready_before_completion_survives_restart_and_settles_only_after_exact_o
         let before = runtime.native_calls();
         // The actual native owner has closed and Ready enrolled the control, but the Fleet completion
         // acknowledgement has not been written. A restored scheduler must initially retain uncertainty.
-        let mut runtime = restart(runtime).await;
+        let mut runtime = restart(runtime, 0).await;
         let state = runtime.scheduler.focused_state(&job.key).unwrap();
         assert_eq!(state.status, FocusStatus::Pending);
         assert_eq!(state.source_work, SourceWorkState::Unconfirmed);
@@ -100,7 +102,7 @@ async fn enrollment_before_dispatch_survives_restart_without_current_route_autho
     let intents = runtime.fixture.journal.focused_intents().await.unwrap();
     let [intent] = intents.as_slice() else { panic!() };
     let intent = intent.clone();
-    let mut runtime = restart(runtime).await;
+    let mut runtime = restart(runtime, 0).await;
     runtime.reconcile().await;
     assert!(!runtime.enroll().await, "a saved route is not a current source execution owner");
     assert_eq!(runtime.fixture.journal.focused_intent(&intent.key().unwrap()).await.unwrap(), Some(intent.clone()));

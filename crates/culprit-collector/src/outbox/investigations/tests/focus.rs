@@ -238,8 +238,12 @@ fn queued_investigation_parent_is_authenticated_idempotent_and_preserved_across_
         .journal
         .conn
         .execute(
-            "UPDATE diagnostic_pins SET observation_id=?1 WHERE owner=?2",
-            params![newer.parent.capture.observation_id, format!("investigation:{key}")],
+            "UPDATE diagnostic_pins SET observation_id=?1 WHERE owner=?2 AND observation_id=?3",
+            params![
+                newer.parent.capture.observation_id,
+                format!("investigation:{key}"),
+                first.parent.capture.observation_id
+            ],
         )
         .unwrap();
     assert!(
@@ -250,8 +254,12 @@ fn queued_investigation_parent_is_authenticated_idempotent_and_preserved_across_
         .journal
         .conn
         .execute(
-            "UPDATE diagnostic_pins SET observation_id=?1 WHERE owner=?2",
-            params![first.parent.capture.observation_id, format!("investigation:{key}")],
+            "UPDATE diagnostic_pins SET observation_id=?1 WHERE owner=?2 AND observation_id=?3",
+            params![
+                first.parent.capture.observation_id,
+                format!("investigation:{key}"),
+                newer.parent.capture.observation_id
+            ],
         )
         .unwrap();
     drop(files);

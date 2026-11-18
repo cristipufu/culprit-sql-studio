@@ -40,6 +40,8 @@ impl Files {
         if let DiagnosticExecutionBinding::Shared { owner } = &intent.execution {
             expected.insert(owner.capture.observation_id.clone());
         }
+        // Revalidation still needs the original native-cost artifact until this exact queued owner retires.
+        expected.insert(intent.qualification.evidence.capture.observation_id.clone());
         let query_limit =
             expected.len().checked_add(1).and_then(|limit| i64::try_from(limit).ok()).ok_or_else(integrity)?;
         let transaction = self.journal.conn.transaction().map_err(storage)?;

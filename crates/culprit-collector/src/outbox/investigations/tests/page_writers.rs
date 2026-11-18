@@ -317,7 +317,10 @@ fn durable_writer_reports_keep_page_candidates_and_all_historical_contexts_witho
     let key = fixture.intent.key().unwrap();
     let mut expected = vec![fixture.original.observation_id.clone(), fixture.page.observation_id.clone()];
     expected.sort();
-    assert_eq!(pins(&fixture.files, &format!("investigation:{key}")), expected);
+    let mut queued = expected.clone();
+    queued.push(fixture.intent.qualification.evidence.capture.observation_id.clone());
+    queued.sort();
+    assert_eq!(pins(&fixture.files, &format!("investigation:{key}")), queued);
     let native = fixture.native();
     assert_eq!(pins(&fixture.files, &format!("focus:{}", native.observation_id)), expected);
     let input = fixture.files.diagnostic_input(&native.observation_id, DIAGNOSTIC_CONTROLLER_VERSION).unwrap();
